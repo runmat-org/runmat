@@ -52,6 +52,20 @@ pub(crate) mod bridge {
     }
 
     #[derive(Debug, Clone)]
+    struct OcctFaceEvaluationSamplePayload {
+        face_id: u64,
+        u: f64,
+        v: f64,
+        point_x: f64,
+        point_y: f64,
+        point_z: f64,
+        normal_x: f64,
+        normal_y: f64,
+        normal_z: f64,
+        projection_error: f64,
+    }
+
+    #[derive(Debug, Clone)]
     struct OcctImportPayload {
         backend: String,
         format_name: String,
@@ -63,6 +77,7 @@ pub(crate) mod bridge {
         face_ids: Vec<u64>,
         face_names: Vec<String>,
         face_semantics: Vec<OcctFaceSemanticPayload>,
+        face_evaluation_samples: Vec<OcctFaceEvaluationSamplePayload>,
         assembly_nodes: Vec<OcctAssemblyNodePayload>,
         warnings: Vec<String>,
     }

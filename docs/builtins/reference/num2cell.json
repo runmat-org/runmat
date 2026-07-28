@@ -1,0 +1,60 @@
+{
+  "title": "num2cell",
+  "category": "cells/core",
+  "keywords": ["num2cell", "cell", "conversion", "array", "dimensions"],
+  "summary": "Convert an array into a cell array, optionally preserving dimensions inside each cell.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "gpuArray inputs are gathered before host cell construction."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::cells::core::num2cell::tests",
+    "integration": null
+  },
+  "description": "`num2cell(A)` creates one cell per element of `A`. `num2cell(A, dims)` keeps the listed dimensions inside each cell and creates cells over the remaining dimensions.",
+  "behaviors": [
+    "Numeric, complex, logical, string, and character arrays are supported.",
+    "Without `dims`, every cell contains a scalar value from the input.",
+    "With `dims`, each cell contains a slice whose shape is the selected dimensions.",
+    "Dimension selectors are one-based positive integers supplied as a scalar or numeric vector."
+  ],
+  "examples": [
+    {
+      "description": "Converting each matrix element to a cell",
+      "input": "C = num2cell([1 2; 3 4])",
+      "output": "C = 2x2 cell array"
+    },
+    {
+      "description": "Grouping rows into row-vector cells",
+      "input": "C = num2cell([1 2 3; 4 5 6], 2)",
+      "output": "C = 2x1 cell array"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `num2cell` preserve grouped array orientation?",
+      "answer": "Yes. Slices use the grouped dimension order and preserve the underlying column-major array data."
+    }
+  ],
+  "links": [
+    { "label": "cell2mat", "url": "./cell2mat" },
+    { "label": "mat2cell", "url": "./mat2cell" },
+    { "label": "cell", "url": "./cell" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/cells/core/num2cell.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/cells/core/num2cell.rs"
+  },
+  "gpu_residency": "The result is a host cell array.",
+  "gpu_behavior": ["GPU inputs are gathered; no GPU kernels are launched."]
+}

@@ -1,0 +1,39 @@
+{
+  "title": "ismissing",
+  "category": "missing",
+  "keywords": ["ismissing", "missing", "NaN", "string", "table"],
+  "summary": "Return a logical mask identifying missing entries.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered before missingness is inspected."
+  },
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 1, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::missing::tests", "integration": "crates/runmat-vm/tests/missing_values.rs"},
+  "description": "`ismissing(A)` returns a logical result with true values where `A` contains missing data.",
+  "behaviors": [
+    "Numeric and complex values are missing when any stored component is `NaN`.",
+    "String values are missing when they equal `<missing>` case-insensitively.",
+    "Character-array rows are missing when blank or equal to `<missing>`.",
+    "Cell arrays are tested element-by-element.",
+    "Tables return a height-by-width logical array, one column per table variable.",
+    "Datetime and duration objects are treated as missing when their internal numeric representation contains `NaN`."
+  ],
+  "examples": [
+    {"description": "Detect NaN values", "input": "tf = ismissing([1 NaN 3])", "output": "tf = [false true false]"},
+    {"description": "Detect table missing values", "input": "M = ismissing(T)", "output": "M is a logical matrix with one column per table variable."}
+  ],
+  "links": [
+    {"label": "missing", "url": "./missing"},
+    {"label": "anymissing", "url": "./anymissing"},
+    {"label": "fillmissing", "url": "./fillmissing"},
+    {"label": "rmmissing", "url": "./rmmissing"}
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/missing/mod.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/missing/mod.rs"
+  }
+}

@@ -18,6 +18,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::math::elementwise::integer_arithmetic::{try_integer_binary, IntegerBinaryOp};
 use crate::builtins::math::symbolic::{symbolic_binary, SymbolicBinaryOp};
 use crate::builtins::math::type_resolvers::numeric_binary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -364,7 +365,8 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
         | Value::SparseTensor(_)
         | Value::Cell(_)
         | Value::Struct(_)
-        | Value::Symbolic(_) => Err(ldivide_error_with_detail(
+        | Value::Symbolic(_)
+        | Value::SymbolicArray(_) => Err(ldivide_error_with_detail(
             &LDIVIDE_ERROR_INVALID_ARGUMENT,
             "unsupported prototype conversion to GPU output",
         )),
@@ -639,6 +641,12 @@ fn ldivide_host(divisor: Value, numerator: Value) -> BuiltinResult<Value> {
     if let Some(result) = symbolic_binary(&numerator, &divisor, SymbolicBinaryOp::Div) {
         return Ok(result);
     }
+    if let Some(result) =
+        try_integer_binary(&numerator, &divisor, IntegerBinaryOp::Divide, BUILTIN_NAME)
+            .map_err(builtin_error)?
+    {
+        return Ok(result);
+    }
     if let Some(result) = scalar_ldivide_value(&divisor, &numerator) {
         return Ok(result);
     }
@@ -819,8 +827,8 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
-        CharArray, ComplexTensor, IntValue, LogicalArray, ResolveContext, SymbolicExpr, Tensor,
-        Type,
+        CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, ResolveContext,
+        SymbolicExpr, Tensor, Type,
     };
 
     const EPS: f64 = 1e-12;
@@ -884,6 +892,24 @@ pub(crate) mod tests {
             Value::Num(v) => assert!((v - (2.0 / 7.0)).abs() < EPS),
             other => panic!("expected scalar result, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn ldivide_integer_arrays_preserve_exact_reversed_division() {
+        let divisor = Tensor::new_integer(IntegerStorage::I64(vec![2, 2, 0]), vec![1, 3])
+            .expect("integer tensor");
+        let numerator = Tensor::new_integer(IntegerStorage::I64(vec![-3, 3, i64::MAX]), vec![1, 3])
+            .expect("integer tensor");
+        let result = ldivide_builtin(Value::Tensor(divisor), Value::Tensor(numerator), Vec::new())
+            .expect("integer ldivide");
+        let Value::Tensor(result) = result else {
+            panic!("expected typed integer tensor");
+        };
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::I64(vec![-2, 2, i64::MAX]))
+        );
     }
 
     #[test]
@@ -1222,13 +1248,10 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn ldivide_int_inputs_promote_to_double() {
+    fn ldivide_same_class_integer_inputs_preserve_class() {
         let lhs = Value::Int(IntValue::I32(6));
         let rhs = Value::Int(IntValue::I32(4));
         let result = ldivide_builtin(lhs, rhs, Vec::new()).expect("ldivide");
-        match result {
-            Value::Num(v) => assert!((v - (4.0 / 6.0)).abs() < EPS),
-            other => panic!("expected numeric scalar, got {other:?}"),
-        }
+        assert_eq!(result, Value::Int(IntValue::I32(1)));
     }
 }

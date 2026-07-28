@@ -2,6 +2,7 @@
 
 pub mod color;
 pub mod filters;
+pub mod imfinfo;
 pub mod imhist;
 pub mod imread;
 pub mod imwrite;

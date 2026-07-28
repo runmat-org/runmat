@@ -1,0 +1,27 @@
+{
+  "title": "bilstmLayer",
+  "category": "deep_learning",
+  "keywords": ["bilstmLayer", "deep learning", "BiLSTM"],
+  "summary": "Create a bidirectional LSTM layer compatibility object.",
+  "description": "`bilstmLayer(numHiddenUnits)` creates metadata for bidirectional LSTM layers.",
+  "behaviors": [
+    "`numHiddenUnits` must be a positive integer.",
+    "`OutputMode` defaults to `last` and can be overridden with a name-value option.",
+    "Common recurrent-layer options are preserved as properties."
+  ],
+  "examples": [
+    {
+      "description": "Create BiLSTM Layer",
+      "input": "layer = bilstmLayer(32, 'Name', 'bilstm')",
+      "output": "Bidirectional LSTM layer compatibility object."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "layer = bilstmLayer(numHiddenUnits)\nlayer = bilstmLayer(numHiddenUnits, Name, Value)",
+      "output": "Layer compatibility object."
+    }
+  },
+  "gpu_residency": "Layer construction is host metadata work and has no provider kernel."
+}

@@ -9,7 +9,7 @@ last_updated: "May 28, 2026"
 
 RunMat tests are organized by ownership boundary. Parser and lowering crates test language structure, VM tests exercise bytecode and interpreter behavior, runtime tests cover builtins and providers, integration tests cover cross-crate execution behavior, and WASM tests cover browser and JavaScript-hosted behavior.
 
-There are 8,000+ tests in the RunMat codebase, systematically covering the language pipeline, execution engines, runtime builtins, acceleration layer, plotting, CLI, LSP, snapshotting, filesystem, and WASM bindings.
+There are 8,000+ tests in the RunMat codebase, systematically covering the language pipeline, execution engines, runtime builtins, acceleration layer, plotting, CLI, LSP, workspace replay, filesystem, and WASM bindings.
 
 ## Baseline Checks
 

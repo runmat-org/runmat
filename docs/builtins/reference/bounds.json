@@ -1,0 +1,85 @@
+{
+  "title": "bounds",
+  "category": "math/reduction",
+  "keywords": [
+    "bounds",
+    "minimum",
+    "maximum",
+    "reduction",
+    "omitnan"
+  ],
+  "summary": "Return smallest and largest elements in MATLAB and RunMat.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": true,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Delegates to the existing `min` and `max` reduction engines, including their GPU fallbacks and host execution paths."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::reduction::bounds::tests",
+    "integration": null
+  },
+  "description": "`bounds(A)` returns the smallest and largest values from each slice of `A` along the first non-singleton dimension.",
+  "behaviors": [
+    "`[S,L] = bounds(A)` returns the same values as `min(A)` and `max(A)` using the default dimension.",
+    "`bounds(A,dim)` and `bounds(A,vecdim)` reduce along explicit dimensions.",
+    "`bounds(A,'all')` reduces all elements and returns scalar lower and upper bounds.",
+    "`bounds` omits NaN values by default, matching MATLAB. Pass `'includenan'` to propagate NaN values consistently with `min` and `max`.",
+    "Logical, integer, real, complex, scalar, vector, matrix, N-D, and GPU tensor inputs follow the behavior of the underlying `min` and `max` builtins."
+  ],
+  "examples": [
+    {
+      "description": "Column-wise bounds",
+      "input": "A = [3 4; 1 2];\n[S,L] = bounds(A)",
+      "output": "S = [1 2]\nL = [3 4]"
+    },
+    {
+      "description": "Bounds across all elements while ignoring NaN by default",
+      "input": "A = [NaN 3; -1 5];\n[S,L] = bounds(A,'all')",
+      "output": "S = -1\nL = 5"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How many outputs does `bounds` return?",
+      "answer": "It returns two outputs: the smallest values and the largest values. RunMat pads additional requested outputs with zero, matching the runtime's multi-output convention."
+    },
+    {
+      "question": "Does `bounds` have separate GPU kernels?",
+      "answer": "No. It composes `min` and `max`, so it inherits their GPU support and host fallback behavior."
+    }
+  ],
+  "links": [
+    {
+      "label": "min",
+      "url": "./min"
+    },
+    {
+      "label": "max",
+      "url": "./max"
+    },
+    {
+      "label": "maxk",
+      "url": "./maxk"
+    },
+    {
+      "label": "mink",
+      "url": "./mink"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/reduction/bounds.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/bounds.rs"
+  }
+}

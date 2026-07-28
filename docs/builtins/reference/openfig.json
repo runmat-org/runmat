@@ -1,0 +1,60 @@
+{
+  "title": "openfig",
+  "category": "plotting",
+  "keywords": [
+    "openfig",
+    "figure open",
+    "fig",
+    "plotting"
+  ],
+  "summary": "Open figures saved in RunMat FIG files.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`openfig` is an I/O and plotting-state operation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": "plot-core",
+  "tested": {
+    "unit": "builtins::plotting::figure_persistence::tests",
+    "integration": "single and multiple figure round-trip tests"
+  },
+  "description": "`openfig(filename)` loads a RunMat FIG scene file and returns the imported figure handle or a row vector of handles.",
+  "behaviors": [
+    "The `.fig` extension is appended when the filename has no extension.",
+    "`openfig(filename, 'new')` imports a new copy of the saved scene. `reuse` mode is rejected until RunMat tracks figure-file reuse relationships.",
+    "`openfig(..., 'visible')` and `openfig(..., 'invisible')` override the loaded figure visibility."
+  ],
+  "examples": [
+    {
+      "description": "Open an invisible figure in visible state",
+      "input": "plot(1:5);\nset(gcf, \"Visible\", \"off\");\nsavefig(\"hidden_plot.fig\");\nfig = openfig(\"hidden_plot.fig\", \"visible\");"
+    }
+  ],
+  "links": [
+    {
+      "label": "savefig",
+      "url": "./savefig"
+    },
+    {
+      "label": "hgload",
+      "url": "./hgload"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/figure_persistence.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/figure_persistence.rs"
+  },
+  "gpu_residency": "`openfig` returns host graphics handles and creates plotting state in the runtime registry.",
+  "gpu_behavior": [
+    "No numeric GPU kernel is launched.",
+    "Loaded figure content can later render through the normal plotting renderer."
+  ]
+}

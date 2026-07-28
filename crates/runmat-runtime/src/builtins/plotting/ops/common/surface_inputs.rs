@@ -99,6 +99,7 @@ fn inferred_grid_shape(value: &Value, builtin: &'static str) -> BuiltinResult<(u
 fn default_surface_axis(len: usize) -> Tensor {
     Tensor {
         data: (1..=len).map(|i| i as f64).collect(),
+        integer_data: None,
         shape: vec![len],
         rows: len,
         cols: 1,
@@ -114,6 +115,7 @@ mod tests {
     fn parse_surface_call_args_supports_z_only_shorthand() {
         let z = Value::Tensor(Tensor {
             data: vec![1.0, 2.0, 3.0, 4.0],
+            integer_data: None,
             shape: vec![2, 2],
             rows: 2,
             cols: 2,
@@ -135,6 +137,7 @@ mod tests {
     fn parse_surface_call_args_matlab_xy_uses_column_then_row_defaults() {
         let z = Value::Tensor(Tensor {
             data: (1..=12).map(|v| v as f64).collect(),
+            integer_data: None,
             shape: vec![3, 4],
             rows: 3,
             cols: 4,
@@ -153,6 +156,7 @@ mod tests {
     async fn image_axis_sources_expand_two_element_extents() {
         let x = Value::Tensor(Tensor {
             data: vec![10.0, 20.0],
+            integer_data: None,
             shape: vec![2],
             rows: 2,
             cols: 1,
@@ -160,6 +164,7 @@ mod tests {
         });
         let y = Value::Tensor(Tensor {
             data: vec![1.0, 5.0],
+            integer_data: None,
             shape: vec![2],
             rows: 2,
             cols: 1,
@@ -186,6 +191,7 @@ mod tests {
     async fn surface_axis_sources_enforce_matlab_vector_lengths() {
         let x = Value::Tensor(Tensor {
             data: vec![1.0, 2.0],
+            integer_data: None,
             shape: vec![2],
             rows: 2,
             cols: 1,
@@ -193,6 +199,7 @@ mod tests {
         });
         let y = Value::Tensor(Tensor {
             data: vec![1.0, 2.0, 3.0, 4.0],
+            integer_data: None,
             shape: vec![4],
             rows: 4,
             cols: 1,

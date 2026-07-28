@@ -1,0 +1,12 @@
+{
+  "title": "grp2idx",
+  "category": "array/grouping",
+  "keywords": ["grp2idx", "groups", "index", "statistics"],
+  "summary": "Create an index vector from a grouping variable.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Grouping runs on the host."},
+  "tested": {"unit": "builtins::array::grouping::tests"},
+  "description": "`g = grp2idx(s)` maps a grouping variable to one-based group indices, with missing entries mapped to NaN.",
+  "behaviors": ["Supports numeric, logical, string, cell, and categorical grouping vectors.", "Additional outputs return group label strings in sorted group order."],
+  "examples": [{"description": "Index groups", "input": "g = grp2idx([\"b\";\"a\";\"b\"])", "output": "g = [2; 1; 2]"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/array/grouping.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/grouping.rs"}
+}

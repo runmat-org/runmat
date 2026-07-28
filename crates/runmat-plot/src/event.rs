@@ -210,6 +210,10 @@ pub enum ScenePlot {
         values: Vec<f64>,
         #[serde(default, deserialize_with = "deserialize_option_vec_f64_lossy")]
         histogram_bin_edges: Option<Vec<f64>>,
+        #[serde(default)]
+        polar_histogram: bool,
+        #[serde(default)]
+        polar_histogram_display_style: Option<String>,
         color_rgba: [f32; 4],
         #[serde(default)]
         outline_color_rgba: Option<[f32; 4]>,
@@ -300,10 +304,14 @@ pub enum ScenePlot {
         x: Vec<f64>,
         #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         y: Vec<f64>,
+        #[serde(default, deserialize_with = "deserialize_option_vec_f64_lossy")]
+        z: Option<Vec<f64>>,
         #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         u: Vec<f64>,
         #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         v: Vec<f64>,
+        #[serde(default, deserialize_with = "deserialize_option_vec_f64_lossy")]
+        w: Option<Vec<f64>>,
         color_rgba: [f32; 4],
         line_width: f32,
         scale: f32,
@@ -319,6 +327,10 @@ pub enum ScenePlot {
         y: Vec<f64>,
         #[serde(deserialize_with = "deserialize_matrix_f64_lossy")]
         z: Vec<Vec<f64>>,
+        #[serde(default)]
+        x_grid: Option<Vec<Vec<f64>>>,
+        #[serde(default)]
+        y_grid: Option<Vec<Vec<f64>>>,
         colormap: String,
         shading_mode: String,
         wireframe: bool,
@@ -581,10 +593,22 @@ impl FigureScene {
             figure.x_label = self.metadata.x_label;
             figure.y_label = self.metadata.y_label;
             figure.legend_enabled = self.metadata.legend_enabled;
+            figure.set_axes_data_aspect_ratio(
+                figure.active_axes_index,
+                self.metadata.data_aspect_ratio,
+                self.metadata.data_aspect_ratio_mode.clone(),
+            );
+            if self.metadata.axis_equal {
+                figure.set_axes_axis_equal(figure.active_axes_index, true);
+            }
         }
         figure.name = self.metadata.name;
         figure.number_title = self.metadata.number_title;
         figure.visible = self.metadata.visible;
+        if let Some(position) = self.metadata.position {
+            validate_figure_position(position)?;
+            figure.set_position(position);
+        }
         figure.sg_title = self.metadata.sg_title;
         figure.sg_title_style = self
             .metadata
@@ -661,6 +685,16 @@ impl FigureScene {
         }
         Ok(())
     }
+}
+
+fn validate_figure_position(position: [f64; 4]) -> Result<(), String> {
+    if !position.iter().all(|value| value.is_finite()) {
+        return Err("figure scene metadata Position values must be finite".to_string());
+    }
+    if position[2] <= 0.0 || position[3] <= 0.0 {
+        return Err("figure scene metadata Position width and height must be positive".to_string());
+    }
+    Ok(())
 }
 
 fn append_geometry_scene_chunks(
@@ -862,6 +896,8 @@ pub struct FigureMetadata {
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub visible: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub position: Option<[f64; 4]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sg_title: Option<String>,
@@ -877,6 +913,16 @@ pub struct FigureMetadata {
     pub legend_enabled: bool,
     pub colorbar_enabled: bool,
     pub axis_equal: bool,
+    #[serde(
+        default = "default_data_aspect_ratio",
+        skip_serializing_if = "is_default_data_aspect_ratio"
+    )]
+    pub data_aspect_ratio: [f64; 3],
+    #[serde(
+        default = "default_data_aspect_ratio_mode",
+        skip_serializing_if = "is_auto_data_aspect_ratio_mode"
+    )]
+    pub data_aspect_ratio_mode: String,
     pub background_rgba: [f32; 4],
     #[serde(skip_serializing_if = "Option::is_none")]
     pub colormap: Option<String>,
@@ -903,6 +949,7 @@ impl FigureMetadata {
             name: figure.name.clone(),
             number_title: figure.number_title,
             visible: figure.visible,
+            position: Some(figure.position),
             title: figure.title.clone(),
             sg_title: figure.sg_title.clone(),
             sg_title_style: figure
@@ -916,8 +963,16 @@ impl FigureMetadata {
             legend_enabled: figure.legend_enabled,
             colorbar_enabled: figure.colorbar_enabled,
             axis_equal: figure.axis_equal,
+            data_aspect_ratio: figure
+                .axes_metadata(figure.active_axes_index)
+                .map(|meta| meta.data_aspect_ratio)
+                .unwrap_or([1.0, 1.0, 1.0]),
+            data_aspect_ratio_mode: figure
+                .axes_metadata(figure.active_axes_index)
+                .map(|meta| meta.data_aspect_ratio_mode.clone())
+                .unwrap_or_else(|| "auto".into()),
             background_rgba: vec4_to_rgba(figure.background_color),
-            colormap: Some(format!("{:?}", figure.colormap)),
+            colormap: Some(figure.colormap.to_serialized_token()),
             color_limits: figure.color_limits.map(|(lo, hi)| [lo, hi]),
             z_limits: figure.z_limits.map(|(lo, hi)| [lo, hi]),
             legend_entries,
@@ -1053,8 +1108,29 @@ impl From<SerializedLegendStyle> for LegendStyle {
 pub struct SerializedAxesMetadata {
     #[serde(default, skip_serializing_if = "is_cartesian_axes_kind")]
     pub axes_kind: SerializedAxesKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overlay_parent: Option<usize>,
+    #[serde(
+        default = "default_y_axis_location",
+        skip_serializing_if = "is_left_axis"
+    )]
+    pub y_axis_location: String,
+    #[serde(
+        default = "default_axes_position",
+        skip_serializing_if = "is_default_axes_position"
+    )]
+    pub position: [f64; 4],
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub position_explicit: bool,
+    #[serde(
+        default = "default_axes_units",
+        skip_serializing_if = "is_normalized_units"
+    )]
+    pub units: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subtitle: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub x_label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1062,9 +1138,21 @@ pub struct SerializedAxesMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub z_label: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x_ticks: Option<Vec<f64>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y_ticks: Option<Vec<f64>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub x_tick_labels: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub y_tick_labels: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x_tick_format: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y_tick_format: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x_tick_label_rotation: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y_tick_label_rotation: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub x_limits: Option<[f64; 2]>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1085,19 +1173,35 @@ pub struct SerializedAxesMetadata {
     pub minor_grid_enabled: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub minor_grid_explicit: bool,
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub hidden_line_removal: bool,
     #[serde(default)]
     pub box_enabled: bool,
     #[serde(default)]
     pub axis_equal: bool,
+    #[serde(
+        default = "default_data_aspect_ratio",
+        skip_serializing_if = "is_default_data_aspect_ratio"
+    )]
+    pub data_aspect_ratio: [f64; 3],
+    #[serde(
+        default = "default_data_aspect_ratio_mode",
+        skip_serializing_if = "is_auto_data_aspect_ratio_mode"
+    )]
+    pub data_aspect_ratio_mode: String,
     pub legend_enabled: bool,
     #[serde(default)]
     pub colorbar_enabled: bool,
     pub colormap: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color_order: Option<Vec<[f32; 3]>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color_limits: Option<[f64; 2]>,
     #[serde(default)]
     pub axes_style: SerializedTextStyle,
     pub title_style: SerializedTextStyle,
+    #[serde(default)]
+    pub subtitle_style: SerializedTextStyle,
     pub x_label_style: SerializedTextStyle,
     pub y_label_style: SerializedTextStyle,
     pub z_label_style: SerializedTextStyle,
@@ -1116,6 +1220,46 @@ pub enum SerializedAxesKind {
 
 fn is_cartesian_axes_kind(value: &SerializedAxesKind) -> bool {
     *value == SerializedAxesKind::Cartesian
+}
+
+fn default_y_axis_location() -> String {
+    "left".into()
+}
+
+fn is_left_axis(value: &str) -> bool {
+    value == "left"
+}
+
+fn default_axes_position() -> [f64; 4] {
+    [0.13, 0.11, 0.775, 0.815]
+}
+
+fn is_default_axes_position(value: &[f64; 4]) -> bool {
+    *value == default_axes_position()
+}
+
+fn default_data_aspect_ratio() -> [f64; 3] {
+    [1.0, 1.0, 1.0]
+}
+
+fn is_default_data_aspect_ratio(value: &[f64; 3]) -> bool {
+    *value == default_data_aspect_ratio()
+}
+
+fn default_data_aspect_ratio_mode() -> String {
+    "auto".into()
+}
+
+fn is_auto_data_aspect_ratio_mode(value: &str) -> bool {
+    value == "auto"
+}
+
+fn default_axes_units() -> String {
+    "normalized".into()
+}
+
+fn is_normalized_units(value: &str) -> bool {
+    value == "normalized"
 }
 
 impl From<AxesKind> for SerializedAxesKind {
@@ -1207,12 +1351,24 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
     fn from(value: AxesMetadata) -> Self {
         Self {
             axes_kind: value.axes_kind.into(),
+            overlay_parent: value.overlay_parent,
+            y_axis_location: value.y_axis_location,
+            position: value.position,
+            position_explicit: value.position_explicit,
+            units: value.units,
             title: value.title,
+            subtitle: value.subtitle,
             x_label: value.x_label,
             y_label: value.y_label,
             z_label: value.z_label,
+            x_ticks: value.x_ticks,
+            y_ticks: value.y_ticks,
             x_tick_labels: value.x_tick_labels,
             y_tick_labels: value.y_tick_labels,
+            x_tick_format: value.x_tick_format,
+            y_tick_format: value.y_tick_format,
+            x_tick_label_rotation: value.x_tick_label_rotation,
+            y_tick_label_rotation: value.y_tick_label_rotation,
             x_limits: value.x_limits.map(|(a, b)| [a, b]),
             y_limits: value.y_limits.map(|(a, b)| [a, b]),
             z_limits: value.z_limits.map(|(a, b)| [a, b]),
@@ -1223,14 +1379,21 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
             grid_enabled: value.grid_enabled,
             minor_grid_enabled: value.minor_grid_enabled,
             minor_grid_explicit: value.minor_grid_explicit,
+            hidden_line_removal: value.hidden_line_removal,
             box_enabled: value.box_enabled,
             axis_equal: value.axis_equal,
+            data_aspect_ratio: value.data_aspect_ratio,
+            data_aspect_ratio_mode: value.data_aspect_ratio_mode,
             legend_enabled: value.legend_enabled,
             colorbar_enabled: value.colorbar_enabled,
-            colormap: format!("{:?}", value.colormap),
+            colormap: value.colormap.to_serialized_token(),
+            color_order: value
+                .color_order
+                .map(|colors| colors.into_iter().map(|c| [c.x, c.y, c.z]).collect()),
             color_limits: value.color_limits.map(|(a, b)| [a, b]),
             axes_style: value.axes_style.into(),
             title_style: value.title_style.into(),
+            subtitle_style: value.subtitle_style.into(),
             x_label_style: value.x_label_style.into(),
             y_label_style: value.y_label_style.into(),
             z_label_style: value.z_label_style.into(),
@@ -1248,12 +1411,24 @@ impl From<SerializedAxesMetadata> for AxesMetadata {
     fn from(value: SerializedAxesMetadata) -> Self {
         Self {
             axes_kind: value.axes_kind.into(),
+            overlay_parent: value.overlay_parent,
+            y_axis_location: value.y_axis_location,
+            position: value.position,
+            position_explicit: value.position_explicit,
+            units: value.units,
             title: value.title,
+            subtitle: value.subtitle,
             x_label: value.x_label,
             y_label: value.y_label,
             z_label: value.z_label,
+            x_ticks: value.x_ticks,
+            y_ticks: value.y_ticks,
             x_tick_labels: value.x_tick_labels,
             y_tick_labels: value.y_tick_labels,
+            x_tick_format: value.x_tick_format,
+            y_tick_format: value.y_tick_format,
+            x_tick_label_rotation: value.x_tick_label_rotation,
+            y_tick_label_rotation: value.y_tick_label_rotation,
             x_limits: value.x_limits.map(|[a, b]| (a, b)),
             y_limits: value.y_limits.map(|[a, b]| (a, b)),
             z_limits: value.z_limits.map(|[a, b]| (a, b)),
@@ -1265,14 +1440,24 @@ impl From<SerializedAxesMetadata> for AxesMetadata {
             grid_enabled: value.grid_enabled,
             minor_grid_enabled: value.minor_grid_enabled,
             minor_grid_explicit: value.minor_grid_explicit || value.minor_grid_enabled,
+            hidden_line_removal: value.hidden_line_removal,
             box_enabled: value.box_enabled,
             axis_equal: value.axis_equal,
+            data_aspect_ratio: value.data_aspect_ratio,
+            data_aspect_ratio_mode: value.data_aspect_ratio_mode,
             legend_enabled: value.legend_enabled,
             colorbar_enabled: value.colorbar_enabled,
             colormap: parse_colormap_name(&value.colormap),
+            color_order: value.color_order.map(|colors| {
+                colors
+                    .into_iter()
+                    .map(|[r, g, b]| glam::Vec4::new(r, g, b, 1.0))
+                    .collect()
+            }),
             color_limits: value.color_limits.map(|[a, b]| (a, b)),
             axes_style: value.axes_style.into(),
             title_style: value.title_style.into(),
+            subtitle_style: value.subtitle_style.into(),
             x_label_style: value.x_label_style.into(),
             y_label_style: value.y_label_style.into(),
             z_label_style: value.z_label_style.into(),
@@ -1579,6 +1764,46 @@ fn validate_surface_grid<T>(
     Ok(())
 }
 
+fn validate_matching_grid_shape<T, U>(
+    kind: &str,
+    reference: &[Vec<T>],
+    grid: &[Vec<U>],
+) -> Result<(), SceneExportError> {
+    if grid.len() != reference.len() {
+        return Err(SceneExportError::unexportable(format!(
+            "{kind} row count ({}) must match surface row count ({})",
+            grid.len(),
+            reference.len()
+        )));
+    }
+    for (row_idx, (reference_row, row)) in reference.iter().zip(grid).enumerate() {
+        if row.len() != reference_row.len() {
+            return Err(SceneExportError::unexportable(format!(
+                "{kind} row {row_idx} length ({}) must match surface row length ({})",
+                row.len(),
+                reference_row.len()
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_surface_coordinate_grids(
+    kind: &str,
+    x_grid: &[Vec<f64>],
+    y_grid: &[Vec<f64>],
+    z_grid: &[Vec<f64>],
+) -> Result<(), SceneExportError> {
+    if z_grid.is_empty() {
+        return Err(SceneExportError::unexportable(format!(
+            "{kind} is missing required grid rows"
+        )));
+    }
+    validate_matching_grid_shape(kind, z_grid, x_grid)?;
+    validate_matching_grid_shape(kind, z_grid, y_grid)?;
+    Ok(())
+}
+
 impl ScenePlot {
     async fn from_plot_for_export(
         plot: &PlotElement,
@@ -1642,6 +1867,11 @@ impl ScenePlot {
                     labels: bar.labels.clone(),
                     values,
                     histogram_bin_edges: bar.histogram_bin_edges().map(|edges| edges.to_vec()),
+                    polar_histogram: bar.is_polar_histogram(),
+                    polar_histogram_display_style: Some(format!(
+                        "{:?}",
+                        bar.polar_histogram_display_style()
+                    )),
                     color_rgba: vec4_to_rgba(bar.color),
                     outline_color_rgba: bar.outline_color.map(vec4_to_rgba),
                     bar_width: bar.bar_width,
@@ -1761,7 +1991,7 @@ impl ScenePlot {
                 }
             }
             PlotElement::Quiver(quiver) => {
-                let (x, y, u, v) = quiver
+                let (x, y, z, u, v, w) = quiver
                     .export_scene_vector_data()
                     .await
                     .map_err(SceneExportError::readback)?;
@@ -1773,8 +2003,10 @@ impl ScenePlot {
                 Self::Quiver {
                     x,
                     y,
+                    z,
                     u,
                     v,
+                    w,
                     color_rgba: vec4_to_rgba(quiver.color),
                     line_width: quiver.line_width,
                     scale: quiver.scale,
@@ -1802,7 +2034,9 @@ impl ScenePlot {
                     x,
                     y,
                     z,
-                    colormap: format!("{:?}", surface.colormap),
+                    x_grid: surface.x_grid.clone(),
+                    y_grid: surface.y_grid.clone(),
+                    colormap: surface.colormap.to_serialized_token(),
                     shading_mode: format!("{:?}", surface.shading_mode),
                     wireframe: surface.wireframe,
                     alpha: surface.alpha,
@@ -1947,7 +2181,9 @@ impl ScenePlot {
                     ],
                 )?;
             }
-            ScenePlot::Quiver { x, y, u, v, .. } => {
+            ScenePlot::Quiver {
+                x, y, z, u, v, w, ..
+            } => {
                 validate_required_equal_lengths(
                     "quiver vector field scene data",
                     &[
@@ -1957,6 +2193,23 @@ impl ScenePlot {
                         ("v", v.len()),
                     ],
                 )?;
+                if let Some(z) = z {
+                    validate_required_equal_lengths(
+                        "quiver3 position scene data",
+                        &[("x", x.len()), ("z", z.len())],
+                    )?;
+                }
+                if let Some(w) = w {
+                    validate_required_equal_lengths(
+                        "quiver3 vector scene data",
+                        &[("u", u.len()), ("w", w.len())],
+                    )?;
+                }
+                if z.is_some() != w.is_some() {
+                    return Err(SceneExportError::unexportable(
+                        "quiver3 scene data requires both z and w arrays",
+                    ));
+                }
             }
             ScenePlot::Bar {
                 labels,
@@ -1992,12 +2245,27 @@ impl ScenePlot {
                 x,
                 y,
                 z,
+                x_grid,
+                y_grid,
                 color_grid_rgba,
                 ..
             } => {
-                validate_surface_grid("surface grid scene data", x, y, z)?;
+                match (x_grid, y_grid) {
+                    (Some(x_grid), Some(y_grid)) => validate_surface_coordinate_grids(
+                        "surface coordinate grid scene data",
+                        x_grid,
+                        y_grid,
+                        z,
+                    )?,
+                    (None, None) => validate_surface_grid("surface grid scene data", x, y, z)?,
+                    _ => {
+                        return Err(SceneExportError::unexportable(
+                            "surface coordinate grid scene data must include both xGrid and yGrid",
+                        ));
+                    }
+                }
                 if let Some(color_grid) = color_grid_rgba {
-                    validate_surface_grid("surface color grid scene data", x, y, color_grid)?;
+                    validate_matching_grid_shape("surface color grid scene data", z, color_grid)?;
                 }
             }
             ScenePlot::Patch {
@@ -2128,6 +2396,11 @@ impl ScenePlot {
                 group_index: bar.group_index as u32,
                 group_count: bar.group_count as u32,
                 stack_offsets: bar.stack_offsets().map(|offsets| offsets.to_vec()),
+                polar_histogram: bar.is_polar_histogram(),
+                polar_histogram_display_style: Some(format!(
+                    "{:?}",
+                    bar.polar_histogram_display_style()
+                )),
                 axes_index,
                 label: bar.label.clone(),
                 visible: bar.visible,
@@ -2196,8 +2469,10 @@ impl ScenePlot {
             PlotElement::Quiver(quiver) => Self::Quiver {
                 x: quiver.x.clone(),
                 y: quiver.y.clone(),
+                z: quiver.z.clone(),
                 u: quiver.u.clone(),
                 v: quiver.v.clone(),
+                w: quiver.w.clone(),
                 color_rgba: vec4_to_rgba(quiver.color),
                 line_width: quiver.line_width,
                 scale: quiver.scale,
@@ -2210,7 +2485,9 @@ impl ScenePlot {
                 x: surface.x_data.clone(),
                 y: surface.y_data.clone(),
                 z: surface.z_data.clone().unwrap_or_default(),
-                colormap: format!("{:?}", surface.colormap),
+                x_grid: surface.x_grid.clone(),
+                y_grid: surface.y_grid.clone(),
+                colormap: surface.colormap.to_serialized_token(),
                 shading_mode: format!("{:?}", surface.shading_mode),
                 wireframe: surface.wireframe,
                 alpha: surface.alpha,
@@ -2423,6 +2700,8 @@ impl ScenePlot {
                 labels,
                 values,
                 histogram_bin_edges,
+                polar_histogram,
+                polar_histogram_display_style,
                 color_rgba,
                 outline_color_rgba,
                 bar_width,
@@ -2441,6 +2720,16 @@ impl ScenePlot {
                     .with_group(group_index as usize, group_count as usize);
                 if let Some(edges) = histogram_bin_edges {
                     bar.set_histogram_bin_edges(edges);
+                }
+                if polar_histogram {
+                    bar.set_polar_histogram(true);
+                    if let Some(style) = polar_histogram_display_style {
+                        if style.eq_ignore_ascii_case("stairs") {
+                            bar.set_polar_histogram_display_style(
+                                crate::plots::PolarHistogramDisplayStyle::Stairs,
+                            );
+                        }
+                    }
                 }
                 if let Some(offsets) = stack_offsets {
                     bar = bar.with_stack_offsets(offsets);
@@ -2578,8 +2867,10 @@ impl ScenePlot {
             ScenePlot::Quiver {
                 x,
                 y,
+                z,
                 u,
                 v,
+                w,
                 color_rgba,
                 line_width,
                 scale,
@@ -2588,9 +2879,13 @@ impl ScenePlot {
                 label,
                 visible,
             } => {
-                let mut quiver = QuiverPlot::new(x, y, u, v)?
-                    .with_style(rgba_to_vec4(color_rgba), line_width, scale, head_size)
-                    .with_label(label.unwrap_or_else(|| "Data".to_string()));
+                let mut quiver = if let (Some(z), Some(w)) = (z, w) {
+                    QuiverPlot::new3d(x, y, z, u, v, w)?
+                } else {
+                    QuiverPlot::new(x, y, u, v)?
+                }
+                .with_style(rgba_to_vec4(color_rgba), line_width, scale, head_size)
+                .with_label(label.unwrap_or_else(|| "Data".to_string()));
                 quiver.set_visible(visible);
                 figure.add_quiver_plot_on_axes(quiver, axes_index as usize);
             }
@@ -2598,6 +2893,8 @@ impl ScenePlot {
                 x,
                 y,
                 z,
+                x_grid,
+                y_grid,
                 colormap,
                 shading_mode,
                 wireframe,
@@ -2610,7 +2907,18 @@ impl ScenePlot {
                 label,
                 visible,
             } => {
-                let mut surface = SurfacePlot::new(x, y, z)?;
+                let mut surface = match (x_grid, y_grid) {
+                    (Some(x_grid), Some(y_grid)) => {
+                        SurfacePlot::from_coordinate_grids(x_grid, y_grid, z)?
+                    }
+                    (None, None) => SurfacePlot::new(x, y, z)?,
+                    _ => {
+                        return Err(
+                            "surface scene must include both xGrid and yGrid for coordinate grids"
+                                .to_string(),
+                        );
+                    }
+                };
                 surface.colormap = parse_colormap(&colormap);
                 surface.shading_mode = parse_shading_mode(&shading_mode);
                 surface.wireframe = wireframe;
@@ -2834,6 +3142,7 @@ impl ScenePlot {
 
 fn parse_line_style(value: &str) -> crate::plots::LineStyle {
     match value {
+        "None" | "none" => crate::plots::LineStyle::None,
         "Dashed" => crate::plots::LineStyle::Dashed,
         "Dotted" => crate::plots::LineStyle::Dotted,
         "DashDot" => crate::plots::LineStyle::DashDot,
@@ -2872,7 +3181,7 @@ fn parse_marker_style(value: &str) -> MarkerStyle {
 }
 
 fn parse_colormap(value: &str) -> ColorMap {
-    ColorMap::from_name(value).unwrap_or(ColorMap::Parula)
+    ColorMap::from_serialized_token(value).unwrap_or(ColorMap::Parula)
 }
 
 fn parse_shading_mode(value: &str) -> ShadingMode {
@@ -3020,6 +3329,7 @@ impl From<PlotType> for PlotKind {
 
 fn parse_line_style_name(name: &str) -> crate::plots::line::LineStyle {
     match name.to_ascii_lowercase().as_str() {
+        "none" => crate::plots::line::LineStyle::None,
         "dashed" => crate::plots::line::LineStyle::Dashed,
         "dotted" => crate::plots::line::LineStyle::Dotted,
         "dashdot" => crate::plots::line::LineStyle::DashDot,
@@ -3028,7 +3338,7 @@ fn parse_line_style_name(name: &str) -> crate::plots::line::LineStyle {
 }
 
 fn parse_colormap_name(name: &str) -> crate::plots::surface::ColorMap {
-    crate::plots::surface::ColorMap::from_name(name)
+    crate::plots::surface::ColorMap::from_serialized_token(name)
         .unwrap_or(crate::plots::surface::ColorMap::Parula)
 }
 
@@ -3155,8 +3465,8 @@ mod tests {
     use super::*;
     use crate::plots::{
         AreaPlot, BarChart, ContourFillPlot, ContourPlot, ErrorBar, Figure, Line3Plot, LinePlot,
-        MeshPlot, PatchPlot, PieChart, QuiverPlot, ReferenceLine, ReferenceLineOrientation,
-        Scatter3Plot, ScatterPlot, StairsPlot, StemPlot, SurfacePlot,
+        MeshPlot, PatchPlot, PieChart, PolarHistogramDisplayStyle, QuiverPlot, ReferenceLine,
+        ReferenceLineOrientation, Scatter3Plot, ScatterPlot, StairsPlot, StemPlot, SurfacePlot,
     };
     use glam::{Vec3, Vec4};
 
@@ -3336,6 +3646,8 @@ mod tests {
             x: vec![0.0, 1.0, 2.0],
             y: vec![10.0, 20.0],
             z: vec![vec![1.0, 2.0], vec![3.0, 4.0], vec![5.0, 6.0]],
+            x_grid: None,
+            y_grid: None,
             colormap: "Parula".to_string(),
             shading_mode: "Smooth".to_string(),
             wireframe: false,
@@ -3358,6 +3670,8 @@ mod tests {
             x: vec![0.0, 1.0, 2.0],
             y: vec![10.0, 20.0],
             z: vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]],
+            x_grid: None,
+            y_grid: None,
             colormap: "Parula".to_string(),
             shading_mode: "Smooth".to_string(),
             wireframe: false,
@@ -3387,6 +3701,8 @@ mod tests {
                 x: vec![0.0, 1.0],
                 y: vec![10.0, 20.0, 30.0],
                 z: vec![vec![0.0, 0.0, 0.0], vec![0.0, 0.0, 0.0]],
+                x_grid: None,
+                y_grid: None,
                 colormap: "Parula".to_string(),
                 shading_mode: "None".to_string(),
                 wireframe: false,
@@ -3446,6 +3762,7 @@ mod tests {
         figure.set_name("Roundtrip");
         figure.set_number_title(false);
         figure.set_visible(false);
+        figure.set_position([100.0, 100.0, 1000.0, 700.0]);
         let mut line = LinePlot::new(vec![0.0, 1.0], vec![1.0, 2.0]).unwrap();
         line.label = Some("line".to_string());
         figure.add_line_plot_on_axes(line, 0);
@@ -3461,6 +3778,7 @@ mod tests {
         assert_eq!(rebuilt.name.as_deref(), Some("Roundtrip"));
         assert!(!rebuilt.number_title);
         assert!(!rebuilt.visible);
+        assert_eq!(rebuilt.position, [100.0, 100.0, 1000.0, 700.0]);
     }
 
     #[test]
@@ -3504,6 +3822,23 @@ mod tests {
             "unsupported figure scene schema version {}",
             FigureScene::SCHEMA_VERSION + 1
         )));
+    }
+
+    #[test]
+    fn figure_scene_rejects_invalid_position_metadata() {
+        let mut scene = FigureScene::capture(&Figure::new());
+        scene.metadata.position = Some([0.0, 0.0, 0.0, 400.0]);
+        let err = scene
+            .clone()
+            .into_figure()
+            .expect_err("zero-width position must fail");
+        assert!(err.contains("Position width and height must be positive"));
+
+        scene.metadata.position = Some([0.0, f64::NAN, 300.0, 400.0]);
+        let err = scene
+            .into_figure()
+            .expect_err("non-finite position must fail");
+        assert!(err.contains("Position values must be finite"));
     }
 
     #[test]
@@ -3883,6 +4218,32 @@ mod tests {
     }
 
     #[test]
+    fn figure_scene_roundtrip_preserves_polar_histogram_state() {
+        let mut figure = Figure::new();
+        let mut bar = BarChart::new(vec!["bin1".into(), "bin2".into()], vec![4.0, 5.0]).unwrap();
+        bar.set_histogram_bin_edges(vec![0.0, std::f64::consts::PI, std::f64::consts::TAU]);
+        bar.set_polar_histogram(true);
+        bar.set_polar_histogram_display_style(PolarHistogramDisplayStyle::Stairs);
+        figure.add_bar_chart(bar);
+
+        let rebuilt = FigureScene::capture(&figure)
+            .into_figure()
+            .expect("scene restore should succeed");
+        let PlotElement::Bar(bar) = rebuilt.plots().next().unwrap() else {
+            panic!("expected bar")
+        };
+        assert!(bar.is_polar_histogram());
+        assert_eq!(
+            bar.polar_histogram_display_style(),
+            PolarHistogramDisplayStyle::Stairs
+        );
+        assert_eq!(
+            bar.histogram_bin_edges().unwrap_or(&[]),
+            &[0.0, std::f64::consts::PI, std::f64::consts::TAU]
+        );
+    }
+
+    #[test]
     fn figure_scene_roundtrip_preserves_errorbar_style_surface() {
         let mut figure = Figure::new();
         let mut error = ErrorBar::new_vertical(
@@ -3977,6 +4338,33 @@ mod tests {
     }
 
     #[test]
+    fn figure_scene_roundtrip_preserves_quiver3_plot() {
+        let mut figure = Figure::new();
+        let quiver = QuiverPlot::new3d(
+            vec![0.0, 1.0],
+            vec![1.0, 2.0],
+            vec![3.0, 4.0],
+            vec![0.5, -0.5],
+            vec![1.0, 0.25],
+            vec![2.0, -1.0],
+        )
+        .unwrap()
+        .with_style(Vec4::new(0.2, 0.3, 0.4, 1.0), 2.0, 1.5, 0.2)
+        .with_label("Field3");
+        figure.add_quiver_plot(quiver);
+
+        let rebuilt = FigureScene::capture(&figure)
+            .into_figure()
+            .expect("scene restore should succeed");
+        let PlotElement::Quiver(quiver) = rebuilt.plots().next().unwrap() else {
+            panic!("expected quiver")
+        };
+        assert_eq!(quiver.z.as_ref().unwrap(), &vec![3.0, 4.0]);
+        assert_eq!(quiver.w.as_ref().unwrap(), &vec![2.0, -1.0]);
+        assert_eq!(quiver.label.as_deref(), Some("Field3"));
+    }
+
+    #[test]
     fn figure_scene_roundtrip_preserves_image_surface_mode_and_color_grid() {
         let mut figure = Figure::new();
         let surface = SurfacePlot::new(
@@ -4009,6 +4397,37 @@ mod tests {
     }
 
     #[test]
+    fn figure_scene_roundtrip_preserves_parametric_surface_coordinate_grids() {
+        let mut figure = Figure::new();
+        let surface = SurfacePlot::from_coordinate_grids(
+            vec![vec![0.0, 0.5], vec![0.2, 0.8]],
+            vec![vec![0.0, 0.1], vec![0.7, 1.0]],
+            vec![vec![1.0, 2.0], vec![3.0, 4.0]],
+        )
+        .unwrap();
+        figure.add_surface_plot(surface);
+
+        let scene = FigureScene::capture(&figure);
+        let ScenePlot::Surface {
+            x_grid: Some(scene_x_grid),
+            y_grid: Some(scene_y_grid),
+            ..
+        } = &scene.plots[0]
+        else {
+            panic!("expected exported coordinate grids");
+        };
+        assert_eq!(scene_x_grid[1][0], 0.2);
+        assert_eq!(scene_y_grid[0][1], 0.1);
+
+        let rebuilt = scene.into_figure().expect("scene restore should succeed");
+        let PlotElement::Surface(surface) = rebuilt.plots().next().unwrap() else {
+            panic!("expected surface")
+        };
+        assert_eq!(surface.x_grid.as_ref().unwrap()[1][1], 0.8);
+        assert_eq!(surface.y_grid.as_ref().unwrap()[1][0], 0.7);
+    }
+
+    #[test]
     fn figure_scene_roundtrip_preserves_area_lower_curve() {
         let mut figure = Figure::new();
         let area = AreaPlot::new(vec![1.0, 2.0], vec![2.0, 3.0])
@@ -4034,12 +4453,15 @@ mod tests {
         figure.set_axes_z_limits(1, Some((5.0, 6.0)));
         figure.set_axes_grid_enabled(1, false);
         figure.set_axes_minor_grid_enabled(1, true);
+        figure.set_axes_hidden_line_removal(1, false);
         figure.set_axes_box_enabled(1, false);
         figure.set_axes_axis_equal(1, true);
+        figure.set_axes_data_aspect_ratio(1, [1.0, 2.0, 3.0], "manual");
         figure.set_axes_kind(1, AxesKind::Polar);
         figure.set_axes_colorbar_enabled(1, true);
         figure.set_axes_colormap(1, ColorMap::Hot);
         figure.set_axes_color_limits(1, Some((0.0, 10.0)));
+        figure.set_axes_tick_label_rotations(1, Some(30.0), Some(-45.0));
         figure.set_axes_style(
             1,
             TextStyle {
@@ -4059,13 +4481,41 @@ mod tests {
         assert!(!meta.grid_enabled);
         assert!(meta.minor_grid_enabled);
         assert!(meta.minor_grid_explicit);
+        assert!(!meta.hidden_line_removal);
         assert!(!meta.box_enabled);
-        assert!(meta.axis_equal);
+        assert!(!meta.axis_equal);
+        assert_eq!(meta.data_aspect_ratio, [1.0, 2.0, 3.0]);
+        assert_eq!(meta.data_aspect_ratio_mode, "manual");
         assert_eq!(meta.axes_kind, AxesKind::Polar);
         assert!(meta.colorbar_enabled);
         assert_eq!(format!("{:?}", meta.colormap), "Hot");
         assert_eq!(meta.color_limits, Some((0.0, 10.0)));
+        assert_eq!(meta.x_tick_label_rotation, Some(30.0));
+        assert_eq!(meta.y_tick_label_rotation, Some(-45.0));
         assert_eq!(meta.axes_style.font_size, Some(14.0));
+    }
+
+    #[test]
+    fn figure_scene_roundtrip_preserves_listed_colormap_rows() {
+        let mut figure = Figure::new();
+        let listed =
+            ColorMap::from_rgb_rows(vec![[0.0, 0.25, 1.0], [1.0, 0.5, 0.0], [0.2, 0.3, 0.4]])
+                .expect("listed colormap");
+        figure.set_axes_colormap(0, listed);
+
+        let scene = FigureScene::capture(&figure);
+        let token = scene.metadata.colormap.as_deref().expect("colormap token");
+        assert!(token.starts_with("listed:"));
+
+        let rebuilt = scene.into_figure().expect("scene restore should succeed");
+        let meta = rebuilt.axes_metadata(0).expect("axes metadata");
+        let ColorMap::Listed(colors) = &meta.colormap else {
+            panic!("expected listed colormap");
+        };
+        assert_eq!(
+            colors.as_ref(),
+            &[[0.0, 0.25, 1.0], [1.0, 0.5, 0.0], [0.2, 0.3, 0.4]]
+        );
     }
 
     #[test]
@@ -4100,6 +4550,7 @@ mod tests {
         });
         figure.set_active_axes_index(0);
         figure.set_axes_title(0, "Left");
+        figure.set_axes_subtitle(0, "Left details");
         figure.set_axes_xlabel(0, "LX");
         figure.set_axes_ylabel(0, "LY");
         figure.set_axes_legend_enabled(0, false);
@@ -4119,6 +4570,8 @@ mod tests {
         if let Some(meta) = figure.axes_metadata.get_mut(0) {
             meta.title_style.font_weight = Some("bold".into());
             meta.title_style.font_angle = Some("italic".into());
+            meta.subtitle_style.font_size = Some(12.0);
+            meta.subtitle_style.font_weight = Some("normal".into());
         }
         figure.set_active_axes_index(1);
 
@@ -4133,6 +4586,10 @@ mod tests {
         assert_eq!(
             rebuilt.axes_metadata(0).and_then(|m| m.title.as_deref()),
             Some("Left")
+        );
+        assert_eq!(
+            rebuilt.axes_metadata(0).and_then(|m| m.subtitle.as_deref()),
+            Some("Left details")
         );
         assert_eq!(
             rebuilt.axes_metadata(0).and_then(|m| m.x_label.as_deref()),
@@ -4160,6 +4617,19 @@ mod tests {
                 .font_angle
                 .as_deref(),
             Some("italic")
+        );
+        assert_eq!(
+            rebuilt.axes_metadata(0).unwrap().subtitle_style.font_size,
+            Some(12.0)
+        );
+        assert_eq!(
+            rebuilt
+                .axes_metadata(0)
+                .unwrap()
+                .subtitle_style
+                .font_weight
+                .as_deref(),
+            Some("normal")
         );
         assert_eq!(
             rebuilt.axes_metadata(1).and_then(|m| m.title.as_deref()),

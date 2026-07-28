@@ -33,6 +33,7 @@
     "`clear('all')` and command-form `clear all` are treated the same as bare `clear`.",
     "`clear x` removes the variable `x` while leaving other workspace bindings intact.",
     "Multiple names can be supplied as separate inputs or command-form tokens, for example `clear x y z`.",
+    "Active `onCleanup` objects are invoked before their workspace bindings are removed.",
     "After a successful clear, removed variables are no longer available to later statements and the workspace snapshot is refreshed so hosts can drop cleared bindings.",
     "Accepts variable names as string scalars, row character vectors, or string arrays. If any input is `all`, the entire workspace is cleared.",
     "Clearing a name that does not exist is a no-op.",

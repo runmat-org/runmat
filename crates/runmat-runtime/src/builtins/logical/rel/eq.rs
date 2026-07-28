@@ -15,8 +15,11 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::logical::rel::integer_comparison::{
+    try_integer_comparison, IntegerComparisonError, IntegerComparisonOp,
+};
 use crate::builtins::logical::type_resolvers::logical_binary_type;
-use crate::builtins::math::symbolic::{symbolic_expr_to_value, value_to_symbolic_scalar};
+use crate::builtins::math::symbolic::{symbolic_binary_broadcast, SymbolicBinaryOp};
 use crate::{build_runtime_error, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::rel::eq")]
@@ -126,6 +129,17 @@ fn eq_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     builder.build()
 }
 
+fn eq_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 #[runtime_builtin(
     name = "eq",
     category = "logical/rel",
@@ -166,18 +180,39 @@ async fn eq_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 
     if matches!(
         (&lhs, &rhs),
-        (Value::Symbolic(_), _) | (_, Value::Symbolic(_))
+        (Value::Symbolic(_), _)
+            | (_, Value::Symbolic(_))
+            | (Value::SymbolicArray(_), _)
+            | (_, Value::SymbolicArray(_))
     ) {
-        let lhs =
-            value_to_symbolic_scalar(&lhs).ok_or_else(|| eq_error(&EQ_ERROR_INVALID_INPUT))?;
-        let rhs =
-            value_to_symbolic_scalar(&rhs).ok_or_else(|| eq_error(&EQ_ERROR_INVALID_INPUT))?;
-        return Ok(symbolic_expr_to_value(
-            runmat_builtins::SymbolicExpr::equation(lhs, rhs),
-        ));
+        return match symbolic_binary_broadcast(&lhs, &rhs, SymbolicBinaryOp::Eq) {
+            Ok(Some(value)) => Ok(value),
+            Ok(None) => Err(eq_error(&EQ_ERROR_INVALID_INPUT)),
+            Err(err) => Err(eq_error_with_message(
+                format!("{}: {err}", EQ_ERROR_SIZE_MISMATCH.message),
+                &EQ_ERROR_SIZE_MISMATCH,
+            )),
+        };
+    }
+
+    if let Some(result) = crate::builtins::table::categorical_compare(
+        &lhs,
+        &rhs,
+        crate::builtins::table::CategoricalComparison::Eq,
+    ) {
+        return result;
     }
 
     let (lhs, rhs) = normalize_char_string(lhs, rhs);
+
+    if let Some(result) = try_integer_comparison(&lhs, &rhs, IntegerComparisonOp::Eq).map_err(
+        |error| match error {
+            IntegerComparisonError::SizeMismatch => eq_error(&EQ_ERROR_SIZE_MISMATCH),
+            IntegerComparisonError::Internal => eq_error(&EQ_ERROR_INVALID_INPUT),
+        },
+    )? {
+        return Ok(result);
+    }
 
     if let Some(result) = scalar_eq_value(&lhs, &rhs) {
         return result;
@@ -569,7 +604,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
-    use runmat_builtins::{HandleRef, Listener, SymbolicExpr};
+    use runmat_builtins::{HandleRef, Listener, SymbolicArray, SymbolicExpr};
 
     fn run_eq(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
         block_on(super::eq_builtin(lhs, rhs))
@@ -644,6 +679,108 @@ pub(crate) mod tests {
         let result = run_eq(Value::Symbolic(applied), Value::Num(0.0)).expect("eq");
 
         assert_eq!(result.to_string(), "Y(0) == 0");
+    }
+
+    #[test]
+    fn eq_numeric_scalar_with_symbolic_scalar_builds_equation() {
+        let result = run_eq(
+            Value::Num(0.0),
+            Value::Symbolic(SymbolicExpr::variable("x")),
+        )
+        .expect("eq");
+
+        assert_eq!(result.to_string(), "0 == x");
+    }
+
+    #[test]
+    fn eq_symbolic_scalar_with_symbolic_scalar_builds_equation() {
+        let result = run_eq(
+            Value::Symbolic(SymbolicExpr::variable("x")),
+            Value::Symbolic(SymbolicExpr::variable("y")),
+        )
+        .expect("eq");
+
+        assert_eq!(result.to_string(), "x == y");
+    }
+
+    #[test]
+    fn eq_symbolic_array_with_scalar_builds_equations() {
+        let array = SymbolicArray::new(
+            vec![SymbolicExpr::variable("x"), SymbolicExpr::variable("y")],
+            vec![1, 2],
+        )
+        .unwrap();
+
+        let result = run_eq(Value::SymbolicArray(array), Value::Num(0.0)).expect("eq");
+
+        match result {
+            Value::SymbolicArray(array) => {
+                assert_eq!(array.shape, vec![1, 2]);
+                assert_eq!(
+                    array
+                        .data
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>(),
+                    vec!["x == 0", "y == 0"]
+                );
+            }
+            other => panic!("expected symbolic array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn eq_compatible_symbolic_arrays_build_equations() {
+        let lhs = SymbolicArray::new(
+            vec![SymbolicExpr::variable("x"), SymbolicExpr::variable("y")],
+            vec![1, 2],
+        )
+        .unwrap();
+        let rhs = SymbolicArray::new(
+            vec![SymbolicExpr::constant(1.0), SymbolicExpr::constant(2.0)],
+            vec![1, 2],
+        )
+        .unwrap();
+
+        let result = run_eq(Value::SymbolicArray(lhs), Value::SymbolicArray(rhs)).expect("eq");
+
+        match result {
+            Value::SymbolicArray(array) => {
+                assert_eq!(array.shape, vec![1, 2]);
+                assert_eq!(
+                    array
+                        .data
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>(),
+                    vec!["x == 1", "y == 2"]
+                );
+            }
+            other => panic!("expected symbolic array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn eq_symbolic_array_shape_mismatch_errors() {
+        let lhs = SymbolicArray::new(
+            vec![SymbolicExpr::variable("x"), SymbolicExpr::variable("y")],
+            vec![1, 2],
+        )
+        .unwrap();
+        let rhs = SymbolicArray::new(
+            vec![
+                SymbolicExpr::constant(1.0),
+                SymbolicExpr::constant(2.0),
+                SymbolicExpr::constant(3.0),
+            ],
+            vec![1, 3],
+        )
+        .unwrap();
+
+        let err = run_eq(Value::SymbolicArray(lhs), Value::SymbolicArray(rhs))
+            .expect_err("shape mismatch should fail");
+
+        assert_eq!(err.identifier(), EQ_ERROR_SIZE_MISMATCH.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

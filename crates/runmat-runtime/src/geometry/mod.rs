@@ -19,10 +19,11 @@ use runmat_geometry_io::{
     GeometryImportContext, GeometryImportOptions,
 };
 use runmat_geometry_ops::{compute_stats, find_region, GeometryStats, QueryError};
-use runmat_meshing_core::{
+use runmat_meshing::{
     prepare_geometry_for_analysis, MeshingOptions, MeshingPrepResult, MeshingProfile,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 
 use crate::operations::{
     operation_error, OperationContext, OperationEnvelope, OperationErrorEnvelope,
@@ -148,6 +149,70 @@ pub struct GeometryAssetSummary {
     pub meshes: Vec<GeometryMeshSummary>,
     pub mapping_summary: GeometryRegionMappingSummary,
     pub cad: GeometryCadSummary,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct GeometryPreviewBudgetPayload {
+    pub max_bytes: Option<u64>,
+    pub max_triangles: Option<u64>,
+    pub max_vertices: Option<u64>,
+    pub timeout_ms: Option<u64>,
+    pub budget_policy: Option<GeometryPreviewBudgetPolicyPayload>,
+    pub tessellation_profile: Option<GeometryPreviewTessellationProfilePayload>,
+    pub xray: Option<bool>,
+    pub allow_create_fea_study: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum GeometryPreviewBudgetPolicyPayload {
+    #[default]
+    Truncate,
+    Strict,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct GeometryPreviewTessellationProfilePayload {
+    pub profile_id: Option<String>,
+    pub chord_tolerance: Option<f64>,
+    pub angle_tolerance_deg: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeometryStatsPayload {
+    pub mesh_count: usize,
+    pub total_vertices: u64,
+    pub total_elements: u64,
+    pub region_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeometryInspectPayload {
+    pub path: String,
+    pub format: String,
+    pub byte_count: u64,
+    pub supported: bool,
+    pub stats: Option<GeometryStatsPayload>,
+    pub geometry_summary: Option<JsonValue>,
+    pub regions: Vec<JsonValue>,
+    pub diagnostics: Vec<JsonValue>,
+    pub degraded_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeometryPreviewPayload {
+    #[serde(flatten)]
+    pub inspect: GeometryInspectPayload,
+    pub scene_kind: String,
+    pub figure_handle: Option<u32>,
+    pub geometry_scene_handle: Option<u32>,
+    pub truncated: bool,
+    pub preview_message: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -873,6 +938,10 @@ pub fn geometry_inspect_op(
         &context,
         data,
     ))
+}
+
+pub fn native_cad_backend_was_used() -> bool {
+    runmat_geometry_io::native_cad_backend_was_used()
 }
 
 pub fn geometry_inspect(path: &str, bytes: &[u8]) -> BuiltinResult<GeometryInspectResult> {

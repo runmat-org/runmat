@@ -245,7 +245,7 @@ pub async fn imagesc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         &c_input,
         &x_axis,
         &y_axis,
-        style.colormap,
+        style.colormap.clone(),
         color_limits,
     )
     .await
@@ -255,7 +255,7 @@ pub async fn imagesc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     if color_limits.is_some() {
         surface = surface.with_color_limits(color_limits);
     }
-    surface.colormap = style.colormap;
+    surface.colormap = style.colormap.clone();
     let mut surface = Some(surface);
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
@@ -301,6 +301,7 @@ mod tests {
     fn grid_tensor(data: Vec<f64>, rows: usize, cols: usize) -> Tensor {
         Tensor {
             data,
+            integer_data: None,
             shape: vec![rows, cols],
             rows,
             cols,
@@ -342,6 +343,7 @@ mod tests {
         let _ = futures::executor::block_on(imagesc_builtin(vec![
             Value::Tensor(Tensor {
                 data: vec![10.0, 20.0],
+                integer_data: None,
                 shape: vec![2],
                 rows: 2,
                 cols: 1,
@@ -349,6 +351,7 @@ mod tests {
             }),
             Value::Tensor(Tensor {
                 data: vec![1.0, 2.0],
+                integer_data: None,
                 shape: vec![2],
                 rows: 2,
                 cols: 1,
@@ -374,6 +377,7 @@ mod tests {
         let _ = futures::executor::block_on(imagesc_builtin(vec![
             Value::Tensor(Tensor {
                 data: vec![10.0, 20.0],
+                integer_data: None,
                 shape: vec![2],
                 rows: 2,
                 cols: 1,
@@ -381,6 +385,7 @@ mod tests {
             }),
             Value::Tensor(Tensor {
                 data: vec![1.0, 5.0],
+                integer_data: None,
                 shape: vec![2],
                 rows: 2,
                 cols: 1,
@@ -398,6 +403,17 @@ mod tests {
             vec![10.0, 13.333333333333332, 16.666666666666664, 20.0]
         );
         assert_eq!(surface.y_data, vec![1.0, 3.0, 5.0]);
+        assert_eq!(
+            surface.z_data.as_deref(),
+            Some(
+                &[
+                    vec![1.0, 2.0, 3.0],
+                    vec![4.0, 5.0, 6.0],
+                    vec![7.0, 8.0, 9.0],
+                    vec![10.0, 11.0, 12.0],
+                ][..]
+            )
+        );
     }
 
     #[test]

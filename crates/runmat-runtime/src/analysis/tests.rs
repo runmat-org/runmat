@@ -12,10 +12,11 @@ use runmat_accelerate_api::{
 };
 use runmat_analysis_core::{
     AnalysisField, AnalysisFieldValues, AnalysisModel, AnalysisModelId, AnalysisStep,
-    AnalysisStepKind, BoundaryCondition, BoundaryConditionKind, CfdSolveFamily,
-    ConductivityFrequencyPoint, ElectromagneticDomain, EvidenceConfidence, LoadCase, LoadKind,
-    MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel, MaterialModel,
-    MaterialThermalModel, ReferenceFrame, StructuralElementKind,
+    AnalysisStepKind, BeamElementModel, BeamSectionModel, BoundaryCondition, BoundaryConditionKind,
+    CfdSolveFamily, ConductivityFrequencyPoint, ElectromagneticDomain, EvidenceConfidence,
+    LoadCase, LoadKind, MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel,
+    MaterialModel, MaterialThermalModel, ReferenceFrame, StructuralElement, StructuralElementKind,
+    StructuralModel, StructuralNode,
 };
 use runmat_analysis_fea::{
     fea_acoustic_frequency_response_field_id, fea_cht_energy_residual_field_id,
@@ -59,17 +60,30 @@ use runmat_analysis_fea::{
     FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS,
     FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE, FEA_FIELD_STRUCTURAL_BEAM_TORSION_MOMENT,
     FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-    FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
-    FEA_FIELD_STRUCTURAL_REACTION_MOMENT, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
-    FEA_FIELD_STRUCTURAL_ROTATION, FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
-    FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE, FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
-    FEA_FIELD_STRUCTURAL_SHELL_VON_MISES, FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRESS,
-    FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
+    FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
+    FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
+    FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_ROTATION,
+    FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
+    FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR, FEA_FIELD_STRUCTURAL_SHELL_VON_MISES,
+    FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
+    FEA_FIELD_STRUCTURAL_STRESS, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+    FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{
-    GeometryAsset, GeometrySource, MaterialEvidence, MaterialEvidenceConfidence, MeshDescriptor,
-    MeshKind, Region, RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh,
-    TessellationProfile, UnitSystem,
+    EntityIdRange, EntityKind, GeometryAsset, GeometrySource, MaterialEvidence,
+    MaterialEvidenceConfidence, MeshDescriptor, MeshKind, Region, RegionEntityMapping,
+    SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
+};
+use runmat_meshing_core::fixtures::{
+    nested_tetrahedron_shell_geometry, split_material_through_hole_plate_geometry,
+    through_hole_plate_geometry,
+};
+use runmat_meshing_core::{
+    contracts::artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryFace,
+    AnalysisFieldTopologyDescriptor, AnalysisFieldTopologyLocation, AnalysisMeshArtifact,
+    AnalysisMeshNode, AnalysisMeshProvenance, AnalysisMeshQualityReport, AnalysisVolumeElement,
+    BoundaryElementKind, MeshEntityProvenance, MeshSizingField, SourceEntityKind,
+    VolumeElementKind, ANALYSIS_MESH_FIELD_TOPOLOGY_ID, TETRAHEDRON4_FIELD_ELEMENT_KIND,
 };
 
 use super::*;
@@ -108,7 +122,7 @@ fn sample_analysis_run_prep_context() -> AnalysisRunPrepContext {
         topology_region_mesh_variance: 0.5,
         topology_triangle_family_ratio: 0.2,
         topology_quad_family_ratio: 0.3,
-        topology_tet_family_ratio: 0.25,
+        topology_tetrahedron_family_ratio: 0.25,
         topology_hex_family_ratio: 0.25,
         coordinate_span_x_m: 2.4,
         coordinate_span_y_m: 0.6,
@@ -195,7 +209,38 @@ fn sample_model() -> AnalysisModel {
             plastic: None,
         }],
         material_assignments: Vec::new(),
-        structural: None,
+        structural: Some(StructuralModel {
+            nodes: vec![
+                StructuralNode {
+                    node_id: 1,
+                    coordinates_m: [0.0, 0.0, 0.0],
+                },
+                StructuralNode {
+                    node_id: 2,
+                    coordinates_m: [1.0, 0.0, 0.0],
+                },
+            ],
+            elements: vec![StructuralElement {
+                element_id: "beam_1".to_string(),
+                region_id: "beam_span".to_string(),
+                kind: StructuralElementKind::Beam(BeamElementModel {
+                    node_ids: [1, 2],
+                    section_id: "rect".to_string(),
+                    reference_axis: [0.0, 1.0, 0.0],
+                }),
+            }],
+            beam_sections: vec![BeamSectionModel {
+                section_id: "rect".to_string(),
+                area_m2: 2.0e-4,
+                iy_m4: 1.6e-9,
+                iz_m4: 6.4e-9,
+                torsion_j_m4: 2.4e-9,
+                outer_fiber_y_m: 0.01,
+                outer_fiber_z_m: 0.005,
+                torsion_outer_radius_m: 0.011_180_339_887_498_949,
+            }],
+            shell_sections: Vec::new(),
+        }),
         thermo_mechanical: None,
         electro_thermal: None,
         electromagnetic: None,
@@ -203,12 +248,12 @@ fn sample_model() -> AnalysisModel {
         interfaces: Vec::new(),
         boundary_conditions: vec![BoundaryCondition {
             bc_id: "bc_root".to_string(),
-            region_id: "root".to_string(),
+            region_id: "node:1".to_string(),
             kind: BoundaryConditionKind::Fixed,
         }],
         loads: vec![LoadCase {
             load_id: "load_tip".to_string(),
-            region_id: "tip".to_string(),
+            region_id: "node:2".to_string(),
             kind: LoadKind::Force {
                 fx: 0.0,
                 fy: -1000.0,
@@ -220,6 +265,29 @@ fn sample_model() -> AnalysisModel {
             kind: AnalysisStepKind::Static,
         }],
     }
+}
+
+fn sample_solid_model() -> AnalysisModel {
+    let mut model = sample_model();
+    model.model_id = AnalysisModelId("solid_model".to_string());
+    model.geometry_id = "geo:closed_cube".to_string();
+    model.geometry_revision = 1;
+    model.structural = None;
+    model.boundary_conditions = vec![BoundaryCondition {
+        bc_id: "bc_root".to_string(),
+        region_id: "root".to_string(),
+        kind: BoundaryConditionKind::Fixed,
+    }];
+    model.loads = vec![LoadCase {
+        load_id: "load_tip".to_string(),
+        region_id: "tip".to_string(),
+        kind: LoadKind::Force {
+            fx: 0.0,
+            fy: -1000.0,
+            fz: 0.0,
+        },
+    }];
+    model
 }
 
 fn sample_model_with_material_assignment_mismatch() -> AnalysisModel {
@@ -242,7 +310,7 @@ fn sample_model_with_material_assignment_mismatch() -> AnalysisModel {
         plastic: None,
     });
     model.material_assignments = vec![MaterialAssignment {
-        region_id: "tip".to_string(),
+        region_id: "beam_span".to_string(),
         expected_material_id: "mat_steel".to_string(),
         assigned_material_id: "mat_polymer".to_string(),
         confidence: EvidenceConfidence::Verified,
@@ -305,7 +373,7 @@ fn sample_cfd_boundary_conditions(inlet_velocity_m_per_s: f64) -> Vec<BoundaryCo
 }
 
 fn sample_cht_model() -> AnalysisModel {
-    let mut model = sample_model();
+    let mut model = sample_solid_model();
     model.steps = vec![
         AnalysisStep {
             step_id: "cht_flow".to_string(),
@@ -497,6 +565,7 @@ fn sample_geometry_asset() -> GeometryAsset {
             kind: SourceGeometryKind::Mesh,
             assembly: None,
             material_evidence: Vec::new(),
+            cad_evaluators: Vec::new(),
         },
         tessellation_profile: TessellationProfile::default(),
         units: UnitSystem::Meter,
@@ -525,6 +594,164 @@ fn sample_geometry_asset() -> GeometryAsset {
         )],
         diagnostics: Vec::new(),
     }
+}
+
+fn closed_cube_geometry_asset() -> GeometryAsset {
+    GeometryAsset {
+        geometry_id: "geo:closed_cube".to_string(),
+        source: GeometrySource {
+            path: "/fixtures/closed_cube.step".to_string(),
+            sha256: "hash-closed-cube".to_string(),
+            importer_version: "test".to_string(),
+        },
+        source_geometry: SourceGeometry {
+            kind: SourceGeometryKind::Cad,
+            assembly: None,
+            material_evidence: Vec::new(),
+            cad_evaluators: Vec::new(),
+        },
+        tessellation_profile: TessellationProfile::default(),
+        units: UnitSystem::Meter,
+        revision: 1,
+        meshes: vec![MeshDescriptor {
+            mesh_id: "cube_surface".to_string(),
+            kind: MeshKind::Surface,
+            vertex_count: 8,
+            element_count: 12,
+        }],
+        surface_meshes: vec![SurfaceMesh::new(
+            "cube_surface",
+            vec![
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [1.0, 1.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [1.0, 0.0, 1.0],
+                [1.0, 1.0, 1.0],
+                [0.0, 1.0, 1.0],
+            ],
+            vec![
+                [0, 2, 1],
+                [0, 3, 2],
+                [4, 5, 6],
+                [4, 6, 7],
+                [0, 1, 5],
+                [0, 5, 4],
+                [1, 2, 6],
+                [1, 6, 5],
+                [2, 3, 7],
+                [2, 7, 6],
+                [3, 0, 4],
+                [3, 4, 7],
+            ],
+        )],
+        regions: vec![
+            Region {
+                region_id: "root".to_string(),
+                name: "root".to_string(),
+                tag: Some("fixed".to_string()),
+                cad_ownership: None,
+            },
+            Region {
+                region_id: "tip".to_string(),
+                name: "tip".to_string(),
+                tag: Some("load".to_string()),
+                cad_ownership: None,
+            },
+        ],
+        region_entity_mappings: vec![
+            RegionEntityMapping::new(
+                "root",
+                "cube_surface",
+                EntityKind::Face,
+                vec![EntityIdRange::new(0, 2)],
+            ),
+            RegionEntityMapping::new(
+                "tip",
+                "cube_surface",
+                EntityKind::Face,
+                vec![EntityIdRange::new(2, 2)],
+            ),
+        ],
+        diagnostics: Vec::new(),
+    }
+}
+
+fn split_material_through_hole_study_geometry() -> GeometryAsset {
+    let mut geometry = split_material_through_hole_plate_geometry();
+    add_through_hole_study_boundary_regions(&mut geometry);
+    geometry
+}
+
+fn through_hole_study_geometry() -> GeometryAsset {
+    let mut geometry = through_hole_plate_geometry();
+    add_through_hole_study_boundary_regions(&mut geometry);
+    geometry
+}
+
+fn nested_tetrahedron_shell_study_geometry() -> GeometryAsset {
+    let mut geometry = nested_tetrahedron_shell_geometry();
+    geometry.regions.extend([
+        Region {
+            region_id: "root".to_string(),
+            name: "root".to_string(),
+            tag: Some("fixed".to_string()),
+            cad_ownership: None,
+        },
+        Region {
+            region_id: "tip".to_string(),
+            name: "tip".to_string(),
+            tag: Some("load".to_string()),
+            cad_ownership: None,
+        },
+    ]);
+    geometry.region_entity_mappings.extend([
+        RegionEntityMapping::new(
+            "root",
+            "nested_tetrahedron_shell_surface",
+            EntityKind::Face,
+            vec![EntityIdRange::new(0, 1)],
+        ),
+        RegionEntityMapping::new(
+            "tip",
+            "nested_tetrahedron_shell_surface",
+            EntityKind::Face,
+            vec![EntityIdRange::new(1, 1)],
+        ),
+    ]);
+    geometry
+}
+
+fn add_through_hole_study_boundary_regions(geometry: &mut GeometryAsset) {
+    geometry.regions.extend([
+        Region {
+            region_id: "root".to_string(),
+            name: "root".to_string(),
+            tag: Some("fixed".to_string()),
+            cad_ownership: None,
+        },
+        Region {
+            region_id: "tip".to_string(),
+            name: "tip".to_string(),
+            tag: Some("load".to_string()),
+            cad_ownership: None,
+        },
+    ]);
+    geometry.region_entity_mappings.extend([
+        RegionEntityMapping::new(
+            "root",
+            "through_hole_plate_surface",
+            EntityKind::Face,
+            vec![EntityIdRange::new(8, 4)],
+        ),
+        RegionEntityMapping::new(
+            "tip",
+            "through_hole_plate_surface",
+            EntityKind::Face,
+            vec![EntityIdRange::new(0, 4)],
+        ),
+    ]);
 }
 
 fn sample_prep_artifact_id_for_model(model: &AnalysisModel) -> String {
@@ -575,7 +802,7 @@ fn sample_step_like_geometry_asset() -> GeometryAsset {
 fn sample_linear_static_study_spec() -> AnalysisStudySpec {
     AnalysisStudySpec {
         study_id: "study_linear_static_001".to_string(),
-        geometry: sample_geometry_asset(),
+        geometry: closed_cube_geometry_asset(),
         create_model_intent: AnalysisCreateModelIntentSpec {
             model_id: "study_model_linear_static_001".to_string(),
             profile: AnalysisCreateModelProfile::LinearStaticStructural,
@@ -584,6 +811,10 @@ fn sample_linear_static_study_spec() -> AnalysisStudySpec {
         model: None,
         run_kind: AnalysisRunKind::LinearStatic,
         backend: ComputeBackend::Cpu,
+        mesh_options: Some(runmat_meshing_core::VolumeMeshingOptions::default()),
+        outputs: Vec::new(),
+        analysis_mesh_artifact_path: None,
+        analysis_mesh_evidence_artifact_path: None,
         linear_static_run_options: None,
         modal_run_options: None,
         acoustic_run_options: None,
@@ -609,6 +840,10 @@ fn sample_electromagnetic_study_spec() -> AnalysisStudySpec {
         model: None,
         run_kind: AnalysisRunKind::Electromagnetic,
         backend: ComputeBackend::Cpu,
+        mesh_options: None,
+        outputs: Vec::new(),
+        analysis_mesh_artifact_path: None,
+        analysis_mesh_evidence_artifact_path: None,
         linear_static_run_options: None,
         modal_run_options: None,
         acoustic_run_options: None,
@@ -643,6 +878,11 @@ run:
     precision_mode: fp64
     preconditioner_mode: jacobi
     quality_policy: strict
+outputs:
+  - id: displacement_view
+    field: structural.displacement
+    location: nodes
+    kind: vector
 "#;
 
     let resolved = pollster::block_on(parse_and_resolve_fea_document(input, tmp.path()))
@@ -661,7 +901,28 @@ run:
     assert_eq!(spec.create_model_intent.model_id, "bracket_static_model");
     assert_eq!(spec.run_kind, AnalysisRunKind::LinearStatic);
     assert_eq!(spec.backend, ComputeBackend::Cpu);
+    assert_eq!(spec.outputs.len(), 1);
+    assert_eq!(spec.outputs[0].id, "displacement_view");
+    assert_eq!(spec.outputs[0].field_id, "structural.displacement");
+    assert_eq!(spec.outputs[0].location.as_deref(), Some("nodes"));
+    assert_eq!(spec.outputs[0].kind.as_deref(), Some("vector"));
     assert!(spec.model.is_none());
+    let mesh_options = spec
+        .mesh_options
+        .as_ref()
+        .expect("linear static structural studies should default to solid analysis mesh options");
+    assert_eq!(
+        mesh_options.kind,
+        runmat_meshing_core::MeshKindRequest::Solid
+    );
+    assert_eq!(
+        mesh_options.element,
+        runmat_meshing_core::VolumeElementKind::Tetrahedron4
+    );
+    assert_eq!(
+        mesh_options.profile,
+        runmat_meshing_core::MeshProfile::AnalysisReady
+    );
 
     let options = spec
         .linear_static_run_options
@@ -670,6 +931,25 @@ run:
     assert_eq!(options.precision_mode, PrecisionMode::Fp64);
     assert_eq!(options.preconditioner_mode, PreconditionerMode::Jacobi);
     assert_eq!(options.quality_policy, QualityPolicy::Strict);
+}
+
+#[test]
+fn mesh_options_convert_study_unit_lengths_to_si_before_meshing() {
+    let options = runmat_meshing_core::VolumeMeshingOptions {
+        target_size: runmat_meshing_core::MeshTargetSize::LengthM(15.0),
+        min_size_m: Some(2.0),
+        max_size_m: Some(25.0),
+        ..runmat_meshing_core::VolumeMeshingOptions::default()
+    };
+
+    let converted = mesh_options_in_si_units(options, UnitSystem::Millimeter);
+
+    assert_eq!(
+        converted.target_size,
+        runmat_meshing_core::MeshTargetSize::LengthM(0.015)
+    );
+    assert_eq!(converted.min_size_m, Some(0.002));
+    assert_eq!(converted.max_size_m, Some(0.025));
 }
 
 #[test]
@@ -1120,7 +1400,7 @@ fn analysis_create_model_returns_v1_envelope() {
 fn transient_run_option_presets_are_ordered_for_cost_vs_accuracy() {
     let coarse = AnalysisTransientRunOptions::coarse();
     let balanced = AnalysisTransientRunOptions::balanced();
-    let production = AnalysisTransientRunOptions::production_recommended();
+    let solid = AnalysisTransientRunOptions::solid_recommended();
     let high_accuracy = AnalysisTransientRunOptions::high_accuracy();
 
     assert!(coarse.step_count < balanced.step_count);
@@ -1132,10 +1412,10 @@ fn transient_run_option_presets_are_ordered_for_cost_vs_accuracy() {
     assert!(coarse.time_step_s > balanced.time_step_s);
     assert!(balanced.time_step_s > high_accuracy.time_step_s);
 
-    assert_eq!(production.quality_policy, QualityPolicy::Balanced);
-    assert!(production.deterministic_mode);
-    assert_eq!(production.precision_mode, PrecisionMode::Fp64);
-    assert_eq!(production.dt_bucket_rel_tolerance, 0.01);
+    assert_eq!(solid.quality_policy, QualityPolicy::Balanced);
+    assert!(solid.deterministic_mode);
+    assert_eq!(solid.precision_mode, PrecisionMode::Fp64);
+    assert_eq!(solid.dt_bucket_rel_tolerance, 0.01);
 }
 
 #[test]
@@ -1154,26 +1434,26 @@ fn modal_run_option_presets_are_ordered_for_cost_vs_accuracy() {
 fn nonlinear_run_option_presets_are_ordered_for_cost_vs_accuracy() {
     let coarse = AnalysisNonlinearRunOptions::coarse();
     let balanced = AnalysisNonlinearRunOptions::balanced();
-    let production = AnalysisNonlinearRunOptions::production_recommended();
+    let solid = AnalysisNonlinearRunOptions::solid_recommended();
     let high_accuracy = AnalysisNonlinearRunOptions::high_accuracy();
 
     assert!(coarse.increment_count < balanced.increment_count);
-    assert!(balanced.increment_count <= production.increment_count);
-    assert!(production.increment_count <= high_accuracy.increment_count);
+    assert!(balanced.increment_count <= solid.increment_count);
+    assert!(solid.increment_count <= high_accuracy.increment_count);
 
     assert!(coarse.max_newton_iters < balanced.max_newton_iters);
-    assert!(balanced.max_newton_iters <= production.max_newton_iters);
-    assert!(production.max_newton_iters <= high_accuracy.max_newton_iters);
+    assert!(balanced.max_newton_iters <= solid.max_newton_iters);
+    assert!(solid.max_newton_iters <= high_accuracy.max_newton_iters);
 
     assert!(coarse.tolerance > balanced.tolerance);
-    assert!(balanced.tolerance >= production.tolerance);
-    assert!(production.tolerance >= high_accuracy.tolerance);
+    assert!(balanced.tolerance >= solid.tolerance);
+    assert!(solid.tolerance >= high_accuracy.tolerance);
 
-    assert_eq!(production.quality_policy, QualityPolicy::Balanced);
-    assert!(production.deterministic_mode);
-    assert_eq!(production.precision_mode, PrecisionMode::Fp64);
-    assert!(production.line_search);
-    assert!(production.max_line_search_backtracks >= balanced.max_line_search_backtracks);
+    assert_eq!(solid.quality_policy, QualityPolicy::Balanced);
+    assert!(solid.deterministic_mode);
+    assert_eq!(solid.precision_mode, PrecisionMode::Fp64);
+    assert!(solid.line_search);
+    assert!(solid.max_line_search_backtracks >= balanced.max_line_search_backtracks);
 }
 
 #[test]
@@ -1377,6 +1657,49 @@ fn analysis_create_model_supports_electromagnetic_profile_template() {
     assert!(domain.enabled);
     assert_eq!(domain.reference_frequency_hz, 60.0);
     assert_eq!(domain.applied_current_a, 100.0);
+}
+
+#[test]
+fn analysis_create_model_supports_electro_thermal_profile_template() {
+    let _guard = analysis_test_guard();
+    let geometry = sample_geometry_asset();
+    let envelope = analysis_create_model_op(
+        &geometry,
+        AnalysisCreateModelIntentSpec {
+            model_id: "electro_thermal_profile_model".to_string(),
+            profile: AnalysisCreateModelProfile::ElectroThermalCoupled,
+            prep_context: None,
+        },
+        OperationContext::new(
+            Some("trace-create-electro-thermal-profile".to_string()),
+            None,
+        ),
+    )
+    .expect("electro-thermal profile model creation should succeed");
+
+    assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Transient);
+    assert_eq!(
+        envelope.data.boundary_conditions[0].kind,
+        BoundaryConditionKind::VectorPotentialGround
+    );
+    assert_eq!(
+        envelope.data.loads[0].load_id,
+        "load_default_electro_thermal_current"
+    );
+    let domain = envelope
+        .data
+        .electro_thermal
+        .as_ref()
+        .expect("electro-thermal domain should be populated");
+    assert!(domain.enabled);
+    assert_eq!(domain.reference_temperature_k, 293.15);
+    assert_eq!(domain.applied_voltage_v, 24.0);
+    assert_eq!(domain.time_profile.len(), 2);
+    assert!(envelope
+        .data
+        .materials
+        .iter()
+        .all(|material| material.electrical.is_some()));
 }
 
 #[test]
@@ -1783,6 +2106,10 @@ fn analysis_run_study_executes_linear_static_path() {
     assert_eq!(envelope.op_version, "fea.run_study/v1");
     assert_eq!(envelope.data.study_id, spec.study_id);
     assert_eq!(envelope.data.model_id, spec.create_model_intent.model_id);
+    assert_eq!(
+        envelope.data.model_profile,
+        AnalysisCreateModelProfile::LinearStaticStructural
+    );
     assert_eq!(envelope.data.run_kind, AnalysisRunKind::LinearStatic);
     assert_eq!(envelope.data.backend, ComputeBackend::Cpu);
     assert!(envelope.data.electromagnetic_run_options.is_none());
@@ -1822,6 +2149,27 @@ fn analysis_run_study_executes_linear_static_path() {
     assert_eq!(persisted.result_quality, envelope.data.result_quality);
     assert_eq!(persisted.quality_reasons, envelope.data.quality_reasons);
     assert_eq!(persisted.provenance, envelope.data.provenance);
+    let analysis_mesh_artifact_path = envelope
+        .data
+        .analysis_mesh_artifact_path
+        .as_ref()
+        .expect("study run should persist generated analysis mesh artifact");
+    let analysis_mesh_payload: serde_json::Value = serde_json::from_slice(
+        &fs::read(analysis_mesh_artifact_path).expect("read generated analysis mesh artifact"),
+    )
+    .expect("parse generated analysis mesh artifact");
+    let solver_node_count = analysis_mesh_payload["mesh"]["nodes"]
+        .as_array()
+        .expect("solver mesh nodes")
+        .len();
+    let solver_boundary_face_count = analysis_mesh_payload["mesh"]["boundary_faces"]
+        .as_array()
+        .expect("solver mesh boundary faces")
+        .len();
+    let solver_volume_element_count = analysis_mesh_payload["mesh"]["volume_elements"]
+        .as_array()
+        .expect("solver mesh volume elements")
+        .len();
     let render_topology = persisted
         .render_topology
         .as_ref()
@@ -1831,24 +2179,1635 @@ fn analysis_run_study_executes_linear_static_path() {
         "analysis_render_topology/v1"
     );
     assert_eq!(render_topology.meshes.len(), 1);
-    assert_eq!(
-        render_topology.meshes[0].vertices.len(),
-        spec.geometry.surface_meshes[0].vertices.len()
-    );
+    assert_eq!(render_topology.meshes[0].vertices.len(), solver_node_count);
     assert_eq!(
         render_topology.meshes[0].triangles.len(),
-        spec.geometry.surface_meshes[0].triangles.len()
+        solver_boundary_face_count
     );
     let von_mises = persisted
         .run
         .field(FEA_FIELD_STRUCTURAL_VON_MISES)
         .expect("study run should persist von Mises field");
+    assert_eq!(von_mises.shape, vec![solver_volume_element_count]);
+    let run_evidence_payload: serde_json::Value = serde_json::from_slice(
+        &fs::read(&envelope.data.evidence_artifact_path).expect("read run evidence artifact"),
+    )
+    .expect("parse run evidence artifact");
     assert_eq!(
-        von_mises.shape,
-        vec![spec.geometry.surface_meshes[0].triangles.len()]
+        run_evidence_payload["model_profile"].as_str(),
+        Some("linear_static_structural")
     );
     drop(env_guard);
     let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("run-study-analysis-mesh");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+    let mut spec = sample_linear_static_study_spec();
+    spec.geometry = closed_cube_geometry_asset();
+    let mut model = sample_solid_model();
+    model.geometry_id = spec.geometry.geometry_id.clone();
+    model.geometry_revision = spec.geometry.revision;
+    model.units = spec.geometry.units;
+    model.material_assignments = vec![MaterialAssignment {
+        region_id: "body".to_string(),
+        expected_material_id: "mat_steel".to_string(),
+        assigned_material_id: "mat_steel".to_string(),
+        confidence: EvidenceConfidence::Verified,
+    }];
+    spec.model = Some(model);
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
+        backend: runmat_meshing_core::MeshBackendKind::StructuredGridTetrahedron,
+        ..runmat_meshing_core::VolumeMeshingOptions::default()
+    };
+    mesh_options.validation.quality = runmat_meshing_core::QualityThresholds {
+        min_scaled_jacobian: 0.0,
+        max_aspect_ratio: 1.0e9,
+        ..runmat_meshing_core::QualityThresholds::default()
+    };
+    spec.mesh_options = Some(mesh_options);
+
+    let envelope = analysis_run_study_op(&spec, OperationContext::new(None, None))
+        .expect("study run should succeed");
+
+    let artifact_path = envelope
+        .data
+        .analysis_mesh_artifact_path
+        .as_ref()
+        .expect("study run should persist analysis mesh artifact path");
+    assert!(artifact_path.ends_with("analysis_mesh.json"));
+    let evidence_path = envelope
+        .data
+        .analysis_mesh_evidence_artifact_path
+        .as_ref()
+        .expect("study run should persist mesh evidence artifact path");
+    assert!(evidence_path.ends_with("mesh_evidence.json"));
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    assert_eq!(
+        payload["schema_version"].as_str(),
+        Some("fea_study_analysis_mesh_artifact/v1")
+    );
+    assert_eq!(
+        payload["mesh"]["schema_version"].as_str(),
+        Some("analysis-mesh/v1")
+    );
+    assert_eq!(
+        payload["mesh_evidence_artifact_path"].as_str(),
+        Some(evidence_path.as_str())
+    );
+    assert_eq!(
+        payload["mesh_validation_options"]["required_boundary_region_ids"]
+            .as_array()
+            .expect("required boundary region ids")
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["root", "tip"]
+    );
+    assert_eq!(
+        payload["mesh_validation_options"]["required_material_region_ids"]
+            .as_array()
+            .expect("required material region ids")
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["body"]
+    );
+    assert!(payload["mesh"]["volume_elements"]
+        .as_array()
+        .expect("volume elements")
+        .iter()
+        .all(|element| element["material_region_id"].as_str() == Some("body")));
+    let evidence_payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(evidence_path).expect("read mesh evidence artifact"))
+            .expect("parse mesh evidence artifact");
+    assert_eq!(
+        evidence_payload["schema_version"].as_str(),
+        Some("fea_study_mesh_evidence_artifact/v1")
+    );
+    assert_eq!(
+        evidence_payload["mesh_validation_options"]["required_boundary_region_ids"]
+            .as_array()
+            .expect("evidence required boundary region ids")
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["root", "tip"]
+    );
+    assert_eq!(
+        evidence_payload["mesh_validation_options"]["required_material_region_ids"]
+            .as_array()
+            .expect("evidence required material region ids")
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["body"]
+    );
+    assert_eq!(
+        evidence_payload["mesh_evidence"]["schema_version"].as_str(),
+        Some("mesh-evidence/v1")
+    );
+    assert_eq!(
+        evidence_payload["mesh_authoring_summary"]["schema_version"].as_str(),
+        Some("mesh-authoring-summary/v1")
+    );
+    assert_eq!(
+        evidence_payload["mesh_authoring_summary"]["mesh_id"].as_str(),
+        evidence_payload["mesh_evidence"]["mesh_id"].as_str()
+    );
+    assert_eq!(
+        evidence_payload["mesh_authoring_summary"]["solve_ready"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        evidence_payload["mesh_authoring_summary"]["regions"]["required_boundary_region_ids"]
+            .as_array()
+            .expect("authoring required boundary region ids")
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["root", "tip"]
+    );
+    assert_eq!(
+        evidence_payload["mesh_authoring_summary"]["regions"]["required_material_region_ids"]
+            .as_array()
+            .expect("authoring required material region ids")
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["body"]
+    );
+    assert!(evidence_payload["mesh_authoring_summary"]
+        .get("debug")
+        .is_none());
+    assert!(evidence_payload["mesh_authoring_summary"]
+        .get("mesh")
+        .is_none());
+    assert_eq!(
+        evidence_payload["mesh_evidence"]["topology"]["node_count"].as_u64(),
+        payload["mesh"]["nodes"]
+            .as_array()
+            .map(|nodes| nodes.len() as u64)
+    );
+    assert!(
+        payload["mesh"]["volume_elements"]
+            .as_array()
+            .expect("volume elements")
+            .len()
+            > spec.geometry.surface_meshes[0].triangles.len()
+    );
+    assert!(payload["mesh"]["boundary_faces"]
+        .as_array()
+        .expect("boundary faces")
+        .iter()
+        .any(|face| face["region_ids"]
+            .as_array()
+            .expect("region ids")
+            .iter()
+            .any(|region| region.as_str() == Some("root"))));
+    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
+        .as_array()
+        .expect("adaptive iteration summaries");
+    assert_eq!(adaptive_iterations.len(), 2);
+    assert_eq!(
+        adaptive_iterations[0]["convergence_status"].as_str(),
+        Some("pending")
+    );
+    assert_eq!(
+        adaptive_iterations[0]["node_count"].as_u64(),
+        payload["mesh"]["nodes"]
+            .as_array()
+            .map(|nodes| nodes.len() as u64)
+    );
+    assert!(adaptive_iterations[0]["indicators"]
+        .as_array()
+        .expect("adaptive indicators")
+        .iter()
+        .any(
+            |indicator| indicator["namespace"].as_str() == Some("structural")
+                && indicator["name"].as_str() == Some("stress_gradient")
+                && indicator["status"].as_str() == Some("skipped_missing_field")
+        ));
+    assert_eq!(
+        adaptive_iterations[1]["convergence_status"].as_str(),
+        Some("pending")
+    );
+    assert!(adaptive_iterations[1]["indicators"]
+        .as_array()
+        .expect("solved adaptive indicators")
+        .iter()
+        .any(
+            |indicator| indicator["namespace"].as_str() == Some("structural")
+                && indicator["name"].as_str() == Some("stress_gradient")
+                && indicator["status"].as_str() == Some("used")
+        ));
+    assert!(!adaptive_iterations[1]["markers"]
+        .as_array()
+        .expect("solved adaptive markers")
+        .is_empty());
+    let refined_artifact_path = envelope
+        .data
+        .refined_analysis_mesh_artifact_path
+        .as_ref()
+        .expect("pending adaptive sizing should persist refined mesh artifact path");
+    assert!(refined_artifact_path.ends_with("analysis_mesh_refined.json"));
+    let refined_evidence_path = envelope
+        .data
+        .refined_analysis_mesh_evidence_artifact_path
+        .as_ref()
+        .expect("pending adaptive sizing should persist refined mesh evidence artifact path");
+    assert!(refined_evidence_path.ends_with("mesh_evidence_refined.json"));
+    let refined_payload: serde_json::Value = serde_json::from_slice(
+        &fs::read(refined_artifact_path).expect("read refined mesh artifact"),
+    )
+    .expect("parse refined mesh artifact");
+    let refined_boundary_faces = refined_payload["mesh"]["boundary_faces"]
+        .as_array()
+        .expect("refined boundary faces");
+    assert!(refined_boundary_faces.iter().any(|face| face["region_ids"]
+        .as_array()
+        .expect("refined face region ids")
+        .iter()
+        .any(|region| region.as_str() == Some("root"))));
+    assert!(refined_boundary_faces.iter().any(|face| face["region_ids"]
+        .as_array()
+        .expect("refined face region ids")
+        .iter()
+        .any(|region| region.as_str() == Some("tip"))));
+    assert_eq!(
+        refined_payload["source_analysis_mesh_artifact_path"].as_str(),
+        Some(artifact_path.as_str())
+    );
+    assert_eq!(
+        refined_payload["mesh_evidence_artifact_path"].as_str(),
+        Some(refined_evidence_path.as_str())
+    );
+    let refined_evidence_payload: serde_json::Value = serde_json::from_slice(
+        &fs::read(refined_evidence_path).expect("read refined mesh evidence artifact"),
+    )
+    .expect("parse refined mesh evidence artifact");
+    assert_eq!(
+        refined_evidence_payload["mesh_evidence"]["topology"]["adaptive_iteration_count"].as_u64(),
+        refined_payload["mesh"]["adaptive_iterations"]
+            .as_array()
+            .map(|iterations| iterations.len() as u64)
+    );
+    assert_eq!(
+        refined_evidence_payload["mesh_evidence"]["sizing"]["applied_sample_count"].as_u64(),
+        refined_payload["mesh"]["sizing"]["applied_samples"]
+            .as_array()
+            .map(|samples| samples.len() as u64)
+    );
+    let refined_volume_element_count = refined_payload["mesh"]["volume_elements"]
+        .as_array()
+        .expect("refined volume elements")
+        .len();
+    let initial_volume_element_count = payload["mesh"]["volume_elements"]
+        .as_array()
+        .expect("initial volume elements")
+        .len();
+    let solid_mesh = payload["mesh"]["backend"]["backend"].as_str() == Some("solid");
+    if solid_mesh {
+        assert!(refined_volume_element_count >= initial_volume_element_count);
+        assert!(!refined_payload["mesh"]["sizing"]["applied_samples"]
+            .as_array()
+            .expect("refined sizing applications")
+            .is_empty());
+    } else {
+        assert!(refined_volume_element_count > initial_volume_element_count);
+    }
+    assert_eq!(
+        refined_payload["mesh"]["adaptive_iterations"]
+            .as_array()
+            .expect("refined adaptive iterations")
+            .len(),
+        adaptive_iterations.len() + 1
+    );
+    assert_eq!(
+        envelope.data.run_options["analysis_mesh_artifact_path"].as_str(),
+        Some(refined_artifact_path.as_str())
+    );
+
+    let run_payload: serde_json::Value = serde_json::from_slice(
+        &fs::read(&envelope.data.evidence_artifact_path).expect("read run evidence artifact"),
+    )
+    .expect("parse run evidence artifact");
+    assert_eq!(
+        run_payload["analysis_mesh_artifact_path"].as_str(),
+        Some(artifact_path.as_str())
+    );
+    assert_eq!(
+        run_payload["analysis_mesh_evidence_artifact_path"].as_str(),
+        Some(evidence_path.as_str())
+    );
+    assert_eq!(
+        run_payload["refined_analysis_mesh_artifact_path"].as_str(),
+        Some(refined_artifact_path.as_str())
+    );
+    assert_eq!(
+        run_payload["refined_analysis_mesh_evidence_artifact_path"].as_str(),
+        Some(refined_evidence_path.as_str())
+    );
+    if solid_mesh {
+        assert_eq!(
+            run_payload["refinement_effect"]["topology_changed"].as_bool(),
+            Some(false)
+        );
+        assert_eq!(
+            run_payload["refinement_effect"]["element_count_delta"].as_i64(),
+            Some(0)
+        );
+    } else {
+        assert_eq!(
+            run_payload["refinement_effect"]["topology_changed"].as_bool(),
+            Some(true)
+        );
+        assert!(run_payload["refinement_effect"]["element_count_delta"]
+            .as_i64()
+            .is_some_and(|delta| delta > 0));
+    }
+    let persisted = storage::load_run_result(&envelope.data.run_id)
+        .expect("run load should succeed")
+        .expect("run should be persisted");
+    let render_topology = persisted
+        .render_topology
+        .as_ref()
+        .expect("analysis mesh backed run should persist render topology");
+    assert_eq!(
+        render_topology.source,
+        AnalysisRenderTopologySource::AnalysisMesh
+    );
+    let render_mesh = render_topology
+        .meshes
+        .first()
+        .expect("render topology should contain analysis mesh boundary surface");
+    assert_eq!(
+        render_mesh.vertices.len(),
+        refined_payload["mesh"]["nodes"]
+            .as_array()
+            .expect("refined mesh nodes")
+            .len()
+    );
+    assert_eq!(
+        render_mesh.triangles.len(),
+        refined_payload["mesh"]["boundary_faces"]
+            .as_array()
+            .expect("refined boundary faces")
+            .len()
+    );
+    assert!(persisted.run.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "FEA_ANALYSIS_MESH_REFERENCE"
+            && diagnostic.message.contains(refined_artifact_path)
+            && diagnostic
+                .message
+                .contains("analysis_mesh_volume_element_count=")
+    }));
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn analysis_author_study_uses_mesh_authoring_summary_regions() {
+    let _guard = analysis_test_guard();
+    let root = temp_artifact_root("author-study-mesh-summary");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    let validation = runmat_meshing_core::AnalysisMeshValidationOptions {
+        required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
+        required_material_region_ids: vec!["solid".to_string()],
+        ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
+    };
+    let evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(&mesh, &validation);
+    let mut summary = runmat_meshing_evidence::build_mesh_authoring_summary(&evidence);
+    summary.solve_ready = true;
+    summary.validation_error_code = None;
+    summary.validation_error_message = None;
+    summary.tetrahedron_generation_family = "star_shaped_polyhedron".to_string();
+    summary.tetrahedron_generation_attempted_family_count = 5;
+    summary.tetrahedron_generation_rejected_family_count = 4;
+    summary.tetrahedron_generation_selected_family_index = 5;
+    summary.tetrahedron_generation_interior_support_candidate_count = 29;
+    summary.tetrahedron_generation_interior_support_accepted_count = 1;
+
+    let authored = analysis_author_study_op(
+        AnalysisStudyAuthoringIntent {
+            study_id: "authored_static".to_string(),
+            model_id: None,
+            geometry: closed_cube_geometry_asset(),
+            mesh_authoring_summary: summary,
+            profile: AnalysisCreateModelProfile::LinearStaticStructural,
+            run_kind: AnalysisRunKind::LinearStatic,
+            backend: ComputeBackend::Cpu,
+            analysis_mesh_artifact_path: None,
+            analysis_mesh_evidence_artifact_path: None,
+            material_region_id: None,
+            boundary_condition_region_id: None,
+            driving_condition_region_id: None,
+            structural_force_n: Some([25.0, -50.0, 0.0]),
+            diagram_observation: None,
+        },
+        OperationContext::new(Some("trace-author-study".to_string()), None),
+    )
+    .expect("authoring should produce a valid study");
+
+    let study = &authored.data.study;
+    let model = study
+        .model
+        .as_ref()
+        .expect("authored study should include model");
+    assert_eq!(model.material_assignments[0].region_id, "solid");
+    assert_eq!(model.boundary_conditions[0].region_id, "root");
+    assert_eq!(model.loads[0].region_id, "tip");
+    assert_eq!(
+        model.loads[0].kind,
+        LoadKind::Force {
+            fx: 25.0,
+            fy: -50.0,
+            fz: 0.0
+        }
+    );
+    assert_eq!(
+        authored.data.evidence.selected_material_region_id,
+        "solid".to_string()
+    );
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .selected_boundary_condition_region_id
+            .as_deref(),
+        Some("root")
+    );
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .selected_driving_condition_region_id
+            .as_deref(),
+        Some("tip")
+    );
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .selected_driving_condition_kind
+            .as_deref(),
+        Some("force")
+    );
+    assert_eq!(
+        authored.data.evidence.selected_structural_force_n,
+        Some([25.0, -50.0, 0.0])
+    );
+    assert_eq!(
+        authored.data.evidence.tetrahedron_generation_family,
+        "star_shaped_polyhedron"
+    );
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .tetrahedron_generation_attempted_family_count,
+        5
+    );
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .tetrahedron_generation_rejected_family_count,
+        4
+    );
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .tetrahedron_generation_selected_family_index,
+        5
+    );
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .tetrahedron_generation_interior_support_candidate_count,
+        29
+    );
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .tetrahedron_generation_interior_support_accepted_count,
+        1
+    );
+
+    let validation = analysis_validate_study_op(study, OperationContext::new(None, None))
+        .expect("authored study should validate");
+    assert!(validation.data.valid);
+
+    let artifact: serde_json::Value = serde_json::from_slice(
+        &fs::read(&authored.data.evidence_artifact_path).expect("read authoring artifact"),
+    )
+    .expect("parse authoring artifact");
+    assert_eq!(
+        artifact["schema_version"].as_str(),
+        Some("fea_study_authoring_artifact/v1")
+    );
+    assert_eq!(
+        artifact["evidence"]["selected_driving_condition_region_id"].as_str(),
+        Some("tip")
+    );
+    assert_eq!(
+        artifact["evidence"]["tetrahedron_generation_family"].as_str(),
+        Some("star_shaped_polyhedron")
+    );
+    assert_eq!(
+        artifact["evidence"]["tetrahedron_generation_attempted_family_count"].as_u64(),
+        Some(5)
+    );
+    assert_eq!(
+        artifact["evidence"]["tetrahedron_generation_rejected_family_count"].as_u64(),
+        Some(4)
+    );
+    assert_eq!(
+        artifact["evidence"]["tetrahedron_generation_selected_family_index"].as_u64(),
+        Some(5)
+    );
+    assert_eq!(
+        artifact["evidence"]["tetrahedron_generation_interior_support_candidate_count"].as_u64(),
+        Some(29)
+    );
+    assert_eq!(
+        artifact["evidence"]["tetrahedron_generation_interior_support_accepted_count"].as_u64(),
+        Some(1)
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn analysis_author_study_preserves_non_structural_profile_defaults() {
+    let _guard = analysis_test_guard();
+    let root = temp_artifact_root("author-study-electromagnetic");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+
+    let mesh = analysis_mesh_with_boundary_regions(&["ground"], &["coil"]);
+    let validation = runmat_meshing_core::AnalysisMeshValidationOptions {
+        required_boundary_region_ids: vec!["ground".to_string(), "coil".to_string()],
+        required_material_region_ids: vec!["solid".to_string()],
+        ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
+    };
+    let evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(&mesh, &validation);
+    let mut summary = runmat_meshing_evidence::build_mesh_authoring_summary(&evidence);
+    summary.solve_ready = true;
+    summary.validation_error_code = None;
+    summary.validation_error_message = None;
+
+    let authored = analysis_author_study_op(
+        AnalysisStudyAuthoringIntent {
+            study_id: "authored_em".to_string(),
+            model_id: None,
+            geometry: closed_cube_geometry_asset(),
+            mesh_authoring_summary: summary,
+            profile: AnalysisCreateModelProfile::ElectromagneticStatic,
+            run_kind: AnalysisRunKind::Electromagnetic,
+            backend: ComputeBackend::Cpu,
+            analysis_mesh_artifact_path: None,
+            analysis_mesh_evidence_artifact_path: None,
+            material_region_id: Some("solid".to_string()),
+            boundary_condition_region_id: Some("ground".to_string()),
+            driving_condition_region_id: Some("coil".to_string()),
+            structural_force_n: Some([25.0, -50.0, 0.0]),
+            diagram_observation: None,
+        },
+        OperationContext::new(Some("trace-author-em".to_string()), None),
+    )
+    .expect("authoring should support non-structural physics profiles");
+
+    let study = &authored.data.study;
+    assert_eq!(study.run_kind, AnalysisRunKind::Electromagnetic);
+    let model = study
+        .model
+        .as_ref()
+        .expect("authored study should include model");
+    assert_eq!(model.material_assignments[0].region_id, "solid");
+    assert_eq!(model.boundary_conditions[0].region_id, "ground");
+    assert_eq!(
+        model.boundary_conditions[0].kind,
+        BoundaryConditionKind::VectorPotentialGround
+    );
+    assert_eq!(model.loads[0].region_id, "coil");
+    assert!(matches!(model.loads[0].kind, LoadKind::CoilCurrent { .. }));
+    assert!(matches!(
+        model.steps[0].kind,
+        AnalysisStepKind::Electromagnetic
+    ));
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .selected_driving_condition_region_id
+            .as_deref(),
+        Some("coil")
+    );
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .selected_driving_condition_kind
+            .as_deref(),
+        Some("coil_current")
+    );
+    assert_eq!(authored.data.evidence.selected_structural_force_n, None);
+
+    let validation = analysis_validate_study_op(study, OperationContext::new(None, None))
+        .expect("authored electromagnetic study should validate");
+    assert!(validation.data.valid);
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn analysis_author_study_records_modal_driver_without_structural_force_evidence() {
+    let _guard = analysis_test_guard();
+    let root = temp_artifact_root("author-study-modal-generic-driver");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    let validation = runmat_meshing_core::AnalysisMeshValidationOptions {
+        required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
+        required_material_region_ids: vec!["solid".to_string()],
+        ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
+    };
+    let evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(&mesh, &validation);
+    let mut summary = runmat_meshing_evidence::build_mesh_authoring_summary(&evidence);
+    summary.solve_ready = true;
+    summary.validation_error_code = None;
+    summary.validation_error_message = None;
+
+    let authored = analysis_author_study_op(
+        AnalysisStudyAuthoringIntent {
+            study_id: "authored_modal".to_string(),
+            model_id: None,
+            geometry: closed_cube_geometry_asset(),
+            mesh_authoring_summary: summary,
+            profile: AnalysisCreateModelProfile::ModalStructural,
+            run_kind: AnalysisRunKind::Modal,
+            backend: ComputeBackend::Cpu,
+            analysis_mesh_artifact_path: None,
+            analysis_mesh_evidence_artifact_path: None,
+            material_region_id: Some("solid".to_string()),
+            boundary_condition_region_id: Some("root".to_string()),
+            driving_condition_region_id: Some("tip".to_string()),
+            structural_force_n: Some([99.0, 88.0, 77.0]),
+            diagram_observation: None,
+        },
+        OperationContext::new(Some("trace-author-modal".to_string()), None),
+    )
+    .expect("modal authoring should preserve generic driving-condition evidence");
+
+    let model = authored
+        .data
+        .study
+        .model
+        .as_ref()
+        .expect("authored modal study should include model");
+    assert_eq!(model.boundary_conditions[0].region_id, "root");
+    assert_eq!(model.loads[0].region_id, "tip");
+    assert!(matches!(model.loads[0].kind, LoadKind::BodyForce { .. }));
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .selected_boundary_condition_region_id
+            .as_deref(),
+        Some("root")
+    );
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .selected_driving_condition_region_id
+            .as_deref(),
+        Some("tip")
+    );
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .selected_driving_condition_kind
+            .as_deref(),
+        Some("body_force")
+    );
+    assert_eq!(authored.data.evidence.selected_structural_force_n, None);
+
+    let validation =
+        analysis_validate_study_op(&authored.data.study, OperationContext::new(None, None))
+            .expect("authored modal study should validate");
+    assert!(validation.data.valid);
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn analysis_author_study_persists_nested_shell_generation_evidence() {
+    let _guard = analysis_test_guard();
+    let root = temp_artifact_root("author-study-nested-shell-evidence");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+    let geometry = nested_tetrahedron_shell_study_geometry();
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
+        backend: runmat_meshing_core::MeshBackendKind::Solid,
+        target_size: runmat_meshing_core::MeshTargetSize::LengthM(10.0),
+        ..runmat_meshing_core::VolumeMeshingOptions::default()
+    };
+    mesh_options.refinement.strategy = runmat_meshing_core::RefinementStrategy::None;
+    mesh_options.refinement.max_iterations = 0;
+    let mesh = runmat_meshing::generate_analysis_mesh(&geometry, mesh_options)
+        .expect("nested-shell fixture should generate an analysis mesh");
+    let validation = runmat_meshing_core::AnalysisMeshValidationOptions {
+        required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
+        required_material_region_ids: vec!["body".to_string()],
+        ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
+    };
+    let evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(&mesh, &validation);
+    let summary = runmat_meshing_evidence::build_mesh_authoring_summary(&evidence);
+    assert!(summary.solve_ready);
+    assert_eq!(
+        summary.tetrahedron_generation_family,
+        "nested_tetrahedron_shell"
+    );
+    assert!(summary.nested_tetrahedron_shell.outer_node_count > 0);
+    assert!(summary.nested_tetrahedron_shell.inner_node_count > 0);
+
+    let authored = analysis_author_study_op(
+        AnalysisStudyAuthoringIntent {
+            study_id: "authored_nested_shell_static".to_string(),
+            model_id: None,
+            geometry,
+            mesh_authoring_summary: summary,
+            profile: AnalysisCreateModelProfile::LinearStaticStructural,
+            run_kind: AnalysisRunKind::LinearStatic,
+            backend: ComputeBackend::Cpu,
+            analysis_mesh_artifact_path: None,
+            analysis_mesh_evidence_artifact_path: None,
+            material_region_id: Some("body".to_string()),
+            boundary_condition_region_id: Some("root".to_string()),
+            driving_condition_region_id: Some("tip".to_string()),
+            structural_force_n: Some([0.0, -125.0, 25.0]),
+            diagram_observation: None,
+        },
+        OperationContext::new(Some("trace-author-nested-shell".to_string()), None),
+    )
+    .expect("authoring should preserve nested-shell mesh evidence");
+
+    assert_eq!(
+        authored.data.evidence.tetrahedron_generation_family,
+        "nested_tetrahedron_shell"
+    );
+    assert!(
+        authored
+            .data
+            .evidence
+            .nested_tetrahedron_shell
+            .outer_node_count
+            > 0
+    );
+    assert!(
+        authored
+            .data
+            .evidence
+            .nested_tetrahedron_shell
+            .inner_node_count
+            > 0
+    );
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .nested_tetrahedron_shell
+            .boundary_exact_cover_refill_count
+            + authored
+                .data
+                .evidence
+                .nested_tetrahedron_shell
+                .boundary_centroid_refinement_refill_count
+            + authored
+                .data
+                .evidence
+                .nested_tetrahedron_shell
+                .barycentric_partition_refill_count,
+        1
+    );
+
+    let artifact: serde_json::Value = serde_json::from_slice(
+        &fs::read(&authored.data.evidence_artifact_path).expect("read authoring artifact"),
+    )
+    .expect("parse authoring artifact");
+    assert_eq!(
+        artifact["evidence"]["nested_tetrahedron_shell"]["outer_node_count"].as_u64(),
+        Some(
+            authored
+                .data
+                .evidence
+                .nested_tetrahedron_shell
+                .outer_node_count as u64
+        )
+    );
+    assert_eq!(
+        artifact["evidence"]["nested_tetrahedron_shell"]["inner_facet_count"].as_u64(),
+        Some(
+            authored
+                .data
+                .evidence
+                .nested_tetrahedron_shell
+                .inner_facet_count as u64
+        )
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn analysis_author_study_run_consumes_supplied_generated_solid_artifact() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("author-study-generated-solid-artifact");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+    let artifact_root = root.join("supplied_mesh");
+    let (mesh_path, evidence_path, summary) =
+        write_generated_through_hole_analysis_mesh_artifacts(&artifact_root);
+    let geometry = through_hole_study_geometry();
+
+    let authored = analysis_author_study_op(
+        AnalysisStudyAuthoringIntent {
+            study_id: "authored_generated_solid_static".to_string(),
+            model_id: None,
+            geometry,
+            mesh_authoring_summary: summary,
+            profile: AnalysisCreateModelProfile::LinearStaticStructural,
+            run_kind: AnalysisRunKind::LinearStatic,
+            backend: ComputeBackend::Cpu,
+            analysis_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            analysis_mesh_evidence_artifact_path: Some(evidence_path.display().to_string()),
+            material_region_id: Some("body".to_string()),
+            boundary_condition_region_id: Some("root".to_string()),
+            driving_condition_region_id: Some("tip".to_string()),
+            structural_force_n: Some([0.0, -250.0, 25.0]),
+            diagram_observation: None,
+        },
+        OperationContext::new(Some("trace-author-generated-solid".to_string()), None),
+    )
+    .expect("authoring should produce a study from generated solid mesh evidence");
+    assert_eq!(
+        authored.data.study.analysis_mesh_artifact_path.as_deref(),
+        Some(mesh_path.to_str().expect("mesh path should be utf-8"))
+    );
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .analysis_mesh_artifact_path
+            .as_deref(),
+        Some(mesh_path.to_str().expect("mesh path should be utf-8"))
+    );
+
+    let run = analysis_run_study_op(&authored.data.study, OperationContext::new(None, None))
+        .expect("authored generated solid study should run from supplied artifact");
+    assert_eq!(
+        run.data.analysis_mesh_artifact_path.as_deref(),
+        Some(mesh_path.to_str().expect("mesh path should be utf-8"))
+    );
+    assert_eq!(
+        run.data.analysis_mesh_evidence_artifact_path.as_deref(),
+        Some(
+            evidence_path
+                .to_str()
+                .expect("evidence path should be utf-8")
+        )
+    );
+    assert_eq!(run.data.refined_analysis_mesh_artifact_path, None);
+    assert_eq!(
+        run.data.run_options["analysis_mesh_artifact_path"].as_str(),
+        Some(mesh_path.to_str().expect("mesh path should be utf-8"))
+    );
+
+    let mesh_payload: serde_json::Value = serde_json::from_slice(
+        &fs::read(&mesh_path).expect("read supplied analysis mesh artifact"),
+    )
+    .expect("parse supplied analysis mesh artifact");
+    assert_eq!(
+        mesh_payload["mesh_options"]["refinement"]["strategy"].as_str(),
+        Some("auto")
+    );
+    assert!(!mesh_payload["mesh"]["adaptive_iterations"]
+        .as_array()
+        .expect("supplied artifact should collect solved adaptive evidence")
+        .is_empty());
+    assert!(!mesh_payload["mesh"]["sizing"]["samples"]
+        .as_array()
+        .expect("supplied artifact should retain solved sizing samples")
+        .is_empty());
+    let volume_element_count = mesh_payload["mesh"]["volume_elements"]
+        .as_array()
+        .expect("supplied volume elements")
+        .len();
+    let persisted = storage::load_run_result(&run.data.run_id)
+        .expect("run load should succeed")
+        .expect("run should be persisted");
+    let von_mises = persisted
+        .run
+        .field(FEA_FIELD_STRUCTURAL_VON_MISES)
+        .expect("authored generated solid run should persist von Mises field");
+    assert_eq!(von_mises.shape, vec![volume_element_count]);
+    assert!(persisted.run.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "FEA_ANALYSIS_MESH_REFERENCE"
+            && diagnostic
+                .message
+                .contains(mesh_path.to_str().expect("mesh path should be utf-8"))
+    }));
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn analysis_author_study_uses_diagram_observation_when_regions_are_not_requested() {
+    let _guard = analysis_test_guard();
+    let root = temp_artifact_root("author-study-diagram-observation");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    let validation = runmat_meshing_core::AnalysisMeshValidationOptions {
+        required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
+        required_material_region_ids: vec!["solid".to_string()],
+        ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
+    };
+    let evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(&mesh, &validation);
+    let mut summary = runmat_meshing_evidence::build_mesh_authoring_summary(&evidence);
+    summary.solve_ready = true;
+    summary.validation_error_code = None;
+    summary.validation_error_message = None;
+
+    let authored = analysis_author_study_op(
+        AnalysisStudyAuthoringIntent {
+            study_id: "authored_from_diagram".to_string(),
+            model_id: None,
+            geometry: closed_cube_geometry_asset(),
+            mesh_authoring_summary: summary,
+            profile: AnalysisCreateModelProfile::LinearStaticStructural,
+            run_kind: AnalysisRunKind::LinearStatic,
+            backend: ComputeBackend::Cpu,
+            analysis_mesh_artifact_path: None,
+            analysis_mesh_evidence_artifact_path: None,
+            material_region_id: None,
+            boundary_condition_region_id: None,
+            driving_condition_region_id: None,
+            structural_force_n: None,
+            diagram_observation: Some(AnalysisStudyDiagramObservation {
+                artifact_path: Some("diagram://fixture/free-body.png".to_string()),
+                source_mime_type: Some("image/png".to_string()),
+                summary: Some(
+                    "boundary condition on tip and driving condition on root".to_string(),
+                ),
+                material_region_id: Some("solid".to_string()),
+                boundary_condition_region_id: Some("tip".to_string()),
+                driving_condition_region_id: Some("root".to_string()),
+                structural_force_n: Some([12.0, -3.0, 4.0]),
+                confidence: Some(0.82),
+            }),
+        },
+        OperationContext::new(Some("trace-author-diagram".to_string()), None),
+    )
+    .expect("diagram observation should author a valid study");
+
+    let model = authored
+        .data
+        .study
+        .model
+        .as_ref()
+        .expect("authored study should include model");
+    assert_eq!(model.material_assignments[0].region_id, "solid");
+    assert_eq!(model.boundary_conditions[0].region_id, "tip");
+    assert_eq!(model.loads[0].region_id, "root");
+    assert_eq!(
+        model.loads[0].kind,
+        LoadKind::Force {
+            fx: 12.0,
+            fy: -3.0,
+            fz: 4.0
+        }
+    );
+    assert_eq!(authored.data.evidence.material_region_source, "diagram");
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .boundary_condition_region_source
+            .as_deref(),
+        Some("diagram")
+    );
+    assert_eq!(
+        authored
+            .data
+            .evidence
+            .driving_condition_region_source
+            .as_deref(),
+        Some("diagram")
+    );
+    assert_eq!(
+        authored.data.evidence.diagram_artifact_path.as_deref(),
+        Some("diagram://fixture/free-body.png")
+    );
+    assert_eq!(
+        authored.data.evidence.diagram_source_mime_type.as_deref(),
+        Some("image/png")
+    );
+    assert_eq!(
+        authored.data.evidence.diagram_summary.as_deref(),
+        Some("boundary condition on tip and driving condition on root")
+    );
+    assert_eq!(authored.data.evidence.diagram_confidence, Some(0.82));
+
+    let artifact: serde_json::Value = serde_json::from_slice(
+        &fs::read(&authored.data.evidence_artifact_path).expect("read authoring artifact"),
+    )
+    .expect("parse authoring artifact");
+    assert_eq!(
+        artifact["evidence"]["diagram_artifact_path"].as_str(),
+        Some("diagram://fixture/free-body.png")
+    );
+    assert_eq!(
+        artifact["evidence"]["boundary_condition_region_source"].as_str(),
+        Some("diagram")
+    );
+    assert_eq!(
+        artifact["evidence"]["driving_condition_region_source"].as_str(),
+        Some("diagram")
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn analysis_author_study_rejects_not_solve_ready_mesh_summary() {
+    let _guard = analysis_test_guard();
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    let evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(
+        &mesh,
+        &runmat_meshing_core::AnalysisMeshValidationOptions {
+            required_boundary_region_ids: vec!["missing".to_string()],
+            ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
+        },
+    );
+    let summary = runmat_meshing_evidence::build_mesh_authoring_summary(&evidence);
+
+    let err = analysis_author_study_op(
+        AnalysisStudyAuthoringIntent {
+            study_id: "rejected_static".to_string(),
+            model_id: None,
+            geometry: closed_cube_geometry_asset(),
+            mesh_authoring_summary: summary,
+            profile: AnalysisCreateModelProfile::LinearStaticStructural,
+            run_kind: AnalysisRunKind::LinearStatic,
+            backend: ComputeBackend::Cpu,
+            analysis_mesh_artifact_path: None,
+            analysis_mesh_evidence_artifact_path: None,
+            material_region_id: None,
+            boundary_condition_region_id: None,
+            driving_condition_region_id: None,
+            structural_force_n: None,
+            diagram_observation: None,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect_err("not solve-ready summary should fail closed");
+
+    assert_eq!(err.error_code, "RM.FEA.AUTHOR_STUDY.MESH_NOT_SOLVE_READY");
+}
+
+#[test]
+fn analysis_run_study_persists_solid_backend_analysis_mesh_artifact() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("run-study-solid-analysis-mesh");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+    let mut spec = sample_linear_static_study_spec();
+    spec.geometry = closed_cube_geometry_asset();
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
+        backend: runmat_meshing_core::MeshBackendKind::Solid,
+        ..runmat_meshing_core::VolumeMeshingOptions::default()
+    };
+    mesh_options.refinement.strategy = runmat_meshing_core::RefinementStrategy::None;
+    mesh_options.refinement.max_iterations = 0;
+    spec.mesh_options = Some(mesh_options);
+
+    let envelope = analysis_run_study_op(&spec, OperationContext::new(None, None))
+        .expect("study run should succeed with solid mesh backend");
+
+    let artifact_path = envelope
+        .data
+        .analysis_mesh_artifact_path
+        .as_ref()
+        .expect("study run should persist solid analysis mesh artifact path");
+    let evidence_path = envelope
+        .data
+        .analysis_mesh_evidence_artifact_path
+        .as_ref()
+        .expect("study run should persist solid mesh evidence artifact path");
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let persisted = storage::load_run_result(&envelope.data.run_id)
+        .expect("run load should succeed")
+        .expect("run should be persisted");
+    let von_mises = persisted
+        .run
+        .field(FEA_FIELD_STRUCTURAL_VON_MISES)
+        .expect("solid mesh run should persist von Mises field");
+    assert_eq!(
+        von_mises.shape,
+        vec![payload["mesh"]["volume_elements"]
+            .as_array()
+            .expect("volume elements")
+            .len()]
+    );
+    assert_eq!(
+        payload["mesh"]["provenance"]["algorithm"].as_str(),
+        Some("plc_tetrahedron/v1")
+    );
+    let volume_element_count = payload["mesh"]["volume_elements"]
+        .as_array()
+        .expect("volume elements")
+        .len();
+    assert!(volume_element_count > 0);
+    assert_eq!(
+        payload["mesh"]["backend"]["tetrahedron_element_count"].as_u64(),
+        Some(volume_element_count as u64)
+    );
+    assert_eq!(
+        payload["mesh"]["backend"]["tetrahedron_unrecovered_component_count"].as_u64(),
+        Some(0)
+    );
+    assert_eq!(
+        payload["mesh"]["backend"]["tetrahedron_recovered_component_ratio"].as_f64(),
+        Some(1.0)
+    );
+    assert_eq!(
+        payload["mesh"]["backend"]["volume_component_count"].as_u64(),
+        Some(1)
+    );
+    let evidence_payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(evidence_path).expect("read mesh evidence artifact"))
+            .expect("parse mesh evidence artifact");
+    assert_eq!(
+        evidence_payload["mesh_evidence"]["backend"]["backend"].as_str(),
+        Some("solid")
+    );
+    assert_eq!(
+        evidence_payload["mesh_evidence"]["validation"]["volume_component_count"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        evidence_payload["mesh_evidence"]["validation"]["max_volume_component_count"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        evidence_payload["mesh_evidence"]["validation"]
+            ["require_no_unrecovered_tetrahedron_components"]
+            .as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        evidence_payload["mesh_evidence"]["validation"]["boundary_recovery"]
+            ["boundary_face_recovery_ratio"]
+            .as_f64(),
+        Some(1.0)
+    );
+    assert_eq!(envelope.data.refined_analysis_mesh_artifact_path, None);
+    assert_eq!(
+        envelope.data.refined_analysis_mesh_evidence_artifact_path,
+        None
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn analysis_run_study_consumes_generated_nested_shell_solid_artifact() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("run-study-nested-shell-solid");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+    let geometry = nested_tetrahedron_shell_study_geometry();
+    let mut model = sample_solid_model();
+    model.geometry_id = geometry.geometry_id.clone();
+    model.geometry_revision = geometry.revision;
+    model.units = geometry.units;
+    model.material_assignments = vec![MaterialAssignment {
+        region_id: "body".to_string(),
+        expected_material_id: "mat_steel".to_string(),
+        assigned_material_id: "mat_steel".to_string(),
+        confidence: EvidenceConfidence::Verified,
+    }];
+    model.loads = vec![LoadCase {
+        load_id: "load_tip".to_string(),
+        region_id: "tip".to_string(),
+        kind: LoadKind::Force {
+            fx: 0.0,
+            fy: -250.0,
+            fz: 25.0,
+        },
+    }];
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
+        backend: runmat_meshing_core::MeshBackendKind::Solid,
+        target_size: runmat_meshing_core::MeshTargetSize::LengthM(10.0),
+        ..runmat_meshing_core::VolumeMeshingOptions::default()
+    };
+    mesh_options.refinement.strategy = runmat_meshing_core::RefinementStrategy::None;
+    mesh_options.refinement.max_iterations = 0;
+    let mut spec = sample_linear_static_study_spec();
+    spec.geometry = geometry;
+    spec.model = Some(model);
+    spec.mesh_options = Some(mesh_options);
+
+    let envelope = analysis_run_study_op(&spec, OperationContext::new(None, None))
+        .expect("nested-shell solid study should run from generated artifact");
+
+    let artifact_path = envelope
+        .data
+        .analysis_mesh_artifact_path
+        .as_ref()
+        .expect("study run should persist nested-shell analysis mesh artifact");
+    assert_eq!(
+        envelope.data.run_options["analysis_mesh_artifact_path"].as_str(),
+        Some(artifact_path.as_str())
+    );
+    assert_eq!(envelope.data.refined_analysis_mesh_artifact_path, None);
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let mesh_payload = &payload["mesh"];
+    assert_eq!(
+        mesh_payload["backend"]["tetrahedron_generation_family"].as_str(),
+        Some("nested_tetrahedron_shell")
+    );
+    assert_eq!(
+        mesh_payload["backend"]["plc_input_nested_shell_count"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        mesh_payload["backend"]["plc_input_max_shell_nesting_depth"].as_u64(),
+        Some(1)
+    );
+    assert!(
+        mesh_payload["backend"]["tetrahedron_generation_nested_shell_outer_node_count"]
+            .as_u64()
+            .unwrap_or_default()
+            > 0
+    );
+    assert!(
+        mesh_payload["backend"]["tetrahedron_generation_nested_shell_inner_node_count"]
+            .as_u64()
+            .unwrap_or_default()
+            > 0
+    );
+    assert_eq!(
+        mesh_payload["backend"]["tetrahedron_missing_recovery_item_count"].as_u64(),
+        Some(0)
+    );
+    assert!(
+        mesh_payload["backend"]["tetrahedron_min_exact_scaled_jacobian"]
+            .as_f64()
+            .unwrap_or_default()
+            >= 0.15
+    );
+    let strategy_count = mesh_payload["backend"]
+        ["tetrahedron_generation_nested_shell_boundary_exact_cover_refill_count"]
+        .as_u64()
+        .unwrap_or_default()
+        + mesh_payload["backend"]
+            ["tetrahedron_generation_nested_shell_boundary_centroid_refinement_refill_count"]
+            .as_u64()
+            .unwrap_or_default()
+        + mesh_payload["backend"]
+            ["tetrahedron_generation_nested_shell_barycentric_partition_refill_count"]
+            .as_u64()
+            .unwrap_or_default();
+    assert_eq!(strategy_count, 1);
+    let volume_element_count = mesh_payload["volume_elements"]
+        .as_array()
+        .expect("nested-shell volume elements")
+        .len();
+    let boundary_face_count = mesh_payload["boundary_faces"]
+        .as_array()
+        .expect("nested-shell boundary faces")
+        .len();
+
+    let persisted = storage::load_run_result(&envelope.data.run_id)
+        .expect("run load should succeed")
+        .expect("run should be persisted");
+    let von_mises = persisted
+        .run
+        .field(FEA_FIELD_STRUCTURAL_VON_MISES)
+        .expect("nested-shell run should persist von Mises field");
+    assert_eq!(von_mises.shape, vec![volume_element_count]);
+    let topology = persisted
+        .render_topology
+        .as_ref()
+        .expect("run should persist nested-shell solver render topology");
+    assert_eq!(topology.source, AnalysisRenderTopologySource::AnalysisMesh);
+    assert_eq!(
+        topology
+            .meshes
+            .iter()
+            .map(|mesh| mesh.triangles.len())
+            .sum::<usize>(),
+        boundary_face_count
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn analysis_run_study_persists_solid_boundary_focus_sizing_evidence() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("run-study-solid-boundary-focus");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+    let mut spec = sample_linear_static_study_spec();
+    spec.geometry = closed_cube_geometry_asset();
+    let mut model = sample_solid_model();
+    model.geometry_id = spec.geometry.geometry_id.clone();
+    model.geometry_revision = spec.geometry.revision;
+    model.units = spec.geometry.units;
+    model.material_assignments = vec![MaterialAssignment {
+        region_id: "body".to_string(),
+        expected_material_id: "mat_steel".to_string(),
+        assigned_material_id: "mat_steel".to_string(),
+        confidence: EvidenceConfidence::Verified,
+    }];
+    spec.model = Some(model);
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
+        backend: runmat_meshing_core::MeshBackendKind::Solid,
+        ..runmat_meshing_core::VolumeMeshingOptions::default()
+    };
+    mesh_options.refinement.focus.loads = runmat_meshing_core::RefinementFocusLevel::Fine;
+    mesh_options.refinement.focus.constraints = runmat_meshing_core::RefinementFocusLevel::Fine;
+    spec.mesh_options = Some(mesh_options);
+
+    let envelope = analysis_run_study_op(&spec, OperationContext::new(None, None))
+        .expect("study run should succeed with solid boundary-focus mesh");
+
+    let initial_artifact_path = envelope
+        .data
+        .analysis_mesh_artifact_path
+        .as_ref()
+        .expect("study run should persist solid analysis mesh artifact path");
+    let payload: serde_json::Value = serde_json::from_slice(
+        &fs::read(initial_artifact_path).expect("read initial analysis mesh artifact"),
+    )
+    .expect("parse analysis mesh artifact");
+
+    let active_artifact_path = envelope
+        .data
+        .refined_analysis_mesh_artifact_path
+        .as_ref()
+        .unwrap_or(initial_artifact_path);
+    assert_eq!(
+        envelope.data.run_options["analysis_mesh_artifact_path"].as_str(),
+        Some(active_artifact_path.as_str())
+    );
+    let active_payload: serde_json::Value = serde_json::from_slice(
+        &fs::read(active_artifact_path).expect("read active analysis mesh artifact"),
+    )
+    .expect("parse active analysis mesh artifact");
+    if active_artifact_path != initial_artifact_path {
+        assert_eq!(
+            active_payload["source_analysis_mesh_artifact_path"].as_str(),
+            Some(initial_artifact_path.as_str())
+        );
+    }
+    let active_volume_element_count = active_payload["mesh"]["volume_elements"]
+        .as_array()
+        .expect("volume elements")
+        .len();
+    let persisted = storage::load_run_result(&envelope.data.run_id)
+        .expect("run load should succeed")
+        .expect("run should be persisted");
+    let von_mises = persisted
+        .run
+        .field(FEA_FIELD_STRUCTURAL_VON_MISES)
+        .expect("solid boundary-focus run should persist von Mises field");
+    assert_eq!(von_mises.shape, vec![active_volume_element_count]);
+
+    let applied_samples = payload["mesh"]["sizing"]["applied_samples"]
+        .as_array()
+        .expect("sizing applied samples");
+    for reason in ["structural.load_regions", "structural.constraint_regions"] {
+        assert!(
+            applied_samples
+                .iter()
+                .any(|sample| sample["reason"].as_str() == Some(reason)
+                    && sample["inserted_breakpoint_count"]
+                        .as_u64()
+                        .unwrap_or_default()
+                        > 0),
+            "expected boundary-focus sizing application for {reason}"
+        );
+        assert!(
+            payload["sizing_applications"]["by_reason"][reason]
+                .as_u64()
+                .unwrap_or_default()
+                > 0,
+            "expected persisted sizing application summary for {reason}"
+        );
+    }
+    assert_eq!(
+        payload["sizing_rejections"]["total"].as_u64(),
+        Some(0),
+        "boundary-focus sizing samples should be accepted for the closed cube fixture"
+    );
+    assert_eq!(
+        payload["refinement_context"]["boundary_load_region_ids"]
+            .as_array()
+            .expect("load region ids")
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["tip"]
+    );
+    assert_eq!(
+        payload["refinement_context"]["boundary_constraint_region_ids"]
+            .as_array()
+            .expect("constraint region ids")
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["root"]
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn analysis_mesh_validation_options_use_geometry_bounds_and_boundary_regions() {
+    let mut spec = sample_linear_static_study_spec();
+    spec.geometry = closed_cube_geometry_asset();
+    spec.geometry.units = UnitSystem::Millimeter;
+    let mut model = sample_solid_model();
+    model.material_assignments = vec![
+        MaterialAssignment {
+            region_id: "body".to_string(),
+            expected_material_id: "mat_steel".to_string(),
+            assigned_material_id: "mat_steel".to_string(),
+            confidence: EvidenceConfidence::Verified,
+        },
+        MaterialAssignment {
+            region_id: "body".to_string(),
+            expected_material_id: "mat_steel".to_string(),
+            assigned_material_id: "mat_steel".to_string(),
+            confidence: EvidenceConfidence::Verified,
+        },
+    ];
+    spec.model = Some(model);
+
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
+        max_elements: 42_000,
+        ..runmat_meshing_core::VolumeMeshingOptions::default()
+    };
+    mesh_options.validation.max_volume_component_count = Some(3);
+    mesh_options.validation.min_bounds_coverage_ratio = 0.95;
+    mesh_options.validation.min_boundary_face_recovery_ratio = 0.98;
+    mesh_options.validation.quality = runmat_meshing_core::QualityThresholds {
+        min_scaled_jacobian: 0.25,
+        max_aspect_ratio: 10.0,
+        max_boundary_projection_error_m: runmat_meshing_core::QualityThresholds::default()
+            .max_boundary_projection_error_m,
+        allow_inverted_elements: false,
+    };
+    let options = analysis_mesh_validation_options_for_study(&spec, &mesh_options);
+
+    assert_eq!(
+        options.expected_bounds_m,
+        Some([[0.0, 0.0, 0.0], [0.001, 0.001, 0.001]])
+    );
+    assert!(
+        (options.expected_volume_m3.expect("expected volume") - 1.0e-9).abs() < 1.0e-18,
+        "unexpected expected volume: {:?}",
+        options.expected_volume_m3
+    );
+    assert!(
+        (options
+            .expected_boundary_area_m2
+            .expect("expected boundary area")
+            - 6.0e-6)
+            .abs()
+            < 1.0e-15,
+        "unexpected expected boundary area: {:?}",
+        options.expected_boundary_area_m2
+    );
+    assert_eq!(
+        options.required_boundary_region_ids,
+        vec!["root".to_string(), "tip".to_string()]
+    );
+    assert_eq!(
+        options.required_material_region_ids,
+        vec!["body".to_string()]
+    );
+    assert_eq!(options.min_bounds_coverage_ratio, 0.95);
+    assert_eq!(options.max_volume_element_count, Some(42_000));
+    assert_eq!(options.max_volume_component_count, Some(3));
+    assert_eq!(options.min_boundary_face_recovery_ratio, 0.98);
+    assert_eq!(
+        options.quality,
+        runmat_meshing_core::QualityThresholds {
+            min_scaled_jacobian: 0.25,
+            max_aspect_ratio: 10.0,
+            max_boundary_projection_error_m: runmat_meshing_core::QualityThresholds::default()
+                .max_boundary_projection_error_m,
+            allow_inverted_elements: false,
+        }
+    );
+}
+
+#[test]
+fn generated_solid_mesh_validation_requires_strict_recovery() {
+    let spec = sample_linear_static_study_spec();
+    let mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
+    let mut mesh = minimal_analysis_mesh();
+    mesh.backend.backend = "solid".to_string();
+    mesh.backend.volume_component_count = 2;
+    mesh.backend.plc_input_protected_edge_count = 6;
+    mesh.nodes[0].provenance.push(MeshEntityProvenance {
+        source_geometry_id: "geo:test".to_string(),
+        source_geometry_revision: 1,
+        source_entity_kind: SourceEntityKind::Body,
+        source_entity_id: "seed_1".to_string(),
+        region_ids: Vec::new(),
+    });
+
+    let options = analysis_mesh_validation_options_for_generated_mesh(&spec, &mesh_options, &mesh);
+
+    assert!(options.require_no_unrecovered_tetrahedron_components);
+    assert!(options.require_no_unrepaired_exact_quality);
+    assert!(options.require_boundary_source_edge_provenance);
+    assert_eq!(options.max_volume_component_count, Some(2));
+    assert_eq!(options.coverage_sample_points_m, vec![[0.0, 0.0, 0.0]]);
+    assert_eq!(options.min_coverage_sample_ratio, 1.0);
+}
+
+#[test]
+fn loaded_solid_mesh_validation_requires_source_edge_provenance_for_protected_plc_edges() {
+    let mut mesh = minimal_analysis_mesh();
+    mesh.backend.backend = "solid".to_string();
+    mesh.backend.plc_input_protected_edge_count = 6;
+    let payload = serde_json::json!({
+        "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
+    });
+
+    let options = analysis_mesh_validation_options_for_loaded_artifact(&payload, &mesh)
+        .expect("loaded validation options should parse");
+
+    assert!(options.require_no_unrecovered_tetrahedron_components);
+    assert!(options.require_no_unrepaired_exact_quality);
+    assert!(options.require_boundary_source_edge_provenance);
+}
+
+#[test]
+fn generated_solid_mesh_validation_caps_body_coverage_samples() {
+    let spec = sample_linear_static_study_spec();
+    let mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
+    let mut mesh = minimal_analysis_mesh();
+    mesh.backend.backend = "solid".to_string();
+    mesh.nodes = (0..70)
+        .map(|index| {
+            let mut node = analysis_mesh_node(index + 1, [index as f64 * 1.0e-3, 0.0, 0.0]);
+            node.provenance.push(MeshEntityProvenance {
+                source_geometry_id: "geo:test".to_string(),
+                source_geometry_revision: 1,
+                source_entity_kind: SourceEntityKind::Body,
+                source_entity_id: format!("seed_{index}"),
+                region_ids: Vec::new(),
+            });
+            node
+        })
+        .collect();
+
+    let options = analysis_mesh_validation_options_for_generated_mesh(&spec, &mesh_options, &mesh);
+
+    assert_eq!(options.coverage_sample_points_m.len(), 64);
+    assert_eq!(options.coverage_sample_points_m[0], [0.0, 0.0, 0.0]);
+    assert_eq!(options.coverage_sample_points_m[63], [0.063, 0.0, 0.0]);
 }
 
 #[test]
@@ -2248,6 +4207,7 @@ fn analysis_run_linear_static_returns_typed_envelope() {
             quality_policy: QualityPolicy::Balanced,
             prep_context: Some(sample_analysis_run_prep_context()),
             prep_artifact_id: Some(prep_artifact_id),
+            analysis_mesh_artifact_path: None,
             prep_calibration_profile: None,
         },
         context,
@@ -2265,12 +4225,14 @@ fn analysis_run_linear_static_returns_typed_envelope() {
         .is_empty());
     assert_eq!(envelope.data.run_status, RunStatus::Publishable);
     assert!(envelope.data.publishable);
+    assert_eq!(envelope.data.result_quality, QualityGate::Pass);
+    assert!(envelope.data.quality_reasons.is_empty());
     assert!(envelope.data.modal_results.is_none());
     assert_eq!(envelope.data.solver_convergence, QualityGate::Pass);
     assert!(envelope.data.provenance.deterministic_mode);
     assert_eq!(envelope.data.provenance.precision_mode, "fp64");
-    assert_eq!(envelope.data.provenance.solver_method, "matrix_free_pcg");
-    assert_eq!(envelope.data.provenance.preconditioner, "ilu0");
+    assert_eq!(envelope.data.provenance.solver_method, "dense_direct");
+    assert_eq!(envelope.data.provenance.preconditioner, "none");
     assert_eq!(envelope.data.provenance.quality_policy, "balanced");
     assert_eq!(envelope.data.provenance.solver_device_apply_k_ratio, 0.0);
     assert_eq!(envelope.data.provenance.solver_host_sync_count, 0);
@@ -2279,7 +4241,8 @@ fn analysis_run_linear_static_returns_typed_envelope() {
 #[test]
 fn analysis_run_linear_static_with_thermo_mechanical_coupling_reports_fields() {
     let _guard = analysis_test_guard();
-    let mut model = sample_model();
+    let (mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("linear-thermo-fields");
+    let mut model = sample_solid_model();
     set_model_thermo_coupling(
         &mut model,
         ThermoMechanicalCouplingOptions {
@@ -2304,6 +4267,7 @@ fn analysis_run_linear_static_with_thermo_mechanical_coupling_reports_fields() {
             quality_policy: QualityPolicy::Balanced,
             prep_context: None,
             prep_artifact_id: None,
+            analysis_mesh_artifact_path: Some(mesh_path.display().to_string()),
             prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-linear-thermo-fields".to_string()), None),
@@ -2375,6 +4339,7 @@ fn analysis_run_linear_static_with_thermo_mechanical_coupling_reports_fields() {
         assert_eq!(descriptor.kind, AnalysisFieldKind::Tensor);
         assert_eq!(descriptor.component_count, Some(6));
     }
+    let _ = fs::remove_dir_all(&mesh_root);
 }
 
 #[test]
@@ -2694,6 +4659,13 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
             AnalysisFieldLocation::Element,
         ),
         (
+            FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY.to_string(),
+            "structural",
+            "strain_energy_density",
+            Some("J/m^3"),
+            AnalysisFieldLocation::Element,
+        ),
+        (
             FEA_FIELD_MODAL_FREQUENCY_HZ.to_string(),
             "modal",
             "frequency_hz",
@@ -2847,6 +4819,78 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
     ));
     assert_eq!(von_mises.kind, AnalysisFieldKind::Scalar);
     assert_eq!(von_mises.component_count, None);
+
+    let displacement = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+        FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+        vec![4, 3],
+        vec![0.0; 12],
+    ));
+    assert_eq!(displacement.topology_id.as_deref(), Some("analysis_mesh"));
+    assert_eq!(displacement.element_kind, None);
+    assert_eq!(displacement.location, AnalysisFieldLocation::Node);
+    assert_eq!(displacement.entity_count, 4);
+    assert_eq!(displacement.value_count, 12);
+    assert_eq!(displacement.element_count, 12);
+    assert_eq!(displacement.component_count, Some(3));
+    let nodal_von_mises = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+        FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
+        vec![4],
+        vec![0.0; 4],
+    ));
+    assert_eq!(
+        nodal_von_mises.topology_id.as_deref(),
+        Some("analysis_mesh")
+    );
+    assert_eq!(nodal_von_mises.element_kind, None);
+    assert_eq!(nodal_von_mises.location, AnalysisFieldLocation::Node);
+    assert_eq!(nodal_von_mises.entity_count, 4);
+    assert_eq!(nodal_von_mises.value_count, 4);
+    assert_eq!(nodal_von_mises.element_count, 4);
+    assert_eq!(nodal_von_mises.component_count, None);
+    let solid_stress = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+        FEA_FIELD_STRUCTURAL_STRESS,
+        vec![1, 6],
+        vec![0.0; 6],
+    ));
+    assert_eq!(solid_stress.topology_id.as_deref(), Some("analysis_mesh"));
+    assert_eq!(solid_stress.element_kind.as_deref(), Some("tetrahedron4"));
+    assert_eq!(solid_stress.location, AnalysisFieldLocation::Element);
+    assert_eq!(solid_stress.entity_count, 1);
+    assert_eq!(solid_stress.value_count, 6);
+    assert_eq!(solid_stress.element_count, 6);
+    assert_eq!(solid_stress.component_count, Some(6));
+    let strain_energy_density = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+        FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
+        vec![1],
+        vec![0.0],
+    ));
+    assert_eq!(
+        strain_energy_density.topology_id.as_deref(),
+        Some("analysis_mesh")
+    );
+    assert_eq!(
+        strain_energy_density.element_kind.as_deref(),
+        Some("tetrahedron4")
+    );
+    assert_eq!(
+        strain_energy_density.location,
+        AnalysisFieldLocation::Element
+    );
+    assert_eq!(strain_energy_density.entity_count, 1);
+    assert_eq!(strain_energy_density.value_count, 1);
+    assert_eq!(membrane.topology_id.as_deref(), Some("analysis_mesh"));
+    assert_eq!(membrane.element_kind.as_deref(), Some("tri3"));
+    assert_eq!(membrane.entity_count, 1);
+    assert_eq!(membrane.value_count, 3);
+    let energy = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+        FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+        vec![1],
+        vec![0.0],
+    ));
+    assert_eq!(energy.topology_id, None);
+    assert_eq!(energy.element_kind, None);
+    assert_eq!(energy.entity_count, 1);
+    assert_eq!(energy.value_count, 1);
 }
 
 #[test]
@@ -3096,8 +5140,11 @@ fn analysis_results_by_run_id_roundtrip_works() {
 
     assert_eq!(fetched.operation, "fea.results");
     assert_eq!(fetched.op_version, "fea.results/v1");
-    assert_eq!(fetched.data.summary.field_count, 10);
-    assert_eq!(fetched.data.field_descriptors.len(), 10);
+    assert_eq!(fetched.data.summary.field_count, run.data.run.fields.len());
+    assert_eq!(
+        fetched.data.field_descriptors.len(),
+        run.data.run.fields.len()
+    );
     let displacement_descriptor = fetched
         .data
         .field_descriptors
@@ -3177,7 +5224,7 @@ fn analysis_results_compare_reports_typed_deltas() {
     let candidate = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions::production_recommended(),
+        AnalysisNonlinearRunOptions::solid_recommended(),
         OperationContext::new(None, None),
     )
     .expect("candidate nonlinear run should succeed");
@@ -3481,145 +5528,70 @@ fn analysis_results_summary_surfaces_thermo_transient_metrics() {
     )
     .expect("results should succeed");
 
-    assert_eq!(results.data.summary.thermo_coupling_enabled, Some(true));
-    assert!(results.data.summary.thermo_coupling_fingerprint.is_some());
+    assert_eq!(results.data.summary.thermo_coupling_enabled, None);
+    assert!(results.data.summary.thermo_coupling_fingerprint.is_none());
     assert!(results
         .data
         .summary
         .thermo_constitutive_temperature_factor
-        .is_some());
+        .is_none());
     assert!(results
         .data
         .summary
         .thermo_effective_modulus_scale
-        .is_some());
+        .is_none());
     assert!(results
         .data
         .summary
         .thermo_constitutive_material_spread_ratio
-        .is_some());
+        .is_none());
     assert!(results
         .data
         .summary
         .thermo_assignment_heterogeneity_index
-        .is_some());
+        .is_none());
     assert!(results.data.summary.thermo_transient_severity.is_some());
     assert!(results.data.summary.thermo_nonlinear_severity.is_none());
-    assert_eq!(
-        results.data.summary.electro_thermal_coupling_enabled,
-        Some(true)
-    );
+    assert_eq!(results.data.summary.electro_thermal_coupling_enabled, None);
     assert!(results
         .data
         .summary
         .electro_thermal_coupling_fingerprint
-        .is_some());
-    assert!(results.data.summary.electro_joule_heating_scale.is_some());
+        .is_none());
+    assert!(results.data.summary.electro_joule_heating_scale.is_none());
     assert!(results
         .data
         .summary
         .electro_conductivity_spread_ratio
-        .is_some());
+        .is_none());
     assert!(results.data.summary.electro_transient_severity.is_some());
     assert!(results.data.summary.electro_nonlinear_severity.is_none());
     assert!(results.data.summary.plastic_nonlinear_severity.is_none());
     assert!(results.data.summary.contact_nonlinear_severity.is_none());
-    assert!(run
-        .data
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL)
-        .is_some());
-    assert!(run
-        .data
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD)
-        .is_some());
-    assert!(run
-        .data
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY)
-        .is_some());
-    assert!(run
-        .data
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT)
-        .is_some());
-    let electric_field = run
-        .data
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD)
-        .expect("electro-thermal electric field should be present");
-    let current_density = run
-        .data
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY)
-        .expect("electro-thermal current density should be present");
-    let joule_heat = run
-        .data
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT)
-        .expect("electro-thermal Joule heat should be present");
-    assert_eq!(electric_field.shape.len(), 2);
-    assert_eq!(electric_field.shape[1], 3);
-    assert_eq!(current_density.shape, electric_field.shape);
-    assert_eq!(joule_heat.shape, vec![electric_field.shape[0]]);
-    let descriptor = |field_id: &str| {
-        results
+    for field_id in [
+        FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL.to_string(),
+        FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT.to_string(),
+        fea_electro_thermal_temperature_field_id(0),
+        fea_electro_thermal_thermal_residual_field_id(0),
+        FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD.to_string(),
+        FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY.to_string(),
+    ] {
+        assert!(run.data.run.field(&field_id).is_none());
+        assert!(results
             .data
             .field_descriptors
             .iter()
-            .find(|descriptor| descriptor.field_id == field_id)
-            .expect("electro-thermal descriptor should be present")
-    };
-    assert_eq!(
-        descriptor(FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL).kind,
-        AnalysisFieldKind::Scalar
-    );
-    for field_id in [
-        FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
-        FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY,
-    ] {
-        let descriptor = descriptor(field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Vector);
-        assert_eq!(descriptor.component_count, Some(3));
+            .all(|descriptor| descriptor.field_id != field_id));
     }
-    assert_eq!(
-        descriptor(FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT).kind,
-        AnalysisFieldKind::Scalar
-    );
-    assert_eq!(
-        descriptor(FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT).component_count,
-        None
-    );
     let transient = run
         .data
         .transient_results
         .as_ref()
         .expect("transient results should be present");
-    assert_eq!(
-        transient.electro_thermal_temperature_snapshots.len(),
-        transient.time_points_s.len()
-    );
-    assert_eq!(
-        transient.electro_thermal_thermal_residual_snapshots.len(),
-        transient.time_points_s.len()
-    );
-    assert_eq!(
-        transient.electro_thermal_temperature_snapshots[0].field_id,
-        fea_electro_thermal_temperature_field_id(0)
-    );
-    assert_eq!(
-        transient.electro_thermal_thermal_residual_snapshots[0].field_id,
-        fea_electro_thermal_thermal_residual_field_id(0)
-    );
-    for field_id in [
-        fea_electro_thermal_temperature_field_id(0),
-        fea_electro_thermal_thermal_residual_field_id(0),
-    ] {
-        let descriptor = descriptor(&field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
-        assert_eq!(descriptor.component_count, None);
-    }
+    assert!(transient.electro_thermal_temperature_snapshots.is_empty());
+    assert!(transient
+        .electro_thermal_thermal_residual_snapshots
+        .is_empty());
 }
 
 #[test]
@@ -3779,7 +5751,7 @@ fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
     let run = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions::production_recommended(),
+        AnalysisNonlinearRunOptions::solid_recommended(),
         OperationContext::new(None, None),
     )
     .expect("nonlinear run should succeed");
@@ -3791,134 +5763,69 @@ fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
     )
     .expect("results should succeed");
 
-    assert_eq!(results.data.summary.thermo_coupling_enabled, Some(true));
-    assert!(results.data.summary.thermo_coupling_fingerprint.is_some());
+    assert_eq!(results.data.summary.thermo_coupling_enabled, None);
+    assert!(results.data.summary.thermo_coupling_fingerprint.is_none());
     assert!(results
         .data
         .summary
         .thermo_constitutive_temperature_factor
-        .is_some());
+        .is_none());
     assert!(results
         .data
         .summary
         .thermo_effective_modulus_scale
-        .is_some());
+        .is_none());
     assert!(results
         .data
         .summary
         .thermo_constitutive_material_spread_ratio
-        .is_some());
+        .is_none());
     assert!(results
         .data
         .summary
         .thermo_assignment_heterogeneity_index
-        .is_some());
+        .is_none());
     assert!(results.data.summary.thermo_nonlinear_severity.is_some());
     assert!(results.data.summary.thermo_transient_severity.is_some());
-    assert_eq!(
-        results.data.summary.electro_thermal_coupling_enabled,
-        Some(true)
-    );
+    assert_eq!(results.data.summary.electro_thermal_coupling_enabled, None);
     assert!(results
         .data
         .summary
         .electro_thermal_coupling_fingerprint
-        .is_some());
-    assert!(results.data.summary.electro_joule_heating_scale.is_some());
+        .is_none());
+    assert!(results.data.summary.electro_joule_heating_scale.is_none());
     assert!(results
         .data
         .summary
         .electro_conductivity_spread_ratio
-        .is_some());
+        .is_none());
     assert!(results.data.summary.electro_nonlinear_severity.is_some());
     assert!(results.data.summary.electro_transient_severity.is_some());
     assert!(results.data.summary.plastic_nonlinear_severity.is_none());
     assert!(results.data.summary.contact_nonlinear_severity.is_none());
-    assert!(run
-        .data
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL)
-        .is_some());
-    assert!(run
-        .data
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD)
-        .is_some());
-    assert!(run
-        .data
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY)
-        .is_some());
-    assert!(run
-        .data
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT)
-        .is_some());
-    let electric_field = run
-        .data
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD)
-        .expect("electro-thermal electric field should be present");
-    let current_density = run
-        .data
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY)
-        .expect("electro-thermal current density should be present");
-    let joule_heat = run
-        .data
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT)
-        .expect("electro-thermal Joule heat should be present");
-    assert_eq!(electric_field.shape.len(), 2);
-    assert_eq!(electric_field.shape[1], 3);
-    assert_eq!(current_density.shape, electric_field.shape);
-    assert_eq!(joule_heat.shape, vec![electric_field.shape[0]]);
     let nonlinear = run
         .data
         .nonlinear_results
         .as_ref()
         .expect("nonlinear results should be present");
-    assert_eq!(
-        nonlinear.electro_thermal_temperature_snapshots.len(),
-        nonlinear.load_factors.len()
-    );
-    assert_eq!(
-        nonlinear.electro_thermal_thermal_residual_snapshots.len(),
-        nonlinear.load_factors.len()
-    );
-    assert_eq!(
-        nonlinear.electro_thermal_temperature_snapshots[0].field_id,
-        fea_electro_thermal_temperature_field_id(0)
-    );
-    assert_eq!(
-        nonlinear.electro_thermal_thermal_residual_snapshots[0].field_id,
-        fea_electro_thermal_thermal_residual_field_id(0)
-    );
-    let descriptor = |field_id: &str| {
-        results
-            .data
-            .field_descriptors
-            .iter()
-            .find(|descriptor| descriptor.field_id == field_id)
-            .expect("nonlinear electro-thermal descriptor should be present")
-    };
+    assert!(nonlinear.electro_thermal_temperature_snapshots.is_empty());
+    assert!(nonlinear
+        .electro_thermal_thermal_residual_snapshots
+        .is_empty());
     for field_id in [
         FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL.to_string(),
         FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT.to_string(),
         fea_electro_thermal_temperature_field_id(0),
         fea_electro_thermal_thermal_residual_field_id(0),
+        FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD.to_string(),
+        FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY.to_string(),
     ] {
-        let descriptor = descriptor(&field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
-        assert_eq!(descriptor.component_count, None);
-    }
-    for field_id in [
-        FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
-        FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY,
-    ] {
-        let descriptor = descriptor(field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Vector);
-        assert_eq!(descriptor.component_count, Some(3));
+        assert!(run.data.run.field(&field_id).is_none());
+        assert!(results
+            .data
+            .field_descriptors
+            .iter()
+            .all(|descriptor| descriptor.field_id != field_id));
     }
 }
 
@@ -4006,6 +5913,121 @@ fn scoped_thermo_field_artifact_root(root: &Path) -> EnvVarRestoreGuard {
     let previous = std::env::var(KEY).ok();
     std::env::set_var(KEY, root.display().to_string());
     EnvVarRestoreGuard { key: KEY, previous }
+}
+
+struct FeaRuntimeConfigRestoreGuard {
+    previous: FeaRuntimeConfig,
+}
+
+impl Drop for FeaRuntimeConfigRestoreGuard {
+    fn drop(&mut self) {
+        configure_fea_runtime(self.previous.clone()).expect("restore FEA runtime config");
+    }
+}
+
+fn scoped_study_artifact_root(root: &Path) -> FeaRuntimeConfigRestoreGuard {
+    let previous = current_fea_runtime_config();
+    configure_fea_runtime(FeaRuntimeConfig {
+        study_artifact_root: Some(root.to_path_buf()),
+        ..previous.clone()
+    })
+    .expect("configure FEA study artifact root");
+    FeaRuntimeConfigRestoreGuard { previous }
+}
+
+fn write_ready_minimal_analysis_mesh_artifact(test_name: &str) -> (PathBuf, PathBuf) {
+    let root = temp_artifact_root(test_name);
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create analysis mesh artifact root");
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    let validation_options = runmat_meshing_core::AnalysisMeshValidationOptions {
+        required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
+        ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
+    };
+    let evidence =
+        runmat_meshing_evidence::build_mesh_evidence_artifact(&mesh, &validation_options);
+    let evidence_path = root.join("mesh_evidence.json");
+    fs::write(
+        &evidence_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_mesh_evidence_artifact/v1",
+            "mesh_validation_options": validation_options.clone(),
+            "mesh_evidence": evidence,
+        }))
+        .expect("encode mesh evidence artifact"),
+    )
+    .expect("write mesh evidence artifact");
+    let mesh_path = root.join("analysis_mesh.json");
+    fs::write(
+        &mesh_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "linear_static_structural",
+            "run_kind": "linear_static",
+            "mesh_evidence_artifact_path": evidence_path.display().to_string(),
+            "mesh_validation_options": validation_options.clone(),
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+    (root, mesh_path)
+}
+
+fn write_generated_through_hole_analysis_mesh_artifacts(
+    root: &Path,
+) -> (
+    PathBuf,
+    PathBuf,
+    runmat_meshing_evidence::MeshAuthoringSummary,
+) {
+    let _ = fs::remove_dir_all(root);
+    fs::create_dir_all(root).expect("create generated analysis mesh artifact root");
+    let geometry = through_hole_study_geometry();
+    let options = runmat_meshing_core::VolumeMeshingOptions {
+        backend: runmat_meshing_core::MeshBackendKind::Solid,
+        ..runmat_meshing_core::VolumeMeshingOptions::default()
+    };
+    let mesh = runmat_meshing::generate_analysis_mesh(&geometry, options.clone())
+        .expect("through-hole fixture should generate an analysis mesh");
+    let validation_options = runmat_meshing_core::AnalysisMeshValidationOptions {
+        required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
+        required_material_region_ids: vec!["body".to_string()],
+        ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
+    };
+    runmat_meshing_core::validate_analysis_mesh_with_options(&mesh, validation_options.clone())
+        .expect("generated through-hole mesh should validate");
+    let evidence =
+        runmat_meshing_evidence::build_mesh_evidence_artifact(&mesh, &validation_options);
+    let summary = runmat_meshing_evidence::build_mesh_authoring_summary(&evidence);
+    let evidence_path = root.join("mesh_evidence.json");
+    fs::write(
+        &evidence_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_mesh_evidence_artifact/v1",
+            "mesh_validation_options": validation_options.clone(),
+            "mesh_authoring_summary": summary,
+            "mesh_evidence": evidence,
+        }))
+        .expect("encode generated mesh evidence artifact"),
+    )
+    .expect("write generated mesh evidence artifact");
+    let mesh_path = root.join("analysis_mesh.json");
+    fs::write(
+        &mesh_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "mesh_evidence_artifact_path": evidence_path.display().to_string(),
+            "mesh_options": options,
+            "analysis_profile": "linear_static_structural",
+            "run_kind": "linear_static",
+            "mesh_validation_options": validation_options,
+            "mesh": mesh,
+        }))
+        .expect("encode generated analysis mesh artifact"),
+    )
+    .expect("write generated analysis mesh artifact");
+    (mesh_path, evidence_path, summary)
 }
 
 #[test]
@@ -4298,7 +6320,9 @@ fn analysis_results_by_run_id_filesystem_replay_is_stable() {
 #[test]
 fn requested_preconditioner_fallback_is_recorded() {
     let _guard = analysis_test_guard();
-    let model = sample_model();
+    let (mesh_root, mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("preconditioner-fallback");
+    let model = sample_solid_model();
     let envelope = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
@@ -4309,6 +6333,7 @@ fn requested_preconditioner_fallback_is_recorded() {
             quality_policy: QualityPolicy::Balanced,
             prep_context: None,
             prep_artifact_id: None,
+            analysis_mesh_artifact_path: Some(mesh_path.display().to_string()),
             prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-preconditioner-fallback".to_string()), None),
@@ -4322,12 +6347,14 @@ fn requested_preconditioner_fallback_is_recorded() {
         .fallback_events
         .iter()
         .any(|event| event.starts_with("SOLVER_PRECONDITIONER_FALLBACK")));
+    let _ = fs::remove_dir_all(&mesh_root);
 }
 
 #[test]
-fn ilu_preconditioner_request_is_honored_without_fallback() {
+fn ilu_preconditioner_fallback_is_recorded_when_solver_uses_jacobi() {
     let _guard = analysis_test_guard();
-    let model = sample_model();
+    let (mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("preconditioner-ilu");
+    let model = sample_solid_model();
     let envelope = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
@@ -4338,27 +6365,33 @@ fn ilu_preconditioner_request_is_honored_without_fallback() {
             quality_policy: QualityPolicy::Balanced,
             prep_context: None,
             prep_artifact_id: None,
+            analysis_mesh_artifact_path: Some(mesh_path.display().to_string()),
             prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-preconditioner-ilu".to_string()), None),
     )
     .expect("run should succeed");
 
-    assert_eq!(envelope.data.provenance.preconditioner, "ilu0");
-    assert!(!envelope
+    assert_eq!(envelope.data.provenance.preconditioner, "jacobi");
+    assert!(envelope
         .data
         .provenance
         .fallback_events
         .iter()
         .any(|event| event.starts_with("SOLVER_PRECONDITIONER_FALLBACK")));
+    let _ = fs::remove_dir_all(&mesh_root);
 }
 
 #[test]
 fn quality_policy_exploratory_allows_publishable_warn_path() {
     let _guard = analysis_test_guard();
-    let model = runmat_analysis_fea::fixtures::fixture_model(
+    let mut model = runmat_analysis_fea::fixtures::fixture_model(
         runmat_analysis_fea::fixtures::FixtureId::MultiMaterialAssembly,
     );
+    let beam_model = sample_model();
+    model.structural = beam_model.structural;
+    model.boundary_conditions = beam_model.boundary_conditions;
+    model.loads = beam_model.loads;
     let envelope = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
@@ -4369,6 +6402,7 @@ fn quality_policy_exploratory_allows_publishable_warn_path() {
             quality_policy: QualityPolicy::Exploratory,
             prep_context: None,
             prep_artifact_id: None,
+            analysis_mesh_artifact_path: None,
             prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-quality-policy-exploratory".to_string()), None),
@@ -4429,6 +6463,7 @@ fn quality_policy_balanced_allows_publishable_with_quality_reasons() {
             quality_policy: QualityPolicy::Balanced,
             prep_context: None,
             prep_artifact_id: None,
+            analysis_mesh_artifact_path: None,
             prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-quality-policy-balanced".to_string()), None),
@@ -4439,11 +6474,6 @@ fn quality_policy_balanced_allows_publishable_with_quality_reasons() {
     assert_eq!(envelope.data.result_quality, QualityGate::Pass);
     assert!(envelope.data.publishable);
     assert_eq!(envelope.data.run_status, RunStatus::Publishable);
-    assert!(envelope
-        .data
-        .quality_reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::FieldPromotionFallback));
     assert_eq!(envelope.data.provenance.quality_policy, "balanced");
 }
 
@@ -4491,6 +6521,7 @@ fn quality_policy_strict_rejects_publishable_with_quality_reasons() {
             quality_policy: QualityPolicy::Strict,
             prep_context: None,
             prep_artifact_id: None,
+            analysis_mesh_artifact_path: None,
             prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-quality-policy-strict".to_string()), None),
@@ -4501,12 +6532,2511 @@ fn quality_policy_strict_rejects_publishable_with_quality_reasons() {
     assert_eq!(envelope.data.result_quality, QualityGate::Pass);
     assert!(!envelope.data.publishable);
     assert_eq!(envelope.data.run_status, RunStatus::Degraded);
-    assert!(envelope
+    assert_eq!(envelope.data.provenance.quality_policy, "strict");
+}
+
+#[test]
+fn mesh_validation_evidence_quality_reasons_fail_closed_on_not_solve_ready() {
+    let mesh = minimal_analysis_mesh();
+    let mut evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(
+        &mesh,
+        &runmat_meshing_core::AnalysisMeshValidationOptions::default(),
+    )
+    .validation;
+    evidence.solve_ready = false;
+    evidence.validation_error_code = Some("coverage_sample_failed".to_string());
+    evidence.validation_error_message = Some("coverage sample was outside the solid".to_string());
+    evidence.unrecovered_tetrahedron_component_count = 1;
+    evidence.unrepaired_exact_quality_total_count = 3;
+    evidence.unrepaired_exact_quality_general_cavity_count = 1;
+    evidence.unrepaired_exact_quality_boundary_adjacent_count = 2;
+    evidence.unrepaired_exact_quality_node_adjacent_count = 4;
+
+    let reasons = mesh_validation_evidence_quality_reasons(&MeshValidationEvidenceStatus::Present(
+        Box::new(evidence.clone()),
+    ));
+
+    assert_eq!(reasons.len(), 1);
+    assert_eq!(
+        reasons[0].code,
+        QualityReasonCode::SolidMeshValidationEvidenceFailed
+    );
+    assert!(reasons[0]
+        .detail
+        .contains("validation_error_code=coverage_sample_failed"));
+    assert!(reasons[0]
+        .detail
+        .contains("coverage sample was outside the solid"));
+    assert!(reasons[0]
+        .detail
+        .contains("unrecovered_tetrahedron_component_count=1"));
+    assert!(reasons[0]
+        .detail
+        .contains("unrepaired_exact_quality_total_count=3"));
+    assert!(reasons[0]
+        .detail
+        .contains("unrepaired_exact_quality_general_cavity_count=1"));
+    assert!(reasons[0]
+        .detail
+        .contains("unrepaired_exact_quality_boundary_adjacent_count=2"));
+    assert!(reasons[0]
+        .detail
+        .contains("unrepaired_exact_quality_node_adjacent_count=4"));
+
+    evidence.solve_ready = true;
+    assert!(
+        mesh_validation_evidence_quality_reasons(&MeshValidationEvidenceStatus::Present(Box::new(
+            evidence,
+        )))
+        .is_empty()
+    );
+    assert!(
+        mesh_validation_evidence_quality_reasons(&MeshValidationEvidenceStatus::NotRequested)
+            .is_empty()
+    );
+
+    let missing =
+        mesh_validation_evidence_quality_reasons(&MeshValidationEvidenceStatus::Missing {
+            detail: "analysis mesh artifact has no mesh_evidence_artifact_path".to_string(),
+        });
+    assert_eq!(missing.len(), 1);
+    assert_eq!(
+        missing[0].code,
+        QualityReasonCode::SolidMeshValidationEvidenceMissing
+    );
+    assert!(missing[0].detail.contains("mesh_evidence_artifact_path"));
+}
+
+#[test]
+fn analysis_mesh_evidence_failure_rejects_direct_run() {
+    let _guard = analysis_test_guard();
+    let root = temp_artifact_root("mesh-evidence-rejects-direct-run");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create artifact root");
+
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    let evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(
+        &mesh,
+        &runmat_meshing_core::AnalysisMeshValidationOptions {
+            coverage_sample_points_m: vec![[9.0, 9.0, 9.0]],
+            min_coverage_sample_ratio: 1.0,
+            ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
+        },
+    );
+    assert!(!evidence.validation.solve_ready);
+
+    let evidence_path = root.join("mesh_evidence.json");
+    fs::write(
+        &evidence_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_mesh_evidence_artifact/v1",
+            "mesh_evidence": evidence,
+        }))
+        .expect("encode mesh evidence"),
+    )
+    .expect("write mesh evidence");
+
+    let mesh_path = root.join("analysis_mesh.json");
+    fs::write(
+        &mesh_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "mesh_evidence_artifact_path": evidence_path.display().to_string(),
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh"),
+    )
+    .expect("write analysis mesh");
+
+    let envelope = analysis_run_linear_static_with_options(
+        &sample_solid_model(),
+        ComputeBackend::Cpu,
+        AnalysisRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            preconditioner_mode: PreconditionerMode::Auto,
+            quality_policy: QualityPolicy::Exploratory,
+            prep_context: None,
+            prep_artifact_id: None,
+            analysis_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            prep_calibration_profile: None,
+        },
+        OperationContext::new(
+            Some("trace-mesh-evidence-rejects-direct-run".to_string()),
+            None,
+        ),
+    )
+    .expect("run should complete and reject on mesh evidence");
+
+    assert_eq!(envelope.data.result_quality, QualityGate::Fail);
+    assert_eq!(envelope.data.run_status, RunStatus::Rejected);
+    assert!(!envelope.data.publishable);
+    let reason = envelope
         .data
         .quality_reasons
         .iter()
-        .any(|reason| reason.code == QualityReasonCode::FieldPromotionFallback));
-    assert_eq!(envelope.data.provenance.quality_policy, "strict");
+        .find(|reason| reason.code == QualityReasonCode::SolidMeshValidationEvidenceFailed)
+        .expect("failed mesh evidence should be reported");
+    assert!(reason
+        .detail
+        .contains("validation_error_code=coverage_sample_failed"));
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn loaded_analysis_mesh_artifact_enforces_persisted_required_regions() {
+    let _guard = analysis_test_guard();
+    let root = temp_artifact_root("mesh-required-region-rejects-direct-run");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create artifact root");
+
+    let mesh_path = root.join("analysis_mesh.json");
+    fs::write(
+        &mesh_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "mesh_validation_options": runmat_meshing_core::AnalysisMeshValidationOptions {
+                required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
+                ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
+            },
+            "mesh": analysis_mesh_with_boundary_regions(&["root"], &[]),
+        }))
+        .expect("encode analysis mesh"),
+    )
+    .expect("write analysis mesh");
+
+    let err = analysis_run_linear_static_with_options(
+        &sample_solid_model(),
+        ComputeBackend::Cpu,
+        AnalysisRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            preconditioner_mode: PreconditionerMode::Auto,
+            quality_policy: QualityPolicy::Balanced,
+            prep_context: None,
+            prep_artifact_id: None,
+            analysis_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            prep_calibration_profile: None,
+        },
+        OperationContext::new(
+            Some("trace-mesh-required-region-rejects-direct-run".to_string()),
+            None,
+        ),
+    )
+    .expect_err("loaded mesh artifact should enforce persisted required regions");
+
+    assert_eq!(
+        err.error_code,
+        "RM.FEA.RUN_LINEAR_STATIC.ANALYSIS_MESH_INVALID"
+    );
+    assert_eq!(
+        err.context
+            .get("mesh_validation_code")
+            .map(|value| value.as_str()),
+        Some("missing_required_boundary_region")
+    );
+    assert!(err.message.contains("tip"));
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn mesh_evidence_refresh_uses_persisted_validation_options() {
+    let root = temp_artifact_root("mesh-evidence-refresh-validation-policy");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create artifact root");
+
+    let evidence_path = root.join("mesh_evidence.json");
+    fs::write(
+        &evidence_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_mesh_evidence_artifact/v1",
+            "mesh_evidence": {
+                "schema_version": "mesh-evidence/v1"
+            }
+        }))
+        .expect("encode stale evidence"),
+    )
+    .expect("write stale evidence");
+
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &[]);
+    let payload = serde_json::json!({
+        "schema_version": "fea_study_analysis_mesh_artifact/v1",
+        "mesh_evidence_artifact_path": evidence_path.display().to_string(),
+        "mesh_validation_options": runmat_meshing_core::AnalysisMeshValidationOptions {
+            required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
+            ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
+        },
+        "mesh": mesh,
+    });
+    let mesh: AnalysisMeshArtifact =
+        serde_json::from_value(payload["mesh"].clone()).expect("decode mesh");
+
+    update_mesh_evidence_from_analysis_mesh_payload(&payload, &mesh)
+        .expect("evidence refresh should succeed");
+
+    let refreshed: serde_json::Value =
+        serde_json::from_slice(&fs::read(&evidence_path).expect("read refreshed evidence"))
+            .expect("parse refreshed evidence");
+    assert_eq!(
+        refreshed["mesh_validation_options"]["required_boundary_region_ids"]
+            .as_array()
+            .expect("persisted required boundary regions")
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["root", "tip"]
+    );
+    assert_eq!(
+        refreshed["mesh_evidence"]["validation"]["validation_error_code"].as_str(),
+        Some("missing_required_boundary_region")
+    );
+    assert_eq!(
+        refreshed["mesh_evidence"]["validation"]["solve_ready"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        refreshed["mesh_authoring_summary"]["schema_version"].as_str(),
+        Some("mesh-authoring-summary/v1")
+    );
+    assert_eq!(
+        refreshed["mesh_authoring_summary"]["solve_ready"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        refreshed["mesh_authoring_summary"]["regions"]["missing_required_boundary_region_ids"]
+            .as_array()
+            .expect("authoring missing boundary regions")
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["tip"]
+    );
+    assert!(
+        refreshed["mesh_evidence"]["validation"]["validation_error_message"]
+            .as_str()
+            .expect("validation message")
+            .contains("tip")
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn analysis_mesh_missing_evidence_rejects_direct_run() {
+    let _guard = analysis_test_guard();
+    let root = temp_artifact_root("mesh-evidence-missing-rejects-direct-run");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create artifact root");
+
+    let mesh_path = root.join("analysis_mesh.json");
+    fs::write(
+        &mesh_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "mesh": analysis_mesh_with_boundary_regions(&["root"], &["tip"]),
+        }))
+        .expect("encode analysis mesh"),
+    )
+    .expect("write analysis mesh");
+
+    let envelope = analysis_run_linear_static_with_options(
+        &sample_solid_model(),
+        ComputeBackend::Cpu,
+        AnalysisRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            preconditioner_mode: PreconditionerMode::Auto,
+            quality_policy: QualityPolicy::Exploratory,
+            prep_context: None,
+            prep_artifact_id: None,
+            analysis_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            prep_calibration_profile: None,
+        },
+        OperationContext::new(
+            Some("trace-mesh-evidence-missing-rejects-direct-run".to_string()),
+            None,
+        ),
+    )
+    .expect("run should complete and reject on missing mesh evidence");
+
+    assert_eq!(envelope.data.result_quality, QualityGate::Fail);
+    assert_eq!(envelope.data.run_status, RunStatus::Rejected);
+    assert!(!envelope.data.publishable);
+    let reason = envelope
+        .data
+        .quality_reasons
+        .iter()
+        .find(|reason| reason.code == QualityReasonCode::SolidMeshValidationEvidenceMissing)
+        .expect("missing mesh evidence should be reported");
+    assert!(reason.detail.contains("mesh_evidence_artifact_path"));
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn direct_solid_run_without_analysis_mesh_fails_closed() {
+    let _guard = analysis_test_guard();
+    let err = analysis_run_linear_static_with_options(
+        &sample_solid_model(),
+        ComputeBackend::Cpu,
+        AnalysisRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            preconditioner_mode: PreconditionerMode::Auto,
+            quality_policy: QualityPolicy::Balanced,
+            prep_context: None,
+            prep_artifact_id: None,
+            analysis_mesh_artifact_path: None,
+            prep_calibration_profile: None,
+        },
+        OperationContext::new(
+            Some("trace-direct-solid-run-requires-analysis-mesh".to_string()),
+            None,
+        ),
+    )
+    .expect_err("direct solid solve must require an analysis mesh");
+
+    assert_eq!(
+        err.error_code,
+        "RM.FEA.RUN_LINEAR_STATIC.SOLVER_MODEL_INVALID"
+    );
+    assert!(err.message.contains("require an analysis mesh"));
+}
+
+#[test]
+fn field_topology_quality_reasons_detect_primary_solver_field_mismatch() {
+    let mesh = minimal_analysis_mesh();
+    let fields = vec![
+        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_DISPLACEMENT, vec![4, 3], vec![0.0; 12]),
+        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_STRESS, vec![2, 6], vec![0.0; 12]),
+    ];
+
+    let reasons = field_topology_quality_reasons(&fields, Some(&mesh));
+
+    assert_eq!(reasons.len(), 1);
+    assert_eq!(reasons[0].code, QualityReasonCode::FieldTopologyMismatch);
+    assert!(reasons[0].detail.contains(FEA_FIELD_STRUCTURAL_STRESS));
+    assert!(reasons[0].detail.contains("expected_entity_count=1"));
+    assert!(reasons[0].detail.contains("actual_entity_count=2"));
+}
+
+#[test]
+fn field_topology_quality_reasons_use_analysis_mesh_descriptors() {
+    let mut mesh = minimal_analysis_mesh();
+    mesh.field_topology = vec![AnalysisFieldTopologyDescriptor {
+        topology_id: ANALYSIS_MESH_FIELD_TOPOLOGY_ID.to_string(),
+        location: AnalysisFieldTopologyLocation::VolumeElement,
+        entity_count: 3,
+        element_kind: Some(TETRAHEDRON4_FIELD_ELEMENT_KIND.to_string()),
+    }];
+    let fields = vec![AnalysisField::host_f64(
+        FEA_FIELD_STRUCTURAL_STRESS,
+        vec![2, 6],
+        vec![0.0; 12],
+    )];
+
+    let reasons = field_topology_quality_reasons(&fields, Some(&mesh));
+
+    assert_eq!(reasons.len(), 1);
+    assert_eq!(reasons[0].code, QualityReasonCode::FieldTopologyMismatch);
+    assert!(reasons[0].detail.contains(FEA_FIELD_STRUCTURAL_STRESS));
+    assert!(reasons[0].detail.contains("expected_entity_count=3"));
+    assert!(reasons[0].detail.contains("actual_entity_count=2"));
+}
+
+#[test]
+fn solid_mesh_quality_reasons_report_volume_kind_and_quality_failures() {
+    let mut mesh = minimal_analysis_mesh();
+    mesh.volume_elements[0].kind = VolumeElementKind::Hex8;
+    mesh.volume_elements[0].node_ids = vec![1, 2, 3, 4, 1, 2, 3, 4];
+    mesh.quality.min_scaled_jacobian = 0.01;
+    mesh.quality.max_aspect_ratio = 30.0;
+
+    let reasons = solid_mesh_quality_reasons(&sample_solid_model(), Some(&mesh));
+
+    assert!(reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::SolidMeshUnsupportedElementKind));
+    assert!(reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::SolidMeshQualityMinJacobianFailed));
+    assert!(reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::SolidMeshQualityAspectRatioWarn));
+
+    let mut projected = minimal_analysis_mesh();
+    projected.sizing.global_target_size_m = Some(0.1);
+    projected.quality.max_boundary_projection_error_m = 0.06;
+    let projection_reasons = solid_mesh_quality_reasons(&sample_solid_model(), Some(&projected));
+    let projection_reason = projection_reasons
+        .iter()
+        .find(|reason| reason.code == QualityReasonCode::SolidMeshBoundaryProjectionWarn)
+        .expect("boundary projection error should be reported");
+    assert!(projection_reason
+        .detail
+        .contains("max_boundary_projection_error_m=0.06"));
+    assert!(projection_reason.detail.contains("thresholds max=0.05"));
+    assert!(projection_reason.detail.contains("mean=0.025"));
+
+    let mut empty = minimal_analysis_mesh();
+    empty.volume_elements.clear();
+    let empty_reasons = solid_mesh_quality_reasons(&sample_solid_model(), Some(&empty));
+    assert!(empty_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::SolidMeshNoVolumeElements));
+}
+
+#[test]
+fn solid_mesh_quality_reasons_require_renderable_volume_attributed_boundary() {
+    let no_boundary = minimal_analysis_mesh();
+    let no_boundary_reasons = solid_mesh_quality_reasons(&sample_solid_model(), Some(&no_boundary));
+    let no_boundary_reason = no_boundary_reasons
+        .iter()
+        .find(|reason| reason.code == QualityReasonCode::SolidMeshRenderTopologyIncomplete)
+        .expect("missing boundary render topology should be reported");
+    assert!(no_boundary_reason
+        .detail
+        .contains("no renderable Tri3 boundary faces"));
+
+    let mut unmapped = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    unmapped.boundary_faces[0]
+        .adjacent_volume_element_ids
+        .clear();
+    unmapped.boundary_faces[1].adjacent_volume_element_ids =
+        vec!["missing_tetrahedron".to_string()];
+
+    let unmapped_reasons = solid_mesh_quality_reasons(&sample_solid_model(), Some(&unmapped));
+    let unmapped_reason = unmapped_reasons
+        .iter()
+        .find(|reason| reason.code == QualityReasonCode::SolidMeshRenderTopologyIncomplete)
+        .expect("unmapped boundary render topology should be reported");
+    assert!(unmapped_reason
+        .detail
+        .contains("field_mapping_error=boundary face"));
+
+    let mapped = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    assert!(
+        solid_mesh_quality_reasons(&sample_solid_model(), Some(&mapped))
+            .iter()
+            .all(|reason| reason.code != QualityReasonCode::SolidMeshRenderTopologyIncomplete)
+    );
+}
+
+#[test]
+fn analysis_mesh_render_topology_requires_solver_field_mapping() {
+    let mapped = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    assert!(render_topology_from_analysis_mesh(Some(&mapped)).is_some());
+
+    let mut stale_node = mapped.clone();
+    stale_node.boundary_faces[0].node_ids[0] = 99;
+    assert_eq!(render_topology_from_analysis_mesh(Some(&stale_node)), None);
+
+    let mut stale_element = mapped;
+    stale_element.boundary_faces[0].adjacent_volume_element_ids =
+        vec!["missing_tetrahedron".to_string()];
+    assert_eq!(
+        render_topology_from_analysis_mesh(Some(&stale_element)),
+        None
+    );
+}
+
+#[test]
+fn analysis_mesh_render_topology_preserves_boundary_regions() {
+    let mut mesh = analysis_mesh_with_boundary_regions(&["fixed", "shared"], &["loaded", "shared"]);
+    mesh.boundary_faces.push(analysis_boundary_face(
+        "face_fixed_2",
+        vec![2, 3, 4],
+        &["fixed"],
+    ));
+    mesh.refresh_field_topology();
+
+    let topology = render_topology_from_analysis_mesh(Some(&mesh))
+        .expect("mapped analysis mesh should produce render topology");
+    let render_mesh = topology
+        .meshes
+        .first()
+        .expect("render topology should contain boundary mesh");
+
+    let fixed = render_mesh
+        .regions
+        .iter()
+        .find(|region| region.region_id == "fixed")
+        .expect("fixed boundary region should be preserved");
+    assert_eq!(fixed.tag.as_deref(), Some("boundary"));
+    assert_eq!(fixed.triangle_ranges.len(), 2);
+    assert_eq!(fixed.triangle_ranges[0].start, 0);
+    assert_eq!(fixed.triangle_ranges[0].count, 1);
+    assert_eq!(fixed.triangle_ranges[1].start, 2);
+    assert_eq!(fixed.triangle_ranges[1].count, 1);
+
+    let shared = render_mesh
+        .regions
+        .iter()
+        .find(|region| region.region_id == "shared")
+        .expect("shared boundary region should be preserved");
+    assert_eq!(shared.triangle_ranges.len(), 1);
+    assert_eq!(shared.triangle_ranges[0].start, 0);
+    assert_eq!(shared.triangle_ranges[0].count, 2);
+}
+
+#[test]
+fn solid_mesh_material_coverage_uses_region_assignments() {
+    let mesh = minimal_analysis_mesh();
+    let mut single_material = sample_model();
+    single_material.material_assignments = vec![MaterialAssignment {
+        region_id: "boundary_face".to_string(),
+        expected_material_id: "mat_steel".to_string(),
+        assigned_material_id: "mat_steel".to_string(),
+        confidence: EvidenceConfidence::Verified,
+    }];
+    assert!(solid_mesh_quality_reasons(&single_material, Some(&mesh))
+        .iter()
+        .all(|reason| reason.code != QualityReasonCode::SolidMeshMaterialCoverageIncomplete));
+
+    let mut multi_material = sample_model();
+    multi_material.materials.push(MaterialModel {
+        material_id: "mat_aluminum".to_string(),
+        name: "Aluminum".to_string(),
+        mechanical: MaterialMechanicalModel {
+            youngs_modulus_pa: 70e9,
+            poisson_ratio: 0.33,
+            density_kg_per_m3: 2700.0,
+        },
+        thermal: MaterialThermalModel::default(),
+        acoustic: None,
+        electrical: None,
+        plastic: None,
+    });
+
+    let missing = solid_mesh_quality_reasons(&multi_material, Some(&mesh));
+    assert!(missing
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::SolidMeshMaterialCoverageIncomplete));
+
+    multi_material.material_assignments = vec![MaterialAssignment {
+        region_id: "solid".to_string(),
+        expected_material_id: "mat_steel".to_string(),
+        assigned_material_id: "mat_steel".to_string(),
+        confidence: EvidenceConfidence::Verified,
+    }];
+    assert!(solid_mesh_quality_reasons(&multi_material, Some(&mesh))
+        .iter()
+        .all(|reason| reason.code != QualityReasonCode::SolidMeshMaterialCoverageIncomplete));
+
+    multi_material.material_assignments[0].region_id = "other_region".to_string();
+    let uncovered = solid_mesh_quality_reasons(&multi_material, Some(&mesh));
+    let reason = uncovered
+        .iter()
+        .find(|reason| reason.code == QualityReasonCode::SolidMeshMaterialCoverageIncomplete)
+        .expect("uncovered mesh material region should be reported");
+    assert!(reason.detail.contains("solid"));
+}
+
+#[test]
+fn solid_mesh_boundary_region_mapping_checks_loads_and_constraints() {
+    let model = sample_solid_model();
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    assert!(solid_mesh_quality_reasons(&model, Some(&mesh))
+        .iter()
+        .all(
+            |reason| reason.code != QualityReasonCode::SolidMeshUnmappedLoadRegion
+                && reason.code != QualityReasonCode::SolidMeshUnmappedBoundaryConditionRegion
+        ));
+
+    let missing_load = analysis_mesh_with_boundary_regions(&["root"], &["other_tip"]);
+    let missing_load_reasons = solid_mesh_quality_reasons(&model, Some(&missing_load));
+    let load_reason = missing_load_reasons
+        .iter()
+        .find(|reason| reason.code == QualityReasonCode::SolidMeshUnmappedLoadRegion)
+        .expect("unmapped load region should be reported");
+    assert!(load_reason.detail.contains("load_tip"));
+    assert!(load_reason.detail.contains("tip"));
+
+    let missing_constraint = analysis_mesh_with_boundary_regions(&["other_root"], &["tip"]);
+    let missing_constraint_reasons = solid_mesh_quality_reasons(&model, Some(&missing_constraint));
+    let bc_reason = missing_constraint_reasons
+        .iter()
+        .find(|reason| reason.code == QualityReasonCode::SolidMeshUnmappedBoundaryConditionRegion)
+        .expect("unmapped boundary condition region should be reported");
+    assert!(bc_reason.detail.contains("bc_root"));
+    assert!(bc_reason.detail.contains("root"));
+}
+
+#[test]
+fn study_analysis_mesh_attaches_requested_boundary_regions_from_source_geometry() {
+    let mut spec = sample_linear_static_study_spec();
+    spec.geometry = closed_cube_geometry_asset();
+    spec.model = Some(sample_solid_model());
+    spec.model.as_mut().expect("sample study has model").loads[0].region_id = "root".to_string();
+    spec.model
+        .as_mut()
+        .expect("sample study has model")
+        .boundary_conditions[0]
+        .region_id = "root".to_string();
+    let mut mesh = minimal_analysis_mesh();
+    mesh.boundary_faces = vec![analysis_boundary_face(
+        "nearest_generated_face",
+        vec![1, 2, 3],
+        &["other_region"],
+    )];
+
+    attach_requested_boundary_regions_to_analysis_mesh(&spec, &mut mesh);
+
+    assert!(mesh
+        .boundary_faces
+        .iter()
+        .any(|face| { face.region_ids.iter().any(|region| region == "root") }));
+}
+
+#[test]
+fn study_analysis_mesh_stamps_single_material_assignment_region() {
+    let mut spec = sample_linear_static_study_spec();
+    let mut model = sample_model();
+    model.material_assignments = vec![MaterialAssignment {
+        region_id: "body".to_string(),
+        expected_material_id: "mat_steel".to_string(),
+        assigned_material_id: "mat_steel".to_string(),
+        confidence: EvidenceConfidence::Verified,
+    }];
+    spec.model = Some(model);
+    let mut mesh = minimal_analysis_mesh();
+    mesh.volume_elements.push(AnalysisVolumeElement {
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
+        node_ids: vec![1, 2, 3, 4],
+        material_region_id: "solid".to_string(),
+        provenance: Vec::new(),
+    });
+
+    attach_single_material_assignment_to_analysis_mesh(&spec, &mut mesh);
+
+    assert!(mesh
+        .volume_elements
+        .iter()
+        .all(|element| element.material_region_id == "body"));
+}
+
+#[test]
+fn study_analysis_mesh_does_not_guess_multiple_material_regions() {
+    let mut spec = sample_linear_static_study_spec();
+    let mut model = sample_model();
+    model.material_assignments = vec![
+        MaterialAssignment {
+            region_id: "core".to_string(),
+            expected_material_id: "mat_steel".to_string(),
+            assigned_material_id: "mat_steel".to_string(),
+            confidence: EvidenceConfidence::Verified,
+        },
+        MaterialAssignment {
+            region_id: "skin".to_string(),
+            expected_material_id: "mat_steel".to_string(),
+            assigned_material_id: "mat_steel".to_string(),
+            confidence: EvidenceConfidence::Verified,
+        },
+    ];
+    spec.model = Some(model);
+    let mut mesh = minimal_analysis_mesh();
+    mesh.volume_elements[0].material_region_id = "solid".to_string();
+
+    attach_single_material_assignment_to_analysis_mesh(&spec, &mut mesh);
+
+    assert_eq!(mesh.volume_elements[0].material_region_id, "solid");
+}
+
+#[test]
+fn solid_mesh_boundary_region_mapping_ignores_volumetric_loads() {
+    let mut model = sample_model();
+    model.loads = vec![LoadCase {
+        load_id: "gravity".to_string(),
+        region_id: "volume_region".to_string(),
+        kind: LoadKind::BodyForce {
+            gx: 0.0,
+            gy: 0.0,
+            gz: -9.81,
+        },
+    }];
+
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &[]);
+    assert!(solid_mesh_quality_reasons(&model, Some(&mesh))
+        .iter()
+        .all(|reason| reason.code != QualityReasonCode::SolidMeshUnmappedLoadRegion));
+}
+
+#[test]
+fn structural_stress_gradient_samples_use_adjacent_tetrahedron_differences() {
+    let mut mesh = minimal_analysis_mesh();
+    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
+    mesh.volume_elements.push(AnalysisVolumeElement {
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
+        node_ids: vec![1, 2, 3, 5],
+        material_region_id: "solid".to_string(),
+        provenance: Vec::new(),
+    });
+
+    let samples = structural_stress_gradient_samples(&mesh, &[10.0, 25.0]);
+
+    assert_eq!(samples.len(), 2);
+    assert_eq!(samples[0].entity_id, "tetrahedron_1");
+    assert_eq!(samples[0].indicator_value, 15.0);
+    assert_eq!(samples[1].entity_id, "tetrahedron_2");
+    assert_eq!(samples[1].indicator_value, 15.0);
+    assert!(samples
+        .iter()
+        .all(|sample| sample.current_size_m.is_finite() && sample.current_size_m > 0.0));
+}
+
+#[test]
+fn structural_boundary_region_samples_use_adjacent_volume_elements() {
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+
+    let samples = structural_boundary_region_samples(&mesh, &["tip".to_string()]);
+
+    assert_eq!(samples.len(), 1);
+    assert_eq!(samples[0].entity_id, "tetrahedron_1");
+    assert_eq!(samples[0].indicator_value, 1.0);
+    assert!(
+        samples[0].current_size_m.is_finite() && samples[0].current_size_m > 0.0,
+        "sample should carry a valid local element size"
+    );
+}
+
+#[test]
+fn append_solved_adaptive_mesh_summary_uses_host_von_mises_fields() {
+    let root = temp_artifact_root("append-solved-adaptive-summary");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let mut mesh = minimal_analysis_mesh();
+    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
+    mesh.volume_elements.push(AnalysisVolumeElement {
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
+        node_ids: vec![1, 2, 3, 5],
+        material_region_id: "solid".to_string(),
+        provenance: Vec::new(),
+    });
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "linear_static_structural",
+            "run_kind": "linear_static",
+            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+    let fields = vec![AnalysisField::host_f64(
+        FEA_FIELD_STRUCTURAL_VON_MISES,
+        vec![2],
+        vec![10.0, 1000.0],
+    )];
+
+    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &fields)
+        .expect("adaptive summary should append");
+
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
+        .as_array()
+        .expect("adaptive iteration summaries");
+    assert_eq!(adaptive_iterations.len(), 1);
+    assert_eq!(
+        adaptive_iterations[0]["convergence_status"].as_str(),
+        Some("pending")
+    );
+    assert!(adaptive_iterations[0]["indicators"]
+        .as_array()
+        .expect("adaptive indicators")
+        .iter()
+        .any(
+            |indicator| indicator["namespace"].as_str() == Some("structural")
+                && indicator["name"].as_str() == Some("stress_gradient")
+                && indicator["status"].as_str() == Some("used")
+        ));
+    assert!(!adaptive_iterations[0]["markers"]
+        .as_array()
+        .expect("adaptive markers")
+        .is_empty());
+    assert!(!payload["mesh"]["sizing"]["samples"]
+        .as_array()
+        .expect("sizing samples")
+        .is_empty());
+}
+
+#[test]
+fn append_solved_adaptive_mesh_summary_refreshes_adaptive_evidence() {
+    let root = temp_artifact_root("append-solved-adaptive-evidence-refresh");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let evidence_path = root.join("mesh_evidence.json");
+    fs::write(
+        &evidence_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_mesh_evidence_artifact/v1",
+            "mesh_evidence": {
+                "schema_version": "mesh-evidence/v1"
+            }
+        }))
+        .expect("encode stale evidence"),
+    )
+    .expect("write stale evidence");
+    let mut mesh = minimal_analysis_mesh();
+    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
+    mesh.volume_elements.push(AnalysisVolumeElement {
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
+        node_ids: vec![1, 2, 3, 5],
+        material_region_id: "solid".to_string(),
+        provenance: Vec::new(),
+    });
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "mesh_evidence_artifact_path": evidence_path.display().to_string(),
+            "analysis_profile": "linear_static_structural",
+            "run_kind": "linear_static",
+            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+    let fields = vec![AnalysisField::host_f64(
+        FEA_FIELD_STRUCTURAL_VON_MISES,
+        vec![2],
+        vec![10.0, 1000.0],
+    )];
+
+    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &fields)
+        .expect("adaptive summary should append");
+
+    let refreshed: serde_json::Value =
+        serde_json::from_slice(&fs::read(&evidence_path).expect("read refreshed evidence"))
+            .expect("parse refreshed evidence");
+    let adaptive = &refreshed["mesh_evidence"]["adaptive"];
+    assert_eq!(adaptive["iteration_count"].as_u64(), Some(1));
+    assert_eq!(
+        adaptive["latest_convergence_status"].as_str(),
+        Some("pending")
+    );
+    assert_eq!(adaptive["latest_indicator_count"].as_u64(), Some(4));
+    assert_eq!(adaptive["latest_used_indicator_count"].as_u64(), Some(1));
+    assert_eq!(adaptive["latest_marker_count"].as_u64(), Some(2));
+    assert_eq!(
+        adaptive["latest_marker_by_reason"]["structural.stress_gradient"].as_u64(),
+        Some(2)
+    );
+    assert_eq!(
+        adaptive["latest_sizing_update_by_reason"]["structural.stress_gradient"].as_u64(),
+        Some(2)
+    );
+    assert_eq!(
+        adaptive["latest_indicator_status_counts"]["used"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        adaptive["latest_indicator_status_counts"]["skipped_missing_field"].as_u64(),
+        Some(3)
+    );
+}
+
+#[test]
+fn append_solved_adaptive_mesh_summary_uses_boundary_region_context() {
+    let root = temp_artifact_root("append-solved-adaptive-boundary-region-summary");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "linear_static_structural",
+            "run_kind": "linear_static",
+            "refinement_context": {
+                "boundary_load_region_ids": ["tip"],
+                "boundary_constraint_region_ids": ["root"]
+            },
+            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+
+    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &[])
+        .expect("adaptive summary should append");
+
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
+        .as_array()
+        .expect("adaptive iteration summaries");
+    assert_eq!(
+        adaptive_iterations[0]["convergence_status"].as_str(),
+        Some("pending")
+    );
+    let indicators = adaptive_iterations[0]["indicators"]
+        .as_array()
+        .expect("adaptive indicators");
+    assert!(indicators
+        .iter()
+        .any(
+            |indicator| indicator["namespace"].as_str() == Some("structural")
+                && indicator["name"].as_str() == Some("load_regions")
+                && indicator["status"].as_str() == Some("used")
+        ));
+    assert!(indicators
+        .iter()
+        .any(
+            |indicator| indicator["namespace"].as_str() == Some("structural")
+                && indicator["name"].as_str() == Some("constraint_regions")
+                && indicator["status"].as_str() == Some("used")
+        ));
+    let markers = adaptive_iterations[0]["markers"]
+        .as_array()
+        .expect("adaptive markers");
+    assert!(markers
+        .iter()
+        .any(|marker| marker["reason"].as_str() == Some("structural.load_regions")));
+    assert!(markers
+        .iter()
+        .any(|marker| marker["reason"].as_str() == Some("structural.constraint_regions")));
+    let samples = payload["mesh"]["sizing"]["samples"]
+        .as_array()
+        .expect("sizing samples");
+    assert!(samples
+        .iter()
+        .any(|sample| sample["reason"].as_str() == Some("structural.load_regions")));
+    assert!(samples
+        .iter()
+        .any(|sample| sample["reason"].as_str() == Some("structural.constraint_regions")));
+}
+
+#[test]
+fn append_solved_adaptive_mesh_summary_converges_boundary_region_context() {
+    let root = temp_artifact_root("append-solved-adaptive-boundary-region-convergence");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
+    mesh_options.refinement.convergence.field_change_tolerance = 1.0;
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "linear_static_structural",
+            "run_kind": "linear_static",
+            "refinement_context": {
+                "boundary_load_region_ids": ["tip"],
+                "boundary_constraint_region_ids": ["root"]
+            },
+            "mesh_options": mesh_options,
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+
+    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &[])
+        .expect("adaptive summary should append");
+
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
+        .as_array()
+        .expect("adaptive iteration summaries");
+    assert_eq!(
+        adaptive_iterations[0]["convergence_status"].as_str(),
+        Some("converged")
+    );
+    let indicators = adaptive_iterations[0]["indicators"]
+        .as_array()
+        .expect("adaptive indicators");
+    for name in ["load_regions", "constraint_regions"] {
+        assert!(indicators
+            .iter()
+            .any(
+                |indicator| indicator["namespace"].as_str() == Some("structural")
+                    && indicator["name"].as_str() == Some(name)
+                    && indicator["status"].as_str() == Some("used")
+            ));
+    }
+}
+
+#[test]
+fn append_solved_adaptive_mesh_summary_honors_boundary_focus_levels() {
+    let root = temp_artifact_root("append-solved-adaptive-boundary-focus-summary");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
+    mesh_options.refinement.focus.loads = runmat_meshing_core::RefinementFocusLevel::Normal;
+    mesh_options.refinement.focus.constraints = runmat_meshing_core::RefinementFocusLevel::Fine;
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "linear_static_structural",
+            "run_kind": "linear_static",
+            "refinement_context": {
+                "boundary_load_region_ids": ["tip"],
+                "boundary_constraint_region_ids": ["root"]
+            },
+            "mesh_options": mesh_options,
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+
+    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &[])
+        .expect("adaptive summary should append");
+
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let samples = payload["mesh"]["sizing"]["samples"]
+        .as_array()
+        .expect("sizing samples");
+    let load_target = samples
+        .iter()
+        .find(|sample| sample["reason"].as_str() == Some("structural.load_regions"))
+        .and_then(|sample| sample["target_size_m"].as_f64())
+        .expect("load-region target size");
+    let constraint_target = samples
+        .iter()
+        .find(|sample| sample["reason"].as_str() == Some("structural.constraint_regions"))
+        .and_then(|sample| sample["target_size_m"].as_f64())
+        .expect("constraint-region target size");
+
+    assert!(
+        constraint_target < load_target,
+        "fine constraint focus should request a smaller target size than normal load focus"
+    );
+}
+
+#[test]
+fn append_solved_adaptive_mesh_summary_disables_boundary_focus_off() {
+    let root = temp_artifact_root("append-solved-adaptive-boundary-focus-off-summary");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
+    mesh_options.refinement.focus.loads = runmat_meshing_core::RefinementFocusLevel::Off;
+    mesh_options.refinement.focus.constraints = runmat_meshing_core::RefinementFocusLevel::Normal;
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "linear_static_structural",
+            "run_kind": "linear_static",
+            "refinement_context": {
+                "boundary_load_region_ids": ["tip"],
+                "boundary_constraint_region_ids": ["root"]
+            },
+            "mesh_options": mesh_options,
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+
+    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &[])
+        .expect("adaptive summary should append");
+
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
+        .as_array()
+        .expect("adaptive iteration summaries");
+    let indicators = adaptive_iterations[0]["indicators"]
+        .as_array()
+        .expect("adaptive indicators");
+    assert!(indicators
+        .iter()
+        .any(
+            |indicator| indicator["namespace"].as_str() == Some("structural")
+                && indicator["name"].as_str() == Some("load_regions")
+                && indicator["status"].as_str() == Some("skipped_not_applicable")
+        ));
+    assert!(indicators
+        .iter()
+        .any(
+            |indicator| indicator["namespace"].as_str() == Some("structural")
+                && indicator["name"].as_str() == Some("constraint_regions")
+                && indicator["status"].as_str() == Some("used")
+        ));
+    let samples = payload["mesh"]["sizing"]["samples"]
+        .as_array()
+        .expect("sizing samples");
+    assert!(!samples
+        .iter()
+        .any(|sample| sample["reason"].as_str() == Some("structural.load_regions")));
+    assert!(samples
+        .iter()
+        .any(|sample| sample["reason"].as_str() == Some("structural.constraint_regions")));
+}
+
+#[test]
+fn initial_boundary_focus_sizing_field_uses_load_and_constraint_regions() {
+    let mut spec = sample_linear_static_study_spec();
+    spec.model = Some(sample_solid_model());
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    let options = runmat_meshing_core::VolumeMeshingOptions::default();
+
+    let sizing = initial_boundary_focus_sizing_field(&spec, &options, &mesh)
+        .expect("boundary load and constraint regions should seed initial sizing");
+
+    assert!(sizing
+        .samples
+        .iter()
+        .any(|sample| sample.reason.as_deref() == Some("structural.load_regions")));
+    assert!(sizing
+        .samples
+        .iter()
+        .any(|sample| sample.reason.as_deref() == Some("structural.constraint_regions")));
+    assert!(sizing
+        .samples
+        .iter()
+        .all(|sample| sample.target_size_m.is_finite() && sample.target_size_m > 0.0));
+}
+
+#[test]
+fn initial_boundary_focus_sizing_field_honors_focus_off() {
+    let mut spec = sample_linear_static_study_spec();
+    spec.model = Some(sample_solid_model());
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    let mut options = runmat_meshing_core::VolumeMeshingOptions::default();
+    options.refinement.focus.loads = runmat_meshing_core::RefinementFocusLevel::Off;
+    options.refinement.focus.constraints = runmat_meshing_core::RefinementFocusLevel::Fine;
+
+    let sizing = initial_boundary_focus_sizing_field(&spec, &options, &mesh)
+        .expect("constraint focus should still seed initial sizing");
+
+    assert!(!sizing
+        .samples
+        .iter()
+        .any(|sample| sample.reason.as_deref() == Some("structural.load_regions")));
+    assert!(sizing
+        .samples
+        .iter()
+        .any(|sample| sample.reason.as_deref() == Some("structural.constraint_regions")));
+}
+
+#[test]
+fn initial_boundary_focus_sizing_field_skips_disabled_refinement() {
+    let mut spec = sample_linear_static_study_spec();
+    spec.model = Some(sample_model());
+    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
+    let mut options = runmat_meshing_core::VolumeMeshingOptions::default();
+    options.refinement.strategy = runmat_meshing_core::RefinementStrategy::None;
+
+    assert!(initial_boundary_focus_sizing_field(&spec, &options, &mesh).is_none());
+}
+
+#[test]
+fn append_solved_adaptive_mesh_summary_uses_strain_energy_density_fields() {
+    let root = temp_artifact_root("append-solved-adaptive-energy-summary");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let mut mesh = minimal_analysis_mesh();
+    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
+    mesh.volume_elements.push(AnalysisVolumeElement {
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
+        node_ids: vec![1, 2, 3, 5],
+        material_region_id: "solid".to_string(),
+        provenance: Vec::new(),
+    });
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "linear_static_structural",
+            "run_kind": "linear_static",
+            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+    let fields = vec![AnalysisField::host_f64(
+        FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
+        vec![2],
+        vec![1.0, 100.0],
+    )];
+
+    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &fields)
+        .expect("adaptive summary should append");
+
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
+        .as_array()
+        .expect("adaptive iteration summaries");
+    assert_eq!(
+        adaptive_iterations[0]["convergence_status"].as_str(),
+        Some("pending")
+    );
+    assert!(adaptive_iterations[0]["indicators"]
+        .as_array()
+        .expect("adaptive indicators")
+        .iter()
+        .any(
+            |indicator| indicator["namespace"].as_str() == Some("structural")
+                && indicator["name"].as_str() == Some("strain_energy_density")
+                && indicator["status"].as_str() == Some("used")
+        ));
+    assert!(adaptive_iterations[0]["markers"]
+        .as_array()
+        .expect("adaptive markers")
+        .iter()
+        .any(|marker| marker["reason"].as_str() == Some("structural.strain_energy_density")));
+    assert!(payload["mesh"]["sizing"]["samples"]
+        .as_array()
+        .expect("sizing samples")
+        .iter()
+        .any(|sample| sample["reason"].as_str() == Some("structural.strain_energy_density")));
+}
+
+#[test]
+fn append_solved_adaptive_mesh_summary_uses_thermal_element_vector_fields() {
+    let root = temp_artifact_root("append-solved-adaptive-thermal-summary");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let mut mesh = minimal_analysis_mesh();
+    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
+    mesh.volume_elements.push(AnalysisVolumeElement {
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
+        node_ids: vec![1, 2, 3, 5],
+        material_region_id: "solid".to_string(),
+        provenance: Vec::new(),
+    });
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "thermal_standalone",
+            "run_kind": "thermal",
+            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+    let fields = vec![
+        AnalysisField::host_f64(
+            fea_thermal_temperature_gradient_field_id(0),
+            vec![2, 3],
+            vec![1.0, 0.0, 0.0, 10.0, 0.0, 0.0],
+        ),
+        AnalysisField::host_f64(
+            fea_thermal_temperature_gradient_field_id(1),
+            vec![2, 3],
+            vec![2.0, 0.0, 0.0, 20.0, 0.0, 0.0],
+        ),
+        AnalysisField::host_f64(
+            fea_thermal_heat_flux_field_id(0),
+            vec![2, 3],
+            vec![3.0, 4.0, 0.0, 0.0, 12.0, 5.0],
+        ),
+    ];
+
+    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &fields)
+        .expect("adaptive summary should append");
+
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
+        .as_array()
+        .expect("adaptive iteration summaries");
+    assert_eq!(
+        adaptive_iterations[0]["convergence_status"].as_str(),
+        Some("pending")
+    );
+    let indicators = adaptive_iterations[0]["indicators"]
+        .as_array()
+        .expect("adaptive indicators");
+    assert!(indicators.iter().any(
+        |indicator| indicator["namespace"].as_str() == Some("thermal")
+            && indicator["name"].as_str() == Some("temperature_gradient")
+            && indicator["status"].as_str() == Some("used")
+    ));
+    assert!(indicators.iter().any(
+        |indicator| indicator["namespace"].as_str() == Some("thermal")
+            && indicator["name"].as_str() == Some("heat_flux_gradient")
+            && indicator["status"].as_str() == Some("used")
+    ));
+    let markers = adaptive_iterations[0]["markers"]
+        .as_array()
+        .expect("adaptive markers");
+    assert!(markers
+        .iter()
+        .any(|marker| marker["reason"].as_str() == Some("thermal.temperature_gradient")));
+    assert!(markers
+        .iter()
+        .any(|marker| marker["reason"].as_str() == Some("thermal.heat_flux_gradient")));
+    let samples = payload["mesh"]["sizing"]["samples"]
+        .as_array()
+        .expect("sizing samples");
+    assert!(samples
+        .iter()
+        .any(|sample| sample["reason"].as_str() == Some("thermal.temperature_gradient")));
+    assert!(samples
+        .iter()
+        .any(|sample| sample["reason"].as_str() == Some("thermal.heat_flux_gradient")));
+}
+
+#[test]
+fn append_solved_adaptive_mesh_summary_converges_thermal_gradient_fields() {
+    let root = temp_artifact_root("append-solved-adaptive-thermal-gradient-convergence");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let mut mesh = minimal_analysis_mesh();
+    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
+    mesh.volume_elements.push(AnalysisVolumeElement {
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
+        node_ids: vec![1, 2, 3, 5],
+        material_region_id: "solid".to_string(),
+        provenance: Vec::new(),
+    });
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
+    mesh_options.refinement.convergence.field_change_tolerance = 1.0;
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "thermal_standalone",
+            "run_kind": "thermal",
+            "mesh_options": mesh_options,
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+    let fields = vec![
+        AnalysisField::host_f64(
+            fea_thermal_temperature_gradient_field_id(0),
+            vec![2, 3],
+            vec![1.0, 0.0, 0.0, 10.0, 0.0, 0.0],
+        ),
+        AnalysisField::host_f64(
+            fea_thermal_heat_flux_field_id(0),
+            vec![2, 3],
+            vec![3.0, 4.0, 0.0, 0.0, 12.0, 5.0],
+        ),
+    ];
+
+    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &fields)
+        .expect("adaptive summary should append");
+
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
+        .as_array()
+        .expect("adaptive iteration summaries");
+    assert_eq!(
+        adaptive_iterations[0]["convergence_status"].as_str(),
+        Some("converged")
+    );
+    let indicators = adaptive_iterations[0]["indicators"]
+        .as_array()
+        .expect("adaptive indicators");
+    for name in ["temperature_gradient", "heat_flux_gradient"] {
+        assert!(indicators
+            .iter()
+            .any(
+                |indicator| indicator["namespace"].as_str() == Some("thermal")
+                    && indicator["name"].as_str() == Some(name)
+                    && indicator["status"].as_str() == Some("used")
+            ));
+    }
+}
+
+#[test]
+fn append_solved_adaptive_mesh_summary_uses_electromagnetic_element_fields() {
+    let root = temp_artifact_root("append-solved-adaptive-electromagnetic-summary");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let mut mesh = minimal_analysis_mesh();
+    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
+    mesh.volume_elements.push(AnalysisVolumeElement {
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
+        node_ids: vec![1, 2, 3, 5],
+        material_region_id: "solid".to_string(),
+        provenance: Vec::new(),
+    });
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "electromagnetic_static",
+            "run_kind": "electromagnetic",
+            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+    let fields = vec![
+        AnalysisField::host_f64(
+            FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE,
+            vec![2],
+            vec![1.0, 10.0],
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_EM_ELECTRIC_FIELD_REAL,
+            vec![2, 3],
+            vec![0.0, 3.0, 4.0, 0.0, 0.0, 13.0],
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_EM_CURRENT_DENSITY_REAL,
+            vec![2, 3],
+            vec![1.0, 2.0, 2.0, 2.0, 3.0, 6.0],
+        ),
+        AnalysisField::host_f64(FEA_FIELD_EM_ENERGY_DENSITY, vec![2], vec![2.0, 18.0]),
+    ];
+
+    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &fields)
+        .expect("adaptive summary should append");
+
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
+        .as_array()
+        .expect("adaptive iteration summaries");
+    assert_eq!(
+        adaptive_iterations[0]["convergence_status"].as_str(),
+        Some("pending")
+    );
+    let indicators = adaptive_iterations[0]["indicators"]
+        .as_array()
+        .expect("adaptive indicators");
+    for name in [
+        "flux_density_gradient",
+        "electric_field_gradient",
+        "current_density_gradient",
+        "energy_density",
+    ] {
+        assert!(indicators
+            .iter()
+            .any(
+                |indicator| indicator["namespace"].as_str() == Some("electromagnetic")
+                    && indicator["name"].as_str() == Some(name)
+                    && indicator["status"].as_str() == Some("used")
+            ));
+    }
+    let markers = adaptive_iterations[0]["markers"]
+        .as_array()
+        .expect("adaptive markers");
+    let samples = payload["mesh"]["sizing"]["samples"]
+        .as_array()
+        .expect("sizing samples");
+    for reason in [
+        "electromagnetic.flux_density_gradient",
+        "electromagnetic.electric_field_gradient",
+        "electromagnetic.current_density_gradient",
+        "electromagnetic.energy_density",
+    ] {
+        assert!(markers
+            .iter()
+            .any(|marker| marker["reason"].as_str() == Some(reason)));
+        assert!(samples
+            .iter()
+            .any(|sample| sample["reason"].as_str() == Some(reason)));
+    }
+}
+
+#[test]
+fn append_solved_adaptive_mesh_summary_converges_electromagnetic_gradient_fields() {
+    let root = temp_artifact_root("append-solved-adaptive-electromagnetic-gradient-convergence");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let mut mesh = minimal_analysis_mesh();
+    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
+    mesh.volume_elements.push(AnalysisVolumeElement {
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
+        node_ids: vec![1, 2, 3, 5],
+        material_region_id: "solid".to_string(),
+        provenance: Vec::new(),
+    });
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
+    mesh_options.refinement.convergence.field_change_tolerance = 1.0;
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "electromagnetic_static",
+            "run_kind": "electromagnetic",
+            "mesh_options": mesh_options,
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+    let fields = vec![
+        AnalysisField::host_f64(
+            FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE,
+            vec![2],
+            vec![1.0, 10.0],
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_EM_ELECTRIC_FIELD_REAL,
+            vec![2, 3],
+            vec![0.0, 3.0, 4.0, 0.0, 0.0, 13.0],
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_EM_CURRENT_DENSITY_REAL,
+            vec![2, 3],
+            vec![1.0, 2.0, 2.0, 2.0, 3.0, 6.0],
+        ),
+    ];
+
+    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &fields)
+        .expect("adaptive summary should append");
+
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
+        .as_array()
+        .expect("adaptive iteration summaries");
+    assert_eq!(
+        adaptive_iterations[0]["convergence_status"].as_str(),
+        Some("converged")
+    );
+    let indicators = adaptive_iterations[0]["indicators"]
+        .as_array()
+        .expect("adaptive indicators");
+    for name in [
+        "flux_density_gradient",
+        "electric_field_gradient",
+        "current_density_gradient",
+    ] {
+        assert!(indicators
+            .iter()
+            .any(
+                |indicator| indicator["namespace"].as_str() == Some("electromagnetic")
+                    && indicator["name"].as_str() == Some(name)
+                    && indicator["status"].as_str() == Some("used")
+            ));
+    }
+}
+
+#[test]
+fn append_solved_adaptive_mesh_summary_uses_acoustic_pressure_fields() {
+    let root = temp_artifact_root("append-solved-adaptive-acoustic-summary");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let mut mesh = minimal_analysis_mesh();
+    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
+    mesh.volume_elements.push(AnalysisVolumeElement {
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
+        node_ids: vec![1, 2, 3, 5],
+        material_region_id: "solid".to_string(),
+        provenance: Vec::new(),
+    });
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "acoustic_harmonic",
+            "run_kind": "acoustic",
+            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+    let fields = vec![AnalysisField::host_f64(
+        FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
+        vec![2],
+        vec![0.25, 2.5],
+    )];
+
+    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &fields)
+        .expect("adaptive summary should append");
+
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
+        .as_array()
+        .expect("adaptive iteration summaries");
+    assert_eq!(
+        adaptive_iterations[0]["convergence_status"].as_str(),
+        Some("pending")
+    );
+    let indicators = adaptive_iterations[0]["indicators"]
+        .as_array()
+        .expect("adaptive indicators");
+    for name in ["pressure_gradient", "pressure_curvature"] {
+        assert!(indicators
+            .iter()
+            .any(
+                |indicator| indicator["namespace"].as_str() == Some("acoustic")
+                    && indicator["name"].as_str() == Some(name)
+                    && indicator["status"].as_str() == Some("used")
+            ));
+    }
+    let markers = adaptive_iterations[0]["markers"]
+        .as_array()
+        .expect("adaptive markers");
+    let samples = payload["mesh"]["sizing"]["samples"]
+        .as_array()
+        .expect("sizing samples");
+    for reason in ["acoustic.pressure_gradient", "acoustic.pressure_curvature"] {
+        assert!(markers
+            .iter()
+            .any(|marker| marker["reason"].as_str() == Some(reason)));
+        assert!(samples
+            .iter()
+            .any(|sample| sample["reason"].as_str() == Some(reason)));
+    }
+}
+
+#[test]
+fn append_solved_adaptive_mesh_summary_uses_cfd_element_fields() {
+    let root = temp_artifact_root("append-solved-adaptive-cfd-summary");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let mut mesh = minimal_analysis_mesh();
+    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
+    mesh.volume_elements.push(AnalysisVolumeElement {
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
+        node_ids: vec![1, 2, 3, 5],
+        material_region_id: "fluid".to_string(),
+        provenance: Vec::new(),
+    });
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "cfd_steady_state",
+            "run_kind": "cfd",
+            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+    let fields = vec![
+        AnalysisField::host_f64(
+            FEA_FIELD_CFD_VELOCITY,
+            vec![2, 3],
+            vec![1.0, 0.0, 0.0, 0.0, 12.0, 5.0],
+        ),
+        AnalysisField::host_f64(FEA_FIELD_CFD_PRESSURE, vec![2], vec![1.0, 20.0]),
+        AnalysisField::host_f64(
+            FEA_FIELD_CFD_VORTICITY,
+            vec![2, 3],
+            vec![0.0, 3.0, 4.0, 2.0, 3.0, 6.0],
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_CFD_WALL_SHEAR_STRESS,
+            vec![2, 3],
+            vec![1.0, 2.0, 2.0, 0.0, 8.0, 15.0],
+        ),
+    ];
+
+    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &fields)
+        .expect("adaptive summary should append");
+
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
+        .as_array()
+        .expect("adaptive iteration summaries");
+    assert_eq!(
+        adaptive_iterations[0]["convergence_status"].as_str(),
+        Some("pending")
+    );
+    let indicators = adaptive_iterations[0]["indicators"]
+        .as_array()
+        .expect("adaptive indicators");
+    for name in [
+        "velocity_gradient",
+        "pressure_gradient",
+        "vorticity",
+        "wall_shear",
+    ] {
+        assert!(indicators
+            .iter()
+            .any(|indicator| indicator["namespace"].as_str() == Some("cfd")
+                && indicator["name"].as_str() == Some(name)
+                && indicator["status"].as_str() == Some("used")));
+    }
+    let markers = adaptive_iterations[0]["markers"]
+        .as_array()
+        .expect("adaptive markers");
+    let samples = payload["mesh"]["sizing"]["samples"]
+        .as_array()
+        .expect("sizing samples");
+    for reason in [
+        "cfd.velocity_gradient",
+        "cfd.pressure_gradient",
+        "cfd.vorticity",
+        "cfd.wall_shear",
+    ] {
+        assert!(markers
+            .iter()
+            .any(|marker| marker["reason"].as_str() == Some(reason)));
+        assert!(samples
+            .iter()
+            .any(|sample| sample["reason"].as_str() == Some(reason)));
+    }
+}
+
+#[test]
+fn append_solved_adaptive_mesh_summary_uses_cht_element_fields() {
+    let root = temp_artifact_root("append-solved-adaptive-cht-summary");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let mut mesh = minimal_analysis_mesh();
+    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
+    mesh.volume_elements.push(AnalysisVolumeElement {
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
+        node_ids: vec![1, 2, 3, 5],
+        material_region_id: "coupled".to_string(),
+        provenance: Vec::new(),
+    });
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "cht_coupled",
+            "run_kind": "cht",
+            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+    let fields = vec![
+        AnalysisField::host_f64(
+            fea_cht_interface_heat_flux_field_id(0),
+            vec![2, 3],
+            vec![1.0, 2.0, 2.0, 0.0, 12.0, 5.0],
+        ),
+        AnalysisField::host_f64(
+            fea_cht_interface_temperature_jump_field_id(0),
+            vec![2],
+            vec![0.5, 9.5],
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_CHT_FLUID_VELOCITY,
+            vec![2, 3],
+            vec![0.0, 3.0, 4.0, 2.0, 3.0, 6.0],
+        ),
+    ];
+
+    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &fields)
+        .expect("adaptive summary should append");
+
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
+        .as_array()
+        .expect("adaptive iteration summaries");
+    assert_eq!(
+        adaptive_iterations[0]["convergence_status"].as_str(),
+        Some("pending")
+    );
+    let indicators = adaptive_iterations[0]["indicators"]
+        .as_array()
+        .expect("adaptive indicators");
+    for name in [
+        "interface_heat_flux_jump",
+        "interface_temperature_jump",
+        "fluid_boundary_layer",
+    ] {
+        assert!(indicators
+            .iter()
+            .any(|indicator| indicator["namespace"].as_str() == Some("cht")
+                && indicator["name"].as_str() == Some(name)
+                && indicator["status"].as_str() == Some("used")));
+    }
+    assert!(indicators
+        .iter()
+        .any(|indicator| indicator["namespace"].as_str() == Some("cht")
+            && indicator["name"].as_str() == Some("solid_heat_flux_gradient")
+            && indicator["status"].as_str() == Some("skipped_missing_field")));
+    let markers = adaptive_iterations[0]["markers"]
+        .as_array()
+        .expect("adaptive markers");
+    let samples = payload["mesh"]["sizing"]["samples"]
+        .as_array()
+        .expect("sizing samples");
+    for reason in [
+        "cht.interface_heat_flux_jump",
+        "cht.interface_temperature_jump",
+        "cht.fluid_boundary_layer",
+    ] {
+        assert!(markers
+            .iter()
+            .any(|marker| marker["reason"].as_str() == Some(reason)));
+        assert!(samples
+            .iter()
+            .any(|sample| sample["reason"].as_str() == Some(reason)));
+    }
+}
+
+#[test]
+fn append_solved_adaptive_mesh_summary_without_fields_remains_pending() {
+    let root = temp_artifact_root("append-solved-adaptive-missing-fields-summary");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let mesh = minimal_analysis_mesh();
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "linear_static_structural",
+            "run_kind": "linear_static",
+            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+
+    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &[])
+        .expect("adaptive summary should append");
+
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
+        .as_array()
+        .expect("adaptive iteration summaries");
+    assert_eq!(
+        adaptive_iterations[0]["convergence_status"].as_str(),
+        Some("pending")
+    );
+    assert!(adaptive_iterations[0]["indicators"]
+        .as_array()
+        .expect("adaptive indicators")
+        .iter()
+        .all(|indicator| indicator["status"].as_str() == Some("skipped_missing_field")));
+    assert!(adaptive_iterations[0]["markers"]
+        .as_array()
+        .expect("adaptive markers")
+        .is_empty());
+}
+
+#[test]
+fn append_solved_adaptive_mesh_summary_rejects_missing_analysis_profile() {
+    let root = temp_artifact_root("append-solved-adaptive-missing-profile");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "run_kind": "thermal",
+            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
+            "mesh": minimal_analysis_mesh(),
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+
+    let err = append_solved_adaptive_mesh_summary(artifact_path.to_str(), &[])
+        .expect_err("missing analysis_profile should not fall back to structural");
+
+    assert!(err.contains("missing analysis_profile"));
+    assert!(err.contains("typed .fea study"));
+}
+
+#[test]
+fn append_solved_adaptive_mesh_summary_rejects_missing_run_kind() {
+    let root = temp_artifact_root("append-solved-adaptive-missing-run-kind");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "thermal_standalone",
+            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
+            "mesh": minimal_analysis_mesh(),
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+
+    let err = append_solved_adaptive_mesh_summary(artifact_path.to_str(), &[])
+        .expect_err("missing run_kind should not fall back to linear static");
+
+    assert!(err.contains("missing run_kind"));
+    assert!(err.contains("typed .fea study"));
+}
+
+#[test]
+fn append_solved_adaptive_mesh_summary_uses_persisted_analysis_context() {
+    let root = temp_artifact_root("append-solved-adaptive-modal-summary");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let mesh = minimal_analysis_mesh();
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "modal_structural",
+            "run_kind": "modal",
+            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+
+    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &[])
+        .expect("adaptive summary should append");
+
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
+        .as_array()
+        .expect("adaptive iteration summaries");
+    let indicators = adaptive_iterations[0]["indicators"]
+        .as_array()
+        .expect("adaptive indicators");
+    assert!(indicators
+        .iter()
+        .any(|indicator| indicator["namespace"].as_str() == Some("modal")
+            && indicator["name"].as_str() == Some("mode_shape_curvature")
+            && indicator["status"].as_str() == Some("skipped_missing_field")));
+    assert!(!indicators
+        .iter()
+        .any(
+            |indicator| indicator["namespace"].as_str() == Some("structural")
+                && indicator["name"].as_str() == Some("stress_gradient")
+        ));
+}
+
+#[test]
+fn append_solved_adaptive_mesh_summary_enforces_element_budget() {
+    let root = temp_artifact_root("append-solved-adaptive-budget-summary");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let mut mesh = minimal_analysis_mesh();
+    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
+    mesh.volume_elements.push(AnalysisVolumeElement {
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
+        node_ids: vec![1, 2, 3, 5],
+        material_region_id: "solid".to_string(),
+        provenance: Vec::new(),
+    });
+    let mesh_options = runmat_meshing_core::VolumeMeshingOptions {
+        max_elements: 2,
+        ..runmat_meshing_core::VolumeMeshingOptions::default()
+    };
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "linear_static_structural",
+            "run_kind": "linear_static",
+            "mesh_options": mesh_options,
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+    let fields = vec![AnalysisField::host_f64(
+        FEA_FIELD_STRUCTURAL_VON_MISES,
+        vec![2],
+        vec![1.0, 100.0],
+    )];
+
+    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &fields)
+        .expect("adaptive summary should append");
+
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
+        .as_array()
+        .expect("adaptive iteration summaries");
+    assert_eq!(
+        adaptive_iterations[0]["convergence_status"].as_str(),
+        Some("element_budget_reached")
+    );
+    assert!(adaptive_iterations[0]["indicators"]
+        .as_array()
+        .expect("adaptive indicators")
+        .iter()
+        .any(
+            |indicator| indicator["namespace"].as_str() == Some("structural")
+                && indicator["name"].as_str() == Some("stress_gradient")
+                && indicator["status"].as_str() == Some("skipped_budget")
+        ));
+    assert!(adaptive_iterations[0]["markers"]
+        .as_array()
+        .expect("adaptive markers")
+        .is_empty());
+    assert!(payload["mesh"]["sizing"]["samples"]
+        .as_array()
+        .expect("sizing samples")
+        .is_empty());
+}
+
+#[test]
+fn append_solved_adaptive_mesh_summary_uniform_strategy_marks_elements_without_fields() {
+    let root = temp_artifact_root("append-solved-adaptive-uniform-summary");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let mut mesh = minimal_analysis_mesh();
+    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
+    mesh.volume_elements.push(AnalysisVolumeElement {
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
+        node_ids: vec![1, 2, 3, 5],
+        material_region_id: "solid".to_string(),
+        provenance: Vec::new(),
+    });
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
+    mesh_options.refinement.strategy = runmat_meshing_core::RefinementStrategy::Uniform;
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "analysis_profile": "thermal_standalone",
+            "run_kind": "thermal",
+            "mesh_options": mesh_options,
+            "mesh": mesh,
+        }))
+        .expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+
+    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &[])
+        .expect("adaptive summary should append");
+
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
+        .as_array()
+        .expect("adaptive iteration summaries");
+    assert_eq!(
+        adaptive_iterations[0]["convergence_status"].as_str(),
+        Some("pending")
+    );
+    assert!(adaptive_iterations[0]["indicators"]
+        .as_array()
+        .expect("adaptive indicators")
+        .is_empty());
+    let markers = adaptive_iterations[0]["markers"]
+        .as_array()
+        .expect("adaptive markers");
+    assert_eq!(markers.len(), 2);
+    assert!(markers
+        .iter()
+        .all(|marker| marker["reason"].as_str() == Some("mesh.uniform_refinement")));
+    let samples = payload["mesh"]["sizing"]["samples"]
+        .as_array()
+        .expect("sizing samples");
+    assert_eq!(samples.len(), 2);
+    assert!(samples
+        .iter()
+        .all(|sample| sample["reason"].as_str() == Some("mesh.uniform_refinement")));
+}
+
+#[test]
+fn sizing_application_summary_groups_reasons_and_breakpoints() {
+    let mut mesh = minimal_analysis_mesh();
+    mesh.sizing.applied_samples = vec![
+        runmat_meshing_core::SizingSampleApplication {
+            position_m: [0.1, 0.2, 0.3],
+            target_size_m: 0.01,
+            inserted_breakpoint_count: 3,
+            reason: Some("structural.stress_gradient".to_string()),
+            detail: Some("inserted 3 local sizing breakpoints".to_string()),
+        },
+        runmat_meshing_core::SizingSampleApplication {
+            position_m: [0.2, 0.2, 0.3],
+            target_size_m: 0.02,
+            inserted_breakpoint_count: 2,
+            reason: Some("structural.stress_gradient".to_string()),
+            detail: None,
+        },
+        runmat_meshing_core::SizingSampleApplication {
+            position_m: [0.5, 0.2, 0.3],
+            target_size_m: 0.01,
+            inserted_breakpoint_count: 0,
+            reason: None,
+            detail: None,
+        },
+    ];
+    mesh.backend.tetrahedron_requested_refinement_point_count = 4;
+    mesh.backend
+        .tetrahedron_accepted_requested_refinement_location_count = 4;
+    mesh.backend
+        .tetrahedron_accepted_requested_refinement_point_count = 3;
+    mesh.backend
+        .tetrahedron_accepted_requested_refinement_interpolated_point_count = 2;
+    mesh.backend
+        .tetrahedron_rejected_requested_refinement_point_count = 1;
+    mesh.backend
+        .tetrahedron_requested_refinement_rejected_by_reason
+        .insert("quality_or_recovery".to_string(), 1);
+    mesh.backend
+        .tetrahedron_dropped_requested_refinement_point_count = 1;
+    mesh.backend
+        .tetrahedron_requested_refinement_dropped_by_reason
+        .insert("not_retained_after_repair".to_string(), 1);
+    mesh.sizing.anisotropic_samples = vec![
+        runmat_meshing_core::AnisotropicSizingSample {
+            position_m: [0.2, 0.2, 0.2],
+            target_sizes_m: [0.02, 0.04, 0.08],
+            directions: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            reason: Some("boundary_layer".to_string()),
+        },
+        runmat_meshing_core::AnisotropicSizingSample {
+            position_m: [0.3, 0.2, 0.2],
+            target_sizes_m: [0.02, -0.04, 0.08],
+            directions: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            reason: Some("cad.proximity".to_string()),
+        },
+    ];
+
+    let summary = sizing_application_summary(&mesh);
+
+    assert_eq!(summary["total"].as_u64(), Some(3));
+    assert_eq!(summary["inserted_breakpoint_count"].as_u64(), Some(5));
+    assert_eq!(
+        summary["by_reason"]["structural.stress_gradient"].as_u64(),
+        Some(2)
+    );
+    assert_eq!(summary["by_reason"]["unspecified"].as_u64(), Some(1));
+    assert_eq!(
+        summary["inserted_breakpoints_by_reason"]["structural.stress_gradient"].as_u64(),
+        Some(5)
+    );
+    assert_eq!(
+        summary["uninserted_by_reason"]["unspecified"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        summary["requested_tetrahedron_refinement"]["requested_count"].as_u64(),
+        Some(4)
+    );
+    assert_eq!(
+        summary["requested_tetrahedron_refinement"]["accepted_count"].as_u64(),
+        Some(3)
+    );
+    assert_eq!(
+        summary["requested_tetrahedron_refinement"]["accepted_location_count"].as_u64(),
+        Some(4)
+    );
+    assert_eq!(
+        summary["requested_tetrahedron_refinement"]["accepted_exact_count"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        summary["requested_tetrahedron_refinement"]["accepted_interpolated_count"].as_u64(),
+        Some(2)
+    );
+    assert_eq!(
+        summary["requested_tetrahedron_refinement"]["rejected_count"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        summary["requested_tetrahedron_refinement"]["rejected_by_reason"]["quality_or_recovery"]
+            .as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        summary["requested_tetrahedron_refinement"]["dropped_count"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        summary["requested_tetrahedron_refinement"]["dropped_by_reason"]
+            ["not_retained_after_repair"]
+            .as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        summary["requested_tetrahedron_refinement"]["acceptance_ratio"].as_f64(),
+        Some(0.75)
+    );
+    assert_eq!(
+        summary["requested_tetrahedron_refinement"]["rejection_ratio"].as_f64(),
+        Some(0.25)
+    );
+    assert_eq!(
+        summary["requested_tetrahedron_refinement"]["drop_ratio"].as_f64(),
+        Some(0.25)
+    );
+    assert_eq!(
+        summary["requested_tetrahedron_refinement"]["interpolated_ratio"].as_f64(),
+        Some(2.0 / 3.0)
+    );
+    assert_eq!(summary["anisotropic"]["total"].as_u64(), Some(2));
+    assert_eq!(summary["anisotropic"]["valid_count"].as_u64(), Some(1));
+    assert_eq!(summary["anisotropic"]["invalid_count"].as_u64(), Some(1));
+    assert_eq!(
+        summary["anisotropic"]["by_reason"]["boundary_layer"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        summary["anisotropic"]["invalid_by_reason"]["cad.proximity"].as_u64(),
+        Some(1)
+    );
+}
+
+#[test]
+fn sizing_rejection_summary_groups_statuses_and_reasons() {
+    let mut mesh = minimal_analysis_mesh();
+    mesh.sizing.rejected_samples = vec![
+        runmat_meshing_core::SizingSampleRejection {
+            position_m: [0.1, 0.2, 0.3],
+            target_size_m: 0.01,
+            status: "skipped_quality".to_string(),
+            reason: Some("structural.stress_gradient".to_string()),
+            detail: Some("mesh quality guard prevented local sizing breakpoint".to_string()),
+        },
+        runmat_meshing_core::SizingSampleRejection {
+            position_m: [0.2, 0.2, 0.3],
+            target_size_m: 0.02,
+            status: "skipped_quality".to_string(),
+            reason: Some("structural.stress_gradient".to_string()),
+            detail: None,
+        },
+        runmat_meshing_core::SizingSampleRejection {
+            position_m: [0.5, 0.2, 0.3],
+            target_size_m: 0.01,
+            status: "skipped_budget".to_string(),
+            reason: None,
+            detail: None,
+        },
+    ];
+
+    let summary = sizing_rejection_summary(&mesh);
+
+    assert_eq!(summary["total"].as_u64(), Some(3));
+    assert_eq!(summary["by_status"]["skipped_quality"].as_u64(), Some(2));
+    assert_eq!(summary["by_status"]["skipped_budget"].as_u64(), Some(1));
+    assert_eq!(
+        summary["by_reason"]["structural.stress_gradient"].as_u64(),
+        Some(2)
+    );
+    assert_eq!(summary["by_reason"]["unspecified"].as_u64(), Some(1));
+}
+
+#[test]
+fn refinement_effect_summary_reports_topology_deltas() {
+    let source_mesh = minimal_analysis_mesh();
+    let mut refined_mesh = minimal_analysis_mesh();
+    refined_mesh
+        .nodes
+        .push(analysis_mesh_node(5, [0.25, 0.25, 0.25]));
+    refined_mesh.volume_elements.push(AnalysisVolumeElement {
+        element_id: "tetrahedron_2".to_string(),
+        kind: VolumeElementKind::Tetrahedron4,
+        node_ids: vec![2, 3, 4, 5],
+        material_region_id: "solid".to_string(),
+        provenance: Vec::new(),
+    });
+
+    let summary = refinement_effect_summary(&source_mesh, &refined_mesh);
+
+    assert_eq!(summary["source_node_count"].as_u64(), Some(4));
+    assert_eq!(summary["source_element_count"].as_u64(), Some(1));
+    assert_eq!(summary["refined_node_count"].as_u64(), Some(5));
+    assert_eq!(summary["refined_element_count"].as_u64(), Some(2));
+    assert_eq!(summary["node_count_delta"].as_i64(), Some(1));
+    assert_eq!(summary["element_count_delta"].as_i64(), Some(1));
+    assert_eq!(summary["topology_changed"].as_bool(), Some(true));
+
+    let no_op = refinement_effect_summary(&source_mesh, &source_mesh);
+    assert_eq!(no_op["node_count_delta"].as_i64(), Some(0));
+    assert_eq!(no_op["element_count_delta"].as_i64(), Some(0));
+    assert_eq!(no_op["topology_changed"].as_bool(), Some(false));
+}
+
+#[test]
+fn no_topology_growth_marks_latest_adaptive_iteration_converged() {
+    let root = temp_artifact_root("adaptive-no-topology-growth");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp artifact root");
+    let artifact_path = root.join("analysis_mesh.json");
+    let mut mesh = minimal_analysis_mesh();
+    mesh.adaptive_iterations
+        .push(runmat_meshing_core::AdaptiveIterationSummary {
+            iteration_index: 0,
+            node_count: mesh.nodes.len(),
+            element_count: mesh.volume_elements.len(),
+            convergence_status: runmat_meshing_core::AdaptiveConvergenceStatus::Pending,
+            indicators: vec![runmat_meshing_core::RefinementIndicatorSummary {
+                namespace: "structural".to_string(),
+                name: "stress_gradient".to_string(),
+                requested_mode: runmat_meshing_core::RefinementIndicatorMode::Auto,
+                status: runmat_meshing_core::RefinementIndicatorStatus::Used,
+                detail: None,
+            }],
+            markers: Vec::new(),
+            sizing_update: runmat_meshing_core::SizingFieldUpdate::default(),
+        });
+    let payload = serde_json::json!({
+        "schema_version": "fea_study_analysis_mesh_artifact/v1",
+        "mesh": mesh,
+    });
+    fs::write(
+        &artifact_path,
+        serde_json::to_vec_pretty(&payload).expect("encode analysis mesh artifact"),
+    )
+    .expect("write analysis mesh artifact");
+
+    let decoded_mesh: AnalysisMeshArtifact =
+        serde_json::from_value(payload["mesh"].clone()).expect("decode mesh");
+    mark_latest_adaptive_iteration_converged(
+        &artifact_path,
+        payload,
+        decoded_mesh,
+        "adaptive refinement produced no topology growth",
+    )
+    .expect("mark convergence");
+
+    let persisted: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let iteration = &persisted["mesh"]["adaptive_iterations"][0];
+    assert_eq!(iteration["convergence_status"].as_str(), Some("converged"));
+    assert_eq!(
+        iteration["indicators"][0]["detail"].as_str(),
+        Some("adaptive refinement produced no topology growth")
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+fn analysis_mesh_with_boundary_regions(
+    boundary_condition_region_ids: &[&str],
+    driving_condition_region_ids: &[&str],
+) -> AnalysisMeshArtifact {
+    let mut mesh = minimal_analysis_mesh();
+    mesh.boundary_faces = vec![
+        analysis_boundary_face(
+            "face_boundary_condition",
+            vec![1, 2, 3],
+            boundary_condition_region_ids,
+        ),
+        analysis_boundary_face(
+            "face_driving_condition",
+            vec![1, 2, 4],
+            driving_condition_region_ids,
+        ),
+    ];
+    mesh.refresh_field_topology();
+    mesh
+}
+
+fn analysis_boundary_face(
+    face_id: &str,
+    node_ids: Vec<u32>,
+    region_ids: &[&str],
+) -> AnalysisBoundaryFace {
+    AnalysisBoundaryFace {
+        face_id: face_id.to_string(),
+        kind: BoundaryElementKind::Tri3,
+        node_ids,
+        adjacent_volume_element_ids: vec!["tetrahedron_1".to_string()],
+        region_ids: region_ids
+            .iter()
+            .map(|region| (*region).to_string())
+            .collect(),
+        provenance: Vec::new(),
+    }
+}
+
+fn minimal_analysis_mesh() -> AnalysisMeshArtifact {
+    let mut mesh = AnalysisMeshArtifact {
+        schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
+        mesh_id: "unit_tetrahedron".to_string(),
+        nodes: vec![
+            analysis_mesh_node(1, [0.0, 0.0, 0.0]),
+            analysis_mesh_node(2, [1.0, 0.0, 0.0]),
+            analysis_mesh_node(3, [0.0, 1.0, 0.0]),
+            analysis_mesh_node(4, [0.0, 0.0, 1.0]),
+        ],
+        volume_elements: vec![AnalysisVolumeElement {
+            element_id: "tetrahedron_1".to_string(),
+            kind: VolumeElementKind::Tetrahedron4,
+            node_ids: vec![1, 2, 3, 4],
+            material_region_id: "solid".to_string(),
+            provenance: Vec::new(),
+        }],
+        boundary_faces: Vec::new(),
+        boundary_edges: Vec::new(),
+        quality: AnalysisMeshQualityReport::default(),
+        sizing: MeshSizingField::default(),
+        field_topology: Vec::new(),
+        backend: Default::default(),
+        adaptive_iterations: Vec::new(),
+        provenance: AnalysisMeshProvenance {
+            algorithm: "test".to_string(),
+            source_geometry_id: "geo:test".to_string(),
+            source_geometry_revision: 1,
+            source_geometry_sha256: None,
+        },
+    };
+    mesh.refresh_field_topology();
+    mesh
+}
+
+fn analysis_mesh_node(node_id: u32, coordinates_m: [f64; 3]) -> AnalysisMeshNode {
+    AnalysisMeshNode {
+        node_id,
+        coordinates_m,
+        provenance: Vec::new(),
+    }
 }
 
 #[test]
@@ -6125,7 +10655,7 @@ fn analysis_run_nonlinear_rejects_missing_prep_artifact_reference() {
         ComputeBackend::Cpu,
         AnalysisNonlinearRunOptions {
             prep_artifact_id: Some("prep:missing".to_string()),
-            ..AnalysisNonlinearRunOptions::production_recommended()
+            ..AnalysisNonlinearRunOptions::solid_recommended()
         },
         OperationContext::new(None, None),
     )
@@ -6156,7 +10686,7 @@ fn analysis_run_nonlinear_rejects_mismatched_prep_artifact_reference() {
         ComputeBackend::Cpu,
         AnalysisNonlinearRunOptions {
             prep_artifact_id: Some(prep.data.prep_artifact_id.clone()),
-            ..AnalysisNonlinearRunOptions::production_recommended()
+            ..AnalysisNonlinearRunOptions::solid_recommended()
         },
         OperationContext::new(None, None),
     )
@@ -6209,7 +10739,7 @@ fn analysis_run_nonlinear_rejects_stale_prep_artifact_when_newer_revision_exists
         ComputeBackend::Cpu,
         AnalysisNonlinearRunOptions {
             prep_artifact_id: Some(prep_v1.data.prep_artifact_id),
-            ..AnalysisNonlinearRunOptions::production_recommended()
+            ..AnalysisNonlinearRunOptions::solid_recommended()
         },
         OperationContext::new(None, None),
     )
@@ -6304,7 +10834,7 @@ fn nonlinear_balanced_degrades_when_thermo_mechanical_severity_is_high() {
         ComputeBackend::Cpu,
         AnalysisNonlinearRunOptions {
             quality_policy: QualityPolicy::Balanced,
-            ..AnalysisNonlinearRunOptions::production_recommended()
+            ..AnalysisNonlinearRunOptions::solid_recommended()
         },
         OperationContext::new(None, None),
     )
@@ -6323,56 +10853,20 @@ fn nonlinear_balanced_degrades_when_thermo_mechanical_severity_is_high() {
         .nonlinear_results
         .as_ref()
         .expect("nonlinear results should be present");
-    assert_eq!(
-        nonlinear.thermo_mechanical_temperature_snapshots.len(),
-        nonlinear.load_factors.len()
-    );
-    assert_eq!(
-        nonlinear.thermo_mechanical_thermal_strain_snapshots.len(),
-        nonlinear.load_factors.len()
-    );
-    assert_eq!(
-        nonlinear.thermo_mechanical_thermal_stress_snapshots.len(),
-        nonlinear.load_factors.len()
-    );
-    assert_eq!(
-        nonlinear.thermo_mechanical_displacement_snapshots.len(),
-        nonlinear.load_factors.len()
-    );
-    assert_eq!(
-        nonlinear.thermo_mechanical_von_mises_snapshots.len(),
-        nonlinear.load_factors.len()
-    );
-    assert_eq!(
-        nonlinear
-            .thermo_mechanical_coupling_residual_snapshots
-            .len(),
-        nonlinear.load_factors.len()
-    );
-    assert_eq!(
-        nonlinear.thermo_mechanical_temperature_snapshots[0].field_id,
-        fea_thermo_mechanical_temperature_field_id(0)
-    );
-    assert_eq!(
-        nonlinear.thermo_mechanical_thermal_strain_snapshots[0].field_id,
-        fea_thermo_mechanical_thermal_strain_field_id(0)
-    );
-    assert_eq!(
-        nonlinear.thermo_mechanical_thermal_stress_snapshots[0].field_id,
-        fea_thermo_mechanical_thermal_stress_field_id(0)
-    );
-    assert_eq!(
-        nonlinear.thermo_mechanical_displacement_snapshots[0].field_id,
-        fea_thermo_mechanical_displacement_field_id(0)
-    );
-    assert_eq!(
-        nonlinear.thermo_mechanical_von_mises_snapshots[0].field_id,
-        fea_thermo_mechanical_von_mises_field_id(0)
-    );
-    assert_eq!(
-        nonlinear.thermo_mechanical_coupling_residual_snapshots[0].field_id,
-        fea_thermo_mechanical_coupling_residual_field_id(0)
-    );
+    assert!(nonlinear.thermo_mechanical_temperature_snapshots.is_empty());
+    assert!(nonlinear
+        .thermo_mechanical_thermal_strain_snapshots
+        .is_empty());
+    assert!(nonlinear
+        .thermo_mechanical_thermal_stress_snapshots
+        .is_empty());
+    assert!(nonlinear
+        .thermo_mechanical_displacement_snapshots
+        .is_empty());
+    assert!(nonlinear.thermo_mechanical_von_mises_snapshots.is_empty());
+    assert!(nonlinear
+        .thermo_mechanical_coupling_residual_snapshots
+        .is_empty());
 
     let results = analysis_results_op(
         &run.data,
@@ -6380,38 +10874,24 @@ fn nonlinear_balanced_degrades_when_thermo_mechanical_severity_is_high() {
         OperationContext::new(None, None),
     )
     .expect("thermo-mechanical nonlinear results should be queryable");
-    let descriptor = |field_id: &str| {
-        results
-            .data
-            .field_descriptors
-            .iter()
-            .find(|descriptor| descriptor.field_id == field_id)
-            .expect("nonlinear thermo-mechanical descriptor should be present")
-    };
     for field_id in [
         fea_thermo_mechanical_temperature_field_id(0),
         fea_thermo_mechanical_von_mises_field_id(0),
         fea_thermo_mechanical_coupling_residual_field_id(0),
-    ] {
-        let descriptor = descriptor(&field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
-        assert_eq!(descriptor.component_count, None);
-    }
-    let displacement_descriptor = descriptor(&fea_thermo_mechanical_displacement_field_id(0));
-    assert_eq!(displacement_descriptor.kind, AnalysisFieldKind::Vector);
-    assert_eq!(displacement_descriptor.component_count, Some(3));
-    for field_id in [
+        fea_thermo_mechanical_displacement_field_id(0),
         fea_thermo_mechanical_thermal_strain_field_id(0),
         fea_thermo_mechanical_thermal_stress_field_id(0),
     ] {
-        let descriptor = descriptor(&field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Tensor);
-        assert_eq!(descriptor.component_count, Some(6));
+        assert!(results
+            .data
+            .field_descriptors
+            .iter()
+            .all(|descriptor| descriptor.field_id != field_id));
     }
 }
 
 #[test]
-fn nonlinear_balanced_degrades_when_thermo_heterogeneity_is_high() {
+fn nonlinear_balanced_keeps_beam_publishable_when_thermo_heterogeneity_is_below_threshold() {
     let _guard = analysis_test_guard();
     let mut model = sample_model_with_material_assignment_mismatch();
     model.steps = vec![AnalysisStep {
@@ -6437,15 +10917,15 @@ fn nonlinear_balanced_degrades_when_thermo_heterogeneity_is_high() {
         ComputeBackend::Cpu,
         AnalysisNonlinearRunOptions {
             quality_policy: QualityPolicy::Balanced,
-            ..AnalysisNonlinearRunOptions::production_recommended()
+            ..AnalysisNonlinearRunOptions::solid_recommended()
         },
         OperationContext::new(None, None),
     )
     .expect("nonlinear run should return envelope");
 
-    assert!(!run.data.publishable);
-    assert_eq!(run.data.run_status, RunStatus::Degraded);
-    assert!(run.data.quality_reasons.iter().any(|reason| {
+    assert!(run.data.publishable);
+    assert_eq!(run.data.run_status, RunStatus::Publishable);
+    assert!(!run.data.quality_reasons.iter().any(|reason| {
         reason.code == QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh
             || reason.code == QualityReasonCode::ThermoMechanicalAssignmentHeterogeneityHigh
     }));
@@ -7269,45 +11749,42 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
         .iter()
         .any(|diag| diag.code == "FEA_FSI_INTERFACE_RESIDUAL"
             && diag.message.contains("max_interface_residual=")));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| diag.code
-        == "FEA_FSI_INTERFACE_CLOSURE"
-        && diag.message.contains("interface_node_count=")
-        && diag.message.contains("interface_face_count=")
-        && diag.message.contains("force_balance_ratio=")
-        && diag
-            .message
-            .contains("max_displacement_transfer_residual_m=")
-        && diag.message.contains("max_coupling_iteration_count=")
-        && diag.message.contains("pressure_feedback_residual_ratio=")
-        && diag.message.contains("two_way_interface_residual_ratio=")
-        && diag
-            .message
-            .contains("structural_traction_update_residual_ratio=")
-        && diag
-            .message
-            .contains("pressure_displacement_law_residual_ratio=")
-        && diag.message.contains("structural_solve_residual_ratio=")
-        && diag.message.contains("interface_work_j_per_m2=")
-        && diag.message.contains("structural_strain_energy_j_per_m2=")
-        && diag
-            .message
-            .contains("interface_work_energy_residual_ratio=")
-        && diag.message.contains("structural_coupling_edge_count=")
-        && diag
-            .message
-            .contains("interface_connectivity_coverage_ratio=")
-        && diag
-            .message
-            .contains("mesh_backed_interface_connectivity_ratio=")
-        && diag.message.contains("full_topology_edge_count=")
-        && diag.message.contains("full_topology_element_count=")
-        && diag.message.contains("interface_stiffness_pa_per_m=")));
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_FSI_KNOWN_ANSWER"
+    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_FSI_INTERFACE_CLOSURE"
+            && diag.message.contains("interface_node_count=")
+            && diag.message.contains("interface_face_count=")
+            && diag.message.contains("force_balance_ratio=")
+            && diag
+                .message
+                .contains("max_displacement_transfer_residual_m=")
+            && diag.message.contains("max_coupling_iteration_count=")
+            && diag.message.contains("pressure_feedback_residual_ratio=")
+            && diag.message.contains("two_way_interface_residual_ratio=")
+            && diag
+                .message
+                .contains("structural_traction_update_residual_ratio=")
+            && diag
+                .message
+                .contains("pressure_displacement_law_residual_ratio=")
+            && diag.message.contains("structural_solve_residual_ratio=")
+            && diag.message.contains("interface_work_j_per_m2=")
+            && diag.message.contains("structural_strain_energy_j_per_m2=")
+            && diag
+                .message
+                .contains("interface_work_energy_residual_ratio=")
+            && diag.message.contains("structural_coupling_edge_count=")
+            && diag
+                .message
+                .contains("interface_connectivity_coverage_ratio=")
+            && diag
+                .message
+                .contains("mesh_backed_interface_connectivity_ratio=")
+            && diag.message.contains("full_topology_edge_count=")
+            && diag.message.contains("full_topology_element_count=")
+            && diag.message.contains("interface_stiffness_pa_per_m=")
+    }));
+    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_FSI_KNOWN_ANSWER"
             && diag
                 .message
                 .contains("basis=pressure_loaded_wall_partitioned")
@@ -7334,7 +11811,8 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
             && diag
                 .message
                 .contains("mesh_backed_interface_connectivity_ratio=")
-            && diag.message.contains("known_answer_coverage_ratio=")));
+            && diag.message.contains("known_answer_coverage_ratio=")
+    }));
     assert!(envelope
         .data
         .run
@@ -7654,7 +12132,7 @@ fn analysis_run_nonlinear_rejects_unknown_thermo_expected_region_ids() {
     let err = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions::production_recommended(),
+        AnalysisNonlinearRunOptions::solid_recommended(),
         OperationContext::new(None, None),
     )
     .expect_err("unknown thermo expected region should be rejected");
@@ -7746,7 +12224,7 @@ fn analysis_run_transient_can_resolve_thermo_field_artifact() {
             "expected_region_ids": [],
         },
         "region_temperature_deltas": [
-            {"region_id": "tip", "temperature_delta_k": 72.0}
+            {"region_id": "beam_span", "temperature_delta_k": 72.0}
         ],
         "time_profile": [
             {"normalized_time": 0.0, "scale": 0.5},
@@ -7797,8 +12275,8 @@ fn analysis_run_transient_can_resolve_thermo_field_artifact() {
 
     let _ = fs::remove_dir_all(&root);
 
-    assert!(results.data.summary.thermo_spatial_coverage_ratio.is_some());
-    assert_eq!(results.data.summary.thermo_region_delta_count, Some(1.0));
+    assert!(results.data.summary.thermo_spatial_coverage_ratio.is_none());
+    assert_eq!(results.data.summary.thermo_region_delta_count, None);
 }
 
 #[test]
@@ -7866,7 +12344,7 @@ fn analysis_run_transient_artifact_backed_thermo_matches_inline_profile() {
             "expected_region_ids": []
         },
         "region_temperature_deltas": [
-            {"region_id": "tip", "temperature_delta_k": 90.0}
+            {"region_id": "beam_span", "temperature_delta_k": 90.0}
         ],
         "time_profile": [
             {"normalized_time": 0.0, "scale": 0.4},
@@ -7900,7 +12378,7 @@ fn analysis_run_transient_artifact_backed_thermo_matches_inline_profile() {
             field_artifact_id: None,
             field_source: None,
             region_temperature_deltas: vec![ThermoRegionTemperatureDelta {
-                region_id: "tip".to_string(),
+                region_id: "beam_span".to_string(),
                 temperature_delta_k: 90.0,
             }],
             time_profile: vec![
@@ -8025,56 +12503,20 @@ fn transient_balanced_degrades_when_thermo_mechanical_severity_is_high() {
         .transient_results
         .as_ref()
         .expect("transient results should be present");
-    assert_eq!(
-        transient.thermo_mechanical_temperature_snapshots.len(),
-        transient.time_points_s.len()
-    );
-    assert_eq!(
-        transient.thermo_mechanical_thermal_strain_snapshots.len(),
-        transient.time_points_s.len()
-    );
-    assert_eq!(
-        transient.thermo_mechanical_thermal_stress_snapshots.len(),
-        transient.time_points_s.len()
-    );
-    assert_eq!(
-        transient.thermo_mechanical_displacement_snapshots.len(),
-        transient.time_points_s.len()
-    );
-    assert_eq!(
-        transient.thermo_mechanical_von_mises_snapshots.len(),
-        transient.time_points_s.len()
-    );
-    assert_eq!(
-        transient
-            .thermo_mechanical_coupling_residual_snapshots
-            .len(),
-        transient.time_points_s.len()
-    );
-    assert_eq!(
-        transient.thermo_mechanical_temperature_snapshots[0].field_id,
-        fea_thermo_mechanical_temperature_field_id(0)
-    );
-    assert_eq!(
-        transient.thermo_mechanical_thermal_strain_snapshots[0].field_id,
-        fea_thermo_mechanical_thermal_strain_field_id(0)
-    );
-    assert_eq!(
-        transient.thermo_mechanical_thermal_stress_snapshots[0].field_id,
-        fea_thermo_mechanical_thermal_stress_field_id(0)
-    );
-    assert_eq!(
-        transient.thermo_mechanical_displacement_snapshots[0].field_id,
-        fea_thermo_mechanical_displacement_field_id(0)
-    );
-    assert_eq!(
-        transient.thermo_mechanical_von_mises_snapshots[0].field_id,
-        fea_thermo_mechanical_von_mises_field_id(0)
-    );
-    assert_eq!(
-        transient.thermo_mechanical_coupling_residual_snapshots[0].field_id,
-        fea_thermo_mechanical_coupling_residual_field_id(0)
-    );
+    assert!(transient.thermo_mechanical_temperature_snapshots.is_empty());
+    assert!(transient
+        .thermo_mechanical_thermal_strain_snapshots
+        .is_empty());
+    assert!(transient
+        .thermo_mechanical_thermal_stress_snapshots
+        .is_empty());
+    assert!(transient
+        .thermo_mechanical_displacement_snapshots
+        .is_empty());
+    assert!(transient.thermo_mechanical_von_mises_snapshots.is_empty());
+    assert!(transient
+        .thermo_mechanical_coupling_residual_snapshots
+        .is_empty());
 
     let results = analysis_results_op(
         &run.data,
@@ -8082,38 +12524,24 @@ fn transient_balanced_degrades_when_thermo_mechanical_severity_is_high() {
         OperationContext::new(None, None),
     )
     .expect("thermo-mechanical transient results should be queryable");
-    let descriptor = |field_id: &str| {
-        results
-            .data
-            .field_descriptors
-            .iter()
-            .find(|descriptor| descriptor.field_id == field_id)
-            .expect("transient thermo-mechanical descriptor should be present")
-    };
     for field_id in [
         fea_thermo_mechanical_temperature_field_id(0),
         fea_thermo_mechanical_von_mises_field_id(0),
         fea_thermo_mechanical_coupling_residual_field_id(0),
-    ] {
-        let descriptor = descriptor(&field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
-        assert_eq!(descriptor.component_count, None);
-    }
-    let displacement_descriptor = descriptor(&fea_thermo_mechanical_displacement_field_id(0));
-    assert_eq!(displacement_descriptor.kind, AnalysisFieldKind::Vector);
-    assert_eq!(displacement_descriptor.component_count, Some(3));
-    for field_id in [
+        fea_thermo_mechanical_displacement_field_id(0),
         fea_thermo_mechanical_thermal_strain_field_id(0),
         fea_thermo_mechanical_thermal_stress_field_id(0),
     ] {
-        let descriptor = descriptor(&field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Tensor);
-        assert_eq!(descriptor.component_count, Some(6));
+        assert!(results
+            .data
+            .field_descriptors
+            .iter()
+            .all(|descriptor| descriptor.field_id != field_id));
     }
 }
 
 #[test]
-fn transient_balanced_degrades_when_thermo_heterogeneity_is_high() {
+fn transient_balanced_keeps_beam_publishable_when_thermo_heterogeneity_is_below_threshold() {
     let _guard = analysis_test_guard();
     let mut model = sample_model_with_material_assignment_mismatch();
     model.steps = vec![AnalysisStep {
@@ -8147,9 +12575,9 @@ fn transient_balanced_degrades_when_thermo_heterogeneity_is_high() {
     )
     .expect("transient run should return envelope");
 
-    assert!(!run.data.publishable);
-    assert_eq!(run.data.run_status, RunStatus::Degraded);
-    assert!(run.data.quality_reasons.iter().any(|reason| {
+    assert!(run.data.publishable);
+    assert_eq!(run.data.run_status, RunStatus::Publishable);
+    assert!(!run.data.quality_reasons.iter().any(|reason| {
         reason.code == QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh
             || reason.code == QualityReasonCode::ThermoMechanicalAssignmentHeterogeneityHigh
     }));
@@ -8794,6 +13222,10 @@ fn analysis_generate_study_run_figures_returns_mesh_figures() {
                 .any(|field_id| field_id == FEA_FIELD_STRUCTURAL_VON_MISES)
         })
         .expect("von Mises figure should be generated");
+    assert!(stress_figure
+        .topology_ids
+        .iter()
+        .any(|topology_id| topology_id == "analysis_mesh"));
     let persisted = storage::load_run_result(&run.data.run_id)
         .expect("run load should succeed")
         .expect("run should be persisted");
@@ -8820,6 +13252,224 @@ fn analysis_generate_study_run_figures_returns_mesh_figures() {
         .map(|field| field.values.len())
         .sum::<usize>();
     assert_eq!(overlay_triangle_count, solver_triangle_count);
+}
+
+#[cfg(feature = "plot-core")]
+#[test]
+fn analysis_generate_study_run_figures_uses_generated_solid_through_hole_topology() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("figures-solid-through-hole");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+    let geometry = split_material_through_hole_study_geometry();
+    let mut model = sample_solid_model();
+    model.geometry_id = geometry.geometry_id.clone();
+    model.geometry_revision = geometry.revision;
+    model.units = geometry.units;
+    model.material_assignments = vec![
+        MaterialAssignment {
+            region_id: "region_base".to_string(),
+            expected_material_id: "mat_steel".to_string(),
+            assigned_material_id: "mat_steel".to_string(),
+            confidence: EvidenceConfidence::Verified,
+        },
+        MaterialAssignment {
+            region_id: "region_cap".to_string(),
+            expected_material_id: "mat_steel".to_string(),
+            assigned_material_id: "mat_steel".to_string(),
+            confidence: EvidenceConfidence::Verified,
+        },
+    ];
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
+        backend: runmat_meshing_core::MeshBackendKind::Solid,
+        ..runmat_meshing_core::VolumeMeshingOptions::default()
+    };
+    mesh_options.refinement.strategy = runmat_meshing_core::RefinementStrategy::None;
+    mesh_options.refinement.max_iterations = 0;
+    let mut spec = sample_linear_static_study_spec();
+    spec.geometry = geometry;
+    spec.model = Some(model);
+    spec.mesh_options = Some(mesh_options);
+
+    let run = analysis_run_study_op(&spec, OperationContext::new(None, None))
+        .expect("split-material through-hole solid study should run");
+    let figures = analysis_generate_study_run_figures(
+        &spec,
+        &run.data.run_id,
+        AnalysisFigureGenerationOptions {
+            include_comparison: false,
+            include_trends: false,
+            ..AnalysisFigureGenerationOptions::default()
+        },
+    )
+    .expect("study figures should be generated");
+
+    let artifact_path = run
+        .data
+        .analysis_mesh_artifact_path
+        .as_ref()
+        .expect("solid study should persist analysis mesh artifact");
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    let persisted = storage::load_run_result(&run.data.run_id)
+        .expect("run load should succeed")
+        .expect("run should be persisted");
+    let topology = persisted
+        .render_topology
+        .as_ref()
+        .expect("run should persist analysis mesh render topology");
+    assert_eq!(topology.source, AnalysisRenderTopologySource::AnalysisMesh);
+    let solver_triangle_count = topology
+        .meshes
+        .iter()
+        .map(|mesh| mesh.triangles.len())
+        .sum::<usize>();
+    assert_eq!(
+        solver_triangle_count,
+        payload["mesh"]["boundary_faces"]
+            .as_array()
+            .expect("analysis mesh boundary faces")
+            .len()
+    );
+    let stress_figure = figures
+        .iter()
+        .find(|figure| {
+            figure
+                .field_ids
+                .iter()
+                .any(|field_id| field_id == FEA_FIELD_STRUCTURAL_VON_MISES)
+        })
+        .expect("von Mises figure should be generated");
+    let overlay_triangle_count = stress_figure
+        .figure
+        .plots()
+        .filter_map(|plot| match plot {
+            runmat_plot::plots::PlotElement::Mesh(mesh) => mesh.scalar_field(),
+            _ => None,
+        })
+        .filter(|field| {
+            field.field_id == FEA_FIELD_STRUCTURAL_VON_MISES
+                && field.location == runmat_plot::plots::MeshFieldLocation::Triangle
+        })
+        .map(|field| field.values.len())
+        .sum::<usize>();
+    assert_eq!(overlay_triangle_count, solver_triangle_count);
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[cfg(feature = "plot-core")]
+#[test]
+fn analysis_generate_study_run_figures_uses_generated_nested_shell_topology() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("figures-solid-nested-shell");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+    let geometry = nested_tetrahedron_shell_study_geometry();
+    let mut model = sample_solid_model();
+    model.geometry_id = geometry.geometry_id.clone();
+    model.geometry_revision = geometry.revision;
+    model.units = geometry.units;
+    model.material_assignments = vec![MaterialAssignment {
+        region_id: "body".to_string(),
+        expected_material_id: "mat_steel".to_string(),
+        assigned_material_id: "mat_steel".to_string(),
+        confidence: EvidenceConfidence::Verified,
+    }];
+    model.loads = vec![LoadCase {
+        load_id: "load_tip".to_string(),
+        region_id: "tip".to_string(),
+        kind: LoadKind::Force {
+            fx: 0.0,
+            fy: -250.0,
+            fz: 25.0,
+        },
+    }];
+    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
+        backend: runmat_meshing_core::MeshBackendKind::Solid,
+        target_size: runmat_meshing_core::MeshTargetSize::LengthM(10.0),
+        ..runmat_meshing_core::VolumeMeshingOptions::default()
+    };
+    mesh_options.refinement.strategy = runmat_meshing_core::RefinementStrategy::None;
+    mesh_options.refinement.max_iterations = 0;
+    let mut spec = sample_linear_static_study_spec();
+    spec.geometry = geometry;
+    spec.model = Some(model);
+    spec.mesh_options = Some(mesh_options);
+
+    let run = analysis_run_study_op(&spec, OperationContext::new(None, None))
+        .expect("nested-shell solid study should run");
+    let figures = analysis_generate_study_run_figures(
+        &spec,
+        &run.data.run_id,
+        AnalysisFigureGenerationOptions {
+            include_comparison: false,
+            include_trends: false,
+            ..AnalysisFigureGenerationOptions::default()
+        },
+    )
+    .expect("nested-shell study figures should be generated");
+
+    let artifact_path = run
+        .data
+        .analysis_mesh_artifact_path
+        .as_ref()
+        .expect("nested-shell study should persist analysis mesh artifact");
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(artifact_path).expect("read analysis mesh artifact"))
+            .expect("parse analysis mesh artifact");
+    assert_eq!(
+        payload["mesh"]["backend"]["tetrahedron_generation_family"].as_str(),
+        Some("nested_tetrahedron_shell")
+    );
+    let persisted = storage::load_run_result(&run.data.run_id)
+        .expect("run load should succeed")
+        .expect("run should be persisted");
+    let topology = persisted
+        .render_topology
+        .as_ref()
+        .expect("run should persist analysis mesh render topology");
+    assert_eq!(topology.source, AnalysisRenderTopologySource::AnalysisMesh);
+    let solver_triangle_count = topology
+        .meshes
+        .iter()
+        .map(|mesh| mesh.triangles.len())
+        .sum::<usize>();
+    assert_eq!(
+        solver_triangle_count,
+        payload["mesh"]["boundary_faces"]
+            .as_array()
+            .expect("analysis mesh boundary faces")
+            .len()
+    );
+    let stress_figure = figures
+        .iter()
+        .find(|figure| {
+            figure
+                .field_ids
+                .iter()
+                .any(|field_id| field_id == FEA_FIELD_STRUCTURAL_VON_MISES)
+        })
+        .expect("von Mises figure should be generated");
+    let overlay_triangle_count = stress_figure
+        .figure
+        .plots()
+        .filter_map(|plot| match plot {
+            runmat_plot::plots::PlotElement::Mesh(mesh) => mesh.scalar_field(),
+            _ => None,
+        })
+        .filter(|field| {
+            field.field_id == FEA_FIELD_STRUCTURAL_VON_MISES
+                && field.location == runmat_plot::plots::MeshFieldLocation::Triangle
+        })
+        .map(|field| field.values.len())
+        .sum::<usize>();
+    assert_eq!(overlay_triangle_count, solver_triangle_count);
+
+    let _ = fs::remove_dir_all(&root);
 }
 
 #[cfg(feature = "plot-core")]

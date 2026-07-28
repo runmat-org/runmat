@@ -1,0 +1,34 @@
+{
+  "title": "isoutlier",
+  "category": "stats/summary",
+  "keywords": ["isoutlier", "outlier", "median", "quartiles", "mean", "statistics"],
+  "summary": "Detect outliers in numeric arrays.",
+  "signatures": [
+    "TF = isoutlier(A)",
+    "TF = isoutlier(A,method)",
+    "TF = isoutlier(A,method,dim)",
+    "[TF,L,U,C] = isoutlier(___)"
+  ],
+  "description": "`isoutlier` returns a logical mask for numeric observations outside method-specific lower and upper thresholds. RunMat supports numeric array inputs, default dimension reduction, and the `\"median\"`, `\"mean\"`, `\"quartiles\"`, `\"percentiles\"`, `\"movmedian\"`, and `\"movmean\"` detection methods.",
+  "notes": [
+    "The default method is `\"median\"`, using three scaled median absolute deviations from the median.",
+    "`\"quartiles\"` uses 1.5 interquartile ranges by default.",
+    "`\"percentiles\"` accepts a two-element percentile vector and does not use `ThresholdFactor`.",
+    "`ThresholdFactor` is supported for median, mean, quartiles, movmedian, and movmean methods.",
+    "Table, timetable, `SamplePoints`, `DataVariables`, and `OutlierLocations` forms are reported as unsupported for `isoutlier` in this numeric-array implementation."
+  ],
+  "examples": [
+    {
+      "description": "Detect a vector outlier",
+      "input": "TF = isoutlier([1;2;100;4;5])"
+    },
+    {
+      "description": "Return thresholds",
+      "input": "[TF,L,U,C] = isoutlier(A,\"quartiles\")"
+    }
+  ],
+  "links": [
+    { "label": "filloutliers", "url": "./filloutliers" },
+    { "label": "fillmissing", "url": "./fillmissing" }
+  ]
+}

@@ -1,0 +1,86 @@
+{
+  "title": "loadobj",
+  "category": "oop/serialization",
+  "keywords": [
+    "loadobj",
+    "saveobj",
+    "object serialization",
+    "mat",
+    "classdef"
+  ],
+  "summary": "Restore an object payload produced during MAT-file loading.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Object restoration is host-side metadata and property construction. Loaded values start CPU-resident like other `load` results."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::object_serialization::tests",
+    "integration": "crates/runmat-vm/tests/functions.rs::object_saveobj_loadobj_script_surface"
+  },
+  "description": "`loadobj(a)` restores an object from a serialized object envelope. The `load` builtin calls this path automatically for objects saved by RunMat. When the saved class registers a static `loadobj` method, RunMat dispatches to it with the saved payload.",
+  "behaviors": [
+    "The public signature is `b = loadobj(a)`.",
+    "RunMat recognizes object envelopes written by `save` and restores their payloads recursively.",
+    "If the saved class registers `Class.loadobj`, that method receives the restored payload and its return value becomes the loaded variable.",
+    "If no registered `loadobj` method exists and the payload is a scalar struct, RunMat reconstructs an object with the saved class name and payload fields as properties.",
+    "Plain non-envelope inputs pass through recursive struct/cell restoration unchanged.",
+    "Recursion is bounded and reports `RunMat:ObjectSerialization:RecursionLimit` for cyclic or excessively nested payloads."
+  ],
+  "examples": [
+    {
+      "description": "Load an object from a MAT-file",
+      "input": "save('object_state.mat', 'obj');\nclear obj;\nload('object_state.mat')"
+    },
+    {
+      "description": "Use class-specific static restoration",
+      "input": "payload = saveobj(obj);\nrestored = classref('MyClass').loadobj(payload)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `load` call `loadobj` automatically?",
+      "answer": "Yes for object envelopes written by RunMat. `load` restores nested object payloads and calls registered static `Class.loadobj` methods when available."
+    },
+    {
+      "question": "What happens without a class-specific `loadobj` method?",
+      "answer": "RunMat reconstructs a value object with the saved class name and property struct fields. If the saved payload was not a struct, the payload itself is returned."
+    },
+    {
+      "question": "Does this support arbitrary MATLAB object MAT-files?",
+      "answer": "No. This support covers RunMat's own Level-5 object envelope and runtime object model. MATLAB v7.3/HDF5 class storage, object arrays, listener state, and handle alias preservation remain unsupported."
+    }
+  ],
+  "links": [
+    {
+      "label": "saveobj",
+      "url": "./saveobj"
+    },
+    {
+      "label": "load",
+      "url": "./load"
+    },
+    {
+      "label": "classref",
+      "url": "./classref"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/object_serialization.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/object_serialization.rs"
+  },
+  "gpu_residency": "`loadobj` creates host values. Downstream acceleration may later promote numeric properties through the usual RunMat Accelerate paths.",
+  "gpu_behavior": [
+    "`loadobj` does not launch provider kernels.",
+    "Loaded object properties are CPU-resident after MAT-file loading."
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "title": "softmaxLayer",
+  "category": "deep_learning",
+  "keywords": ["softmaxLayer", "deep learning", "softmax"],
+  "summary": "Create a softmax layer compatibility object.",
+  "description": "`softmaxLayer` creates metadata for softmax layers.",
+  "behaviors": ["Common layer name-value options are stored as properties."],
+  "examples": [
+    {
+      "description": "Create Softmax",
+      "input": "layer = softmaxLayer('Name', 'prob')",
+      "output": "Softmax layer compatibility object."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "layer = softmaxLayer\nlayer = softmaxLayer(Name, Value)",
+      "output": "Layer compatibility object."
+    }
+  },
+  "gpu_residency": "Layer construction is host metadata work and has no provider kernel."
+}

@@ -1,0 +1,108 @@
+{
+  "title": "perms",
+  "category": "array/creation",
+  "keywords": [
+    "perms",
+    "permutation",
+    "combinatorics",
+    "vector"
+  ],
+  "summary": "Return all permutations of a vector as rows.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "RunMat gathers gpuArray inputs and materializes the factorial-size permutation matrix on the host."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::creation::perms::tests",
+    "integration": "builtins::array::creation::perms::tests::gpu_inputs_gather_to_host_before_permuting"
+  },
+  "description": "`P = perms(v)` returns every permutation of the elements in vector `v`, one permutation per row. RunMat follows MATLAB's reverse lexicographic row order and preserves supported vector container classes.",
+  "behaviors": [
+    "`perms(v)` accepts row vectors, column vectors, scalars, and empty vectors.",
+    "The output has `factorial(numel(v))` rows and `numel(v)` columns.",
+    "Rows are emitted in MATLAB-compatible reverse lexicographic permutation order relative to the original element positions.",
+    "Duplicate input values are permuted by position and are not deduplicated.",
+    "Dense numeric tensors preserve their RunMat dtype metadata; logical, character, string-array, and cell-array vectors return matching container types.",
+    "Scalar numeric, logical, and string inputs return the scalar value unchanged.",
+    "Complex numeric vectors are permuted positionally and preserve their complex values.",
+    "Inputs that are not vectors, unsupported object-like values, sparse tensors, and outputs beyond RunMat's materialization limit raise stable errors."
+  ],
+  "examples": [
+    {
+      "description": "Permute a numeric vector",
+      "input": "P = perms([1 2 3])",
+      "output": "P =\n     3     2     1\n     3     1     2\n     2     3     1\n     2     1     3\n     1     3     2\n     1     2     3"
+    },
+    {
+      "description": "Permute characters",
+      "input": "P = perms('abc')",
+      "output": "P =\n    'cba'\n    'cab'\n    'bca'\n    'bac'\n    'acb'\n    'abc'"
+    },
+    {
+      "description": "Duplicate values are retained",
+      "input": "P = perms([1 1 2])",
+      "output": "% P has six rows; duplicate rows are preserved."
+    },
+    {
+      "description": "Work with an empty vector",
+      "input": "P = perms([])",
+      "output": "% P is a 1-by-0 empty double array."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why can `perms` error for long vectors?",
+      "answer": "`perms` materializes `factorial(numel(v)) * numel(v)` elements. RunMat rejects outputs beyond its configured materialization limit instead of exhausting memory."
+    },
+    {
+      "question": "Does `perms` remove duplicate rows?",
+      "answer": "No. Like MATLAB, values are permuted by position. Repeated input values can therefore produce repeated rows."
+    },
+    {
+      "question": "Can `perms` run on gpuArray inputs?",
+      "answer": "RunMat accepts gpuArray inputs by gathering them to the host before constructing the output. The result is a host array because the output is factorial-size and not fusion-friendly."
+    }
+  ],
+  "links": [
+    {
+      "label": "randperm",
+      "url": "./randperm"
+    },
+    {
+      "label": "nchoosek",
+      "url": "./nchoosek"
+    },
+    {
+      "label": "factorial",
+      "url": "./factorial"
+    },
+    {
+      "label": "ndgrid",
+      "url": "./ndgrid"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/creation/perms.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/perms.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "P = perms(v)"
+    },
+    "points": [
+      "`v` must be a scalar, row vector, or column vector.",
+      "`P` has one row for each positional permutation of `v`."
+    ]
+  }
+}

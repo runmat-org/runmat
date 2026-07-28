@@ -201,6 +201,11 @@ fn im2uint8_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
             .iter()
             .map(|&value| common::clamp_round(value * 255.0 / 65535.0, 255.0))
             .collect(),
+        NumericDType::U32 => tensor
+            .data
+            .iter()
+            .map(|&value| common::clamp_round(value / (u32::MAX as f64) * 255.0, 255.0))
+            .collect(),
         NumericDType::F32 | NumericDType::F64 => tensor
             .data
             .iter()

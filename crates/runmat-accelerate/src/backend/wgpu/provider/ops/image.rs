@@ -183,31 +183,6 @@ impl WgpuProvider {
         let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
             * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
 
-        {
-            let mut enc =
-                self.device_ref()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-imfilter-noop"),
-                    });
-            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("runmat-imfilter-noop-pass"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&self.pipelines.imfilter.pipeline);
-            drop(pass);
-            self.submit(enc);
-        }
-
-        self.device_ref().poll(wgpu::Maintain::Poll);
-        {
-            let enc = self
-                .device_ref()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("runmat-imfilter-flush-gap"),
-                });
-            self.submit(enc);
-        }
-
         let mut offset = 0usize;
         while offset < output_len {
             let remaining = output_len - offset;

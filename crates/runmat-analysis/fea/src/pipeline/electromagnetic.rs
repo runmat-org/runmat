@@ -88,7 +88,7 @@ pub fn run_electromagnetic_with_options(
         Some(1),
         Some(5),
     );
-    let mut summary = assemble_linear_system(model, options.prep_context.clone(), None, None);
+    let mut summary = assemble_linear_system(model, options.prep_context.clone(), None, None, None);
     emit_phase(
         "fea.run_electromagnetic",
         FeaProgressPhase::ModelAssembly,
@@ -520,6 +520,7 @@ pub fn run_electromagnetic_with_options(
         dof_count: node_count,
         constrained: constrained.clone(),
         stiffness_dense: None,
+        stiffness_csr: None,
         stiffness_diag,
         stiffness_upper,
         mass_diag: vec![1.0; node_count],
@@ -2635,6 +2636,7 @@ impl MaxwellEdgeTopology {
             dof_count: edge_count,
             constrained,
             stiffness_dense: None,
+            stiffness_csr: None,
             stiffness_diag,
             stiffness_upper,
             mass_diag,
@@ -3554,7 +3556,7 @@ mod tests {
                 topology_region_mesh_variance: 0.4,
                 topology_triangle_family_ratio: 0.2,
                 topology_quad_family_ratio: 0.3,
-                topology_tet_family_ratio: 0.3,
+                topology_tetrahedron_family_ratio: 0.3,
                 topology_hex_family_ratio: 0.2,
                 coordinate_span_x_m: 2.4,
                 coordinate_span_y_m: 0.6,
@@ -3616,6 +3618,7 @@ mod tests {
             }),
             None,
             None,
+            None,
         );
         let topology = MaxwellEdgeTopology::from_assembly_or_line(
             &summary,
@@ -3628,9 +3631,9 @@ mod tests {
             topology.basis,
             MaxwellEdgeTopologyBasis::PrepReferenceVectorElement
         );
-        assert_eq!(topology.edge_count(), 7);
-        assert_eq!(topology.oriented_edge_count(), 7);
-        assert_eq!(topology.vector_basis_dimension_count, 7);
+        assert_eq!(topology.edge_count(), 5);
+        assert_eq!(topology.oriented_edge_count(), 5);
+        assert_eq!(topology.vector_basis_dimension_count, 5);
         assert_eq!(topology.incidence_element_count(), 2);
         assert_eq!(topology.incidence_orientation_count(), 6);
         assert_eq!(topology.incidence_pair_count(), 6);
@@ -3655,6 +3658,7 @@ mod tests {
             dof_count: 5,
             constrained: vec![true, false, false, false, true],
             stiffness_dense: None,
+            stiffness_csr: None,
             stiffness_diag: vec![10.0, 20.0, 30.0, 20.0, 10.0],
             stiffness_upper: vec![1.0, 1.0, 1.0, 1.0],
             mass_diag: vec![1.0; 5],

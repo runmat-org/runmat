@@ -117,7 +117,7 @@ The WASM bindings serialize errors into structured JavaScript payloads instead o
 | `callstack` | Runtime call-stack lines or frame function names. |
 | `callstackElided` | Number of elided runtime frames. |
 
-Initialization failures are separate JavaScript `Error` values with codes such as `InvalidOptions`, `SnapshotResolution`, `FilesystemProvider`, and `SessionCreation`.
+Initialization failures are separate JavaScript `Error` values with codes such as `InvalidOptions`, `FilesystemProvider`, and `SessionCreation`.
 
 ## Boundaries
 

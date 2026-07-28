@@ -1,0 +1,87 @@
+{
+  "title": "perfcurve",
+  "category": "stats/ml",
+  "keywords": [
+    "perfcurve",
+    "roc",
+    "auc",
+    "classification",
+    "statistics",
+    "machine learning"
+  ],
+  "summary": "Compute classifier performance curves and AUC values.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": true,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "gpuArray inputs are gathered to host. Label handling, threshold sweeps, and AUC calculation run on CPU."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::ml::perfcurve::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`perfcurve(labels,scores,posclass)` treats `posclass` as the positive class, all other nonmissing classes as negative classes, and returns ROC false-positive-rate values. `[X,Y,T,AUC,OPTROCPT,SUBY,SUBYNAMES] = perfcurve(...)` returns the Y criterion, thresholds, trapezoidal AUC, optimal ROC point, per-negative-subclass Y values, and subclass labels as a cell array.",
+  "behaviors": [
+    "Labels may be numeric, logical, string, character rows, categorical values, or cell strings. Text label families can be mixed between string, char, cell-string, and categorical inputs.",
+    "`scores` must be a numeric vector with one score per label. Score matrices for class-column inference are rejected explicitly until the classifier object/class-order surface is available.",
+    "Rows with missing labels, zero weights, or `NaN` scores are omitted by default. `\"ProcessNaN\",\"addtofalse\"` keeps `NaN` scores: positive-class `NaN` scores are counted as false negatives and negative-class `NaN` scores as false positives at every threshold.",
+    "Default thresholds include an initial reject-all point whose threshold duplicates the highest score, followed by each unique finite score in descending order. `\"TVals\",t` uses explicit thresholds and cannot be combined with `\"XVals\"`.",
+    "`\"XCrit\"` and `\"YCrit\"` support common criteria: `\"fpr\"`, `\"tpr\"`/`\"sens\"`/`\"reca\"`, `\"tnr\"`/`\"spec\"`, `\"fnr\"`/`\"miss\"`, `\"ppv\"`/`\"prec\"`, `\"npv\"`, `\"accu\"`, `\"tp\"`, `\"fn\"`, `\"fp\"`, `\"tn\"`, `\"tp+fp\"`, `\"rpp\"`, `\"rnp\"`, and `\"ecost\"`.",
+    "`\"NegClass\",labels` restricts the negative class set. `SUBY` contains one Y-criterion column per selected negative subclass and `SUBYNAMES` returns the corresponding labels as an `n`-by-1 cell array.",
+    "`\"Weights\",w` applies nonnegative observation weights. `\"Prior\"` accepts `\"empirical\"`, `\"uniform\"`, or a two-element numeric positive/negative prior vector and rescales class weights before the curve is computed.",
+    "`\"Cost\",C` accepts a nonnegative 2-by-2 cost matrix and is used for `\"ecost\"` and when choosing `OPTROCPT` for standard ROC curves. `OPTROCPT` is `[NaN NaN]` for non-ROC criteria.",
+    "`\"XVals\",x` returns curve values at requested X positions and cannot be combined with `\"TVals\"`. `\"UseNearest\"` defaults to `true`; nearest mode returns the nearest actual X values in requested order, while `\"UseNearest\",false` sorts requested X values and linearly interpolates between finite X/Y points. AUC is computed over the full curve interval covered by `XVals`.",
+    "Confidence-bound and bootstrap modes such as `\"NBoot\"` are not implemented yet and fail with a dedicated unsupported-mode error rather than returning placeholder intervals."
+  ],
+  "examples": [
+    {
+      "description": "Compute a basic ROC curve and AUC",
+      "input": "labels = [1; 0; 1; 0];\nscores = [0.9; 0.8; 0.4; 0.1];\n[X,Y,T,AUC] = perfcurve(labels, scores, 1)",
+      "output": "AUC is 0.75 for this ranking."
+    },
+    {
+      "description": "Compute precision-recall values at explicit thresholds",
+      "input": "[R,P] = perfcurve(labels, scores, 1, \"XCrit\", \"reca\", \"YCrit\", \"prec\", \"TVals\", [0.8 0.4])"
+    },
+    {
+      "description": "Restrict negative classes",
+      "input": "[X,Y,T,AUC,opt,suby,names] = perfcurve(labels, scores, \"hit\", \"NegClass\", \"miss\")"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does perfcurve train a classifier?",
+      "answer": "No. It evaluates existing classifier scores against known labels. Train or evaluate a model separately and pass the score vector for the positive class."
+    },
+    {
+      "question": "Why are confidence intervals not returned?",
+      "answer": "RunMat currently implements deterministic curve, threshold, AUC, optimal-point, weighting, prior, cost, and subclass outputs. Bootstrap confidence-bound modes require a separate statistical resampling implementation and are rejected explicitly."
+    }
+  ],
+  "links": [
+    {
+      "label": "confusionmat",
+      "url": "./confusionmat"
+    },
+    {
+      "label": "classify",
+      "url": "./classify"
+    },
+    {
+      "label": "fitctree",
+      "url": "./fitctree"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/ml/perfcurve.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/perfcurve.rs"
+  }
+}

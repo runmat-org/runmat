@@ -380,4 +380,71 @@ mod stress_tests {
         assert!(gpu_vertices.vertex_count > 0);
         assert_eq!(gpu_vertices.vertex_count, (lod_x_len * lod_y_len) as usize);
     }
+
+    #[test]
+    fn gpu_surface_layout_matches_non_square_cpu_surface_contract() {
+        let Some((device, queue)) = maybe_device() else {
+            return;
+        };
+        let x_axis = [10.0f32, 20.0, 30.0];
+        let y_axis = [1.0f32, 2.0];
+        let z_data = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let z_buffer = Arc::new(
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("surface-layout-test-z"),
+                contents: bytemuck::cast_slice(&z_data),
+                usage: wgpu::BufferUsages::STORAGE,
+            }),
+        );
+        let color_table = [[0.0, 0.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0]];
+        let packed = pack_surface_vertices(
+            &device,
+            &queue,
+            &SurfaceGpuInputs {
+                x_axis: SurfaceAxis::F32(&x_axis),
+                y_axis: SurfaceAxis::F32(&y_axis),
+                z_buffer,
+                color_table: &color_table,
+                x_len: 3,
+                y_len: 2,
+                scalar: ScalarType::F32,
+            },
+            &SurfaceGpuParams {
+                min_z: 1.0,
+                max_z: 6.0,
+                alpha: 1.0,
+                flatten_z: false,
+                x_stride: 1,
+                y_stride: 1,
+                lod_x_len: 3,
+                lod_y_len: 2,
+            },
+        )
+        .expect("surface pack should succeed");
+
+        let byte_len = packed.vertex_count * std::mem::size_of::<Vertex>();
+        let bytes =
+            crate::gpu::util::copy_readback_bytes(&device, &queue, &packed.buffer, byte_len)
+                .block_on()
+                .expect("surface vertices should read back");
+        let vertices = bytes
+            .chunks_exact(std::mem::size_of::<Vertex>())
+            .map(bytemuck::pod_read_unaligned)
+            .collect::<Vec<Vertex>>();
+        let expected = [
+            [10.0, 1.0, 1.0],
+            [10.0, 2.0, 2.0],
+            [20.0, 1.0, 3.0],
+            [20.0, 2.0, 4.0],
+            [30.0, 1.0, 5.0],
+            [30.0, 2.0, 6.0],
+        ];
+        assert_eq!(
+            vertices
+                .iter()
+                .map(|vertex| vertex.position)
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
 }

@@ -1,0 +1,83 @@
+{
+  "title": "gobjects",
+  "category": "plotting",
+  "keywords": [
+    "gobjects",
+    "graphics objects",
+    "graphics handles",
+    "handle preallocation",
+    "plotting"
+  ],
+  "summary": "Create an array of invalid graphics-handle placeholders.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`gobjects` allocates host-side graphics handle placeholders and does not execute numeric GPU kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::gobjects::tests",
+    "vm": "runmat-vm plotting::gobjects_preallocates_assignable_graphics_handle_arrays"
+  },
+  "description": "`gobjects` creates arrays suitable for preallocating graphics handles. RunMat represents graphics handles as numeric values, so placeholders are stored as invalid numeric handle sentinels that can later be overwritten by real plotting handles.",
+  "behaviors": [
+    "`gobjects()` returns a 1-by-1 placeholder handle array.",
+    "`gobjects(n)` returns an n-by-n placeholder handle array.",
+    "`gobjects(m,n,...)` returns a placeholder handle array with the requested dimensions.",
+    "`gobjects([m n ...])` accepts a numeric size vector.",
+    "Placeholder entries are not valid handles: `isgraphics` and `ishandle` return false for them.",
+    "Assigned plotting handles retain normal numeric-handle fast paths and can be validated elementwise through `isgraphics` or `ishandle`."
+  ],
+  "examples": [
+    {
+      "description": "Preallocate an array and fill one graphics handle",
+      "input": "h = gobjects(2,1);\nh(1) = plot(1:3);\nisgraphics(h)",
+      "output": "ans = [true; false]"
+    },
+    {
+      "description": "Use a size vector",
+      "input": "h = gobjects([1 3]);\nnumel(h)",
+      "output": "ans = 3"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Are `gobjects` placeholders valid graphics handles?",
+      "answer": "No. They are invalid placeholders used for preallocation until a real graphics handle is assigned into the array."
+    },
+    {
+      "question": "Does `gobjects` create figures or axes?",
+      "answer": "No. It only allocates placeholder handle values; plotting functions create the actual graphics objects."
+    }
+  ],
+  "links": [
+    {
+      "label": "isgraphics",
+      "url": "./isgraphics"
+    },
+    {
+      "label": "ishandle",
+      "url": "./ishandle"
+    },
+    {
+      "label": "plot",
+      "url": "./plot"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/gobjects.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/gobjects.rs"
+  },
+  "gpu_residency": "`gobjects` always returns host-side placeholder handles because graphics state is host-managed.",
+  "gpu_behavior": [
+    "`gobjects` performs no provider dispatch and does not gather or upload GPU arrays."
+  ]
+}

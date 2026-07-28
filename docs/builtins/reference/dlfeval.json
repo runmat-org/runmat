@@ -1,0 +1,28 @@
+{
+  "title": "dlfeval",
+  "category": "deep_learning",
+  "keywords": ["dlfeval", "deep learning", "automatic differentiation", "function handle"],
+  "summary": "Evaluate a function handle in Deep Learning compatibility context.",
+  "description": "`dlfeval(fun,args...)` invokes a function handle through RunMat's function-handle dispatch and forwards requested outputs.",
+  "behaviors": [
+    "`fun` must be a function handle value, including named handles, method handles, bound handles, and closures.",
+    "Requested output count is preserved, so bracketed multi-output calls forward to the invoked function.",
+    "A bounded automatic-differentiation tape is installed for the call. Host `dlarray` inputs, supported `dlnetwork` learnables, dlarray arithmetic, scalar sums, and supported `forward` layer chains can be differentiated with `dlgradient` inside `fun`.",
+    "Text function names and callable objects are rejected by `dlfeval`; use `feval` for those RunMat extension forms."
+  ],
+  "examples": [
+    {
+      "description": "Evaluate Function",
+      "input": "[loss,gradients] = dlfeval(@modelLoss, net, X, T)",
+      "output": "Outputs returned by `modelLoss`, including traced losses and gradients from `dlgradient`."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported form",
+      "input": "varargout = dlfeval(fun, args...)",
+      "output": "Outputs returned by `fun`."
+    }
+  },
+  "gpu_residency": "`dlfeval` preserves callable dispatch behavior. GPU-backed `dlarray` values are rejected for automatic differentiation with an explicit provider-gap error because provider-resident tape kernels are not implemented yet."
+}

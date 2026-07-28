@@ -1,0 +1,70 @@
+{
+  "title": "movstd",
+  "category": "math/reduction",
+  "keywords": [
+    "movstd",
+    "moving",
+    "window",
+    "standard deviation",
+    "std",
+    "omitnan"
+  ],
+  "summary": "Compute moving standard deviations in MATLAB and RunMat.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": true,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Real dense gpuArray inputs use provider-resident count-window reductions for scalar or [kb kf] windows, explicit dimensions, omit/include NaN modes, shrink/discard/fill endpoints, and sample/population normalization for movstd/movvar. SamplePoints and unsupported provider backends fall back to gather-once host evaluation and re-upload when an acceleration provider is active; complex GPU moving-window support remains tracked outside this resident real-dense fast path."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::reduction::moving::tests",
+    "integration": null
+  },
+  "description": "`movstd(A,k)` computes standard deviations over a sliding window of length `k` along the first non-singleton dimension.",
+  "behaviors": [
+    "`k` may be a positive scalar window length or a two-element `[kb kf]` backward/forward window.",
+    "`movstd(A,k,0)` uses sample normalization by `N-1`, except singleton windows divide by `N`; this is the default.",
+    "`movstd(A,k,1)` uses population normalization by `N`.",
+    "Pass an explicit normalization flag before `dim`, for example `movstd(A,k,0,2)`, to move along a chosen dimension.",
+    "`'includenan'` is the default; `'omitnan'` and `'omitmissing'` skip NaN values inside each window.",
+    "`'Endpoints'` supports `'shrink'` (default), `'discard'`, `'fill'`, and numeric scalar fill values.",
+    "`'SamplePoints', sp` uses a strictly increasing numeric point vector for irregular moving windows. With sample points, RunMat currently supports shrink endpoints.",
+    "This implementation covers numeric, logical, complex, and gpuArray inputs; table/timetable `DataVariables` forms are tracked separately."
+  ],
+  "examples": [
+    {
+      "description": "Moving standard deviation across columns",
+      "input": "A = [4 8 6];\nM = movstd(A,3)",
+      "output": "M = [2.8284 2.0000 1.4142]"
+    }
+  ],
+  "links": [
+    {
+      "label": "std",
+      "url": "./std"
+    },
+    {
+      "label": "movvar",
+      "url": "./movvar"
+    },
+    {
+      "label": "movmean",
+      "url": "./movmean"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/reduction/moving.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/moving.rs"
+  }
+}

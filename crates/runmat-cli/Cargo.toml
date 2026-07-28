@@ -36,6 +36,7 @@ rustyline = "14.0"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 owo-colors = "4.3.0"
 supports-color = "3.0.2"
+libc = "0.2"
 
 # Ensure vendored OpenSSL can be enabled for cross targets (feature unification)
 openssl = { version = "0.10", optional = true }
@@ -50,7 +51,6 @@ runmat-vm = { version = "=0.5.6", path = "../runmat-vm" }
 runmat-runtime = { version = "=0.5.6", path = "../runmat-runtime" }
 runmat-gc = { version = "=0.5.6", path = "../runmat-gc" }
 runmat-builtins = { version = "=0.5.6", path = "../runmat-builtins" }
-runmat-snapshot = { version = "=0.5.6", path = "../runmat-snapshot" }
 runmat-plot = { version = "=0.5.6", path = "../runmat-plot" }
 runmat-accelerate = { version = "=0.5.6", path = "../runmat-accelerate" }
 runmat-accelerate-api = { version = "=0.5.6", path = "../runmat-accelerate-api" }
@@ -58,6 +58,7 @@ runmat-config = { version = "=0.5.6", path = "../runmat-config", features = ["ac
 runmat-time = { version = "=0.5.6", path = "../runmat-time" }
 runmat-filesystem = { version = "=0.5.6", path = "../runmat-filesystem" }
 runmat-telemetry = { version = "=0.5.6", path = "../runmat-telemetry" }
+runmat-static-analysis = { version = "=0.5.6", path = "../runmat-static-analysis" }
 runmat-server-client = { workspace = true }
 
 [features]

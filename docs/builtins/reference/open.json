@@ -1,0 +1,103 @@
+{
+  "title": "open",
+  "category": "io/repl_fs",
+  "keywords": [
+    "open",
+    "file",
+    "MAT-file",
+    "viewer",
+    "extension handler"
+  ],
+  "summary": "Open a file or variable using MATLAB-compatible dispatch.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-side file and workspace dispatch. gpuArray filename inputs are gathered before lookup."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::repl_fs::open::tests"
+  },
+  "description": "`open(name)` resolves a workspace variable or file name using RunMat's MATLAB-style search path. MAT-files are loaded and returned as a struct, RunMat figure scene payloads return a figure handle, custom `open<extension>` handlers are invoked when available, and ordinary editor/viewer file types succeed with an empty result in noninteractive hosts.",
+  "behaviors": [
+    "`open name` and `A = open(name)` accept a string scalar or row character vector.",
+    "Workspace variable names are accepted as editor-style opens and return an empty 0-by-0 array.",
+    "Names without an extension are searched on the current RunMat path using MATLAB-like file extensions.",
+    "Names with an explicit extension are first searched exactly on the current RunMat path so custom extensions such as `.log` can dispatch to `openlog`.",
+    "MAT-files are decoded through the same implementation as `load` and return a scalar struct with one field per variable.",
+    "`.fig` files first try RunMat figure-scene import and return a numeric figure handle when successful; otherwise RunMat decodes them as MAT-file containers until full MATLAB figure reconstruction is available.",
+    "For non-MAT files, RunMat looks for a semantic handler named `open<extension>` and passes the resolved file path as a string.",
+    "Known text, script, project/model, document, toolbox/install, executable, and spreadsheet file extensions open as no-op viewer/editor requests and return an empty 0-by-0 array.",
+    "Requesting more than one output raises `RunMat:open:TooManyOutputs`.",
+    "Unsupported file types without a handler raise `RunMat:open:UnsupportedFileType`."
+  ],
+  "examples": [
+    {
+      "description": "Load a MAT-file through open",
+      "input": "S = open('results.mat')",
+      "output": "% S is a struct containing the variables stored in results.mat."
+    },
+    {
+      "description": "Open a script from the current path",
+      "input": "open setup",
+      "output": "% setup.m is resolved and treated as an editor/viewer open."
+    },
+    {
+      "description": "Open a figure scene",
+      "input": "h = open('plot.fig')",
+      "output": "% h is a figure handle when plot.fig contains a RunMat figure scene payload."
+    },
+    {
+      "description": "Dispatch to a custom extension handler",
+      "input": "function out = openabc(filename)\n    out = fileread(filename);\nend\nout = open('payload.abc')",
+      "output": "% openabc receives the resolved filename and returns its output."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `open` launch a desktop editor or external application?",
+      "answer": "No. RunMat's runtime implementation is host-safe and noninteractive. It resolves the target and performs data-returning work where possible; viewer/editor opens complete as no-ops."
+    },
+    {
+      "question": "How is `open('file.mat')` different from `load('file.mat')`?",
+      "answer": "For MAT-files, `open` returns the same struct-style data that `load` returns when called with one output."
+    },
+    {
+      "question": "Can user code customize how an extension opens?",
+      "answer": "Yes. Define a function named `open` followed by the lowercase extension, for example `openabc` for `.abc` files. RunMat calls that handler with the resolved filename."
+    }
+  ],
+  "links": [
+    {
+      "label": "load",
+      "url": "./load"
+    },
+    {
+      "label": "which",
+      "url": "./which"
+    },
+    {
+      "label": "exist",
+      "url": "./exist"
+    },
+    {
+      "label": "run",
+      "url": "./run"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/open.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/open.rs"
+  },
+  "gpu_behavior": [
+    "`open` is an I/O dispatcher and does not participate in GPU fusion or provider-native execution."
+  ]
+}

@@ -11,6 +11,24 @@ Mid-Level IR (MIR) Analysis is the primary stage for dataflow reasoning and vali
 
 These facts approximate runtime values; they are not the runtime value representation itself. For the concrete `Value` type passed through the VM, builtins, session, GC, GPU, and host adapters, see [Runtime Values & Type Model](/docs/runtime/values).
 
+## Diagnostic identifiers
+
+RunMat diagnostic identifiers describe the subsystem and kind of failure.
+
+- Compiler diagnostics use `RM-<DOMAIN><NNNN>`. Current domains include `RES`
+  for name resolution, `CAT` for source-catalog construction, and `MIR` for MIR
+  validation. Numbers are stable within a domain and are not reused.
+- Runtime errors use MATLAB-compatible `RunMat:<operation>:<condition>`
+  identifiers because callers can inspect and catch them at execution time.
+- Optional static-analysis lints use the hierarchical `lint.<area>.<rule>`
+  namespace.
+
+For example, `RM-RES0001` means a callable could not be resolved from the
+statically known program and source catalog. `RM-RES0002` means a preceding
+runtime environment mutation prevents a sound static answer; it does not claim
+that the function is absent at execution time. `RM-CAT0001` means RunMat could
+not construct the catalog that resolution depends on.
+
 ## MIR Analysis Architecture
 
 The analysis system operates on the `MirAssembly` structure, iterating through `MirBody` objects. The core of the analysis is a fixed-point dataflow engine that propagates "facts" across the Control Flow Graph (CFG).

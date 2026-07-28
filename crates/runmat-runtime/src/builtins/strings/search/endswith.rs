@@ -1,5 +1,6 @@
 //! MATLAB-compatible `endsWith` builtin for RunMat.
 
+use regex::RegexBuilder;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
@@ -17,6 +18,7 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 
 use super::text_utils::{logical_result, parse_ignore_case, TextCollection, TextElement};
+use crate::builtins::strings::core::compat::pattern_regex;
 use crate::builtins::strings::type_resolvers::logical_text_match_type;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::search::endswith")]
@@ -267,10 +269,40 @@ async fn endswith_builtin(
     let subject = TextCollection::from_subject(BUILTIN_NAME, text).map_err(|err| {
         endswith_error_with_message(err.message().to_string(), &ENDSWITH_ERROR_INVALID_INPUT)
     })?;
+    if matches!(pattern, Value::Object(_)) {
+        let regex = pattern_regex(&pattern, BUILTIN_NAME).map_err(|err| {
+            endswith_error_with_message(err.message().to_string(), &ENDSWITH_ERROR_INVALID_INPUT)
+        })?;
+        return evaluate_endswith_regex(&subject, &regex, ignore_case);
+    }
     let patterns = TextCollection::from_pattern(BUILTIN_NAME, pattern).map_err(|err| {
         endswith_error_with_message(err.message().to_string(), &ENDSWITH_ERROR_INVALID_INPUT)
     })?;
     evaluate_endswith(&subject, &patterns, ignore_case)
+}
+
+fn evaluate_endswith_regex(
+    subject: &TextCollection,
+    pattern: &str,
+    ignore_case: bool,
+) -> BuiltinResult<Value> {
+    let regex = RegexBuilder::new(&format!("(?:{pattern})$"))
+        .case_insensitive(ignore_case)
+        .build()
+        .map_err(|err| {
+            endswith_error_with_message(err.to_string(), &ENDSWITH_ERROR_INVALID_INPUT)
+        })?;
+    let mut data = Vec::with_capacity(subject.elements.len());
+    for element in &subject.elements {
+        let value = match element {
+            TextElement::Missing => false,
+            TextElement::Text(text) => regex.is_match(text),
+        };
+        data.push(u8::from(value));
+    }
+    logical_result(BUILTIN_NAME, data, subject.shape.clone()).map_err(|err| {
+        endswith_error_with_message(err.message().to_string(), &ENDSWITH_ERROR_INTERNAL)
+    })
 }
 
 fn evaluate_endswith(
@@ -753,6 +785,14 @@ pub(crate) mod tests {
         )
         .expect("endsWith");
         assert_eq!(result, Value::Bool(false));
+    }
+
+    #[test]
+    fn endswith_accepts_pattern_object() {
+        let pattern = crate::builtins::strings::core::compat::pattern_object(r"\d+");
+        let result =
+            run_endswith(Value::String("run42".into()), pattern, Vec::new()).expect("endsWith");
+        assert_eq!(result, Value::Bool(true));
     }
 
     #[test]

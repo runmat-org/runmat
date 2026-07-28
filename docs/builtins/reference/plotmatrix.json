@@ -1,0 +1,84 @@
+{
+  "title": "plotmatrix",
+  "category": "plotting",
+  "keywords": [
+    "plotmatrix",
+    "scatter",
+    "matrix plot",
+    "plotting",
+    "statistics"
+  ],
+  "summary": "Create a scatter plot matrix from matrix columns.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`plotmatrix` is a rendering sink. MATLAB accepts gpuArray inputs for this builtin but executes on the CPU. RunMat gathers input matrices when needed, slices columns on the host, and delegates rendering to existing `scatter` and `histogram` plotting paths."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::plotmatrix::tests",
+    "integration": "crates/runmat-vm/tests/plotting.rs"
+  },
+  "description": "`plotmatrix` builds a grid of axes where each off-diagonal subplot compares one variable column against another. The one-input form also places histograms on the diagonal. Matrix rows are observations and columns are variables; vector inputs are treated as one variable.",
+  "behaviors": [
+    "`plotmatrix(X)` creates an `n` by `n` grid for the `n` variables in `X`, with diagonal histograms and off-diagonal scatter plots.",
+    "`plotmatrix(X,LineSpec)` applies the line specification to off-diagonal scatter plots while retaining diagonal histograms.",
+    "`plotmatrix(X,Y)` creates an `n` by `m` rectangular grid for `n` columns in `X` and `m` columns in `Y`; diagonal histogram outputs are empty for this form.",
+    "`plotmatrix(X,Y,lineSpec)` applies the line specification to scatter plots in the matrix.",
+    "`plotmatrix(ax,...)` uses the supplied axes as the compatibility big-axes target.",
+    "`[S,AX,BigAx,H,HAx] = plotmatrix(X)` returns the scatter handle matrix, axes handle matrix, current big-axes handle, diagonal histogram handles, and diagonal histogram axes handles.",
+    "Inputs must be numeric and must have the same number of observations when both `X` and `Y` are supplied.",
+    "Diagonal histograms are created through the same `histogram` builtin path as direct histogram calls."
+  ],
+  "examples": [
+    {
+      "description": "Plot pairwise relationships between columns",
+      "input": "X = [1 10; 2 20; 3 30; 4 40];\nS = plotmatrix(X);"
+    },
+    {
+      "description": "Compare X columns against a separate response column",
+      "input": "X = [1 10; 2 20; 3 30];\nY = [4; 5; 6];\n[S,AX] = plotmatrix(X, Y, 'r+');"
+    },
+    {
+      "description": "Inspect diagonal histogram handles",
+      "input": "X = [1 10; 2 20; 3 30];\n[S,AX,BigAx,H,HAx] = plotmatrix(X);\nnumel(H)",
+      "output": "ans =\n     2"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does plotmatrix preserve gpuArray residency?",
+      "answer": "No. `plotmatrix` is a CPU-rendered plotting sink, matching MATLAB's documented gpuArray behavior for this function. Individual scatter/histogram rendering then follows the existing plotting paths."
+    },
+    {
+      "question": "What is BigAx in RunMat?",
+      "answer": "RunMat returns a valid axes handle and leaves it as `gca` so scripts can pass it to labeling/property helpers. The current renderer does not model MATLAB's invisible spanning axes as a distinct object."
+    }
+  ],
+  "links": [
+    {
+      "label": "scatter",
+      "url": "./scatter"
+    },
+    {
+      "label": "histogram",
+      "url": "./histogram"
+    },
+    {
+      "label": "subplot",
+      "url": "./subplot"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/plotmatrix.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/plotmatrix.rs"
+  }
+}

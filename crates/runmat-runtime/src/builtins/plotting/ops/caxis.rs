@@ -117,6 +117,7 @@ mod tests {
 
         let _ = caxis_builtin(vec![Value::Tensor(Tensor {
             data: vec![0.1, 0.9],
+            integer_data: None,
             shape: vec![1, 2],
             rows: 1,
             cols: 2,

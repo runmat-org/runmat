@@ -1,0 +1,61 @@
+{
+  "title": "bitshift",
+  "category": "logical/bit",
+  "keywords": ["bitshift", "bitwise", "shift", "integer"],
+  "summary": "Shift integer-valued scalars and arrays left or right by bit counts.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f32", "f64"],
+    "broadcasting": "matlab",
+    "notes": "GPU inputs gather to host for integer bit operations."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::logical::bit::integer::tests",
+    "integration": null
+  },
+  "description": "`bitshift(A, K)` shifts integer-valued input `A` left for positive `K` and right for negative `K`, using implicit expansion between `A` and `K`.",
+  "behaviors": [
+    "Accepts double integer-valued inputs, logical inputs, integer scalar values, integer-class tensors, and gatherable gpuArray tensors.",
+    "Positive shifts move bits left; negative shifts move bits right.",
+    "Shift magnitudes of 32 or more produce zero for the uint32 execution path.",
+    "Preserves uint8, uint16, and uint32 output class from the input being shifted.",
+    "Rejects fractional, infinite, NaN, complex, string, cell, and struct inputs."
+  ],
+  "examples": [
+    {
+      "description": "Left and right shifts",
+      "input": "bitshift(uint32(3), 2)\nbitshift(uint32(8), -1)",
+      "output": "ans = uint32\n  12\nans = uint32\n  4"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Can shift counts be arrays?",
+      "answer": "Yes. `A` and `K` are implicitly expanded against each other when their shapes are compatible."
+    }
+  ],
+  "links": [
+    {
+      "label": "bitand",
+      "url": "./bitand"
+    },
+    {
+      "label": "bitor",
+      "url": "./bitor"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/logical/bit/integer.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/bit/integer.rs"
+  },
+  "gpu_residency": "GPU inputs are gathered for host execution.",
+  "gpu_behavior": ["RunMat currently executes integer bitwise functions on the host."]
+}

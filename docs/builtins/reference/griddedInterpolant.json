@@ -1,0 +1,82 @@
+{
+  "title": "griddedInterpolant",
+  "category": "math/interpolation",
+  "keywords": [
+    "griddedInterpolant",
+    "interpolation",
+    "grid",
+    "linear",
+    "nearest",
+    "pchip",
+    "spline"
+  ],
+  "summary": "Create an object that interpolates real dense data on a rectilinear grid.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "matlab",
+    "notes": "griddedInterpolant stores host tensors and evaluates through the runtime object-indexing path."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "description": "`griddedInterpolant` constructs an interpolant object with `GridVectors`, `Values`, `Method`, and `ExtrapolationMethod` properties. Calling the object with parentheses evaluates the interpolant at query points.",
+  "behaviors": [
+    "`griddedInterpolant(V)` uses default grid vectors `1:size(V,dim)`.",
+    "`griddedInterpolant(x, v)` and `griddedInterpolant({x1,...,xn}, V)` use explicit compact grid vectors.",
+    "Full-grid construction with `griddedInterpolant(X1,...,Xn,V)` extracts compact grid vectors from monotone full grids.",
+    "Evaluation supports `F(xq)` for 1-D data, `F(xq1,...,xqn)` for matching-shape query arrays, `F(Xq)` for row-wise N-D query points, and `F({xg1,...,xgn})` for full query grids.",
+    "Linear, nearest, next, and previous methods are supported. PCHIP and spline methods are supported for 1-D grids. Cubic, makima, and N-D higher-order interpolation are reported as unsupported instead of approximated."
+  ],
+  "examples": [
+    {
+      "description": "Linear interpolation from explicit sample points",
+      "input": "F = griddedInterpolant([0 1 2], [0 10 40]);\nyq = F([0.5 1.5])",
+      "output": "yq = [5 25]"
+    },
+    {
+      "description": "Two-dimensional interpolation from grid vectors",
+      "input": "F = griddedInterpolant({[0 1], [0 2]}, [0 20; 10 30]);\nyq = F(0.5, 1)",
+      "output": "yq = 15"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "F = griddedInterpolant(V)\nF = griddedInterpolant(x, v)\nF = griddedInterpolant({x1, ..., xn}, V)\nF = griddedInterpolant(X1, ..., Xn, V)\nF = griddedInterpolant(___, method)\nF = griddedInterpolant(___, method, extrapolationMethod)\nVq = F(Xq)\nVq = F(xq1, ..., xqn)\nVq = F({xgq1, ..., xgqn})"
+    },
+    "points": [
+      "Grid vectors must be finite, strictly increasing, real single or double vectors with at least two points.",
+      "`Values` must be real single or double dense data whose leading dimensions match the grid lengths.",
+      "`method` may be `linear`, `nearest`, `next`, `previous`, `pchip`, or `spline`; `cubic` and `makima` are not implemented yet.",
+      "`extrapolationMethod` may be `linear`, `nearest`, `next`, `previous`, `pchip`, `spline`, or `none`; `cubic` and `makima` are not implemented yet.",
+      "Single-precision values produce single-precision tensor outputs; scalar double outputs are returned as numeric scalars."
+    ]
+  },
+  "links": [
+    {
+      "label": "interp1",
+      "url": "./interp1"
+    },
+    {
+      "label": "interp2",
+      "url": "./interp2"
+    },
+    {
+      "label": "pchip",
+      "url": "./pchip"
+    },
+    {
+      "label": "spline",
+      "url": "./spline"
+    }
+  ],
+  "source": {
+    "label": "Open an issue",
+    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+  }
+}

@@ -127,7 +127,6 @@ async fn execute_script_request(
     let mut engine = create_session(
         enable_jit,
         config.runtime.verbose,
-        config.runtime.snapshot_path.as_ref(),
         config,
         "Failed to create execution engine",
     )?;

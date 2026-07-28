@@ -510,7 +510,12 @@ fn eval_nearest(x: &[f64], y: &[f64], xq: f64, extrap: &Extrapolation) -> f64 {
     }
 }
 
-fn eval_pp_scalar(pp: &PiecewisePolynomial, series: usize, xq: f64, extrap: &Extrapolation) -> f64 {
+pub(super) fn eval_pp_scalar(
+    pp: &PiecewisePolynomial,
+    series: usize,
+    xq: f64,
+    extrap: &Extrapolation,
+) -> f64 {
     if !xq.is_finite() {
         return f64::NAN;
     }

@@ -1,0 +1,104 @@
+{
+  "title": "copyobj",
+  "category": "plotting",
+  "keywords": [
+    "copyobj",
+    "copy graphics object",
+    "graphics handle",
+    "axes",
+    "figure",
+    "plotting"
+  ],
+  "summary": "Copy plot-child graphics objects to an axes or figure parent.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`copyobj` clones host-managed graphics state and does not execute numeric GPU kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::copyobj::tests",
+    "vm": "runmat-vm plotting::copyobj_dispatches_plot_child_copies"
+  },
+  "description": "`copyobj` duplicates supported graphics objects and returns fresh graphics handles. RunMat currently supports plot-child object copies, including line, scatter, bar, stairs, stem, area, quiver, image, heatmap, binscatter, surface, patch, line3, scatter3, contour, fcontour, fsurf, constant-line, pie, and histogram-backed plot children.",
+  "behaviors": [
+    "`copyobj(h, parent)` copies each plot-child handle in `h` to an axes or figure parent.",
+    "When `parent` is an axes handle, copied objects are inserted into that axes.",
+    "When `parent` is a figure handle, copied objects are inserted into the figure's active axes.",
+    "A scalar parent is applied to every source handle; same-sized source and parent arrays copy each source into the corresponding parent; a scalar source can be copied into each parent in a parent array.",
+    "Handle arrays preserve the controlling input shape and receive fresh handle values.",
+    "RunMat validates the whole source/parent copy plan before mutating graphics state, so invalid handle arrays do not leave partial copies behind.",
+    "Copied plot children preserve their plotted geometry and readable/writable plot-child properties such as `Type`, `Parent`, data vectors, line styling, and display names.",
+    "Figure, axes, text, legend, ruler, and root-object deep copies are rejected with `RunMat:copyobj:InvalidArgument` rather than silently returning shallow placeholders."
+  ],
+  "examples": [
+    {
+      "description": "Copy a line to another axes",
+      "input": "h = plot(1:3, [1 4 9], 'DisplayName', 'source');\nax2 = subplot(1,2,2);\nh2 = copyobj(h, ax2);\nget(h2, 'Parent') == ax2",
+      "output": "ans = true"
+    },
+    {
+      "description": "Copy a handle array to the same parent",
+      "input": "h(1) = plot(1:3);\nh(2) = plot(3:-1:1);\nax2 = subplot(1,2,2);\nh2 = copyobj(h, ax2);\nsize(h2)",
+      "output": "ans = [1 2]"
+    },
+    {
+      "description": "Copy one object into two parent axes",
+      "input": "h = plot(1:3);\nax1 = subplot(1,2,1);\nax2 = subplot(1,2,2);\nh2 = copyobj(h, [ax1 ax2]);\nsize(h2)",
+      "output": "ans = [1 2]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `copyobj` copy figures or axes?",
+      "answer": "Not yet. This implementation covers plot-child graphics objects and reports a deterministic invalid-argument error for figure, axes, text, legend, ruler, and root deep-copy requests."
+    },
+    {
+      "question": "Does copying share mutable plot properties with the source?",
+      "answer": "No. The copied plot receives a fresh handle and independent plot state."
+    },
+    {
+      "question": "Does `copyobj` launch GPU kernels?",
+      "answer": "No. It operates on host-side graphics metadata. Plot geometry already stored in graphics state is cloned without provider dispatch."
+    }
+  ],
+  "links": [
+    {
+      "label": "plot",
+      "url": "./plot"
+    },
+    {
+      "label": "axes",
+      "url": "./axes"
+    },
+    {
+      "label": "isgraphics",
+      "url": "./isgraphics"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/copyobj.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/copyobj.rs"
+  },
+  "gpu_residency": "`copyobj` returns host-side numeric graphics handles. It does not gather, transform, or upload GPU arrays.",
+  "gpu_behavior": [
+    "`copyobj` performs no provider dispatch because graphics object copying is a host graphics-registry operation.",
+    "When copied plot elements were originally built from GPU-resident input data, the existing plot-state representation is cloned; no additional CPU/GPU transfer is initiated by `copyobj` itself."
+  ]
+}

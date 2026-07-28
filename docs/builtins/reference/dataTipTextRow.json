@@ -1,0 +1,90 @@
+{
+  "title": "dataTipTextRow",
+  "category": "plotting",
+  "keywords": [
+    "dataTipTextRow",
+    "data tip",
+    "datatip",
+    "data cursor",
+    "plotting",
+    "graphics"
+  ],
+  "summary": "Create a data-tip text row object for customizing plot data tips.",
+  "hero_image": null,
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`dataTipTextRow` constructs metadata. It stores the supplied value object as-is, including GPU-resident tensor handles, and does not gather numeric payloads."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::data_tip_text_row::tests",
+    "integration": "crates/runmat-vm/tests/plotting.rs"
+  },
+  "description": "`dataTipTextRow(label, value)` creates a MATLAB-compatible `matlab.graphics.datatip.DataTipTextRow` handle object with `Label`, `Value`, and `Format` properties. Use these rows with plot data-tip templates as RunMat's graphics template support expands.",
+  "behaviors": [
+    "`dataTipTextRow(label, value)` creates a handle-class row object and stores an empty `Format` property so the renderer or host can use its default formatting.",
+    "`dataTipTextRow(label, value, format)` stores the supplied display format string.",
+    "`label` and `format` accept character vectors, string scalars, and scalar string arrays.",
+    "`Value` is preserved without reinterpretation, so property names such as `'YData'`, numeric vectors, string values, function handles, and GPU-resident values remain available to downstream graphics code.",
+    "Returned rows support dot-property access and mutation for `Label`, `Value`, and `Format`; aliases refer to the same underlying handle object."
+  ],
+  "options": [
+    "`Label` is the displayed row label.",
+    "`Value` is the data source, value vector, expression result, or property name used by the row.",
+    "`Format` is an optional numeric, datetime, duration, or text display format."
+  ],
+  "examples": [
+    {
+      "description": "Create a row that reads from plotted Y data",
+      "input": "row = dataTipTextRow('Speed', 'YData', '%.2f');\nrow.Label",
+      "output": "ans =\n    \"Speed\""
+    },
+    {
+      "description": "Create a row from explicit values",
+      "input": "values = [10 20 30];\nrow = dataTipTextRow('Amplitude', values);\nrow.Format = '%.1f';",
+      "output": "% row is a DataTipTextRow handle object"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does dataTipTextRow render data tips by itself?",
+      "answer": "No. It creates the row object used by data-tip templates. Rendering and interactive data cursor behavior are handled by graphics hosts and future template integration."
+    },
+    {
+      "question": "Does it gather GPU data?",
+      "answer": "No. RunMat preserves the supplied `Value` property as metadata, including GPU tensor handles, so constructing a row does not force a host round trip."
+    }
+  ],
+  "links": [
+    {
+      "label": "line",
+      "url": "./line"
+    },
+    {
+      "label": "plot",
+      "url": "./plot"
+    },
+    {
+      "label": "scatter",
+      "url": "./scatter"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/data_tip_text_row.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/data_tip_text_row.rs"
+  },
+  "gpu_residency": "`dataTipTextRow` is metadata-only. It does not inspect, gather, or convert the supplied `Value` property, so GPU-resident values remain represented by their existing handles.",
+  "gpu_behavior": [
+    "Object construction terminates numeric fusion because the result is a graphics metadata object.",
+    "Supplying a GPU-resident value preserves the handle in the returned object's `Value` property."
+  ]
+}

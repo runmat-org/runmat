@@ -1,4 +1,4 @@
-use runmat_builtins::{StringArray, Value};
+use runmat_builtins::{StringArray, Tensor, Value};
 
 #[path = "support/mod.rs"]
 mod test_helpers;
@@ -92,4 +92,82 @@ fn datetime_subtraction_between_scalars_uses_object_overload_path() {
     assert!(vars
         .iter()
         .any(|value| matches!(value, Value::Num(n) if (*n - 7.0).abs() < f64::EPSILON)));
+}
+
+#[test]
+fn datetime_legacy_conversion_helpers_execute_in_scripts() {
+    let vars = execute_source(
+        "n = datenum(2024, 3, 14); \
+         v = datevec(n); \
+         w = weekday(n); \
+         e = eomday(2024, 2); \
+         s = datestr(n, 'yyyy-MM-dd'); \
+         ok = isbetween(n, n - 1, n + 1);",
+    )
+    .unwrap();
+
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(n) if (*n - 5.0).abs() < f64::EPSILON)));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(n) if (*n - 29.0).abs() < f64::EPSILON)));
+    assert!(vars.iter().any(|value| match value {
+        Value::CharArray(array) => {
+            let rendered: String = array.data.iter().collect();
+            rendered.trim_end() == "2024-03-14"
+        }
+        _ => false,
+    }));
+}
+
+#[test]
+fn calendar_duration_helpers_execute_in_scripts() {
+    let vars = execute_source(
+        "t = datetime(2024, 1, 31); \
+         c = calmonths(1); \
+         shifted = t + c; \
+         shifted.Format = 'yyyy-MM-dd'; \
+         txt = char(shifted); \
+         m = calmonths(c); \
+         p = iscalendarduration(c);",
+    )
+    .unwrap();
+
+    assert!(vars.iter().any(|value| match value {
+        Value::CharArray(array) => {
+            let rendered: String = array.data.iter().collect();
+            rendered.trim_end() == "2024-02-29"
+        }
+        _ => false,
+    }));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(n) if (*n - 1.0).abs() < f64::EPSILON)));
+    assert!(vars.iter().any(|value| matches!(value, Value::Bool(true))));
+}
+
+#[test]
+fn business_day_helpers_execute_in_scripts() {
+    let vars = execute_source(
+        "f = fbusdate(2024, 6); \
+         l = lbusdate(2024, 6); \
+         span = daysdif(f, l); \
+         count = days252bus(f, f + 3); \
+         mask = isbusday([f f + 1]);",
+    )
+    .unwrap();
+
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(n) if (*n - 739_406.0).abs() < f64::EPSILON)));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(n) if (*n - 25.0).abs() < f64::EPSILON)));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(n) if (*n - 4.0).abs() < f64::EPSILON)));
+    assert!(vars.iter().any(
+        |value| matches!(value, Value::Tensor(Tensor { data, .. }) if data == &vec![1.0, 1.0])
+    ));
 }

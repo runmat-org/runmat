@@ -1,0 +1,108 @@
+{
+  "title": "erf",
+  "category": "math/elementwise",
+  "keywords": [
+    "erf",
+    "error function",
+    "special function",
+    "elementwise",
+    "gpu"
+  ],
+  "summary": "Compute error-function values element-wise in MATLAB and RunMat.",
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Uses the provider unary_erf hook for real GPU tensors and falls back to host evaluation when the hook is unavailable."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::elementwise::erf::tests",
+    "integration": "builtins::math::elementwise::erf::tests::erf_gpu_provider_roundtrip"
+  },
+  "description": "`Y = erf(X)` evaluates the Gaussian error function element-by-element for real numeric input. RunMat follows MATLAB's documented real, nonsparse surface and keeps real GPU tensors resident when the active provider supports `unary_erf`.",
+  "behaviors": [
+    "`erf(X)` applies the error function element-by-element while preserving the input tensor shape.",
+    "Double inputs return double results; single tensors preserve single dtype metadata with single-rounded output values.",
+    "Scalar integer, logical, and character inputs are promoted through RunMat's ordinary numeric coercion path for compatibility with existing elementwise builtins.",
+    "Complex, string, and sparse inputs produce stable `RunMat:erf:InvalidInput` errors.",
+    "Real GPU tensors stay on device when the provider implements `unary_erf`; otherwise RunMat gathers the tensor, evaluates on the host, and returns a host value with the computed results."
+  ],
+  "examples": [
+    {
+      "description": "Calculate the error function of a scalar",
+      "input": "y = erf(1)",
+      "output": "y = 0.8427"
+    },
+    {
+      "description": "Apply erf to every element of a vector",
+      "input": "x = [-0.5 0 1 3];\ny = erf(x)",
+      "output": "y = [-0.5205 0 0.8427 1.0000]"
+    },
+    {
+      "description": "Evaluate a matrix element-wise",
+      "input": "A = [0.29 -0.11; 3.1 -2.9];\nB = erf(A)",
+      "output": "B = [0.3183 -0.1236; 1.0000 -1.0000]"
+    },
+    {
+      "description": "Use erf when computing a normal CDF",
+      "input": "x = -3:0.1:3;\ny = 0.5*(1 + erf(x/sqrt(2)));",
+      "output": "y = 1x61 double"
+    },
+    {
+      "description": "Run erf on GPU data",
+      "input": "G = gpuArray([-1 0 1]);\nout = erf(G);\nresult = gather(out)",
+      "output": "result = [-0.8427 0 0.8427]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `erf` support complex inputs?",
+      "answer": "No. MATLAB documents `erf` for real single and double arrays, and RunMat reports a typed input error for complex values instead of applying a non-MATLAB analytic continuation."
+    },
+    {
+      "question": "Why use `erfc` instead of `1 - erf(x)`?",
+      "answer": "For large positive `x`, `erf(x)` is very close to 1. A complementary error function can preserve the small residual more accurately than subtracting from 1."
+    },
+    {
+      "question": "Can `erf` run on GPU arrays?",
+      "answer": "Yes for real tensors. The WGPU backend evaluates `erf` on device; other providers may fall back to the host if they do not expose `unary_erf`."
+    }
+  ],
+  "related": [
+    {
+      "label": "erfc",
+      "url": "./erfc"
+    },
+    {
+      "label": "erfinv",
+      "url": "./erfinv"
+    },
+    {
+      "label": "gamma",
+      "url": "./gamma"
+    }
+  ],
+  "source": [
+    {
+      "label": "`crates/runmat-runtime/src/builtins/math/elementwise/erf.rs`",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/erf.rs"
+    }
+  ],
+  "gpu_residency": "Yes when the active provider implements `unary_erf` for real-valued gpuArray inputs. Providers without that hook trigger a host fallback, so the computed result is returned as a host tensor rather than a resident gpuArray.",
+  "implementation_notes": [
+    "CPU evaluation uses libm's `erf` for double-precision real values.",
+    "WGPU kernels use a piecewise real implementation with a power series near the origin and an asymptotic complementary-error expansion in the tails.",
+    "The builtin rejects sparse and complex inputs to match MATLAB's documented `erf` input surface."
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "title": "convolution1dLayer",
+  "category": "deep_learning",
+  "keywords": ["convolution1dLayer", "deep learning", "convolution"],
+  "summary": "Create a 1-D convolution layer compatibility object.",
+  "description": "`convolution1dLayer(filterSize,numFilters)` creates metadata for 1-D convolution layers.",
+  "behaviors": [
+    "`filterSize` and `numFilters` must be positive integers.",
+    "`Stride` defaults to `1`; `Padding` defaults to `same`.",
+    "Common convolution name-value options are preserved as properties."
+  ],
+  "examples": [
+    {
+      "description": "Create 1-D Convolution",
+      "input": "layer = convolution1dLayer(3, 16, 'Padding', 'causal', 'Name', 'conv')",
+      "output": "1-D convolution layer compatibility object."
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "layer = convolution1dLayer(filterSize, numFilters)\nlayer = convolution1dLayer(filterSize, numFilters, Name, Value)",
+      "output": "Layer compatibility object."
+    }
+  },
+  "gpu_residency": "Layer construction is host metadata work. Convolution execution kernels remain future training/inference work."
+}

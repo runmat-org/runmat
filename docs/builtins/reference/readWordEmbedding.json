@@ -1,0 +1,105 @@
+{
+  "title": "readWordEmbedding",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "readWordEmbedding",
+    "wordEmbedding",
+    "text analytics",
+    "word2vec",
+    "GloVe"
+  ],
+  "summary": "Read a word embedding model from a UTF-8 text file or zip archive.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`readWordEmbedding` reads host file data and creates text/model metadata; it does not use provider kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::embeddings::tests",
+    "integration": null
+  },
+  "description": "`readWordEmbedding(filename)` reads UTF-8 word2vec or GloVe text embedding data. Zip archives are supported when they contain an embedding text file.",
+  "behaviors": [
+    "`filename` may be a string scalar, character vector, or a 1-by-1 cell array containing a character vector.",
+    "Plain text files may use GloVe-style rows (`word value value ...`) or word2vec text rows with a leading `numWords dimension` header.",
+    "Zip archives are scanned for a text-like embedding entry (`.txt`, `.vec`, `.glove`, or `.emb`); otherwise the first file entry is parsed as UTF-8 text.",
+    "Duplicate words are collapsed so the last duplicate row supplies the vector, matching MATLAB's documented duplicate-word behavior.",
+    "The returned RunMat `wordEmbedding` compatibility object exposes `Dimension` and `Vocabulary`. Vector storage is kept in an implementation-detail property used by `word2vec` and `vec2word`.",
+    "Binary word2vec files, compressed formats other than zip, full pretrained model download helpers, the full fastText support-package corpus, and exact fastText optimizer parity for `trainWordEmbedding` remain tracked in the broader Text Analytics compatibility issue."
+  ],
+  "examples": [
+    {
+      "description": "Read An Embedding File",
+      "input": "emb = readWordEmbedding('vectors.vec')",
+      "output": "`emb` is a RunMat `wordEmbedding` compatibility object."
+    },
+    {
+      "description": "Inspect Metadata",
+      "input": "emb.Dimension\nemb.Vocabulary",
+      "output": "`Dimension` is the vector length, and `Vocabulary` is a string row vector of words."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `readWordEmbedding` support zip files?",
+      "answer": "Yes. RunMat reads a UTF-8 embedding text file from a zip archive."
+    },
+    {
+      "question": "Does `readWordEmbedding` download pretrained embeddings?",
+      "answer": "No. This helper reads local UTF-8 text or zip files. Pretrained download helpers remain separate Text Analytics work."
+    },
+    {
+      "question": "Does `readWordEmbedding` execute on the GPU?",
+      "answer": "No. It is host file parsing and object construction."
+    }
+  ],
+  "links": [
+    {
+      "label": "word2vec",
+      "url": "./word2vec"
+    },
+    {
+      "label": "vec2word",
+      "url": "./vec2word"
+    },
+    {
+      "label": "trainWordEmbedding",
+      "url": "./trainWordEmbedding"
+    },
+    {
+      "label": "fastTextWordEmbedding",
+      "url": "./fastTextWordEmbedding"
+    },
+    {
+      "label": "doc2sequence",
+      "url": "./doc2sequence"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported form",
+      "input": "emb = readWordEmbedding(filename)",
+      "output": "`emb` is a `wordEmbedding` compatibility object."
+    },
+    "points": [
+      "The embedding text must be UTF-8.",
+      "`filename` must be a scalar text path or 1-by-1 cell containing a character vector path.",
+      "Every vector row must have the same dimension.",
+      "A word2vec text header, when present, must match the number of vector rows in the file."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/embeddings.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/embeddings.rs"
+  },
+  "gpu_residency": "`readWordEmbedding` performs host file IO and has no provider kernel."
+}

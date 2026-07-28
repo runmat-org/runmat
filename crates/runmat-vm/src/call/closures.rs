@@ -8,7 +8,9 @@ use crate::call::shared::{
 };
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::{pop_args, pop_value};
-use runmat_builtins::{builtin_functions, get_class, lookup_method, Access, Closure, Value};
+use runmat_builtins::{
+    builtin_function_by_name, builtin_functions, get_class, lookup_method, Access, Closure, Value,
+};
 use runmat_hir::{CallableFallbackPolicy, CallableIdentity, QualifiedName, SymbolName};
 use runmat_runtime::RuntimeError;
 
@@ -140,6 +142,9 @@ fn method_function_identity(
             CallableIdentity::BoundFunction(runmat_hir::FunctionId(function)),
             CallableFallbackPolicy::None,
         );
+    }
+    if !trimmed.is_empty() && builtin_function_by_name(trimmed).is_some() {
+        return runtime_named_identity(trimmed);
     }
     if trimmed.is_empty() {
         return (

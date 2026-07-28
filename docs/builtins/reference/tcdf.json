@@ -1,0 +1,33 @@
+{
+  "title": "tcdf",
+  "category": "stats/summary",
+  "keywords": ["tcdf", "student t", "cdf", "upper tail", "statistics", "distribution"],
+  "summary": "Evaluate the Student's t cumulative distribution function.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "elementwise",
+    "notes": "GPU inputs are gathered to host for compatibility until a provider hook exists."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": { "unit": "builtins::stats::summary::distributions::tests", "integration": null },
+  "description": "`tcdf(x,nu)` evaluates the Student's t cumulative distribution function. `tcdf(x,nu,\"upper\")` returns the complementary upper-tail probability.",
+  "behaviors": [
+    "`x` and `nu` may be scalars or matching-size numeric arrays.",
+    "Scalar inputs broadcast over matching-size array inputs.",
+    "Nonpositive or `NaN` degrees of freedom produce `NaN` elementwise.",
+    "`nu = Inf` uses the standard normal distribution."
+  ],
+  "examples": [
+    { "description": "Distribution midpoint", "input": "p = tcdf(0, 10)" },
+    { "description": "Upper tail", "input": "p = tcdf(10, 99, \"upper\")" }
+  ],
+  "faqs": [{ "question": "Does tcdf support upper-tail probabilities?", "answer": "Yes. Pass `\"upper\"` as the final argument to compute the complementary tail." }],
+  "links": [{ "label": "tpdf", "url": "./tpdf" }, { "label": "tinv", "url": "./tinv" }, { "label": "trnd", "url": "./trnd" }],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/distributions.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/distributions.rs"
+  }
+}

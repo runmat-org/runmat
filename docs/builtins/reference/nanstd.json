@@ -1,0 +1,15 @@
+{
+  "title": "nanstd",
+  "category": "missing",
+  "keywords": ["nanstd", "std", "omitnan"],
+  "summary": "Compute standard deviations while ignoring NaN values.",
+  "gpu_support": {"elementwise": false, "reduction": true, "precisions": ["f32", "f64"], "broadcasting": "matlab", "notes": "Delegates to `std(..., 'omitnan')`."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 1, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::missing::tests"},
+  "description": "`nanstd(A, ...)` is a compatibility alias for `std(A, ..., 'omitnan')`.",
+  "behaviors": ["Normalization, dimension, output-class, and `\"like\"` options supported by `std` are forwarded."],
+  "examples": [{"description": "Ignore NaN values", "input": "s = nanstd([1 NaN 3], 0, 'all')", "output": "s uses std(..., 'omitnan') semantics."}],
+  "links": [{"label": "std", "url": "./std"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/missing/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/missing/mod.rs"}
+}

@@ -1,0 +1,98 @@
+{
+  "title": "allfinite",
+  "category": "logical/tests",
+  "keywords": [
+    "allfinite",
+    "finite",
+    "isfinite",
+    "all",
+    "logical"
+  ],
+  "summary": "Return true when every element of the input is finite.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": true,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "gpuArray inputs use provider-side `isfinite` plus `all` reduction when available, then gather the scalar logical result; otherwise RunMat gathers the array and reduces on the host."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::logical::tests::allfinite::tests"
+  },
+  "description": "`tf = allfinite(A)` returns a scalar logical indicating whether every element of `A` is finite. It is equivalent to applying `isfinite` to the whole input and reducing the mask with `all(...,'all')`.",
+  "behaviors": [
+    "Numeric scalars return `true` for finite values and `false` for `NaN` or `Inf`.",
+    "Numeric arrays return a scalar logical over all elements; empty numeric arrays return `true`.",
+    "Complex inputs return `true` only when every real and imaginary component is finite.",
+    "Sparse inputs inspect stored nonzero values; implicit zeros are finite.",
+    "Logical and character arrays return `true`.",
+    "String scalars and nonempty string arrays return `false`; empty string arrays return `true`.",
+    "Cell arrays, structs, objects, and function handles are rejected with `RunMat:allfinite:InvalidInput`."
+  ],
+  "examples": [
+    {
+      "description": "Check a finite matrix",
+      "input": "tf = allfinite([1 2; 3 4])",
+      "output": "tf =\n     1"
+    },
+    {
+      "description": "Detect nonfinite values",
+      "input": "tf = allfinite([1 NaN Inf])",
+      "output": "tf =\n     0"
+    },
+    {
+      "description": "Check complex values",
+      "input": "tf = allfinite([1+2i 3-4i])",
+      "output": "tf =\n     1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `allfinite(A)` different from `isfinite(A)`?",
+      "answer": "`isfinite` returns an element-wise logical mask. `allfinite` returns a single logical scalar for the whole input."
+    },
+    {
+      "question": "Are empty arrays all finite?",
+      "answer": "Yes. The result follows MATLAB-style `all` identity behavior: reducing an empty finite mask gives `true`."
+    },
+    {
+      "question": "How does `allfinite` handle complex numbers?",
+      "answer": "A complex value is finite only when both its real and imaginary components are finite."
+    }
+  ],
+  "links": [
+    {
+      "label": "isfinite",
+      "url": "./isfinite"
+    },
+    {
+      "label": "all",
+      "url": "./all"
+    },
+    {
+      "label": "isinf",
+      "url": "./isinf"
+    },
+    {
+      "label": "isnan",
+      "url": "./isnan"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/logical/tests/allfinite.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/tests/allfinite.rs"
+  },
+  "gpu_behavior": [
+    "`allfinite` is a scalar predicate over the full input. gpuArray inputs use provider-side `isfinite` plus `all` reduction when available; the scalar logical result is returned on the CPU. Providers without those hooks fall back to host gather and reduction."
+  ]
+}

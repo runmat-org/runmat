@@ -1,0 +1,18 @@
+{
+  "title": "nanmin",
+  "category": "missing",
+  "keywords": ["nanmin", "min", "omitnan"],
+  "summary": "Compute minima while ignoring NaN values.",
+  "gpu_support": {"elementwise": false, "reduction": true, "precisions": ["f32", "f64"], "broadcasting": "matlab", "notes": "Delegates to `min(..., 'omitnan')`."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 1, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::missing::tests"},
+  "description": "`nanmin(A, ...)` is a compatibility alias for `min(A, ..., 'omitnan')` and supports the legacy pairwise `nanmin(A, B)` form.",
+  "behaviors": ["Dimension and `\"all\"` options supported by `min` are forwarded.", "`nanmin(A, B)` returns pairwise minima, ignoring NaN from either side when the other side is present."],
+  "examples": [
+    {"description": "Ignore NaN values", "input": "m = nanmin([NaN 2 3])", "output": "m = 2"},
+    {"description": "Pairwise minima", "input": "B = nanmin([NaN 4 3], [2 NaN 5])", "output": "B = [2 4 3]"}
+  ],
+  "links": [{"label": "min", "url": "./min"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/missing/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/missing/mod.rs"}
+}

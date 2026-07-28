@@ -1,0 +1,100 @@
+{
+  "title": "wordEncoding",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "wordEncoding",
+    "text analytics",
+    "vocabulary",
+    "indices"
+  ],
+  "summary": "Create a word encoding object that maps words to indices and back.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`wordEncoding` builds host text metadata and has no provider-resident numeric kernel."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 5,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::encoding::tests",
+    "integration": null
+  },
+  "description": "`wordEncoding(documents)` creates a RunMat `wordEncoding` compatibility object from tokenized documents. `wordEncoding(words)` creates one from a word vector.",
+  "behaviors": [
+    "`documents` must be a RunMat `tokenizedDocument` compatibility object.",
+    "`words` may be a string scalar, string array, character vector, character matrix, or cell array of scalar text. A character vector is treated as one word.",
+    "The returned object exposes `NumWords` and `Vocabulary`. `Vocabulary` is a 1-by-NumWords string array.",
+    "`Order` accepts `\"first-seen\"` and `\"frequency\"` for tokenizedDocument input. The default is first-seen order.",
+    "For frequency ordering, RunMat sorts by descending total count and uses first-seen order as a deterministic tie-breaker.",
+    "`MaxNumWords` accepts a positive integer or `Inf` for tokenizedDocument input. The option is applied after ordering.",
+    "RunMat rejects `Order` and `MaxNumWords` when the first input is a word vector, matching the documented MATLAB syntax.",
+    "First-class MATLAB object-array identity semantics are not required for this scalar model object and remain covered by the broader object infrastructure work."
+  ],
+  "examples": [
+    {
+      "description": "Create Encoding From Documents",
+      "input": "documents = tokenizedDocument([\"alpha beta alpha\"; \"gamma beta\"]);\nenc = wordEncoding(documents)",
+      "output": "`enc.Vocabulary` is `[\"alpha\" \"beta\" \"gamma\"]` for first-seen order."
+    },
+    {
+      "description": "Sort By Frequency",
+      "input": "enc = wordEncoding(documents, \"Order\", \"frequency\", \"MaxNumWords\", 2)",
+      "output": "`enc.Vocabulary` contains the two most frequent words."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Can the result be used with `doc2sequence`?",
+      "answer": "Yes. `doc2sequence(enc, documents)` returns cell arrays of 1-by-S word-index vectors."
+    },
+    {
+      "question": "Does `wordEncoding` execute on the GPU?",
+      "answer": "No. It constructs host text metadata and does not use provider kernels."
+    }
+  ],
+  "links": [
+    {
+      "label": "word2ind",
+      "url": "./word2ind"
+    },
+    {
+      "label": "ind2word",
+      "url": "./ind2word"
+    },
+    {
+      "label": "isVocabularyWord",
+      "url": "./isVocabularyWord"
+    },
+    {
+      "label": "doc2sequence",
+      "url": "./doc2sequence"
+    },
+    {
+      "label": "tokenizedDocument",
+      "url": "./tokenizedDocument"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "enc = wordEncoding(documents)\nenc = wordEncoding(words)\nenc = wordEncoding(documents, Name, Value)",
+      "output": "`enc` is a `wordEncoding` compatibility object."
+    },
+    "points": [
+      "`Order` must be `\"first-seen\"` or `\"frequency\"` and is only accepted for tokenizedDocument input.",
+      "`MaxNumWords` must be a positive integer or `Inf` and is only accepted for tokenizedDocument input."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/encoding.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/encoding.rs"
+  },
+  "gpu_residency": "`wordEncoding` is host text/object metadata construction with no provider kernel."
+}

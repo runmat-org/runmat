@@ -13,9 +13,16 @@ use runmat_analysis_core::{
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::{GeometryAsset, UnitSystem};
 use runmat_geometry_io::GeometryImportOptions;
-use serde::de::DeserializeOwned;
-use serde::Deserialize;
+use runmat_meshing_core::{
+    MeshBackendKind, MeshElementOrder, MeshKindRequest, MeshProfile, MeshRefinementOptions,
+    MeshTargetSize, MeshValidationPolicyOptions, QualityThresholds, RefinementConvergenceOptions,
+    RefinementFocusLevel, RefinementFocusOptions, RefinementIndicatorMode,
+    RefinementIndicatorOverrides, RefinementStrategy, VolumeElementKind, VolumeMeshingOptions,
+};
+use serde::de::{DeserializeOwned, Error as DeError};
+use serde::{Deserialize, Deserializer};
 
+use super::contracts::AnalysisOutputRequest;
 use super::{
     analysis_create_model_op, AnalysisAcousticRunOptions, AnalysisCfdRunOptions,
     AnalysisChtRunOptions, AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile,
@@ -59,6 +66,8 @@ struct FeaStudyDocument {
     model: FeaModelDocument,
     run: FeaRunDocument,
     #[serde(default)]
+    mesh: Option<FeaMeshDocument>,
+    #[serde(default)]
     regions: BTreeMap<String, FeaRegionDocument>,
     #[serde(default)]
     materials: BTreeMap<String, FeaMaterialDocument>,
@@ -78,6 +87,8 @@ struct FeaStudyDocument {
     loads: Vec<FeaLoadDocument>,
     #[serde(default)]
     steps: Vec<FeaStepDocument>,
+    #[serde(default)]
+    outputs: Vec<FeaOutputDocument>,
     #[serde(default)]
     domains: FeaDomainsDocument,
     #[serde(default)]
@@ -111,6 +122,149 @@ struct FeaModelDocument {
     frame: Option<ReferenceFrame>,
     #[serde(default)]
     defaults: FeaModelDefaultsMode,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeaMeshDocument {
+    #[serde(default)]
+    backend: MeshBackendKind,
+    #[serde(default = "default_mesh_kind")]
+    kind: MeshKindRequest,
+    #[serde(default = "default_mesh_element")]
+    element: VolumeElementKind,
+    #[serde(default = "default_mesh_element_order")]
+    element_order: MeshElementOrder,
+    #[serde(default = "default_mesh_profile")]
+    profile: MeshProfile,
+    #[serde(default = "default_mesh_max_elements")]
+    max_elements: usize,
+    #[serde(default, deserialize_with = "deserialize_optional_mesh_target_size")]
+    target_size: Option<MeshTargetSize>,
+    #[serde(default)]
+    min_size: Option<f64>,
+    #[serde(default)]
+    max_size: Option<f64>,
+    #[serde(default)]
+    growth_rate: Option<f64>,
+    #[serde(default)]
+    refinement: FeaMeshRefinementDocument,
+    #[serde(default)]
+    validation: FeaMeshValidationDocument,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeaMeshValidationDocument {
+    #[serde(default)]
+    coverage: FeaMeshCoveragePreset,
+    #[serde(default)]
+    quality: FeaMeshQualityPreset,
+    #[serde(default)]
+    min_bounds_coverage_ratio: Option<f64>,
+    #[serde(default)]
+    min_volume_coverage_ratio: Option<f64>,
+    #[serde(default)]
+    min_boundary_area_ratio: Option<f64>,
+    #[serde(default)]
+    min_boundary_face_recovery_ratio: Option<f64>,
+    #[serde(default)]
+    min_boundary_edge_recovery_ratio: Option<f64>,
+    #[serde(default)]
+    max_volume_components: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+enum FeaMeshCoveragePreset {
+    Strict,
+    #[default]
+    Balanced,
+    Relaxed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+enum FeaMeshQualityPreset {
+    Strict,
+    #[default]
+    Balanced,
+    Relaxed,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeaMeshRefinementDocument {
+    #[serde(default = "default_refinement_strategy")]
+    strategy: RefinementStrategy,
+    #[serde(default = "default_refinement_max_iterations")]
+    max_iterations: usize,
+    #[serde(default)]
+    convergence: FeaRefinementConvergenceDocument,
+    #[serde(default)]
+    focus: FeaRefinementFocusDocument,
+    #[serde(default)]
+    indicators: BTreeMap<String, BTreeMap<String, RefinementIndicatorMode>>,
+}
+
+impl Default for FeaMeshRefinementDocument {
+    fn default() -> Self {
+        Self {
+            strategy: default_refinement_strategy(),
+            max_iterations: default_refinement_max_iterations(),
+            convergence: FeaRefinementConvergenceDocument::default(),
+            focus: FeaRefinementFocusDocument::default(),
+            indicators: BTreeMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeaRefinementConvergenceDocument {
+    #[serde(default = "default_field_change_tolerance")]
+    field_change_tolerance: f64,
+    #[serde(default = "default_energy_change_tolerance")]
+    energy_change_tolerance: f64,
+    #[serde(default, deserialize_with = "deserialize_optional_auto_f64")]
+    residual_tolerance: Option<f64>,
+}
+
+impl Default for FeaRefinementConvergenceDocument {
+    fn default() -> Self {
+        Self {
+            field_change_tolerance: default_field_change_tolerance(),
+            energy_change_tolerance: default_energy_change_tolerance(),
+            residual_tolerance: None,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeaRefinementFocusDocument {
+    #[serde(default = "default_focus_fine")]
+    loads: RefinementFocusLevel,
+    #[serde(default = "default_focus_fine")]
+    constraints: RefinementFocusLevel,
+    #[serde(default = "default_focus_normal")]
+    interfaces: RefinementFocusLevel,
+    #[serde(default = "default_true")]
+    curvature: bool,
+    #[serde(default = "default_true")]
+    small_features: bool,
+}
+
+impl Default for FeaRefinementFocusDocument {
+    fn default() -> Self {
+        Self {
+            loads: default_focus_fine(),
+            constraints: default_focus_fine(),
+            interfaces: default_focus_normal(),
+            curvature: true,
+            small_features: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
@@ -307,6 +461,12 @@ struct FeaLoadDocument {
     #[serde(default)]
     vector: Option<[f64; 3]>,
     #[serde(default)]
+    force: Option<[f64; 3]>,
+    #[serde(default)]
+    moment: Option<[f64; 3]>,
+    #[serde(default)]
+    point: Option<[f64; 3]>,
+    #[serde(default)]
     magnitude_pa: Option<f64>,
     #[serde(default)]
     current_a: Option<f64>,
@@ -324,6 +484,7 @@ enum FeaLoadType {
     Force,
     Moment,
     Torque,
+    Wrench,
     Pressure,
     BodyForce,
     CurrentDensity,
@@ -336,6 +497,18 @@ enum FeaLoadType {
 struct FeaStepDocument {
     id: String,
     kind: runmat_analysis_core::AnalysisStepKind,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeaOutputDocument {
+    id: String,
+    #[serde(rename = "field_id", alias = "field", alias = "name")]
+    field_id: String,
+    #[serde(default, alias = "target")]
+    location: Option<String>,
+    #[serde(default, rename = "kind", alias = "type")]
+    kind: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -444,6 +617,16 @@ async fn resolve_study(
     let model = resolve_model(&study, &geometry, &intent)?;
     let run_kind = resolve_run_kind(study.model.profile, &study.run)?;
     let run_options = resolve_run_options(&study.run, run_kind)?;
+    if let Some(mesh) = study.mesh.as_ref() {
+        validate_refinement_indicator_applicability(
+            &mesh.refinement.indicators,
+            study.model.profile,
+            run_kind,
+            &study.domains,
+        )?;
+    }
+    let mesh_options = resolve_mesh_options(study.mesh.as_ref(), study.model.profile, run_kind)?;
+    let outputs = study.outputs.iter().map(resolve_output_request).collect();
     let spec = AnalysisStudySpec {
         study_id: study.id,
         geometry,
@@ -451,6 +634,10 @@ async fn resolve_study(
         model,
         run_kind,
         backend: study.run.backend,
+        mesh_options,
+        outputs,
+        analysis_mesh_artifact_path: None,
+        analysis_mesh_evidence_artifact_path: None,
         linear_static_run_options: run_options.linear_static,
         modal_run_options: run_options.modal,
         acoustic_run_options: run_options.acoustic,
@@ -463,6 +650,439 @@ async fn resolve_study(
         electromagnetic_run_options: run_options.electromagnetic,
     };
     Ok(ResolvedStudyParts { spec })
+}
+
+fn resolve_output_request(output: &FeaOutputDocument) -> AnalysisOutputRequest {
+    AnalysisOutputRequest {
+        id: output.id.clone(),
+        field_id: output.field_id.clone(),
+        location: output.location.clone(),
+        kind: output.kind.clone(),
+    }
+}
+
+fn resolve_mesh_options(
+    mesh: Option<&FeaMeshDocument>,
+    profile: AnalysisCreateModelProfile,
+    run_kind: AnalysisRunKind,
+) -> Result<Option<VolumeMeshingOptions>, String> {
+    let Some(mesh) = mesh else {
+        return Ok(default_mesh_options_for_study(profile, run_kind));
+    };
+    if mesh.max_elements == 0 {
+        return Err("mesh.max_elements must be greater than zero".to_string());
+    }
+    if !matches!(mesh.kind, MeshKindRequest::Solid) {
+        return Err(format!(
+            "mesh.kind {:?} is not supported by the current analysis mesher; use mesh.kind: solid",
+            mesh.kind
+        ));
+    }
+    if !mesh.element.is_supported_for_solid_solve() {
+        return Err(format!(
+            "mesh.element {:?} is not supported for mesh.kind solid; use mesh.element: tetrahedron4",
+            mesh.element
+        ));
+    }
+    if let Some(min_size) = mesh.min_size {
+        if !min_size.is_finite() || min_size <= 0.0 {
+            return Err("mesh.min_size must be finite and positive".to_string());
+        }
+    }
+    if let Some(max_size) = mesh.max_size {
+        if !max_size.is_finite() || max_size <= 0.0 {
+            return Err("mesh.max_size must be finite and positive".to_string());
+        }
+    }
+    if let (Some(min_size), Some(max_size)) = (mesh.min_size, mesh.max_size) {
+        if min_size > max_size {
+            return Err("mesh.min_size must be less than or equal to mesh.max_size".to_string());
+        }
+    }
+    if let Some(growth_rate) = mesh.growth_rate {
+        if !growth_rate.is_finite() || growth_rate < 1.0 {
+            return Err("mesh.growth_rate must be finite and at least 1.0".to_string());
+        }
+    }
+    if !mesh
+        .refinement
+        .convergence
+        .field_change_tolerance
+        .is_finite()
+        || mesh.refinement.convergence.field_change_tolerance <= 0.0
+    {
+        return Err(
+            "mesh.refinement.convergence.field_change_tolerance must be finite and positive"
+                .to_string(),
+        );
+    }
+    if !mesh
+        .refinement
+        .convergence
+        .energy_change_tolerance
+        .is_finite()
+        || mesh.refinement.convergence.energy_change_tolerance <= 0.0
+    {
+        return Err(
+            "mesh.refinement.convergence.energy_change_tolerance must be finite and positive"
+                .to_string(),
+        );
+    }
+    if let Some(residual_tolerance) = mesh.refinement.convergence.residual_tolerance {
+        if !residual_tolerance.is_finite() || residual_tolerance <= 0.0 {
+            return Err(
+                "mesh.refinement.convergence.residual_tolerance must be finite and positive"
+                    .to_string(),
+            );
+        }
+    }
+    let validation = resolve_mesh_validation_policy(&mesh.validation)?;
+    if matches!(mesh.refinement.strategy, RefinementStrategy::None)
+        && mesh.refinement.max_iterations > 0
+    {
+        return Err(
+            "mesh.refinement.max_iterations must be 0 when mesh.refinement.strategy is none"
+                .to_string(),
+        );
+    }
+    validate_refinement_indicators(&mesh.refinement.indicators)?;
+
+    Ok(Some(VolumeMeshingOptions {
+        backend: mesh.backend,
+        kind: mesh.kind,
+        element: mesh.element,
+        element_order: mesh.element_order,
+        profile: mesh.profile,
+        max_elements: mesh.max_elements,
+        target_size: mesh.target_size.unwrap_or(MeshTargetSize::Auto),
+        min_size_m: mesh.min_size,
+        max_size_m: mesh.max_size,
+        growth_rate: mesh.growth_rate,
+        refinement: MeshRefinementOptions {
+            strategy: mesh.refinement.strategy,
+            max_iterations: mesh.refinement.max_iterations,
+            convergence: RefinementConvergenceOptions {
+                field_change_tolerance: mesh.refinement.convergence.field_change_tolerance,
+                energy_change_tolerance: mesh.refinement.convergence.energy_change_tolerance,
+                residual_tolerance: mesh.refinement.convergence.residual_tolerance,
+            },
+            focus: RefinementFocusOptions {
+                loads: mesh.refinement.focus.loads,
+                constraints: mesh.refinement.focus.constraints,
+                interfaces: mesh.refinement.focus.interfaces,
+                curvature: mesh.refinement.focus.curvature,
+                small_features: mesh.refinement.focus.small_features,
+            },
+            indicators: RefinementIndicatorOverrides {
+                namespaces: mesh.refinement.indicators.clone(),
+            },
+        },
+        validation,
+    }))
+}
+
+fn resolve_mesh_validation_policy(
+    validation: &FeaMeshValidationDocument,
+) -> Result<MeshValidationPolicyOptions, String> {
+    let mut policy = coverage_preset_options(validation.coverage);
+    policy.quality = quality_preset_thresholds(validation.quality);
+    apply_optional_unit_ratio(
+        "mesh.validation.min_bounds_coverage_ratio",
+        validation.min_bounds_coverage_ratio,
+        &mut policy.min_bounds_coverage_ratio,
+    )?;
+    apply_optional_unit_ratio(
+        "mesh.validation.min_volume_coverage_ratio",
+        validation.min_volume_coverage_ratio,
+        &mut policy.min_volume_coverage_ratio,
+    )?;
+    apply_optional_unit_ratio(
+        "mesh.validation.min_boundary_area_ratio",
+        validation.min_boundary_area_ratio,
+        &mut policy.min_boundary_area_ratio,
+    )?;
+    apply_optional_unit_ratio(
+        "mesh.validation.min_boundary_face_recovery_ratio",
+        validation.min_boundary_face_recovery_ratio,
+        &mut policy.min_boundary_face_recovery_ratio,
+    )?;
+    apply_optional_unit_ratio(
+        "mesh.validation.min_boundary_edge_recovery_ratio",
+        validation.min_boundary_edge_recovery_ratio,
+        &mut policy.min_boundary_edge_recovery_ratio,
+    )?;
+    if matches!(validation.max_volume_components, Some(0)) {
+        return Err("mesh.validation.max_volume_components must be greater than zero".to_string());
+    }
+    policy.max_volume_component_count = validation.max_volume_components;
+    Ok(policy)
+}
+
+fn coverage_preset_options(preset: FeaMeshCoveragePreset) -> MeshValidationPolicyOptions {
+    match preset {
+        FeaMeshCoveragePreset::Strict => MeshValidationPolicyOptions {
+            min_bounds_coverage_ratio: 1.0,
+            min_volume_coverage_ratio: 1.0,
+            min_boundary_area_ratio: 1.0,
+            min_boundary_face_recovery_ratio: 1.0,
+            min_boundary_edge_recovery_ratio: 1.0,
+            ..MeshValidationPolicyOptions::default()
+        },
+        FeaMeshCoveragePreset::Balanced => MeshValidationPolicyOptions::default(),
+        FeaMeshCoveragePreset::Relaxed => MeshValidationPolicyOptions {
+            min_bounds_coverage_ratio: 0.80,
+            min_volume_coverage_ratio: 0.80,
+            min_boundary_area_ratio: 0.80,
+            min_boundary_face_recovery_ratio: 0.95,
+            min_boundary_edge_recovery_ratio: 0.95,
+            ..MeshValidationPolicyOptions::default()
+        },
+    }
+}
+
+fn quality_preset_thresholds(preset: FeaMeshQualityPreset) -> QualityThresholds {
+    match preset {
+        FeaMeshQualityPreset::Strict => QualityThresholds {
+            min_scaled_jacobian: 0.25,
+            max_aspect_ratio: 10.0,
+            max_boundary_projection_error_m: 1.0e-8,
+            allow_inverted_elements: false,
+        },
+        FeaMeshQualityPreset::Balanced => QualityThresholds::default(),
+        FeaMeshQualityPreset::Relaxed => QualityThresholds {
+            min_scaled_jacobian: 0.05,
+            max_aspect_ratio: 50.0,
+            max_boundary_projection_error_m: 1.0e-4,
+            allow_inverted_elements: false,
+        },
+    }
+}
+
+fn apply_optional_unit_ratio(
+    label: &str,
+    value: Option<f64>,
+    target: &mut f64,
+) -> Result<(), String> {
+    if let Some(value) = value {
+        validate_unit_ratio(label, value)?;
+        *target = value;
+    }
+    Ok(())
+}
+
+fn validate_unit_ratio(label: &str, value: f64) -> Result<(), String> {
+    if !value.is_finite() || value <= 0.0 || value > 1.0 {
+        return Err(format!("{label} must be finite and in the range (0, 1]"));
+    }
+    Ok(())
+}
+
+fn default_mesh_options_for_study(
+    profile: AnalysisCreateModelProfile,
+    run_kind: AnalysisRunKind,
+) -> Option<VolumeMeshingOptions> {
+    (matches!(profile, AnalysisCreateModelProfile::LinearStaticStructural)
+        && matches!(run_kind, AnalysisRunKind::LinearStatic))
+    .then(VolumeMeshingOptions::default)
+}
+
+fn validate_refinement_indicators(
+    indicators: &BTreeMap<String, BTreeMap<String, RefinementIndicatorMode>>,
+) -> Result<(), String> {
+    for (namespace, names) in indicators {
+        let allowed = allowed_refinement_indicator_names(namespace)
+            .ok_or_else(|| format!("unknown mesh.refinement.indicators namespace `{namespace}`"))?;
+        for name in names.keys() {
+            if !allowed.contains(&name.as_str()) {
+                return Err(format!(
+                    "unknown mesh.refinement.indicators.{namespace}.{name}"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_refinement_indicator_applicability(
+    indicators: &BTreeMap<String, BTreeMap<String, RefinementIndicatorMode>>,
+    profile: AnalysisCreateModelProfile,
+    run_kind: AnalysisRunKind,
+    domains: &FeaDomainsDocument,
+) -> Result<(), String> {
+    for namespace in indicators.keys() {
+        if !refinement_indicator_namespace_applies(namespace, profile, run_kind, domains) {
+            return Err(format!(
+                "mesh.refinement.indicators.{namespace} does not apply to profile `{}` and run kind `{}`",
+                profile.as_snake_case(),
+                run_kind.as_snake_case()
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn refinement_indicator_namespace_applies(
+    namespace: &str,
+    profile: AnalysisCreateModelProfile,
+    run_kind: AnalysisRunKind,
+    domains: &FeaDomainsDocument,
+) -> bool {
+    match namespace {
+        "structural" => {
+            matches!(
+                profile,
+                AnalysisCreateModelProfile::LinearStaticStructural
+                    | AnalysisCreateModelProfile::TransientStructural
+                    | AnalysisCreateModelProfile::NonlinearStructural
+                    | AnalysisCreateModelProfile::ThermoMechanicalCoupled
+                    | AnalysisCreateModelProfile::FsiCoupled
+            ) || matches!(
+                run_kind,
+                AnalysisRunKind::LinearStatic
+                    | AnalysisRunKind::Transient
+                    | AnalysisRunKind::Nonlinear
+                    | AnalysisRunKind::Fsi
+            )
+        }
+        "modal" => {
+            matches!(profile, AnalysisCreateModelProfile::ModalStructural)
+                || matches!(run_kind, AnalysisRunKind::Modal)
+        }
+        "thermal" => {
+            matches!(
+                profile,
+                AnalysisCreateModelProfile::ThermalStandalone
+                    | AnalysisCreateModelProfile::ThermoMechanicalCoupled
+                    | AnalysisCreateModelProfile::ElectroThermalCoupled
+                    | AnalysisCreateModelProfile::ChtCoupled
+            ) || matches!(run_kind, AnalysisRunKind::Thermal | AnalysisRunKind::Cht)
+                || domains.thermo_mechanical.is_some()
+                || domains.electro_thermal.is_some()
+        }
+        "thermo_mechanical" => {
+            matches!(profile, AnalysisCreateModelProfile::ThermoMechanicalCoupled)
+                || domains.thermo_mechanical.is_some()
+        }
+        "electro_thermal" => {
+            matches!(profile, AnalysisCreateModelProfile::ElectroThermalCoupled)
+                || domains.electro_thermal.is_some()
+        }
+        "electromagnetic" => {
+            matches!(
+                profile,
+                AnalysisCreateModelProfile::ElectromagneticStatic
+                    | AnalysisCreateModelProfile::ElectroThermalCoupled
+            ) || matches!(run_kind, AnalysisRunKind::Electromagnetic)
+                || domains.electromagnetic.is_some()
+                || domains.electro_thermal.is_some()
+        }
+        "acoustic" => {
+            matches!(profile, AnalysisCreateModelProfile::AcousticHarmonic)
+                || matches!(run_kind, AnalysisRunKind::Acoustic)
+        }
+        "cfd" => {
+            matches!(
+                profile,
+                AnalysisCreateModelProfile::CfdSteadyState
+                    | AnalysisCreateModelProfile::CfdTransient
+                    | AnalysisCreateModelProfile::ChtCoupled
+                    | AnalysisCreateModelProfile::FsiCoupled
+            ) || matches!(
+                run_kind,
+                AnalysisRunKind::Cfd | AnalysisRunKind::Cht | AnalysisRunKind::Fsi
+            ) || domains.cfd.is_some()
+        }
+        "cht" => {
+            matches!(profile, AnalysisCreateModelProfile::ChtCoupled)
+                || matches!(run_kind, AnalysisRunKind::Cht)
+        }
+        "fsi" => {
+            matches!(profile, AnalysisCreateModelProfile::FsiCoupled)
+                || matches!(run_kind, AnalysisRunKind::Fsi)
+        }
+        _ => false,
+    }
+}
+
+fn allowed_refinement_indicator_names(namespace: &str) -> Option<&'static [&'static str]> {
+    match namespace {
+        "structural" => Some(&[
+            "stress_gradient",
+            "strain_energy_density",
+            "displacement_gradient",
+            "load_regions",
+            "constraint_regions",
+            "plastic_strain",
+            "contact_pressure",
+            "contact_gap",
+        ]),
+        "modal" => Some(&[
+            "mode_shape_curvature",
+            "modal_strain_energy",
+            "frequency_residual",
+        ]),
+        "thermal" => Some(&[
+            "temperature_gradient",
+            "heat_flux_gradient",
+            "heat_source",
+            "convection_regions",
+            "prescribed_temperature_regions",
+        ]),
+        "thermo_mechanical" => Some(&[
+            "thermal_gradient",
+            "thermal_stress",
+            "structural_von_mises",
+            "strain_energy_density",
+            "region_temperature_delta",
+        ]),
+        "electro_thermal" => Some(&[
+            "electric_field_gradient",
+            "current_density_gradient",
+            "joule_heat_density",
+            "thermal_gradient",
+            "source_regions",
+            "ground_regions",
+        ]),
+        "electromagnetic" => Some(&[
+            "flux_density_gradient",
+            "electric_field_gradient",
+            "current_density_gradient",
+            "energy_density",
+            "source_regions",
+            "ground_regions",
+            "insulation_regions",
+        ]),
+        "acoustic" => Some(&[
+            "pressure_gradient",
+            "pressure_curvature",
+            "wavelength",
+            "impedance_regions",
+            "source_regions",
+        ]),
+        "cfd" => Some(&[
+            "velocity_gradient",
+            "pressure_gradient",
+            "vorticity",
+            "wall_shear",
+            "boundary_layer",
+            "inlet_regions",
+            "outlet_regions",
+        ]),
+        "cht" => Some(&[
+            "interface_heat_flux_jump",
+            "interface_temperature_jump",
+            "solid_heat_flux_gradient",
+            "fluid_boundary_layer",
+        ]),
+        "fsi" => Some(&[
+            "interface_displacement_jump",
+            "interface_traction_jump",
+            "structural_stress_gradient",
+            "fluid_pressure_gradient",
+            "fluid_velocity_gradient",
+        ]),
+        _ => None,
+    }
 }
 
 async fn load_geometry(
@@ -811,6 +1431,22 @@ fn resolve_load(
             let [mx, my, mz] = load_vector(load, "moment")?;
             LoadKind::Moment { mx, my, mz }
         }
+        FeaLoadType::Wrench => {
+            let [fx, fy, fz] = load_force(load)?;
+            let [mx, my, mz] = load_moment(load)?;
+            let [px, py, pz] = point_in_meters(load_point(load)?, geometry.units);
+            LoadKind::Wrench {
+                fx,
+                fy,
+                fz,
+                mx,
+                my,
+                mz,
+                px,
+                py,
+                pz,
+            }
+        }
         FeaLoadType::Pressure => LoadKind::Pressure {
             magnitude_pa: required_f64(load.magnitude_pa, "pressure.magnitude_pa")?,
         },
@@ -1027,6 +1663,34 @@ fn load_vector(load: &FeaLoadDocument, label: &str) -> Result<[f64; 3], String> 
         .ok_or_else(|| format!("{label} load requires vector: [x, y, z]"))
 }
 
+fn load_force(load: &FeaLoadDocument) -> Result<[f64; 3], String> {
+    load.force
+        .ok_or_else(|| "wrench load requires force: [fx, fy, fz]".to_string())
+}
+
+fn load_moment(load: &FeaLoadDocument) -> Result<[f64; 3], String> {
+    load.moment
+        .ok_or_else(|| "wrench load requires moment: [mx, my, mz]".to_string())
+}
+
+fn load_point(load: &FeaLoadDocument) -> Result<[f64; 3], String> {
+    load.point
+        .ok_or_else(|| "wrench load requires point: [px, py, pz]".to_string())
+}
+
+fn point_in_meters(point: [f64; 3], units: UnitSystem) -> [f64; 3] {
+    let scale = geometry_unit_scale_to_meters(units);
+    [point[0] * scale, point[1] * scale, point[2] * scale]
+}
+
+fn geometry_unit_scale_to_meters(units: UnitSystem) -> f64 {
+    match units {
+        UnitSystem::Meter | UnitSystem::Unspecified => 1.0,
+        UnitSystem::Millimeter => 1.0e-3,
+        UnitSystem::Inch => 0.0254,
+    }
+}
+
 fn required_f64(value: Option<f64>, label: &str) -> Result<f64, String> {
     value.ok_or_else(|| format!("{label} is required"))
 }
@@ -1069,12 +1733,114 @@ fn default_backend() -> ComputeBackend {
     ComputeBackend::Cpu
 }
 
+fn default_mesh_kind() -> MeshKindRequest {
+    MeshKindRequest::Solid
+}
+
+fn default_mesh_element() -> VolumeElementKind {
+    VolumeElementKind::Tetrahedron4
+}
+
+fn default_mesh_element_order() -> MeshElementOrder {
+    MeshElementOrder::Linear
+}
+
+fn default_mesh_profile() -> MeshProfile {
+    MeshProfile::AnalysisReady
+}
+
+fn default_mesh_max_elements() -> usize {
+    250_000
+}
+
+fn default_refinement_strategy() -> RefinementStrategy {
+    RefinementStrategy::Auto
+}
+
+fn default_refinement_max_iterations() -> usize {
+    4
+}
+
+fn default_field_change_tolerance() -> f64 {
+    0.05
+}
+
+fn default_energy_change_tolerance() -> f64 {
+    0.02
+}
+
+fn default_focus_fine() -> RefinementFocusLevel {
+    RefinementFocusLevel::Fine
+}
+
+fn default_focus_normal() -> RefinementFocusLevel {
+    RefinementFocusLevel::Normal
+}
+
+fn default_true() -> bool {
+    true
+}
+
 fn default_fail_fast() -> bool {
     true
 }
 
 fn default_assignment_confidence() -> EvidenceConfidence {
     EvidenceConfidence::Verified
+}
+
+fn deserialize_optional_mesh_target_size<'de, D>(
+    deserializer: D,
+) -> Result<Option<MeshTargetSize>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let Some(value) = Option::<serde_yaml::Value>::deserialize(deserializer)? else {
+        return Ok(None);
+    };
+    match value {
+        serde_yaml::Value::Null => Ok(None),
+        serde_yaml::Value::String(value) if value.eq_ignore_ascii_case("auto") => Ok(None),
+        serde_yaml::Value::Number(value) => {
+            let value = value
+                .as_f64()
+                .ok_or_else(|| D::Error::custom("mesh.target_size must be a finite number"))?;
+            if !value.is_finite() || value <= 0.0 {
+                return Err(D::Error::custom(
+                    "mesh.target_size must be finite and positive",
+                ));
+            }
+            Ok(Some(MeshTargetSize::LengthM(value)))
+        }
+        _ => Err(D::Error::custom(
+            "mesh.target_size must be auto, null, or a positive number in geometry units",
+        )),
+    }
+}
+
+fn deserialize_optional_auto_f64<'de, D>(deserializer: D) -> Result<Option<f64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let Some(value) = Option::<serde_yaml::Value>::deserialize(deserializer)? else {
+        return Ok(None);
+    };
+    match value {
+        serde_yaml::Value::Null => Ok(None),
+        serde_yaml::Value::String(value) if value.eq_ignore_ascii_case("auto") => Ok(None),
+        serde_yaml::Value::Number(value) => {
+            let value = value
+                .as_f64()
+                .ok_or_else(|| D::Error::custom("value must be a finite number"))?;
+            if !value.is_finite() || value <= 0.0 {
+                return Err(D::Error::custom("value must be finite and positive"));
+            }
+            Ok(Some(value))
+        }
+        _ => Err(D::Error::custom(
+            "value must be auto, null, or a positive number",
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -1097,6 +1863,7 @@ mod tests {
                 kind: SourceGeometryKind::Cad,
                 assembly: None,
                 material_evidence: Vec::new(),
+                cad_evaluators: Vec::new(),
             },
             tessellation_profile: TessellationProfile::default(),
             units: UnitSystem::Meter,
@@ -1121,6 +1888,16 @@ mod tests {
             region_entity_mappings: Vec::new(),
             diagnostics: Vec::new(),
         }
+    }
+
+    fn resolve_linear_static_mesh_options(
+        mesh: Option<&FeaMeshDocument>,
+    ) -> Result<Option<VolumeMeshingOptions>, String> {
+        resolve_mesh_options(
+            mesh,
+            AnalysisCreateModelProfile::LinearStaticStructural,
+            AnalysisRunKind::LinearStatic,
+        )
     }
 
     #[test]
@@ -1172,6 +1949,94 @@ type: moment
     }
 
     #[test]
+    fn fea_document_resolves_wrench_load() {
+        let geometry = sample_geometry();
+        let load: FeaLoadDocument = serde_yaml::from_str(
+            r#"
+id: tip_wrench
+region: tag:tip
+type: wrench
+force: [10.0, 20.0, 30.0]
+moment: [1.0, 2.0, 3.0]
+point: [0.1, 0.2, 0.3]
+"#,
+        )
+        .expect("load document should parse");
+
+        let resolved = resolve_load(&load, &geometry, &BTreeMap::new())
+            .expect("load should resolve against geometry");
+
+        assert_eq!(resolved.load_id, "tip_wrench");
+        assert_eq!(resolved.region_id, "tip");
+        assert!(matches!(
+            resolved.kind,
+            LoadKind::Wrench {
+                fx: 10.0,
+                fy: 20.0,
+                fz: 30.0,
+                mx: 1.0,
+                my: 2.0,
+                mz: 3.0,
+                px: 0.1,
+                py: 0.2,
+                pz: 0.3,
+            }
+        ));
+    }
+
+    #[test]
+    fn fea_document_scales_wrench_point_from_geometry_units_to_meters() {
+        let mut geometry = sample_geometry();
+        geometry.units = UnitSystem::Millimeter;
+        let load: FeaLoadDocument = serde_yaml::from_str(
+            r#"
+id: tip_wrench
+region: tag:tip
+type: wrench
+force: [10.0, 20.0, 30.0]
+moment: [1.0, 2.0, 3.0]
+point: [100.0, 200.0, 300.0]
+"#,
+        )
+        .expect("load document should parse");
+
+        let resolved = resolve_load(&load, &geometry, &BTreeMap::new())
+            .expect("load should resolve against geometry");
+
+        assert!(matches!(
+            resolved.kind,
+            LoadKind::Wrench {
+                px,
+                py,
+                pz,
+                ..
+            } if (px - 0.1).abs() <= 1.0e-12
+                && (py - 0.2).abs() <= 1.0e-12
+                && (pz - 0.3).abs() <= 1.0e-12
+        ));
+    }
+
+    #[test]
+    fn fea_document_wrench_requires_force_moment_and_point() {
+        let geometry = sample_geometry();
+        let load: FeaLoadDocument = serde_yaml::from_str(
+            r#"
+id: tip_wrench
+region: tip
+type: wrench
+force: [1.0, 0.0, 0.0]
+moment: [0.0, 0.0, 1.0]
+"#,
+        )
+        .expect("load document should parse");
+
+        let err = resolve_load(&load, &geometry, &BTreeMap::new())
+            .expect_err("wrench without point should fail");
+
+        assert!(err.contains("wrench load requires point: [px, py, pz]"));
+    }
+
+    #[test]
     fn fea_document_moment_rejects_unknown_fields() {
         let err = serde_yaml::from_str::<FeaLoadDocument>(
             r#"
@@ -1185,5 +2050,526 @@ units: n_m
         .expect_err("unknown moment load fields should be rejected");
 
         assert!(err.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn fea_document_mesh_options_accept_auto_refinement_controls() {
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+kind: solid
+element: tetrahedron4
+element_order: linear
+profile: adaptive
+max_elements: 250000
+target_size: auto
+min_size: 0.001
+max_size: 0.02
+growth_rate: 1.35
+refinement:
+  strategy: auto
+  max_iterations: 4
+  convergence:
+    field_change_tolerance: 0.05
+    energy_change_tolerance: 0.02
+    residual_tolerance: auto
+  focus:
+    loads: fine
+    constraints: fine
+    interfaces: normal
+    curvature: true
+    small_features: true
+  indicators:
+    structural:
+      stress_gradient: true
+      displacement_gradient: false
+      plastic_strain: auto
+    modal:
+      modal_strain_energy: on
+      frequency_residual: off
+    thermal:
+      temperature_gradient: true
+"#,
+        )
+        .expect("mesh document should parse");
+
+        let options = resolve_linear_static_mesh_options(Some(&mesh))
+            .expect("mesh options should resolve")
+            .expect("mesh options should be present");
+
+        assert_eq!(options.backend, MeshBackendKind::Auto);
+        assert_eq!(options.kind, MeshKindRequest::Solid);
+        assert_eq!(options.element, VolumeElementKind::Tetrahedron4);
+        assert_eq!(options.element_order, MeshElementOrder::Linear);
+        assert_eq!(options.profile, MeshProfile::Adaptive);
+        assert_eq!(options.max_elements, 250_000);
+        assert_eq!(options.target_size, MeshTargetSize::Auto);
+        assert_eq!(options.min_size_m, Some(0.001));
+        assert_eq!(options.max_size_m, Some(0.02));
+        assert_eq!(options.growth_rate, Some(1.35));
+        assert_eq!(options.refinement.strategy, RefinementStrategy::Auto);
+        assert_eq!(options.refinement.max_iterations, 4);
+        assert_eq!(options.refinement.convergence.field_change_tolerance, 0.05);
+        assert_eq!(options.refinement.convergence.energy_change_tolerance, 0.02);
+        assert_eq!(options.refinement.convergence.residual_tolerance, None);
+        assert_eq!(options.validation.min_bounds_coverage_ratio, 0.90);
+        assert_eq!(options.validation.min_volume_coverage_ratio, 0.90);
+        assert_eq!(options.validation.min_boundary_area_ratio, 0.90);
+        assert_eq!(options.validation.min_boundary_face_recovery_ratio, 1.0);
+        assert_eq!(options.validation.min_boundary_edge_recovery_ratio, 1.0);
+        assert_eq!(options.validation.quality, QualityThresholds::default());
+        assert_eq!(options.refinement.focus.loads, RefinementFocusLevel::Fine);
+        assert_eq!(
+            options.refinement.focus.constraints,
+            RefinementFocusLevel::Fine
+        );
+        assert_eq!(
+            options.refinement.focus.interfaces,
+            RefinementFocusLevel::Normal
+        );
+        assert!(options.refinement.focus.curvature);
+        assert!(options.refinement.focus.small_features);
+        let indicators = &options.refinement.indicators.namespaces;
+        assert_eq!(
+            indicators["structural"]["stress_gradient"],
+            RefinementIndicatorMode::On
+        );
+        assert_eq!(
+            indicators["structural"]["displacement_gradient"],
+            RefinementIndicatorMode::Off
+        );
+        assert_eq!(
+            indicators["structural"]["plastic_strain"],
+            RefinementIndicatorMode::Auto
+        );
+        assert_eq!(
+            indicators["modal"]["modal_strain_energy"],
+            RefinementIndicatorMode::On
+        );
+        assert_eq!(
+            indicators["modal"]["frequency_residual"],
+            RefinementIndicatorMode::Off
+        );
+        assert_eq!(
+            indicators["thermal"]["temperature_gradient"],
+            RefinementIndicatorMode::On
+        );
+    }
+
+    #[test]
+    fn fea_document_mesh_options_accept_validation_policy_controls() {
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+validation:
+  coverage: strict
+  quality: strict
+  min_bounds_coverage_ratio: 0.95
+  max_volume_components: 2
+"#,
+        )
+        .expect("mesh document should parse validation policy");
+
+        let options = resolve_linear_static_mesh_options(Some(&mesh))
+            .expect("mesh options should resolve")
+            .expect("mesh options should be present");
+
+        assert_eq!(options.validation.min_bounds_coverage_ratio, 0.95);
+        assert_eq!(options.validation.min_volume_coverage_ratio, 1.0);
+        assert_eq!(options.validation.min_boundary_area_ratio, 1.0);
+        assert_eq!(options.validation.min_boundary_face_recovery_ratio, 1.0);
+        assert_eq!(options.validation.min_boundary_edge_recovery_ratio, 1.0);
+        assert_eq!(options.validation.max_volume_component_count, Some(2));
+        assert_eq!(
+            options.validation.quality,
+            QualityThresholds {
+                min_scaled_jacobian: 0.25,
+                max_aspect_ratio: 10.0,
+                max_boundary_projection_error_m: 1.0e-8,
+                allow_inverted_elements: false,
+            }
+        );
+    }
+
+    #[test]
+    fn fea_document_mesh_options_accept_relaxed_validation_presets() {
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+validation:
+  coverage: relaxed
+  quality: relaxed
+"#,
+        )
+        .expect("mesh document should parse validation presets");
+
+        let options = resolve_linear_static_mesh_options(Some(&mesh))
+            .expect("mesh options should resolve")
+            .expect("mesh options should be present");
+
+        assert_eq!(options.validation.min_bounds_coverage_ratio, 0.80);
+        assert_eq!(options.validation.min_volume_coverage_ratio, 0.80);
+        assert_eq!(options.validation.min_boundary_area_ratio, 0.80);
+        assert_eq!(options.validation.min_boundary_face_recovery_ratio, 0.95);
+        assert_eq!(options.validation.min_boundary_edge_recovery_ratio, 0.95);
+        assert_eq!(
+            options.validation.quality,
+            QualityThresholds {
+                min_scaled_jacobian: 0.05,
+                max_aspect_ratio: 50.0,
+                max_boundary_projection_error_m: 1.0e-4,
+                allow_inverted_elements: false,
+            }
+        );
+    }
+
+    #[test]
+    fn fea_document_mesh_options_reject_invalid_validation_policy_controls() {
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+validation:
+  min_volume_coverage_ratio: 1.2
+"#,
+        )
+        .expect("mesh document should parse before semantic validation");
+
+        let err = resolve_linear_static_mesh_options(Some(&mesh))
+            .expect_err("invalid validation ratio should fail");
+
+        assert!(err.contains("mesh.validation.min_volume_coverage_ratio"));
+
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+validation:
+  max_volume_components: 0
+"#,
+        )
+        .expect("mesh document should parse before semantic validation");
+
+        let err = resolve_linear_static_mesh_options(Some(&mesh))
+            .expect_err("invalid component count should fail");
+
+        assert!(err.contains("mesh.validation.max_volume_components"));
+    }
+
+    #[test]
+    fn fea_document_mesh_options_reject_invalid_size_envelope_controls() {
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+min_size: 0.02
+max_size: 0.01
+growth_rate: 1.2
+"#,
+        )
+        .expect("mesh document should parse before semantic validation");
+
+        let err = resolve_linear_static_mesh_options(Some(&mesh))
+            .expect_err("invalid size envelope should fail");
+        assert!(err.contains("mesh.min_size"));
+
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+min_size: 0.001
+max_size: 0.01
+growth_rate: 0.95
+"#,
+        )
+        .expect("mesh document should parse before semantic validation");
+
+        let err = resolve_linear_static_mesh_options(Some(&mesh))
+            .expect_err("invalid growth rate should fail");
+        assert!(err.contains("mesh.growth_rate"));
+    }
+
+    #[test]
+    fn fea_document_defaults_linear_static_structural_mesh_options() {
+        let options = resolve_linear_static_mesh_options(None)
+            .expect("default structural mesh options should resolve")
+            .expect("linear static structural study should default a solid analysis mesh");
+
+        assert_eq!(options.kind, MeshKindRequest::Solid);
+        assert_eq!(options.element, VolumeElementKind::Tetrahedron4);
+        assert_eq!(options.profile, MeshProfile::AnalysisReady);
+        assert_eq!(options.backend, MeshBackendKind::Auto);
+        assert_eq!(options.refinement.strategy, RefinementStrategy::Auto);
+
+        let modal_default = resolve_mesh_options(
+            None,
+            AnalysisCreateModelProfile::ModalStructural,
+            AnalysisRunKind::Modal,
+        )
+        .expect("modal default should resolve");
+        assert!(modal_default.is_none());
+    }
+
+    #[test]
+    fn fea_document_mesh_options_accept_backend_selection() {
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+backend: structured_grid_tetrahedron
+"#,
+        )
+        .expect("mesh document should parse backend");
+
+        let options = resolve_linear_static_mesh_options(Some(&mesh))
+            .expect("mesh options should resolve")
+            .expect("mesh options should be present");
+
+        assert_eq!(options.backend, MeshBackendKind::StructuredGridTetrahedron);
+    }
+
+    #[test]
+    fn fea_document_mesh_options_accept_physics_refinement_namespaces() {
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+refinement:
+  indicators:
+    structural:
+      load_regions: auto
+      constraint_regions: auto
+    modal:
+      mode_shape_curvature: on
+    thermal:
+      convection_regions: auto
+      prescribed_temperature_regions: auto
+    thermo_mechanical:
+      strain_energy_density: auto
+      region_temperature_delta: auto
+    electro_thermal:
+      source_regions: auto
+      ground_regions: auto
+    electromagnetic:
+      source_regions: auto
+      ground_regions: auto
+      insulation_regions: auto
+    acoustic:
+      pressure_curvature: auto
+      impedance_regions: auto
+      source_regions: auto
+    cfd:
+      inlet_regions: auto
+      outlet_regions: auto
+    cht:
+      interface_heat_flux_jump: on
+      interface_temperature_jump: on
+      solid_heat_flux_gradient: auto
+      fluid_boundary_layer: auto
+    fsi:
+      interface_displacement_jump: on
+      interface_traction_jump: on
+      structural_stress_gradient: auto
+      fluid_pressure_gradient: auto
+      fluid_velocity_gradient: auto
+"#,
+        )
+        .expect("mesh document should parse");
+
+        let options = resolve_linear_static_mesh_options(Some(&mesh))
+            .expect("mesh options should resolve")
+            .expect("mesh options should be present");
+
+        let indicators = &options.refinement.indicators.namespaces;
+        assert_eq!(
+            indicators["structural"]["load_regions"],
+            RefinementIndicatorMode::Auto
+        );
+        assert_eq!(
+            indicators["thermal"]["convection_regions"],
+            RefinementIndicatorMode::Auto
+        );
+        assert_eq!(
+            indicators["thermo_mechanical"]["strain_energy_density"],
+            RefinementIndicatorMode::Auto
+        );
+        assert_eq!(
+            indicators["electromagnetic"]["insulation_regions"],
+            RefinementIndicatorMode::Auto
+        );
+        assert_eq!(
+            indicators["cht"]["interface_heat_flux_jump"],
+            RefinementIndicatorMode::On
+        );
+        assert_eq!(
+            indicators["fsi"]["interface_traction_jump"],
+            RefinementIndicatorMode::On
+        );
+    }
+
+    #[test]
+    fn fea_document_mesh_options_accept_numeric_size_and_residual() {
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+target_size: 0.002
+refinement:
+  strategy: adaptive
+  max_iterations: 2
+  convergence:
+    residual_tolerance: 1.0e-6
+"#,
+        )
+        .expect("mesh document should parse");
+
+        let options = resolve_linear_static_mesh_options(Some(&mesh))
+            .expect("mesh options should resolve")
+            .expect("mesh options should be present");
+
+        assert_eq!(options.target_size, MeshTargetSize::LengthM(0.002));
+        assert_eq!(options.refinement.strategy, RefinementStrategy::Adaptive);
+        assert_eq!(options.refinement.max_iterations, 2);
+        assert_eq!(
+            options.refinement.convergence.residual_tolerance,
+            Some(1.0e-6)
+        );
+    }
+
+    #[test]
+    fn fea_document_mesh_options_reject_none_refinement_iterations() {
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+refinement:
+  strategy: none
+  max_iterations: 1
+"#,
+        )
+        .expect("mesh document should parse");
+
+        let err = resolve_linear_static_mesh_options(Some(&mesh))
+            .expect_err("none refinement should reject positive iteration count");
+
+        assert!(err.contains("mesh.refinement.max_iterations"));
+    }
+
+    #[test]
+    fn fea_document_mesh_options_reject_invalid_numeric_controls() {
+        let err = serde_yaml::from_str::<FeaMeshDocument>(
+            r#"
+target_size: -0.002
+"#,
+        )
+        .expect_err("negative target size should fail during parsing");
+
+        assert!(err.to_string().contains("mesh.target_size"));
+    }
+
+    #[test]
+    fn fea_document_mesh_options_reject_unsupported_mesh_kind() {
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+kind: display_only
+"#,
+        )
+        .expect("display-only mesh document should parse");
+
+        let err = resolve_linear_static_mesh_options(Some(&mesh))
+            .expect_err("display-only mesh kind is unsupported for analysis");
+
+        assert!(err.contains("mesh.kind"));
+        assert!(err.contains("solid"));
+    }
+
+    #[test]
+    fn fea_document_mesh_options_reject_unsupported_solid_element() {
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+element: hex8
+"#,
+        )
+        .expect("mesh document should parse");
+
+        let err = resolve_linear_static_mesh_options(Some(&mesh))
+            .expect_err("hex8 solid element is not supported yet");
+
+        assert!(err.contains("mesh.element"));
+        assert!(err.contains("tetrahedron4"));
+    }
+
+    #[test]
+    fn fea_document_mesh_options_reject_unknown_refinement_indicators() {
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+refinement:
+  indicators:
+    structural:
+      stress_gradient: true
+      made_up_indicator: true
+"#,
+        )
+        .expect("mesh document should parse before semantic validation");
+
+        let err = resolve_linear_static_mesh_options(Some(&mesh))
+            .expect_err("unknown refinement indicator should fail validation");
+
+        assert!(err.contains("mesh.refinement.indicators.structural.made_up_indicator"));
+
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+refinement:
+  indicators:
+    made_up_physics:
+      stress_gradient: true
+"#,
+        )
+        .expect("mesh document should parse before semantic validation");
+
+        let err = resolve_linear_static_mesh_options(Some(&mesh))
+            .expect_err("unknown refinement namespace should fail validation");
+
+        assert!(err.contains("mesh.refinement.indicators namespace `made_up_physics`"));
+
+        let mesh: FeaMeshDocument = serde_yaml::from_str(
+            r#"
+refinement:
+  indicators:
+    coupling:
+      interface_jump: true
+"#,
+        )
+        .expect("mesh document should parse before semantic validation");
+
+        let err = resolve_linear_static_mesh_options(Some(&mesh))
+            .expect_err("generic coupling namespace should fail validation");
+
+        assert!(err.contains("mesh.refinement.indicators namespace `coupling`"));
+    }
+
+    #[test]
+    fn fea_document_refinement_indicator_applicability_matches_profile_context() {
+        let structural = BTreeMap::from([(
+            "structural".to_string(),
+            BTreeMap::from([("stress_gradient".to_string(), RefinementIndicatorMode::Auto)]),
+        )]);
+        validate_refinement_indicator_applicability(
+            &structural,
+            AnalysisCreateModelProfile::LinearStaticStructural,
+            AnalysisRunKind::LinearStatic,
+            &FeaDomainsDocument::default(),
+        )
+        .expect("structural indicators should apply to linear static structural studies");
+
+        let unrelated = BTreeMap::from([(
+            "thermal".to_string(),
+            BTreeMap::from([(
+                "temperature_gradient".to_string(),
+                RefinementIndicatorMode::Auto,
+            )]),
+        )]);
+        let err = validate_refinement_indicator_applicability(
+            &unrelated,
+            AnalysisCreateModelProfile::LinearStaticStructural,
+            AnalysisRunKind::LinearStatic,
+            &FeaDomainsDocument::default(),
+        )
+        .expect_err("thermal indicators should not apply to uncoupled structural studies");
+        assert!(err.contains("mesh.refinement.indicators.thermal"));
+        assert!(err.contains("linear_static_structural"));
+
+        let coupled = BTreeMap::from([(
+            "thermo_mechanical".to_string(),
+            BTreeMap::from([("thermal_stress".to_string(), RefinementIndicatorMode::On)]),
+        )]);
+        validate_refinement_indicator_applicability(
+            &coupled,
+            AnalysisCreateModelProfile::ThermoMechanicalCoupled,
+            AnalysisRunKind::Transient,
+            &FeaDomainsDocument::default(),
+        )
+        .expect("thermo-mechanical indicators should apply to thermo-mechanical studies");
     }
 }

@@ -86,13 +86,16 @@ fn class_builtin(value: Value) -> crate::BuiltinResult<String> {
 pub(crate) fn class_name_for_value(value: &Value) -> String {
     match value {
         Value::Num(_) | Value::ComplexTensor(_) | Value::Complex(_, _) => "double".to_string(),
-        Value::Tensor(tensor) => tensor.dtype.class_name().to_string(),
+        Value::Tensor(tensor) => tensor.integer_storage().map_or_else(
+            || tensor.dtype.class_name().to_string(),
+            |storage| storage.class_name().to_string(),
+        ),
         Value::SparseTensor(_) => "double".to_string(),
         Value::Int(iv) => iv.class_name().to_string(),
         Value::Bool(_) | Value::LogicalArray(_) => "logical".to_string(),
         Value::String(_) | Value::StringArray(_) => "string".to_string(),
         Value::CharArray(_) => "char".to_string(),
-        Value::Symbolic(_) => "sym".to_string(),
+        Value::Symbolic(_) | Value::SymbolicArray(_) => "sym".to_string(),
         Value::Cell(_) => "cell".to_string(),
         Value::Struct(_) => "struct".to_string(),
         Value::GpuTensor(_) => "gpuArray".to_string(),
@@ -142,6 +145,17 @@ pub(crate) mod tests {
     fn class_reports_integer_type_names() {
         let name = class_builtin(Value::Int(IntValue::I32(12))).expect("class");
         assert_eq!(name, "int32");
+    }
+
+    #[test]
+    fn class_reports_exact_integer_tensor_storage_type() {
+        let tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![u64::MAX]),
+            vec![1, 1],
+        )
+        .expect("uint64 tensor");
+
+        assert_eq!(class_name_for_value(&Value::Tensor(tensor)), "uint64");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

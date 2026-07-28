@@ -37,7 +37,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cpu_fallback_handles_zero_scale() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         random::reset_rng();
         let mut tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("tensor");
         stochastic_evolution_host(&mut tensor, 0.1, 0.0, 3).expect("evolve");

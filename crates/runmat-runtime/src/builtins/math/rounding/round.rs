@@ -23,14 +23,19 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Elementwise,
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::Matlab,
-    provider_hooks: &[ProviderHook::Unary { name: "unary_round" }],
+    provider_hooks: &[
+        ProviderHook::Unary {
+            name: "unary_round",
+        },
+        ProviderHook::Custom("round_digits"),
+    ],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Providers may execute round directly on the device; digit-aware rounding currently gathers to the host.",
+    notes: "Providers may execute round directly on the device; digit-aware rounding uses the round_digits hook when available.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::rounding::round")]
@@ -186,8 +191,12 @@ enum RoundStrategy {
 }
 
 impl RoundStrategy {
-    fn requires_host(&self) -> bool {
-        !matches!(self, RoundStrategy::Integer)
+    fn provider_digits(self) -> Option<(i32, bool)> {
+        match self {
+            RoundStrategy::Integer => None,
+            RoundStrategy::Decimals(digits) => Some((digits, false)),
+            RoundStrategy::Significant(digits) => Some((digits, true)),
+        }
     }
 }
 
@@ -225,10 +234,17 @@ async fn round_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 async fn round_gpu(handle: GpuTensorHandle, strategy: RoundStrategy) -> BuiltinResult<Value> {
-    if !strategy.requires_host() {
-        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-            if let Ok(out) = provider.unary_round(&handle).await {
-                return Ok(Value::GpuTensor(out));
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+        match strategy.provider_digits() {
+            Some((digits, significant)) => {
+                if let Ok(out) = provider.round_digits(&handle, digits, significant).await {
+                    return Ok(Value::GpuTensor(out));
+                }
+            }
+            None => {
+                if let Ok(out) = provider.unary_round(&handle).await {
+                    return Ok(Value::GpuTensor(out));
+                }
             }
         }
     }
@@ -573,6 +589,59 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![4, 1]);
             assert_eq!(gathered.data, vec![-3.0, 0.0, 1.0, 2.0]);
+        });
+    }
+
+    #[test]
+    fn round_gpu_decimals_stays_resident_when_provider_supports_digits() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![1.2345, 2.499, 149.9, 150.0], vec![4, 1]).unwrap();
+            let view = runmat_accelerate_api::HostTensorView {
+                data: &tensor.data,
+                shape: &tensor.shape,
+            };
+            let handle = provider.upload(&view).expect("upload");
+            let result = round_builtin(
+                Value::GpuTensor(handle),
+                vec![Value::Int(IntValue::I32(-2))],
+            )
+            .expect("round");
+            assert!(
+                matches!(result, Value::GpuTensor(_)),
+                "digit-aware round should stay GPU resident"
+            );
+            let gathered = test_support::gather(result).expect("gather");
+            assert_eq!(gathered.shape, vec![4, 1]);
+            assert_eq!(gathered.data, vec![0.0, 0.0, 100.0, 200.0]);
+        });
+    }
+
+    #[test]
+    fn round_gpu_significant_stays_resident_when_provider_supports_digits() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![0.0012345, 12.3456, 98765.0], vec![3, 1]).unwrap();
+            let view = runmat_accelerate_api::HostTensorView {
+                data: &tensor.data,
+                shape: &tensor.shape,
+            };
+            let handle = provider.upload(&view).expect("upload");
+            let result = round_builtin(
+                Value::GpuTensor(handle),
+                vec![Value::Int(IntValue::I32(3)), Value::from("significant")],
+            )
+            .expect("round");
+            assert!(
+                matches!(result, Value::GpuTensor(_)),
+                "significant round should stay GPU resident"
+            );
+            let gathered = test_support::gather(result).expect("gather");
+            let expected = [0.00123, 12.3, 98800.0];
+            for (actual, expected) in gathered.data.iter().zip(expected.iter()) {
+                assert!(
+                    (actual - expected).abs() < 1e-10,
+                    "expected {expected}, got {actual}"
+                );
+            }
         });
     }
 }

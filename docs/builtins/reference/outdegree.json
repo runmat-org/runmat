@@ -1,0 +1,11 @@
+{
+  "title": "outdegree",
+  "category": "graph",
+  "keywords": ["outdegree", "digraph", "graph", "nodes"],
+  "summary": "Return directed node out-degree counts.",
+  "status": "implemented",
+  "tested": {"unit": "builtins::graph::tests"},
+  "description": "`outdegree(G)` returns one out-degree value per node. For undirected graphs, RunMat returns the undirected degree counts.",
+  "signatures": [{"label": "d = outdegree(G)", "description": "Return a column vector of out-degree counts."}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/graph/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/graph/mod.rs"}
+}

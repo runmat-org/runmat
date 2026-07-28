@@ -1,0 +1,85 @@
+{
+  "title": "timer",
+  "category": "timing",
+  "keywords": [
+    "timer",
+    "callback",
+    "start",
+    "stop",
+    "wait",
+    "timerfind"
+  ],
+  "summary": "Create a MATLAB-compatible timer handle object.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`timer` is a host-side control-flow object. Timer callbacks may call GPU-capable builtins, but timer creation and lifecycle methods do not own provider kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::timing::timer::tests",
+    "integration": [
+      "timer_constructs_finds_starts_and_deletes_through_vm"
+    ]
+  },
+  "description": "`timer` creates a handle object with MATLAB timer properties and method dispatch for `start`, `startat`, `stop`, `wait`, and `delete`. RunMat stores timers in a per-thread registry so `timerfind` and `timerfindall` can retrieve them while valid.",
+  "behaviors": [
+    "`t = timer` creates a valid timer handle with defaults: `ExecutionMode='singleShot'`, `Period=1`, `StartDelay=0`, `TasksToExecute=1`, `BusyMode='drop'`, `ObjectVisibility='on'`, `Running='off'`, `TasksExecuted=0`, `Type='timer'`, and a generated `Name`.",
+    "`t = timer(Name, Value, ...)` accepts common callback, timing, labeling, and user-data properties: `TimerFcn`, `StartFcn`, `StopFcn`, `ErrorFcn`, `Period`, `StartDelay`, `TasksToExecute`, `BusyMode`, `ExecutionMode`, `Name`, `Tag`, `ObjectVisibility`, and `UserData`.",
+    "Callback properties accept strings, character rows, function handles, closures, or callback cell arrays for property compatibility. This slice executes function-handle, closure, and callback-cell callbacks; non-empty text callbacks are rejected at execution time because they require dynamic-eval callback infrastructure.",
+    "`start(t)` validates `TimerFcn`, marks `Running='on'`, executes `StartFcn`, executes `TimerFcn` once for `singleShot` or `TasksToExecute` times for fixed execution modes, updates `TasksExecuted`, `InstantPeriod`, and `AveragePeriod`, then executes `StopFcn` and marks `Running='off'`.",
+    "`startat(t, delaySeconds)` is supported for numeric positive relative delays. MATLAB date/time and date-string start times are not yet implemented.",
+    "`stop(t)` marks the timer stopped and runs `StopFcn` if the timer was running. `wait(t)` returns after the timer is stopped. `delete(t)` invalidates the handle, removes it from timer discovery, and releases its GC root.",
+    "RunMat executes timer callbacks synchronously on the current VM path rather than on a background event queue. Long delays therefore block the caller on native hosts. This preserves deterministic behavior across native and wasm hosts, but it is not full MATLAB asynchronous scheduling.",
+    "Multiple timers are represented as a cell row because RunMat does not yet have first-class MATLAB object arrays."
+  ],
+  "examples": [
+    {
+      "description": "Create and start a one-shot timer",
+      "input": "t = timer('TimerFcn', @(src, evt)disp(\"tick\"));\nstart(t)"
+    },
+    {
+      "description": "Find a timer by tag",
+      "input": "t = timer('Tag', 'batch', 'TimerFcn', @tick);\nfound = timerfind('Tag', 'batch')"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does RunMat run timers in the background?",
+      "answer": "No. Timer callbacks run synchronously when `start` drives the timer. Background scheduling and a MATLAB-compatible timer event queue require additional runtime infrastructure."
+    },
+    {
+      "question": "Can timer callbacks use GPU arrays?",
+      "answer": "Yes, when the callback body calls GPU-capable builtins. The timer object itself is host-side control flow and has no GPU kernel."
+    }
+  ],
+  "links": [
+    {
+      "label": "timerfind",
+      "url": "./timerfind"
+    },
+    {
+      "label": "timerfindall",
+      "url": "./timerfindall"
+    },
+    {
+      "label": "pause",
+      "url": "./pause"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/timing/timer.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/timing/timer.rs"
+  },
+  "gpu_behavior": [
+    "`timer` is a control-flow and callback object. It gathers no tensors, allocates no GPU buffers, and does not participate in fusion."
+  ]
+}

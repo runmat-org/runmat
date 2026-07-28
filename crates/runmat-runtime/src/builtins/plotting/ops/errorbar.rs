@@ -705,6 +705,7 @@ fn infer_errorbar_x_from_y(y: &Value) -> crate::BuiltinResult<Value> {
         .len();
     Ok(Value::Tensor(Tensor {
         data: (1..=len).map(|i| i as f64).collect(),
+        integer_data: None,
         shape: vec![len],
         rows: len,
         cols: 1,
@@ -727,6 +728,7 @@ mod tests {
     fn vec_tensor(data: &[f64]) -> Tensor {
         Tensor {
             data: data.to_vec(),
+            integer_data: None,
             shape: vec![data.len()],
             rows: data.len(),
             cols: 1,

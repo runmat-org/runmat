@@ -1,0 +1,68 @@
+{
+  "title": "movsum",
+  "category": "math/reduction",
+  "keywords": [
+    "movsum",
+    "moving",
+    "window",
+    "sum",
+    "omitnan"
+  ],
+  "summary": "Compute moving sums in MATLAB and RunMat.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": true,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Real dense gpuArray inputs use provider-resident count-window reductions for scalar or [kb kf] windows, explicit dimensions, omit/include NaN modes, shrink/discard/fill endpoints, and sample/population normalization for movstd/movvar. SamplePoints and unsupported provider backends fall back to gather-once host evaluation and re-upload when an acceleration provider is active; complex GPU moving-window support remains tracked outside this resident real-dense fast path."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::reduction::moving::tests",
+    "integration": null
+  },
+  "description": "`movsum(A,k)` computes sums over a sliding window of length `k` along the first non-singleton dimension.",
+  "behaviors": [
+    "`k` may be a positive scalar window length or a two-element `[kb kf]` backward/forward window.",
+    "Pass an explicit `dim` to move along a chosen dimension.",
+    "`'includenan'` is the default; `'omitnan'` and `'omitmissing'` skip NaN values inside each window.",
+    "`'Endpoints'` supports `'shrink'` (default), `'discard'`, `'fill'`, and numeric scalar fill values.",
+    "`'SamplePoints', sp` uses a strictly increasing numeric point vector for irregular moving windows. With sample points, RunMat currently supports shrink endpoints.",
+    "This implementation covers numeric, logical, complex, and gpuArray inputs; table/timetable `DataVariables` forms are tracked separately."
+  ],
+  "examples": [
+    {
+      "description": "Moving sum over a row vector",
+      "input": "M = movsum([1 2 3 4], 3)",
+      "output": "M = [3 6 9 7]"
+    },
+    {
+      "description": "Moving sum with omitted NaN values",
+      "input": "M = movsum([2 NaN 3 4], [1 0], 'omitnan')",
+      "output": "M = [2 2 3 7]"
+    }
+  ],
+  "links": [
+    {
+      "label": "sum",
+      "url": "./sum"
+    },
+    {
+      "label": "movmean",
+      "url": "./movmean"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/reduction/moving.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/moving.rs"
+  }
+}

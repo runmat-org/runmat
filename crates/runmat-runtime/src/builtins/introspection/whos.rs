@@ -573,6 +573,11 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> BuiltinResult
             .map(|s| s.encode_utf16().count().saturating_mul(2))
             .sum(),
         Value::Symbolic(expr) => expr.to_string().encode_utf16().count().saturating_mul(2),
+        Value::SymbolicArray(array) => array
+            .data
+            .iter()
+            .map(|expr| expr.to_string().encode_utf16().count().saturating_mul(2))
+            .sum(),
         Value::Tensor(t) => t.data.len().saturating_mul(8),
         Value::SparseTensor(t) => t
             .values
@@ -609,14 +614,6 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> BuiltinResult
             total
         }
         Value::GpuTensor(handle) => {
-            #[cfg(all(test, feature = "wgpu"))]
-            {
-                if handle.device_id != 0 {
-                    let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                        runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-                    );
-                }
-            }
             let elem_size = if handle_is_logical(handle) {
                 1
             } else {

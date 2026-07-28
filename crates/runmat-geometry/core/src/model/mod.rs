@@ -18,7 +18,11 @@ pub use regions::{
     CadColorEvidence, CadLabelRef, CadPhysicalMaterialEvidence, CadRegionOwnership,
     CadSemanticKind, EntityIdRange, Region, RegionEntityMapping,
 };
-pub use source_geometry::{SourceGeometry, SourceGeometryKind};
+pub use source_geometry::{
+    CadCurveEvaluationSample, CadCurveEvaluationSampleSource, CadCurveEvaluator, CadEvaluatorSet,
+    CadFaceEvaluationSample, CadFaceEvaluationSampleSource, CadFaceEvaluator, SourceGeometry,
+    SourceGeometryKind,
+};
 pub use tessellation_profile::{HealingMode, TessellationProfile};
 pub use topology::ElementKind;
 pub use units::UnitSystem;

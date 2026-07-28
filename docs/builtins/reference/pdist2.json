@@ -1,0 +1,81 @@
+{
+  "title": "pdist2",
+  "category": "stats/ml",
+  "keywords": [
+    "pdist2",
+    "pairwise",
+    "distance",
+    "nearest neighbor",
+    "statistics",
+    "machine learning"
+  ],
+  "summary": "Compute pairwise distances between two sets of observations.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host. Pairwise distance kernels run on CPU."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::ml::distance::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`pdist2(X,Y)` returns a `size(X,1)` by `size(Y,1)` matrix of distances between rows of `X` and rows of `Y`.",
+  "behaviors": [
+    "`X` and `Y` must be real numeric vectors or 2-D matrices with the same number of columns.",
+    "The default metric is Euclidean distance.",
+    "Supported metrics match `pdist`: `\"euclidean\"`, `\"squaredeuclidean\"`, `\"cityblock\"`, `\"chebychev\"`, `\"minkowski\"`, `\"seuclidean\"`, `\"mahalanobis\"`, `\"cosine\"`, `\"correlation\"`, `\"hamming\"`, `\"jaccard\"`, and `\"spearman\"`.",
+    "`pdist2(X,Y,\"minkowski\",P)` uses positive finite exponent `P`.",
+    "`pdist2(X,Y,\"seuclidean\",S)` accepts a standard-deviation vector and defaults to scale estimated from `X`. `pdist2(X,Y,\"mahalanobis\",C)` accepts a symmetric positive definite covariance matrix and defaults to covariance estimated from `X`.",
+    "`\"Smallest\",K` and `\"Largest\",K` return the K smallest or largest distances per row of `Y`. `[D,I] = pdist2(...)` also returns one-based row indices from `X` for the selected distances."
+  ],
+  "examples": [
+    {
+      "description": "Compute distances between two sets",
+      "input": "X = [0 0; 2 0];\nY = [1 0; 3 0];\nD = pdist2(X,Y)",
+      "output": "D is a 2-by-2 distance matrix."
+    },
+    {
+      "description": "Use squared Euclidean distance",
+      "input": "D = pdist2(X,Y,\"squaredeuclidean\")",
+      "output": "D contains squared distances."
+    },
+    {
+      "description": "Keep nearest distances per query row",
+      "input": "[D,I] = pdist2(X,Y,\"euclidean\",\"Smallest\",1)",
+      "output": "D is a 1-by-size(Y,1) matrix of nearest distances; I contains row indices from X."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `Smallest` return indices?",
+      "answer": "Yes. Request `[D,I]` to receive one-based row indices from `X`, matching MATLAB's nearest-distance output form."
+    },
+    {
+      "question": "Are custom distance functions supported?",
+      "answer": "No. RunMat currently supports the standard named numeric distance metrics."
+    }
+  ],
+  "links": [
+    {
+      "label": "pdist",
+      "url": "./pdist"
+    },
+    {
+      "label": "squareform",
+      "url": "./squareform"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/ml/distance.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/distance.rs"
+  }
+}

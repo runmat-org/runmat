@@ -163,7 +163,39 @@ pub struct ProjectSourceFile {
     pub package_path: Option<String>,
     #[serde(default)]
     pub class_name: Option<String>,
+    /// Canonical class scope contributed by `@Class` folders. This intentionally
+    /// excludes the file stem: `@Report/Report.m` and `@Report/title.m` both
+    /// belong to class `Report`, while their callable file identities remain
+    /// `Report.Report` and `Report.title` respectively.
+    #[serde(default)]
+    pub class_qualified_name: Option<String>,
     pub is_private: bool,
+}
+
+impl ProjectSourceFile {
+    /// The canonical name to apply to a parsed `classdef` source.
+    ///
+    /// Class-folder sources use their class scope rather than their member/file
+    /// name. Package classdef files outside an `@Class` folder use their normal
+    /// package-qualified file identity. Plain root classdefs retain the name
+    /// declared in the source.
+    pub fn class_definition_qualified_name(&self) -> Option<&str> {
+        self.class_qualified_name.as_deref().or_else(|| {
+            self.package_path
+                .as_ref()
+                .map(|_| self.qualified_name.as_str())
+        })
+    }
+
+    /// The callable identity for a parsed function or class-folder member file.
+    pub fn function_qualified_name(&self) -> Option<&str> {
+        if self.is_private {
+            return None;
+        }
+        (self.package_path.is_some() || self.class_name.is_some())
+            .then_some(self.qualified_name.as_str())
+            .filter(|name| name.contains('.'))
+    }
 }
 
 #[derive(Debug, Error)]
@@ -313,6 +345,67 @@ pub struct DiscoveredProjectSymbols {
     pub root_package: String,
     pub project_root: PathBuf,
     pub symbols: HashSet<String>,
+    pub definitions: Vec<ProjectSymbolDefinition>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectSymbolDefinition {
+    /// Name visible to source code in the root project. Dependency aliases and
+    /// package-qualified variants are represented as separate definitions that
+    /// point at the same source file.
+    pub name: String,
+    /// Canonical callable/class identity derived from the MATLAB source path.
+    pub qualified_name: String,
+    pub source_path: PathBuf,
+    pub package_name: String,
+    pub is_private: bool,
+}
+
+fn extend_project_source_symbols(
+    symbols: &mut HashSet<String>,
+    definitions: &mut Vec<ProjectSymbolDefinition>,
+    source: &ProjectSourceFile,
+    package_name: &str,
+    package_root: &Path,
+    root_dependencies: &BTreeMap<String, String>,
+) {
+    let mut names = vec![source.qualified_name.as_str()];
+    if let Some(class_name) = source.class_definition_qualified_name() {
+        if class_name != source.qualified_name {
+            names.push(class_name);
+        }
+    }
+    let source_path = package_root
+        .join(&source.source_root)
+        .join(&source.relative_path);
+    for name in names {
+        let package_name_variant =
+            (!package_name.is_empty()).then(|| format!("{package_name}.{name}"));
+        let exposed_names = std::iter::once(name.to_string())
+            .chain(package_name_variant)
+            .chain(
+                root_dependencies
+                    .iter()
+                    .filter(|(_, dependency_package)| *dependency_package == package_name)
+                    .map(|(alias, _)| format!("{alias}.{name}")),
+            );
+        for exposed_name in exposed_names {
+            if !definitions.iter().any(|definition| {
+                definition.name == exposed_name && definition.source_path == source_path
+            }) {
+                definitions.push(ProjectSymbolDefinition {
+                    name: exposed_name.clone(),
+                    qualified_name: source.qualified_name.clone(),
+                    source_path: source_path.clone(),
+                    package_name: package_name.to_string(),
+                    is_private: source.is_private,
+                });
+            }
+            if !source.is_private {
+                symbols.insert(exposed_name);
+            }
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -329,6 +422,29 @@ pub enum DiscoverProjectSymbolsError {
     MissingRootPackage {
         manifest_path: PathBuf,
         package: String,
+    },
+}
+
+/// Source lookup context used by static analysis, the LSP, and runtime
+/// compilation. Manifest-backed projects and loose MATLAB folders share this
+/// representation so callers do not need separate name-resolution paths.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveredSourceSymbols {
+    pub manifest_path: Option<PathBuf>,
+    pub project_root: PathBuf,
+    pub symbols: HashSet<String>,
+    pub definitions: Vec<ProjectSymbolDefinition>,
+}
+
+#[derive(Debug, Error)]
+pub enum DiscoverSourceSymbolsError {
+    #[error(transparent)]
+    Project(#[from] DiscoverProjectSymbolsError),
+    #[error("failed to index loose MATLAB sources under {root}: {source}")]
+    LooseSourceIndex {
+        root: PathBuf,
+        #[source]
+        source: ProjectSourceIndexError,
     },
 }
 
@@ -598,7 +714,7 @@ pub fn discover_project_manifest_from(start: &Path) -> Option<PathBuf> {
     loop {
         for filename in PROJECT_MANIFEST_FILENAMES {
             let candidate = current.join(filename);
-            if candidate.is_file() {
+            if candidate.is_file() && file_declares_project_manifest(&candidate) {
                 return Some(candidate);
             }
         }
@@ -618,7 +734,9 @@ pub async fn discover_project_manifest_from_async(start: &Path) -> Option<PathBu
     loop {
         for filename in PROJECT_MANIFEST_FILENAMES {
             let candidate = current.join(filename);
-            if path_is_file_async(&candidate).await {
+            if path_is_file_async(&candidate).await
+                && file_declares_project_manifest_async(&candidate).await
+            {
                 return Some(candidate);
             }
         }
@@ -627,6 +745,45 @@ pub async fn discover_project_manifest_from_async(start: &Path) -> Option<PathBu
         }
     }
     None
+}
+
+/// `runmat.toml` and `runmat.json` are shared by runtime configuration and
+/// project metadata. A valid runtime-only document is not a project manifest
+/// merely because it uses the canonical filename. Documents that declare
+/// either project section are candidates (and are subsequently validated as
+/// project manifests); unreadable or syntactically invalid documents remain
+/// candidates so callers receive the underlying load error instead of silently
+/// falling back to loose-folder semantics.
+fn file_declares_project_manifest(path: &Path) -> bool {
+    fs::read_to_string(path)
+        .map(|content| content_declares_project_manifest(path, &content))
+        .unwrap_or(true)
+}
+
+async fn file_declares_project_manifest_async(path: &Path) -> bool {
+    runmat_filesystem::read_to_string_async(path)
+        .await
+        .map(|content| content_declares_project_manifest(path, &content))
+        .unwrap_or(true)
+}
+
+fn content_declares_project_manifest(path: &Path, content: &str) -> bool {
+    if path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+    {
+        return serde_json::from_str::<serde_json::Value>(content)
+            .ok()
+            .and_then(|value| value.as_object().cloned())
+            .map(|object| object.contains_key("package") || object.contains_key("sources"))
+            .unwrap_or(true);
+    }
+    toml::from_str::<toml::Value>(content)
+        .ok()
+        .and_then(|value| value.as_table().cloned())
+        .map(|table| table.contains_key("package") || table.contains_key("sources"))
+        .unwrap_or(true)
 }
 
 pub fn build_project_source_index(
@@ -698,6 +855,108 @@ pub async fn build_project_source_index_async(
     index.private_dirs.sort();
     index.private_dirs.dedup();
     Ok(index)
+}
+
+/// Build the MATLAB lookup index for a folder that has no `runmat.toml`.
+/// MATLAB's implicit lookup scope contains files directly beside the checked
+/// source plus package (`+pkg`), class (`@Class`), and `private` subtrees. Plain
+/// nested directories are not implicitly on the path.
+pub fn build_loose_source_index(
+    root: &Path,
+) -> Result<ProjectSourceIndex, ProjectSourceIndexError> {
+    let mut index = ProjectSourceIndex::default();
+    let entries = fs::read_dir(root).map_err(|source| ProjectSourceIndexError::ReadDir {
+        path: root.to_path_buf(),
+        source,
+    })?;
+    let mut entries = entries
+        .map(|entry| {
+            entry.map_err(|source| ProjectSourceIndexError::ReadEntry {
+                path: root.to_path_buf(),
+                source,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|entry| entry.file_name());
+
+    for entry in entries {
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .map_err(|source| ProjectSourceIndexError::ReadEntry {
+                path: root.to_path_buf(),
+                source,
+            })?;
+        if file_type.is_dir() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with('+') || name.starts_with('@') || name == "private" {
+                scan_source_dir(
+                    &path,
+                    root,
+                    Path::new("."),
+                    &ScanState::default(),
+                    &mut index,
+                    root,
+                )?;
+            }
+            continue;
+        }
+        if let Some(source) = project_source_file_from_path(&path, root, Path::new(".")) {
+            index.files.push(source);
+        }
+    }
+    normalize_source_index(&mut index);
+    Ok(index)
+}
+
+pub async fn build_loose_source_index_async(
+    root: &Path,
+) -> Result<ProjectSourceIndex, ProjectSourceIndexError> {
+    let mut index = ProjectSourceIndex::default();
+    let mut entries = runmat_filesystem::read_dir_async(root)
+        .await
+        .map_err(|source| ProjectSourceIndexError::ReadDir {
+            path: root.to_path_buf(),
+            source,
+        })?;
+    entries.sort_by_key(|entry| entry.file_name().to_string_lossy().to_string());
+
+    for entry in entries {
+        let path = entry.path().to_path_buf();
+        if entry.is_dir() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('+') || name.starts_with('@') || name == "private" {
+                scan_source_dir_async(
+                    &path,
+                    root,
+                    Path::new("."),
+                    &ScanState::default(),
+                    &mut index,
+                    root,
+                )
+                .await?;
+            }
+            continue;
+        }
+        if let Some(source) = project_source_file_from_path(&path, root, Path::new(".")) {
+            index.files.push(source);
+        }
+    }
+    normalize_source_index(&mut index);
+    Ok(index)
+}
+
+fn normalize_source_index(index: &mut ProjectSourceIndex) {
+    index
+        .files
+        .sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    index.package_dirs.sort();
+    index.package_dirs.dedup();
+    index.class_dirs.sort();
+    index.class_dirs.dedup();
+    index.private_dirs.sort();
+    index.private_dirs.dedup();
 }
 
 pub fn resolve_project_entrypoint(
@@ -836,18 +1095,17 @@ pub fn discover_project_symbols_from(
         .expect("root package should be present");
     let root_dependencies = root.dependencies.clone();
     let mut symbols = HashSet::new();
+    let mut definitions = Vec::new();
     for package in discovered.composition.packages.values() {
         for source in &package.source_index.files {
-            symbols.insert(source.qualified_name.clone());
-            symbols.insert(format!(
-                "{}.{}",
-                package.package_name, source.qualified_name
-            ));
-            for (alias, dependency_package) in &root_dependencies {
-                if dependency_package == &package.package_name {
-                    symbols.insert(format!("{alias}.{}", source.qualified_name));
-                }
-            }
+            extend_project_source_symbols(
+                &mut symbols,
+                &mut definitions,
+                source,
+                &package.package_name,
+                &package.project_root,
+                &root_dependencies,
+            );
         }
     }
     Ok(Some(DiscoveredProjectSymbols {
@@ -855,6 +1113,7 @@ pub fn discover_project_symbols_from(
         root_package,
         project_root: root.project_root.clone(),
         symbols,
+        definitions,
     }))
 }
 
@@ -891,18 +1150,17 @@ pub async fn discover_project_symbols_from_async(
         .expect("root package should be present");
     let root_dependencies = root.dependencies.clone();
     let mut symbols = HashSet::new();
+    let mut definitions = Vec::new();
     for package in discovered.composition.packages.values() {
         for source in &package.source_index.files {
-            symbols.insert(source.qualified_name.clone());
-            symbols.insert(format!(
-                "{}.{}",
-                package.package_name, source.qualified_name
-            ));
-            for (alias, dependency_package) in &root_dependencies {
-                if dependency_package == &package.package_name {
-                    symbols.insert(format!("{alias}.{}", source.qualified_name));
-                }
-            }
+            extend_project_source_symbols(
+                &mut symbols,
+                &mut definitions,
+                source,
+                &package.package_name,
+                &package.project_root,
+                &root_dependencies,
+            );
         }
     }
     Ok(Some(DiscoveredProjectSymbols {
@@ -910,6 +1168,7 @@ pub async fn discover_project_symbols_from_async(
         root_package,
         project_root: root.project_root.clone(),
         symbols,
+        definitions,
     }))
 }
 
@@ -995,6 +1254,155 @@ pub async fn discover_project_symbols_from_source_name_async(
     discover_project_symbols_from_async(&start).await
 }
 
+pub fn discover_source_symbols_from_source_name(
+    source_name: &str,
+    cwd: &Path,
+) -> Result<Option<DiscoveredSourceSymbols>, DiscoverSourceSymbolsError> {
+    // Virtual/text source labels such as `<input>` and remote identifiers do
+    // not belong to the process working directory. Requiring an actual local
+    // primary source before manifest discovery prevents an unrelated (or
+    // concurrently removed) cwd from leaking project symbols or errors into a
+    // text execution.
+    let Some((source_path, root)) = local_source_and_parent(source_name, cwd) else {
+        return Ok(None);
+    };
+    if let Some(project) = discover_project_symbols_from_source_name(source_name, cwd)? {
+        let mut symbols = project.symbols;
+        add_visible_private_symbols(&mut symbols, &project.definitions, &source_path);
+        return Ok(Some(DiscoveredSourceSymbols {
+            manifest_path: Some(project.manifest_path),
+            project_root: project.project_root,
+            symbols,
+            definitions: project.definitions,
+        }));
+    }
+    let index = build_loose_source_index(&root).map_err(|source| {
+        DiscoverSourceSymbolsError::LooseSourceIndex {
+            root: root.clone(),
+            source,
+        }
+    })?;
+    Ok(Some(source_symbols_from_index(
+        &index,
+        &root,
+        &source_path,
+        None,
+    )))
+}
+
+pub async fn discover_source_symbols_from_source_name_async(
+    source_name: &str,
+    cwd: &Path,
+) -> Result<Option<DiscoveredSourceSymbols>, DiscoverSourceSymbolsError> {
+    let Some((source_path, root)) = local_source_and_parent_async(source_name, cwd).await else {
+        return Ok(None);
+    };
+    if let Some(project) = discover_project_symbols_from_source_name_async(source_name, cwd).await?
+    {
+        let mut symbols = project.symbols;
+        add_visible_private_symbols(&mut symbols, &project.definitions, &source_path);
+        return Ok(Some(DiscoveredSourceSymbols {
+            manifest_path: Some(project.manifest_path),
+            project_root: project.project_root,
+            symbols,
+            definitions: project.definitions,
+        }));
+    }
+    let index = build_loose_source_index_async(&root)
+        .await
+        .map_err(|source| DiscoverSourceSymbolsError::LooseSourceIndex {
+            root: root.clone(),
+            source,
+        })?;
+    Ok(Some(source_symbols_from_index(
+        &index,
+        &root,
+        &source_path,
+        None,
+    )))
+}
+
+pub fn source_symbols_from_index(
+    index: &ProjectSourceIndex,
+    root: &Path,
+    primary_source: &Path,
+    manifest_path: Option<PathBuf>,
+) -> DiscoveredSourceSymbols {
+    let mut symbols = HashSet::new();
+    let mut definitions = Vec::new();
+    for source in &index.files {
+        extend_project_source_symbols(
+            &mut symbols,
+            &mut definitions,
+            source,
+            "",
+            root,
+            &BTreeMap::new(),
+        );
+    }
+    add_visible_private_symbols(&mut symbols, &definitions, primary_source);
+    DiscoveredSourceSymbols {
+        manifest_path,
+        project_root: root.to_path_buf(),
+        symbols,
+        definitions,
+    }
+}
+
+fn add_visible_private_symbols(
+    symbols: &mut HashSet<String>,
+    definitions: &[ProjectSymbolDefinition],
+    primary_source: &Path,
+) {
+    let primary_parent = primary_source.parent();
+    for definition in definitions
+        .iter()
+        .filter(|definition| definition.is_private)
+    {
+        let private_owner = definition.source_path.parent().and_then(Path::parent);
+        if private_owner.is_some() && private_owner == primary_parent {
+            symbols.insert(definition.name.clone());
+        }
+    }
+}
+
+fn local_source_and_parent(source_name: &str, cwd: &Path) -> Option<(PathBuf, PathBuf)> {
+    let source_path = PathBuf::from(source_name);
+    let local = if source_path.is_absolute() {
+        source_path
+    } else {
+        cwd.join(source_path)
+    };
+    if source_name.contains(':') && !local.exists() {
+        return None;
+    }
+    if !local.is_file() {
+        return None;
+    }
+    let parent = local.parent()?.to_path_buf();
+    Some((local, parent))
+}
+
+async fn local_source_and_parent_async(
+    source_name: &str,
+    cwd: &Path,
+) -> Option<(PathBuf, PathBuf)> {
+    let source_path = PathBuf::from(source_name);
+    let local = if source_path.is_absolute() {
+        source_path
+    } else {
+        cwd.join(source_path)
+    };
+    if source_name.contains(':') && !path_exists_async(&local).await {
+        return None;
+    }
+    if !path_is_file_async(&local).await {
+        return None;
+    }
+    let parent = local.parent()?.to_path_buf();
+    Some((local, parent))
+}
+
 pub fn discover_known_project_symbols_from_source_name(
     source_name: Option<&str>,
     cwd: &Path,
@@ -1002,7 +1410,7 @@ pub fn discover_known_project_symbols_from_source_name(
     let Some(source_name) = source_name else {
         return HashSet::new();
     };
-    let Ok(discovered) = discover_project_symbols_from_source_name(source_name, cwd) else {
+    let Ok(discovered) = discover_source_symbols_from_source_name(source_name, cwd) else {
         return HashSet::new();
     };
     discovered
@@ -1017,7 +1425,7 @@ pub async fn discover_known_project_symbols_from_source_name_async(
     let Some(source_name) = source_name else {
         return HashSet::new();
     };
-    let Ok(discovered) = discover_project_symbols_from_source_name_async(source_name, cwd).await
+    let Ok(discovered) = discover_source_symbols_from_source_name_async(source_name, cwd).await
     else {
         return HashSet::new();
     };
@@ -1558,6 +1966,74 @@ struct ScanState {
     in_private: bool,
 }
 
+/// Normalize one MATLAB source path into the identity used by project
+/// composition. This is shared by manifest source-root scanning and the
+/// unmanaged loose-file resolver; consumers must not derive identities from
+/// raw path components themselves.
+pub fn project_source_file_from_path(
+    source_path: &Path,
+    root_dir: &Path,
+    source_root: &Path,
+) -> Option<ProjectSourceFile> {
+    let relative_path = source_path.strip_prefix(root_dir).ok()?.to_path_buf();
+    if !source_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("m"))
+    {
+        return None;
+    }
+    let stem = source_path.file_stem()?.to_str()?.trim();
+    if stem.is_empty() {
+        return None;
+    }
+
+    let mut state = ScanState::default();
+    if let Some(parent) = relative_path.parent() {
+        for component in parent.components() {
+            let segment = component.as_os_str().to_str()?;
+            if let Some(package) = segment.strip_prefix('+') {
+                if package.is_empty() {
+                    return None;
+                }
+                state.package_segments.push(package.to_string());
+            } else if let Some(class) = segment.strip_prefix('@') {
+                if class.is_empty() {
+                    return None;
+                }
+                state.class_name = Some(class.to_string());
+            } else if segment == "private" {
+                state.in_private = true;
+            } else {
+                state.module_segments.push(segment.to_string());
+            }
+        }
+    }
+
+    let mut qualified_segments = state.package_segments.clone();
+    qualified_segments.extend(state.module_segments.iter().cloned());
+    let class_qualified_name = state.class_name.as_ref().map(|class_name| {
+        let mut class_segments = qualified_segments.clone();
+        class_segments.push(class_name.clone());
+        class_segments.join(".")
+    });
+    if let Some(class_name) = &state.class_name {
+        qualified_segments.push(class_name.clone());
+    }
+    qualified_segments.push(stem.to_string());
+    let qualified_name = qualified_segments.join(".");
+    (!qualified_name.is_empty()).then_some(ProjectSourceFile {
+        source_root: source_root.to_path_buf(),
+        relative_path,
+        qualified_name,
+        package_path: (!state.package_segments.is_empty())
+            .then(|| state.package_segments.join(".")),
+        class_name: state.class_name,
+        class_qualified_name,
+        is_private: state.in_private,
+    })
+}
+
 fn scan_source_dir(
     dir: &Path,
     root_abs: &Path,
@@ -1627,45 +2103,9 @@ fn scan_source_dir(
             continue;
         }
 
-        let relative_path = path
-            .strip_prefix(root_abs)
-            .unwrap_or(path.as_path())
-            .to_path_buf();
-        let stem = path
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .unwrap_or("")
-            .trim();
-        if stem.is_empty() {
-            continue;
+        if let Some(source) = project_source_file_from_path(&path, root_abs, source_root) {
+            index.files.push(source);
         }
-
-        let mut qualified_segments = Vec::new();
-        qualified_segments.extend(state.package_segments.iter().cloned());
-        qualified_segments.extend(state.module_segments.iter().cloned());
-        if let Some(class_name) = &state.class_name {
-            qualified_segments.push(class_name.clone());
-        }
-        qualified_segments.push(stem.to_string());
-        let qualified_name = qualified_segments.join(".");
-        if qualified_name.is_empty() {
-            continue;
-        }
-
-        let package_path = if state.package_segments.is_empty() {
-            None
-        } else {
-            Some(state.package_segments.join("."))
-        };
-
-        index.files.push(ProjectSourceFile {
-            source_root: source_root.to_path_buf(),
-            relative_path,
-            qualified_name,
-            package_path,
-            class_name: state.class_name.clone(),
-            is_private: state.in_private,
-        });
     }
 
     Ok(())
@@ -1729,45 +2169,9 @@ async fn scan_source_dir_async(
                 continue;
             }
 
-            let relative_path = path
-                .strip_prefix(root_abs)
-                .unwrap_or(path.as_path())
-                .to_path_buf();
-            let stem = path
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .unwrap_or("")
-                .trim();
-            if stem.is_empty() {
-                continue;
+            if let Some(source) = project_source_file_from_path(&path, root_abs, source_root) {
+                index.files.push(source);
             }
-
-            let mut qualified_segments = Vec::new();
-            qualified_segments.extend(current_state.package_segments.iter().cloned());
-            qualified_segments.extend(current_state.module_segments.iter().cloned());
-            if let Some(class_name) = &current_state.class_name {
-                qualified_segments.push(class_name.clone());
-            }
-            qualified_segments.push(stem.to_string());
-            let qualified_name = qualified_segments.join(".");
-            if qualified_name.is_empty() {
-                continue;
-            }
-
-            let package_path = if current_state.package_segments.is_empty() {
-                None
-            } else {
-                Some(current_state.package_segments.join("."))
-            };
-
-            index.files.push(ProjectSourceFile {
-                source_root: source_root.to_path_buf(),
-                relative_path,
-                qualified_name,
-                package_path,
-                class_name: current_state.class_name.clone(),
-                is_private: current_state.in_private,
-            });
         }
     }
 

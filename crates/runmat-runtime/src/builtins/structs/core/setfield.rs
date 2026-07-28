@@ -9,6 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::introspection::dynamicprops;
 use crate::builtins::structs::type_resolvers::setfield_type;
 use crate::{
     build_runtime_error, call_builtin_async, gather_if_needed_async, object_property_getter_name,
@@ -988,6 +989,10 @@ async fn write_object_property(
     name: &str,
     rhs: Value,
 ) -> BuiltinResult<()> {
+    if dynamicprops::metadata_assignment(obj, name, rhs.clone())? {
+        return Ok(());
+    }
+
     if let Some((prop, _owner)) = runmat_builtins::lookup_property(&obj.class_name, name) {
         if prop.is_static {
             return Err(setfield_static_access(format!(
@@ -1022,6 +1027,10 @@ async fn write_object_property(
             obj.properties.insert(format!("{name}_backing"), rhs);
             return Ok(());
         }
+    }
+
+    if dynamicprops::dynamic_property_assign(obj, name, rhs.clone())? {
+        return Ok(());
     }
 
     obj.properties.insert(name.to_string(), rhs);

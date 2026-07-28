@@ -123,7 +123,7 @@ This page defines RunMat-specific terms and abbreviations used across the runtim
 
 | Term | Definition | More |
 | --- | --- | --- |
-| MAT payload | Binary workspace data used by save/load and workspace replay paths. Session replay can encode MAT bytes in a host-facing JSON envelope. | [Snapshots & Replay](/docs/runtime/session/snapshots) |
+| MAT payload | Binary workspace data used by save/load and workspace replay paths. Session replay can encode MAT bytes in a host-facing JSON envelope. | [Workspace Replay](/docs/runtime/session/workspace-replay) |
 | MException | MATLAB-compatible error value used for catch/rethrow behavior and structured runtime failures. | [Errors & Diagnostics](/docs/runtime/execution/errors) |
 | MIR | Mid-Level Intermediate Representation. MIR turns HIR into explicit control flow, statements, terminators, places, rvalues, and analysis inputs for bytecode generation. | [Mid-Level IR (MIR)](/docs/runtime/compiler/mir) |
 | MIR analysis | Static analysis over MIR. It computes facts used by diagnostics, bytecode compilation, async behavior, spawn safety, and future optimization work. | [MIR & Static Analysis](/docs/runtime/compiler/static-analysis) |
@@ -151,7 +151,7 @@ This page defines RunMat-specific terms and abbreviations used across the runtim
 | --- | --- | --- |
 | REPL | Read-eval-print loop. The CLI REPL keeps one `RunMatSession` alive and submits each entered line as an execution request. | [Host Integration](/docs/runtime/session/host-integration) |
 | Remote I/O | Filesystem work backed by a remote provider instead of local disk. The provider interface allows remote reads and writes to be scheduled in parallel so throughput can saturate the network when storage allows it. | [Filesystem Abstraction](/docs/runtime/fs) |
-| Replay | Reconstructing saved runtime state. RunMat uses replay for workspace variables and plotting scenes, but startup snapshots are a separate mechanism. | [Snapshots & Replay](/docs/runtime/session/snapshots) |
+| Replay | Reconstructing saved runtime state. RunMat uses replay for workspace variables and plotting scenes. | [Workspace Replay](/docs/runtime/session/workspace-replay) |
 | Residency | Whether a value is currently host-resident, GPU-resident, or able to stay on device across operations. Fusion and provider paths use residency to avoid unnecessary transfers. | [Fusion Engine & Residency Management](/docs/runtime/gpu/fusion) |
 | Runtime | The execution support layer below the session and VM. It owns builtins, values, warnings, console streams, plotting hooks, input hooks, object helpers, and provider integration. | [Execution](/docs/runtime/execution) |
 | Rvalue | A MIR expression that produces a value for an assignment or temporary. Rvalues make computation explicit before bytecode generation. | [Mid-Level IR (MIR)](/docs/runtime/compiler/mir) |
@@ -164,11 +164,10 @@ This page defines RunMat-specific terms and abbreviations used across the runtim
 | Semantic tokens | LSP classification data used by editors for syntax-aware highlighting. RunMat emits tokens from parser and compiler context instead of relying only on text patterns. | [Diagnostics & Highlighting](/docs/runtime/lsp/diagnostics-and-highlighting) |
 | Session | The long-lived execution object that connects source compilation, VM/JIT execution, workspace state, host policy, plotting, diagnostics, telemetry, and result assembly. | [Session Engine](/docs/runtime/session) |
 | Slice | A range-like indexing selector over one or more dimensions. Slices are represented explicitly so CPU, GPU, dataset, and remote filesystem paths can avoid materializing unnecessary data. | [Indexing Subsystem](/docs/runtime/vm/indexing) |
-| Snapshot | A serialized payload used for startup acceleration or state transfer. Startup snapshots package standard-library metadata and caches; workspace replay snapshots preserve live variables. | [Snapshots & Replay](/docs/runtime/session/snapshots) |
+| Snapshot | A point-in-time representation whose meaning is defined by its owning subsystem, such as a filesystem history entry, workspace projection, rendered figure, or provider telemetry reading. | [Workspace Replay](/docs/runtime/session/workspace-replay) |
 | Source identity | Stable metadata attached to submitted source, such as a file path, REPL name, notebook cell name, or host-provided label. Diagnostics and workspace keys use it to stay tied to the right source. | [Execution Requests](/docs/runtime/session/execution-requests) |
 | Spawn handle | The single-use value returned by `spawn(future)`. In the current runtime, spawning resolves the future before returning the handle; it does not schedule background work yet. | [Async Execution](/docs/runtime/execution/async) |
 | Static analysis | Compile-time reasoning over source or IR. RunMat uses it for diagnostics, assignment checks, type/shape facts, async/spawn metadata, and later execution decisions. | [MIR & Static Analysis](/docs/runtime/compiler/static-analysis) |
-| Startup snapshot | A binary payload that packages standard-library metadata and caches to reduce startup cost. It is separate from workspace replay. | [Snapshots & Replay](/docs/runtime/session/snapshots) |
 | Surface | A host presentation target for plotting. A figure can outlive a surface, and a surface can be rebound to another figure. | [Plotting Host Integration](/docs/runtime/plotting/host-integration) |
 
 ## T
@@ -178,7 +177,7 @@ This page defines RunMat-specific terms and abbreviations used across the runtim
 | Telemetry | Bounded runtime analytics and provider counters used to understand installation health, execution behavior, acceleration usage, failures, and benchmark characteristics. | [Telemetry](/docs/runtime/development/telemetry) |
 | Terminator | The MIR instruction that ends a basic block, such as branch, return, jump, or await. Terminators make control flow explicit. | [Mid-Level IR (MIR)](/docs/runtime/compiler/mir) |
 | Turbine | RunMat's JIT compiler crate. It compiles eligible bytecode paths into native code and falls back to the VM when a path cannot be compiled safely. | [JIT Compiler](/docs/runtime/jit) |
-| TypeScript bindings | The `bindings/ts` package that exposes RunMat's WASM runtime, session API, LSP bundle, startup snapshot, plotting hooks, and host integration types to JavaScript and TypeScript callers. | [WASM & TypeScript/JavaScript](/docs/runtime/wasm) |
+| TypeScript bindings | The `bindings/ts` package that exposes RunMat's WASM runtime, session API, LSP bundle, plotting hooks, and host integration types to JavaScript and TypeScript callers. | [WASM & TypeScript/JavaScript](/docs/runtime/wasm) |
 
 ## V
 
@@ -198,5 +197,5 @@ This page defines RunMat-specific terms and abbreviations used across the runtim
 | Workspace | The session's live variable state. It bridges durable host-visible values and VM slots during execution. | [Workspace State](/docs/runtime/session/workspace) |
 | Workspace delta | Versioned upserts, removals, and full-snapshot requests emitted after execution so hosts can update variable panes without rebuilding them blindly. | [Workspace State](/docs/runtime/session/workspace) |
 | Workspace handle | Stable request/session identity used to build interactive binding keys and associate source execution with a particular workspace. | [Execution Requests](/docs/runtime/session/execution-requests) |
-| Workspace replay | Exporting and importing live workspace variables through a bounded payload. Replay replaces the current workspace with restored variables; it does not merge into the existing workspace. | [Snapshots & Replay](/docs/runtime/session/snapshots) |
+| Workspace replay | Exporting and importing live workspace variables through a bounded payload. Replay replaces the current workspace with restored variables; it does not merge into the existing workspace. | [Workspace Replay](/docs/runtime/session/workspace-replay) |
 | Write barrier | GC bookkeeping used when an older object is updated to reference a younger object. It keeps minor collections correct by adding remembered-set roots. | [Memory Management](/docs/runtime/gc) |

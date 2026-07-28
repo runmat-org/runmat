@@ -1,0 +1,25 @@
+{
+  "title": "prctile",
+  "category": "stats/summary",
+  "keywords": ["prctile", "percentile", "quantile", "statistics"],
+  "summary": "Compute sample percentiles.",
+  "gpu_support": { "elementwise": false, "reduction": false, "precisions": ["f64"], "broadcasting": "none", "notes": "GPU inputs are gathered to host." },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": { "unit": "builtins::stats::summary::order_stats::tests", "integration": null },
+  "description": "`prctile(X,p)` computes sample percentiles along the first nonsingleton dimension using linear interpolation.",
+  "behaviors": [
+    "`p` must contain percentages in `[0,100]`.",
+    "`prctile(X,p,dim)` operates along a selected dimension.",
+    "NaNs are omitted by default in each slice.",
+    "`\"omitnan\"` omits NaNs in each slice; `\"includenan\"` returns NaN for slices containing NaN.",
+    "`\"Method\",\"linear\"` and `\"Method\",\"exact\"` use in-memory linear interpolation; `\"approximate\"` is rejected because tall arrays are not supported here."
+  ],
+  "examples": [{ "description": "Median percentile", "input": "m = prctile([1 3 10 20], 50)" }],
+  "faqs": [{ "question": "Can p be a vector?", "answer": "Yes. Vector `p` replaces the operated dimension with the number of requested percentiles." }],
+  "links": [{ "label": "quantile", "url": "./quantile" }, { "label": "median", "url": "./median" }],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/order_stats.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/order_stats.rs"
+  }
+}

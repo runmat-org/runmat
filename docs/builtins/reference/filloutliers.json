@@ -1,0 +1,35 @@
+{
+  "title": "filloutliers",
+  "category": "stats/summary",
+  "keywords": ["filloutliers", "outlier", "fill", "median", "quartiles", "mean", "statistics"],
+  "summary": "Fill outliers in numeric arrays.",
+  "signatures": [
+    "B = filloutliers(A,fillmethod)",
+    "B = filloutliers(A,fillmethod,findmethod)",
+    "B = filloutliers(A,fillmethod,findmethod,dim)",
+    "[B,TF] = filloutliers(___)",
+    "[B,TF,L,U,C] = filloutliers(___)"
+  ],
+  "description": "`filloutliers` detects numeric outliers and replaces them using a requested fill method. RunMat supports numeric arrays, default dimension reduction, the common outlier detection methods shared with `isoutlier`, array `OutlierLocations`, and scalar threshold outputs.",
+  "notes": [
+    "Supported fill methods are `\"center\"`, `\"clip\"`, `\"previous\"`, `\"next\"`, `\"nearest\"`, `\"linear\"`, and numeric scalar constants.",
+    "Supported detection methods are `\"median\"`, `\"mean\"`, `\"quartiles\"`, `\"percentiles\"`, `\"movmedian\"`, and `\"movmean\"`.",
+    "`[B,TF,L,U,C]` returns the filled array, detected outlier mask, lower threshold, upper threshold, and center value.",
+    "`OutlierLocations` accepts a logical or numeric array mask with the same number of elements as the input.",
+    "Spline-like interpolation methods, `SamplePoints`, and table/timetable-specific options are reported as unsupported instead of approximated."
+  ],
+  "examples": [
+    {
+      "description": "Linearly fill an outlier",
+      "input": "B = filloutliers([1;2;100;4;5],\"linear\")"
+    },
+    {
+      "description": "Fill outliers with a constant",
+      "input": "B = filloutliers(A,0)"
+    }
+  ],
+  "links": [
+    { "label": "isoutlier", "url": "./isoutlier" },
+    { "label": "fillmissing", "url": "./fillmissing" }
+  ]
+}

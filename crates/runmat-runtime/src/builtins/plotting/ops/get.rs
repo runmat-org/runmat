@@ -115,10 +115,27 @@ pub fn get_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             "expected a plotting handle",
         ));
     }
-    let handle = resolve_plot_handle(&args[0], BUILTIN_NAME).map_err(map_get_error)?;
     let property = args
         .get(1)
         .and_then(|v| crate::builtins::plotting::style::value_as_string(v));
+    if let Some(value) =
+        super::zoom::get_zoom_object_property(&args[0], property.as_deref(), BUILTIN_NAME)?
+    {
+        return Ok(value);
+    }
+    if let Some(value) =
+        super::pan::get_pan_object_property(&args[0], property.as_deref(), BUILTIN_NAME)?
+    {
+        return Ok(value);
+    }
+    if let Some(value) = super::datacursormode::get_data_cursor_object_property(
+        &args[0],
+        property.as_deref(),
+        BUILTIN_NAME,
+    )? {
+        return Ok(value);
+    }
+    let handle = resolve_plot_handle(&args[0], BUILTIN_NAME).map_err(map_get_error)?;
     get_properties(handle, property.as_deref(), BUILTIN_NAME).map_err(map_get_error)
 }
 
@@ -278,6 +295,7 @@ mod tests {
                 cols: 2,
                 shape: vec![1, 2],
                 data: vec![1.0, 5.0],
+                integer_data: None,
                 dtype: runmat_builtins::NumericDType::F64,
             }),
             Value::String("XScale".into()),
@@ -380,9 +398,18 @@ mod tests {
         );
         assert_eq!(text_struct.fields.get("Parent"), Some(&Value::Num(ax)));
 
-        assert!(ishandle_builtin(vec![Value::Num(fig)]).unwrap());
-        assert!(isgraphics_builtin(vec![Value::Num(ax)]).unwrap());
-        assert!(!ishandle_builtin(vec![Value::Num(-1.0)]).unwrap());
+        assert!(matches!(
+            ishandle_builtin(vec![Value::Num(fig)]).unwrap(),
+            Value::Bool(true)
+        ));
+        assert!(matches!(
+            isgraphics_builtin(vec![Value::Num(ax)]).unwrap(),
+            Value::Bool(true)
+        ));
+        assert!(matches!(
+            ishandle_builtin(vec![Value::Num(-1.0)]).unwrap(),
+            Value::Bool(false)
+        ));
     }
 
     #[test]
@@ -394,6 +421,7 @@ mod tests {
                 cols: 1,
                 shape: vec![2],
                 data: vec![1.0, 2.0],
+                integer_data: None,
                 dtype: runmat_builtins::NumericDType::F64,
             }),
             Value::String("DisplayName".into()),

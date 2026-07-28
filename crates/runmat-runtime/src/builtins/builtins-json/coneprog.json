@@ -1,0 +1,81 @@
+{
+  "title": "coneprog",
+  "category": "math/optim",
+  "keywords": [
+    "coneprog",
+    "conic programming",
+    "second-order cone",
+    "SOCP",
+    "optimization",
+    "bounds"
+  ],
+  "summary": "Solve linear conic optimization problems with second-order cone constraints, linear constraints, equalities, and bounds.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "The solver runs on the host. GPU-resident numeric inputs are gathered before solving."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 9,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::optim::coneprog::tests",
+    "integration": null
+  },
+  "description": "`coneprog` minimizes `f' * x` subject to second-order cone constraints `norm(A*x + b) <= d'*x + gamma`, optional `A*x <= b`, optional `Aeq*x == beq`, and optional bounds `lb <= x <= ub`. RunMat supports positional forms, problem structs, `optimoptions(\"coneprog\")`, and one- through five-output forms.",
+  "behaviors": [
+    "`socConstraints` may be `[]`, a `secondordercone` struct, a cell array of cone structs, or an output list of cone structs.",
+    "`f`, linear right-hand sides, equality right-hand sides, and bounds must have compatible vector lengths.",
+    "`A`, `Aeq`, and cone `A` matrices must have one column per element of `f`.",
+    "`[]` may be passed for omitted optional linear constraints, equalities, bounds, and cone lists.",
+    "`exitflag` is `1` when an optimum is found, `-2` when no feasible point is found, and `-3` when the objective is plainly unbounded below.",
+    "The fourth output is an `output` struct with `iterations`, `algorithm`, `constrviolation`, and `message` fields.",
+    "The fifth output is a `lambda` compatibility struct with `ineqlin`, `eqlin`, `lower`, `upper`, and `soc` fields. Multiplier fields are estimated from the active constraint KKT system after the host barrier solve."
+  ],
+  "examples": [
+    {
+      "description": "Solve a bounded second-order cone problem",
+      "input": "soc = secondordercone(eye(2), [0; 0], [0; 0], 1);\nf = [-1; 0];\nA = [1 0];\nb = 0.75;\n[x, fval, exitflag] = coneprog(f, soc, A, b)",
+      "output": "x =\n    0.7500\n         0\nfval =\n   -0.7500\nexitflag =\n     1"
+    },
+    {
+      "description": "Use a problem struct with options",
+      "input": "problem.f = [0; 1];\nproblem.socConstraints = secondordercone(eye(2), [0; 0], [0; 0], 1);\nproblem.Aineq = [0 -1];\nproblem.bineq = 0.25;\nproblem.options = optimoptions(\"coneprog\", \"TolFun\", 1e-8);\n[x, fval] = coneprog(problem)",
+      "output": "x =\n         0\n   -0.2500\nfval =\n   -0.2500"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does coneprog run on the GPU?",
+      "answer": "No. `coneprog` is an iterative solver boundary; RunMat gathers gpuArray numeric inputs and solves on the host."
+    },
+    {
+      "question": "How do I build second-order cone constraints?",
+      "answer": "Use `secondordercone(A,b,d,gamma)` to describe `norm(A*x + b) <= d'*x + gamma`, then pass the result or a cell array of results to `coneprog`."
+    }
+  ],
+  "links": [
+    {
+      "label": "secondordercone",
+      "url": "./secondordercone"
+    },
+    {
+      "label": "linprog",
+      "url": "./linprog"
+    },
+    {
+      "label": "optimoptions",
+      "url": "./optimoptions"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/optim/coneprog.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/coneprog.rs"
+  }
+}

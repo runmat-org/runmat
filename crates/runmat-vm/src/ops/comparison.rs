@@ -35,21 +35,33 @@ where
         (Value::Object(obj), _) => {
             match call_method(Value::Object(obj.clone()), name, b.clone()).await {
                 Ok(v) => v,
-                Err(_) => Value::Num(if predicate((&a).try_into()?, (&b).try_into()?) {
-                    1.0
-                } else {
-                    0.0
-                }),
+                Err(_) => {
+                    if rel_binary_use_builtin(&a, &b) {
+                        call_builtin(name, a.clone(), b.clone()).await?
+                    } else {
+                        Value::Num(if predicate((&a).try_into()?, (&b).try_into()?) {
+                            1.0
+                        } else {
+                            0.0
+                        })
+                    }
+                }
             }
         }
         (_, Value::Object(obj)) => {
             match call_method(Value::Object(obj.clone()), reverse_name, a.clone()).await {
                 Ok(v) => v,
-                Err(_) => Value::Num(if predicate((&a).try_into()?, (&b).try_into()?) {
-                    1.0
-                } else {
-                    0.0
-                }),
+                Err(_) => {
+                    if rel_binary_use_builtin(&a, &b) {
+                        call_builtin(name, a.clone(), b.clone()).await?
+                    } else {
+                        Value::Num(if predicate((&a).try_into()?, (&b).try_into()?) {
+                            1.0
+                        } else {
+                            0.0
+                        })
+                    }
+                }
             }
         }
         _ => {
@@ -100,11 +112,17 @@ where
                             },
                         ),
                         Err(_) => {
-                            Value::Num(if (spec.predicate)((&a).try_into()?, (&b).try_into()?) {
-                                1.0
+                            if rel_binary_use_builtin(&a, &b) {
+                                call_builtin(spec.name, a.clone(), b.clone()).await?
                             } else {
-                                0.0
-                            })
+                                Value::Num(
+                                    if (spec.predicate)((&a).try_into()?, (&b).try_into()?) {
+                                        1.0
+                                    } else {
+                                        0.0
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -129,11 +147,17 @@ where
                             },
                         ),
                         Err(_) => {
-                            Value::Num(if (spec.predicate)((&a).try_into()?, (&b).try_into()?) {
-                                1.0
+                            if rel_binary_use_builtin(&a, &b) {
+                                call_builtin(spec.name, a.clone(), b.clone()).await?
                             } else {
-                                0.0
-                            })
+                                Value::Num(
+                                    if (spec.predicate)((&a).try_into()?, (&b).try_into()?) {
+                                        1.0
+                                    } else {
+                                        0.0
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -218,9 +242,13 @@ where
             match call_method(Value::Object(obj.clone()), "eq", b.clone()).await {
                 Ok(v) => stack.push(v),
                 Err(_) => {
-                    let aa: f64 = (&a).try_into()?;
-                    let bb: f64 = (&b).try_into()?;
-                    stack.push(Value::Num(if aa == bb { 1.0 } else { 0.0 }))
+                    if rel_binary_use_builtin(&a, &b) {
+                        stack.push(call_builtin("eq", a.clone(), b.clone()).await?);
+                    } else {
+                        let aa: f64 = (&a).try_into()?;
+                        let bb: f64 = (&b).try_into()?;
+                        stack.push(Value::Num(if aa == bb { 1.0 } else { 0.0 }))
+                    }
                 }
             }
         }
@@ -228,16 +256,23 @@ where
             match call_method(Value::Object(obj.clone()), "eq", a.clone()).await {
                 Ok(v) => stack.push(v),
                 Err(_) => {
-                    let aa: f64 = (&a).try_into()?;
-                    let bb: f64 = (&b).try_into()?;
-                    stack.push(Value::Num(if aa == bb { 1.0 } else { 0.0 }))
+                    if rel_binary_use_builtin(&a, &b) {
+                        stack.push(call_builtin("eq", a.clone(), b.clone()).await?);
+                    } else {
+                        let aa: f64 = (&a).try_into()?;
+                        let bb: f64 = (&b).try_into()?;
+                        stack.push(Value::Num(if aa == bb { 1.0 } else { 0.0 }))
+                    }
                 }
             }
         }
         (Value::HandleObject(_), _) | (_, Value::HandleObject(_)) => {
             stack.push(call_builtin("eq", a.clone(), b.clone()).await?);
         }
-        (Value::Symbolic(_), _) | (_, Value::Symbolic(_)) => {
+        (Value::Symbolic(_), _)
+        | (_, Value::Symbolic(_))
+        | (Value::SymbolicArray(_), _)
+        | (_, Value::SymbolicArray(_)) => {
             stack.push(call_builtin("eq", a.clone(), b.clone()).await?);
         }
         (Value::LogicalArray(la), Value::LogicalArray(lb)) => {
@@ -393,9 +428,13 @@ where
                         },
                     )),
                     Err(_) => {
-                        let aa: f64 = (&a).try_into()?;
-                        let bb: f64 = (&b).try_into()?;
-                        stack.push(Value::Num(if aa != bb { 1.0 } else { 0.0 }));
+                        if rel_binary_use_builtin(&a, &b) {
+                            stack.push(call_builtin("ne", a.clone(), b.clone()).await?);
+                        } else {
+                            let aa: f64 = (&a).try_into()?;
+                            let bb: f64 = (&b).try_into()?;
+                            stack.push(Value::Num(if aa != bb { 1.0 } else { 0.0 }));
+                        }
                     }
                 },
             }
@@ -412,9 +451,13 @@ where
                         },
                     )),
                     Err(_) => {
-                        let aa: f64 = (&a).try_into()?;
-                        let bb: f64 = (&b).try_into()?;
-                        stack.push(Value::Num(if aa != bb { 1.0 } else { 0.0 }));
+                        if rel_binary_use_builtin(&a, &b) {
+                            stack.push(call_builtin("ne", a.clone(), b.clone()).await?);
+                        } else {
+                            let aa: f64 = (&a).try_into()?;
+                            let bb: f64 = (&b).try_into()?;
+                            stack.push(Value::Num(if aa != bb { 1.0 } else { 0.0 }));
+                        }
                     }
                 },
             }

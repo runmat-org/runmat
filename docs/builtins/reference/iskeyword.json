@@ -1,0 +1,78 @@
+{
+  "title": "iskeyword",
+  "category": "introspection",
+  "keywords": [
+    "iskeyword",
+    "keyword",
+    "identifier",
+    "language",
+    "MATLAB compatibility"
+  ],
+  "summary": "Test MATLAB reserved keywords or list all keywords.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host text/language predicate. gpuArray inputs are invalid because the input must be text."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::identifiers::tests",
+    "integration": null
+  },
+  "description": "`iskeyword(s)` returns true when `s` is a MATLAB reserved keyword. `iskeyword` with no inputs returns a cell column containing the full keyword list as character vectors.",
+  "behaviors": [
+    "Accepts a string scalar or character vector for the predicate form.",
+    "Rejects non-text inputs and nonscalar string arrays.",
+    "The keyword list is shared with `isvarname`, so reserved words such as `for`, `end`, `classdef`, and `parfor` cannot be valid variable names.",
+    "The result of `iskeyword(s)` is a host logical scalar. The result of `iskeyword` is a cell column of character row vectors."
+  ],
+  "examples": [
+    {
+      "description": "Test a reserved keyword",
+      "input": "tf = iskeyword('for')",
+      "output": "tf = logical(1)"
+    },
+    {
+      "description": "Test ordinary text",
+      "input": "tf = iskeyword(\"plot\")",
+      "output": "tf = logical(0)"
+    },
+    {
+      "description": "Return all keywords",
+      "input": "k = iskeyword",
+      "output": "k = {'break'; 'case'; ...; 'while'}"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `iskeyword` accept string arrays?",
+      "answer": "Only string scalars are accepted. Multi-element string arrays are rejected so the predicate remains a scalar MATLAB-compatible query."
+    },
+    {
+      "question": "Is the comparison case-sensitive?",
+      "answer": "Yes. MATLAB keywords are lowercase language tokens, so `iskeyword('for')` is true while `iskeyword('For')` is false."
+    }
+  ],
+  "links": [
+    {
+      "label": "isvarname",
+      "url": "./isvarname"
+    },
+    {
+      "label": "namelengthmax",
+      "url": "./namelengthmax"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/identifiers.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/identifiers.rs"
+  }
+}

@@ -6,8 +6,8 @@ use std::fmt::Write as FmtWrite;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, IntValue, LogicalArray, ObjectInstance, StringArray,
-    StructValue, Tensor, Value,
+    CellArray, CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, ObjectInstance,
+    StringArray, StructValue, SymbolicArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -437,6 +437,7 @@ fn value_to_json(value: &Value, options: &JsonEncodeOptions) -> BuiltinResult<Js
         Value::ComplexTensor(ct) => complex_tensor_to_json(ct, options),
         Value::String(s) => Ok(JsonValue::String(s.clone())),
         Value::Symbolic(expr) => Ok(JsonValue::String(expr.to_string())),
+        Value::SymbolicArray(array) => symbolic_array_to_json(array, options),
         Value::StringArray(sa) => string_array_to_json(sa, options),
         Value::CharArray(ca) => char_array_to_json(ca, options),
         Value::Struct(sv) => struct_to_json(sv, options),
@@ -502,11 +503,35 @@ fn tensor_to_json(tensor: &Tensor, options: &JsonEncodeOptions) -> BuiltinResult
     }
     let keep_dims = compute_keep_dims(&tensor.shape, true);
     if keep_dims.is_empty() {
-        return number_to_json(tensor.data[0], options);
+        return tensor_value_to_json(tensor, 0, options);
     }
     build_strided_array(&tensor.shape, &keep_dims, |offset| {
-        number_to_json(tensor.data[offset], options)
+        tensor_value_to_json(tensor, offset, options)
     })
+}
+
+fn tensor_value_to_json(
+    tensor: &Tensor,
+    offset: usize,
+    options: &JsonEncodeOptions,
+) -> BuiltinResult<JsonValue> {
+    match tensor.integer_storage() {
+        Some(storage) => Ok(JsonValue::Number(integer_storage_number(storage, offset))),
+        None => number_to_json(tensor.data[offset], options),
+    }
+}
+
+fn integer_storage_number(storage: &IntegerStorage, offset: usize) -> JsonNumber {
+    match storage {
+        IntegerStorage::I8(values) => JsonNumber::I64(values[offset] as i64),
+        IntegerStorage::I16(values) => JsonNumber::I64(values[offset] as i64),
+        IntegerStorage::I32(values) => JsonNumber::I64(values[offset] as i64),
+        IntegerStorage::I64(values) => JsonNumber::I64(values[offset]),
+        IntegerStorage::U8(values) => JsonNumber::U64(values[offset] as u64),
+        IntegerStorage::U16(values) => JsonNumber::U64(values[offset] as u64),
+        IntegerStorage::U32(values) => JsonNumber::U64(values[offset] as u64),
+        IntegerStorage::U64(values) => JsonNumber::U64(values[offset]),
+    }
 }
 
 fn complex_scalar_to_json(
@@ -553,6 +578,22 @@ fn string_array_to_json(
     }
     build_strided_array(&sa.shape, &keep_dims, |offset| {
         Ok(JsonValue::String(sa.data[offset].clone()))
+    })
+}
+
+fn symbolic_array_to_json(
+    array: &SymbolicArray,
+    _options: &JsonEncodeOptions,
+) -> BuiltinResult<JsonValue> {
+    if array.data.is_empty() {
+        return Ok(JsonValue::Array(Vec::new()));
+    }
+    let keep_dims = compute_keep_dims(&array.shape, true);
+    if keep_dims.is_empty() {
+        return Ok(JsonValue::String(array.data[0].to_string()));
+    }
+    build_strided_array(&array.shape, &keep_dims, |offset| {
+        Ok(JsonValue::String(array.data[offset].to_string()))
     })
 }
 
@@ -955,8 +996,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{
-        CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, StructValue, SymbolicExpr,
-        Tensor,
+        CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, StructValue, SymbolicArray,
+        SymbolicExpr, Tensor,
     };
 
     fn as_string(value: Value) -> String {
@@ -1011,6 +1052,26 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn jsonencode_symbolic_array_preserves_matrix_shape() {
+        let array = SymbolicArray::new(
+            vec![
+                SymbolicExpr::variable("a"),
+                SymbolicExpr::variable("c"),
+                SymbolicExpr::variable("b"),
+                SymbolicExpr::variable("d"),
+            ],
+            vec![2, 2],
+        )
+        .expect("symbolic array");
+
+        let encoded = block_on(jsonencode_builtin(Value::SymbolicArray(array), Vec::new()))
+            .expect("jsonencode");
+
+        assert_eq!(as_string(encoded), "[[\"a\",\"b\"],[\"c\",\"d\"]]");
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn jsonencode_matrix_pretty_print() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).expect("tensor");
         let args = vec![Value::from("PrettyPrint"), Value::Bool(true)];
@@ -1018,6 +1079,22 @@ pub(crate) mod tests {
             block_on(jsonencode_builtin(Value::Tensor(tensor), args)).expect("jsonencode");
         let expected = "[\n    [1,2,3],\n    [4,5,6]\n]";
         assert_eq!(as_string(encoded), expected);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn jsonencode_integer_tensor_preserves_exact_uint64_values() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]), vec![1, 2])
+                .expect("integer tensor");
+
+        let encoded =
+            block_on(jsonencode_builtin(Value::Tensor(tensor), Vec::new())).expect("jsonencode");
+
+        assert_eq!(
+            as_string(encoded),
+            format!("[{},{}]", u64::MAX, 1_u64 << 63)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

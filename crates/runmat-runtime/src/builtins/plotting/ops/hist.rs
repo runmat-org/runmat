@@ -451,10 +451,12 @@ impl HistWeightsInput {
                         data: values,
                         total_weight: total,
                     }),
-                    NumericDType::U8 | NumericDType::U16 => Ok(HistogramGpuWeights::HostF64 {
-                        data: values,
-                        total_weight: total,
-                    }),
+                    NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => {
+                        Ok(HistogramGpuWeights::HostF64 {
+                            data: values,
+                            total_weight: total,
+                        })
+                    }
                 }
             }
             HistWeightsInput::Gpu(handle) => {
@@ -1372,6 +1374,8 @@ async fn build_histogram_gpu_chart_async(
         bar_width: style.bar_width,
         series_index: 0,
         series_count: 1,
+        source_row_count: bin_count_u32,
+        transpose_source: false,
         group_index: 0,
         group_count: 1,
         orientation: BarOrientation::Vertical,
@@ -1503,6 +1507,7 @@ pub(crate) mod tests {
     fn tensor_from(data: &[f64]) -> Tensor {
         Tensor {
             data: data.to_vec(),
+            integer_data: None,
             shape: vec![data.len()],
             rows: data.len(),
             cols: 1,

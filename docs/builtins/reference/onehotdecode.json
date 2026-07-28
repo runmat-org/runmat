@@ -1,0 +1,67 @@
+{
+  "title": "onehotdecode",
+  "category": "stats/summary",
+  "keywords": [
+    "onehotdecode",
+    "one hot",
+    "classification",
+    "categorical",
+    "statistics"
+  ],
+  "summary": "Decode one-hot vectors into class labels.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host. Decoding runs on CPU."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::summary::encoding::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`onehotdecode(B,classes,featureDim)` chooses the maximum value along `featureDim` and maps the index to `classes`.",
+  "behaviors": [
+    "The length of `classes` must match the size of `B` along `featureDim`.",
+    "`B` must be numeric or logical with non-`NaN` values in the range `[0,1]`; `NaN` entries are ignored while choosing the maximum class.",
+    "Ties are resolved by the first class along `featureDim`, matching MATLAB-style first-maximum behavior.",
+    "The decoded output keeps the encoded shape with the feature dimension set to 1.",
+    "By default the decoded output is categorical and preserves the supplied class order as the category order.",
+    "An optional typename can request `double`, `logical`, `string`, `cellstr`, or `categorical` output; `OutputType` is also accepted as a RunMat extension.",
+    "Numeric output requires numeric classes, and logical output requires logical classes."
+  ],
+  "examples": [
+    {
+      "description": "Decode logical one-hot rows",
+      "input": "A = onehotdecode(logical([0 1; 1 0]), [\"blue\" \"red\"], 2, 'string')",
+      "output": "A is a 2-by-1 string array."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What happens when a vector contains all zeros?",
+      "answer": "The first class is selected because all classes tie at zero."
+    }
+  ],
+  "links": [
+    {
+      "label": "onehotencode",
+      "url": "./onehotencode"
+    },
+    {
+      "label": "dummyvar",
+      "url": "./dummyvar"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/encoding.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/encoding.rs"
+  }
+}

@@ -68,8 +68,13 @@ pub fn run_transient_with_options(
         Some(1),
         Some(5),
     );
-    let summary =
-        assemble_linear_system(model, prep_context.clone(), thermo_context, electro_context);
+    let summary = assemble_linear_system(
+        model,
+        prep_context.clone(),
+        None,
+        thermo_context,
+        electro_context,
+    );
     super::validate_rotational_dof_targets(model, &summary)?;
     emit_phase(
         "fea.run_transient",

@@ -16,6 +16,8 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::elementwise::integer_arithmetic::{try_integer_binary, IntegerBinaryOp};
+use crate::builtins::math::elementwise::sparse::{try_sparse_binary, SparseBinaryOp};
 use crate::builtins::math::symbolic::{symbolic_binary, SymbolicBinaryOp};
 use crate::builtins::math::type_resolvers::numeric_binary_type;
 use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
@@ -163,11 +165,43 @@ const MINUS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "minus: internal error",
 };
 
-const MINUS_ERRORS: [BuiltinErrorDescriptor; 4] = [
+const MINUS_ERROR_SPARSE_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MINUS.SPARSE_SIZE_MISMATCH",
+    identifier: Some("RunMat:minus:SparseSizeMismatch"),
+    when: "Sparse operands cannot be implicitly expanded to a compatible result shape.",
+    message: "minus: sparse operand sizes are not compatible",
+};
+
+const MINUS_ERROR_SPARSE_UNSUPPORTED_OPERAND: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MINUS.SPARSE_UNSUPPORTED_OPERAND",
+    identifier: Some("RunMat:minus:SparseUnsupportedOperand"),
+    when: "Sparse arithmetic is requested with an unsupported operand class or residency.",
+    message: "minus: unsupported sparse arithmetic operand",
+};
+
+const MINUS_ERROR_SPARSE_DENSIFY_TOO_LARGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MINUS.SPARSE_DENSIFY_TOO_LARGE",
+    identifier: Some("RunMat:minus:SparseDensifyTooLarge"),
+    when: "A sparse operation would have to materialize a dense or fully populated sparse result beyond the runtime limit.",
+    message: "minus: sparse arithmetic result is too large to materialize",
+};
+
+const MINUS_ERROR_SPARSE_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MINUS.SPARSE_INTERNAL",
+    identifier: Some("RunMat:minus:SparseInternal"),
+    when: "Sparse arithmetic storage construction or conversion failed unexpectedly.",
+    message: "minus: sparse arithmetic internal error",
+};
+
+const MINUS_ERRORS: [BuiltinErrorDescriptor; 8] = [
     MINUS_ERROR_INVALID_ARGUMENT,
     MINUS_ERROR_INVALID_INPUT,
     MINUS_ERROR_SIZE_MISMATCH,
     MINUS_ERROR_INTERNAL,
+    MINUS_ERROR_SPARSE_SIZE_MISMATCH,
+    MINUS_ERROR_SPARSE_UNSUPPORTED_OPERAND,
+    MINUS_ERROR_SPARSE_DENSIFY_TOO_LARGE,
+    MINUS_ERROR_SPARSE_INTERNAL,
 ];
 
 pub const MINUS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -358,7 +392,8 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
         | Value::SparseTensor(_)
         | Value::Cell(_)
         | Value::Struct(_)
-        | Value::Symbolic(_) => Err(minus_error_with_detail(
+        | Value::Symbolic(_)
+        | Value::SymbolicArray(_) => Err(minus_error_with_detail(
             &MINUS_ERROR_INVALID_ARGUMENT,
             "unsupported prototype conversion to GPU output",
         )),
@@ -608,6 +643,14 @@ fn scalar_minus_value(lhs: &Value, rhs: &Value) -> Option<Value> {
 
 fn minus_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     if let Some(result) = symbolic_binary(&lhs, &rhs, SymbolicBinaryOp::Sub) {
+        return Ok(result);
+    }
+    if let Some(result) = try_sparse_binary(&lhs, &rhs, SparseBinaryOp::Sub, BUILTIN_NAME) {
+        return result;
+    }
+    if let Some(result) = try_integer_binary(&lhs, &rhs, IntegerBinaryOp::Subtract, BUILTIN_NAME)
+        .map_err(builtin_error)?
+    {
         return Ok(result);
     }
     if let Some(result) = scalar_minus_value(&lhs, &rhs) {

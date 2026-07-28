@@ -333,10 +333,29 @@ impl Scene {
     }
 
     /// Add a new node to the scene
-    pub fn add_node(&mut self, mut node: SceneNode) -> NodeId {
+    pub fn add_node(&mut self, node: SceneNode) -> NodeId {
+        while self.nodes.contains_key(&self.next_id) {
+            self.next_id = self.next_id.checked_add(1).unwrap_or(1);
+        }
         let id = self.next_id;
-        self.next_id += 1;
+        self.next_id = self.next_id.checked_add(1).unwrap_or(1);
 
+        self.insert_node_with_id(id, node)
+    }
+
+    /// Add a node using its existing ID when that ID is available.
+    ///
+    /// Geometry scenes use stable IDs so presentation refreshes can update the
+    /// same scene nodes without re-identifying them through insertion order.
+    pub fn add_node_preserving_id(&mut self, node: SceneNode) -> NodeId {
+        let id = node.id;
+        if id != 0 && !self.nodes.contains_key(&id) {
+            return self.insert_node_with_id(id, node);
+        }
+        self.add_node(node)
+    }
+
+    fn insert_node_with_id(&mut self, id: NodeId, mut node: SceneNode) -> NodeId {
         node.id = id;
 
         // Add to parent's children if specified
@@ -729,5 +748,51 @@ mod tests {
 
         let child = scene.get_node(child_id).unwrap();
         assert_eq!(child.parent, Some(parent_id));
+    }
+
+    #[test]
+    fn scene_can_preserve_explicit_node_ids() {
+        let mut scene = Scene::new();
+        let explicit_id = 42;
+
+        let node = SceneNode {
+            id: explicit_id,
+            name: "Stable".to_string(),
+            transform: Mat4::IDENTITY,
+            visible: true,
+            cast_shadows: false,
+            receive_shadows: false,
+            axes_index: 0,
+            parent: None,
+            children: Vec::new(),
+            render_data: None,
+            bounds: BoundingBox::default(),
+            lod_levels: Vec::new(),
+            current_lod: 0,
+        };
+
+        let inserted_id = scene.add_node_preserving_id(node);
+
+        assert_eq!(inserted_id, explicit_id);
+        assert!(scene.get_node(explicit_id).is_some());
+
+        let generated_id = scene.add_node(SceneNode {
+            id: explicit_id,
+            name: "Generated".to_string(),
+            transform: Mat4::IDENTITY,
+            visible: true,
+            cast_shadows: false,
+            receive_shadows: false,
+            axes_index: 0,
+            parent: None,
+            children: Vec::new(),
+            render_data: None,
+            bounds: BoundingBox::default(),
+            lod_levels: Vec::new(),
+            current_lod: 0,
+        });
+
+        assert_ne!(generated_id, explicit_id);
+        assert!(scene.get_node(generated_id).is_some());
     }
 }

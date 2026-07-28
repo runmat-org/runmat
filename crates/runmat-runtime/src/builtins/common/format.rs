@@ -4,7 +4,7 @@ use std::char;
 use std::iter::Peekable;
 use std::str::Chars;
 
-use runmat_builtins::{IntValue, LogicalArray, StringArray, Value};
+use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, StringArray, Value};
 
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -848,7 +848,7 @@ fn value_to_string(value: &Value) -> BuiltinResult<String> {
         }
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
         Value::Num(n) => Ok(number_to_string(*n)),
-        Value::Int(i) => Ok(i.to_i64().to_string()),
+        Value::Int(i) => Ok(int_value_to_decimal(i)),
         Value::Bool(b) => Ok(if *b { "true" } else { "false" }.to_string()),
         Value::Complex(re, im) => Ok(complex_to_string(*re, *im)),
         other => Err(format_error(format!(
@@ -1073,9 +1073,20 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
         | Value::Symbolic(_) => {
             output.push(value);
         }
+        Value::SymbolicArray(array) => {
+            for expr in array.data {
+                output.push(Value::Symbolic(expr));
+            }
+        }
         Value::Tensor(tensor) => {
-            for &elem in &tensor.data {
-                output.push(Value::Num(elem));
+            if let Some(storage) = tensor.integer_storage() {
+                for index in 0..storage.len() {
+                    output.push(Value::Int(integer_storage_value(storage, index)));
+                }
+            } else {
+                for &elem in &tensor.data {
+                    output.push(Value::Num(elem));
+                }
             }
         }
         Value::ComplexTensor(tensor) => {
@@ -1149,6 +1160,32 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
     Ok(())
 }
 
+fn integer_storage_value(storage: &IntegerStorage, index: usize) -> IntValue {
+    match storage {
+        IntegerStorage::I8(values) => IntValue::I8(values[index]),
+        IntegerStorage::I16(values) => IntValue::I16(values[index]),
+        IntegerStorage::I32(values) => IntValue::I32(values[index]),
+        IntegerStorage::I64(values) => IntValue::I64(values[index]),
+        IntegerStorage::U8(values) => IntValue::U8(values[index]),
+        IntegerStorage::U16(values) => IntValue::U16(values[index]),
+        IntegerStorage::U32(values) => IntValue::U32(values[index]),
+        IntegerStorage::U64(values) => IntValue::U64(values[index]),
+    }
+}
+
+fn int_value_to_decimal(value: &IntValue) -> String {
+    match value {
+        IntValue::I8(value) => value.to_string(),
+        IntValue::I16(value) => value.to_string(),
+        IntValue::I32(value) => value.to_string(),
+        IntValue::I64(value) => value.to_string(),
+        IntValue::U8(value) => value.to_string(),
+        IntValue::U16(value) => value.to_string(),
+        IntValue::U32(value) => value.to_string(),
+        IntValue::U64(value) => value.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1180,5 +1217,30 @@ mod tests {
 
         let out = result.expect("%s formatting should succeed");
         assert_eq!(out, "3.141592653589793 1.5-2i");
+    }
+
+    #[test]
+    fn typed_integer_tensors_keep_exact_values_through_formatting() {
+        let tensor = runmat_builtins::Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]),
+            vec![1, 2],
+        )
+        .expect("integer tensor");
+        let flattened =
+            futures::executor::block_on(flatten_arguments(&[Value::Tensor(tensor)], "sprintf"))
+                .expect("flattened arguments");
+
+        assert_eq!(
+            format_variadic(
+                "%u %x %s",
+                &[
+                    flattened[0].clone(),
+                    flattened[0].clone(),
+                    flattened[1].clone()
+                ]
+            )
+            .expect("formatted integer values"),
+            format!("{} ffffffffffffffff {}", u64::MAX, 1_u64 << 63)
+        );
     }
 }

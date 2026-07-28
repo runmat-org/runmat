@@ -140,6 +140,40 @@ fn drawnow_without_arg_is_command_form() {
 }
 
 #[test]
+fn diary_command_forms_rewrite_to_string_args() {
+    let program = parse_with_options(
+        "diary runmat_session.log\ndiary off\ndiary",
+        ParserOptions::new(CompatMode::Matlab),
+    )
+    .unwrap();
+    assert_eq!(program.body.len(), 3);
+
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+            assert_eq!(name, "diary");
+            assert_eq!(args.len(), 1);
+            assert!(matches!(args[0], Expr::String(ref s, _) if s == "\"runmat_session.log\""));
+        }
+        _ => panic!("expected diary filename command"),
+    }
+    match &program.body[1] {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+            assert_eq!(name, "diary");
+            assert_eq!(args.len(), 1);
+            assert!(matches!(args[0], Expr::String(ref s, _) if s == "\"off\""));
+        }
+        _ => panic!("expected diary off command"),
+    }
+    match &program.body[2] {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+            assert_eq!(name, "diary");
+            assert!(args.is_empty());
+        }
+        _ => panic!("expected bare diary command"),
+    }
+}
+
+#[test]
 fn axis_command_modes_rewrite_to_string_args() {
     for src in [
         "axis auto",
@@ -161,6 +195,65 @@ fn axis_command_modes_rewrite_to_string_args() {
                 assert!(matches!(&args[0], Expr::String(s, _) if s.trim_matches('"') == expected));
             }
             _ => panic!("expected {src} command form"),
+        }
+    }
+}
+
+#[test]
+fn runtests_command_forms_rewrite_to_string_args() {
+    let program = parse_with_options(
+        "runtests testSmoke.m\nruntests",
+        ParserOptions::new(CompatMode::Matlab),
+    )
+    .unwrap();
+    assert_eq!(program.body.len(), 2);
+
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+            assert_eq!(name, "runtests");
+            assert_eq!(args.len(), 1);
+            assert!(matches!(args[0], Expr::String(ref s, _) if s == "\"testSmoke.m\""));
+        }
+        _ => panic!("expected runtests filename command"),
+    }
+    match &program.body[1] {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+            assert_eq!(name, "runtests");
+            assert!(args.is_empty());
+        }
+        _ => panic!("expected bare runtests command"),
+    }
+}
+
+#[test]
+fn debugger_command_forms_rewrite_to_string_args() {
+    let program = parse_with_options(
+        "dbtype demo.m 2:4\ndbstack -completenames\ndbclear all\ndbstatus demo -completenames\nkeyboard\nmlock\nmunlock demo\nmislocked demo",
+        ParserOptions::new(CompatMode::Matlab),
+    )
+    .unwrap();
+    assert_eq!(program.body.len(), 8);
+
+    let expected = [
+        ("dbtype", vec!["\"demo.m\"", "\"2:4\""]),
+        ("dbstack", vec!["\"-completenames\""]),
+        ("dbclear", vec!["\"all\""]),
+        ("dbstatus", vec!["\"demo\"", "\"-completenames\""]),
+        ("keyboard", vec![]),
+        ("mlock", vec![]),
+        ("munlock", vec!["\"demo\""]),
+        ("mislocked", vec!["\"demo\""]),
+    ];
+    for (stmt, (expected_name, expected_args)) in program.body.iter().zip(expected) {
+        match stmt {
+            Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+                assert_eq!(name, expected_name);
+                assert_eq!(args.len(), expected_args.len());
+                for (arg, expected_text) in args.iter().zip(expected_args) {
+                    assert!(matches!(arg, Expr::String(s, _) if s == expected_text));
+                }
+            }
+            _ => panic!("expected debugger command form"),
         }
     }
 }
@@ -442,6 +535,11 @@ fn filesystem_path_command_forms_stringify_path_words() {
             "run ./SourceCode/path_worker.m",
             "run",
             &["./SourceCode/path_worker.m"],
+        ),
+        (
+            "pcode ./SourceCode/path_worker.m -R2022a -inplace",
+            "pcode",
+            &["./SourceCode/path_worker.m", "-R2022a", "-inplace"],
         ),
         (
             "save ./results/out.mat x -v7.3",

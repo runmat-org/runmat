@@ -3,7 +3,7 @@
 //! This module provides language-compatible matrix concatenation operations.
 //! Supports both horizontal concatenation [A, B] and vertical concatenation [A; B].
 
-use runmat_builtins::{CharArray, Tensor, Value};
+use runmat_builtins::{CharArray, SymbolicArray, SymbolicExpr, Tensor, Value};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -35,6 +35,271 @@ pub fn char_array_from_f64_with_prefix(value: f64, error_prefix: &str) -> Builti
 
 fn char_array_from_f64(value: f64) -> BuiltinResult<CharArray> {
     char_array_from_f64_with_prefix(value, "char concat")
+}
+
+fn has_symbolic_operand(values: &[Value]) -> bool {
+    values
+        .iter()
+        .any(|value| matches!(value, Value::Symbolic(_) | Value::SymbolicArray(_)))
+}
+
+fn numeric_scalar_to_symbolic(value: &Value) -> Option<SymbolicExpr> {
+    match value {
+        Value::Symbolic(expr) => Some(expr.clone()),
+        Value::Num(n) => Some(SymbolicExpr::constant(*n)),
+        Value::Int(i) => Some(SymbolicExpr::constant(i.to_f64())),
+        Value::Bool(flag) => Some(SymbolicExpr::constant(if *flag { 1.0 } else { 0.0 })),
+        _ => None,
+    }
+}
+
+fn normalize_symbolic_concat_shape(shape: &[usize]) -> Vec<usize> {
+    if shape.len() == 1 && shape[0] != 1 {
+        vec![1, shape[0]]
+    } else if crate::builtins::common::shape::is_scalar_shape(shape) {
+        vec![1, 1]
+    } else {
+        shape.to_vec()
+    }
+}
+
+#[derive(Clone)]
+struct SymbolicConcatBlock {
+    data: Vec<SymbolicExpr>,
+    shape: Vec<usize>,
+}
+
+impl SymbolicConcatBlock {
+    fn new(data: Vec<SymbolicExpr>, shape: Vec<usize>) -> BuiltinResult<Self> {
+        let expected_len = checked_shape_len(&shape)?;
+        if data.len() != expected_len {
+            return Err(concat_error(format!(
+                "Symbolic array data length {} does not match shape {:?} (expected {} elements)",
+                data.len(),
+                shape,
+                expected_len
+            )));
+        }
+        Ok(Self { data, shape })
+    }
+
+    fn rows(&self) -> usize {
+        self.shape[0]
+    }
+
+    fn cols(&self) -> usize {
+        self.shape[1]
+    }
+}
+
+fn checked_shape_len(shape: &[usize]) -> BuiltinResult<usize> {
+    shape.iter().try_fold(1usize, |acc, dim| {
+        acc.checked_mul(*dim)
+            .ok_or_else(|| concat_error("Symbolic array dimensions overflow"))
+    })
+}
+
+fn dim_or_one(shape: &[usize], dim: usize) -> usize {
+    shape.get(dim).copied().unwrap_or(1)
+}
+
+fn symbolic_block_from_value(value: &Value) -> BuiltinResult<Option<SymbolicConcatBlock>> {
+    match value {
+        Value::SymbolicArray(array) => {
+            let shape = normalize_symbolic_concat_shape(&array.shape);
+            if shape[0] == 0 && shape[1] == 0 {
+                return Ok(None);
+            }
+            SymbolicConcatBlock::new(array.data.clone(), shape).map(Some)
+        }
+        Value::Tensor(tensor) => {
+            let shape = normalize_symbolic_concat_shape(&tensor.shape);
+            if shape[0] == 0 && shape[1] == 0 {
+                return Ok(None);
+            }
+            let data = tensor
+                .data
+                .iter()
+                .map(|value| SymbolicExpr::constant(*value))
+                .collect();
+            SymbolicConcatBlock::new(data, shape).map(Some)
+        }
+        Value::LogicalArray(array) => {
+            let shape = normalize_symbolic_concat_shape(&array.shape);
+            if shape[0] == 0 && shape[1] == 0 {
+                return Ok(None);
+            }
+            let data = array
+                .data
+                .iter()
+                .map(|value| SymbolicExpr::constant(if *value == 0 { 0.0 } else { 1.0 }))
+                .collect();
+            SymbolicConcatBlock::new(data, shape).map(Some)
+        }
+        _ => {
+            if let Some(expr) = numeric_scalar_to_symbolic(value) {
+                SymbolicConcatBlock::new(vec![expr], vec![1, 1]).map(Some)
+            } else {
+                Err(concat_error(format!(
+                    "Cannot concatenate value of type {value:?} with symbolic array"
+                )))
+            }
+        }
+    }
+}
+
+fn hcat_symbolic_values(values: &[Value]) -> BuiltinResult<Value> {
+    let mut blocks = Vec::new();
+
+    for value in values {
+        let Some(block) = symbolic_block_from_value(value)? else {
+            continue;
+        };
+        blocks.push(block);
+    }
+
+    if blocks.is_empty() {
+        return SymbolicArray::new(Vec::new(), vec![0, 0])
+            .map(Value::SymbolicArray)
+            .map_err(concat_error);
+    }
+
+    let rank = blocks
+        .iter()
+        .map(|block| block.shape.len())
+        .max()
+        .unwrap_or(2)
+        .max(2);
+    let rows = dim_or_one(&blocks[0].shape, 0);
+    let mut cols_total = 0usize;
+    let mut output_shape = vec![1; rank];
+    output_shape[0] = rows;
+    for dim in 2..rank {
+        output_shape[dim] = dim_or_one(&blocks[0].shape, dim);
+    }
+
+    for block in &blocks {
+        if dim_or_one(&block.shape, 0) != rows {
+            return Err(concat_error(format!(
+                "Cannot horizontally concatenate symbolic arrays with different row counts: {} vs {}",
+                rows,
+                block.rows()
+            )));
+        }
+        for (dim, expected) in output_shape.iter().enumerate().skip(2) {
+            let actual = dim_or_one(&block.shape, dim);
+            if actual != *expected {
+                return Err(concat_error(format!(
+                    "Cannot horizontally concatenate symbolic arrays with different dimension {} sizes: {} vs {}",
+                    dim + 1,
+                    expected,
+                    actual
+                )));
+            }
+        }
+        cols_total = cols_total
+            .checked_add(block.cols())
+            .ok_or_else(|| concat_error("Symbolic array dimensions overflow"))?;
+    }
+    output_shape[1] = cols_total;
+
+    let output_len = checked_shape_len(&output_shape)?;
+    let tail_len = output_shape.iter().skip(2).try_fold(1usize, |acc, dim| {
+        acc.checked_mul(*dim)
+            .ok_or_else(|| concat_error("Symbolic array dimensions overflow"))
+    })?;
+    let mut data = Vec::with_capacity(output_len);
+    for tail in 0..tail_len {
+        for block in &blocks {
+            let block_plane_len = block.rows() * block.cols();
+            let block_tail_offset = tail * block_plane_len;
+            for c in 0..block.cols() {
+                for r in 0..rows {
+                    data.push(block.data[block_tail_offset + r + c * block.rows()].clone());
+                }
+            }
+        }
+    }
+    SymbolicArray::new(data, output_shape)
+        .map(Value::SymbolicArray)
+        .map_err(concat_error)
+}
+
+fn vcat_symbolic_values(values: &[Value]) -> BuiltinResult<Value> {
+    let mut blocks = Vec::new();
+
+    for value in values {
+        let Some(block) = symbolic_block_from_value(value)? else {
+            continue;
+        };
+        blocks.push(block);
+    }
+
+    if blocks.is_empty() {
+        return SymbolicArray::new(Vec::new(), vec![0, 0])
+            .map(Value::SymbolicArray)
+            .map_err(concat_error);
+    }
+
+    let rank = blocks
+        .iter()
+        .map(|block| block.shape.len())
+        .max()
+        .unwrap_or(2)
+        .max(2);
+    let cols = dim_or_one(&blocks[0].shape, 1);
+    let mut rows_total = 0usize;
+    let mut output_shape = vec![1; rank];
+    output_shape[1] = cols;
+    for dim in 2..rank {
+        output_shape[dim] = dim_or_one(&blocks[0].shape, dim);
+    }
+
+    for block in &blocks {
+        if dim_or_one(&block.shape, 1) != cols {
+            return Err(concat_error(format!(
+                "Cannot vertically concatenate symbolic arrays with different column counts: {} vs {}",
+                cols,
+                block.cols()
+            )));
+        }
+        for (dim, expected) in output_shape.iter().enumerate().skip(2) {
+            let actual = dim_or_one(&block.shape, dim);
+            if actual != *expected {
+                return Err(concat_error(format!(
+                    "Cannot vertically concatenate symbolic arrays with different dimension {} sizes: {} vs {}",
+                    dim + 1,
+                    expected,
+                    actual
+                )));
+            }
+        }
+        rows_total = rows_total
+            .checked_add(block.rows())
+            .ok_or_else(|| concat_error("Symbolic array dimensions overflow"))?;
+    }
+    output_shape[0] = rows_total;
+
+    let output_len = checked_shape_len(&output_shape)?;
+    let tail_len = output_shape.iter().skip(2).try_fold(1usize, |acc, dim| {
+        acc.checked_mul(*dim)
+            .ok_or_else(|| concat_error("Symbolic array dimensions overflow"))
+    })?;
+    let mut data = Vec::with_capacity(output_len);
+    for tail in 0..tail_len {
+        for c in 0..cols {
+            for block in &blocks {
+                let block_plane_len = block.rows() * block.cols();
+                let block_tail_offset = tail * block_plane_len;
+                for r in 0..block.rows() {
+                    data.push(block.data[block_tail_offset + r + c * block.rows()].clone());
+                }
+            }
+        }
+    }
+    SymbolicArray::new(data, output_shape)
+        .map(Value::SymbolicArray)
+        .map_err(concat_error)
 }
 
 /// Horizontally concatenate two matrices [A, B]
@@ -311,6 +576,10 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
         return Ok(Value::CharArray(ca));
     }
 
+    if has_symbolic_operand(values) {
+        return hcat_symbolic_values(values);
+    }
+
     // Convert all scalars to 1x1 matrices for uniform processing
     let mut matrices = Vec::new();
     let mut _total_cols = 0;
@@ -571,6 +840,10 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
         return Ok(Value::CharArray(ca));
     }
 
+    if has_symbolic_operand(values) {
+        return vcat_symbolic_values(values);
+    }
+
     // Convert all scalars to 1x1 matrices for uniform processing
     let mut matrices = Vec::new();
     let mut _total_rows = 0;
@@ -730,6 +1003,287 @@ mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn test_hcat_values_mixed_symbolic_numeric() {
+        let values = vec![
+            Value::Symbolic(SymbolicExpr::variable("dA")),
+            Value::Num(95.0),
+            Value::Num(0.0),
+        ];
+        let result = hcat_values(&values).unwrap();
+
+        if let Value::SymbolicArray(array) = result {
+            assert_eq!(array.shape, vec![1, 3]);
+            assert_eq!(
+                array
+                    .data
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+                vec!["dA", "95", "0"]
+            );
+        } else {
+            panic!("Expected symbolic array result");
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn test_hcat_values_promotes_numeric_and_logical_arrays() {
+        let numeric = Tensor::new_2d(vec![1.0, 2.0], 2, 1).unwrap();
+        let logical = runmat_builtins::LogicalArray::new(vec![1, 0], vec![2, 1]).unwrap();
+        let values = vec![
+            Value::SymbolicArray(
+                SymbolicArray::new_2d(
+                    vec![SymbolicExpr::variable("x"), SymbolicExpr::variable("y")],
+                    2,
+                    1,
+                )
+                .unwrap(),
+            ),
+            Value::Tensor(numeric),
+            Value::LogicalArray(logical),
+        ];
+        let result = hcat_values(&values).unwrap();
+
+        if let Value::SymbolicArray(array) = result {
+            assert_eq!(array.shape, vec![2, 3]);
+            assert_eq!(
+                array
+                    .data
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+                vec!["x", "y", "1", "2", "1", "0"]
+            );
+        } else {
+            panic!("Expected symbolic array result");
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn test_hcat_values_promotes_one_dimensional_logical_array() {
+        let logical = runmat_builtins::LogicalArray::new(vec![1], vec![1]).unwrap();
+        let values = vec![
+            Value::Symbolic(SymbolicExpr::variable("x")),
+            Value::LogicalArray(logical),
+        ];
+        let result = hcat_values(&values).unwrap();
+
+        if let Value::SymbolicArray(array) = result {
+            assert_eq!(array.shape, vec![1, 2]);
+            assert_eq!(
+                array
+                    .data
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+                vec!["x", "1"]
+            );
+        } else {
+            panic!("Expected symbolic array result");
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn test_hcat_values_promotes_non_scalar_one_dimensional_logical_array() {
+        let logical = runmat_builtins::LogicalArray::new(vec![1, 0], vec![2]).unwrap();
+        let values = vec![
+            Value::Symbolic(SymbolicExpr::variable("x")),
+            Value::LogicalArray(logical),
+        ];
+        let result = hcat_values(&values).unwrap();
+
+        if let Value::SymbolicArray(array) = result {
+            assert_eq!(array.shape, vec![1, 3]);
+            assert_eq!(
+                array
+                    .data
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+                vec!["x", "1", "0"]
+            );
+        } else {
+            panic!("Expected symbolic array result");
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn test_hcat_values_promotes_one_dimensional_empty_numeric_tensor_as_empty_row() {
+        let empty = Tensor::new(vec![], vec![0]).unwrap();
+        let values = vec![
+            Value::Symbolic(SymbolicExpr::variable("x")),
+            Value::Tensor(empty),
+        ];
+        let result = hcat_values(&values).unwrap();
+
+        if let Value::SymbolicArray(array) = result {
+            assert_eq!(array.shape, vec![1, 1]);
+            assert_eq!(
+                array
+                    .data
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+                vec!["x"]
+            );
+        } else {
+            panic!("Expected symbolic array result");
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn test_hcat_values_normalizes_one_dimensional_symbolic_array_as_row() {
+        let array = SymbolicArray::new(
+            vec![SymbolicExpr::variable("y"), SymbolicExpr::variable("z")],
+            vec![2],
+        )
+        .unwrap();
+        let values = vec![
+            Value::Symbolic(SymbolicExpr::variable("x")),
+            Value::SymbolicArray(array),
+        ];
+        let result = hcat_values(&values).unwrap();
+
+        if let Value::SymbolicArray(array) = result {
+            assert_eq!(array.shape, vec![1, 3]);
+            assert_eq!(
+                array
+                    .data
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+                vec!["x", "y", "z"]
+            );
+        } else {
+            panic!("Expected symbolic array result");
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn test_hcat_values_normalizes_one_dimensional_empty_symbolic_array_as_empty_row() {
+        let empty = SymbolicArray::new(vec![], vec![0]).unwrap();
+        let values = vec![
+            Value::Symbolic(SymbolicExpr::variable("x")),
+            Value::SymbolicArray(empty),
+        ];
+        let result = hcat_values(&values).unwrap();
+
+        if let Value::SymbolicArray(array) = result {
+            assert_eq!(array.shape, vec![1, 1]);
+            assert_eq!(
+                array
+                    .data
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+                vec!["x"]
+            );
+        } else {
+            panic!("Expected symbolic array result");
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn test_hcat_values_preserves_trailing_symbolic_dimensions() {
+        let left = SymbolicArray::new(
+            vec![SymbolicExpr::variable("a1"), SymbolicExpr::variable("a2")],
+            vec![1, 1, 2],
+        )
+        .unwrap();
+        let right = SymbolicArray::new(
+            vec![SymbolicExpr::variable("b1"), SymbolicExpr::variable("b2")],
+            vec![1, 1, 2],
+        )
+        .unwrap();
+        let result = hcat_values(&[Value::SymbolicArray(left), Value::SymbolicArray(right)])
+            .expect("symbolic hcat");
+
+        if let Value::SymbolicArray(array) = result {
+            assert_eq!(array.shape, vec![1, 2, 2]);
+            assert_eq!(
+                array
+                    .data
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+                vec!["a1", "b1", "a2", "b2"]
+            );
+        } else {
+            panic!("Expected symbolic array result");
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn test_hcat_values_preserves_nd_column_major_order_with_multiple_rows() {
+        let left = SymbolicArray::new(
+            vec![
+                SymbolicExpr::variable("a1"),
+                SymbolicExpr::variable("a2"),
+                SymbolicExpr::variable("a3"),
+                SymbolicExpr::variable("a4"),
+            ],
+            vec![2, 1, 2],
+        )
+        .unwrap();
+        let right = SymbolicArray::new(
+            vec![
+                SymbolicExpr::variable("b1"),
+                SymbolicExpr::variable("b2"),
+                SymbolicExpr::variable("b3"),
+                SymbolicExpr::variable("b4"),
+            ],
+            vec![2, 1, 2],
+        )
+        .unwrap();
+        let result = hcat_values(&[Value::SymbolicArray(left), Value::SymbolicArray(right)])
+            .expect("symbolic hcat");
+
+        if let Value::SymbolicArray(array) = result {
+            assert_eq!(array.shape, vec![2, 2, 2]);
+            assert_eq!(
+                array
+                    .data
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+                vec!["a1", "a2", "b1", "b2", "a3", "a4", "b3", "b4"]
+            );
+        } else {
+            panic!("Expected symbolic array result");
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn test_hcat_values_rejects_trailing_symbolic_dimension_mismatch() {
+        let left = SymbolicArray::new(
+            vec![SymbolicExpr::variable("a1"), SymbolicExpr::variable("a2")],
+            vec![1, 1, 2],
+        )
+        .unwrap();
+        let right = SymbolicArray::new(
+            vec![
+                SymbolicExpr::variable("b1"),
+                SymbolicExpr::variable("b2"),
+                SymbolicExpr::variable("b3"),
+            ],
+            vec![1, 1, 3],
+        )
+        .unwrap();
+
+        assert!(hcat_values(&[Value::SymbolicArray(left), Value::SymbolicArray(right)]).is_err());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn test_vcat_values_scalars() {
         let values = vec![Value::Num(1.0), Value::Num(2.0)];
         let result = vcat_values(&values).unwrap();
@@ -740,6 +1294,103 @@ mod tests {
             assert_eq!(m.data, vec![1.0, 2.0]);
         } else {
             panic!("Expected matrix result");
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn test_vcat_values_mixed_symbolic_numeric() {
+        let values = vec![
+            Value::Symbolic(SymbolicExpr::variable("dA")),
+            Value::Num(95.0),
+            Value::Num(0.0),
+        ];
+        let result = vcat_values(&values).unwrap();
+
+        if let Value::SymbolicArray(array) = result {
+            assert_eq!(array.shape, vec![3, 1]);
+            assert_eq!(
+                array
+                    .data
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+                vec!["dA", "95", "0"]
+            );
+        } else {
+            panic!("Expected symbolic array result");
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn test_vcat_values_preserves_trailing_symbolic_dimensions() {
+        let top = SymbolicArray::new(
+            vec![SymbolicExpr::variable("a1"), SymbolicExpr::variable("a2")],
+            vec![1, 1, 2],
+        )
+        .unwrap();
+        let bottom = SymbolicArray::new(
+            vec![SymbolicExpr::variable("b1"), SymbolicExpr::variable("b2")],
+            vec![1, 1, 2],
+        )
+        .unwrap();
+        let result = vcat_values(&[Value::SymbolicArray(top), Value::SymbolicArray(bottom)])
+            .expect("symbolic vcat");
+
+        if let Value::SymbolicArray(array) = result {
+            assert_eq!(array.shape, vec![2, 1, 2]);
+            assert_eq!(
+                array
+                    .data
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+                vec!["a1", "b1", "a2", "b2"]
+            );
+        } else {
+            panic!("Expected symbolic array result");
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn test_vcat_values_preserves_nd_column_major_order_with_multiple_columns() {
+        let top = SymbolicArray::new(
+            vec![
+                SymbolicExpr::variable("a1"),
+                SymbolicExpr::variable("a2"),
+                SymbolicExpr::variable("a3"),
+                SymbolicExpr::variable("a4"),
+            ],
+            vec![1, 2, 2],
+        )
+        .unwrap();
+        let bottom = SymbolicArray::new(
+            vec![
+                SymbolicExpr::variable("b1"),
+                SymbolicExpr::variable("b2"),
+                SymbolicExpr::variable("b3"),
+                SymbolicExpr::variable("b4"),
+            ],
+            vec![1, 2, 2],
+        )
+        .unwrap();
+        let result = vcat_values(&[Value::SymbolicArray(top), Value::SymbolicArray(bottom)])
+            .expect("symbolic vcat");
+
+        if let Value::SymbolicArray(array) = result {
+            assert_eq!(array.shape, vec![2, 2, 2]);
+            assert_eq!(
+                array
+                    .data
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+                vec!["a1", "b1", "a2", "b2", "a3", "b3", "a4", "b4"]
+            );
+        } else {
+            panic!("Expected symbolic array result");
         }
     }
 }

@@ -1,0 +1,51 @@
+{
+  "title": "pdf",
+  "category": "stats/summary",
+  "keywords": ["pdf", "fitdist", "probability distribution", "density", "mass", "statistics"],
+  "summary": "Evaluate a fitted or named probability distribution density or probability mass function.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "evaluation input shape",
+    "notes": "GPU inputs are gathered to host. Fitted-distribution evaluation currently runs on CPU."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::summary::fitdist::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`pdf(pd,x)` evaluates the density or probability mass function for a `ProbabilityDistribution` object returned by `fitdist`. `pdf(distname,x,params...)` evaluates supported named distributions directly.",
+  "behaviors": [
+    "`pd` must be a fitted distribution object returned by `fitdist`, or `distname` must name a supported distribution.",
+    "Supported named distributions are `\"Normal\"`, `\"Exponential\"`, `\"Lognormal\"`, `\"Gamma\"`, `\"Weibull\"`, and `\"Poisson\"` with their standard scalar parameters.",
+    "`x` may be a scalar or numeric array; the output has the same shape as `x`.",
+    "Continuous distributions return probability densities. Poisson returns probability mass values at integer support points and zero outside the support."
+  ],
+  "examples": [
+    {
+      "description": "Evaluate a fitted normal density",
+      "input": "pd = fitdist([1;2;3], \"Normal\"); y = pdf(pd, 2)"
+    },
+    {
+      "description": "Evaluate a named normal density",
+      "input": "y = pdf(\"Normal\", 0, 0, 1)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Can pdf evaluate by distribution name?",
+      "answer": "Yes. The named overload supports normal, exponential, lognormal, gamma, Weibull, and Poisson with scalar parameters. Distribution-specific helpers such as `normpdf` remain available."
+    }
+  ],
+  "links": [
+    { "label": "fitdist", "url": "./fitdist" },
+    { "label": "cdf", "url": "./cdf" },
+    { "label": "normpdf", "url": "./normpdf" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/fitdist.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/fitdist.rs"
+  }
+}

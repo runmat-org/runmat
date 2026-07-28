@@ -1,0 +1,11 @@
+{
+  "title": "dfsearch",
+  "category": "graph",
+  "keywords": ["dfsearch", "graph", "depth first search"],
+  "summary": "Return depth-first search order.",
+  "status": "implemented",
+  "tested": {"unit": "builtins::graph::tests"},
+  "description": "`dfsearch(G,start)` returns the reachable nodes in depth-first order. Directed graphs follow outgoing edges.",
+  "signatures": [{"label": "nodes = dfsearch(G, start)", "description": "Return DFS visit order."}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/graph/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/graph/mod.rs"}
+}

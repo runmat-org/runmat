@@ -1,11 +1,12 @@
 use runmat_config::project::{
-    build_project_composition_graph, build_project_source_index,
+    build_loose_source_index, build_project_composition_graph, build_project_source_index,
     discover_known_project_symbols_from_source_name, discover_project_manifest_from,
     discover_project_symbols_from, discover_project_symbols_from_source_name,
-    load_project_manifest, parse_project_manifest_toml, resolve_named_entrypoint_from,
-    resolve_project_entrypoint, resolve_project_source_input_from, ProjectCompositionError,
-    ProjectEntrypointResolveError, ProjectManifestLoadError, ProjectSourceIndexError,
-    ResolveProjectSourceInputError, ResolvedEntrypointTarget, PROJECT_MANIFEST_FILENAME,
+    discover_source_symbols_from_source_name, load_project_manifest, parse_project_manifest_toml,
+    resolve_named_entrypoint_from, resolve_project_entrypoint, resolve_project_source_input_from,
+    ProjectCompositionError, ProjectEntrypointResolveError, ProjectManifestLoadError,
+    ProjectSourceIndexError, ResolveProjectSourceInputError, ResolvedEntrypointTarget,
+    PROJECT_MANIFEST_FILENAME,
 };
 use std::fs;
 use tempfile::TempDir;
@@ -261,6 +262,51 @@ roots = []
 }
 
 #[test]
+fn project_discovery_skips_runtime_only_configuration() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    fs::create_dir_all(root.join("nested")).unwrap();
+    write_manifest(
+        root,
+        r#"
+[runtime]
+verbose = false
+
+[desktop]
+theme = "dark"
+"#,
+    );
+
+    assert_eq!(
+        discover_project_manifest_from(&root.join("nested/script.m")),
+        None,
+        "a runtime/desktop configuration must not opt the folder into project semantics"
+    );
+}
+
+#[test]
+fn project_discovery_keeps_malformed_project_documents_visible() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    let manifest_path = write_manifest(
+        root,
+        r#"
+[package]
+name = "demo"
+"#,
+    );
+
+    assert_eq!(
+        discover_project_manifest_from(&root.join("script.m")),
+        Some(manifest_path.clone())
+    );
+    assert!(
+        load_project_manifest(&manifest_path).is_err(),
+        "declaring a project section must retain strict project validation"
+    );
+}
+
+#[test]
 fn discover_project_symbols_includes_dependency_alias_qualified_names() {
     let tmp = TempDir::new().unwrap();
     let dep_root = tmp.path().join("deps/statslib");
@@ -412,6 +458,75 @@ roots = ["."]
 }
 
 #[test]
+fn loose_source_discovery_matches_matlab_lookup_boundaries() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("+signal")).unwrap();
+    fs::create_dir_all(tmp.path().join("@Point")).unwrap();
+    fs::create_dir_all(tmp.path().join("private")).unwrap();
+    fs::create_dir_all(tmp.path().join("not_on_path")).unwrap();
+    fs::write(tmp.path().join("main.m"), "result = helper();").unwrap();
+    fs::write(tmp.path().join("helper.m"), "function y=helper(); y=1; end").unwrap();
+    fs::write(
+        tmp.path().join("+signal/filter.m"),
+        "function y=filter(); y=1; end",
+    )
+    .unwrap();
+    fs::write(tmp.path().join("@Point/Point.m"), "classdef Point; end").unwrap();
+    fs::write(
+        tmp.path().join("private/secret.m"),
+        "function y=secret(); y=1; end",
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("not_on_path/hidden.m"),
+        "function y=hidden(); y=1; end",
+    )
+    .unwrap();
+
+    let discovered = discover_source_symbols_from_source_name("main.m", tmp.path())
+        .expect("loose source discovery")
+        .expect("local source context");
+    assert_eq!(discovered.manifest_path, None);
+    assert!(discovered.symbols.contains("helper"));
+    assert!(discovered.symbols.contains("signal.filter"));
+    assert!(discovered.symbols.contains("Point"));
+    assert!(discovered.symbols.contains("secret"));
+    assert!(!discovered.symbols.contains("hidden"));
+    assert!(discovered
+        .definitions
+        .iter()
+        .any(|definition| definition.name == "secret" && definition.is_private));
+}
+
+#[test]
+fn loose_private_functions_are_visible_only_to_their_owner_folder() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("private")).unwrap();
+    fs::write(tmp.path().join("main.m"), "secret();").unwrap();
+    fs::write(
+        tmp.path().join("private/secret.m"),
+        "function y=secret(); y=1; end",
+    )
+    .unwrap();
+    let outside = TempDir::new().unwrap();
+    fs::write(outside.path().join("other.m"), "secret();").unwrap();
+
+    let owner = discover_source_symbols_from_source_name("main.m", tmp.path())
+        .unwrap()
+        .unwrap();
+    assert!(owner.symbols.contains("secret"));
+
+    let index = build_loose_source_index(tmp.path()).unwrap();
+    let external = runmat_config::project::source_symbols_from_index(
+        &index,
+        tmp.path(),
+        &outside.path().join("other.m"),
+        None,
+    );
+    assert!(!external.symbols.contains("secret"));
+}
+
+#[test]
 fn resolve_project_source_input_from_infers_m_extension() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join("src")).unwrap();
@@ -517,6 +632,11 @@ fn source_index_discovers_pkg_class_and_private_layout() {
     )
     .unwrap();
     fs::write(
+        tmp.path().join("src/+pkg/@Point/Point.m"),
+        "classdef Point; end",
+    )
+    .unwrap();
+    fs::write(
         tmp.path().join("src/+pkg/@Point/private/helper.m"),
         "function y=helper(); y=1; end",
     )
@@ -547,6 +667,7 @@ roots = ["src"]
     assert!(qualified.contains("main"));
     assert!(qualified.contains("pkg.value"));
     assert!(qualified.contains("pkg.Point.move"));
+    assert!(qualified.contains("pkg.Point.Point"));
     assert!(qualified.contains("pkg.Point.helper"));
     assert!(qualified.contains("utils.local"));
 
@@ -562,6 +683,69 @@ roots = ["src"]
         .private_dirs
         .iter()
         .any(|dir| dir == std::path::Path::new("src/+pkg/@Point/private")));
+    let constructor = index
+        .files
+        .iter()
+        .find(|file| file.relative_path == std::path::Path::new("+pkg/@Point/Point.m"))
+        .expect("class constructor should be indexed");
+    assert_eq!(constructor.qualified_name, "pkg.Point.Point");
+    assert_eq!(
+        constructor.class_qualified_name.as_deref(),
+        Some("pkg.Point")
+    );
+    assert_eq!(
+        constructor.class_definition_qualified_name(),
+        Some("pkg.Point")
+    );
+}
+
+#[test]
+fn source_index_distinguishes_root_class_constructor_from_member_identity() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src/@Report")).unwrap();
+    fs::write(
+        tmp.path().join("src/@Report/Report.m"),
+        "classdef Report; end",
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("src/@Report/title.m"),
+        "function out=title(); out=1; end",
+    )
+    .unwrap();
+    let manifest_path = write_manifest(
+        tmp.path(),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+"#,
+    );
+    let manifest = load_project_manifest(&manifest_path).expect("manifest should validate");
+    let index = build_project_source_index(tmp.path(), &manifest).expect("source index");
+
+    let constructor = index
+        .files
+        .iter()
+        .find(|file| file.relative_path == std::path::Path::new("@Report/Report.m"))
+        .expect("class constructor should be indexed");
+    assert_eq!(constructor.qualified_name, "Report.Report");
+    assert_eq!(constructor.class_qualified_name.as_deref(), Some("Report"));
+    assert_eq!(
+        constructor.class_definition_qualified_name(),
+        Some("Report")
+    );
+
+    let member = index
+        .files
+        .iter()
+        .find(|file| file.relative_path == std::path::Path::new("@Report/title.m"))
+        .expect("class member should be indexed");
+    assert_eq!(member.qualified_name, "Report.title");
+    assert_eq!(member.class_qualified_name.as_deref(), Some("Report"));
+    assert_eq!(member.function_qualified_name(), Some("Report.title"));
 }
 
 #[test]

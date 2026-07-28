@@ -1,5 +1,5 @@
 use futures::executor::block_on;
-use runmat_builtins::{CharArray, NumericDType, SparseTensor, Tensor, Value};
+use runmat_builtins::{CharArray, IntegerStorage, NumericDType, SparseTensor, Tensor, Value};
 
 #[test]
 fn zeros_single_uses_f32_dtype() {
@@ -82,6 +82,59 @@ fn zeros_like_sparse_proto_preserves_sparse_storage() {
             assert!(sparse.values.is_empty());
         }
         other => panic!("expected sparse result, got {other:?}"),
+    }
+}
+
+#[test]
+fn sparse_full_and_nonzeros_preserve_exact_integer_storage() {
+    let cases = vec![
+        IntegerStorage::I8(vec![0, i8::MIN, i8::MAX, 0]),
+        IntegerStorage::I16(vec![0, i16::MIN, i16::MAX, 0]),
+        IntegerStorage::I32(vec![0, i32::MIN, i32::MAX, 0]),
+        IntegerStorage::I64(vec![0, i64::MIN, i64::MAX, 0]),
+        IntegerStorage::U8(vec![0, 1, u8::MAX, 0]),
+        IntegerStorage::U16(vec![0, 1, u16::MAX, 0]),
+        IntegerStorage::U32(vec![0, 1, u32::MAX, 0]),
+        IntegerStorage::U64(vec![0, 1, u64::MAX, 0]),
+    ];
+
+    for storage in cases {
+        let source = Tensor::new_integer(storage.clone(), vec![2, 2]).expect("integer tensor");
+        let sparse = match runmat_runtime::call_builtin("sparse", &[Value::Tensor(source)])
+            .expect("sparse integer tensor")
+        {
+            Value::SparseTensor(sparse) => sparse,
+            other => panic!("expected sparse tensor, got {other:?}"),
+        };
+        assert_eq!(
+            sparse.integer_storage().map(IntegerStorage::class_name),
+            Some(storage.class_name())
+        );
+        assert_eq!(sparse.integer_at(1, 0), storage.value_at(1));
+        assert_eq!(sparse.integer_at(0, 1), storage.value_at(2));
+        assert_eq!(sparse.integer_at(0, 0), None);
+        assert_eq!(sparse.integer_at(1, 1), None);
+
+        let full =
+            match runmat_runtime::call_builtin("full", &[Value::SparseTensor(sparse.clone())])
+                .expect("full integer sparse")
+            {
+                Value::Tensor(tensor) => tensor,
+                other => panic!("expected tensor, got {other:?}"),
+            };
+        assert_eq!(full.integer_storage(), Some(&storage));
+
+        let nonzeros =
+            match runmat_runtime::call_builtin("nonzeros", &[Value::SparseTensor(sparse)])
+                .expect("nonzeros integer sparse")
+            {
+                Value::Tensor(tensor) => tensor,
+                other => panic!("expected tensor, got {other:?}"),
+            };
+        assert_eq!(
+            nonzeros.integer_storage().map(IntegerStorage::class_name),
+            Some(storage.class_name())
+        );
     }
 }
 

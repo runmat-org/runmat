@@ -13,8 +13,8 @@ use wasm_bindgen::prelude::*;
 use crate::core::analysis::{
     analyze_document_with_compat_and_source_async, completion_at, definition_locations_at_async,
     diagnostics_for_document, document_symbols as core_document_symbols, formatting_edits,
-    hover_at, references_locations_at_async, semantic_tokens_full, signature_help_at, CompatMode,
-    DocumentAnalysis,
+    hover_at, references_locations_at_async, semantic_tokens_full, semantic_tokens_lexical,
+    signature_help_at, CompatMode, DocumentAnalysis,
 };
 use crate::core::workspace::workspace_symbols_with_project_async;
 
@@ -25,8 +25,11 @@ struct DocStore {
 
 #[derive(Clone)]
 struct DocEntry {
+    version: u64,
     text: String,
-    analysis: DocumentAnalysis,
+    lexical_tokens: lsp_types::SemanticTokens,
+    analysis: Option<DocumentAnalysis>,
+    compat: CompatMode,
 }
 
 runmat_thread_local! {
@@ -77,26 +80,89 @@ pub fn builtin_inventory_counts() -> JsValue {
 
 #[wasm_bindgen]
 pub async fn open_document(uri: String, text: String) {
-    ensure_builtins_registered();
-    let compat = COMPAT_MODE.with(|c| c.get());
-    let source_name = source_name_from_uri(&uri);
-    let analysis =
-        analyze_document_with_compat_and_source_async(&text, compat, source_name.as_deref()).await;
-    DOCS.with(|d| {
-        d.borrow_mut().docs.insert(uri, DocEntry { text, analysis });
+    let version = DOCS.with(|d| {
+        d.borrow()
+            .docs
+            .get(&uri)
+            .map(|doc| doc.version.saturating_add(1))
+            .unwrap_or(1)
     });
+    let _ = update_document_lexical(uri.clone(), version, text);
+    let _ = analyze_document(uri, version).await;
 }
 
 #[wasm_bindgen]
 pub async fn change_document(uri: String, text: String) {
+    open_document(uri, text).await;
+}
+
+/// Commit a complete lexical token snapshot before asynchronous semantic
+/// analysis begins. The caller supplies the document revision so a later
+/// analysis completion can never overwrite newer text.
+#[wasm_bindgen]
+pub fn update_document_lexical(
+    uri: String,
+    version: u64,
+    text: String,
+) -> Result<JsValue, JsValue> {
     ensure_builtins_registered();
     let compat = COMPAT_MODE.with(|c| c.get());
-    let source_name = source_name_from_uri(&uri);
-    let analysis =
-        analyze_document_with_compat_and_source_async(&text, compat, source_name.as_deref()).await;
-    DOCS.with(|d| {
-        d.borrow_mut().docs.insert(uri, DocEntry { text, analysis });
+    let lexical_tokens = semantic_tokens_lexical(&text).unwrap_or_else(|| SemanticTokens {
+        result_id: None,
+        data: Vec::new(),
     });
+    DOCS.with(|d| {
+        d.borrow_mut().docs.insert(
+            uri,
+            DocEntry {
+                version,
+                text,
+                lexical_tokens: lexical_tokens.clone(),
+                analysis: None,
+                compat,
+            },
+        );
+    });
+    to_js(&lexical_tokens)
+}
+
+/// Analyze a previously committed lexical snapshot. A result is published only
+/// if the requested revision is still current for the URI.
+#[wasm_bindgen]
+pub async fn analyze_document(uri: String, version: u64) -> Result<JsValue, JsValue> {
+    ensure_builtins_registered();
+    let entry = DOCS.with(|d| d.borrow().docs.get(&uri).cloned());
+    let Some(entry) = entry else {
+        return Ok(JsValue::NULL);
+    };
+    if entry.version != version {
+        return Ok(JsValue::NULL);
+    }
+    let source_name = source_name_from_uri(&uri);
+    let analysis = analyze_document_with_compat_and_source_async(
+        &entry.text,
+        entry.compat,
+        source_name.as_deref(),
+    )
+    .await;
+    let tokens =
+        semantic_tokens_full(&entry.text, &analysis).unwrap_or(entry.lexical_tokens.clone());
+    let committed = DOCS.with(|d| {
+        let mut docs = d.borrow_mut();
+        let Some(current) = docs.docs.get_mut(&uri) else {
+            return false;
+        };
+        if current.version != version {
+            return false;
+        }
+        current.analysis = Some(analysis);
+        true
+    });
+    if committed {
+        to_js(&tokens)
+    } else {
+        Ok(JsValue::NULL)
+    }
 }
 
 #[wasm_bindgen]
@@ -114,7 +180,13 @@ pub fn completion(_uri: String, _line: u32, _character: u32) -> Result<JsValue, 
         return Ok(JsValue::NULL);
     };
     let position = Position::new(_line, _character);
-    let items = completion_at(&doc.text, &doc.analysis, &position);
+    let Some(analysis) = doc.analysis.as_ref() else {
+        return to_js(&CompletionList {
+            is_incomplete: true,
+            items: Vec::new(),
+        });
+    };
+    let items = completion_at(&doc.text, analysis, &position);
     let list = CompletionList {
         is_incomplete: false,
         items,
@@ -130,7 +202,10 @@ pub fn hover(_uri: String, _line: u32, _character: u32) -> Result<JsValue, JsVal
         return Ok(JsValue::NULL);
     };
     let position = Position::new(_line, _character);
-    let result = hover_at(&doc.text, &doc.analysis, &position);
+    let Some(analysis) = doc.analysis.as_ref() else {
+        return Ok(JsValue::NULL);
+    };
+    let result = hover_at(&doc.text, analysis, &position);
     match result {
         Some(h) => to_js(&h),
         None => Ok(JsValue::NULL),
@@ -146,7 +221,10 @@ pub async fn definition(_uri: String, _line: u32, _character: u32) -> Result<JsV
     };
     let position = Position::new(_line, _character);
     let uri = Url::parse(&_uri).unwrap_or_else(|_| Url::parse("file:///").unwrap());
-    let locations = definition_locations_at_async(&doc.text, &doc.analysis, &position, &uri).await;
+    let Some(analysis) = doc.analysis.as_ref() else {
+        return Ok(JsValue::NULL);
+    };
+    let locations = definition_locations_at_async(&doc.text, analysis, &position, &uri).await;
     to_js(&locations)
 }
 
@@ -159,7 +237,10 @@ pub async fn references(_uri: String, _line: u32, _character: u32) -> Result<JsV
     };
     let position = Position::new(_line, _character);
     let uri = Url::parse(&_uri).unwrap_or_else(|_| Url::parse("file:///").unwrap());
-    let locations = references_locations_at_async(&doc.text, &doc.analysis, &position, &uri).await;
+    let Some(analysis) = doc.analysis.as_ref() else {
+        return Ok(JsValue::NULL);
+    };
+    let locations = references_locations_at_async(&doc.text, analysis, &position, &uri).await;
     to_js(&locations)
 }
 
@@ -171,7 +252,10 @@ pub fn signature_help(_uri: String, _line: u32, _character: u32) -> Result<JsVal
         return Ok(JsValue::NULL);
     };
     let position = Position::new(_line, _character);
-    let result = signature_help_at(&doc.text, &doc.analysis, &position);
+    let Some(analysis) = doc.analysis.as_ref() else {
+        return Ok(JsValue::NULL);
+    };
+    let result = signature_help_at(&doc.text, analysis, &position);
     match result {
         Some(h) => to_js(&h),
         None => Ok(JsValue::NULL),
@@ -185,11 +269,12 @@ pub fn semantic_tokens(_uri: String) -> Result<JsValue, JsValue> {
     let Some(doc) = entry else {
         return Ok(JsValue::NULL);
     };
-    let tokens: Option<SemanticTokens> = semantic_tokens_full(&doc.text, &doc.analysis);
-    match tokens {
-        Some(t) => to_js(&t),
-        None => Ok(JsValue::NULL),
-    }
+    let tokens = doc
+        .analysis
+        .as_ref()
+        .and_then(|analysis| semantic_tokens_full(&doc.text, analysis))
+        .unwrap_or(doc.lexical_tokens);
+    to_js(&tokens)
 }
 
 #[wasm_bindgen]
@@ -199,7 +284,10 @@ pub fn document_symbols(_uri: String) -> Result<JsValue, JsValue> {
     let Some(doc) = entry else {
         return Ok(JsValue::NULL);
     };
-    let symbols: Vec<DocumentSymbol> = core_document_symbols(&doc.text, &doc.analysis);
+    let Some(analysis) = doc.analysis.as_ref() else {
+        return to_js(&Vec::<DocumentSymbol>::new());
+    };
+    let symbols: Vec<DocumentSymbol> = core_document_symbols(&doc.text, analysis);
     to_js(&symbols)
 }
 
@@ -218,6 +306,7 @@ pub async fn workspace_symbols_all() -> Result<JsValue, JsValue> {
                     doc.analysis.clone(),
                 )
             })
+            .filter_map(|(uri, text, analysis)| analysis.map(|analysis| (uri, text, analysis)))
             .collect::<Vec<_>>()
     });
     let syms: Vec<SymbolInformation> =
@@ -232,7 +321,10 @@ pub fn formatting(_uri: String) -> Result<JsValue, JsValue> {
     let Some(doc) = entry else {
         return Ok(JsValue::NULL);
     };
-    let edits: Vec<TextEdit> = formatting_edits(&doc.text, &doc.analysis);
+    let Some(analysis) = doc.analysis.as_ref() else {
+        return to_js(&Vec::<TextEdit>::new());
+    };
+    let edits: Vec<TextEdit> = formatting_edits(&doc.text, analysis);
     to_js(&edits)
 }
 
@@ -243,7 +335,10 @@ pub fn diagnostics(_uri: String) -> Result<JsValue, JsValue> {
     let Some(doc) = entry else {
         return Ok(JsValue::NULL);
     };
-    let diags: Vec<Diagnostic> = diagnostics_for_document(&doc.text, &doc.analysis);
+    let Some(analysis) = doc.analysis.as_ref() else {
+        return to_js(&Vec::<Diagnostic>::new());
+    };
+    let diags: Vec<Diagnostic> = diagnostics_for_document(&doc.text, analysis);
     to_js(&diags)
 }
 

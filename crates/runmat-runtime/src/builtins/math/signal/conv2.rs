@@ -351,15 +351,6 @@ fn try_conv2_gpu(a: &Value, b: &Value, mode: Conv2Mode) -> BuiltinResult<Option<
         _ => return Ok(None),
     };
 
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        if lhs.device_id != 0 || rhs.device_id != 0 {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
-
     let lhs_dims = match conv2_dimensions(&lhs.shape) {
         Some(dims) => dims,
         None => return Ok(None),

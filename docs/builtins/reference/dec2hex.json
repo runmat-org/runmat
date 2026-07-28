@@ -1,0 +1,87 @@
+{
+  "title": "dec2hex",
+  "category": "comms/conversion",
+  "keywords": [
+    "dec2hex",
+    "decimal",
+    "hexadecimal",
+    "base conversion",
+    "twos complement"
+  ],
+  "summary": "Convert decimal integers to hexadecimal character rows in MATLAB and RunMat.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "gpuArray inputs are gathered to the host for integer validation and text formatting."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::comms::binary_conversion::tests",
+    "integration": null
+  },
+  "description": "`dec2hex(D)` converts each element of `D` to one uppercase hexadecimal character row. `dec2hex(D, minDigits)` pads rows to at least `minDigits` characters. Numeric arrays are processed in column-major element order and produce one output row per element.",
+  "behaviors": [
+    "`D` may be numeric, integer, logical, character, or gpuArray numeric data.",
+    "Double inputs must be finite integer values.",
+    "Nonnegative values are padded with `0` characters.",
+    "Negative values are represented using the smallest signed two's-complement storage width that can contain the value, with additional padding using `F` characters.",
+    "Signed integer inputs preserve their source integer storage width for negative two's-complement output.",
+    "`minDigits` must be a finite nonnegative integer scalar.",
+    "Outputs larger than RunMat's character-output safety limit are rejected before formatting.",
+    "Complex, non-finite, fractional, and unsupported input values raise an error."
+  ],
+  "examples": [
+    {
+      "description": "Convert a scalar decimal value",
+      "input": "s = dec2hex(1023)",
+      "output": "s = '3FF'"
+    },
+    {
+      "description": "Pad to a minimum width",
+      "input": "s = dec2hex(1023, 6)",
+      "output": "s = '0003FF'"
+    },
+    {
+      "description": "Convert multiple values to padded rows",
+      "input": "s = dec2hex([1023 122 14])",
+      "output": "s = ['3FF'; '07A'; '00E']"
+    },
+    {
+      "description": "Format a negative value as two's complement",
+      "input": "s = dec2hex(-16)",
+      "output": "s = 'F0'"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Are fractional inputs accepted?",
+      "answer": "No. RunMat requires finite integer values for `dec2hex`."
+    },
+    {
+      "question": "Are hexadecimal letters uppercase?",
+      "answer": "Yes. RunMat emits uppercase `A` through `F` characters."
+    }
+  ],
+  "links": [
+    {
+      "label": "hex2dec",
+      "url": "./hex2dec"
+    },
+    {
+      "label": "dec2bin",
+      "url": "./dec2bin"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/comms/binary_conversion.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/comms/binary_conversion.rs"
+  }
+}

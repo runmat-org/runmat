@@ -3,13 +3,87 @@
 // runmat-runtime wasm binary per test file with zero executable tests.
 #![cfg(not(target_arch = "wasm32"))]
 
+use runmat_builtins::Value;
 use runmat_core::{ExecutionStreamKind, RunError, RunMatSession};
 use runmat_gc::gc_test_context;
+use std::path::{Path, PathBuf};
+
+struct CwdGuard {
+    original: PathBuf,
+}
+
+impl Drop for CwdGuard {
+    fn drop(&mut self) {
+        let _ = std::env::set_current_dir(&self.original);
+    }
+}
+
+fn push_cwd(path: &Path) -> CwdGuard {
+    let original = std::env::current_dir().expect("current dir");
+    std::env::set_current_dir(path).expect("set current dir");
+    CwdGuard { original }
+}
 
 fn isolate_plot_test() -> runmat_runtime::builtins::plotting::PlotTestLockGuard {
     let guard = runmat_runtime::builtins::plotting::lock_plot_test_context();
     runmat_runtime::builtins::plotting::reset_plot_state();
     guard
+}
+
+#[test]
+fn pcode_command_generates_p_file_and_run_prefers_it() {
+    let _fs_guard = runmat_filesystem::provider_override_lock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(temp.path().join("worker.m"), "pcodeValue = 10;\n").expect("write source");
+    let _cwd = push_cwd(temp.path());
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    let result = runmat_core::execute_text_request_for_testing(&mut engine, "pcode worker;")
+        .expect("pcode command should execute");
+    assert!(result.error.is_none());
+    assert!(temp.path().join("worker.p").is_file());
+
+    std::fs::write(temp.path().join("worker.m"), "pcodeValue = 20;\n")
+        .expect("rewrite source after pcode");
+    let result = runmat_core::execute_text_request_for_testing(&mut engine, "run worker;")
+        .expect("run command should execute P-code");
+    assert!(result.error.is_none());
+
+    let readback = runmat_core::execute_text_request_for_testing(&mut engine, "pcodeValue")
+        .expect("read P-code assigned variable");
+    assert_eq!(
+        readback.value.as_ref().map(|value| value.to_string()),
+        Some("10".to_string())
+    );
+
+    let result = runmat_core::execute_text_request_for_testing(&mut engine, "pcodeValue = 0;")
+        .expect("reset value");
+    assert!(result.error.is_none());
+    let result = runmat_core::execute_text_request_for_testing(&mut engine, "run worker.m;")
+        .expect("explicit .m run should still execute P-code sibling");
+    assert!(result.error.is_none());
+    let readback = runmat_core::execute_text_request_for_testing(&mut engine, "pcodeValue")
+        .expect("read explicit .m P-code assigned variable");
+    assert_eq!(
+        readback.value.as_ref().map(|value| value.to_string()),
+        Some("10".to_string())
+    );
+}
+
+#[test]
+fn run_invalid_pcode_reports_pcode_identifier() {
+    let _fs_guard = runmat_filesystem::provider_override_lock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(temp.path().join("bad.p"), "not runmat pcode").expect("write invalid pcode");
+    let _cwd = push_cwd(temp.path());
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    let result = runmat_core::execute_text_request_for_testing(&mut engine, "run bad;")
+        .expect("run should report runtime error in response");
+    assert_eq!(
+        result.error.as_ref().and_then(|err| err.identifier()),
+        Some("RunMat:pcode:InvalidPcode")
+    );
 }
 
 #[test]
@@ -414,6 +488,90 @@ fn plotting_command_gap_repros_execute() {
     if let Some(error) = result.error {
         assert_eq!(error.identifier(), Some("RunMat:plot:EngineError"));
     }
+}
+
+#[test]
+fn debugger_compat_commands_execute_through_core() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    let result = runmat_core::execute_text_request_for_testing(
+        &mut engine,
+        "keyboard; mlock; locked = mislocked; munlock; unlocked = mislocked; dbclear all; status = dbstatus; info = getcallinfo;",
+    )
+    .unwrap();
+    assert!(
+        result.error.is_none(),
+        "unexpected debugger compatibility error: {:?}",
+        result.error
+    );
+    let locked = runmat_core::execute_text_request_for_testing(&mut engine, "locked").unwrap();
+    assert_eq!(locked.value.as_ref(), Some(&Value::Bool(true)));
+    let unlocked = runmat_core::execute_text_request_for_testing(&mut engine, "unlocked").unwrap();
+    assert_eq!(unlocked.value.as_ref(), Some(&Value::Bool(false)));
+    let status = runmat_core::execute_text_request_for_testing(&mut engine, "status").unwrap();
+    assert!(matches!(status.value.as_ref(), Some(Value::Cell(cell)) if cell.data.is_empty()));
+    let info = runmat_core::execute_text_request_for_testing(&mut engine, "info").unwrap();
+    assert!(matches!(info.value.as_ref(), Some(Value::Struct(_))));
+
+    runmat_vm::reset_thread_state_for_tests();
+    let reset_locked =
+        runmat_core::execute_text_request_for_testing(&mut engine, "resetLocked = mislocked;")
+            .unwrap();
+    assert!(
+        reset_locked.error.is_none(),
+        "mislocked after reset failed: {:?}",
+        reset_locked.error
+    );
+    let reset_locked =
+        runmat_core::execute_text_request_for_testing(&mut engine, "resetLocked").unwrap();
+    assert_eq!(reset_locked.value.as_ref(), Some(&Value::Bool(false)));
+}
+
+#[test]
+fn dbstack_reports_user_function_frame_through_core() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    let define = runmat_core::execute_text_request_for_testing(
+        &mut engine,
+        "function st = stack_probe(); st = dbstack; end",
+    )
+    .unwrap();
+    assert!(
+        define.error.is_none(),
+        "function definition failed: {:?}",
+        define.error
+    );
+
+    let result =
+        runmat_core::execute_text_request_for_testing(&mut engine, "frames = stack_probe();")
+            .unwrap();
+    assert!(
+        result.error.is_none(),
+        "stack probe failed: {:?}",
+        result.error
+    );
+    let frames = runmat_core::execute_text_request_for_testing(&mut engine, "frames").unwrap();
+    let Some(Value::Cell(cell)) = frames.value.as_ref() else {
+        panic!("dbstack should return a cell row of frame structs");
+    };
+    assert!(
+        !cell.data.is_empty(),
+        "dbstack should include at least one frame"
+    );
+    let Value::Struct(first) = &cell.data[0] else {
+        panic!("first frame should be a struct");
+    };
+    assert_eq!(
+        first.fields.get("name"),
+        Some(&Value::String("stack_probe".to_string()))
+    );
+    let Some(Value::Num(line)) = first.fields.get("line") else {
+        panic!("first frame should include a numeric line");
+    };
+    assert!(
+        *line >= 1.0,
+        "VM-backed dbstack frame should report a source line, got {line}"
+    );
 }
 
 #[test]

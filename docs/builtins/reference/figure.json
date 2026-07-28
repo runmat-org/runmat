@@ -25,19 +25,21 @@
   "tested": {
     "integration": "runmat-plot/tests/renderer_tests.rs"
   },
-  "description": "`figure` creates a new plotting figure or selects an existing one as current. With no arguments (or `'next'`) it allocates a fresh handle; passing a positive numeric handle selects that figure, creating it if needed. `figure` also accepts figure property/value pairs such as `'Name'`, `'NumberTitle'`, `'Visible'`, and `'Color'`. Handle selection, creation, and property assignment behavior follow MATLAB semantics.",
+  "description": "`figure` creates a new plotting figure or selects an existing one as current. With no arguments (or `'next'`) it allocates a fresh handle; passing a positive numeric handle selects that figure, creating it if needed. `figure` also accepts figure property/value pairs such as `'Name'`, `'NumberTitle'`, `'Visible'`, `'Position'`, and `'Color'`. Handle selection, creation, and property assignment behavior follow MATLAB semantics.",
   "behaviors": [
     "`figure()` creates a new figure and returns its numeric handle.",
     "`figure(n)` selects figure `n`. If that handle does not exist yet, RunMat creates it.",
     "`figure('next')` creates a new figure instead of selecting an existing one.",
     "`figure('Property', value, ...)` creates a fresh figure and applies the requested figure properties.",
     "`figure(n, 'Property', value, ...)` selects or creates figure `n` and applies the requested figure properties.",
+    "`figure('Position', [left bottom width height])` stores MATLAB-style figure window geometry and makes it available through `get(f, 'Position')` and figure scene metadata.",
     "The selected figure becomes the target for subsequent plotting commands such as `plot`, `subplot`, `gca`, `clf`, and `hold`."
   ],
   "options": [
     "`'Name'` sets the figure window name and can be inspected later with `get(f, 'Name')`.",
     "`'NumberTitle'` accepts logical values or MATLAB-style `'on'`/`'off'` strings.",
     "`'Visible'` accepts logical values or MATLAB-style `'on'`/`'off'` strings. Hidden figures keep their graphics state but do not open or update interactive windows until made visible again.",
+    "`'Position'` accepts a finite four-element numeric vector `[left bottom width height]`; width and height must be positive.",
     "`'Color'` and `'BackgroundColor'` accept exact MATLAB color letters, full color names such as `'black'`, or RGB triples, and update the figure background color."
   ],
   "examples": [
@@ -60,6 +62,11 @@
       "description": "Create a named figure with MATLAB-style property pairs",
       "input": "f = figure('Name', 'demo', 'NumberTitle', 'off', 'Visible', 'off');\nplot(1:5, [1 4 2 5 3]);",
       "output": "% f is a figure handle whose Name, NumberTitle, and Visible properties are set"
+    },
+    {
+      "description": "Create a figure with explicit geometry",
+      "input": "f = figure('Position', [100 100 1000 700]);\npos = get(f, 'Position')",
+      "output": "% pos is [100 100 1000 700]"
     }
   ],
   "faqs": [

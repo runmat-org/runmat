@@ -1,0 +1,76 @@
+{
+  "title": "squareform",
+  "category": "stats/ml",
+  "keywords": [
+    "squareform",
+    "distance",
+    "condensed",
+    "symmetric",
+    "statistics",
+    "machine learning"
+  ],
+  "summary": "Convert between condensed distance vectors and square distance matrices.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host before conversion."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::ml::distance::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`squareform` converts a condensed pairwise-distance vector into a square symmetric matrix, or converts a square symmetric distance matrix back into condensed form.",
+  "behaviors": [
+    "Vector inputs must have length `n*(n-1)/2` for an integer `n`.",
+    "Matrix inputs must be square, symmetric, and have a zero diagonal.",
+    "`squareform(Z,\"tomatrix\")` forces vector-to-matrix conversion.",
+    "`squareform(Z,\"tovector\")` forces matrix-to-vector conversion.",
+    "Condensed vectors use the same pair ordering as `pdist`."
+  ],
+  "examples": [
+    {
+      "description": "Expand a condensed vector",
+      "input": "D = [5 4 7];\nM = squareform(D)",
+      "output": "M is a 3-by-3 symmetric matrix with zeros on the diagonal."
+    },
+    {
+      "description": "Convert back to condensed form",
+      "input": "D2 = squareform(M)",
+      "output": "D2 is [5 4 7]."
+    },
+    {
+      "description": "Force output mode",
+      "input": "M = squareform(D, \"tomatrix\")",
+      "output": "The input is interpreted as a condensed distance vector."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why does a matrix input need a zero diagonal?",
+      "answer": "A distance matrix represents distance from each observation to itself on the diagonal, which must be zero for condensed conversion."
+    }
+  ],
+  "links": [
+    {
+      "label": "pdist",
+      "url": "./pdist"
+    },
+    {
+      "label": "pdist2",
+      "url": "./pdist2"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/ml/distance.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/distance.rs"
+  }
+}

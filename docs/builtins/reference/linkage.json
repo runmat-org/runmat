@@ -1,0 +1,87 @@
+{
+  "title": "linkage",
+  "category": "stats/ml",
+  "keywords": [
+    "linkage",
+    "hierarchical",
+    "cluster",
+    "clustering",
+    "dendrogram",
+    "statistics",
+    "machine learning"
+  ],
+  "summary": "Construct a hierarchical agglomerative clustering tree.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host. Hierarchical clustering runs on CPU."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::ml::linkage::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`linkage(X)` computes pairwise distances between rows of `X` and returns an `(m-1)-by-3` cluster tree. `linkage(Y, method)` accepts a row-vector condensed distance vector in the same ordering as `pdist`.",
+  "behaviors": [
+    "Rows of `X` are observations and columns are variables. `X` must contain at least two observations; an `n`-by-1 column vector is treated as `n` one-dimensional observations.",
+    "A row-vector input is interpreted as a condensed distance vector whose length is `n*(n-1)/2`.",
+    "Distances must be finite and nonnegative.",
+    "The default linkage method is `\"single\"`.",
+    "Supported methods are `\"single\"`, `\"complete\"`, `\"average\"`, `\"weighted\"`, `\"centroid\"`, `\"median\"`, and `\"ward\"`, including common MATLAB aliases such as `\"nearest\"`, `\"farthest\"`, `\"upgma\"`, and `\"wpgma\"`.",
+    "Condensed distance vectors used with `\"centroid\"`, `\"median\"`, or `\"ward\"` must pass a Euclidean-distance validity check.",
+    "`linkage(X, method, metric, ...)` uses the same named numeric distance metrics and metric parameters as `pdist`.",
+    "`linkage(X, method, {metric, parameter})` accepts a cell array of `pdist` inputs.",
+    "`\"SaveMemory\",\"off\"` is accepted for source compatibility. `\"SaveMemory\",\"on\"` is accepted for observation-matrix input with centroid, median, or ward linkage and Euclidean distance; RunMat uses the same bounded in-memory implementation for both values.",
+    "The current exact agglomerative implementation is bounded to 700 observations to avoid unbounded CPU and memory use.",
+    "The first two columns of `Z` contain one-based cluster identifiers. Original observations are numbered `1:m`; newly formed clusters are numbered `m+1`, `m+2`, and so on. The third column contains the linkage distance for each merge."
+  ],
+  "examples": [
+    {
+      "description": "Cluster observation rows",
+      "input": "X = [0 0; 3 4; 4 0; 0 2];\nZ = linkage(X, \"single\")",
+      "output": "Z is a 3-by-3 hierarchy. The first merge joins observations 1 and 4 at distance 2."
+    },
+    {
+      "description": "Cluster a condensed distance vector",
+      "input": "Y = [1 4 6 5 7 2];\nZ = linkage(Y, \"complete\")",
+      "output": "Z describes complete-linkage merges for four observations."
+    },
+    {
+      "description": "Use a pdist metric",
+      "input": "Z = linkage(X, \"average\", \"cityblock\")",
+      "output": "Pairwise cityblock distances are used before average-linkage clustering."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does linkage draw a dendrogram?",
+      "answer": "No. `linkage` returns the cluster tree matrix. Plotting functions such as `dendrogram` are separate compatibility surfaces."
+    },
+    {
+      "question": "Are custom distance functions supported?",
+      "answer": "No. RunMat currently supports the standard named numeric distance metrics shared with `pdist`."
+    }
+  ],
+  "links": [
+    {
+      "label": "pdist",
+      "url": "./pdist"
+    },
+    {
+      "label": "squareform",
+      "url": "./squareform"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/ml/linkage.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/linkage.rs"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "title": "h5read",
+  "category": "io/hdf5",
+  "keywords": ["h5read", "hdf5", "dataset", "file", "io"],
+  "summary": "Read dense numeric, logical, or string datasets from an HDF5 file.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "HDF5 parsing is host file I/O; GPU inputs are gathered at the builtin boundary."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 0, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::io::hdf5::tests", "integration": null},
+  "description": "`h5read(filename, dataset)` reads dense HDF5 datasets, with optional one-based `start`, `count`, and `stride` selections.",
+  "behaviors": ["Supports dense numeric, logical, and variable-length string datasets.", "Unsupported compound/object/reference types raise deterministic unsupported-type errors."],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/io/hdf5.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/hdf5.rs"}
+}

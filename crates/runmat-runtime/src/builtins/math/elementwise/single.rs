@@ -5,7 +5,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, LogicalArray, NumericDType, Tensor, Value,
+    CharArray, ComplexTensor, LogicalArray, NumericDType, SymbolicArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -215,6 +215,7 @@ async fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
             .numeric_constant_value()
             .map(|value| Value::Num(cast_f64_to_single(value)))
             .ok_or_else(|| conversion_error("sym")),
+        Value::SymbolicArray(array) => single_from_symbolic_array(array),
         Value::Cell(_) => Err(conversion_error("cell")),
         Value::Struct(_) => Err(conversion_error("struct")),
         Value::Object(obj) => Err(conversion_error(&obj.class_name)),
@@ -234,6 +235,19 @@ async fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
 
 fn single_from_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     single_tensor_to_host(tensor).map(Value::Tensor)
+}
+
+fn single_from_symbolic_array(array: SymbolicArray) -> BuiltinResult<Value> {
+    let mut data = Vec::with_capacity(array.data.len());
+    for expr in array.data {
+        let value = expr
+            .numeric_constant_value()
+            .ok_or_else(|| conversion_error("sym"))?;
+        data.push(cast_f64_to_single(value));
+    }
+    Tensor::new(data, array.shape)
+        .map(Value::Tensor)
+        .map_err(|e| single_error_with_detail(&SINGLE_ERROR_INTERNAL, e))
 }
 
 fn single_from_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
@@ -438,7 +452,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ResolveContext, SymbolicExpr, Type};
+    use runmat_builtins::{ResolveContext, SymbolicArray, SymbolicExpr, Type};
 
     fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::single_builtin(value, rest))
@@ -503,6 +517,38 @@ pub(crate) mod tests {
         .expect("single");
 
         assert_eq!(result, Value::Num((std::f64::consts::PI as f32) as f64));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn single_converts_symbolic_array_constants() {
+        let array = SymbolicArray::new(
+            vec![SymbolicExpr::constant(1.25), SymbolicExpr::constant(2.5)],
+            vec![1, 2],
+        )
+        .unwrap();
+
+        let result = single_builtin(Value::SymbolicArray(array), Vec::new()).expect("single");
+
+        match result {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![1, 2]);
+                assert_eq!(tensor.data, vec![(1.25f32) as f64, (2.5f32) as f64]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn single_rejects_symbolic_array_variables() {
+        let array = SymbolicArray::new(vec![SymbolicExpr::variable("x")], vec![1, 1]).unwrap();
+
+        let err = single_builtin(Value::SymbolicArray(array), Vec::new())
+            .expect_err("symbolic variable should not convert");
+
+        assert_eq!(err.identifier(), SINGLE_ERROR_INVALID_INPUT.identifier);
+        assert!(err.message().contains("conversion to single from sym"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

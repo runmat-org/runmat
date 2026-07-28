@@ -1,0 +1,55 @@
+{
+  "title": "getcallinfo",
+  "category": "introspection",
+  "keywords": ["getcallinfo", "debug", "call", "stack"],
+  "summary": "Return deterministic information about the current RunMat call context.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-side debugger introspection only."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::debugging::tests::getcallinfo_reports_current_frame",
+    "integration": "debugger_compat_commands_execute_through_core"
+  },
+  "description": "`getcallinfo` is an undocumented MATLAB-adjacent compatibility helper. RunMat exposes deterministic call-context metadata for client code that probes it.",
+  "behaviors": [
+    "`getcallinfo` accepts no inputs.",
+    "The result is a scalar struct with `name`, `file`, `line`, and `stack` fields.",
+    "`stack` uses the same 1-by-N cell row of frame structs as `dbstack`."
+  ],
+  "examples": [
+    {
+      "description": "Read the current call context",
+      "input": "info = getcallinfo;"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Is `getcallinfo` full MATLAB API compatibility?",
+      "answer": "No public MathWorks API contract was used for this helper. RunMat provides stable current-frame and stack metadata for compatibility with code that checks for its existence."
+    }
+  ],
+  "links": [
+    {
+      "label": "dbstack",
+      "url": "./dbstack"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/debugging.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/debugging.rs"
+  },
+  "gpu_behavior": [
+    "`getcallinfo` is host-side call-context introspection and has no GPU/provider behavior."
+  ]
+}

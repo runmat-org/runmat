@@ -118,6 +118,20 @@ pub fn total_len_from_shape(shape: &[usize]) -> usize {
     }
 }
 
+fn checked_total_len_from_shape(shape: &[usize]) -> VmResult<usize> {
+    if is_scalar_shape(shape) {
+        return Ok(1);
+    }
+    shape.iter().try_fold(1usize, |acc, dim| {
+        acc.checked_mul(*dim)
+            .ok_or_else(|| mex("IndexOutOfBounds", "Index dimensions overflow"))
+    })
+}
+
+fn checked_u32_index(index: usize) -> VmResult<u32> {
+    u32::try_from(index).map_err(|_| mex("IndexOutOfBounds", "Index exceeds supported range"))
+}
+
 fn matlab_squeezed_shape(selection_lengths: &[usize], scalar_mask: &[bool]) -> Vec<usize> {
     let mut dims: Vec<(usize, usize, bool)> = selection_lengths
         .iter()
@@ -159,7 +173,7 @@ pub fn build_index_plan(
     dims: usize,
     base_shape: &[usize],
 ) -> VmResult<IndexPlan> {
-    let total_len = total_len_from_shape(base_shape);
+    let total_len = checked_total_len_from_shape(base_shape)?;
     if dims == 1 {
         let list = selectors
             .first()
@@ -174,7 +188,10 @@ pub fn build_index_plan(
         if indices.iter().any(|&i| i == 0 || i > total_len) {
             return Err(mex("IndexOutOfBounds", "Index out of bounds"));
         }
-        let zero_based: Vec<u32> = indices.iter().map(|&i| (i - 1) as u32).collect();
+        let zero_based: Vec<u32> = indices
+            .iter()
+            .map(|&i| checked_u32_index(i - 1))
+            .collect::<Result<_, _>>()?;
         let count = zero_based.len();
         let base_is_row_vector = base_shape.first().copied().unwrap_or(1) == 1
             && base_shape.get(1).copied().unwrap_or(1) > 1;
@@ -232,18 +249,43 @@ pub fn build_index_plan(
     }
     let mut strides = vec![1usize; dims];
     for d in 1..dims {
-        strides[d] = strides[d - 1] * base_norm[d - 1].max(1);
+        strides[d] = strides[d - 1]
+            .checked_mul(base_norm[d - 1].max(1))
+            .ok_or_else(|| mex("IndexOutOfBounds", "Index dimensions overflow"))?;
     }
 
     let mut indices = Vec::new();
+    let mut index_error: Option<RuntimeError> = None;
     cartesian_product(&per_dim_lists, |multi| {
+        if index_error.is_some() {
+            return;
+        }
         let mut lin = 0usize;
         for d in 0..dims {
             let idx = multi[d] - 1;
-            lin += idx * strides[d];
+            let offset = match idx.checked_mul(strides[d]) {
+                Some(offset) => offset,
+                None => {
+                    index_error = Some(mex("IndexOutOfBounds", "Index dimensions overflow"));
+                    return;
+                }
+            };
+            lin = match lin.checked_add(offset) {
+                Some(sum) => sum,
+                None => {
+                    index_error = Some(mex("IndexOutOfBounds", "Index dimensions overflow"));
+                    return;
+                }
+            };
         }
-        indices.push(lin as u32);
+        match checked_u32_index(lin) {
+            Ok(index) => indices.push(index),
+            Err(err) => index_error = Some(err),
+        }
     });
+    if let Some(err) = index_error {
+        return Err(err);
+    }
 
     let total_out: usize = selection_lengths.iter().product();
     if total_out == 1 {
@@ -339,7 +381,7 @@ where
 {
     let rank = spec.shape.len();
     let full_shape: Vec<usize> = if spec.dims == 1 {
-        vec![total_len_from_shape(spec.shape)]
+        vec![checked_total_len_from_shape(spec.shape)?]
     } else if rank < spec.dims {
         let mut s = spec.shape.to_vec();
         s.resize(spec.dims, 1);
@@ -471,6 +513,7 @@ where
         && spec.shape.first().copied().unwrap_or(1) == 1
         && spec.shape.get(1).copied().unwrap_or(1) > 1;
     let linear_selector_is_colon = matches!(selectors.first(), Some(ExprSel::Colon));
+    let linear_selector_is_range = matches!(selectors.first(), Some(ExprSel::Range { .. }));
     for (d, sel) in selectors.iter().enumerate().take(spec.dims) {
         let dim_len = full_shape[d] as i64;
         let idxs: Vec<usize> = match sel {
@@ -539,16 +582,21 @@ where
     let mut acc = 1usize;
     for (d, stride) in strides.iter_mut().enumerate().take(spec.dims) {
         *stride = acc;
-        acc *= full_shape[d];
+        acc = acc
+            .checked_mul(full_shape[d])
+            .ok_or_else(|| mex("IndexOutOfBounds", "Index dimensions overflow"))?;
     }
-    let total_out: usize = per_dim_indices.iter().map(|v| v.len()).product();
+    let total_out: usize = per_dim_indices.iter().try_fold(1usize, |acc, values| {
+        acc.checked_mul(values.len())
+            .ok_or_else(|| mex("IndexOutOfBounds", "Index result dimensions overflow"))
+    })?;
     if total_out == 0 {
         let output_shape = if spec.dims == 1 {
             if let Some(shape) = linear_output_shape.clone() {
                 shape
             } else if linear_selector_is_colon {
                 vec![0, 1]
-            } else if base_is_row_vector {
+            } else if linear_selector_is_range || base_is_row_vector {
                 vec![1, 0]
             } else {
                 vec![0, 1]
@@ -595,9 +643,14 @@ where
         let mut lin = 0usize;
         for d in 0..spec.dims {
             let i0 = per_dim_indices[d][idx[d]] - 1;
-            lin += i0 * strides[d];
+            let offset = i0
+                .checked_mul(strides[d])
+                .ok_or_else(|| mex("IndexOutOfBounds", "Index dimensions overflow"))?;
+            lin = lin
+                .checked_add(offset)
+                .ok_or_else(|| mex("IndexOutOfBounds", "Index dimensions overflow"))?;
         }
-        indices.push(lin as u32);
+        indices.push(checked_u32_index(lin)?);
         let mut d = 0usize;
         while d < spec.dims {
             idx[d] += 1;
@@ -619,7 +672,7 @@ where
             vec![1, 1]
         } else if linear_selector_is_colon {
             vec![total_out, 1]
-        } else if base_is_row_vector {
+        } else if linear_selector_is_range || base_is_row_vector {
             vec![1, total_out]
         } else {
             vec![total_out, 1]
@@ -761,6 +814,74 @@ mod tests {
     }
 
     #[test]
+    fn expr_linear_range_on_column_vector_uses_range_shape() {
+        futures::executor::block_on(async {
+            let plan = build_expr_index_plan(
+                ExprPlanSpec {
+                    dims: 1,
+                    colon_mask: 0,
+                    end_mask: 0,
+                    range_dims: &[0],
+                    range_params: &[(1.0, 1.0)],
+                    range_start_exprs: &[None],
+                    range_step_exprs: &[None],
+                    range_end_exprs: &[EndExpr::Var(0)],
+                    numeric: &[],
+                    shape: &[10, 1],
+                },
+                |_dim_len, expr| {
+                    let expr = expr.clone();
+                    async move {
+                        match expr {
+                            EndExpr::Var(_) => Ok(6.0),
+                            other => panic!("unsupported expr: {other:?}"),
+                        }
+                    }
+                },
+            )
+            .await
+            .unwrap();
+            assert_eq!(plan.indices, vec![0, 1, 2, 3, 4, 5]);
+            assert_eq!(plan.output_shape, vec![1, 6]);
+            assert_eq!(plan.selection_lengths, vec![6]);
+        })
+    }
+
+    #[test]
+    fn expr_empty_linear_range_uses_range_shape() {
+        futures::executor::block_on(async {
+            let plan = build_expr_index_plan(
+                ExprPlanSpec {
+                    dims: 1,
+                    colon_mask: 0,
+                    end_mask: 0,
+                    range_dims: &[0],
+                    range_params: &[(1.0, 1.0)],
+                    range_start_exprs: &[None],
+                    range_step_exprs: &[None],
+                    range_end_exprs: &[EndExpr::Var(0)],
+                    numeric: &[],
+                    shape: &[10, 1],
+                },
+                |_dim_len, expr| {
+                    let expr = expr.clone();
+                    async move {
+                        match expr {
+                            EndExpr::Var(_) => Ok(0.0),
+                            other => panic!("unsupported expr: {other:?}"),
+                        }
+                    }
+                },
+            )
+            .await
+            .unwrap();
+            assert!(plan.indices.is_empty());
+            assert_eq!(plan.output_shape, vec![1, 0]);
+            assert_eq!(plan.selection_lengths, vec![0]);
+        })
+    }
+
+    #[test]
     fn expr_plan_rejects_range_dim_conflicting_with_colon_mask() {
         futures::executor::block_on(async {
             let err = build_expr_index_plan(
@@ -878,6 +999,22 @@ mod tests {
             .expect_err("inconsistent range metadata should fail");
             assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
         })
+    }
+
+    #[test]
+    fn index_plan_rejects_sparse_sized_indices_beyond_u32_storage() {
+        let selectors = vec![SliceSelector::Scalar((u32::MAX as usize) + 2)];
+        let err = build_index_plan(&selectors, 1, &[u32::MAX as usize + 2, 1])
+            .expect_err("linear index should exceed u32 plan storage");
+        assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
+    }
+
+    #[test]
+    fn index_plan_rejects_dimension_product_overflow() {
+        let selectors = vec![SliceSelector::Colon];
+        let err = build_index_plan(&selectors, 1, &[usize::MAX, 2])
+            .expect_err("linearized sparse shape should overflow");
+        assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
     }
 
     #[test]

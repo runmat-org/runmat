@@ -91,7 +91,7 @@ The WASM target is:
 wasm32-unknown-unknown
 ```
 
-`runmat-wasm` is compiled as a `cdylib` and `rlib`, then packaged by `wasm-pack` for the TypeScript distribution. The package build emits browser WASM artifacts, LSP WASM artifacts, TypeScript definitions, builtin metadata, and a startup snapshot.
+`runmat-wasm` is compiled as a `cdylib` and `rlib`, then packaged by `wasm-pack` for the TypeScript distribution. The package build emits browser WASM artifacts, LSP WASM artifacts, TypeScript definitions, and builtin metadata.
 
 WASM builds differ from native builds in a few important ways:
 

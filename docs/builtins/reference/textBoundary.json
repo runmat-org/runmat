@@ -1,0 +1,93 @@
+{
+  "title": "textBoundary",
+  "category": "strings/pattern",
+  "keywords": [
+    "textBoundary",
+    "strings",
+    "pattern",
+    "boundary",
+    "matlab",
+    "compatibility"
+  ],
+  "summary": "Create a pattern matching the start or end of text.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "No GPU kernel is registered for this compatibility builtin; it creates host pattern metadata."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "not applicable",
+    "notes": "Not eligible for fusion; this builtin materializes a host pattern object."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::core::compat::tests",
+    "integration": null
+  },
+  "description": "`textBoundary` creates a lightweight RunMat `pattern` object that matches the start or end of text.",
+  "behaviors": [
+    "`textBoundary` and `textBoundary(\"either\")` create a pattern that matches either the start or end of a text scalar.",
+    "`textBoundary(\"start\")` matches only the start of text.",
+    "`textBoundary(\"end\")` matches only the end of text.",
+    "The boundary `type` argument accepts string scalars or character vectors and is matched case-insensitively.",
+    "Returned pattern objects are regular-expression-backed and can be used by RunMat pattern-aware string APIs such as `contains`, `startsWith`, `endsWith`, `erase`, and `replace`.",
+    "Full MATLAB pattern-expression algebra, including `textBoundary + otherPattern` composition and `~textBoundary` negation, remains broader pattern infrastructure work."
+  ],
+  "examples": [
+    {
+      "description": "Create A Start Boundary Pattern",
+      "input": "pat = textBoundary(\"start\")",
+      "output": "`pat` is a pattern object backed by a start-of-text boundary."
+    },
+    {
+      "description": "Create An End Boundary Pattern",
+      "input": "pat = textBoundary(\"end\")",
+      "output": "`pat` is a pattern object backed by an end-of-text boundary."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `textBoundary` support pattern negation?",
+      "answer": "Not in this slice. The constructor returns a boundary pattern object, but full MATLAB pattern algebra such as `~textBoundary` remains broader pattern infrastructure work."
+    },
+    {
+      "question": "Does `textBoundary` execute on the GPU?",
+      "answer": "No. It creates host pattern metadata; pattern-aware text consumers gather GPU-resident text before matching."
+    }
+  ],
+  "links": [
+    {
+      "label": "pattern",
+      "url": "./pattern"
+    },
+    {
+      "label": "regexpPattern",
+      "url": "./regexpPattern"
+    },
+    {
+      "label": "lettersPattern",
+      "url": "./lettersPattern"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "pat = textBoundary\npat = textBoundary(type)",
+      "output": "`pat` is a `pattern` compatibility object."
+    },
+    "points": [
+      "`type` can be `\"either\"`, `\"start\"`, or `\"end\"`.",
+      "The default `type` is `\"either\"`."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/core/compat.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/compat.rs"
+  },
+  "gpu_residency": "`textBoundary` creates a host pattern object; no provider-resident execution is applicable."
+}

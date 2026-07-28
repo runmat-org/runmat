@@ -1,0 +1,82 @@
+{
+  "title": "mink",
+  "category": "math/reduction",
+  "keywords": [
+    "mink",
+    "top-k",
+    "minimum",
+    "reduction",
+    "indices"
+  ],
+  "summary": "Return the k smallest elements in MATLAB and RunMat.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Device-resident tensors are gathered to the host because RunMat Accelerate does not expose top-k provider hooks yet."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::reduction::topk::tests",
+    "integration": null
+  },
+  "description": "`mink(A,k)` returns the smallest `k` values from each slice of `A` along the first non-singleton dimension. A second output returns one-based indices within the selected dimension.",
+  "behaviors": [
+    "`mink(A,k)` selects along the first non-singleton dimension and clamps nonnegative `k` to that dimension's length. `k = 0` returns an empty result along the selected dimension.",
+    "`mink(A,k,dim)` selects along the specified dimension. Dimensions larger than `ndims(A)` behave like trailing singleton dimensions and return the input with index values of `1`.",
+    "`[B,I] = mink(...)` returns selected values and one-based indices along the selected dimension.",
+    "Real, integer, logical, complex, scalar, vector, matrix, and N-D tensor inputs are supported. Integers and logical values are promoted to double precision.",
+    "Complex inputs support `'ComparisonMethod','auto'`, `'abs'`/`'magnitude'`, and `'real'`, matching the comparison options used by `min`.",
+    "GPU tensors gather to the host for top-k selection and return host tensors."
+  ],
+  "examples": [
+    {
+      "description": "Smallest values from each column",
+      "input": "A = [3 2; 4 6; 1 5];\n[B,I] = mink(A,2)",
+      "output": "B = [1 2; 3 5]\nI = [3 1; 1 3]"
+    },
+    {
+      "description": "Smallest values along rows",
+      "input": "A = [3 1 5; 4 2 6];\nB = mink(A,2,2)",
+      "output": "B = [1 3; 2 4]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `mink` preserve GPU residency?",
+      "answer": "Not currently. RunMat gathers GPU tensors to the host because top-k provider hooks are not available yet."
+    },
+    {
+      "question": "Can `k` be zero or larger than the selected dimension?",
+      "answer": "Yes. `k = 0` returns an empty result along the selected dimension. Larger values are clamped to the selected dimension length, so the full sorted slice is returned."
+    }
+  ],
+  "links": [
+    {
+      "label": "maxk",
+      "url": "./maxk"
+    },
+    {
+      "label": "min",
+      "url": "./min"
+    },
+    {
+      "label": "bounds",
+      "url": "./bounds"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/reduction/topk.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/topk.rs"
+  }
+}

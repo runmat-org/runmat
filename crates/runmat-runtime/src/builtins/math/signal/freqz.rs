@@ -382,6 +382,11 @@ mod tests {
         block_on(evaluate(b, a, rest))
     }
 
+    fn assert_error_identifier(result: BuiltinResult<Value>, identifier: &str) {
+        let err = result.expect_err("expected freqz error");
+        assert_eq!(err.identifier(), Some(identifier));
+    }
+
     #[test]
     fn descriptor_is_registered() {
         let builtin = builtin_function_by_name(BUILTIN_NAME).expect("freqz builtin");
@@ -434,9 +439,91 @@ mod tests {
     }
 
     #[test]
+    fn default_response_uses_512_point_radian_grid() {
+        let out = call(Value::Num(1.0), Value::Num(1.0), &[], Some(2)).unwrap();
+        let Value::OutputList(values) = out else {
+            panic!("expected output list");
+        };
+        let Value::ComplexTensor(h) = &values[0] else {
+            panic!("expected H");
+        };
+        let Value::Tensor(w) = &values[1] else {
+            panic!("expected w");
+        };
+        assert_eq!(h.shape, vec![512, 1]);
+        assert_eq!(w.shape, vec![512, 1]);
+        assert_eq!(w.data[0], 0.0);
+        assert!((w.data[511] - std::f64::consts::PI * 511.0 / 512.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn output_count_zero_and_padding_are_respected() {
+        let out = call(
+            Value::Num(1.0),
+            Value::Num(1.0),
+            &[Value::Num(2.0)],
+            Some(0),
+        )
+        .unwrap();
+        assert_eq!(out, Value::OutputList(Vec::new()));
+
+        let out = call(
+            Value::Num(1.0),
+            Value::Num(1.0),
+            &[Value::Num(2.0)],
+            Some(3),
+        )
+        .unwrap();
+        let Value::OutputList(values) = out else {
+            panic!("expected output list");
+        };
+        assert_eq!(values.len(), 3);
+        assert!(matches!(values[0], Value::ComplexTensor(_)));
+        assert!(matches!(values[1], Value::Tensor(_)));
+        assert_eq!(values[2], Value::Num(0.0));
+    }
+
+    #[test]
     fn rejects_invalid_n_and_empty_coefficients() {
-        assert!(call(Value::Num(1.0), Value::Num(1.0), &[Value::Num(0.0)], None).is_err());
+        assert_error_identifier(
+            call(Value::Num(1.0), Value::Num(1.0), &[Value::Num(0.0)], None),
+            "RunMat:freqz:InvalidN",
+        );
         let empty = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
-        assert!(call(Value::Tensor(empty), Value::Num(1.0), &[], None).is_err());
+        assert_error_identifier(
+            call(Value::Tensor(empty), Value::Num(1.0), &[], None),
+            "RunMat:freqz:InvalidCoefficients",
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_fs_non_vector_coefficients_and_too_many_inputs() {
+        assert_error_identifier(
+            call(
+                Value::Num(1.0),
+                Value::Num(1.0),
+                &[Value::Num(8.0), Value::Num(0.0)],
+                None,
+            ),
+            "RunMat:freqz:InvalidFs",
+        );
+        assert_error_identifier(
+            call(
+                Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap()),
+                Value::Num(1.0),
+                &[],
+                None,
+            ),
+            "RunMat:freqz:InvalidCoefficients",
+        );
+        assert_error_identifier(
+            call(
+                Value::Num(1.0),
+                Value::Num(1.0),
+                &[Value::Num(8.0), Value::Num(1000.0), Value::Num(1.0)],
+                None,
+            ),
+            "RunMat:freqz:ArgCount",
+        );
     }
 }

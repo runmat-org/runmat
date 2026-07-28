@@ -6,7 +6,8 @@ use crate::{
 };
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ObjectInstance, StructValue, Value,
 };
 
 const POINT_MOVE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -538,6 +539,169 @@ pub(crate) async fn overidx_subsasgn(
             &OVERIDX_ERROR_SUBSASGN_PAYLOAD_UNSUPPORTED,
         )),
     }
+}
+
+const OVERIDX_NUM_ARGUMENTS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "n",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Expected indexing argument count.",
+}];
+
+const OVERIDX_NUM_ARGUMENTS_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "OverIdx object.",
+    },
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Substruct-compatible indexing descriptor.",
+    },
+    BuiltinParamDescriptor {
+        name: "indexingContext",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Indexing context.",
+    },
+];
+
+const OVERIDX_NUM_ARGUMENTS_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "n = OverIdx.numArgumentsFromSubscript(obj, S, indexingContext)",
+        inputs: &OVERIDX_NUM_ARGUMENTS_INPUTS,
+        outputs: &OVERIDX_NUM_ARGUMENTS_OUTPUT,
+    }];
+
+pub const OVERIDX_NUM_ARGUMENTS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &OVERIDX_NUM_ARGUMENTS_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::MethodOnly,
+    errors: &[],
+};
+
+#[runmat_macros::runtime_builtin(
+    name = "OverIdx.numArgumentsFromSubscript",
+    descriptor(self::OVERIDX_NUM_ARGUMENTS_DESCRIPTOR),
+    builtin_path = "crate::builtins::introspection::test_methods"
+)]
+pub(crate) async fn overidx_num_arguments_from_subscript(
+    obj: Value,
+    _subscript: Value,
+    _indexing_context: Value,
+) -> crate::BuiltinResult<Value> {
+    let object = overidx_expect_object(obj, "OverIdx.numArgumentsFromSubscript")?;
+    Ok(object
+        .properties
+        .get("nargs")
+        .cloned()
+        .unwrap_or(Value::Num(3.0)))
+}
+
+const OVERIDX_SAVEOBJ_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "payload",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Serialized OverIdx payload.",
+}];
+
+const OVERIDX_SAVEOBJ_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "obj",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "OverIdx object receiver.",
+}];
+
+const OVERIDX_SAVEOBJ_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "payload = OverIdx.saveobj(obj)",
+    inputs: &OVERIDX_SAVEOBJ_INPUTS,
+    outputs: &OVERIDX_SAVEOBJ_OUTPUT,
+}];
+
+pub const OVERIDX_SAVEOBJ_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &OVERIDX_SAVEOBJ_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::MethodOnly,
+    errors: &[],
+};
+
+#[runmat_macros::runtime_builtin(
+    name = "OverIdx.saveobj",
+    descriptor(self::OVERIDX_SAVEOBJ_DESCRIPTOR),
+    builtin_path = "crate::builtins::introspection::test_methods"
+)]
+pub(crate) async fn overidx_saveobj(obj: Value) -> crate::BuiltinResult<Value> {
+    let object = overidx_expect_object(obj, "OverIdx.saveobj")?;
+    let mut payload = StructValue::new();
+    for key in ["k", "nargs"] {
+        if let Some(value) = object.properties.get(key) {
+            payload.insert(key.to_string(), value.clone());
+        }
+    }
+    payload.insert(
+        "saved_by".to_string(),
+        Value::String("OverIdx.saveobj".to_string()),
+    );
+    Ok(Value::Struct(payload))
+}
+
+const OVERIDX_LOADOBJ_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "obj",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Restored OverIdx object.",
+}];
+
+const OVERIDX_LOADOBJ_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "payload",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Serialized OverIdx payload.",
+}];
+
+const OVERIDX_LOADOBJ_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "obj = OverIdx.loadobj(payload)",
+    inputs: &OVERIDX_LOADOBJ_INPUTS,
+    outputs: &OVERIDX_LOADOBJ_OUTPUT,
+}];
+
+pub const OVERIDX_LOADOBJ_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &OVERIDX_LOADOBJ_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::MethodOnly,
+    errors: &[],
+};
+
+#[runmat_macros::runtime_builtin(
+    name = "OverIdx.loadobj",
+    descriptor(self::OVERIDX_LOADOBJ_DESCRIPTOR),
+    builtin_path = "crate::builtins::introspection::test_methods"
+)]
+pub(crate) async fn overidx_loadobj(payload: Value) -> crate::BuiltinResult<Value> {
+    let mut object = ObjectInstance::new("OverIdx".to_string());
+    if let Value::Struct(st) = payload {
+        for (name, value) in st.fields {
+            if name != "saved_by" {
+                object.properties.insert(name, value);
+            }
+        }
+    }
+    object.properties.insert(
+        "loaded_by".to_string(),
+        Value::String("OverIdx.loadobj".to_string()),
+    );
+    Ok(Value::Object(object))
 }
 
 fn overidx_expect_object(

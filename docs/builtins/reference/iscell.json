@@ -1,0 +1,53 @@
+{
+  "title": "iscell",
+  "category": "cells/core",
+  "keywords": ["iscell", "cell", "type predicate"],
+  "summary": "Return true when a value is a cell array.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Metadata-only predicate; gpuArray inputs return false."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::cells::core::iscell::tests",
+    "integration": null
+  },
+  "description": "`iscell(A)` returns a logical scalar indicating whether `A` is represented as a MATLAB cell array.",
+  "behaviors": [
+    "Cell arrays, including empty cells, return true.",
+    "Numeric, logical, string, character, struct, object, function handle, and gpuArray values return false."
+  ],
+  "examples": [
+    {
+      "description": "Detecting a cell array",
+      "input": "tf = iscell({1, 'a'})",
+      "output": "tf = logical(1)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `iscell` inspect cell contents?",
+      "answer": "No. It only checks the container type."
+    }
+  ],
+  "links": [
+    { "label": "cell", "url": "./cell" },
+    { "label": "iscellstr", "url": "./iscellstr" },
+    { "label": "cellfun", "url": "./cellfun" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/cells/core/iscell.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/cells/core/iscell.rs"
+  },
+  "gpu_residency": "The result is a host logical scalar.",
+  "gpu_behavior": ["No GPU kernels are launched."]
+}

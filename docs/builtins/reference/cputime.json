@@ -1,0 +1,89 @@
+{
+  "title": "cputime",
+  "category": "timing",
+  "keywords": [
+    "cputime",
+    "cpu time",
+    "timing",
+    "profiling",
+    "legacy"
+  ],
+  "summary": "Return total CPU time used by the current RunMat process.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-side process timing helper. GPU providers are never consulted."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::timing::cputime::tests",
+    "integration": null
+  },
+  "description": "`cputime` returns the total CPU time used by the current RunMat process in seconds. It is intended for legacy MATLAB compatibility; prefer `timeit` or `tic`/`toc` for wall-clock benchmarking.",
+  "behaviors": [
+    "Takes no input arguments.",
+    "Returns a finite, nonnegative scalar double in seconds.",
+    "Native Unix builds use host process CPU accounting via getrusage.",
+    "Native Windows builds use host process CPU accounting via GetProcessTimes.",
+    "WASM/browser builds do not expose process CPU accounting, so RunMat returns monotonic seconds since the WASM runtime first used `cputime`; differences remain useful for compatibility code, but the measurement is wall-clock elapsed time rather than true CPU time.",
+    "GPU providers are never consulted, and the builtin is excluded from fusion plans."
+  ],
+  "examples": [
+    {
+      "description": "Measure CPU Time Used By Code",
+      "input": "tStart = cputime;\nfor k = 1:100000\n    sqrt(k);\nend\ntElapsed = cputime - tStart",
+      "output": "tElapsed = <seconds>"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `cputime` different from `tic` and `toc`?",
+      "answer": "`cputime` measures CPU time consumed by the process on native targets. `tic`/`toc` measure wall-clock elapsed time."
+    },
+    {
+      "question": "Why does WASM use a wall-clock fallback?",
+      "answer": "Browsers do not expose process CPU time. RunMat keeps the no-argument scalar API available so MATLAB compatibility code that subtracts two calls still runs."
+    },
+    {
+      "question": "Does `cputime` reset?",
+      "answer": "No. Like MATLAB, native builds return total CPU time since the current process started. On WASM, the wall-clock fallback is measured from the first `cputime` call. To measure a section of code, subtract two readings."
+    }
+  ],
+  "links": [
+    {
+      "label": "tic",
+      "url": "./tic"
+    },
+    {
+      "label": "toc",
+      "url": "./toc"
+    },
+    {
+      "label": "timeit",
+      "url": "./timeit"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/timing/cputime.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/timing/cputime.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "t = cputime"
+    },
+    "points": [
+      "`cputime` accepts no input arguments.",
+      "`t` is a scalar double value in seconds.",
+      "Use `cputime` differences to measure CPU time spent between two points."
+    ]
+  }
+}

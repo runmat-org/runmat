@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Falls back to the host implementation when rounding to digits or significant figures if the active provider lacks unary_round."
+    "notes": "Uses unary_round for plain rounding and round_digits for decimal-place or significant-digit rounding when the active provider implements those hooks; otherwise falls back to host semantics."
   },
   "fusion": {
     "elementwise": true,
@@ -63,7 +63,7 @@
     },
     {
       "description": "Rounding GPU tensors and gathering the results",
-      "input": "G = gpuArray(linspace(-2.5, 2.5, 6));\nrounded = round(G);\nhostValues = gather(rounded)",
+      "input": "G = gpuArray(linspace(-2.5, 2.5, 6));\nrounded = round(G, 2);\nhostValues = gather(rounded)",
       "output": "hostValues = [-3 -2 -1 1 2 3]"
     }
   ],
@@ -90,7 +90,7 @@
     },
     {
       "question": "Will rounding stay on the GPU?",
-      "answer": "`round(X)` stays on the GPU when the provider implements `unary_round`. Rounding with digit arguments currently gathers to the host; providers can override this by adding specialised kernels."
+      "answer": "`round(X)` stays on the GPU when the provider implements `unary_round`. `round(X, N)` and `round(X, N, 'significant')` also stay resident when the provider implements the `round_digits` hook; otherwise RunMat gathers and uses the host implementation."
     },
     {
       "question": "Can I round logical or character arrays?",
@@ -151,9 +151,9 @@
     "label": "`crates/runmat-runtime/src/builtins/math/rounding/round.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/rounding/round.rs"
   },
-  "gpu_residency": "You usually do **not** need to call `gpuArray` manually. RunMat's planner keeps tensors on the GPU when the provider exposes the required kernels and it is profitable to do so. `round` takes advantage of this mechanism for the plain `round(X)` form. When you specify digits or the `'significant'` option, RunMat currently gathers data to the host to match MATLAB exactly. Future providers can extend `unary_round` or add digit-aware kernels to keep those workloads on the device.",
+  "gpu_residency": "You usually do **not** need to call `gpuArray` manually. RunMat's planner keeps tensors on the GPU when the provider exposes the required kernels and it is profitable to do so. `round` takes advantage of this mechanism for the plain `round(X)` form through `unary_round` and for digit-aware forms through `round_digits`. If a provider lacks the relevant hook, RunMat gathers to the host to preserve MATLAB semantics.",
   "gpu_behavior": [
-    "When a tensor already resides on the GPU, RunMat checks whether the active acceleration provider implements a specialised `unary_round` kernel. If available, `round(X)` executes entirely on the device. Advanced modes (`round(X, N)` and `round(X, N, 'significant')`) currently gather tensors to the host before rounding to keep semantics aligned with MATLAB. Providers that add digit-aware kernels can extend this path in the future."
+    "When a tensor already resides on the GPU, RunMat checks whether the active acceleration provider implements `unary_round` for `round(X)` or `round_digits` for `round(X, N)` and `round(X, N, 'significant')`. If available, the operation executes entirely on the device; otherwise RunMat gathers tensors to the host before rounding to keep semantics aligned with MATLAB."
   ],
   "syntax": {
     "example": {

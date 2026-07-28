@@ -24,6 +24,7 @@ pub(crate) fn slice_value_for_preview(
             let cols = shape.get(1).copied().unwrap_or(1);
             Some(Value::Tensor(Tensor {
                 data,
+                integer_data: gather_integer_tensor_slice(tensor, slice),
                 shape,
                 rows,
                 cols,
@@ -43,6 +44,62 @@ fn gather_tensor_slice(tensor: &Tensor, slice: &WorkspaceSliceOptions) -> Vec<f6
     let mut coords = vec![0usize; tensor.shape.len()];
     gather_tensor_slice_recursive(tensor, slice, 0, &mut coords, &mut result);
     result
+}
+
+fn gather_integer_tensor_slice(
+    tensor: &Tensor,
+    slice: &WorkspaceSliceOptions,
+) -> Option<runmat_builtins::IntegerStorage> {
+    let storage = tensor.integer_storage()?;
+    let total: usize = slice.shape.iter().product();
+    let mut result = storage.zeros_like(total);
+    let mut coords = vec![0usize; tensor.shape.len()];
+    let mut output_index = 0usize;
+    gather_integer_tensor_slice_recursive(
+        tensor,
+        slice,
+        0,
+        &mut coords,
+        &mut result,
+        &mut output_index,
+    );
+    Some(result)
+}
+
+fn gather_integer_tensor_slice_recursive(
+    tensor: &Tensor,
+    slice: &WorkspaceSliceOptions,
+    axis: usize,
+    coords: &mut [usize],
+    output: &mut runmat_builtins::IntegerStorage,
+    output_index: &mut usize,
+) {
+    if axis == tensor.shape.len() {
+        let index = column_major_index(&tensor.shape, coords);
+        if let Some(value) = tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(index))
+        {
+            output
+                .set_value(*output_index, value)
+                .expect("integer preview storage shape must match slice shape");
+            *output_index += 1;
+        }
+        return;
+    }
+    let start = slice.start.get(axis).copied().unwrap_or(0);
+    let count = slice.shape.get(axis).copied().unwrap_or(1);
+    for offset in 0..count {
+        coords[axis] = start + offset;
+        gather_integer_tensor_slice_recursive(
+            tensor,
+            slice,
+            axis + 1,
+            coords,
+            output,
+            output_index,
+        );
+    }
 }
 
 fn gather_tensor_slice_recursive(

@@ -1,4 +1,5 @@
 pub mod creation;
+pub mod grouping;
 pub mod indexing;
 pub mod introspection;
 pub mod shape;

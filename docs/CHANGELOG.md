@@ -2,6 +2,73 @@
 
 _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/runmat/releases) for runtime release binaries._
 
+## [v0.6.0](https://github.com/runmat-org/runmat/compare/v0.5.6...v0.6.0) - July 2026
+
+### Desktop
+
+#### Added
+* Added restart + download RunMat Desktop options for if runtime is terminated due to memory pressure by Chrome / Safari / browser runtimes
+
+#### Fixed
+* Fixed logout / auth token refresh. Previously, when your authentication token expired (2h after log in), you'd need to log in again.
+* Fixed browser runtime worker recovery so lost/failed workers are fully reinitialized before commands run, instead of permanently failing with “RunMat session has not been initialised yet”
+* Fixed intermittent syntax highlighting: the web LSP no longer acknowledges document open/change before the WASM document entry exists, and now publishes revision-safe lexical/semantic tokens (including `%` comments) as analysis runs
+
+### Agent
+
+#### Added
+* Agent now supports image attachments
+* Agent now supports dragged files as context attachments from file sidebar
+* Attached context items show up as chips above the prompt input box, and are clear what's attached, and when
+* Added geometry / fea study setup tools (we'll share more details on this soon — for now this is hidden)
+* Added RCA background agent, which does a quick, low cost (>$0.001), multi-step, read-only root cause analysis using gpt-5.6-luna on every error. While we test this, RCA background agent runs are free. You can turn the RCA background agent off in settings if you'd like
+
+#### Fixed
+* Fixed agent project-persistence race: the agent could bind a stale memory store before the workspace filesystem provider was ready, so project sessions failed with “storage unavailable” (often after idle / restart)
+* Fixed bug where undo plan would be binary serialized into agent context, causing wasted use / binary blob in context
+
+### Runtime
+
+#### Added
+* Added argument-validation compatibility helpers, including `mustBe*` predicates and supporting identifier/validation utilities.
+* Added table and timetable compatibility as a structured module instead of a single large file: constructors, conversions, indexing, selectors, predicates, IO, timetable handling, containers, metadata, registry, parsing, display, and object-backed table behavior.
+* Added missing-value compatibility and filled out datetime/duration compatibility paths.
+* Added broad numeric/array compatibility: `full`, `nchoosek`, `ndgrid`, `perms`, sparse descriptors, grouping utilities, row/column predicates, `blkdiag`, `toeplitz`, `ismembertol`, `issortedrows`, `setxor`, `bsxfun`, `erf`, `erfcinv`, `gammaln`, `realsqrt`, numeric limit helpers, `uint32`, `pol2cart`, `sinpi`, `cospi`, `lcm`, `primes`, `bounds`, moving-window reductions, and top-k reductions.
+* Added linalg helpers including `decomposition`, `eigs`, `pagemtimes`, `pagetranspose`, `vecnorm`, and diagonal/triangular structure predicates.
+* Added optimization/control builtins including `lsqnonlin`, `coneprog`, `lqr`, and `pzmap`.
+* Added signal/order-selection compatibility including `cheb2ord`, shared order-selection logic, and sample-rate/filter/resample improvements.
+* Added statistics and ML compatibility: descriptive stats, distribution helpers, random sampling, covariance/correlation helpers, outlier cleanup, ECDF, hypothesis tests, clustering, nearest-neighbor/distance helpers, regression/classification helpers, `fitlm`, `predict`, `ridge`, `lasso`, `lassoglm`, `mnrfit`, `fitdist`, `fitctree`, `fitclinear`, `cvpartition`, `crossvalind`, `bayesopt`, and related option/encoding support.
+* Added deep-learning compatibility primitives: `dlarray`, `dlfeval`, `dlgradient`, `dlnetwork`, `dlupdate`, `adamupdate`, `crossentropy`, layer descriptors, training options, supervised training helpers, sequence helpers, and ONNX export metadata.
+* Added text analytics compatibility: tokenized documents, bags of words/ngrams, stop words, normalization, text transforms, HTML/file text extraction, word embeddings, word encoding, sentiment scores, dependency/entity/lemma/POS/sentence/type detail helpers, token details, and pattern utilities.
+* Added plotting/UI compatibility builtins and broadened existing plotting argument parsing: axes/groot/gobjects, tick labels/formats/angles, axis scales, colororder/colormaps, `line`, `plotyy`, `plotmatrix`, `animatedline`, `addpoints`, `copyobj`, `findobj`, `ancestor`, `linkaxes`, `daspect`, `datacursormode`, `dataTipTextRow`, `fcontour`, `fsurf`, `triplot`, `sphere`, `quiver3`, `polarhistogram`, `polarscatter`, `histogram2`, `ribbon`, `stackedplot`, `textscatter`, `wordcloud`, `waitbar`, zoom/pan/openGL, figure persistence, and close/figure property fixes.
+* Added file/structured IO compatibility: `matfile`, HDF5/H5 helpers, parquet info/read helpers, xlswrite, read/write lines, XML helpers, file datastore descriptors, `uigetdir`, `open`, `opentoline`, `pcode`, diary/display/evalc, HTTP/REPL filesystem helpers, and MAT-file load/save improvements.
+* Added graph/geometry compatibility: graph/digraph helpers, traversal/connectivity docs, and Delaunay triangulation support.
+* Added finance helpers including Black-Scholes and MACD.
+* Added object/introspection compatibility: dynamic properties, metaclass hierarchy, object save/load hooks, `onCleanup`, `memoize`, `numArgumentsFromSubscript`, `underlyingType`, identifier queries, debugger/runtests/timer compatibility, and related runtime metadata helpers.
+
+#### Changed
+* Moved `runmat check` off bytecode-only validation onto the shared static-analysis frontend (with the LSP), so it reports Rust-style / JSON diagnostics for unresolved and runtime-dependent calls instead of treating successful bytecode compilation as `valid`
+* Removed the unused startup-snapshot system as a pre-1.0 breaking cleanup: the `runmat-snapshot` crate and CLI, session loading APIs, `runtime.snapshot_path`, TypeScript snapshot initialization options, and packaged `stdlib.snapshot` artifact no longer exist. Workspace replay and remote filesystem snapshots are unchanged.
+
+#### Fixed
+* Fixed `@Class` folder constructor resolution so `Report(...)` from `src/@Report/Report.m` resolves correctly in manifest projects
+
+### Math on Geometry / FEA System
+
+* Re-wrote the `runmat-meshing` crate and solid meshing path originally written as a placeholder during the construction of the balance of the FEA pipeline was built in the wrong order for engineering-grade CAD-solid FEA. It forms candidate volume tetrahedra too early and then tries to recover CAD/source topology, boundary provenance, and element quality after the fact. That is backwards for trimmed CAD solids, holes, thin features, protected edges, load/constraint faces, material regions, and adaptive refinement. The solid meshing has been rewritten topology-first:
+
+1. CAD topology is authoritative.
+2. Curve meshes recover vertices and source edges first.
+3. Surface meshes recover source faces and loops next.
+4. A watertight oriented PLC/shell is validated before volume meshing.
+5. Tetrahedron generation consumes that recovered PLC/shell.
+6. Boundary/source constraints are recovered before quality optimization.
+7. Sliver removal and smoothing run after constraints are present.
+8. Solver readiness gates FEA assembly.
+9. Mesh topology and quality is measurable and traceable
+
+We are finishing wiring up the geometry loading, meshing, study preparation, execution and result visualization pieces of the system together. Stay tuned for more details on running math (specifically, solving physics ODEs) on meshed geometry in RunMat in the coming weeks!
+
 ## [v0.5.6](https://github.com/runmat-org/runmat/compare/v0.5.5...v0.5.6) - June 2026
 
 _June 28, 2026_
@@ -46,6 +113,8 @@ _June 26, 2026_
 - Add broader MATLAB compatibility across I/O, signal processing, optimization, symbolic math, plotting, control systems, and array construction, including `xlsread`, `writecell`, `textscan`, `importdata`, `uiputfile`, `unzip`, `imwrite`, `audioread`, `audioinfo`, `pwelch`, `periodogram`, `spectrogram`, `freqz`, `filtfilt`, `fir1`, `buttord`, `envelope`, `zplane`, `pskmod`, `lsqcurvefit`, `fminunc`, `quad`, `digits`, `vpa`, `int`, `nan`, `inf`, `zero`, `damp`, and `polarplot`
 - Add MAT-file save/load coverage, including append workflows, and expand spreadsheet/text import/export paths through provider-backed filesystems
 - Add resident GPU execution paths for complex math, signal, communication, modulation, Hilbert, gradient, reshape, meshgrid, polynomial integration, gamma, sinc, sign, and trigonometric workflows
+- Add generalized eigenvalue support through `eig(A, B)`
+- Added geometry loading, meshing, and FEA solver support (early alpha). See [PR #399](https://github.com/runmat-org/runmat/pull/399) and [FEA docs](/docs/fea) for details. We will share more details as this work matures.
 
 #### Changed
 - Expand GPU acceleration plumbing with dedicated WGPU shader modules for signal and communications workloads, complex tensor residency, and shared provider APIs
@@ -54,9 +123,24 @@ _June 26, 2026_
 
 #### Fixed
 - Fix GC safety by replacing dereference-oriented pointer APIs with opaque handles, explicit root guards, guarded borrow access, thread-local rooting, and Miri-backed soundness coverage
-- Fix WebAssembly and release publishing issues around OCCT feature wiring, generated builtin registries, TypeScript package builds, headless compatibility checks, and nested crate publishing
 - Fix Windows CI and runtime compatibility issues involving path handling, OpenBLAS/LAPACK linking, CWD behavior, file dialog tests, and release build tooling
 - Fix GPU/runtime regressions in image normalization, lazy-transpose reshape, WGPU complex trigonometry overflow handling, communications modulation fallback, constellation portability, envelope input layout, and complex unary metadata handling
+- Fix `clear` inside active VM execution frames so hidden loop slots are preserved and browser/desktop workers do not trap or close response channels
+- Fix interactive `input()` evaluation on native by removing nested executor blocking from the input hook path
+- Fix MAT-file load robustness for compressed Level-5 payloads, endian variants, broader numeric storage classes, UTF char encodings, sparse matrices, and clearer unsupported-format diagnostics
+
+### Agent
+
+#### Added
+- Added “Fix with RunMat Agent” to execution errors for easy agent-assisted fixes
+
+#### Changed
+- Improve browser Agent transport so turn submission, approvals, and resumes are scheduled work instead of long-running worker RPCs, allowing progress views and parallel/new Agent sessions to respond promptly
+- Gate FEA/geometry Agent tools and model-visible guidance behind the same product feature flags as the desktop UI
+
+#### Fixed
+- Fix Agent prompt stickiness so only the active/current running turn is treated as sticky context
+- Fix usage-cap and insufficient-credit flows so desktop shows upgrade interruptions instead of generic failures
 
 ### Development
 

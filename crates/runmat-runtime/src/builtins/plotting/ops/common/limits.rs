@@ -71,6 +71,7 @@ pub fn limit_value(limits: Option<(f64, f64)>) -> Value {
         cols: 2,
         shape: vec![1, 2],
         data,
+        integer_data: None,
         dtype: runmat_builtins::NumericDType::F64,
     })
 }

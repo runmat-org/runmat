@@ -1,0 +1,86 @@
+{
+  "title": "calendarDuration",
+  "category": "datetime",
+  "keywords": [
+    "calendarDuration",
+    "caldays",
+    "calweeks",
+    "calmonths",
+    "calquarters",
+    "calyears",
+    "datetime",
+    "MATLAB compatibility"
+  ],
+  "summary": "Create calendar duration values for month-aware datetime arithmetic.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "calendarDuration values are host-side objects backed by month and day tensors."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::datetime::tests::calendar_duration_helpers_and_datetime_arithmetic_work"
+  },
+  "description": "`calendarDuration` represents calendar-relative elapsed time. RunMat supports construction from numeric calendar components, unit helpers, predicates, arithmetic with datetime values, and calendarDuration addition/subtraction.",
+  "behaviors": [
+    "`calendarDuration()` creates a zero calendar duration.",
+    "`calendarDuration(Y, M, D)` and `calendarDuration(Y, M, D, H, MN, S)` create month/day-backed calendar durations with scalar expansion across component arrays.",
+    "`caldays`, `calweeks`, `calmonths`, `calquarters`, and `calyears` create calendar durations from a single numeric unit.",
+    "Calling a calendar unit helper on a calendarDuration converts it back to numeric counts in that unit.",
+    "`iscalendarduration(x)` returns true for calendarDuration objects.",
+    "Adding or subtracting a calendarDuration from a datetime performs month-aware calendar arithmetic and clamps invalid month-end days to the final day of the target month."
+  ],
+  "examples": [
+    {
+      "description": "Create a calendar duration from months",
+      "input": "c = calmonths(2)",
+      "output": "c =\n  calendarDuration"
+    },
+    {
+      "description": "Add a calendar month to a month-end datetime",
+      "input": "t = datetime(2024, 1, 31, 'Format', 'yyyy-MM-dd');\nt + calmonths(1)",
+      "output": "ans =\n  2024-02-29"
+    },
+    {
+      "description": "Construct from components",
+      "input": "c = calendarDuration(1, 2, 3)",
+      "output": "c =\n  calendarDuration"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is calendarDuration different from duration?",
+      "answer": "`duration` stores fixed elapsed time. `calendarDuration` stores calendar months and days, so adding one month to January 31 lands on the last day of February."
+    },
+    {
+      "question": "Does calendarDuration run on the GPU?",
+      "answer": "No. It is a host-side object used for datetime arithmetic."
+    }
+  ],
+  "links": [
+    {
+      "label": "datetime",
+      "url": "./datetime"
+    },
+    {
+      "label": "duration",
+      "url": "./duration"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/datetime/mod.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/datetime/mod.rs"
+  },
+  "gpu_residency": "No. calendarDuration values are represented as host-side objects with internal numeric tensors.",
+  "gpu_behavior": [
+    "`calendarDuration` does not dispatch GPU kernels. Numeric inputs may be gathered before object construction."
+  ]
+}

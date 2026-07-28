@@ -1,0 +1,98 @@
+{
+  "title": "pol2cart",
+  "category": "math/trigonometry",
+  "keywords": [
+    "pol2cart",
+    "polar",
+    "cylindrical",
+    "cartesian",
+    "coordinates",
+    "trigonometry",
+    "gpu"
+  ],
+  "summary": "Transform polar or cylindrical coordinates to Cartesian coordinates.",
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Real gpuArray inputs stay resident when the active provider implements unary sin/cos and broadcasted elementwise multiply. Providers without those hooks fall back to the host implementation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline",
+    "notes": "pol2cart returns multiple outputs and is treated as a terminal coordinate transform."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::trigonometry::pol2cart::tests",
+    "integration": "builtins::math::trigonometry::pol2cart::tests::gpu_inputs_keep_resident_outputs"
+  },
+  "description": "`[x,y] = pol2cart(theta,rho)` converts polar coordinates to Cartesian coordinates. `[x,y,z] = pol2cart(theta,rho,z)` converts cylindrical coordinates and returns the elevation after MATLAB-style implicit expansion.",
+  "behaviors": [
+    "Inputs must be real floating-point scalars, vectors, matrices, or N-D tensors.",
+    "`theta`, `rho`, and optional `z` must have the same size or compatible sizes for implicit expansion.",
+    "`x` is computed as `rho .* cos(theta)` and `y` is computed as `rho .* sin(theta)`.",
+    "For cylindrical coordinates, the output `z` is the input elevation expanded to the same size as `x` and `y`.",
+    "Complex inputs are rejected, matching current MATLAB behavior.",
+    "Integer, logical, string, char, cell, struct, and object inputs are rejected because MATLAB documents `pol2cart` for real `single` and `double` data.",
+    "With no explicit multi-output context, RunMat returns the first output, `x`, matching MATLAB's single-output assignment behavior."
+  ],
+  "examples": [
+    {
+      "description": "Converting polar coordinates",
+      "input": "theta = [0 pi/4 pi/2 pi];\nrho = [5 5 10 10];\n[x,y] = pol2cart(theta,rho)",
+      "output": "x = [5.0000 3.5355 0 -10.0000]\ny = [0 3.5355 10.0000 0]"
+    },
+    {
+      "description": "Converting cylindrical coordinates",
+      "input": "theta = [0 pi/2]';\nrho = [1 2 3];\nz = 7;\n[x,y,z] = pol2cart(theta,rho,z)",
+      "output": "x =\n     1     2     3\n     0     0     0\ny =\n     0     0     0\n     1     2     3\nz =\n     7     7     7\n     7     7     7"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What angle units does `pol2cart` use?",
+      "answer": "`theta` is in radians, measured counterclockwise from the positive x-axis."
+    },
+    {
+      "question": "Can I request only two outputs with three inputs?",
+      "answer": "Yes. `[x,y] = pol2cart(theta,rho,z)` computes the cylindrical transform but returns only `x` and `y`."
+    },
+    {
+      "question": "Does `pol2cart` accept complex inputs?",
+      "answer": "No. Current MATLAB releases reject complex inputs, and RunMat does the same."
+    },
+    {
+      "question": "Does RunMat keep `pol2cart` on the GPU?",
+      "answer": "Yes for real gpuArray inputs when the active provider supports the required sin, cos, and broadcasted multiply hooks. The returned `x`, `y`, and requested `z` outputs remain gpuArray values. Providers without those hooks fall back to host evaluation."
+    }
+  ],
+  "links": [
+    {
+      "label": "atan2",
+      "url": "./atan2"
+    },
+    {
+      "label": "hypot",
+      "url": "./hypot"
+    },
+    {
+      "label": "cos",
+      "url": "./cos"
+    },
+    {
+      "label": "sin",
+      "url": "./sin"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/trigonometry/pol2cart.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/pol2cart.rs"
+  }
+}

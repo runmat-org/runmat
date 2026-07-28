@@ -350,7 +350,7 @@ async fn build_output(parsed: ParsedRandn) -> crate::BuiltinResult<Value> {
         RandnTemplate::Double => match parsed.dtype {
             NumericDType::F64 => randn_double(&parsed.shape),
             NumericDType::F32 => randn_single(&parsed.shape),
-            NumericDType::U8 | NumericDType::U16 => randn_double(&parsed.shape),
+            NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => randn_double(&parsed.shape),
         },
         RandnTemplate::Like(proto) => randn_like(&proto, &parsed.shape).await,
     }
@@ -407,7 +407,7 @@ async fn randn_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Valu
         Value::Tensor(t) => match t.dtype {
             NumericDType::F32 => randn_single(shape),
             NumericDType::F64 => randn_double(shape),
-            NumericDType::U8 | NumericDType::U16 => randn_double(shape),
+            NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => randn_double(shape),
         },
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_) => {
             randn_double(shape)
@@ -465,16 +465,18 @@ pub(crate) mod tests {
     use crate::builtins::common::{random, test_support};
     use futures::executor::block_on;
 
-    fn reset_rng_clean() {
+    fn reset_rng_clean() -> impl Drop {
+        let guard = random::test_guard();
         runmat_accelerate_api::clear_provider();
         random::reset_rng();
+        guard
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randn_default_scalar() {
-        let _guard = random::test_lock().lock().unwrap();
-        reset_rng_clean();
+        let _guard = random::test_guard();
+        let _guard = reset_rng_clean();
         let result = block_on(randn_builtin(Vec::new())).expect("randn");
         let expected = random::expected_normal_sequence(1)[0];
         match result {
@@ -501,8 +503,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randn_square_from_single_dimension() {
-        let _guard = random::test_lock().lock().unwrap();
-        reset_rng_clean();
+        let _guard = random::test_guard();
+        let _guard = reset_rng_clean();
         let args = vec![Value::Num(2.0)];
         let result = block_on(randn_builtin(args)).expect("randn");
         match result {
@@ -520,8 +522,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randn_size_vector_argument() {
-        let _guard = random::test_lock().lock().unwrap();
-        reset_rng_clean();
+        let _guard = random::test_guard();
+        let _guard = reset_rng_clean();
         let size_vec = Tensor::new(vec![2.0, 3.0, 4.0], vec![1, 3]).unwrap();
         let result = block_on(randn_builtin(vec![Value::Tensor(size_vec)])).expect("randn");
         match result {
@@ -540,8 +542,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randn_zero_dimension_returns_empty() {
-        let _guard = random::test_lock().lock().unwrap();
-        reset_rng_clean();
+        let _guard = random::test_guard();
+        let _guard = reset_rng_clean();
         let result = block_on(randn_builtin(vec![Value::Num(0.0)])).expect("randn");
         match result {
             Value::Tensor(t) => {
@@ -555,8 +557,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randn_single_precision_produces_f32() {
-        let _guard = random::test_lock().lock().unwrap();
-        reset_rng_clean();
+        let _guard = random::test_guard();
+        let _guard = reset_rng_clean();
         let result = block_on(randn_builtin(vec![Value::from("single")])).expect("randn single");
         match result {
             Value::Tensor(t) => {
@@ -573,8 +575,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randn_like_tensor_infers_shape() {
-        let _guard = random::test_lock().lock().unwrap();
-        reset_rng_clean();
+        let _guard = random::test_guard();
+        let _guard = reset_rng_clean();
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::Tensor(tensor)];
         let result = block_on(randn_builtin(args)).expect("randn");
@@ -598,8 +600,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randn_like_complex_produces_complex_tensor() {
-        let _guard = random::test_lock().lock().unwrap();
-        reset_rng_clean();
+        let _guard = random::test_guard();
+        let _guard = reset_rng_clean();
         let args = vec![
             Value::Num(2.0),
             Value::Num(1.0),
@@ -623,8 +625,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randn_gpuarray_keyword_produces_valid_output() {
-        let _guard = random::test_lock().lock().unwrap();
-        reset_rng_clean();
+        let _guard = random::test_guard();
+        let _guard = reset_rng_clean();
         let args = vec![Value::Num(3.0), Value::Num(4.0), Value::from("gpuArray")];
         let result = block_on(randn_builtin(args)).expect("randn gpuArray");
         match result {
@@ -645,7 +647,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randn_gpu_like_roundtrip() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         random::reset_rng();
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();

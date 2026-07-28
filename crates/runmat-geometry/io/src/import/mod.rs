@@ -181,6 +181,7 @@ pub(crate) fn build_asset(input: BuildAssetInput<'_>) -> GeometryAsset {
             kind: SourceGeometryKind::Mesh,
             assembly: None,
             material_evidence: Vec::new(),
+            cad_evaluators: Vec::new(),
         },
         tessellation_profile,
         units,

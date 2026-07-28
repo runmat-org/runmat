@@ -6,6 +6,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::introspection::dynamicprops;
 use crate::builtins::structs::type_resolvers::getfield_type;
 use crate::make_cell_with_shape;
 use crate::{
@@ -1006,6 +1007,10 @@ async fn get_object_field(obj: &ObjectInstance, name: &str) -> BuiltinResult<Val
                 return Ok(val.clone());
             }
         }
+    }
+
+    if let Some(value) = dynamicprops::dynamic_property_read(obj, name)? {
+        return Ok(value);
     }
 
     if let Some(value) = obj.properties.get(name) {

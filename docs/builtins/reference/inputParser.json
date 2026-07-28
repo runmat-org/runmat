@@ -1,0 +1,61 @@
+{
+  "title": "inputParser",
+  "category": "introspection",
+  "keywords": [
+    "inputParser",
+    "addParameter",
+    "parse",
+    "name-value",
+    "varargin"
+  ],
+  "summary": "Parse MATLAB-style optional name-value arguments.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "inputParser stores host-side metadata and parsed values."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::input_parser::tests",
+    "integration": "runmat-vm inputParser tests"
+  },
+  "description": "`inputParser` creates a handle object for parsing common MATLAB name-value argument patterns. RunMat supports the minimal workflow used by imported helper functions: create a parser, register parameters with defaults, parse `varargin{:}`, and read values from `p.Results`.",
+  "behaviors": [
+    "`p = inputParser` returns a handle object with an initially empty `Results` struct.",
+    "`addParameter(p, name, default)` registers a case-sensitive name and default value, mutating `p` in place.",
+    "`parse(p, name, value, ...)` starts from the registered defaults and applies exact name matches.",
+    "`p.Results.<name>` reads the parsed value for a registered parameter.",
+    "Duplicate parameter names, odd name-value argument counts, non-text names, and unknown parsed names raise stable RunMat errors.",
+    "This compatibility slice does not yet implement `addRequired`, `addOptional`, validators, `CaseSensitive`, `PartialMatching`, `KeepUnmatched`, or `StructExpand`."
+  ],
+  "examples": [
+    {
+      "description": "Parse an optional scale parameter",
+      "input": "function y = f(varargin)\n  p = inputParser;\n  addParameter(p, 'scale', 2);\n  parse(p, varargin{:});\n  y = p.Results.scale;\nend\n\nf('scale', 4)",
+      "output": "ans =\n     4"
+    },
+    {
+      "description": "Use a registered default when the name is omitted",
+      "input": "p = inputParser;\naddParameter(p, 'scale', 2);\nparse(p);\np.Results.scale",
+      "output": "ans =\n     2"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Are parameter names case-sensitive?",
+      "answer": "Yes. This initial RunMat implementation uses exact case-sensitive name matching."
+    },
+    {
+      "question": "Does RunMat support validators or positional arguments?",
+      "answer": "Not yet. The current support is intentionally limited to optional name-value parameters registered with `addParameter`."
+    }
+  ]
+}

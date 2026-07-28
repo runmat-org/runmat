@@ -148,6 +148,47 @@ mod tests {
     }
 
     #[test]
+    fn invalid_wrench_vectors_fail_validation() {
+        let mut model = valid_model();
+        model.loads[0].kind = LoadKind::Wrench {
+            fx: 0.0,
+            fy: 1.0,
+            fz: 0.0,
+            mx: f64::INFINITY,
+            my: 0.0,
+            mz: 0.0,
+            px: 0.0,
+            py: 0.0,
+            pz: 0.0,
+        };
+        assert_eq!(
+            validate_model(&model).expect_err("expected nonfinite wrench validation failure"),
+            AnalysisValidationError::InvalidWrench {
+                load_id: "load_tip".to_string()
+            }
+        );
+
+        let mut model = valid_model();
+        model.loads[0].kind = LoadKind::Wrench {
+            fx: 0.0,
+            fy: 0.0,
+            fz: 0.0,
+            mx: 0.0,
+            my: 0.0,
+            mz: 0.0,
+            px: 0.0,
+            py: 0.0,
+            pz: 0.0,
+        };
+        assert_eq!(
+            validate_model(&model).expect_err("expected zero wrench validation failure"),
+            AnalysisValidationError::ZeroWrench {
+                load_id: "load_tip".to_string()
+            }
+        );
+    }
+
+    #[test]
     fn unit_frame_mismatch_rejection() {
         let mut model = valid_model();
         model.units = UnitSystem::Inch;
@@ -200,6 +241,33 @@ mod tests {
         assert_eq!(json["kind"]["moment"]["mx"], 1.0);
         assert_eq!(json["kind"]["moment"]["my"], 2.0);
         assert_eq!(json["kind"]["moment"]["mz"], 3.0);
+
+        let decoded: LoadCase = serde_json::from_value(json).expect("load should deserialize");
+        assert_eq!(decoded, load);
+    }
+
+    #[test]
+    fn wrench_load_kind_serializes_as_snake_case() {
+        let load = LoadCase {
+            load_id: "tip_wrench".to_string(),
+            region_id: "tip".to_string(),
+            kind: LoadKind::Wrench {
+                fx: 1.0,
+                fy: 2.0,
+                fz: 3.0,
+                mx: 4.0,
+                my: 5.0,
+                mz: 6.0,
+                px: 0.1,
+                py: 0.2,
+                pz: 0.3,
+            },
+        };
+
+        let json = serde_json::to_value(&load).expect("load should serialize");
+        assert_eq!(json["kind"]["wrench"]["fx"], 1.0);
+        assert_eq!(json["kind"]["wrench"]["mz"], 6.0);
+        assert_eq!(json["kind"]["wrench"]["pz"], 0.3);
 
         let decoded: LoadCase = serde_json::from_value(json).expect("load should deserialize");
         assert_eq!(decoded, load);

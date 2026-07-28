@@ -1,0 +1,85 @@
+{
+  "title": "strtok",
+  "category": "strings/core",
+  "keywords": [
+    "strtok",
+    "strings",
+    "core",
+    "matlab",
+    "compatibility"
+  ],
+  "summary": "Split text into first token and remainder.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "not applicable",
+    "notes": "Not eligible for fusion; this builtin materializes host text or logical results."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::core::compat::tests",
+    "integration": null
+  },
+  "description": "[tok, rem] = strtok(text, delimiters) - Split text into first token and remainder.",
+  "signatures": [
+    {
+      "label": "[tok, rem] = strtok(text, delimiters)",
+      "inputs": [
+        {
+          "name": "text",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Input text."
+        },
+        {
+          "name": "arg",
+          "ty": "Any",
+          "arity": "Variadic",
+          "default": null,
+          "description": "Additional arguments."
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Output value."
+        }
+      ]
+    }
+  ],
+  "behaviors": [
+    "Split text into first token and remainder.",
+    "When multiple outputs are requested, returns both the first token and the remaining text.",
+    "Leading delimiters are skipped before token selection; the returned remainder begins at the delimiter after the token."
+  ],
+  "examples": [
+    "[tok,rem] = strtok(\"  alpha,beta\", \" ,\") returns tok = \"alpha\" and rem = \",beta\"."
+  ],
+  "faqs": [],
+  "links": [
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "char",
+      "url": "./char"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/core/compat.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/compat.rs"
+  }
+}

@@ -350,6 +350,8 @@ pub use runtime_error::{
     ReplayErrorKind, RuntimeError, RuntimeErrorBuilder,
 };
 
+pub mod debug_context;
+
 #[cfg(feature = "blas-lapack")]
 pub mod blas;
 #[cfg(feature = "blas-lapack")]
@@ -1309,6 +1311,47 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
             implicit_class_argument: None,
         },
     );
+    overidx_methods.insert(
+        crate::builtins::introspection::object_indexing::NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD
+            .to_string(),
+        MethodDef {
+            name:
+                crate::builtins::introspection::object_indexing::NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD
+                    .to_string(),
+            is_static: false,
+            is_abstract: false,
+            is_sealed: false,
+            access: Access::Public,
+            function_name: format!(
+                "OverIdx.{}",
+                crate::builtins::introspection::object_indexing::NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD
+            ),
+            implicit_class_argument: None,
+        },
+    );
+    for (name, is_static) in [
+        (
+            crate::builtins::introspection::object_serialization::SAVEOBJ_METHOD,
+            false,
+        ),
+        (
+            crate::builtins::introspection::object_serialization::LOADOBJ_METHOD,
+            true,
+        ),
+    ] {
+        overidx_methods.insert(
+            name.to_string(),
+            MethodDef {
+                name: name.to_string(),
+                is_static,
+                is_abstract: false,
+                is_sealed: false,
+                access: Access::Public,
+                function_name: format!("OverIdx.{name}"),
+                implicit_class_argument: None,
+            },
+        );
+    }
     for name in [
         "plus", "times", "mtimes", "lt", "gt", "eq", "uplus", "rdivide", "mrdivide", "ldivide",
         "mldivide", "and", "or", "xor",
@@ -1606,10 +1649,11 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
-        Arc,
+        Arc, Mutex,
     };
 
     static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
+    static LISTENER_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn unique_class_name(prefix: &str) -> String {
         let id = TEST_CLASS_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -1617,11 +1661,12 @@ mod tests {
     }
 
     fn listener_gc_test(test: impl FnOnce()) {
-        runmat_gc::gc_test_context(|| {
-            reset_event_registry_for_test();
-            test();
-            reset_event_registry_for_test();
-        });
+        let _guard = LISTENER_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        reset_event_registry_for_test();
+        test();
+        reset_event_registry_for_test();
     }
 
     #[test]
@@ -3110,8 +3155,18 @@ mod tests {
 
     #[test]
     fn addlistener_preserves_handle_target_when_callback_allocation_collects() {
-        runmat_gc::gc_test_context(|| {
+        listener_gc_test(|| {
             reset_event_registry_for_test();
+            struct ConfigGuard(runmat_gc::GcConfig);
+
+            impl Drop for ConfigGuard {
+                fn drop(&mut self) {
+                    runmat_gc::gc_configure(self.0.clone())
+                        .expect("restore GC configuration after listener test");
+                }
+            }
+
+            let _config_guard = ConfigGuard(runmat_gc::gc_get_config());
             let config = runmat_gc::GcConfig {
                 young_generation_size: 64 * 1024 * 1024,
                 minor_gc_threshold: 0.35,
@@ -3147,7 +3202,6 @@ mod tests {
                     .expect("listener callback should survive construction"),
                 Value::FunctionHandle("sin".to_string())
             );
-            reset_event_registry_for_test();
         });
     }
 

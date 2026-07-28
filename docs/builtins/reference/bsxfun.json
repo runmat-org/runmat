@@ -1,0 +1,107 @@
+{
+  "title": "bsxfun",
+  "category": "math/elementwise",
+  "keywords": [
+    "bsxfun",
+    "binary singleton expansion",
+    "implicit expansion",
+    "function handle",
+    "broadcasting"
+  ],
+  "summary": "Apply a binary function element-wise with MATLAB-compatible singleton expansion.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "matlab",
+    "notes": "Arbitrary callbacks execute on the host. gpuArray inputs are gathered before callback execution; use direct element-wise operators for provider-native GPU execution."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::elementwise::bsxfun::tests",
+    "integration": "bsxfun dispatches builtin function handles and bound semantic callbacks"
+  },
+  "description": "`C = bsxfun(fun,A,B)` applies binary function `fun` element-wise to `A` and `B` after expanding singleton dimensions to a common compatible size.",
+  "behaviors": [
+    "`fun` can be a function handle, closure, bound function handle, or callable text accepted by `feval`.",
+    "`A` and `B` can be numeric, logical, complex, or character scalars or arrays.",
+    "Dimensions must either match or have length one. A singleton dimension can expand to a zero-length dimension, producing an empty output.",
+    "The callback is invoked once per output element with scalar values from the expanded inputs.",
+    "Callback outputs must be scalar numeric, logical, complex, or character values. Mixed logical/numeric/character outputs promote to numeric; complex outputs promote the entire result to complex.",
+    "The result shape is the MATLAB implicit-expansion shape of `A` and `B`.",
+    "gpuArray inputs are gathered and callbacks run on the host because arbitrary function handles cannot be fused safely."
+  ],
+  "examples": [
+    {
+      "description": "Subtract column means from a matrix",
+      "input": "A = [1 2 10; 3 4 20; 9 6 15];\nC = bsxfun(@minus,A,mean(A))",
+      "output": "% C has the same size as A."
+    },
+    {
+      "description": "Compare every column-vector value with every row-vector value",
+      "input": "A = [8; 17; 20; 24];\nB = [0 10 21];\nC = bsxfun(@gt,A,B)",
+      "output": "C = logical 4-by-3 array"
+    },
+    {
+      "description": "Use a custom binary function",
+      "input": "f = @(a,b) a - exp(b);\nC = bsxfun(f,1:7,pi*[0 1/4 1/3].')",
+      "output": "% C contains every pairwise callback result."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Should new code use `bsxfun`?",
+      "answer": "MATLAB now supports implicit expansion for many operators directly, but `bsxfun` remains useful for older code and for applying custom binary callbacks."
+    },
+    {
+      "question": "Can callbacks return arrays?",
+      "answer": "No. `bsxfun` collects one scalar result per expanded element. Use `arrayfun` or `cellfun` when you need non-scalar or non-uniform outputs."
+    },
+    {
+      "question": "Does `bsxfun` keep gpuArray inputs on the GPU?",
+      "answer": "No. RunMat gathers gpuArray inputs for `bsxfun` because the callback can be arbitrary MATLAB code. Direct element-wise builtins such as `plus`, `minus`, and `times` are the provider-native path."
+    }
+  ],
+  "links": [
+    {
+      "label": "arrayfun",
+      "url": "./arrayfun"
+    },
+    {
+      "label": "cellfun",
+      "url": "./cellfun"
+    },
+    {
+      "label": "plus",
+      "url": "./plus"
+    },
+    {
+      "label": "minus",
+      "url": "./minus"
+    },
+    {
+      "label": "times",
+      "url": "./times"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/elementwise/bsxfun.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/bsxfun.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "C = bsxfun(fun,A,B)"
+    },
+    "points": [
+      "`fun` is a binary function handle or callable text.",
+      "`A` and `B` are scalar or array inputs whose sizes are compatible by singleton expansion."
+    ]
+  }
+}

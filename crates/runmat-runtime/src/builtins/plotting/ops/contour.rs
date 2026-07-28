@@ -729,7 +729,7 @@ impl ContourCall {
                 &x_axis,
                 &y_axis,
                 handle,
-                color_map,
+                color_map.clone(),
                 base_z,
                 &level_spec,
                 &line_color,
@@ -769,7 +769,7 @@ impl ContourCall {
     }
 }
 
-fn parse_level_spec(value: Value, context: &str) -> BuiltinResult<ContourLevelSpec> {
+pub(crate) fn parse_level_spec(value: Value, context: &str) -> BuiltinResult<ContourLevelSpec> {
     match value {
         Value::Tensor(tensor) => parse_tensor_levels(tensor, context),
         other => {
@@ -831,7 +831,10 @@ fn parse_tensor_levels(tensor: Tensor, context: &str) -> BuiltinResult<ContourLe
     Ok(ContourLevelSpec::Values(tensor.data))
 }
 
-fn apply_contour_options(args: &mut ContourArgs, options: &[Value]) -> BuiltinResult<()> {
+pub(crate) fn apply_contour_options(
+    args: &mut ContourArgs,
+    options: &[Value],
+) -> BuiltinResult<()> {
     if options.is_empty() {
         return Ok(());
     }
@@ -1251,7 +1254,7 @@ fn build_contour_gpu_plot_with_axes_bounds_and_z_mode(
 
     let scalar = ScalarType::from_is_f64(z_ref.precision == ProviderPrecision::F64);
     let color_table = match line_color {
-        ContourLineColor::Auto => build_color_lut(color_map, 512, 1.0),
+        ContourLineColor::Auto => build_color_lut(&color_map, 512, 1.0),
         ContourLineColor::Color(color) => vec![color.to_array()],
         ContourLineColor::None => vec![[0.0, 0.0, 0.0, 0.0]],
     };
@@ -1391,7 +1394,7 @@ pub(crate) fn build_contour_plot_with_z_mode(
     let (min_z, max_z) = grid_extents(name, grid)?;
     let levels = level_spec.resolve(name, min_z, max_z)?;
     let color_table = match line_color {
-        ContourLineColor::Auto => build_color_lut(color_map, 512, 1.0),
+        ContourLineColor::Auto => build_color_lut(&color_map, 512, 1.0),
         ContourLineColor::Color(color) => vec![color.to_array()],
         ContourLineColor::None => vec![[0.0, 0.0, 0.0, 0.0]],
     };
@@ -1453,7 +1456,7 @@ pub(crate) fn build_contour_fill_gpu_plot(
         .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU Z data")))?;
     let (min_z, max_z) = axis_bounds(z, name)?;
     let levels = ensure_fill_levels(name, level_spec, min_z, max_z)?;
-    let palette = build_color_lut(color_map, palette_size(&levels), 0.95);
+    let palette = build_color_lut(&color_map, palette_size(&levels), 0.95);
     let scalar = ScalarType::from_is_f64(z_ref.precision == ProviderPrecision::F64);
     let x_f32 = if scalar == ScalarType::F32 {
         Some(x_axis.iter().map(|&v| v as f32).collect::<Vec<f32>>())
@@ -1530,7 +1533,7 @@ pub(crate) fn build_contour_fill_plot(
 ) -> BuiltinResult<ContourFillPlot> {
     let (min_z, max_z) = grid_extents(name, grid)?;
     let levels = ensure_fill_levels(name, level_spec, min_z, max_z)?;
-    let palette_raw = build_color_lut(color_map, palette_size(&levels), 0.95);
+    let palette_raw = build_color_lut(&color_map, palette_size(&levels), 0.95);
     let palette: Vec<Vec4> = palette_raw.iter().map(|c| Vec4::from_array(*c)).collect();
 
     let nx = x_axis.len();
@@ -2018,6 +2021,7 @@ pub(crate) mod tests {
         }
         Tensor {
             data: data.to_vec(),
+            integer_data: None,
             shape,
             rows,
             cols,

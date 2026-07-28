@@ -1,0 +1,93 @@
+{
+  "title": "triplot",
+  "category": "plotting",
+  "keywords": [
+    "triplot",
+    "triangulation",
+    "triangle mesh",
+    "mesh edges",
+    "plotting"
+  ],
+  "summary": "Draw the edges of a 2-D triangular mesh.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`triplot` is a plotting sink. RunMat gathers connectivity and coordinate inputs, builds a NaN-separated line object for triangle edges, and then uses the existing line rendering path."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::triplot::tests",
+    "integration": "crates/runmat-vm/tests/plotting.rs"
+  },
+  "description": "`triplot` plots the edges of a 2-D triangulation. The common numeric form accepts an M-by-3 one-based connectivity matrix plus X and Y coordinate vectors. RunMat also accepts triangulation-like structs or `DelaunayTri` objects with connectivity and point properties for compatibility with saved or user-constructed triangulation data.",
+  "behaviors": [
+    "`triplot(TRI, X, Y)` draws all triangle edges as one line graphics object.",
+    "`triplot(TRI, X, Y, LineSpec)` applies MATLAB line shorthand such as `'r--'`.",
+    "`triplot(TRI, X, Y, Name, Value, ...)` supports shared line styling properties including `Color`, `LineWidth`, `LineStyle`, `DisplayName`, `Parent`, and `Visible`.",
+    "`triplot(ax, ...)` and `triplot(..., 'Parent', ax)` target a specific axes.",
+    "`triplot(TR)` accepts a struct or `DelaunayTri` object with `ConnectivityList`/`Triangulation` and an N-by-2 or wider `Points`/`X` matrix. The first two point columns are used as X and Y coordinates.",
+    "Connectivity entries must be positive finite integer indices within the coordinate vectors."
+  ],
+  "examples": [
+    {
+      "description": "Plot a two-triangle square mesh",
+      "input": "TRI = [1 2 3; 2 4 3];\nX = [0 1 0 1];\nY = [0 0 1 1];\nh = triplot(TRI, X, Y);"
+    },
+    {
+      "description": "Style triangulation edges",
+      "input": "TRI = [1 2 3];\nX = [0 1 0];\nY = [0 0 1];\nh = triplot(TRI, X, Y, 'r--', 'LineWidth', 2, 'DisplayName', 'mesh');"
+    },
+    {
+      "description": "Use a triangulation-like struct or object",
+      "input": "TR.ConnectivityList = [1 2 3];\nTR.Points = [0 0; 1 0; 0 1];\ntriplot(TR);\ndt = DelaunayTri(TR.Points);\ntriplot(dt);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What does triplot return?",
+      "answer": "`triplot` returns the line graphics handle containing the triangulation edges. The handle can be queried and styled with `get` and `set` like other line objects."
+    },
+    {
+      "question": "Does triplot render filled triangles?",
+      "answer": "No. `triplot` draws mesh edges only. Use patch-style graphics when filled faces are needed."
+    },
+    {
+      "question": "Does triplot preserve gpuArray residency?",
+      "answer": "No. The current implementation gathers connectivity and point data before constructing the edge list. It is a plotting sink, and the produced line object follows the normal line renderer path."
+    }
+  ],
+  "links": [
+    {
+      "label": "plot",
+      "url": "./plot"
+    },
+    {
+      "label": "line",
+      "url": "./line"
+    },
+    {
+      "label": "patch",
+      "url": "./patch"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/triplot.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/triplot.rs"
+  }
+}

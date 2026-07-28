@@ -1,0 +1,92 @@
+{
+  "title": "ancestor",
+  "category": "plotting",
+  "keywords": [
+    "ancestor",
+    "graphics handles",
+    "graphics parent",
+    "handle ancestry",
+    "plotting"
+  ],
+  "summary": "Find a graphics object ancestor with a requested type.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`ancestor` inspects host-side graphics handle metadata and does not execute numeric GPU kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::ancestor::tests",
+    "vm": "runmat-vm plotting::ancestor_dispatches_graphics_parent_queries"
+  },
+  "description": "`ancestor` returns the closest graphics handle whose object type matches the requested type name. The search includes the input object itself, follows the encoded handle parent chain, and returns an empty handle array when no match exists.",
+  "syntax": [
+    "p = ancestor(h, type)",
+    "p = ancestor(h, type, 'toplevel')"
+  ],
+  "behaviors": [
+    "`type` can be a character vector, string scalar, string array, or cell array of type names.",
+    "`ancestor(h, type)` returns the nearest matching object, including `h` itself when its type matches.",
+    "`ancestor(h, type, 'toplevel')` returns the highest matching object among the requested types.",
+    "Invalid or non-graphics scalar handles return an empty handle array instead of throwing.",
+    "Numeric handle arrays are processed elementwise and return the matching ancestor handles in a row vector; if no entries match, the result is empty.",
+    "Supported graphics types include `root`, `figure`, `axes`, `numericruler`, `text`, `legend`, and RunMat plot child types such as `line`, `scatter`, `bar`, `surface`, `patch`, and `contour`."
+  ],
+  "examples": [
+    {
+      "description": "Find the axes and figure for a plotted line",
+      "input": "h = plot(1:3);\nax = ancestor(h, 'axes');\nfig = ancestor(h, 'figure');",
+      "output": "ax and fig are graphics handles"
+    },
+    {
+      "description": "Choose nearest or top-level match from multiple types",
+      "input": "h = plot(1:3);\nnearest = ancestor(h, {'axes','figure'});\ntop = ancestor(h, {'axes','figure'}, 'toplevel');",
+      "output": "nearest is the axes handle; top is the figure handle"
+    },
+    {
+      "description": "Inspect a ruler handle",
+      "input": "ax = gca;\nxr = get(ax, 'XAxis');\nancestor(xr, 'numericruler')",
+      "output": "ans = xr"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `ancestor` scan every plot object in the figure?",
+      "answer": "No. RunMat graphics handles encode or snapshot their own object type and parent location, so `ancestor` builds the parent chain directly from handle metadata."
+    },
+    {
+      "question": "Why do array results use `NaN` for misses?",
+      "answer": "No. Unmatched or invalid entries are omitted from array results. If none of the entries has a matching ancestor, `ancestor` returns an empty handle array."
+    }
+  ],
+  "links": [
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "isgraphics",
+      "url": "./isgraphics"
+    },
+    {
+      "label": "gobjects",
+      "url": "./gobjects"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/ancestor.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/ancestor.rs"
+  },
+  "gpu_residency": "`ancestor` only reads host-managed graphics handle metadata. It does not inspect, gather, or transform GPU-resident plot data.",
+  "gpu_behavior": [
+    "`ancestor` performs no provider dispatch and does not gather or upload GPU arrays."
+  ]
+}

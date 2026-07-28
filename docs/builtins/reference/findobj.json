@@ -1,0 +1,124 @@
+{
+  "title": "findobj",
+  "category": "plotting",
+  "keywords": [
+    "findobj",
+    "graphics",
+    "handle",
+    "property search",
+    "plotting"
+  ],
+  "summary": "Find graphics objects by handle hierarchy and property predicates.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`findobj` searches host-side graphics metadata. It does not execute numeric GPU kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::findobj::tests",
+    "vm": "crates/runmat-vm/tests/functions.rs"
+  },
+  "description": "`findobj` walks the RunMat graphics handle tree and returns handles whose properties satisfy MATLAB-style search predicates. With no root handle it searches from the graphics root through figures, axes, plot children, numeric rulers, nonempty text labels, and legends represented by the RunMat plotting registry.",
+  "behaviors": [
+    "`findobj()` returns the graphics root, figures, axes, and searchable descendants in traversal order.",
+    "`findobj(prop, value)` returns objects whose property exactly matches `value`.",
+    "`findobj(objhandles, ...)` restricts the search to the supplied numeric graphics handle or numeric handle array. Duplicate roots can produce duplicate result handles, matching MATLAB traversal behavior.",
+    "`findobj(objhandles, 'flat', ...)` searches only the supplied root handles.",
+    "`findobj(objhandles, '-depth', d, ...)` limits descendant traversal to depth `d`; `Inf` means unlimited depth.",
+    "Multiple property predicates are combined with implicit `-and` when no logical operator is supplied.",
+    "An empty result is returned as a numeric `0x0` tensor; nonempty results are returned as a numeric column vector of handles."
+  ],
+  "options": [
+    "`'-not', predicate` negates a property, grouped, `-property`, or `-regexp` predicate.",
+    "`'-and'`, `'-or'`, and `'-xor'` combine adjacent predicates from left to right.",
+    "`'-property', prop` matches objects that expose property `prop` through RunMat's plotting `get` surface.",
+    "`'-regexp', prop, expr` matches text-renderable property values against a regular expression. A cell array or string array of patterns matches when any pattern matches.",
+    "Grouped predicates can be passed as cell arrays, for example `{ 'Type', 'line', '-and', 'DisplayName', 'series-a' }`.",
+    "The `Type` property comparison is case-insensitive. Logical properties accept logical values and MATLAB-style `'on'`/`'off'` text.",
+    "Color properties normalize MATLAB short names, full names, hex colors, and RGB triples before comparison when both sides are recognized color specifications."
+  ],
+  "limitations": [
+    "RunMat currently models figures, axes, plot children, X/Y numeric rulers, nonempty title/subtitle/xlabel/ylabel/zlabel text handles, legends, and the graphics root. UI containers and other MATLAB graphics object families are not yet represented.",
+    "RunMat does not yet model per-object `HandleVisibility`; hidden-handle filtering and `findall` parity remain future graphics-infrastructure work.",
+    "Property matching is based on the values exposed by RunMat's `get` implementation, so unsupported graphics properties cannot be searched until the owning graphics object exposes them."
+  ],
+  "examples": [
+    {
+      "description": "Find all line objects",
+      "input": "plot(1:3, [1 4 9], 'DisplayName', 'series-a');\nh = findobj('Type', 'line')",
+      "output": "% h is a column vector of matching line handles"
+    },
+    {
+      "description": "Search below the current axes",
+      "input": "plot(1:3, [1 4 9], 'DisplayName', 'series-a');\nh = findobj(gca(), 'DisplayName', 'series-a')",
+      "output": "% h contains the plotted line handle"
+    },
+    {
+      "description": "Limit search depth from a figure",
+      "input": "f = gcf();\nh = findobj(f, '-depth', 1)",
+      "output": "% h contains the figure and its axes, but not line descendants"
+    },
+    {
+      "description": "Use a regular expression predicate",
+      "input": "plot(1:3, [1 4 9], 'DisplayName', 'series-a');\nh = findobj('-regexp', 'DisplayName', '^series-')"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `findobj` include the graphics root?",
+      "answer": "Yes. A root search starts at handle `0`, and `findobj()` includes the root when no filter excludes it."
+    },
+    {
+      "question": "Can `findobj` search only a figure or axes?",
+      "answer": "Yes. Pass a numeric figure, axes, or plot-object handle as the first argument to use that object as the search root."
+    },
+    {
+      "question": "Does `findobj` gather GPU arrays?",
+      "answer": "No. `findobj` only searches host-side graphics metadata and never inspects provider-resident numeric buffers."
+    }
+  ],
+  "links": [
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    },
+    {
+      "label": "gcf",
+      "url": "./gcf"
+    },
+    {
+      "label": "gca",
+      "url": "./gca"
+    },
+    {
+      "label": "figure",
+      "url": "./figure"
+    },
+    {
+      "label": "plot",
+      "url": "./plot"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/findobj.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/findobj.rs"
+  },
+  "gpu_residency": "`findobj` returns host-side numeric graphics handles. It does not transfer, gather, or mutate GPU-resident arrays.",
+  "gpu_behavior": [
+    "`findobj` performs no provider dispatch because graphics-handle metadata is owned by the runtime plotting registry.",
+    "Plotting commands that created the graphics objects remain responsible for preserving or consuming GPU-resident data through the plotting pipeline."
+  ]
+}

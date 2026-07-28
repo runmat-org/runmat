@@ -1,0 +1,15 @@
+{
+  "title": "fileDatastore",
+  "category": "io/tabular",
+  "keywords": ["fileDatastore", "datastore", "file", "readfcn"],
+  "summary": "Create a file datastore descriptor object.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Datastore descriptors are host metadata."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 1, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::table::tests"},
+  "description": "`fileDatastore(files, Name, Value)` creates a descriptor object for file-backed datastore workflows.",
+  "behaviors": ["The constructor preserves file specifications and common metadata options: `ReadFcn`, `FileExtensions`, `IncludeSubfolders`, and `ReadMode`.", "`ReadFcn` is retained as the supplied value, including function handles, so caller code can pass datastore descriptors around without invoking the reader during construction.", "Iterator-style operations such as `read`, `hasdata`, and `reset` require the generic datastore dispatch layer and are not provided by this constructor builtin."],
+  "examples": [{"description": "Create file datastore descriptor", "input": "ds = fileDatastore('*.txt', 'ReadFcn', @readlines)", "output": "ds = fileDatastore object"}],
+  "links": [{"label": "arrayDatastore", "url": "./arrayDatastore"}, {"label": "parquetDatastore", "url": "./parquetDatastore"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/table/builtins/constructors.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/builtins/constructors.rs"}
+}

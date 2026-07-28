@@ -1,0 +1,28 @@
+{
+  "title": "normpdf",
+  "category": "stats/summary",
+  "keywords": ["normpdf", "normal", "gaussian", "pdf", "statistics"],
+  "summary": "Evaluate the normal probability density function.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "elementwise",
+    "notes": "GPU inputs are gathered to host for compatibility until a provider hook exists."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": { "unit": "builtins::stats::summary::distributions::tests", "integration": null },
+  "description": "`normpdf(x)` evaluates the standard normal density. `normpdf(x,mu)` and `normpdf(x,mu,sigma)` evaluate a normal distribution with mean `mu` and standard deviation `sigma`.",
+  "behaviors": [
+    "`x`, `mu`, and `sigma` may be scalars or matching-size numeric arrays.",
+    "Nonpositive `sigma` values produce `NaN` elementwise."
+  ],
+  "examples": [{ "description": "Standard normal density", "input": "y = normpdf(0)" }],
+  "faqs": [{ "question": "What is the default distribution?", "answer": "The default is the standard normal distribution with `mu = 0` and `sigma = 1`." }],
+  "links": [{ "label": "normcdf", "url": "./normcdf" }, { "label": "norminv", "url": "./norminv" }],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/distributions.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/distributions.rs"
+  }
+}

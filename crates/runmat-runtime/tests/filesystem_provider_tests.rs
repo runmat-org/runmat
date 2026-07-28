@@ -334,6 +334,7 @@ fn sandbox_provider_supports_repl_and_tabular_builtins() {
 
     let matrix = Tensor {
         data: vec![1.0, 2.0, 3.5, 4.0],
+        integer_data: None,
         shape: vec![2, 2],
         rows: 2,
         cols: 2,
@@ -382,6 +383,7 @@ fn remote_provider_supports_repl_and_tabular_builtins() {
     call_builtin("mkdir", &[Value::from("remote")]).expect("mkdir succeeds");
     let matrix = Tensor {
         data: vec![10.0, 20.0, 30.0, 40.0],
+        integer_data: None,
         shape: vec![2, 2],
         rows: 2,
         cols: 2,

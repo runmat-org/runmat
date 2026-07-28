@@ -1,0 +1,65 @@
+{
+  "title": "dbstack",
+  "category": "introspection",
+  "keywords": ["dbstack", "debug", "call stack", "stack trace"],
+  "summary": "Return or display the active RunMat call stack.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-side debugger introspection only; it does not inspect or move GPU buffers."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::debugging::tests",
+    "integration": "dbstack_reports_user_function_frame_through_core"
+  },
+  "description": "`dbstack` inspects RunMat's runtime call-stack context and returns MATLAB-style frame metadata.",
+  "behaviors": [
+    "`dbstack` with no output displays the active stack.",
+    "`ST = dbstack` returns stack entries as a 1-by-N cell row of scalar structs because RunMat does not yet have first-class MATLAB struct arrays.",
+    "Each frame struct contains `file`, `name`, `line`, and `I` fields.",
+    "`dbstack(n)` omits the first `n` returned entries. `'-completenames'` is accepted; RunMat already reports the full source path when the source catalog has one.",
+    "`[ST,I] = dbstack(...)` returns the stack cell row and a current workspace index of `1` when a stack is available."
+  ],
+  "examples": [
+    {
+      "description": "Capture the current call stack",
+      "input": "ST = dbstack;"
+    },
+    {
+      "description": "Skip the current frame",
+      "input": "ST = dbstack(1, '-completenames');"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why is `ST` a cell row instead of a struct array?",
+      "answer": "RunMat currently represents heterogeneous struct-list results as cell rows of scalar structs. This preserves the frame fields until struct-array infrastructure lands."
+    }
+  ],
+  "links": [
+    {
+      "label": "dbstatus",
+      "url": "./dbstatus"
+    },
+    {
+      "label": "getcallinfo",
+      "url": "./getcallinfo"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/debugging.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/debugging.rs"
+  },
+  "gpu_behavior": [
+    "`dbstack` is host-side introspection and is excluded from GPU execution and fusion."
+  ]
+}

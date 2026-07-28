@@ -1,0 +1,13 @@
+{
+  "title": "h5write",
+  "category": "io/hdf5",
+  "keywords": ["h5write", "hdf5", "dataset", "file", "io"],
+  "summary": "Write dense numeric, logical, string, or char data to an HDF5 dataset.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "HDF5 serialization is host file I/O; GPU inputs are gathered at the builtin boundary."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 0, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::io::hdf5::tests", "integration": null},
+  "description": "`h5write(filename, dataset, data)` creates or replaces a dense HDF5 dataset and creates intermediate groups. `h5write(filename, dataset, data, start, count, stride)` writes one-based native hyperslab selections into an existing dataset.",
+  "behaviors": ["Writes numeric data as double, logical data as booleans, and text as UTF-8 variable-length strings.", "Partial writes require the data shape to match the selected count.", "Unsupported MATLAB value classes raise deterministic unsupported-type errors."],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/io/hdf5.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/hdf5.rs"}
+}

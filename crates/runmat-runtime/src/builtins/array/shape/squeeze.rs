@@ -173,6 +173,7 @@ fn value_kind(value: &Value) -> &'static str {
         Value::Complex(_, _) => "complex scalar",
         Value::String(_) => "string scalar",
         Value::Symbolic(_) => "symbolic scalar",
+        Value::SymbolicArray(_) => "symbolic array",
         Value::Object(_) => "object",
         Value::HandleObject(_) => "handle object",
         Value::Listener(_) => "listener",
@@ -193,7 +194,9 @@ fn squeeze_numeric_tensor(tensor: Tensor) -> crate::BuiltinResult<Tensor> {
     if shape == tensor.shape {
         return Ok(tensor);
     }
-    Tensor::new(tensor.data, shape).map_err(|e| squeeze_error(format!("squeeze: {e}")))
+    tensor
+        .reshape(shape)
+        .map_err(|e| squeeze_error(format!("squeeze: {e}")))
 }
 
 fn squeeze_complex_tensor(ct: ComplexTensor) -> crate::BuiltinResult<ComplexTensor> {
@@ -270,7 +273,7 @@ pub(crate) mod tests {
         block_on(super::squeeze_builtin(value))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{IntValue, Tensor};
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
 
     #[test]
     fn squeeze_type_preserves_logical_shape() {
@@ -295,6 +298,23 @@ pub(crate) mod tests {
         let result = squeeze_builtin(Value::Tensor(tensor)).expect("squeeze ok");
         match result {
             Value::Tensor(t) => assert_eq!(t.shape, vec![2, 2]),
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn squeeze_preserves_exact_integer_storage() {
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2, 1])
+            .expect("integer tensor");
+        let result = squeeze_builtin(Value::Tensor(tensor)).expect("squeeze ok");
+        match result {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![2, 1]);
+                assert_eq!(
+                    tensor.integer_storage(),
+                    Some(&IntegerStorage::U64(vec![0, u64::MAX]))
+                );
+            }
             other => panic!("expected tensor, got {other:?}"),
         }
     }

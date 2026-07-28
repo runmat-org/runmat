@@ -777,6 +777,7 @@ fn parse_stem_args(
         let len = y_tensor.data.len();
         let x = Value::Tensor(Tensor {
             data: (1..=len).map(|i| i as f64).collect(),
+            integer_data: None,
             shape: vec![len],
             rows: len,
             cols: 1,
@@ -791,6 +792,7 @@ fn parse_stem_args(
         let len = y_tensor.data.len();
         let x = Value::Tensor(Tensor {
             data: (1..=len).map(|i| i as f64).collect(),
+            integer_data: None,
             shape: vec![len],
             rows: len,
             cols: 1,
@@ -818,6 +820,7 @@ mod tests {
     fn tensor_from(data: &[f64]) -> Tensor {
         Tensor {
             data: data.to_vec(),
+            integer_data: None,
             shape: vec![data.len()],
             rows: data.len(),
             cols: 1,

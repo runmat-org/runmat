@@ -1,9 +1,112 @@
 import type {
   RunMatFilesystemProvider
 } from "./fs/provider-types.js";
+import type {
+  FeaAnalysisProfile,
+  FeaAnalysisRunKind,
+  FeaCapabilities,
+  FeaCheckResult,
+  FeaDiagnosticsArtifactPayload,
+  FeaDocumentKind,
+  FeaFieldDescriptorsArtifactPayload,
+  FeaFieldKind,
+  FeaFieldDescriptor,
+  FeaFieldLocation,
+  FeaFieldPagingDescriptor,
+  FeaFieldRequestOptions,
+  FeaFieldResult,
+  FeaFieldStorage,
+  FeaFieldStorageRef,
+  FeaObjectArtifactMetadata,
+  FeaProgressEvent,
+  FeaProgressPhase,
+  FeaProgressStatus,
+  FeaRunDatasetFieldPagingPolicy,
+  FeaRunDatasetPayload,
+  FeaRunDatasetStudyRef,
+  FeaRunResult,
+  FeaStudyDocumentOperation,
+  FeaStudyDocumentOperationOutput
+} from "./fea-contracts.js";
+import {
+  FEA_ARTIFACT_MANIFEST_KIND,
+  FEA_DATASET_ARTIFACT_KIND,
+  FEA_DIAGNOSTICS_ARTIFACT_KIND,
+  FEA_DIAGNOSTICS_SCHEMA_VERSION,
+  FEA_FIELD_DEFAULT_MATERIALIZE_LIMIT,
+  FEA_FIELD_DEFAULT_PAGE_SIZE,
+  FEA_FIELD_DESCRIPTORS_ARTIFACT_KIND,
+  FEA_FIELD_DESCRIPTORS_SCHEMA_VERSION,
+  FEA_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION,
+  FEA_RUN_DATASET_KIND,
+  FEA_RUN_DATASET_SCHEMA_VERSION,
+} from "./fea-contracts.js";
 import { createDefaultFsProvider } from "./fs/default.js";
 import { __internals as workspaceHoverInternals } from "./workspace-hover.js";
 import { installWebGpuCompatibilityShims } from "./webgpu-shims.js";
+export {
+  FEA_ANALYSIS_PROFILES,
+  FEA_ANALYSIS_RUN_KINDS,
+  FEA_ARTIFACT_MANIFEST_KIND,
+  FEA_DATASET_ARTIFACT_KIND,
+  FEA_DIAGNOSTICS_ARTIFACT_KIND,
+  FEA_DIAGNOSTICS_SCHEMA_VERSION,
+  FEA_FIELD_DEFAULT_MATERIALIZE_LIMIT,
+  FEA_FIELD_DEFAULT_PAGE_SIZE,
+  FEA_FIELD_DESCRIPTORS_ARTIFACT_KIND,
+  FEA_FIELD_DESCRIPTORS_SCHEMA_VERSION,
+  FEA_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION,
+  FEA_RUN_DATASET_KIND,
+  FEA_RUN_DATASET_SCHEMA_VERSION,
+  FEA_RUN_CELL_ID,
+  FEA_RUN_KIND,
+  FEA_RUN_MANIFEST_METADATA_SCHEMA_VERSION,
+  FEA_STUDY_DOCUMENT_OPERATIONS,
+  FEA_SUPPORTED_PHYSICS_FAMILIES,
+  FEA_SUPPORTED_PHYSICS_PROFILES,
+  feaRunArtifactRefId,
+} from "./fea-contracts.js";
+export type {
+  FeaAnalysisProfile,
+  FeaAnalysisRunKind,
+  FeaCapabilities,
+  FeaCheckResult,
+  FeaDiagnosticsArtifactPayload,
+  FeaDocumentKind,
+  FeaFieldDescriptorsArtifactPayload,
+  FeaFieldKind,
+  FeaFieldDescriptor,
+  FeaFieldLocation,
+  FeaFieldPagingDescriptor,
+  FeaFieldRequestOptions,
+  FeaFieldResult,
+  FeaFieldStorage,
+  FeaFieldStorageRef,
+  FeaObjectArtifactMetadata,
+  FeaPhysicsProfileCatalogEntry,
+  FeaProgressEvent,
+  FeaProgressPhase,
+  FeaProgressStatus,
+  FeaRunDatasetFieldPagingPolicy,
+  FeaRunDatasetPayload,
+  FeaRunDatasetStudyRef,
+  FeaRunResult,
+  FeaStudyBoundaryConditionEntry,
+  FeaStudyDocumentCounts,
+  FeaStudyDocumentDiff,
+  FeaStudyDocumentOperation,
+  FeaStudyDocumentOperationOutput,
+  FeaStudyDocumentOperationResult,
+  FeaStudyDrivingConditionEntry,
+  FeaStudyMaterialAssignmentEntry,
+  FeaStudyMaterialEntry,
+  FeaStudyOutputEntry,
+  FeaStudyReadiness,
+  FeaStudyRegionEntry,
+  FeaStudyStepEntry,
+  FeaStudySummary,
+  FeaRunArtifactRole
+} from "./fea-contracts.js";
 export {
   createInMemoryFsProvider,
   createIndexedDbFsHandle,
@@ -45,30 +148,7 @@ export type RunMatLogLevel = RunMatPresetLogLevel | (string & Record<never, neve
 
 export type WasmInitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
-export interface RunMatSnapshotSource {
-  bytes?: Uint8Array | ArrayBuffer;
-  url?: string;
-  fetcher?: SnapshotFetcher;
-  stream?: ReadableStream<Uint8Array | ArrayBufferView | ArrayBuffer>;
-}
-
-export interface SnapshotFetcherContext {
-  url?: string;
-}
-
-export type SnapshotFetcher = (
-  ctx: SnapshotFetcherContext
-) => Promise<SnapshotFetcherResult>;
-
-export type SnapshotFetcherResult =
-  | Uint8Array
-  | ArrayBuffer
-  | ArrayBufferView
-  | Response
-  | ReadableStream<Uint8Array | ArrayBufferView | ArrayBuffer>;
-
 export interface RunMatInitOptions {
-  snapshot?: RunMatSnapshotSource;
   enableGpu?: boolean;
   enableJit?: boolean;
   verbose?: boolean;
@@ -312,6 +392,25 @@ export interface GeometrySceneImageOptions {
   width?: number;
   height?: number;
   view?: string | null;
+  visibility?: GeometrySceneImageVisibilityState | null;
+  section?: GeometrySceneImageSectionState | null;
+}
+
+export interface GeometrySceneImageVisibilityState {
+  mode: "all" | "hidden" | "isolated" | string;
+  hidden_ids?: string[];
+  isolated_ids?: string[];
+}
+
+export interface GeometrySceneImageSectionState {
+  plane: GeometrySceneImageSectionPlane;
+}
+
+export interface GeometrySceneImageSectionPlane {
+  normal: [number, number, number];
+  origin?: [number, number, number] | null;
+  offset?: number | null;
+  label?: string | null;
 }
 
 export type FigureImageCameraProjectionState =
@@ -724,41 +823,6 @@ export interface GeometryPreviewResult extends GeometryInspectResult {
   previewMessage?: string | null;
 }
 
-export interface FeaCapabilities {
-  supportedDocumentExtensions: string[];
-  supportedGeometryExtensions: string[];
-  supportsCheck: boolean;
-  supportsRun: boolean;
-  supportsResults: boolean;
-  supportsLiveProgress: boolean;
-  visualizationBackend: "runmat-plot";
-}
-
-export interface FeaCheckResult {
-  path: string;
-  documentKind: "study" | "sweep";
-  valid: boolean;
-  validation: unknown;
-  plan?: unknown;
-  diagnostics: unknown[];
-  evidenceArtifactPaths: string[];
-}
-
-export interface FeaRunResult {
-  path: string;
-  documentKind: "study" | "sweep";
-  run: unknown;
-  results?: unknown;
-  figureHandles: number[];
-  artifactManifest?: unknown;
-  diagnostics: unknown[];
-}
-
-export interface FeaResultsResult {
-  runId: string;
-  results: unknown;
-}
-
 export interface RunMatSessionHandle {
   executeRequest(request: ExecuteRequest): Promise<ExecuteResult>;
   resetSession(): Promise<void>;
@@ -768,7 +832,6 @@ export interface RunMatSessionHandle {
   importWorkspaceState(state: Uint8Array): Promise<boolean>;
   workspaceSnapshot(): Promise<WorkspaceSnapshot>;
   inspectDataFile(path: string): Promise<WorkspaceEntry[]>;
-  inspectGeometry(path: string, budget?: GeometryPreviewBudget | null): Promise<GeometryInspectResult>;
   previewGeometry(path: string, budget?: GeometryPreviewBudget | null): Promise<GeometryPreviewResult>;
   disposeGeometryPreview?(
     figureHandle?: number | null,
@@ -776,8 +839,14 @@ export interface RunMatSessionHandle {
   ): Promise<void> | void;
   feaCapabilities(): Promise<FeaCapabilities>;
   checkFeaStudy(path: string): Promise<FeaCheckResult>;
+  applyFeaStudyDocumentOperation(
+    operation: FeaStudyDocumentOperation,
+    path: string,
+    source: string | null,
+    input: Record<string, unknown>,
+  ): Promise<FeaStudyDocumentOperationOutput>;
   runFeaStudy(path: string, artifactRoot?: string | null): Promise<FeaRunResult>;
-  feaResults(runId: string): Promise<FeaResultsResult>;
+  feaField(runId: string, fieldId: string, options?: FeaFieldRequestOptions): Promise<FeaFieldResult>;
   materializeDataFileVariable(
     path: string,
     selector: WorkspaceMaterializeSelector,
@@ -807,9 +876,6 @@ export interface RunMatSessionHandle {
 }
 
 interface NativeInitOptions {
-  snapshotBytes?: Uint8Array;
-  snapshotStream?: ReadableStream<Uint8Array | ArrayBufferView | ArrayBuffer>;
-  snapshotUrl?: string;
   enableGpu?: boolean;
   enableJit?: boolean;
   verbose?: boolean;
@@ -839,7 +905,6 @@ interface RunMatNativeSession {
   importWorkspaceState?: (state: Uint8Array) => boolean;
   workspaceSnapshot?: () => WorkspaceSnapshot;
   inspectDataFile?: (path: string) => WorkspaceEntry[] | Promise<WorkspaceEntry[]>;
-  inspectGeometry?: (path: string, budget?: GeometryPreviewBudget | null) => GeometryInspectResult | Promise<GeometryInspectResult>;
   previewGeometry?: (path: string, budget?: GeometryPreviewBudget | null) => GeometryPreviewResult | Promise<GeometryPreviewResult>;
   disposeGeometryPreview?: (
     figureHandle?: number | null,
@@ -847,8 +912,18 @@ interface RunMatNativeSession {
   ) => void | Promise<void>;
   feaCapabilities?: () => FeaCapabilities | Promise<FeaCapabilities>;
   checkFeaStudy?: (path: string) => FeaCheckResult | Promise<FeaCheckResult>;
+  applyFeaStudyDocumentOperation?: (
+    operation: FeaStudyDocumentOperation,
+    path: string,
+    source: string | null,
+    input: Record<string, unknown>,
+  ) => FeaStudyDocumentOperationOutput | Promise<FeaStudyDocumentOperationOutput>;
   runFeaStudy?: (path: string, artifactRoot?: string | null) => FeaRunResult | Promise<FeaRunResult>;
-  feaResults?: (runId: string) => FeaResultsResult | Promise<FeaResultsResult>;
+  feaField?: (
+    runId: string,
+    fieldId: string,
+    options?: FeaFieldRequestOptions,
+  ) => FeaFieldResult | Promise<FeaFieldResult>;
   materializeDataFileVariable?: (
     path: string,
     array: string,
@@ -925,17 +1000,26 @@ export interface PlotSurfaceCameraState {
 }
 
 export type GeometrySceneDisplayMode = "shaded" | "edges" | "wireframe";
+export type GeometrySceneViewPreset =
+  | "perspective"
+  | "isometric"
+  | "front"
+  | "back"
+  | "left"
+  | "right"
+  | "top"
+  | "bottom";
 
 export interface GeometrySceneRegionHighlightState {
   regionId: string;
-  color: [number, number, number, number];
+  color?: [number, number, number, number] | null;
   role?: string | null;
   label?: string | null;
 }
 
 export interface GeometrySceneRegionAnnotationState {
   regionId: string;
-  color: [number, number, number, number];
+  color?: [number, number, number, number] | null;
   role?: string | null;
   label?: string | null;
   direction?: [number, number, number] | null;
@@ -944,11 +1028,16 @@ export interface GeometrySceneRegionAnnotationState {
 
 export interface GeometryScenePresentationState {
   selectedRegionId?: string | null;
+  selectedRegionIds?: string[] | null;
   hoveredRegionId?: string | null;
   regionHighlights?: GeometrySceneRegionHighlightState[];
   regionAnnotations?: GeometrySceneRegionAnnotationState[];
   displayMode?: GeometrySceneDisplayMode;
   edgeOverlayEnabled?: boolean;
+  hiddenOwnerNodeIds?: string[] | null;
+  isolatedOwnerNodeIds?: string[] | null;
+  section?: GeometrySceneImageSectionState | null;
+  viewPreset?: GeometrySceneViewPreset | null;
 }
 
 export interface GeometryScenePickResult {
@@ -1065,7 +1154,6 @@ async function loadNativeModule(wasmModule?: WasmInitInput): Promise<RunMatNativ
 
 export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMatSessionHandle> {
   const native = await loadNativeModule(options.wasmModule);
-  const snapshotResolution = await resolveSnapshotSource(options.snapshot);
   const fsProvider = await resolveFsProvider(options.fsProvider);
   if (options.plotCanvas) {
     if (typeof native.createPlotSurface === "function") {
@@ -1098,9 +1186,6 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
     }
   }
   const session = await native.initRunMat({
-    snapshotBytes: snapshotResolution.bytes,
-    snapshotStream: snapshotResolution.stream,
-    snapshotUrl: options.snapshot?.url,
     enableGpu: effectiveEnableGpu,
     enableJit: options.enableJit ?? false,
     verbose: options.verbose ?? false,
@@ -1610,14 +1695,6 @@ class WebRunMatSession implements RunMatSessionHandle {
     return Array.isArray(entries) ? entries : [];
   }
 
-  async inspectGeometry(path: string, budget?: GeometryPreviewBudget | null): Promise<GeometryInspectResult> {
-    this.ensureActive();
-    if (typeof this.native.inspectGeometry !== "function") {
-      throw new Error("The loaded runmat-wasm module does not expose inspectGeometry yet.");
-    }
-    return this.native.inspectGeometry(path, budget ?? null);
-  }
-
   async previewGeometry(path: string, budget?: GeometryPreviewBudget | null): Promise<GeometryPreviewResult> {
     this.ensureActive();
     if (typeof this.native.previewGeometry !== "function") {
@@ -1659,6 +1736,19 @@ class WebRunMatSession implements RunMatSessionHandle {
     return this.native.checkFeaStudy(path);
   }
 
+  async applyFeaStudyDocumentOperation(
+    operation: FeaStudyDocumentOperation,
+    path: string,
+    source: string | null,
+    input: Record<string, unknown>,
+  ): Promise<FeaStudyDocumentOperationOutput> {
+    this.ensureActive();
+    if (typeof this.native.applyFeaStudyDocumentOperation !== "function") {
+      throw new Error("The loaded runmat-wasm module does not expose applyFeaStudyDocumentOperation yet.");
+    }
+    return this.native.applyFeaStudyDocumentOperation(operation, path, source, input);
+  }
+
   async runFeaStudy(path: string, artifactRoot?: string | null): Promise<FeaRunResult> {
     this.ensureActive();
     if (typeof this.native.runFeaStudy !== "function") {
@@ -1667,12 +1757,12 @@ class WebRunMatSession implements RunMatSessionHandle {
     return this.native.runFeaStudy(path, artifactRoot ?? null);
   }
 
-  async feaResults(runId: string): Promise<FeaResultsResult> {
+  async feaField(runId: string, fieldId: string, options?: FeaFieldRequestOptions): Promise<FeaFieldResult> {
     this.ensureActive();
-    if (typeof this.native.feaResults !== "function") {
-      throw new Error("The loaded runmat-wasm module does not expose feaResults yet.");
+    if (typeof this.native.feaField !== "function") {
+      throw new Error("The loaded runmat-wasm module does not expose feaField yet.");
     }
-    return this.native.feaResults(runId);
+    return this.native.feaField(runId, fieldId, options);
   }
 
   async materializeDataFileVariable(
@@ -2051,127 +2141,6 @@ async function resolveFsProvider(
   }
 }
 
-type SnapshotStream = ReadableStream<Uint8Array | ArrayBufferView | ArrayBuffer>;
-
-interface SnapshotResolution {
-  bytes?: Uint8Array;
-  stream?: SnapshotStream;
-}
-
-async function resolveSnapshotSource(source?: RunMatSnapshotSource): Promise<SnapshotResolution> {
-  if (!source) {
-    return {};
-  }
-  if (source.bytes) {
-    return { bytes: toUint8Array(source.bytes) };
-  }
-  if (source.stream) {
-    return { stream: source.stream };
-  }
-  if (source.fetcher) {
-    const fetched = await source.fetcher({ url: source.url });
-    return coerceSnapshotFetcherResult(fetched);
-  }
-  if (source.url) {
-    if (typeof fetch === "undefined") {
-      throw new Error(
-        "Global fetch API is unavailable; provide snapshot.bytes or snapshot.fetcher instead."
-      );
-    }
-    const response = await fetch(source.url);
-    return coerceResponseForSnapshot(response, source.url);
-  }
-  return {};
-}
-
-async function coerceSnapshotFetcherResult(value: SnapshotFetcherResult): Promise<SnapshotResolution> {
-  if (value instanceof Uint8Array) {
-    return { bytes: value };
-  }
-  if (value instanceof ArrayBuffer) {
-    return { bytes: new Uint8Array(value) };
-  }
-  if (ArrayBuffer.isView(value)) {
-    return { bytes: toUint8Array(value) };
-  }
-  if (isReadableStream(value)) {
-    return { stream: value };
-  }
-  if (isResponse(value)) {
-    return coerceResponseForSnapshot(value);
-  }
-  throw new Error("Unsupported snapshot fetcher result");
-}
-
-async function coerceResponseForSnapshot(response: Response, origin?: string): Promise<SnapshotResolution> {
-  if (!response.ok) {
-    const suffix = origin ? ` from ${origin}` : "";
-    throw new Error(`Failed to fetch snapshot${suffix} (status ${response.status})`);
-  }
-  if (response.body) {
-    return { stream: response.body as SnapshotStream };
-  }
-  const buffer = await response.arrayBuffer();
-  return { bytes: new Uint8Array(buffer) };
-}
-
-function isReadableStream(value: unknown): value is SnapshotStream {
-  return typeof ReadableStream !== "undefined" && value instanceof ReadableStream;
-}
-
-function isResponse(value: unknown): value is Response {
-  return typeof Response !== "undefined" && value instanceof Response;
-}
-
-async function fetchSnapshotFromUrl(url: string): Promise<Uint8Array> {
-  if (typeof fetch === "undefined") {
-    throw new Error("Global fetch API is unavailable; provide snapshot.bytes or snapshot.fetcher instead.");
-  }
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch snapshot from ${url} (status ${response.status})`);
-  }
-  if (!response.body) {
-    const buffer = await response.arrayBuffer();
-    return new Uint8Array(buffer);
-  }
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) {
-      break;
-    }
-    if (!value) {
-      continue;
-    }
-    const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
-    total += chunk.length;
-    chunks.push(chunk);
-  }
-  const result = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    result.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return result;
-}
-
-function toUint8Array(data: Uint8Array | ArrayBuffer | ArrayBufferView): Uint8Array {
-  if (data instanceof Uint8Array) {
-    return data;
-  }
-  if (data instanceof ArrayBuffer) {
-    return new Uint8Array(data);
-  }
-  if (ArrayBuffer.isView(data)) {
-    return new Uint8Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength));
-  }
-  throw new Error("Unsupported snapshot buffer type");
-}
-
 function normalizeMaterializeSelector(
   selector: WorkspaceMaterializeSelector
 ): WorkspaceMaterializeSelectorWire {
@@ -2265,8 +2234,6 @@ function normalizeResumeInputValue(value: ResumeInputValue): ResumeInputPayload 
 }
 
 export const __internals = {
-  resolveSnapshotSource,
-  fetchSnapshotFromUrl,
   coerceFigureError,
   normalizeResumeInputValue,
   workspaceHover: workspaceHoverInternals as unknown as Record<string, unknown>,

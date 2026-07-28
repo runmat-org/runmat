@@ -11,7 +11,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode, SurfacePlot};
 
-use super::common::{tensor_to_surface_grid, SurfaceDataInput};
+use super::common::{tensor_to_surface_grid_matlab_xy, SurfaceDataInput};
 use super::op_common::surface_inputs::{
     axis_sources_to_host, image_axis_sources_from_xy_values, parse_surface_call_args, AxisSource,
 };
@@ -254,11 +254,15 @@ pub async fn image_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             build_truecolor_image_surface_gpu(&handle, &x_axis, &y_axis, rows, cols, channels)
                 .map_err(map_image_invalid_argument)?
         }
-        ImageInputKind::Indexed(input) => {
-            build_indexed_image_surface(&input, &x_axis, &y_axis, style.colormap, color_limits)
-                .await
-                .map_err(map_image_invalid_argument)?
-        }
+        ImageInputKind::Indexed(input) => build_indexed_image_surface(
+            &input,
+            &x_axis,
+            &y_axis,
+            style.colormap.clone(),
+            color_limits,
+        )
+        .await
+        .map_err(map_image_invalid_argument)?,
     };
 
     surface = surface.with_flatten_z(true).with_image_mode(true);
@@ -498,7 +502,7 @@ pub(crate) async fn build_indexed_image_surface(
                 &c_gpu,
                 min_z,
                 max_z,
-                colormap,
+                colormap.clone(),
                 1.0,
                 true,
             )
@@ -523,7 +527,7 @@ pub(crate) async fn build_indexed_image_surface(
             super::common::gather_tensor_from_gpu_async(handle, BUILTIN_NAME).await?
         }
     };
-    let grid = tensor_to_surface_grid(tensor, x_host.len(), y_host.len(), BUILTIN_NAME)?;
+    let grid = tensor_to_surface_grid_matlab_xy(tensor, y_host.len(), x_host.len(), BUILTIN_NAME)?;
     Ok(super::surf::build_surface(x_host, y_host, grid)?
         .with_flatten_z(true)
         .with_image_mode(true)
@@ -537,30 +541,32 @@ fn build_truecolor_image_surface(
     x_axis: Vec<f64>,
     y_axis: Vec<f64>,
 ) -> crate::BuiltinResult<SurfacePlot> {
-    let rows = x_axis.len();
-    let cols = y_axis.len();
+    let x_len = x_axis.len();
+    let y_len = y_axis.len();
     let channels = tensor.shape.get(2).copied().unwrap_or(3);
     let scale = match tensor.dtype {
         NumericDType::U8 => 1.0f32 / 255.0,
         NumericDType::U16 => 1.0f32 / 65535.0,
+        NumericDType::U32 => 1.0f32 / (u32::MAX as f32),
         NumericDType::F32 | NumericDType::F64 => 1.0,
     };
-    let mut grid = vec![vec![glam::Vec4::ZERO; cols]; rows];
-    for row in 0..rows {
-        for col in 0..cols {
-            let base = row + rows * col;
+    let mut grid = vec![vec![glam::Vec4::ZERO; y_len]; x_len];
+    let plane = x_len * y_len;
+    for x_col in 0..x_len {
+        for y_row in 0..y_len {
+            let base = y_row + y_len * x_col;
             let r = tensor.data[base] as f32 * scale;
-            let g = tensor.data[base + rows * cols] as f32 * scale;
-            let b = tensor.data[base + 2 * rows * cols] as f32 * scale;
+            let g = tensor.data[base + plane] as f32 * scale;
+            let b = tensor.data[base + 2 * plane] as f32 * scale;
             let a = if channels == 4 {
-                tensor.data[base + 3 * rows * cols] as f32 * scale
+                tensor.data[base + 3 * plane] as f32 * scale
             } else {
                 1.0
             };
-            grid[row][col] = glam::Vec4::new(r, g, b, a);
+            grid[x_col][y_row] = glam::Vec4::new(r, g, b, a);
         }
     }
-    let z = vec![vec![0.0; cols]; rows];
+    let z = vec![vec![0.0; y_len]; x_len];
     Ok(SurfacePlot::new(x_axis, y_axis, z)
         .map_err(|e| {
             crate::builtins::plotting::plotting_error(BUILTIN_NAME, format!("image: {e}"))
@@ -585,6 +591,7 @@ mod tests {
     fn truecolor_tensor() -> Tensor {
         Tensor {
             data: vec![1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0],
+            integer_data: None,
             shape: vec![2, 2, 3],
             rows: 2,
             cols: 2,
@@ -621,6 +628,7 @@ mod tests {
         let _ = clear_figure(None);
         let c = Tensor {
             data: (1..=12).map(|v| v as f64).collect(),
+            integer_data: None,
             shape: vec![3, 4],
             rows: 3,
             cols: 4,
@@ -629,6 +637,7 @@ mod tests {
         let _ = futures::executor::block_on(image_builtin(vec![
             Value::Tensor(Tensor {
                 data: vec![10.0, 20.0],
+                integer_data: None,
                 shape: vec![2],
                 rows: 2,
                 cols: 1,
@@ -636,6 +645,7 @@ mod tests {
             }),
             Value::Tensor(Tensor {
                 data: vec![1.0, 5.0],
+                integer_data: None,
                 shape: vec![2],
                 rows: 2,
                 cols: 1,
@@ -653,6 +663,43 @@ mod tests {
             vec![10.0, 13.333333333333332, 16.666666666666664, 20.0]
         );
         assert_eq!(surface.y_data, vec![1.0, 3.0, 5.0]);
+        assert_eq!(
+            surface.z_data.as_deref(),
+            Some(
+                &[
+                    vec![1.0, 2.0, 3.0],
+                    vec![4.0, 5.0, 6.0],
+                    vec![7.0, 8.0, 9.0],
+                    vec![10.0, 11.0, 12.0],
+                ][..]
+            )
+        );
+    }
+
+    #[test]
+    fn image_truecolor_preserves_non_square_matlab_pixel_order() {
+        let tensor = Tensor {
+            data: vec![
+                0.1, 0.2, 0.3, 0.4, 0.5, 0.6, // red
+                0.7, 0.8, 0.9, 1.0, 0.1, 0.2, // green
+                0.3, 0.4, 0.5, 0.6, 0.7, 0.8, // blue
+            ],
+            integer_data: None,
+            shape: vec![2, 3, 3],
+            rows: 2,
+            cols: 3,
+            dtype: NumericDType::F64,
+        };
+        let surface = build_truecolor_image_surface(tensor, vec![1.0, 2.0, 3.0], vec![1.0, 2.0])
+            .expect("truecolor image should build");
+        let colors = surface.color_grid.expect("expected truecolor grid");
+
+        assert_eq!(colors.len(), 3);
+        assert_eq!(colors[0].len(), 2);
+        assert_eq!(colors[0][0], glam::Vec4::new(0.1, 0.7, 0.3, 1.0));
+        assert_eq!(colors[0][1], glam::Vec4::new(0.2, 0.8, 0.4, 1.0));
+        assert_eq!(colors[1][0], glam::Vec4::new(0.3, 0.9, 0.5, 1.0));
+        assert_eq!(colors[2][1], glam::Vec4::new(0.6, 0.2, 0.8, 1.0));
     }
 
     #[test]

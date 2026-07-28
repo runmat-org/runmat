@@ -8,12 +8,36 @@ pub fn isa_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Bool
 }
 
+pub fn underlying_type_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    Type::String
+}
+
+pub fn is_underlying_type_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    Type::Bool
+}
+
 pub fn ischar_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Bool
 }
 
 pub fn isstring_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Bool
+}
+
+pub fn ismethod_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    Type::Bool
+}
+
+pub fn isobject_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    Type::Bool
+}
+
+pub fn metaclass_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    Type::Unknown
+}
+
+pub fn superclasses_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    Type::cell_of(Type::String)
 }
 
 pub fn which_type(_args: &[Type], _context: &ResolveContext) -> Type {
@@ -64,6 +88,22 @@ mod tests {
     }
 
     #[test]
+    fn underlying_type_type_reports_string() {
+        assert_eq!(
+            underlying_type_type(&[], &ResolveContext::new(Vec::new())),
+            Type::String
+        );
+    }
+
+    #[test]
+    fn is_underlying_type_type_reports_bool() {
+        assert_eq!(
+            is_underlying_type_type(&[], &ResolveContext::new(Vec::new())),
+            Type::Bool
+        );
+    }
+
+    #[test]
     fn ischar_type_reports_bool() {
         assert_eq!(
             ischar_type(&[], &ResolveContext::new(Vec::new())),
@@ -76,6 +116,30 @@ mod tests {
         assert_eq!(
             isstring_type(&[], &ResolveContext::new(Vec::new())),
             Type::Bool
+        );
+    }
+
+    #[test]
+    fn ismethod_type_reports_bool() {
+        assert_eq!(
+            ismethod_type(&[], &ResolveContext::new(Vec::new())),
+            Type::Bool
+        );
+    }
+
+    #[test]
+    fn metaclass_type_reports_unknown_metadata() {
+        assert_eq!(
+            metaclass_type(&[], &ResolveContext::new(Vec::new())),
+            Type::Unknown
+        );
+    }
+
+    #[test]
+    fn superclasses_type_reports_cell_of_strings() {
+        assert_eq!(
+            superclasses_type(&[], &ResolveContext::new(Vec::new())),
+            Type::cell_of(Type::String)
         );
     }
 

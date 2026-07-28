@@ -1,0 +1,55 @@
+{
+  "title": "cell2struct",
+  "category": "cells/core",
+  "keywords": ["cell2struct", "cell", "struct", "conversion"],
+  "summary": "Convert a cell array into a struct or struct array.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host container conversion."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::cells::core::cell2struct::tests",
+    "integration": null
+  },
+  "description": "`cell2struct(C, fields, dim)` maps entries along dimension `dim` of `C` to named fields. Remaining dimensions become the struct-array shape.",
+  "behaviors": [
+    "`fields` may be a string scalar, string array, character matrix, character vector, or cell array of text scalars.",
+    "The selected dimension must have the same extent as the number of field names.",
+    "When the remaining dimensions contain a single element, the result is a scalar struct.",
+    "Larger remaining dimensions are represented as a RunMat struct-array cell container."
+  ],
+  "examples": [
+    {
+      "description": "Converting a row cell into a scalar struct",
+      "input": "S = cell2struct({1, 'Ada'}, {'id','name'}, 2)",
+      "output": "S = struct with fields: id, name"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why are non-scalar struct arrays represented as cells?",
+      "answer": "RunMat currently represents struct arrays as cell arrays containing struct values, matching existing table and struct-array runtime conventions."
+    }
+  ],
+  "links": [
+    { "label": "num2cell", "url": "./num2cell" },
+    { "label": "struct", "url": "./struct" },
+    { "label": "cell", "url": "./cell" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/cells/core/cell2struct.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/cells/core/cell2struct.rs"
+  },
+  "gpu_residency": "The result is host-resident.",
+  "gpu_behavior": ["No GPU kernels are launched."]
+}

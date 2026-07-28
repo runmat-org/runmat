@@ -244,6 +244,7 @@ async fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
         | Value::ClassRef(_)
         | Value::MException(_)
         | Value::Symbolic(_)
+        | Value::SymbolicArray(_)
         | Value::OutputList(_) => Err(rot90_error(&ROT90_ERROR_UNSUPPORTED_INPUT)),
     }
 }
@@ -428,14 +429,6 @@ fn rot90_char_array(array: CharArray, steps: usize) -> crate::BuiltinResult<Char
 async fn rot90_gpu(handle: GpuTensorHandle, steps: usize) -> crate::BuiltinResult<Value> {
     if steps == 0 {
         return Ok(Value::GpuTensor(handle));
-    }
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        if handle.device_id != 0 {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
     }
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(out) = rot90_gpu_via_provider(provider, &handle, steps) {

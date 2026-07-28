@@ -175,6 +175,18 @@ async fn ctranspose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
         Value::Int(i) => Ok(Value::Int(i)),
         Value::Bool(b) => Ok(Value::Bool(b)),
         Value::String(s) => Ok(Value::String(s)),
+        receiver @ Value::Object(_) | receiver @ Value::HandleObject(_) => {
+            let class_name = crate::object_receiver_class_name(&receiver).ok_or_else(|| {
+                invalid_input("ctranspose: unsupported object receiver".to_string())
+            })?;
+            crate::dispatch_object_external_member(
+                class_name,
+                NAME,
+                vec![receiver],
+                crate::current_requested_outputs(),
+            )
+            .await
+        }
         other => Err(invalid_input(format!(
             "ctranspose: unsupported input type {other:?}"
         ))),

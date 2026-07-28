@@ -8,7 +8,15 @@ use crate::core::{
     AlphaMode, BoundingBox, Camera, DrawCall, Material, PipelineType, RenderData, SceneNode, Vertex,
 };
 use glam::{Mat4, Vec2, Vec3, Vec4};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+use std::collections::BTreeSet;
+
+const SECTION_DISTANCE_EPSILON: f32 = 1.0e-6;
+const GEOMETRY_SELECTED_REGION_COLOR: [f32; 4] = [0.98, 0.45, 0.12, 1.0];
+const GEOMETRY_HOVER_REGION_COLOR: [f32; 4] = [0.43, 0.78, 1.0, 1.0];
+const GEOMETRY_MATERIAL_REGION_COLOR: [f32; 4] = [0.38, 0.58, 0.96, 0.92];
+const GEOMETRY_BOUNDARY_REGION_COLOR: [f32; 4] = [0.22, 0.82, 0.52, 0.96];
+const GEOMETRY_DRIVING_REGION_COLOR: [f32; 4] = [0.98, 0.38, 0.28, 0.96];
 
 #[derive(Debug, Clone)]
 pub struct GeometryScene {
@@ -153,7 +161,9 @@ impl GeometryScene {
                 let Some(anchor) = chunk.region_anchor(&annotation.region_id) else {
                     continue;
                 };
-                let color = annotation.color;
+                let color = annotation
+                    .color
+                    .unwrap_or_else(|| geometry_region_role_color(annotation.role.as_deref()));
                 let mut marker = vertex(
                     anchor.to_array(),
                     color,
@@ -251,6 +261,8 @@ impl GeometryScene {
 #[serde(rename_all = "camelCase")]
 pub struct GeometryScenePresentation {
     pub selected_region_id: Option<String>,
+    #[serde(default)]
+    pub selected_region_ids: Vec<String>,
     pub hovered_region_id: Option<String>,
     #[serde(default)]
     pub region_highlights: Vec<GeometrySceneRegionHighlight>,
@@ -260,26 +272,149 @@ pub struct GeometryScenePresentation {
     pub display_mode: GeometrySceneDisplayMode,
     #[serde(default = "default_edge_overlay_enabled")]
     pub edge_overlay_enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hidden_owner_node_ids: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub isolated_owner_node_ids: Option<Vec<String>>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_explicit_optional_section",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub section: Option<Option<GeometrySceneSection>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view_preset: Option<GeometrySceneViewPreset>,
 }
 
 impl Default for GeometryScenePresentation {
     fn default() -> Self {
         Self {
             selected_region_id: None,
+            selected_region_ids: Vec::new(),
             hovered_region_id: None,
             region_highlights: Vec::new(),
             region_annotations: Vec::new(),
             display_mode: GeometrySceneDisplayMode::Shaded,
             edge_overlay_enabled: true,
+            hidden_owner_node_ids: None,
+            isolated_owner_node_ids: None,
+            section: None,
+            view_preset: None,
         }
     }
+}
+
+impl GeometryScenePresentation {
+    pub(crate) fn rewrites_geometry_vertices(&self) -> bool {
+        self.hovered_region_id.is_some()
+            || self.selected_region_id.is_some()
+            || !self.selected_region_ids.is_empty()
+            || !self.region_highlights.is_empty()
+            || self.active_section().is_some()
+    }
+
+    pub(crate) fn resolves_owner_visibility(&self) -> bool {
+        self.hidden_owner_node_ids.is_some() || self.isolated_owner_node_ids.is_some()
+    }
+
+    pub(crate) fn resolved_hidden_owner_node_ids<'a, I>(
+        &self,
+        all_owner_node_ids: I,
+        current_hidden_owner_node_ids: &BTreeSet<String>,
+    ) -> BTreeSet<String>
+    where
+        I: IntoIterator<Item = &'a str>,
+    {
+        if !self.resolves_owner_visibility() {
+            return current_hidden_owner_node_ids.clone();
+        }
+
+        let mut hidden = BTreeSet::new();
+        if let Some(isolated_owner_node_ids) = self.isolated_owner_node_ids.as_ref() {
+            let isolated =
+                normalized_owner_node_id_set(isolated_owner_node_ids.iter().map(String::as_str));
+            for owner_id in all_owner_node_ids {
+                let normalized = owner_id.trim();
+                if !normalized.is_empty() && !isolated.contains(normalized) {
+                    hidden.insert(normalized.to_string());
+                }
+            }
+        }
+
+        if let Some(hidden_owner_node_ids) = self.hidden_owner_node_ids.as_ref() {
+            hidden.extend(normalized_owner_node_id_set(
+                hidden_owner_node_ids.iter().map(String::as_str),
+            ));
+        }
+        hidden
+    }
+
+    pub(crate) fn resolves_section(&self) -> bool {
+        self.section.is_some()
+    }
+
+    pub(crate) fn active_section(&self) -> Option<&GeometrySceneSection> {
+        self.section.as_ref().and_then(Option::as_ref)
+    }
+}
+
+fn normalized_owner_node_id_set<'a, I>(ids: I) -> BTreeSet<String>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    ids.into_iter()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn deserialize_explicit_optional_section<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<GeometrySceneSection>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<GeometrySceneSection>::deserialize(deserializer).map(Some)
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeometrySceneSection {
+    pub plane: GeometrySceneSectionPlane,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeometrySceneSectionPlane {
+    pub normal: [f32; 3],
+    #[serde(default)]
+    pub origin: Option<[f32; 3]>,
+    #[serde(default)]
+    pub offset: Option<f32>,
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GeometrySceneViewPreset {
+    Perspective,
+    Isometric,
+    Front,
+    Back,
+    Left,
+    Right,
+    Top,
+    Bottom,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GeometrySceneRegionHighlight {
     pub region_id: String,
-    pub color: [f32; 4],
+    #[serde(default)]
+    pub color: Option<[f32; 4]>,
     #[serde(default)]
     pub role: Option<String>,
     #[serde(default)]
@@ -290,7 +425,8 @@ pub struct GeometrySceneRegionHighlight {
 #[serde(rename_all = "camelCase")]
 pub struct GeometrySceneRegionAnnotation {
     pub region_id: String,
-    pub color: [f32; 4],
+    #[serde(default)]
+    pub color: Option<[f32; 4]>,
     #[serde(default)]
     pub role: Option<String>,
     #[serde(default)]
@@ -667,6 +803,11 @@ impl GeometrySceneChunk {
         presentation: &GeometryScenePresentation,
     ) -> RenderData {
         let mut render_data = self.render_data.clone();
+        if presentation.rewrites_geometry_vertices() {
+            // Presentation overlays rewrite CPU-side vertices/indices. A stale
+            // GPU vertex source would otherwise bypass the rewritten data.
+            render_data.gpu_vertices = None;
+        }
         let is_edge_chunk = self.is_edge_chunk();
         match presentation.display_mode {
             GeometrySceneDisplayMode::Wireframe if !is_edge_chunk => {
@@ -703,20 +844,71 @@ impl GeometrySceneChunk {
         }
 
         for highlight in &presentation.region_highlights {
-            self.apply_region_color(&mut render_data, &highlight.region_id, highlight.color);
+            self.apply_region_color(
+                &mut render_data,
+                &highlight.region_id,
+                highlight
+                    .color
+                    .unwrap_or_else(|| geometry_region_role_color(highlight.role.as_deref())),
+            );
         }
         if let Some(region_id) = presentation.hovered_region_id.as_deref() {
-            self.apply_region_color(&mut render_data, region_id, [0.43, 0.78, 1.0, 1.0]);
+            self.apply_region_color(&mut render_data, region_id, GEOMETRY_HOVER_REGION_COLOR);
+        }
+        for region_id in &presentation.selected_region_ids {
+            let colored = self.apply_region_color(
+                &mut render_data,
+                region_id,
+                GEOMETRY_SELECTED_REGION_COLOR,
+            );
+            log::info!(
+                target: "runmat_plot",
+                "geometry_scene.selection_color chunk_id={} region_id={} colored_triangles={}",
+                self.chunk_id,
+                region_id,
+                colored
+            );
         }
         if let Some(region_id) = presentation.selected_region_id.as_deref() {
-            self.apply_region_color(&mut render_data, region_id, [0.98, 0.78, 0.22, 1.0]);
+            let colored = self.apply_region_color(
+                &mut render_data,
+                region_id,
+                GEOMETRY_SELECTED_REGION_COLOR,
+            );
+            log::info!(
+                target: "runmat_plot",
+                "geometry_scene.selection_color chunk_id={} region_id={} colored_triangles={}",
+                self.chunk_id,
+                region_id,
+                colored
+            );
+        }
+        if let Some(section) = presentation.active_section() {
+            render_data = self.render_data_with_section(render_data, section);
         }
         render_data
     }
 
+    fn render_data_with_section(
+        &self,
+        render_data: RenderData,
+        section: &GeometrySceneSection,
+    ) -> RenderData {
+        let Some(plane) = section_plane(&section.plane) else {
+            return render_data;
+        };
+        match render_data.pipeline_type {
+            PipelineType::Triangles => clip_triangle_render_data(render_data, plane),
+            PipelineType::Lines => clip_line_render_data(render_data, plane),
+            _ => render_data,
+        }
+    }
+
     fn is_edge_chunk(&self) -> bool {
-        self.render_data.pipeline_type == PipelineType::Lines
-            || self.chunk_id.contains(":edges")
+        matches!(
+            self.render_data.pipeline_type,
+            PipelineType::Lines | PipelineType::LinesNoDepth
+        ) || self.chunk_id.contains(":edges")
             || self
                 .label
                 .as_ref()
@@ -803,19 +995,32 @@ impl GeometrySceneChunk {
         }
     }
 
-    fn apply_region_color(&self, render_data: &mut RenderData, region_id: &str, color: [f32; 4]) {
+    fn apply_region_color(
+        &self,
+        render_data: &mut RenderData,
+        region_id: &str,
+        color: [f32; 4],
+    ) -> usize {
         if self.render_data.pipeline_type != PipelineType::Triangles {
-            return;
+            return 0;
         }
         let Some(region) = self.regions.iter().find(|item| item.region_id == region_id) else {
-            return;
+            log::info!(
+                target: "runmat_plot",
+                "geometry_scene.selection_color_missing chunk_id={} region_id={} available_regions={}",
+                self.chunk_id,
+                region_id,
+                self.regions.len()
+            );
+            return 0;
         };
-        let Some(indices) = self.indices.as_ref() else {
-            return;
+        let (Some(indices), Some(render_indices)) =
+            (self.indices.as_ref(), render_data.indices.as_mut())
+        else {
+            return self.apply_direct_region_color(render_data, region, color);
         };
-        let Some(render_indices) = render_data.indices.as_mut() else {
-            return;
-        };
+
+        let mut colored = 0usize;
         for range in &region.triangle_ranges {
             let start = range.start as usize;
             let end = start.saturating_add(range.count as usize);
@@ -847,9 +1052,239 @@ impl GeometrySceneChunk {
                 }
                 if isolated {
                     render_indices[base..base + 3].copy_from_slice(&isolated_indices);
+                    colored += 1;
                 }
             }
         }
+        colored
+    }
+
+    fn apply_direct_region_color(
+        &self,
+        render_data: &mut RenderData,
+        region: &GeometrySceneRegion,
+        color: [f32; 4],
+    ) -> usize {
+        if render_data.indices.is_some() {
+            return 0;
+        }
+        let mut colored = 0usize;
+        for range in &region.triangle_ranges {
+            let start = range.start as usize;
+            let end = start.saturating_add(range.count as usize);
+            for triangle_index in start..end {
+                let base = triangle_index.saturating_mul(3);
+                let Some(triangle) = render_data.vertices.get_mut(base..base + 3) else {
+                    continue;
+                };
+                for vertex in triangle {
+                    vertex.color = color;
+                }
+                colored += 1;
+            }
+        }
+        colored
+    }
+}
+
+fn section_plane(plane: &GeometrySceneSectionPlane) -> Option<(Vec3, Vec3)> {
+    let normal = Vec3::from_array(plane.normal).normalize_or_zero();
+    if normal.length_squared() <= f32::EPSILON {
+        return None;
+    }
+    let origin = plane
+        .origin
+        .map(Vec3::from_array)
+        .unwrap_or_else(|| normal * plane.offset.unwrap_or(0.0));
+    if !origin.is_finite() {
+        return None;
+    }
+    Some((normal, origin))
+}
+
+fn geometry_region_role_color(role: Option<&str>) -> [f32; 4] {
+    match role.unwrap_or_default() {
+        "material" => GEOMETRY_MATERIAL_REGION_COLOR,
+        "boundary" => GEOMETRY_BOUNDARY_REGION_COLOR,
+        "driving" => GEOMETRY_DRIVING_REGION_COLOR,
+        "selection" => GEOMETRY_SELECTED_REGION_COLOR,
+        _ => GEOMETRY_HOVER_REGION_COLOR,
+    }
+}
+
+fn clip_triangle_render_data(mut render_data: RenderData, plane: (Vec3, Vec3)) -> RenderData {
+    let mut clipped_vertices = Vec::new();
+    if let Some(indices) = render_data.indices.as_ref() {
+        for triangle in indices.chunks_exact(3) {
+            let Some(vertices) = triangle_vertices_from_indices(&render_data.vertices, triangle)
+            else {
+                continue;
+            };
+            push_clipped_triangle(vertices, plane, &mut clipped_vertices);
+        }
+    } else {
+        for triangle in render_data.vertices.chunks_exact(3) {
+            push_clipped_triangle(
+                [triangle[0], triangle[1], triangle[2]],
+                plane,
+                &mut clipped_vertices,
+            );
+        }
+    }
+    let bounds = bounds_from_vertices(&clipped_vertices);
+    let vertex_count = clipped_vertices.len();
+    render_data.vertices = clipped_vertices;
+    render_data.indices = None;
+    render_data.bounds = Some(bounds);
+    render_data.draw_calls = vec![DrawCall {
+        vertex_offset: 0,
+        vertex_count,
+        index_offset: None,
+        index_count: None,
+        instance_count: 1,
+    }];
+    render_data
+}
+
+fn clip_line_render_data(mut render_data: RenderData, plane: (Vec3, Vec3)) -> RenderData {
+    let mut clipped_vertices = Vec::new();
+    if let Some(indices) = render_data.indices.as_ref() {
+        for line in indices.chunks_exact(2) {
+            let Some(a) = render_data.vertices.get(line[0] as usize).copied() else {
+                continue;
+            };
+            let Some(b) = render_data.vertices.get(line[1] as usize).copied() else {
+                continue;
+            };
+            push_clipped_line(a, b, plane, &mut clipped_vertices);
+        }
+    } else {
+        for line in render_data.vertices.chunks_exact(2) {
+            push_clipped_line(line[0], line[1], plane, &mut clipped_vertices);
+        }
+    }
+    let bounds = bounds_from_vertices(&clipped_vertices);
+    let vertex_count = clipped_vertices.len();
+    render_data.vertices = clipped_vertices;
+    render_data.indices = None;
+    render_data.bounds = Some(bounds);
+    render_data.draw_calls = vec![DrawCall {
+        vertex_offset: 0,
+        vertex_count,
+        index_offset: None,
+        index_count: None,
+        instance_count: 1,
+    }];
+    render_data
+}
+
+fn triangle_vertices_from_indices(vertices: &[Vertex], triangle: &[u32]) -> Option<[Vertex; 3]> {
+    Some([
+        *vertices.get(*triangle.first()? as usize)?,
+        *vertices.get(*triangle.get(1)? as usize)?,
+        *vertices.get(*triangle.get(2)? as usize)?,
+    ])
+}
+
+fn push_clipped_triangle(vertices: [Vertex; 3], plane: (Vec3, Vec3), output: &mut Vec<Vertex>) {
+    let clipped = clip_polygon_to_plane(&vertices, plane);
+    if clipped.len() < 3 {
+        return;
+    }
+    for index in 1..clipped.len().saturating_sub(1) {
+        output.push(clipped[0]);
+        output.push(clipped[index]);
+        output.push(clipped[index + 1]);
+    }
+}
+
+fn push_clipped_line(a: Vertex, b: Vertex, plane: (Vec3, Vec3), output: &mut Vec<Vertex>) {
+    let distance_a = signed_distance_to_plane(a, plane);
+    let distance_b = signed_distance_to_plane(b, plane);
+    let inside_a = distance_a >= -SECTION_DISTANCE_EPSILON;
+    let inside_b = distance_b >= -SECTION_DISTANCE_EPSILON;
+    match (inside_a, inside_b) {
+        (true, true) => {
+            output.push(a);
+            output.push(b);
+        }
+        (false, false) => {}
+        (true, false) => {
+            output.push(a);
+            output.push(interpolate_vertex(
+                a,
+                b,
+                section_intersection_t(distance_a, distance_b),
+            ));
+        }
+        (false, true) => {
+            output.push(interpolate_vertex(
+                a,
+                b,
+                section_intersection_t(distance_a, distance_b),
+            ));
+            output.push(b);
+        }
+    }
+}
+
+fn clip_polygon_to_plane(vertices: &[Vertex], plane: (Vec3, Vec3)) -> Vec<Vertex> {
+    let Some(mut previous) = vertices.last().copied() else {
+        return Vec::new();
+    };
+    let mut previous_distance = signed_distance_to_plane(previous, plane);
+    let mut previous_inside = previous_distance >= -SECTION_DISTANCE_EPSILON;
+    let mut output = Vec::with_capacity(vertices.len() + 1);
+    for current in vertices.iter().copied() {
+        let current_distance = signed_distance_to_plane(current, plane);
+        let current_inside = current_distance >= -SECTION_DISTANCE_EPSILON;
+        if current_inside != previous_inside {
+            output.push(interpolate_vertex(
+                previous,
+                current,
+                section_intersection_t(previous_distance, current_distance),
+            ));
+        }
+        if current_inside {
+            output.push(current);
+        }
+        previous = current;
+        previous_distance = current_distance;
+        previous_inside = current_inside;
+    }
+    output
+}
+
+fn signed_distance_to_plane(vertex: Vertex, (normal, origin): (Vec3, Vec3)) -> f32 {
+    (Vec3::from_array(vertex.position) - origin).dot(normal)
+}
+
+fn section_intersection_t(distance_a: f32, distance_b: f32) -> f32 {
+    let denominator = distance_a - distance_b;
+    if denominator.abs() <= f32::EPSILON {
+        0.0
+    } else {
+        (distance_a / denominator).clamp(0.0, 1.0)
+    }
+}
+
+fn interpolate_vertex(a: Vertex, b: Vertex, t: f32) -> Vertex {
+    let position = Vec3::from_array(a.position).lerp(Vec3::from_array(b.position), t);
+    let color = Vec4::from_array(a.color).lerp(Vec4::from_array(b.color), t);
+    let normal = Vec3::from_array(a.normal)
+        .lerp(Vec3::from_array(b.normal), t)
+        .normalize_or_zero();
+    let tex_coords_a = Vec2::from_array(a.tex_coords);
+    let tex_coords_b = Vec2::from_array(b.tex_coords);
+    Vertex {
+        position: position.to_array(),
+        color: color.to_array(),
+        normal: if normal.length_squared() > f32::EPSILON {
+            normal.to_array()
+        } else {
+            a.normal
+        },
+        tex_coords: tex_coords_a.lerp(tex_coords_b, t).to_array(),
     }
 }
 
@@ -1212,6 +1647,242 @@ mod tests {
     }
 
     #[test]
+    fn presentation_selection_colors_indexed_triangle_region() {
+        let material = cad_default_material();
+        let chunk = GeometrySceneChunk::indexed_triangles(
+            "face_chunk",
+            vec![
+                vertex([-1.0, -1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
+                vertex([1.0, -1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
+                vertex([0.0, 1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
+                vertex([2.0, -1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
+            ],
+            vec![0, 1, 2, 1, 3, 2],
+            material,
+        )
+        .with_regions(vec![GeometrySceneRegion::new(
+            "face_b",
+            Some("Face B".to_string()),
+            Some("cad-face".to_string()),
+            vec![GeometrySceneTriangleRange::new(1, 1)],
+        )]);
+
+        let render_data = chunk.render_data_with_presentation(&GeometryScenePresentation {
+            selected_region_ids: vec!["face_b".to_string()],
+            ..Default::default()
+        });
+
+        assert_eq!(render_data.vertices.len(), 7);
+        assert_eq!(
+            render_data.indices.as_deref(),
+            Some(&[0, 1, 2, 4, 5, 6][..])
+        );
+        assert_eq!(
+            render_data.vertices[4].color,
+            GEOMETRY_SELECTED_REGION_COLOR
+        );
+        assert_eq!(
+            render_data.vertices[5].color,
+            GEOMETRY_SELECTED_REGION_COLOR
+        );
+        assert_eq!(
+            render_data.vertices[6].color,
+            GEOMETRY_SELECTED_REGION_COLOR
+        );
+    }
+
+    #[test]
+    fn presentation_selection_colors_direct_triangle_region() {
+        let material = cad_default_material();
+        let base_color = [0.5, 0.5, 0.5, 1.0];
+        let vertices = vec![
+            vertex([-1.0, -1.0, 0.0], base_color, [0.0, 0.0, 1.0]),
+            vertex([1.0, -1.0, 0.0], base_color, [0.0, 0.0, 1.0]),
+            vertex([0.0, 1.0, 0.0], base_color, [0.0, 0.0, 1.0]),
+            vertex([1.0, -1.0, 0.0], base_color, [0.0, 0.0, 1.0]),
+            vertex([2.0, -1.0, 0.0], base_color, [0.0, 0.0, 1.0]),
+            vertex([0.0, 1.0, 0.0], base_color, [0.0, 0.0, 1.0]),
+        ];
+        let chunk = GeometrySceneChunk::from_render_data(
+            "face_chunk",
+            RenderData {
+                pipeline_type: PipelineType::Triangles,
+                vertices,
+                indices: None,
+                gpu_vertices: None,
+                bounds: None,
+                material,
+                draw_calls: vec![DrawCall {
+                    vertex_offset: 0,
+                    vertex_count: 6,
+                    index_offset: None,
+                    index_count: None,
+                    instance_count: 1,
+                }],
+                image: None,
+            },
+        )
+        .with_regions(vec![GeometrySceneRegion::new(
+            "face_b",
+            Some("Face B".to_string()),
+            Some("cad-face".to_string()),
+            vec![GeometrySceneTriangleRange::new(1, 1)],
+        )]);
+
+        let render_data = chunk.render_data_with_presentation(&GeometryScenePresentation {
+            selected_region_id: Some("face_b".to_string()),
+            ..Default::default()
+        });
+
+        assert!(render_data.indices.is_none());
+        assert_eq!(render_data.vertices.len(), 6);
+        assert_eq!(render_data.vertices[0].color, base_color);
+        assert_eq!(render_data.vertices[1].color, base_color);
+        assert_eq!(render_data.vertices[2].color, base_color);
+        assert_eq!(
+            render_data.vertices[3].color,
+            GEOMETRY_SELECTED_REGION_COLOR
+        );
+        assert_eq!(
+            render_data.vertices[4].color,
+            GEOMETRY_SELECTED_REGION_COLOR
+        );
+        assert_eq!(
+            render_data.vertices[5].color,
+            GEOMETRY_SELECTED_REGION_COLOR
+        );
+    }
+
+    #[test]
+    fn presentation_resolves_hidden_and_isolated_owner_visibility() {
+        let current_hidden = BTreeSet::from(["panel_b".to_string()]);
+        let all_owner_ids = ["panel_a", "panel_b", "panel_c"];
+
+        assert_eq!(
+            GeometryScenePresentation::default()
+                .resolved_hidden_owner_node_ids(all_owner_ids, &current_hidden),
+            current_hidden
+        );
+
+        assert_eq!(
+            GeometryScenePresentation {
+                hidden_owner_node_ids: Some(vec![
+                    " panel_a ".to_string(),
+                    String::new(),
+                    "panel_a".to_string(),
+                ]),
+                ..Default::default()
+            }
+            .resolved_hidden_owner_node_ids(all_owner_ids, &BTreeSet::new()),
+            BTreeSet::from(["panel_a".to_string()])
+        );
+
+        assert_eq!(
+            GeometryScenePresentation {
+                hidden_owner_node_ids: Some(vec!["panel_c".to_string()]),
+                isolated_owner_node_ids: Some(vec!["panel_a".to_string()]),
+                ..Default::default()
+            }
+            .resolved_hidden_owner_node_ids(all_owner_ids, &BTreeSet::new()),
+            BTreeSet::from(["panel_b".to_string(), "panel_c".to_string()])
+        );
+
+        assert_eq!(
+            GeometryScenePresentation {
+                hidden_owner_node_ids: Some(Vec::new()),
+                isolated_owner_node_ids: None,
+                ..Default::default()
+            }
+            .resolved_hidden_owner_node_ids(all_owner_ids, &current_hidden),
+            BTreeSet::new()
+        );
+    }
+
+    #[test]
+    fn presentation_section_distinguishes_preserve_clear_and_plane() {
+        let preserve: GeometryScenePresentation =
+            serde_json::from_value(serde_json::json!({})).expect("preserve presentation");
+        assert_eq!(preserve.section, None);
+
+        let clear: GeometryScenePresentation =
+            serde_json::from_value(serde_json::json!({ "section": null }))
+                .expect("clear presentation");
+        assert_eq!(clear.section, Some(None));
+
+        let sectioned: GeometryScenePresentation = serde_json::from_value(serde_json::json!({
+            "section": {
+                "plane": {
+                    "normal": [1.0, 0.0, 0.0],
+                    "origin": [0.0, 0.0, 0.0],
+                    "label": "midplane"
+                }
+            }
+        }))
+        .expect("section presentation");
+        let section = sectioned
+            .section
+            .as_ref()
+            .and_then(Option::as_ref)
+            .expect("section");
+        assert_eq!(section.plane.normal, [1.0, 0.0, 0.0]);
+        assert_eq!(section.plane.label.as_deref(), Some("midplane"));
+    }
+
+    #[test]
+    fn presentation_accepts_bounded_view_presets() {
+        let front: GeometryScenePresentation =
+            serde_json::from_value(serde_json::json!({ "viewPreset": "front" }))
+                .expect("front view presentation");
+        assert_eq!(front.view_preset, Some(GeometrySceneViewPreset::Front));
+
+        let isometric: GeometryScenePresentation =
+            serde_json::from_value(serde_json::json!({ "viewPreset": "isometric" }))
+                .expect("isometric view presentation");
+        assert_eq!(
+            isometric.view_preset,
+            Some(GeometrySceneViewPreset::Isometric)
+        );
+    }
+
+    #[test]
+    fn presentation_section_clips_triangle_render_data() {
+        let material = cad_default_material();
+        let chunk = GeometrySceneChunk::indexed_triangles(
+            "face_chunk",
+            vec![
+                vertex([-1.0, -1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
+                vertex([1.0, -1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
+                vertex([0.0, 1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
+            ],
+            vec![0, 1, 2],
+            material,
+        );
+        let render_data = chunk.render_data_with_presentation(&GeometryScenePresentation {
+            section: Some(Some(GeometrySceneSection {
+                plane: GeometrySceneSectionPlane {
+                    normal: [1.0, 0.0, 0.0],
+                    origin: Some([0.0, 0.0, 0.0]),
+                    offset: None,
+                    label: Some("midplane".to_string()),
+                },
+            })),
+            ..Default::default()
+        });
+
+        assert_eq!(render_data.pipeline_type, PipelineType::Triangles);
+        assert!(render_data.indices.is_none());
+        assert_eq!(render_data.vertices.len(), 6);
+        assert_eq!(
+            render_data.draw_calls[0].vertex_count,
+            render_data.vertices.len()
+        );
+        assert!(render_data
+            .vertices
+            .iter()
+            .all(|vertex| vertex.position[0] >= -SECTION_DISTANCE_EPSILON));
+    }
+
+    #[test]
     fn presentation_region_annotations_emit_marker_and_vector_nodes() {
         let material = cad_default_material();
         let chunk = GeometrySceneChunk::indexed_triangles(
@@ -1234,7 +1905,7 @@ mod tests {
         let nodes = scene.nodes_with_presentation(&GeometryScenePresentation {
             region_annotations: vec![GeometrySceneRegionAnnotation {
                 region_id: "loaded_face".to_string(),
-                color: [0.9, 0.1, 0.1, 1.0],
+                color: Some([0.9, 0.1, 0.1, 1.0]),
                 role: Some("load".to_string()),
                 label: Some("load".to_string()),
                 direction: Some([0.0, 0.0, 1.0]),

@@ -1,0 +1,101 @@
+{
+  "title": "axes",
+  "category": "plotting",
+  "keywords": [
+    "axes",
+    "graphics",
+    "plotting",
+    "current axes"
+  ],
+  "summary": "Create axes or make an existing axes current.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`axes` updates host-side plotting state and viewport metadata. Numeric plot data can still use the existing GPU rendering fast paths."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::axes::tests",
+    "vm": "crates/runmat-vm/tests/plotting.rs"
+  },
+  "description": "`axes` creates a new axes in the current figure, creates axes in a target figure, or selects an existing axes handle as current. Property/value pairs are applied during construction or selection.",
+  "behaviors": [
+    "`axes()` creates a new axes in the current figure and returns its numeric axes handle.",
+    "`axes(fig)` creates a new axes parented to the specified figure handle.",
+    "`axes(ax)` makes an existing axes handle current.",
+    "`axes('Parent', fig, ...)` creates axes in the requested figure and applies the remaining axes properties.",
+    "`axes(ax, property, value, ...)` selects an existing axes and applies the supplied properties.",
+    "`Position` and `Units` round-trip through `get`, `set`, and dot-property access. Explicit `Position` values participate in renderer viewport layout without disabling per-axes fast paths."
+  ],
+  "examples": [
+    {
+      "description": "Create positioned axes",
+      "input": "ax = axes('Position', [0.2 0.2 0.6 0.6]);\nplot(ax, 1:10);",
+      "output": "% ax is a numeric axes handle"
+    },
+    {
+      "description": "Create axes in a specific figure",
+      "input": "f = figure(3);\nax = axes('Parent', f, 'Units', 'pixels', 'Position', [40 40 320 220]);"
+    },
+    {
+      "description": "Select an existing axes",
+      "input": "ax1 = axes();\nax2 = axes();\naxes(ax1);"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `axes` replace `gca`?",
+      "answer": "No. Use `axes` when creating or selecting axes. Use `gca` when reading the current axes handle."
+    },
+    {
+      "question": "Does an explicit axes `Position` force a slow renderer path?",
+      "answer": "No. Positioned axes are converted into the same per-axes viewport rectangles used by subplot rendering, preserving direct viewport mapping where it is otherwise applicable."
+    },
+    {
+      "question": "Does `axes` run numeric kernels?",
+      "answer": "No. It mutates plotting state only."
+    }
+  ],
+  "links": [
+    {
+      "label": "gca",
+      "url": "./gca"
+    },
+    {
+      "label": "gcf",
+      "url": "./gcf"
+    },
+    {
+      "label": "figure",
+      "url": "./figure"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    },
+    {
+      "label": "subplot",
+      "url": "./subplot"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/axes.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/axes.rs"
+  },
+  "gpu_residency": "`axes` returns host-side handles and does not change array GPU residency.",
+  "gpu_behavior": [
+    "`axes` performs no provider dispatch; it updates plotting registry state and renderer axes metadata."
+  ]
+}

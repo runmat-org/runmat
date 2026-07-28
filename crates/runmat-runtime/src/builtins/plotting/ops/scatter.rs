@@ -33,7 +33,8 @@ use super::op_common::{apply_axes_target, split_leading_axes_handle};
 use super::perf::scatter_target_points;
 use super::plotting_error;
 use super::point::{
-    convert_rgb_color_matrix, convert_scalar_color_values, convert_size_vector,
+    convert_rgb_color_matrix, convert_rgb_color_matrix_async, convert_scalar_color_values,
+    convert_scalar_color_values_async, convert_size_vector, convert_size_vector_async,
     default_marker_diameter_px, map_scalar_values_to_colors, marker_area_points2_to_diameter_px,
     validate_gpu_color_matrix, validate_gpu_vector_length, PointArgs, PointColorArg, PointGpuColor,
     PointSizeArg,
@@ -574,7 +575,7 @@ fn build_scatter_plot(
         .map_err(|err| scatter_err(format!("scatter: {err}")))?
         .with_style(style.uniform_color, style.marker_size, style.marker_style)
         .with_label(style.label.clone());
-    scatter.colormap = style.colormap;
+    scatter.colormap = style.colormap.clone();
     scatter.set_edge_color(style.edge_color);
     scatter.set_edge_thickness(style.edge_thickness);
     scatter.set_filled(style.filled);
@@ -590,6 +591,25 @@ fn build_scatter_plot(
         scatter.set_color_values(values, style.color_limits.take());
     }
     Ok(scatter)
+}
+
+pub(super) async fn build_scatter_plot_from_args_async(
+    x: Vec<f64>,
+    y: Vec<f64>,
+    rest: &[Value],
+    context: &'static str,
+) -> BuiltinResult<ScatterPlot> {
+    let style_args = PointArgs::parse(
+        rest.to_vec(),
+        LineStyleParseOptions {
+            builtin_name: context,
+            forbid_leading_numeric: true,
+            forbid_interleaved_numeric: true,
+            accepts_handle_visibility: false,
+        },
+    )?;
+    let mut resolved_style = resolve_scatter_style_async(x.len(), &style_args, context).await?;
+    build_scatter_plot(x, y, &mut resolved_style)
 }
 
 fn scatter_err(message: impl Into<String>) -> RuntimeError {
@@ -622,6 +642,127 @@ struct ScatterResolvedStyle {
     marker_edge_flat: bool,
     requires_cpu: bool,
     label: String,
+}
+
+fn base_scatter_style(args: &PointArgs) -> ScatterResolvedStyle {
+    let mut style = ScatterResolvedStyle {
+        uniform_color: default_color(),
+        edge_color: default_color(),
+        edge_thickness: DEFAULT_LINE_WIDTH,
+        marker_style: MarkerStyle::Circle,
+        marker_size: default_marker_diameter_px(),
+        filled: args.filled,
+        per_point_sizes: None,
+        per_point_colors: None,
+        color_values: None,
+        color_limits: None,
+        gpu_sizes: None,
+        gpu_colors: None,
+        colormap: ColorMap::Parula,
+        marker_face_flat: false,
+        marker_edge_flat: false,
+        requires_cpu: false,
+        label: DEFAULT_SCATTER_LABEL.to_string(),
+    };
+    if let Some(label) = args.style.label.clone() {
+        style.label = label;
+    }
+    style
+}
+
+fn apply_scatter_line_appearance(
+    style: &mut ScatterResolvedStyle,
+    args: &PointArgs,
+) -> BuiltinResult<()> {
+    let appearance = &args.style.appearance;
+    style.uniform_color = appearance.color;
+    style.edge_color = appearance.color;
+    style.edge_thickness = appearance.line_width.max(0.1);
+
+    if let PointColorArg::Uniform(color) = &args.color {
+        style.uniform_color = *color;
+        style.edge_color = *color;
+    }
+
+    if appearance.marker.is_none() {
+        style.edge_color = style.uniform_color;
+    }
+
+    if let Some(marker) = appearance.marker.as_ref() {
+        style.marker_style = marker.kind.to_plot_marker();
+        if let Some(size) = marker.size {
+            style.marker_size = size.max(0.1);
+        }
+        if matches!(marker.edge_color, MarkerColor::Flat) {
+            style.marker_edge_flat = true;
+        } else {
+            style.edge_color =
+                resolve_marker_color(&marker.edge_color, style.edge_color, style.uniform_color);
+        }
+        match &marker.face_color {
+            MarkerColor::Flat => {
+                style.marker_face_flat = true;
+                style.filled = true;
+            }
+            MarkerColor::None => {
+                style.filled = false;
+            }
+            _ => {
+                let face_color = resolve_marker_color(
+                    &marker.face_color,
+                    style.uniform_color,
+                    style.uniform_color,
+                );
+                if matches!(marker.face_color, MarkerColor::Color(_) | MarkerColor::Auto) {
+                    style.uniform_color = face_color;
+                }
+            }
+        }
+    }
+
+    if let PointSizeArg::Scalar(size) = &args.size {
+        style.marker_size = marker_area_points2_to_diameter_px(*size as f64);
+    }
+    Ok(())
+}
+
+fn finalize_scatter_style(
+    style: &mut ScatterResolvedStyle,
+    args: &PointArgs,
+    context: &'static str,
+) -> BuiltinResult<()> {
+    if style.per_point_colors.is_some() || style.color_values.is_some() {
+        style.filled = true;
+    }
+
+    if style.marker_face_flat {
+        if style.per_point_colors.is_none() && style.gpu_colors.is_none() {
+            return Err(scatter_err(format!(
+                "{context}: MarkerFaceColor 'flat' requires per-point color data (C argument)"
+            )));
+        }
+        style.filled = true;
+    }
+
+    if style.marker_edge_flat && style.per_point_colors.is_none() && style.gpu_colors.is_none() {
+        return Err(scatter_err(format!(
+            "{context}: MarkerEdgeColor 'flat' requires per-point color data (C argument)"
+        )));
+    }
+
+    if args.style.line_style_explicit
+        && !matches!(
+            args.style.appearance.line_style,
+            LineStyle::Solid | LineStyle::None
+        )
+    {
+        style.requires_cpu = true;
+    }
+    style.requires_cpu |= args.style.requires_cpu_fallback;
+    if args.style.line_style_order.is_some() {
+        style.requires_cpu = true;
+    }
+    Ok(())
 }
 
 fn resolve_scatter_style(
@@ -718,7 +859,7 @@ fn resolve_scatter_style(
     match &args.color {
         PointColorArg::ScalarValues(value) => {
             let scalars = convert_scalar_color_values(value, point_count, context)?;
-            let (colors, limits) = map_scalar_values_to_colors(&scalars, style.colormap);
+            let (colors, limits) = map_scalar_values_to_colors(&scalars, style.colormap.clone());
             style.color_values = Some(scalars);
             style.per_point_colors = Some(colors);
             style.color_limits = Some(limits);
@@ -758,7 +899,12 @@ fn resolve_scatter_style(
         )));
     }
 
-    if args.style.appearance.line_style != LineStyle::Solid && args.style.line_style_explicit {
+    if args.style.line_style_explicit
+        && !matches!(
+            args.style.appearance.line_style,
+            LineStyle::Solid | LineStyle::None
+        )
+    {
         style.requires_cpu = true;
     }
     style.requires_cpu |= args.style.requires_cpu_fallback;
@@ -766,6 +912,55 @@ fn resolve_scatter_style(
         style.requires_cpu = true;
     }
 
+    Ok(style)
+}
+
+async fn resolve_scatter_style_async(
+    point_count: usize,
+    args: &PointArgs,
+    context: &'static str,
+) -> BuiltinResult<ScatterResolvedStyle> {
+    let mut style = base_scatter_style(args);
+    apply_scatter_line_appearance(&mut style, args)?;
+
+    if let Some(value) = args.size.value() {
+        match value {
+            Value::GpuTensor(handle) => {
+                validate_gpu_vector_length(handle, point_count, context)?;
+                style.gpu_sizes = Some(handle.clone());
+            }
+            _ => {
+                style.per_point_sizes =
+                    Some(convert_size_vector_async(value, point_count, context).await?);
+            }
+        }
+    }
+
+    match &args.color {
+        PointColorArg::ScalarValues(value) => {
+            let scalars = convert_scalar_color_values_async(value, point_count, context).await?;
+            let (colors, limits) = map_scalar_values_to_colors(&scalars, style.colormap.clone());
+            style.color_values = Some(scalars);
+            style.per_point_colors = Some(colors);
+            style.color_limits = Some(limits);
+        }
+        PointColorArg::RgbMatrix(value) => match value {
+            Value::GpuTensor(handle) => {
+                let components = validate_gpu_color_matrix(handle, point_count, context)?;
+                style.gpu_colors = Some(PointGpuColor {
+                    handle: handle.clone(),
+                    components,
+                });
+            }
+            _ => {
+                style.per_point_colors =
+                    Some(convert_rgb_color_matrix_async(value, point_count, context).await?);
+            }
+        },
+        _ => {}
+    }
+
+    finalize_scatter_style(&mut style, args, context)?;
     Ok(style)
 }
 
@@ -853,7 +1048,7 @@ fn build_scatter_gpu_plot(
     let mut scatter = ScatterPlot::from_gpu_buffer(gpu_vertices, drawn_points, bounds, gpu_style)
         .with_gpu_source_inputs(inputs)
         .with_label(style.label.clone());
-    scatter.colormap = style.colormap;
+    scatter.colormap = style.colormap.clone();
     scatter.set_edge_color_from_vertex(style.marker_edge_flat);
     if lod_stride == 1 {
         if let Some(values) = style.color_values.as_ref() {
@@ -1028,6 +1223,7 @@ pub(crate) mod tests {
     fn tensor_from(data: &[f64]) -> Tensor {
         Tensor {
             data: data.to_vec(),
+            integer_data: None,
             shape: vec![data.len()],
             rows: data.len(),
             cols: 1,
@@ -1094,6 +1290,7 @@ pub(crate) mod tests {
             Value::Num(49.0),
             Value::Tensor(Tensor {
                 data: vec![0.9, 0.2, 0.2],
+                integer_data: None,
                 shape: vec![1, 3],
                 rows: 1,
                 cols: 3,

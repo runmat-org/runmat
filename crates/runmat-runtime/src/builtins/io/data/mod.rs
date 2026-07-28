@@ -1027,12 +1027,7 @@ async fn data_create_builtin(
     let now = now_rfc3339();
     let mut arrays = BTreeMap::new();
     for (name, mut meta) in schema.arrays {
-        let total = meta.shape.iter().copied().product::<usize>();
-        let payload = DataArrayPayload {
-            dtype: meta.dtype.clone(),
-            shape: meta.shape.clone(),
-            values: vec![0.0; total],
-        };
+        let payload = DataArrayPayload::zeros(meta.dtype.clone(), meta.shape.clone());
         let (payload_path, chunk_index_path) =
             write_array_payload_async(&root, &name, &payload, &meta.chunk_shape).await?;
         meta.data_path = make_rel_data_path(&root, &payload_path)?;
@@ -1646,9 +1641,9 @@ async fn data_array_read_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult
     } else {
         payload
     };
-    let tensor = Tensor::new(sliced.values, sliced.shape)
-        .map_err(|err| data_error(format!("DataArray.read: {err}")))?;
-    Ok(Value::Tensor(tensor))
+    sliced
+        .into_value()
+        .map_err(|err| data_error(format!("DataArray.read: {err}")))
 }
 
 #[runtime_builtin(
@@ -1696,11 +1691,7 @@ async fn data_array_resize_builtin(
         .get_mut(&name)
         .ok_or_else(|| data_error(format!("DataArray.resize: array '{name}' not found")))?;
     meta.shape = shape.clone();
-    let payload = DataArrayPayload {
-        dtype: meta.dtype.clone(),
-        shape: shape.clone(),
-        values: vec![0.0; shape.iter().copied().product()],
-    };
+    let payload = DataArrayPayload::zeros(meta.dtype.clone(), shape.clone());
     let (payload_path, chunk_index_path) =
         write_array_payload_async(&root, &name, &payload, &meta.chunk_shape).await?;
     meta.data_path = make_rel_data_path(&root, &payload_path)?;
@@ -1731,12 +1722,7 @@ async fn data_array_fill_builtin(
         .arrays
         .get_mut(&name)
         .ok_or_else(|| data_error(format!("DataArray.fill: array '{name}' not found")))?;
-    let scalar = scalar_to_f64(&value)?;
-    let payload = DataArrayPayload {
-        dtype: meta.dtype.clone(),
-        shape: meta.shape.clone(),
-        values: vec![scalar; meta.shape.iter().copied().product()],
-    };
+    let payload = DataArrayPayload::filled(meta.dtype.clone(), meta.shape.clone(), &value)?;
     let (payload_path, chunk_index_path) =
         write_array_payload_async(&root, &name, &payload, &meta.chunk_shape).await?;
     meta.data_path = make_rel_data_path(&root, &payload_path)?;
@@ -2246,11 +2232,7 @@ async fn create_array_in_manifest(
             "DataTransaction.create_array: array '{array_name}' already exists"
         )));
     }
-    let payload = DataArrayPayload {
-        dtype: meta.dtype.clone(),
-        shape: meta.shape.clone(),
-        values: vec![0.0; meta.shape.iter().copied().product()],
-    };
+    let payload = DataArrayPayload::zeros(meta.dtype.clone(), meta.shape.clone());
     let (payload_path, chunk_index_path) =
         write_array_payload_async(root, array_name, &payload, &meta.chunk_shape).await?;
     meta.data_path = make_rel_data_path(root, &payload_path)?;
@@ -2270,11 +2252,7 @@ async fn resize_array_in_manifest(
         .get_mut(array_name)
         .ok_or_else(|| data_error(format!("array '{array_name}' not found")))?;
     meta.shape = shape.clone();
-    let payload = DataArrayPayload {
-        dtype: meta.dtype.clone(),
-        shape: shape.clone(),
-        values: vec![0.0; shape.iter().copied().product()],
-    };
+    let payload = DataArrayPayload::zeros(meta.dtype.clone(), shape.clone());
     let (payload_path, chunk_index_path) =
         write_array_payload_async(root, array_name, &payload, &meta.chunk_shape).await?;
     meta.data_path = make_rel_data_path(root, &payload_path)?;
@@ -2294,7 +2272,6 @@ async fn fill_array_in_manifest(
         .get(array_name)
         .cloned()
         .ok_or_else(|| data_error(format!("array '{array_name}' not found")))?;
-    let scalar = scalar_to_f64(value)?;
     let payload = read_array_payload_async(root, &meta).await?;
     let next_payload = if let Some(slice_spec) = slice_spec {
         let ranges = parse_slice_spec(slice_spec, &payload.shape)?;
@@ -2302,20 +2279,12 @@ async fn fill_array_in_manifest(
             .iter()
             .map(|r| r.end.saturating_sub(r.start))
             .collect();
-        let rhs = Value::Tensor(
-            Tensor::new(
-                vec![scalar; target_shape.iter().copied().product()],
-                target_shape,
-            )
-            .map_err(|err| data_error(format!("DataTransaction.fill: {err}")))?,
-        );
+        let rhs = DataArrayPayload::filled(payload.dtype.clone(), target_shape, value)?
+            .into_value()
+            .map_err(|err| data_error(format!("DataTransaction.fill: {err}")))?;
         write_slice_payload(&payload, slice_spec, &rhs)?
     } else {
-        DataArrayPayload {
-            dtype: payload.dtype,
-            shape: payload.shape.clone(),
-            values: vec![scalar; payload.shape.iter().copied().product()],
-        }
+        DataArrayPayload::filled(payload.dtype.clone(), payload.shape.clone(), value)?
     };
     let (payload_path, chunk_index_path) =
         write_array_payload_async(root, array_name, &next_payload, &meta.chunk_shape).await?;
@@ -2472,14 +2441,6 @@ fn parse_shape_from_value(value: &Value) -> BuiltinResult<Vec<usize>> {
     }
 }
 
-fn scalar_to_f64(value: &Value) -> BuiltinResult<f64> {
-    match value {
-        Value::Num(v) => Ok(*v),
-        Value::Int(v) => Ok(v.to_i64() as f64),
-        _ => Err(data_error("expected numeric scalar")),
-    }
-}
-
 async fn write_array_full_async(
     dataset_path: &str,
     array_name: &str,
@@ -2516,14 +2477,11 @@ async fn apply_write_to_manifest_async(
     }
 
     let payload = read_array_payload_async(root, &meta).await?;
-    let mut next_payload = payload.clone();
-    if let Some(slice_spec) = slice_spec {
-        next_payload = write_slice_payload(&payload, slice_spec, value)?;
+    let next_payload = if let Some(slice_spec) = slice_spec {
+        write_slice_payload(&payload, slice_spec, value)?
     } else {
-        let (shape, values) = value_to_tensor_shape_values(value)?;
-        next_payload.shape = shape;
-        next_payload.values = values;
-    }
+        DataArrayPayload::from_value(payload.dtype.clone(), value)?
+    };
 
     let (payload_path, chunk_index_path) =
         write_array_payload_async(root, array_name, &next_payload, &meta.chunk_shape).await?;
@@ -2558,11 +2516,11 @@ async fn apply_slice_write_chunked_async(
         .iter()
         .map(|r| r.end.saturating_sub(r.start))
         .collect();
-    let (actual_rhs_shape, rhs_values) = value_to_tensor_shape_values(value)?;
-    if actual_rhs_shape != rhs_shape {
+    let rhs = DataArrayPayload::from_value(meta.dtype.clone(), value)?;
+    if rhs.shape != rhs_shape {
         return Err(data_error(format!(
             "SHAPE_MISMATCH: rhs shape {:?} must match target slice shape {:?}",
-            actual_rhs_shape, rhs_shape
+            rhs.shape, rhs_shape
         )));
     }
 
@@ -2603,6 +2561,7 @@ async fn apply_slice_write_chunked_async(
             &key,
             &coords,
             &chunk_extent,
+            &meta.dtype,
             &pos_by_key,
             &chunk_index,
         )
@@ -2630,7 +2589,9 @@ async fn apply_slice_write_chunked_async(
                 .collect();
             let rhs_linear = linear_index_column_major(&rhs_index, &rhs_shape)?;
             let chunk_linear = linear_index_column_major(&chunk_index_local, &chunk_extent)?;
-            chunk_payload.values[chunk_linear] = rhs_values[rhs_linear];
+            chunk_payload
+                .values
+                .set(chunk_linear, rhs.values.get(rhs_linear)?)?;
             if !advance_index(&mut local, &intersection_shape) {
                 break;
             }
@@ -2697,17 +2658,6 @@ async fn apply_slice_write_chunked_async(
     Ok(true)
 }
 
-fn value_to_tensor_shape_values(value: &Value) -> BuiltinResult<(Vec<usize>, Vec<f64>)> {
-    match value {
-        Value::Tensor(t) => Ok((t.shape.clone(), t.data.clone())),
-        Value::Num(n) => Ok((vec![1, 1], vec![*n])),
-        Value::Int(i) => Ok((vec![1, 1], vec![i.to_i64() as f64])),
-        _ => Err(data_error(
-            "DataArray.write supports tensor or numeric scalar values",
-        )),
-    }
-}
-
 #[derive(Clone, Copy, Debug)]
 struct DimRange {
     start: usize,
@@ -2723,7 +2673,7 @@ fn read_slice_payload(
         .iter()
         .map(|r| r.end.saturating_sub(r.start))
         .collect();
-    let mut out_values = Vec::new();
+    let mut out_values = crate::data::DataArrayValues::zeros(&payload.dtype, 0);
     let mut out_index = vec![0usize; out_shape.len()];
     loop {
         let source_index: Vec<usize> = out_index
@@ -2732,7 +2682,7 @@ fn read_slice_payload(
             .map(|(dim, idx)| ranges[dim].start + *idx)
             .collect();
         let linear = linear_index_column_major(&source_index, &payload.shape)?;
-        out_values.push(payload.values[linear]);
+        out_values.push(payload.values.get(linear)?)?;
 
         if !advance_index(&mut out_index, &out_shape) {
             break;
@@ -2755,11 +2705,11 @@ fn write_slice_payload(
         .iter()
         .map(|r| r.end.saturating_sub(r.start))
         .collect();
-    let (rhs_shape, rhs_values) = value_to_tensor_shape_values(rhs)?;
-    if rhs_shape != target_shape {
+    let rhs = DataArrayPayload::from_value(payload.dtype.clone(), rhs)?;
+    if rhs.shape != target_shape {
         return Err(data_error(format!(
             "SHAPE_MISMATCH: rhs shape {:?} must match target slice shape {:?}",
-            rhs_shape, target_shape
+            rhs.shape, target_shape
         )));
     }
 
@@ -2773,7 +2723,7 @@ fn write_slice_payload(
             .map(|(dim, idx)| ranges[dim].start + *idx)
             .collect();
         let target_linear = linear_index_column_major(&target_index, &payload.shape)?;
-        next[target_linear] = rhs_values[rhs_linear];
+        next.set(target_linear, rhs.values.get(rhs_linear)?)?;
         rhs_linear += 1;
 
         if !advance_index(&mut rhs_index, &target_shape) {
@@ -3039,6 +2989,7 @@ async fn load_or_init_chunk(
     key: &str,
     coords: &[usize],
     chunk_extent: &[usize],
+    dtype: &str,
     pos_by_key: &HashMap<String, usize>,
     chunk_index: &DataChunkIndex,
 ) -> BuiltinResult<(usize, bool, DataChunkIndexEntry, DataArrayPayload)> {
@@ -3056,12 +3007,14 @@ async fn load_or_init_chunk(
                     entry.data_path
                 ))
             })?;
-        let payload: DataArrayPayload = serde_json::from_slice(&bytes).map_err(|err| {
-            data_error(format!(
-                "failed to parse chunk payload '{}': {err}",
-                entry.data_path
-            ))
-        })?;
+        let payload: DataArrayPayload = serde_json::from_slice::<DataArrayPayload>(&bytes)
+            .map_err(|err| {
+                data_error(format!(
+                    "failed to parse chunk payload '{}': {err}",
+                    entry.data_path
+                ))
+            })?
+            .normalize_for_dtype(dtype)?;
         return Ok((index, true, entry, payload));
     }
 
@@ -3076,11 +3029,7 @@ async fn load_or_init_chunk(
         shape: chunk_extent.to_vec(),
         data_path: chunk_rel_path(array_name, &object_id),
     };
-    let payload = DataArrayPayload {
-        dtype: "f64".to_string(),
-        shape: chunk_extent.to_vec(),
-        values: vec![0.0; chunk_extent.iter().copied().product()],
-    };
+    let payload = DataArrayPayload::zeros(dtype.to_string(), chunk_extent.to_vec());
     Ok((chunk_index.chunks.len(), false, entry, payload))
 }
 
@@ -3095,7 +3044,7 @@ fn attrs_to_struct(attrs: &BTreeMap<String, serde_json::Value>) -> Value {
 fn value_to_json(value: &Value) -> serde_json::Value {
     match value {
         Value::String(s) => serde_json::Value::String(s.clone()),
-        Value::CharArray(ca) => serde_json::Value::String(ca.to_string()),
+        Value::CharArray(chars) => serde_json::Value::String(chars.data.iter().collect::<String>()),
         Value::Num(n) => serde_json::json!(n),
         Value::Int(i) => serde_json::json!(i.to_i64()),
         Value::Bool(b) => serde_json::json!(b),
@@ -3133,7 +3082,7 @@ mod tests {
     use axum::http::{HeaderMap, StatusCode};
     use axum::routing::{post, put};
     use axum::{Json, Router};
-    use runmat_builtins::CellArray;
+    use runmat_builtins::{CellArray, IntegerStorage};
     use runmat_filesystem::data_contract::{
         DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
     };
@@ -4109,5 +4058,163 @@ mod tests {
         };
         assert_eq!(t.shape, vec![3, 1]);
         assert_eq!(t.data, vec![7.0, 7.0, 7.0]);
+    }
+
+    #[test]
+    fn data_arrays_preserve_every_integer_class_through_chunked_write_and_read() {
+        let _serial = serial_test_guard();
+        let _provider = native_provider_guard();
+        let cases = vec![
+            ("int8", IntegerStorage::I8(vec![i8::MIN, i8::MAX])),
+            ("int16", IntegerStorage::I16(vec![i16::MIN, i16::MAX])),
+            ("int32", IntegerStorage::I32(vec![i32::MIN, i32::MAX])),
+            ("int64", IntegerStorage::I64(vec![i64::MIN, i64::MAX])),
+            ("uint8", IntegerStorage::U8(vec![0, u8::MAX])),
+            ("uint16", IntegerStorage::U16(vec![0, u16::MAX])),
+            ("uint32", IntegerStorage::U32(vec![0, u32::MAX])),
+            ("uint64", IntegerStorage::U64(vec![0, u64::MAX])),
+        ];
+
+        for (dtype, storage) in cases {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let path = dir
+                .path()
+                .join(format!("{dtype}.data"))
+                .to_string_lossy()
+                .to_string();
+            let mut array_meta = StructValue::new();
+            array_meta
+                .fields
+                .insert("dtype".to_string(), Value::String(dtype.to_string()));
+            array_meta.fields.insert(
+                "shape".to_string(),
+                Value::Tensor(Tensor::new(vec![2.0, 1.0], vec![1, 2]).expect("shape")),
+            );
+            array_meta.fields.insert(
+                "chunk".to_string(),
+                Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).expect("chunk")),
+            );
+            let mut arrays = StructValue::new();
+            arrays
+                .fields
+                .insert("samples".to_string(), Value::Struct(array_meta));
+            let mut schema = StructValue::new();
+            schema
+                .fields
+                .insert("arrays".to_string(), Value::Struct(arrays));
+
+            let ds = call_builtin(
+                "data.create",
+                &[
+                    Value::String(path),
+                    Value::Struct(schema),
+                    Value::Cell(CellArray::new(vec![], 1, 0).expect("cell")),
+                ],
+            )
+            .expect("create dataset");
+            let arr = call_builtin("Dataset.array", &[ds, Value::String("samples".to_string())])
+                .expect("array");
+            let input = Tensor::new_integer(storage.clone(), vec![2, 1]).expect("integer tensor");
+            call_builtin("DataArray.write", &[arr.clone(), Value::Tensor(input)])
+                .expect("write integer array");
+
+            let Value::Tensor(read_back) = call_builtin("DataArray.read", &[arr]).expect("read")
+            else {
+                panic!("expected tensor");
+            };
+            assert_eq!(read_back.integer_storage(), Some(&storage), "{dtype}");
+        }
+    }
+
+    #[test]
+    fn uint64_data_array_slice_fill_and_transaction_paths_remain_exact() {
+        let _serial = serial_test_guard();
+        let _provider = native_provider_guard();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("uint64.data").to_string_lossy().to_string();
+        let mut array_meta = StructValue::new();
+        array_meta
+            .fields
+            .insert("dtype".to_string(), Value::String("uint64".to_string()));
+        array_meta.fields.insert(
+            "shape".to_string(),
+            Value::Tensor(Tensor::new(vec![2.0, 2.0], vec![1, 2]).expect("shape")),
+        );
+        array_meta.fields.insert(
+            "chunk".to_string(),
+            Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).expect("chunk")),
+        );
+        let mut arrays = StructValue::new();
+        arrays
+            .fields
+            .insert("samples".to_string(), Value::Struct(array_meta));
+        let mut schema = StructValue::new();
+        schema
+            .fields
+            .insert("arrays".to_string(), Value::Struct(arrays));
+        let ds = call_builtin(
+            "data.create",
+            &[
+                Value::String(path),
+                Value::Struct(schema),
+                Value::Cell(CellArray::new(vec![], 1, 0).expect("cell")),
+            ],
+        )
+        .expect("create dataset");
+        let arr = call_builtin(
+            "Dataset.array",
+            &[ds.clone(), Value::String("samples".to_string())],
+        )
+        .expect("array");
+
+        call_builtin(
+            "DataArray.fill",
+            &[
+                arr.clone(),
+                Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+            ],
+        )
+        .expect("fill");
+        let slice = Value::Cell(
+            CellArray::new(
+                vec![
+                    Value::Int(runmat_builtins::IntValue::I32(1)),
+                    Value::String(":".to_string()),
+                ],
+                1,
+                2,
+            )
+            .expect("slice"),
+        );
+        let replacement = Tensor::new_integer(
+            IntegerStorage::U64(vec![1_u64 << 63, u64::MAX - 1]),
+            vec![1, 2],
+        )
+        .expect("replacement");
+        call_builtin(
+            "DataArray.write",
+            &[arr.clone(), slice, Value::Tensor(replacement)],
+        )
+        .expect("slice write");
+
+        let tx = call_builtin("Dataset.begin", &[ds]).expect("begin transaction");
+        call_builtin(
+            "DataTransaction.fill",
+            &[
+                tx.clone(),
+                Value::String("samples".to_string()),
+                Value::Int(runmat_builtins::IntValue::U64(1_u64 << 63)),
+            ],
+        )
+        .expect("queue transaction fill");
+        call_builtin("DataTransaction.commit", &[tx]).expect("commit transaction");
+
+        let Value::Tensor(read_back) = call_builtin("DataArray.read", &[arr]).expect("read") else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            read_back.integer_storage(),
+            Some(&IntegerStorage::U64(vec![1_u64 << 63; 4]))
+        );
     }
 }

@@ -103,6 +103,46 @@ const COMMAND_VERBS: &[CommandVerb] = &[
         arg_kind: CommandArgKind::Any,
     },
     CommandVerb {
+        name: "diary",
+        arg_kind: OPTIONAL_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "dbstack",
+        arg_kind: CommandArgKind::Any,
+    },
+    CommandVerb {
+        name: "dbstatus",
+        arg_kind: CommandArgKind::StringifyWords,
+    },
+    CommandVerb {
+        name: "dbclear",
+        arg_kind: CommandArgKind::StringifyWords,
+    },
+    CommandVerb {
+        name: "dbtype",
+        arg_kind: REQUIRED_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "keyboard",
+        arg_kind: CommandArgKind::Any,
+    },
+    CommandVerb {
+        name: "mlock",
+        arg_kind: CommandArgKind::Any,
+    },
+    CommandVerb {
+        name: "munlock",
+        arg_kind: OPTIONAL_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "mislocked",
+        arg_kind: OPTIONAL_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "getcallinfo",
+        arg_kind: CommandArgKind::Any,
+    },
+    CommandVerb {
         name: "pause",
         arg_kind: CommandArgKind::Any,
     },
@@ -191,6 +231,10 @@ const COMMAND_VERBS: &[CommandVerb] = &[
         arg_kind: OPTIONAL_PATH_WORDS,
     },
     CommandVerb {
+        name: "pcode",
+        arg_kind: REQUIRED_PATH_WORDS,
+    },
+    CommandVerb {
         name: "pwd",
         arg_kind: CommandArgKind::Any,
     },
@@ -205,6 +249,10 @@ const COMMAND_VERBS: &[CommandVerb] = &[
     CommandVerb {
         name: "run",
         arg_kind: REQUIRED_PATH_WORDS,
+    },
+    CommandVerb {
+        name: "runtests",
+        arg_kind: OPTIONAL_PATH_WORDS,
     },
     CommandVerb {
         name: "save",
@@ -429,7 +477,7 @@ impl Parser {
                         break;
                     };
                     let span = self.span_from(minus.position, option.end);
-                    args.push(Expr::Ident(format!("-{}", option.lexeme), span));
+                    args.push(Expr::String(format!("\"-{}\"", option.lexeme), span));
                 }
                 Some(Token::Slash)
                 | Some(Token::Star)
@@ -493,6 +541,8 @@ impl Parser {
     fn can_parse_dash_option_arg(&self, verb: &str) -> bool {
         verb.eq_ignore_ascii_case("clearvars")
             || verb.eq_ignore_ascii_case("print")
+            || verb.eq_ignore_ascii_case("dbstack")
+            || verb.eq_ignore_ascii_case("dbstatus")
             || self.can_parse_path_word_arg(verb)
     }
 

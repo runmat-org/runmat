@@ -1,0 +1,30 @@
+{
+  "title": "kurtosis",
+  "category": "stats/summary",
+  "keywords": ["kurtosis", "fourth moment", "statistics", "summary"],
+  "summary": "Compute sample kurtosis.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host for compatibility until provider reduction hooks exist."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": { "unit": "builtins::stats::summary::descriptive::tests", "integration": null },
+  "description": "`kurtosis(X)` computes biased sample kurtosis, not excess kurtosis. `kurtosis(X,0,...)` applies the finite-sample bias correction. Dimension, vector-dimension, and `\"all\"` forms are supported.",
+  "behaviors": [
+    "Flag `1` is the default biased moment estimator.",
+    "Flag `0` applies the usual finite-sample bias correction and returns `NaN` for slices with fewer than four values.",
+    "Slices with zero variance return `NaN`.",
+    "NaNs are treated as missing and omitted from each slice by default."
+  ],
+  "examples": [{ "description": "Kurtosis across all values", "input": "k = kurtosis(x, 1, \"all\")" }],
+  "faqs": [{ "question": "Does kurtosis return excess kurtosis?", "answer": "No. The returned value is kurtosis with the normal distribution centered around 3." }],
+  "links": [{ "label": "skewness", "url": "./skewness" }, { "label": "std", "url": "./std" }],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/descriptive.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/descriptive.rs"
+  }
+}

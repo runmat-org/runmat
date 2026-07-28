@@ -1,0 +1,52 @@
+{
+  "title": "blsprice",
+  "category": "finance",
+  "keywords": ["blsprice", "Black-Scholes", "option", "call", "put", "finance"],
+  "summary": "Compute Black-Scholes European call and put option prices.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "MATLAB implicit expansion",
+    "notes": "Resident real gpuArray inputs route through the provider `black_scholes_price` hook and return resident call/put gpuArray outputs. Host scalar/tensor inputs in a mixed GPU call are uploaded as temporary provider inputs; providers without the hook fall back to the host implementation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 6,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::finance::black_scholes::tests"
+  },
+  "description": "`blsprice(Price,Strike,Rate,Time,Volatility)` computes European call and put option prices using the Black-Scholes model. An optional `Yield` argument defaults to zero.",
+  "behaviors": [
+    "Returns the call price as the single-output value and `[Call, Put]` under two-output semantics.",
+    "Each input may be scalar or an array. Inputs use MATLAB implicit expansion, so compatible nonscalar dimensions expand elementwise.",
+    "The optional `Yield` argument represents a continuously compounded dividend or foreign risk-free yield; an empty `Yield` uses the default zero yield.",
+    "Invalid financial domains and `NaN` inputs produce elementwise `NaN` outputs rather than aborting the full call."
+  ],
+  "examples": [
+    {
+      "description": "European stock option",
+      "input": "[Call, Put] = blsprice(100, 95, 0.10, 0.25, 0.50)",
+      "output": "Call = 13.6953, Put = 6.3497"
+    },
+    {
+      "description": "Stock index option with yield",
+      "input": "[Call, Put] = blsprice(910, 980, 0.02, 0.25, 0.25, 0.025)",
+      "output": "Call = 19.6863, Put = 90.4683"
+    }
+  ],
+  "links": [
+    {
+      "label": "blsimpv",
+      "url": "./blsimpv"
+    }
+  ],
+  "source": {
+    "label": "crates/runmat-runtime/src/builtins/finance/black_scholes.rs",
+    "url": "crates/runmat-runtime/src/builtins/finance/black_scholes.rs"
+  }
+}

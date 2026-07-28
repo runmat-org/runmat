@@ -1,0 +1,46 @@
+{
+  "title": "wblrnd",
+  "category": "stats/random",
+  "keywords": ["wblrnd", "weibull", "random", "statistics"],
+  "summary": "Generate Weibull-distributed random samples.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "matlab",
+    "notes": "RunMat currently generates samples on the host RNG path."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 4, "constants": "inline" },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::random::distribution_random::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`wblrnd(a,b)` generates Weibull random samples with scale parameter `a` and shape parameter `b`. Size-vector and dimension-list forms are supported.",
+  "behaviors": [
+    "`a` and `b` support scalar expansion and matching array shapes.",
+    "Without explicit size arguments, the output shape is the scalar-expanded parameter shape.",
+    "With explicit size arguments, nonscalar parameters must match the requested shape.",
+    "`a` and `b` must be positive."
+  ],
+  "examples": [
+    {
+      "description": "Generate Weibull samples",
+      "input": "r = wblrnd(4,3,[2 3])"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How are samples generated?",
+      "answer": "RunMat uses inverse-transform sampling with `a * (-log(U))^(1/b)` and the shared RunMat RNG."
+    }
+  ],
+  "links": [
+    { "label": "wblinv", "url": "./wblinv" },
+    { "label": "rng", "url": "./rng" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/random/distribution_random.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/random/distribution_random.rs"
+  }
+}

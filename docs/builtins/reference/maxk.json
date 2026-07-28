@@ -1,0 +1,87 @@
+{
+  "title": "maxk",
+  "category": "math/reduction",
+  "keywords": [
+    "maxk",
+    "top-k",
+    "maximum",
+    "reduction",
+    "indices"
+  ],
+  "summary": "Return the k largest elements in MATLAB and RunMat.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Device-resident tensors are gathered to the host because RunMat Accelerate does not expose top-k provider hooks yet."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::reduction::topk::tests",
+    "integration": null
+  },
+  "description": "`maxk(A,k)` returns the largest `k` values from each slice of `A` along the first non-singleton dimension. A second output returns one-based indices within the selected dimension.",
+  "behaviors": [
+    "`maxk(A,k)` selects along the first non-singleton dimension and clamps nonnegative `k` to that dimension's length. `k = 0` returns an empty result along the selected dimension.",
+    "`maxk(A,k,dim)` selects along the specified dimension. Dimensions larger than `ndims(A)` behave like trailing singleton dimensions and return the input with index values of `1`.",
+    "`[B,I] = maxk(...)` returns selected values and one-based indices along the selected dimension.",
+    "Real, integer, logical, complex, scalar, vector, matrix, and N-D tensor inputs are supported. Integers and logical values are promoted to double precision.",
+    "Complex inputs support `'ComparisonMethod','auto'`, `'abs'`/`'magnitude'`, and `'real'`, matching the comparison options used by `max`.",
+    "GPU tensors gather to the host for top-k selection and return host tensors."
+  ],
+  "examples": [
+    {
+      "description": "Largest values from each column",
+      "input": "A = [1 2; 4 6; 3 5];\n[B,I] = maxk(A,2)",
+      "output": "B = [4 6; 3 5]\nI = [2 2; 3 3]"
+    },
+    {
+      "description": "Largest values along rows",
+      "input": "A = [3 1 5; 4 2 6];\nB = maxk(A,2,2)",
+      "output": "B = [5 3; 6 4]"
+    },
+    {
+      "description": "Complex values ordered by real component",
+      "input": "Z = [1+10i; 3-1i; 2+0i];\nB = maxk(Z,2,'ComparisonMethod','real')",
+      "output": "B = [3-1i; 2+0i]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `maxk` preserve GPU residency?",
+      "answer": "Not currently. RunMat gathers GPU tensors to the host because top-k provider hooks are not available yet."
+    },
+    {
+      "question": "Can `k` be zero or larger than the selected dimension?",
+      "answer": "Yes. `k = 0` returns an empty result along the selected dimension. Larger values are clamped to the selected dimension length, so the full sorted slice is returned."
+    }
+  ],
+  "links": [
+    {
+      "label": "mink",
+      "url": "./mink"
+    },
+    {
+      "label": "max",
+      "url": "./max"
+    },
+    {
+      "label": "bounds",
+      "url": "./bounds"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/reduction/topk.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/topk.rs"
+  }
+}

@@ -1,0 +1,119 @@
+{
+  "title": "pagetranspose",
+  "category": "math/linalg/ops",
+  "keywords": [
+    "pagetranspose",
+    "page-wise transpose",
+    "non-conjugate transpose",
+    "permute",
+    "gpuArray"
+  ],
+  "summary": "Apply the nonconjugate transpose to every matrix page of an array.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64",
+      "i32",
+      "bool"
+    ],
+    "broadcasting": "none",
+    "notes": "Equivalent to `permute(X,[2 1 3:ndims(X)])`; providers may keep gpuArray results resident through the permute hook, otherwise RunMat gathers once, transposes on the host, and uploads the result."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::linalg::ops::pagetranspose::tests"
+  },
+  "description": "`Y = pagetranspose(X)` swaps the first two dimensions of `X` on every page without conjugating complex values. For N-D arrays, each output page `Y(:,:,i,j,...)` is the nonconjugate transpose of `X(:,:,i,j,...)`.",
+  "behaviors": [
+    "Equivalent to `permute(X,[2 1 3:ndims(X)])` for dense arrays.",
+    "Works for scalars, vectors, matrices, and N-D arrays; only the first two axes are swapped.",
+    "Complex values are not conjugated. Compose with `conj` when Hermitian page transpose semantics are needed.",
+    "Logical, character, string, and cell arrays preserve their element type while their first two dimensions are swapped.",
+    "Sparse matrices transpose through RunMat's sparse CSC transpose path.",
+    "Scalar structs are treated as 1-by-1 values and round-trip unchanged; true struct-array permutation will follow RunMat's struct-array representation when that lands.",
+    "gpuArray inputs remain device-resident when a provider is available; otherwise they fall back to host execution."
+  ],
+  "examples": [
+    {
+      "description": "Transpose each page of a 3-D array",
+      "input": "A = reshape(1:12, [2 3 2]);\nB = pagetranspose(A);\nsize(B)",
+      "output": "ans = [3 2 2]"
+    },
+    {
+      "description": "Preserve complex values without conjugation",
+      "input": "Z = reshape([1+2i 3-4i], [1 2 1]);\nY = pagetranspose(Z)",
+      "output": "Y =\n   1.0000 + 2.0000i\n   3.0000 - 4.0000i"
+    },
+    {
+      "description": "Use `pagetranspose` as the page-wise form of `transpose`",
+      "input": "A = rand(5, 3, 10);\nB = pagetranspose(A);\nsize(B)",
+      "output": "ans = [3 5 10]"
+    },
+    {
+      "description": "Transpose gpuArray pages while preserving residency",
+      "input": "G = gpuArray(rand(4, 2, 8));\nH = pagetranspose(G);\nisgpuarray(H)",
+      "output": "ans = logical 1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How does `pagetranspose` differ from `transpose`?",
+      "answer": "For dense arrays they use the same first-two-dimension swap. `pagetranspose` names the page-wise intent explicitly for N-D arrays and mirrors MATLAB's page-wise API."
+    },
+    {
+      "question": "Does `pagetranspose` conjugate complex numbers?",
+      "answer": "No. It is the page-wise nonconjugate transpose."
+    },
+    {
+      "question": "What happens to dimensions three and higher?",
+      "answer": "They stay in the same order and size. Only dimensions one and two are swapped."
+    },
+    {
+      "question": "Is the result a view?",
+      "answer": "No. RunMat materializes a new value, although GPU providers may optimize the data movement internally."
+    }
+  ],
+  "links": [
+    {
+      "label": "transpose",
+      "url": "./transpose"
+    },
+    {
+      "label": "ctranspose",
+      "url": "./ctranspose"
+    },
+    {
+      "label": "pagemtimes",
+      "url": "./pagemtimes"
+    },
+    {
+      "label": "permute",
+      "url": "./permute"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/linalg/ops/pagetranspose.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/ops/pagetranspose.rs"
+  },
+  "gpu_residency": "Yes for explicit `gpuArray` inputs when an acceleration provider is available.",
+  "gpu_behavior": [
+    "`pagetranspose` uses the same provider `permute` hook as `permute(X,[2 1 3:ndims(X)])`.",
+    "If the provider lacks a native hook, RunMat gathers, performs the page-wise transpose on the host, and uploads the result back to the provider."
+  ]
+}

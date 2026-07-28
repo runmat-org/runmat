@@ -1,0 +1,102 @@
+{
+  "title": "fastTextWordEmbedding",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "fastTextWordEmbedding",
+    "wordEmbedding",
+    "text analytics",
+    "fastText",
+    "pretrained"
+  ],
+  "summary": "Return a compact fastText-style word embedding compatibility model.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`fastTextWordEmbedding` constructs host wordEmbedding metadata and dense vectors; it does not use provider kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::embeddings::tests",
+    "integration": null
+  },
+  "description": "`fastTextWordEmbedding` returns a RunMat `wordEmbedding` compatibility object with `Dimension` 300 and a compact built-in English vocabulary.",
+  "behaviors": [
+    "The supported form is the zero-argument `emb = fastTextWordEmbedding` form.",
+    "The returned object exposes `Dimension` and `Vocabulary` and stores dense vectors in the same implementation-detail property used by `word2vec`, `vec2word`, and `doc2sequence`.",
+    "The compact model includes curated vectors for common examples such as `Italy - Rome + Paris`, which maps back to `France` with `vec2word`.",
+    "RunMat does not download MathWorks support packages. The full 1-million-word fastText English 16 Billion Token model remains tracked in the broader Text Analytics compatibility issue."
+  ],
+  "examples": [
+    {
+      "description": "Create The Compatibility Model",
+      "input": "emb = fastTextWordEmbedding",
+      "output": "`emb.Dimension` is 300."
+    },
+    {
+      "description": "Use With Embedding Lookup",
+      "input": "italy = word2vec(emb,\"Italy\");\nrome = word2vec(emb,\"Rome\");\nparis = word2vec(emb,\"Paris\");\nword = vec2word(emb, italy - rome + paris)",
+      "output": "`word` is `\"France\"` for the bundled compact model."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does this include MATLAB's full pretrained fastText support-package corpus?",
+      "answer": "No. RunMat currently provides a compact compatibility model so scripts can construct and use a `wordEmbedding` object. Full support-package corpus parity remains open."
+    },
+    {
+      "question": "Can the result be used with `word2vec`, `vec2word`, and `doc2sequence`?",
+      "answer": "Yes. The returned object uses the same RunMat `wordEmbedding` representation as `readWordEmbedding` and `trainWordEmbedding`."
+    },
+    {
+      "question": "Does `fastTextWordEmbedding` execute on the GPU?",
+      "answer": "No. It constructs host text/model metadata and dense vectors."
+    }
+  ],
+  "links": [
+    {
+      "label": "word2vec",
+      "url": "./word2vec"
+    },
+    {
+      "label": "vec2word",
+      "url": "./vec2word"
+    },
+    {
+      "label": "doc2sequence",
+      "url": "./doc2sequence"
+    },
+    {
+      "label": "readWordEmbedding",
+      "url": "./readWordEmbedding"
+    },
+    {
+      "label": "trainWordEmbedding",
+      "url": "./trainWordEmbedding"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported form",
+      "input": "emb = fastTextWordEmbedding",
+      "output": "`emb` is a `wordEmbedding` compatibility object."
+    },
+    "points": [
+      "No input arguments are accepted.",
+      "The compact model is deterministic and bundled with RunMat.",
+      "Full pretrained-corpus parity is not yet implemented."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/embeddings.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/embeddings.rs"
+  },
+  "gpu_residency": "`fastTextWordEmbedding` performs host object construction and has no provider kernel."
+}

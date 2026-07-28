@@ -17,6 +17,8 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::math::elementwise::integer_arithmetic::{try_integer_binary, IntegerBinaryOp};
+use crate::builtins::math::elementwise::sparse::{try_sparse_binary, SparseBinaryOp};
 use crate::builtins::math::symbolic::{symbolic_binary, SymbolicBinaryOp};
 use crate::builtins::math::type_resolvers::numeric_binary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -164,11 +166,43 @@ const TIMES_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "times: internal error",
 };
 
-const TIMES_ERRORS: [BuiltinErrorDescriptor; 4] = [
+const TIMES_ERROR_SPARSE_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TIMES.SPARSE_SIZE_MISMATCH",
+    identifier: Some("RunMat:times:SparseSizeMismatch"),
+    when: "Sparse operands cannot be implicitly expanded to a compatible result shape.",
+    message: "times: sparse operand sizes are not compatible",
+};
+
+const TIMES_ERROR_SPARSE_UNSUPPORTED_OPERAND: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TIMES.SPARSE_UNSUPPORTED_OPERAND",
+    identifier: Some("RunMat:times:SparseUnsupportedOperand"),
+    when: "Sparse arithmetic is requested with an unsupported operand class or residency.",
+    message: "times: unsupported sparse arithmetic operand",
+};
+
+const TIMES_ERROR_SPARSE_DENSIFY_TOO_LARGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TIMES.SPARSE_DENSIFY_TOO_LARGE",
+    identifier: Some("RunMat:times:SparseDensifyTooLarge"),
+    when: "A sparse operation would have to materialize a dense or fully populated sparse result beyond the runtime limit.",
+    message: "times: sparse arithmetic result is too large to materialize",
+};
+
+const TIMES_ERROR_SPARSE_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TIMES.SPARSE_INTERNAL",
+    identifier: Some("RunMat:times:SparseInternal"),
+    when: "Sparse arithmetic storage construction or conversion failed unexpectedly.",
+    message: "times: sparse arithmetic internal error",
+};
+
+const TIMES_ERRORS: [BuiltinErrorDescriptor; 8] = [
     TIMES_ERROR_INVALID_ARGUMENT,
     TIMES_ERROR_INVALID_INPUT,
     TIMES_ERROR_SIZE_MISMATCH,
     TIMES_ERROR_INTERNAL,
+    TIMES_ERROR_SPARSE_SIZE_MISMATCH,
+    TIMES_ERROR_SPARSE_UNSUPPORTED_OPERAND,
+    TIMES_ERROR_SPARSE_DENSIFY_TOO_LARGE,
+    TIMES_ERROR_SPARSE_INTERNAL,
 ];
 
 pub const TIMES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -362,7 +396,8 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
         | Value::SparseTensor(_)
         | Value::Cell(_)
         | Value::Struct(_)
-        | Value::Symbolic(_) => Err(times_error_with_detail(
+        | Value::Symbolic(_)
+        | Value::SymbolicArray(_) => Err(times_error_with_detail(
             &TIMES_ERROR_INVALID_ARGUMENT,
             "unsupported prototype conversion to GPU output",
         )),
@@ -625,6 +660,14 @@ fn times_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     if let Some(result) = symbolic_binary(&lhs, &rhs, SymbolicBinaryOp::Mul) {
         return Ok(result);
     }
+    if let Some(result) = try_sparse_binary(&lhs, &rhs, SparseBinaryOp::Mul, BUILTIN_NAME) {
+        return result;
+    }
+    if let Some(result) = try_integer_binary(&lhs, &rhs, IntegerBinaryOp::Multiply, BUILTIN_NAME)
+        .map_err(builtin_error)?
+    {
+        return Ok(result);
+    }
     if let Some(result) = scalar_times_value(&lhs, &rhs) {
         return Ok(result);
     }
@@ -715,7 +758,7 @@ fn apply_result_dtype(tensor: &mut Tensor, dtype: NumericDType) {
             }
             tensor.dtype = NumericDType::F32;
         }
-        NumericDType::U8 | NumericDType::U16 => {
+        NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => {
             tensor.dtype = NumericDType::F64;
         }
     }
@@ -1207,13 +1250,10 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn times_int_inputs_promote_to_double() {
+    fn times_same_class_integer_inputs_preserve_class() {
         let lhs = Value::Int(IntValue::I32(3));
         let rhs = Value::Int(IntValue::I32(5));
         let result = times_builtin(lhs, rhs, Vec::new()).expect("times");
-        match result {
-            Value::Num(v) => assert_eq!(v, 15.0),
-            other => panic!("expected numeric scalar, got {other:?}"),
-        }
+        assert_eq!(result, Value::Int(IntValue::I32(15)));
     }
 }

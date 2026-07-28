@@ -1,0 +1,85 @@
+{
+  "title": "word2vec",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "word2vec",
+    "wordEmbedding",
+    "text analytics",
+    "vectors"
+  ],
+  "summary": "Map words to embedding vectors.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`word2vec` looks up host-resident text/model metadata and returns a numeric matrix; it does not use provider kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::embeddings::tests",
+    "integration": null
+  },
+  "description": "`word2vec(emb, words)` returns one embedding-vector row per requested word from a RunMat `wordEmbedding` object.",
+  "behaviors": [
+    "`emb` must be a RunMat `wordEmbedding` compatibility object, normally created by `readWordEmbedding`.",
+    "`words` may be a string scalar, string array, character vector, character matrix, or cell array of scalar text.",
+    "The output is an `n`-by-`emb.Dimension` numeric matrix, where `n` is the number of requested words after flattening the input text container.",
+    "Words missing from the vocabulary return `NaN` rows.",
+    "`word2vec(___, 'IgnoreCase', true)` performs case-insensitive vocabulary lookup and uses the first matching vocabulary entry."
+  ],
+  "examples": [
+    {
+      "description": "Look Up Word Vectors",
+      "input": "emb = readWordEmbedding('vectors.vec');\nM = word2vec(emb, [\"king\" \"queen\"])",
+      "output": "`M` has two rows and `emb.Dimension` columns."
+    },
+    {
+      "description": "Ignore Case",
+      "input": "M = word2vec(emb, \"MATLAB\", \"IgnoreCase\", true)",
+      "output": "`M` uses a case-insensitive vocabulary lookup."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What happens for missing words?",
+      "answer": "RunMat returns a row of `NaN` values for each missing vocabulary word."
+    },
+    {
+      "question": "Does `word2vec` execute on the GPU?",
+      "answer": "No. It is a host lookup into a text model object."
+    }
+  ],
+  "links": [
+    {
+      "label": "readWordEmbedding",
+      "url": "./readWordEmbedding"
+    },
+    {
+      "label": "vec2word",
+      "url": "./vec2word"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "M = word2vec(emb, words)\nM = word2vec(emb, words, 'IgnoreCase', true)",
+      "output": "`M` is a numeric matrix with one row per input word."
+    },
+    "points": [
+      "Input words are flattened into lookup order.",
+      "`IgnoreCase` must be a logical scalar."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/embeddings.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/embeddings.rs"
+  },
+  "gpu_residency": "`word2vec` reads host model metadata and returns a CPU numeric matrix."
+}

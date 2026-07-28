@@ -1,0 +1,47 @@
+{
+  "title": "wblinv",
+  "category": "stats/summary",
+  "keywords": ["wblinv", "weibull", "inverse cdf", "statistics"],
+  "summary": "Evaluate the inverse Weibull cumulative distribution function.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "matlab",
+    "notes": "gpuArray inputs are gathered to the host reference path."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 3, "constants": "inline" },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::summary::distributions::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`wblinv(p)` evaluates the unit Weibull inverse CDF. `wblinv(p,a,b)` uses scale parameter `a` and shape parameter `b`.",
+  "behaviors": [
+    "`p`, `a`, and `b` support scalar expansion and matching array shapes.",
+    "`p` must be in `[0,1]`; `a` and `b` must be positive. Invalid parameters produce `NaN` outputs.",
+    "`p == 0` returns zero and `p == 1` returns `Inf`.",
+    "Confidence-bound output forms that depend on fitted-parameter covariance are not implemented yet."
+  ],
+  "examples": [
+    {
+      "description": "Weibull median",
+      "input": "x = wblinv(0.5,3,4)",
+      "output": "x = 2.7376"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What is the formula?",
+      "answer": "RunMat computes `a * (-log(1-p))^(1/b)` for valid probabilities and positive parameters."
+    }
+  ],
+  "links": [
+    { "label": "wblrnd", "url": "./wblrnd" },
+    { "label": "tinv", "url": "./tinv" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/distributions.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/distributions.rs"
+  }
+}

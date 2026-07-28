@@ -1,0 +1,88 @@
+{
+  "title": "lcm",
+  "category": "math/discrete",
+  "keywords": [
+    "lcm",
+    "least common multiple",
+    "integer",
+    "number theory",
+    "discrete math"
+  ],
+  "summary": "Compute least common multiples for positive integer inputs.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "matlab",
+    "notes": "gpuArray inputs are gathered to the host. RunMat preserves supported host output classes rather than dispatching to a GPU provider."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::discrete::lcm::tests",
+    "integration": null
+  },
+  "description": "`lcm(A,B)` returns the least common multiples of corresponding elements of `A` and `B`. Inputs must be real positive integer values, and the inputs must be the same size or one input must be scalar.",
+  "behaviors": [
+    "Accepts exactly two inputs.",
+    "Inputs must contain finite, real, positive integer values.",
+    "Inputs must have the same size or one input must be scalar-expanded.",
+    "Double inputs return double results; single inputs mixed with double return single results.",
+    "Supported unsigned integer array inputs (`uint8`, `uint16`, and `uint32`) preserve their output class when paired with the same class or a double scalar.",
+    "Scalar signed integer and `uint64` inputs preserve their scalar integer class when the result is representable.",
+    "Mixed integer classes are rejected, matching MATLAB's requirement that integer inputs use the same class unless paired with a double scalar.",
+    "Logical, complex, zero, negative, fractional, non-finite, shape-mismatched, and overflowing inputs raise errors."
+  ],
+  "examples": [
+    {
+      "description": "Least common multiples of a double array and a scalar",
+      "input": "A = [5 17; 10 60];\nL = lcm(A,45)",
+      "output": "L = [45 765; 90 180]"
+    },
+    {
+      "description": "Preserve unsigned integer output class",
+      "input": "A = uint16([255 511 15]);\nB = uint16([15 127 1023]);\nL = lcm(A,B)",
+      "output": "L = uint16([255 64897 5115])"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does lcm support implicit expansion?",
+      "answer": "RunMat supports MATLAB-compatible scalar expansion. Non-scalar inputs must have the same size."
+    },
+    {
+      "question": "Why does lcm reject mixed integer classes?",
+      "answer": "MATLAB requires integer inputs to have the same class unless the other input is a double scalar. RunMat follows that rule to avoid silently returning the wrong integer class."
+    },
+    {
+      "question": "Why does lcm raise overflow errors for integer outputs?",
+      "answer": "The result must fit the output class. RunMat rejects overflowing integer results instead of silently truncating them."
+    }
+  ],
+  "links": [
+    {
+      "label": "primes",
+      "url": "./primes"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/discrete/lcm.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/discrete/lcm.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "L = lcm(A,B)"
+    },
+    "points": [
+      "`A` and `B` must be positive integer numeric values.",
+      "`A` and `B` must be the same size, unless one input is scalar.",
+      "`L` has the same size as the non-scalar input, or scalar size when both inputs are scalar."
+    ]
+  }
+}

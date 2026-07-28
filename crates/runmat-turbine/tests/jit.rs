@@ -2130,14 +2130,15 @@ fn test_jit_function_compilation_attempts() {
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
 
     // Bytecode with function instructions (should not crash JIT compiler)
+    let missing_function = "__runmat_jit_test_missing_function__";
     let function_instructions_bytecode = Bytecode::with_instructions(
         vec![
             Instr::LoadConst(42.0),
-            Instr::LoadLocal(0),            // Should be handled gracefully
-            Instr::StoreLocal(1),           // Should be handled gracefully
-            Instr::EnterScope(5),           // Should be handled gracefully
-            Instr::ExitScope(5),            // Should be handled gracefully
-            named_call_instr("test", 1, 1), // Should trigger fallback
+            Instr::LoadLocal(0),  // Should be handled gracefully
+            Instr::StoreLocal(1), // Should be handled gracefully
+            Instr::EnterScope(5), // Should be handled gracefully
+            Instr::ExitScope(5),  // Should be handled gracefully
+            named_call_instr(missing_function, 1, 1), // Should trigger fallback
             Instr::StoreVar(0),
         ],
         1,
@@ -2154,7 +2155,8 @@ fn test_jit_function_compilation_attempts() {
     // This will likely error due to undefined function, but should not crash
     if let Err(error) = exec_result {
         assert!(
-            error.to_string().contains("test") || error.to_string().contains("undefined"),
+            error.to_string().contains(missing_function)
+                && error.to_string().to_ascii_lowercase().contains("undefined"),
             "Should get undefined function error, got: {error}"
         );
     }

@@ -1,5 +1,6 @@
 //! MATLAB-compatible `replace` builtin with GPU-aware semantics for RunMat.
 
+use regex::Regex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -13,6 +14,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
+use crate::builtins::strings::core::compat::pattern_regex;
 use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
@@ -295,8 +297,17 @@ fn replace_cell_element(value: &Value, spec: &ReplacementSpec) -> BuiltinResult<
     }
 }
 
-fn extract_pattern_list(value: &Value) -> BuiltinResult<Vec<String>> {
+fn extract_pattern_list(value: &Value) -> BuiltinResult<Vec<SearchPattern>> {
+    if matches!(value, Value::Object(_)) {
+        let regex = pattern_regex(value, BUILTIN_NAME).map_err(|err| {
+            replace_error_with_message(err.message().to_string(), &REPLACE_ERROR_PATTERN_TYPE)
+        })?;
+        return Ok(vec![SearchPattern::Regex(Regex::new(&regex).map_err(
+            |err| replace_error_with_message(err.to_string(), &REPLACE_ERROR_PATTERN_TYPE),
+        )?)]);
+    }
     extract_text_list(value, &REPLACE_ERROR_PATTERN_TYPE)
+        .map(|items| items.into_iter().map(SearchPattern::Literal).collect())
 }
 
 fn extract_replacement_list(value: &Value) -> BuiltinResult<Vec<String>> {
@@ -352,8 +363,13 @@ fn extract_text_list(
     }
 }
 
+enum SearchPattern {
+    Literal(String),
+    Regex(Regex),
+}
+
 struct ReplacementSpec {
-    pairs: Vec<(String, String)>,
+    pairs: Vec<(SearchPattern, String)>,
 }
 
 impl ReplacementSpec {
@@ -386,13 +402,22 @@ impl ReplacementSpec {
     fn apply(&self, input: &str) -> String {
         let mut current = input.to_string();
         for (pattern, replacement) in &self.pairs {
-            if pattern.is_empty() && replacement.is_empty() {
-                continue;
+            match pattern {
+                SearchPattern::Literal(pattern) => {
+                    if pattern.is_empty() && replacement.is_empty() {
+                        continue;
+                    }
+                    if pattern == replacement {
+                        continue;
+                    }
+                    current = current.replace(pattern, replacement);
+                }
+                SearchPattern::Regex(pattern) => {
+                    current = pattern
+                        .replace_all(&current, replacement.as_str())
+                        .to_string();
+                }
             }
-            if pattern == replacement {
-                continue;
-            }
-            current = current.replace(pattern, replacement);
         }
         current
     }
@@ -582,6 +607,18 @@ pub(crate) mod tests {
         )
         .expect("replace");
         assert_eq!(result, Value::String("<missing>".into()));
+    }
+
+    #[test]
+    fn replace_accepts_pattern_object() {
+        let pattern = crate::builtins::strings::core::compat::pattern_object(r"\d+");
+        let result = replace_builtin(
+            Value::String("run42mat".into()),
+            pattern,
+            Value::String("-".into()),
+        )
+        .expect("replace");
+        assert_eq!(result, Value::String("run-mat".into()));
     }
 
     #[test]

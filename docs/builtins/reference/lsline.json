@@ -1,0 +1,82 @@
+{
+  "title": "lsline",
+  "category": "stats/summary",
+  "keywords": [
+    "lsline",
+    "least squares",
+    "fit line",
+    "statistics",
+    "plotting"
+  ],
+  "summary": "Add least-squares fit lines to scatter-style plots.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`lsline` inspects existing graphics objects and adds line graphics objects. It does not perform numeric GPU computation or mutate GPU-resident tensors."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::summary::lsline::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`lsline` appends least-squares fit lines to eligible scatter-style series in the current or specified axes. It matches MATLAB's compatibility surface for adding fit lines to scatter plots and marker-only line plots, returning the created line handle or handles when requested.",
+  "behaviors": [
+    "`lsline()` scans the current axes and adds one least-squares line for each visible eligible scatter-style plot.",
+    "`lsline(ax)` targets the specified axes without changing other axes.",
+    "Eligible plots include scatter plots and marker-only line plots. Ordinary line plots with a visible connecting line are ignored.",
+    "Non-finite X/Y pairs are skipped when computing the fit. A vertical or constant-X eligible series produces a horizontal least-squares line at the mean Y value.",
+    "If no eligible plots are present, RunMat returns an empty `0x0` handle array.",
+    "The returned line handle is compatible with `get` and `set` for line properties such as `XData`, `YData`, `Color`, `LineStyle`, `LineWidth`, and `DisplayName`."
+  ],
+  "examples": [
+    {
+      "description": "Add a least-squares line to a scatter plot",
+      "input": "x = [1 2 3 4];\ny = [1.2 1.9 3.1 3.8];\nscatter(x, y);\nh = lsline;"
+    },
+    {
+      "description": "Target a specific axes",
+      "input": "ax = subplot(1,2,2);\nscatter(ax, [1 2 3], [2 4 6]);\nh = lsline(ax);"
+    },
+    {
+      "description": "Inspect the generated line data",
+      "input": "scatter([1 2 3], [2 4 6]);\nh = lsline;\nget(h, 'YData')",
+      "output": "ans =\n     2     6"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is lsline related to refline?",
+      "answer": "`lsline` only computes least-squares fit lines for eligible scatter-style plots. `refline` can do the same when called without coefficients, but it also accepts explicit slope/intercept coefficients for drawing arbitrary reference lines."
+    },
+    {
+      "question": "Does lsline fit every plot in the axes?",
+      "answer": "No. MATLAB-style `lsline` is intended for scatter-style data. RunMat fits scatter plots and marker-only line plots and ignores connected line plots, surfaces, bars, and other graphics objects."
+    }
+  ],
+  "links": [
+    {
+      "label": "refline",
+      "url": "./refline"
+    },
+    {
+      "label": "scatter",
+      "url": "./scatter"
+    },
+    {
+      "label": "plot",
+      "url": "./plot"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/lsline.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/lsline.rs"
+  }
+}

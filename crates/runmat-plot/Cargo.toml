@@ -34,7 +34,7 @@ serde_json = { workspace = true }
 # Image processing for export
 image = { version = "0.24", features = ["png", "jpeg"] }
 font8x8 = "0.3"
-rfd = { version = "0.14", optional = true }
+rfd = { version = "0.15", optional = true }
 
 
 

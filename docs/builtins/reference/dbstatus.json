@@ -1,0 +1,59 @@
+{
+  "title": "dbstatus",
+  "category": "introspection",
+  "keywords": ["dbstatus", "debug", "breakpoints"],
+  "summary": "Return RunMat debugger breakpoint status.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host-side debugger state only."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::debugging::tests::dbstatus_returns_empty_breakpoint_cell",
+    "integration": "debugger_compat_commands_execute_through_core"
+  },
+  "description": "`dbstatus` returns RunMat's breakpoint registry state.",
+  "behaviors": [
+    "`dbstatus` accepts MATLAB-style file and `'-completenames'` text arguments.",
+    "RunMat does not yet implement execution breakpoints or `dbstop`, so the current status is an empty 0-by-0 cell list.",
+    "The empty-list representation uses a cell because RunMat does not yet have first-class MATLAB struct arrays."
+  ],
+  "examples": [
+    {
+      "description": "Query breakpoint state",
+      "input": "b = dbstatus;"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `dbstatus` list MATLAB breakpoints?",
+      "answer": "Not yet. The interactive breakpoint engine is a broader runtime feature; this compatibility helper returns the currently empty registry."
+    }
+  ],
+  "links": [
+    {
+      "label": "dbclear",
+      "url": "./dbclear"
+    },
+    {
+      "label": "dbstack",
+      "url": "./dbstack"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/debugging.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/debugging.rs"
+  },
+  "gpu_behavior": [
+    "`dbstatus` is host-side debugger state and has no GPU/provider behavior."
+  ]
+}

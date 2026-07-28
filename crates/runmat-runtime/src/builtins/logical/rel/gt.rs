@@ -15,7 +15,11 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::logical::type_resolvers::logical_binary_type;
+use crate::builtins::logical::rel::integer_comparison::{
+    try_integer_comparison, IntegerComparisonError, IntegerComparisonOp,
+};
+use crate::builtins::logical::type_resolvers::symbolic_logical_binary_type;
+use crate::builtins::math::symbolic::symbolic_named_binary;
 use crate::{build_runtime_error, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::rel::gt")]
@@ -142,7 +146,7 @@ fn gt_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     summary = "Compute element-wise greater-than comparisons.",
     keywords = "gt,greater than,comparison,logical,gpu",
     accel = "elementwise",
-    type_resolver(logical_binary_type),
+    type_resolver(symbolic_logical_binary_type),
     descriptor(crate::builtins::logical::rel::gt::GT_DESCRIPTOR),
     builtin_path = "crate::builtins::logical::rel::gt"
 )]
@@ -170,7 +174,28 @@ async fn try_gt_gpu(
 }
 
 async fn gt_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
+    if let Some(result) = crate::builtins::table::categorical_compare(
+        &lhs,
+        &rhs,
+        crate::builtins::table::CategoricalComparison::Gt,
+    ) {
+        return result;
+    }
+
+    if let Some(value) = symbolic_named_binary(&lhs, &rhs, BUILTIN_NAME) {
+        return Ok(value);
+    }
+
     let (lhs, rhs) = normalize_char_string(lhs, rhs);
+
+    if let Some(result) = try_integer_comparison(&lhs, &rhs, IntegerComparisonOp::Gt).map_err(
+        |error| match error {
+            IntegerComparisonError::SizeMismatch => gt_error(&GT_ERROR_SIZE_MISMATCH),
+            IntegerComparisonError::Internal => gt_error(&GT_ERROR_INVALID_INPUT),
+        },
+    )? {
+        return Ok(result);
+    }
 
     if let Some(result) = scalar_gt_value(&lhs, &rhs) {
         return result;

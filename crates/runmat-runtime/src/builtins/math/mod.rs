@@ -1,3 +1,4 @@
+pub mod discrete;
 pub mod elementwise;
 pub mod fft;
 pub mod interpolation;

@@ -1,0 +1,82 @@
+{
+  "title": "statset",
+  "category": "stats/options",
+  "keywords": [
+    "statset",
+    "statistics options",
+    "MaxIter",
+    "TolFun",
+    "TolX",
+    "Display",
+    "UseParallel"
+  ],
+  "summary": "Create or update statistics options structures.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Options are host metadata. gpuArray option values are gathered before validation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::options::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`statset` builds MATLAB-style statistics options structs for functions such as `kmeans`, `tsne`, `bootstrp`, `lasso`, and distribution fitting routines.",
+  "behaviors": [
+    "`statset()` returns a struct with canonical statistics option fields initialized to empty values.",
+    "`statset(statfun)` returns common defaults for recognized statistics functions. RunMat includes defaults for widely used fitting, clustering, resampling, and parallel-capable routines.",
+    "`statset(name,value,...)` creates an options struct from name-value pairs. `statset(oldopts,name,value,...)` copies an existing options struct and applies overrides.",
+    "`statset(oldopts,newopts)` merges nonempty fields from `newopts` into `oldopts`, preserving old values where the replacement field is empty.",
+    "Option names are case-insensitive and support unique leading prefixes, matching MATLAB-style option lookup.",
+    "Recognized fields include `Display`, `MaxFunEvals`, `MaxIter`, `TolBnd`, `TolFun`, `TolTypeFun`, `TolX`, `TolTypeX`, `GradObj`, `Jacobian`, `DerivStep`, `FunValCheck`, `Robust`, `RobustWgtFun`, `WgtFun`, `Tune`, `UseParallel`, `UseSubstreams`, `Streams`, and `OutputFcn`.",
+    "Numeric tolerance fields must be finite positive scalars, iteration fields must be positive integers, and enum fields such as `Display`, `TolTypeFun`, and `FunValCheck` are validated.",
+    "Callback, stream, and robust-weight payload fields preserve function handles and metadata values so consuming builtins can interpret them."
+  ],
+  "examples": [
+    {
+      "description": "Create custom statistics options",
+      "input": "opts = statset('TolX', 1e-8, 'Display', 'off')",
+      "output": "`opts` is a struct with canonical statistics option fields."
+    },
+    {
+      "description": "Start from function defaults and override a value",
+      "input": "opts = statset('nbinfit');\nopts = statset(opts, 'TolX', 1e-8)",
+      "output": "`opts` keeps `nbinfit` defaults such as `MaxIter` and uses the new `TolX`."
+    },
+    {
+      "description": "Merge two options structures",
+      "input": "base = statset('MaxIter', 20);\nupdate = statset('TolFun', 1e-7);\nopts = statset(base, update)",
+      "output": "`opts` contains both `MaxIter` and `TolFun`."
+    }
+  ],
+  "links": [
+    {
+      "label": "statget",
+      "url": "./statget"
+    },
+    {
+      "label": "kmeans",
+      "url": "./kmeans"
+    },
+    {
+      "label": "tsne",
+      "url": "./tsne"
+    },
+    {
+      "label": "bootstrp",
+      "url": "./bootstrp"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/options.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/options.rs"
+  }
+}

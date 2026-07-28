@@ -1,0 +1,13 @@
+{
+  "title": "hdf5read",
+  "category": "io/hdf5",
+  "keywords": ["hdf5read", "h5read", "hdf5", "dataset", "legacy"],
+  "summary": "Legacy alias for reading dense HDF5 datasets.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Uses the same host HDF5 path as `h5read`."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 0, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::io::hdf5::tests", "integration": null},
+  "description": "`hdf5read(filename, dataset)` delegates to `h5read` for legacy compatibility.",
+  "behaviors": ["Supports the same dense dataset and selection subset as `h5read`."],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/io/hdf5.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/hdf5.rs"}
+}

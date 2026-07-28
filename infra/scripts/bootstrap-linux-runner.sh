@@ -32,6 +32,7 @@ PACKAGES=(
   libdbus-1-dev
   libegl1-mesa-dev
   libgl1-mesa-dev
+  libhdf5-dev
   liblapack-dev
   libopenblas-dev
   libssl-dev
@@ -96,6 +97,7 @@ if [[ "$(command -v cargo || true)" != "${CARGO_HOME}/bin/cargo" ]]; then
   exit 1
 fi
 pkg-config --modversion libzmq
+pkg-config --modversion hdf5
 cmake --version >/dev/null
 if [[ -z "${LDCONFIG_BIN}" ]]; then
   echo "ldconfig was not found on PATH or at /usr/sbin/ldconfig" >&2

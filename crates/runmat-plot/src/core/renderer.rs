@@ -124,6 +124,8 @@ pub struct DirectUniforms {
     pub viewport_min: [f32; 2], // NDC coordinates of viewport bottom-left
     pub viewport_max: [f32; 2], // NDC coordinates of viewport top-right
     pub viewport_px: [f32; 2],  // viewport size in pixels (width, height)
+    pub log_flags: [u32; 2],    // (x_log, y_log), 1 when axis uses log10 mapping
+    pub _pad: [u32; 2],
 }
 
 /// Style uniforms for direct point rendering (scatter markers)
@@ -202,6 +204,7 @@ impl DirectUniforms {
         viewport_min: [f32; 2],
         viewport_max: [f32; 2],
         viewport_px: [f32; 2],
+        log_flags: [u32; 2],
     ) -> Self {
         Self {
             data_min,
@@ -209,6 +212,8 @@ impl DirectUniforms {
             viewport_min,
             viewport_max,
             viewport_px,
+            log_flags,
+            _pad: [0, 0],
         }
     }
 }
@@ -231,6 +236,7 @@ pub fn marker_shape_code(style: crate::plots::scatter::MarkerStyle) -> u32 {
 pub enum PipelineType {
     Points,
     Lines,
+    LinesNoDepth,
     Triangles,
     Scatter3,
     Textured,
@@ -248,6 +254,7 @@ pub struct WgpuRenderer {
     // Rendering pipelines (traditional camera-based)
     point_pipeline: Option<wgpu::RenderPipeline>,
     line_pipeline: Option<wgpu::RenderPipeline>,
+    line_no_depth_pipeline: Option<wgpu::RenderPipeline>,
     triangle_pipeline: Option<wgpu::RenderPipeline>,
 
     // Direct rendering pipelines (optimized coordinate transformation)
@@ -394,6 +401,7 @@ impl WgpuRenderer {
                         [-1.0, -1.0],
                         [1.0, 1.0],
                         [1.0, 1.0],
+                        [0, 0],
                     )]),
                     usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 });
@@ -488,6 +496,7 @@ impl WgpuRenderer {
             [-1.0, -1.0], // viewport_min (full NDC)
             [1.0, 1.0],   // viewport_max (full NDC)
             [1.0, 1.0],   // viewport_px
+            [0, 0],       // log_flags
         );
         let direct_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Direct Uniform Buffer"),
@@ -641,6 +650,7 @@ impl WgpuRenderer {
             msaa_sample_count: 1,
             point_pipeline: None,
             line_pipeline: None,
+            line_no_depth_pipeline: None,
             triangle_pipeline: None,
             direct_line_pipeline: None,
             direct_triangle_pipeline: None,
@@ -717,6 +727,7 @@ impl WgpuRenderer {
             // Pipelines depend on depth compare; rebuild.
             self.point_pipeline = None;
             self.line_pipeline = None;
+            self.line_no_depth_pipeline = None;
             self.triangle_pipeline = None;
             self.direct_line_pipeline = None;
             self.direct_triangle_pipeline = None;
@@ -742,6 +753,7 @@ impl WgpuRenderer {
             // Drop pipelines so they are recreated with new MSAA count
             self.point_pipeline = None;
             self.line_pipeline = None;
+            self.line_no_depth_pipeline = None;
             self.triangle_pipeline = None;
             self.direct_line_pipeline = None;
             self.direct_triangle_pipeline = None;
@@ -1054,6 +1066,11 @@ impl WgpuRenderer {
                     self.line_pipeline = Some(self.create_line_pipeline());
                 }
             }
+            PipelineType::LinesNoDepth => {
+                if self.line_no_depth_pipeline.is_none() {
+                    self.line_no_depth_pipeline = Some(self.create_line_no_depth_pipeline());
+                }
+            }
             PipelineType::Triangles => {
                 if self.triangle_pipeline.is_none() {
                     self.triangle_pipeline = Some(self.create_triangle_pipeline());
@@ -1076,6 +1093,7 @@ impl WgpuRenderer {
         match pipeline_type {
             PipelineType::Points => self.point_pipeline.as_ref().unwrap(),
             PipelineType::Lines => self.line_pipeline.as_ref().unwrap(),
+            PipelineType::LinesNoDepth => self.line_no_depth_pipeline.as_ref().unwrap(),
             PipelineType::Triangles => self.triangle_pipeline.as_ref().unwrap(),
             PipelineType::Scatter3 => self.get_pipeline(PipelineType::Points),
             PipelineType::Textured => self.image_pipeline.as_ref().unwrap(),
@@ -1150,24 +1168,41 @@ impl WgpuRenderer {
 
     /// Create line rendering pipeline
     fn create_line_pipeline(&self) -> wgpu::RenderPipeline {
+        self.create_camera_line_pipeline("Line Pipeline", true, self.depth_compare())
+    }
+
+    fn create_line_no_depth_pipeline(&self) -> wgpu::RenderPipeline {
+        self.create_camera_line_pipeline(
+            "Line No Depth Pipeline",
+            false,
+            wgpu::CompareFunction::Always,
+        )
+    }
+
+    fn create_camera_line_pipeline(
+        &self,
+        label: &'static str,
+        depth_write_enabled: bool,
+        depth_compare: wgpu::CompareFunction,
+    ) -> wgpu::RenderPipeline {
         let shader = self
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Line Shader"),
+                label: Some(label),
                 source: wgpu::ShaderSource::Wgsl(shaders::vertex::LINE.into()),
             });
 
         let pipeline_layout = self
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Line Pipeline Layout"),
+                label: Some(label),
                 bind_group_layouts: &[&self.uniform_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
         self.device
             .create_render_pipeline(&crate::wgpu_compat::wgpu_render_pipeline_descriptor! {
-                label: Some("Line Pipeline"),
+                label: Some(label),
                 layout: Some(&pipeline_layout),
                 vertex: crate::wgpu_compat::wgpu_vertex_state!(&shader, "vs_main", &[Vertex::desc()]),
                 fragment: Some(crate::wgpu_compat::wgpu_fragment_state!(&shader, "fs_main", &[Some(wgpu::ColorTargetState {
@@ -1186,8 +1221,8 @@ impl WgpuRenderer {
                 },
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: Self::depth_format(),
-                    depth_write_enabled: true,
-                    depth_compare: self.depth_compare(),
+                    depth_write_enabled,
+                    depth_compare,
                     stencil: wgpu::StencilState::default(),
                     bias: wgpu::DepthBiasState::default(),
                 }),
@@ -1638,16 +1673,8 @@ impl WgpuRenderer {
     }
 
     /// Update transformation uniforms for direct viewport rendering
-    pub fn update_direct_uniforms(
-        &mut self,
-        data_min: [f32; 2],
-        data_max: [f32; 2],
-        viewport_min: [f32; 2],
-        viewport_max: [f32; 2],
-        viewport_px: [f32; 2],
-    ) {
-        self.direct_uniforms =
-            DirectUniforms::new(data_min, data_max, viewport_min, viewport_max, viewport_px);
+    pub fn update_direct_uniforms(&mut self, uniforms: DirectUniforms) {
+        self.direct_uniforms = uniforms;
         self.queue.write_buffer(
             &self.direct_uniform_buffer,
             0,
@@ -1661,18 +1688,8 @@ impl WgpuRenderer {
         );
     }
 
-    pub fn update_direct_uniforms_for_axes(
-        &mut self,
-        axes_index: usize,
-        data_min: [f32; 2],
-        data_max: [f32; 2],
-        viewport_min: [f32; 2],
-        viewport_max: [f32; 2],
-        viewport_px: [f32; 2],
-    ) {
+    pub fn update_direct_uniforms_for_axes(&mut self, axes_index: usize, uniforms: DirectUniforms) {
         self.ensure_axes_uniform_capacity(axes_index + 1);
-        let uniforms =
-            DirectUniforms::new(data_min, data_max, viewport_min, viewport_max, viewport_px);
         self.queue.write_buffer(
             &self.axes_direct_uniform_buffers[axes_index],
             0,
@@ -1922,6 +1939,7 @@ pub mod vertex_utils {
         let mut vertices = Vec::new();
         for i in 1..x_data.len() {
             let include = match style {
+                crate::plots::line::LineStyle::None => false,
                 crate::plots::line::LineStyle::Solid => true,
                 crate::plots::line::LineStyle::Dashed => (i % 4) < 2, // on,on,off,off
                 crate::plots::line::LineStyle::Dotted => false,       // handled elsewhere as points
@@ -1987,6 +2005,7 @@ pub mod vertex_utils {
             .collect();
         for i in 0..pts.len() - 1 {
             let include = match style {
+                crate::plots::line::LineStyle::None => false,
                 crate::plots::line::LineStyle::Solid => true,
                 crate::plots::line::LineStyle::Dashed => (i % 4) < 2,
                 crate::plots::line::LineStyle::Dotted => false,

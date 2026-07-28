@@ -1,0 +1,54 @@
+{
+  "title": "swapbytes",
+  "category": "math/elementwise",
+  "keywords": ["swapbytes", "byte order", "endian", "numeric"],
+  "summary": "Reverse the byte order of numeric values.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "gpuArray inputs are gathered to the host before bytes are swapped."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::logical::bit::integer::tests",
+    "integration": null
+  },
+  "description": "`swapbytes(X)` reverses the byte order of each numeric element while preserving the input numeric class.",
+  "behaviors": [
+    "Supports scalar integer values and scalar doubles.",
+    "Supports dense `double`, `single`, `uint8`, `uint16`, and `uint32` tensors.",
+    "`uint8` values are unchanged because they contain one byte.",
+    "Floating-point values are reinterpreted by their IEEE bytes, byte-swapped, and returned in the same class.",
+    "Logical, complex, string, cell, struct, and object inputs raise errors."
+  ],
+  "examples": [
+    {
+      "description": "Swap an unsigned integer scalar",
+      "input": "y = swapbytes(uint16(hex2dec('1234')))",
+      "output": "y = uint16\n  13330"
+    },
+    {
+      "description": "Swap every element of an unsigned integer array",
+      "input": "y = swapbytes(uint16([hex2dec('1234') hex2dec('00ff')]))",
+      "output": "y = uint16([hex2dec('3412') hex2dec('ff00')])"
+    }
+  ],
+  "links": [
+    {
+      "label": "idivide",
+      "url": "./idivide"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/logical/bit/integer.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/bit/integer.rs"
+  }
+}

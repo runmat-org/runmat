@@ -1,4 +1,7 @@
 use super::*;
+use crate::backend::wgpu::params::{
+    MovingWindowParamsF32, MovingWindowParamsF64, PackedF32, PackedU32,
+};
 use crate::backend::wgpu::shaders::signal::{
     analytic_signal_mask_shader, envelope_analytic_bounds_shader,
     envelope_analytic_fir_bounds_shader, envelope_analytic_mask_shader,
@@ -7,8 +10,265 @@ use crate::backend::wgpu::shaders::signal::{
     SpectralFrameShaderMode, SpectralRangeShaderMode,
 };
 use runmat_accelerate_api::{
-    ProviderEnvelopeMethod, ProviderEnvelopeRequest, ProviderEnvelopeResult, ProviderHilbertRequest,
+    ProviderEnvelopeMethod, ProviderEnvelopeRequest, ProviderEnvelopeResult,
+    ProviderHilbertRequest, ProviderMovingWindowEndpoints, ProviderMovingWindowOp,
+    ProviderMovingWindowRequest, ProviderNanMode, ProviderStdNormalization,
+    ProviderTrapezoidSpacing,
 };
+
+#[derive(Clone, Copy)]
+enum GradientSpacingInput<'a> {
+    Scalar(f64),
+    Coordinates(&'a GpuTensorHandle),
+}
+
+enum IirCoefficientPlan {
+    UnitDenominatorFir,
+    Normalized { b: Vec<f64>, a: Vec<f64> },
+}
+
+fn moving_window_op_code(op: ProviderMovingWindowOp) -> u32 {
+    match op {
+        ProviderMovingWindowOp::Sum => 0,
+        ProviderMovingWindowOp::Mean => 1,
+        ProviderMovingWindowOp::Prod => 2,
+        ProviderMovingWindowOp::Min => 3,
+        ProviderMovingWindowOp::Max => 4,
+        ProviderMovingWindowOp::Std => 5,
+        ProviderMovingWindowOp::Var => 6,
+        ProviderMovingWindowOp::Median => 7,
+    }
+}
+
+fn moving_window_endpoint_code(endpoint: ProviderMovingWindowEndpoints) -> (u32, f64) {
+    match endpoint {
+        ProviderMovingWindowEndpoints::Shrink => (0, 0.0),
+        ProviderMovingWindowEndpoints::Discard => (1, 0.0),
+        ProviderMovingWindowEndpoints::Fill(value) => (2, value),
+    }
+}
+
+const WGPU_MOVING_MEDIAN_MAX_WINDOW: usize = 256;
+const WGPU_MOVING_WINDOW_I32_LIMIT: usize = i32::MAX as usize;
+
+struct MovingWindowShaderSpec {
+    precision: NumericPrecision,
+    output_len: usize,
+    axis_len: usize,
+    out_axis_len: usize,
+    stride_before: usize,
+    before: usize,
+    after: usize,
+    op: ProviderMovingWindowOp,
+    endpoints: ProviderMovingWindowEndpoints,
+    nan_mode: ProviderNanMode,
+    normalization: ProviderStdNormalization,
+    fill_value: f64,
+}
+
+fn build_specialized_moving_window_shader(spec: &MovingWindowShaderSpec) -> String {
+    let ty = spec.precision.as_str();
+    let nan_helpers = match spec.precision {
+        NumericPrecision::F64 => {
+            r#"
+fn is_nan(value: f64) -> bool {
+  let bits = bitcast<u64>(value);
+  return (bits & 0x7ff0000000000000u) == 0x7ff0000000000000u &&
+    (bits & 0x000fffffffffffffu) != 0u;
+}
+fn nan_value() -> f64 { return bitcast<f64>(0x7ff8000000000000u); }
+"#
+        }
+        NumericPrecision::F32 => {
+            r#"
+fn is_nan(value: f32) -> bool {
+  let bits = bitcast<u32>(value);
+  return (bits & 0x7f800000u) == 0x7f800000u && (bits & 0x007fffffu) != 0u;
+}
+fn nan_value() -> f32 { return bitcast<f32>(0x7fc00000u); }
+"#
+        }
+    };
+    let fill = match spec.precision {
+        NumericPrecision::F64 => format!("f64({:?})", spec.fill_value),
+        NumericPrecision::F32 => format!("f32({:?})", spec.fill_value as f32),
+    };
+    let endpoint = moving_window_endpoint_code(spec.endpoints).0;
+    let omit_nan = matches!(spec.nan_mode, ProviderNanMode::Omit);
+    let workgroup = crate::backend::wgpu::config::WORKGROUP_SIZE;
+    let common = format!(
+        r#"
+struct Tensor {{ data: array<{ty}>, }};
+@group(0) @binding(0) var<storage, read> Input: Tensor;
+@group(0) @binding(1) var<storage, read_write> Output: Tensor;
+{nan_helpers}
+"#
+    );
+    let main_prefix = format!(
+        r#"
+@compute @workgroup_size({workgroup})
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
+  let idx = gid.x;
+  if (idx >= {output_len}u) {{ return; }}
+  let before_idx = idx % {stride_before}u;
+  let tmp = idx / {stride_before}u;
+  let out_pos = tmp % {out_axis_len}u;
+  let after_idx = tmp / {out_axis_len}u;
+  let center = out_pos + {discard_offset}u;
+  let start = i32(center) - {before};
+  let end = i32(center) + {after};
+  let in_start = max(start, 0);
+  let in_end = min(end, {last_axis});
+  var fill_count = 0u;
+  if ({fill_enabled}) {{
+    if (start < 0) {{ fill_count = fill_count + u32(-start); }}
+    if (end > {last_axis}) {{ fill_count = fill_count + u32(end - {last_axis}); }}
+  }}
+"#,
+        output_len = spec.output_len,
+        stride_before = spec.stride_before,
+        out_axis_len = spec.out_axis_len,
+        discard_offset = if endpoint == 1 { spec.before } else { 0 },
+        before = spec.before,
+        after = spec.after,
+        last_axis = spec.axis_len as i32 - 1,
+        fill_enabled = endpoint == 2,
+    );
+
+    if matches!(spec.op, ProviderMovingWindowOp::Median) {
+        let median_body = format!(
+            r#"
+  var values: array<{ty}, {max_window}>;
+  var count = 0u;
+  var saw_nan = false;
+  if (in_start <= in_end) {{
+    var pos = u32(in_start);
+    loop {{
+      if (pos > u32(in_end)) {{ break; }}
+      let input_idx = before_idx + pos * {stride_before}u + after_idx * {stride_before}u * {axis_len}u;
+      let value = Input.data[input_idx];
+      if (is_nan(value)) {{
+        if (!{omit_nan}) {{ saw_nan = true; break; }}
+      }} else {{ values[count] = value; count = count + 1u; }}
+      pos = pos + 1u;
+    }}
+  }}
+  if (!saw_nan && fill_count > 0u) {{
+    if (is_nan({fill})) {{
+      if (!{omit_nan}) {{ saw_nan = true; }}
+    }} else {{
+      var fill_idx = 0u;
+      loop {{
+        if (fill_idx >= fill_count) {{ break; }}
+        values[count] = {fill}; count = count + 1u; fill_idx = fill_idx + 1u;
+      }}
+    }}
+  }}
+  if (saw_nan || count == 0u) {{ Output.data[idx] = nan_value(); return; }}
+  var i = 1u;
+  loop {{
+    if (i >= count) {{ break; }}
+    let key = values[i];
+    var j = i;
+    loop {{
+      if (j == 0u || values[j - 1u] <= key) {{ break; }}
+      values[j] = values[j - 1u]; j = j - 1u;
+    }}
+    values[j] = key; i = i + 1u;
+  }}
+  let lower = values[(count - 1u) / 2u];
+  let upper = values[count / 2u];
+  Output.data[idx] = (lower + upper) * {ty}(0.5);
+}}
+"#,
+            max_window = WGPU_MOVING_MEDIAN_MAX_WINDOW,
+            stride_before = spec.stride_before,
+            axis_len = spec.axis_len,
+        );
+        return common + &main_prefix + &median_body;
+    }
+
+    let empty_value = match spec.op {
+        ProviderMovingWindowOp::Sum => format!("{ty}(0.0)"),
+        ProviderMovingWindowOp::Prod => format!("{ty}(1.0)"),
+        _ => "nan_value()".to_owned(),
+    };
+    let result = match spec.op {
+        ProviderMovingWindowOp::Sum => "sum".to_owned(),
+        ProviderMovingWindowOp::Mean => format!("sum / {ty}(count)"),
+        ProviderMovingWindowOp::Prod => "product".to_owned(),
+        ProviderMovingWindowOp::Min => "minimum".to_owned(),
+        ProviderMovingWindowOp::Max => "maximum".to_owned(),
+        ProviderMovingWindowOp::Std | ProviderMovingWindowOp::Var => {
+            let denominator = match spec.normalization {
+                ProviderStdNormalization::Sample => {
+                    format!("{ty}(select(1u, count - 1u, count > 1u))")
+                }
+                ProviderStdNormalization::Population => format!("{ty}(count)"),
+            };
+            let variance = format!("m2 / {denominator}");
+            if matches!(spec.op, ProviderMovingWindowOp::Std) {
+                format!("sqrt({variance})")
+            } else {
+                variance
+            }
+        }
+        ProviderMovingWindowOp::Median => unreachable!(),
+    };
+    let body = format!(
+        r#"
+  var count = 0u;
+  var sum = {ty}(0.0);
+  var product = {ty}(1.0);
+  var minimum = {ty}(0.0);
+  var maximum = {ty}(0.0);
+  var mean = {ty}(0.0);
+  var m2 = {ty}(0.0);
+  var saw_nan = false;
+  if (in_start <= in_end) {{
+    var pos = u32(in_start);
+    loop {{
+      if (pos > u32(in_end)) {{ break; }}
+      let input_idx = before_idx + pos * {stride_before}u + after_idx * {stride_before}u * {axis_len}u;
+      let value = Input.data[input_idx];
+      if (is_nan(value)) {{
+        if (!{omit_nan}) {{ saw_nan = true; break; }}
+      }} else {{
+        count = count + 1u; sum = sum + value; product = product * value;
+        if (count == 1u) {{ minimum = value; maximum = value; }}
+        else {{ minimum = min(minimum, value); maximum = max(maximum, value); }}
+        let delta = value - mean; mean = mean + delta / {ty}(count);
+        m2 = m2 + delta * (value - mean);
+      }}
+      pos = pos + 1u;
+    }}
+  }}
+  if (!saw_nan && fill_count > 0u) {{
+    var fill_idx = 0u;
+    loop {{
+      if (fill_idx >= fill_count) {{ break; }}
+      let value = {fill};
+      if (is_nan(value)) {{ if (!{omit_nan}) {{ saw_nan = true; }} }}
+      else {{
+        count = count + 1u; sum = sum + value; product = product * value;
+        if (count == 1u) {{ minimum = value; maximum = value; }}
+        else {{ minimum = min(minimum, value); maximum = max(maximum, value); }}
+        let delta = value - mean; mean = mean + delta / {ty}(count);
+        m2 = m2 + delta * (value - mean);
+      }}
+      fill_idx = fill_idx + 1u;
+    }}
+  }}
+  if (saw_nan) {{ Output.data[idx] = nan_value(); }}
+  else if (count == 0u) {{ Output.data[idx] = {empty_value}; }}
+  else {{ Output.data[idx] = {result}; }}
+}}
+"#,
+        stride_before = spec.stride_before,
+        axis_len = spec.axis_len,
+    );
+    common + &main_prefix + &body
+}
 
 impl WgpuProvider {
     pub(crate) async fn uniform_spectral_estimate_exec(
@@ -541,12 +801,31 @@ impl WgpuProvider {
         x: &GpuTensorHandle,
         options: ProviderIirFilterOptions,
     ) -> Result<ProviderIirFilterResult> {
-        let ProviderIirFilterOptions { dim, zi } = options;
+        let ProviderIirFilterOptions {
+            dim,
+            zi,
+            unit_denominator,
+        } = options;
 
         let entry_b = self.get_entry(b)?;
         let entry_a = self.get_entry(a)?;
         let entry_x = self.get_entry(x)?;
+        let effective_storage = |handle: &GpuTensorHandle, entry_storage: GpuTensorStorage| match (
+            runmat_accelerate_api::handle_storage(handle),
+            entry_storage,
+        ) {
+            (GpuTensorStorage::ComplexInterleaved, _)
+            | (_, GpuTensorStorage::ComplexInterleaved) => GpuTensorStorage::ComplexInterleaved,
+            _ => GpuTensorStorage::Real,
+        };
+        let b_storage = effective_storage(b, entry_b.storage);
+        let a_storage = effective_storage(a, entry_a.storage);
+        let x_storage = effective_storage(x, entry_x.storage);
 
+        ensure!(
+            b_storage == GpuTensorStorage::Real && a_storage == GpuTensorStorage::Real,
+            "iir_filter: complex filter coefficients are not supported"
+        );
         ensure!(
             entry_b.precision == self.precision
                 && entry_a.precision == self.precision
@@ -565,35 +844,47 @@ impl WgpuProvider {
             "iir_filter: denominator coefficients must not be empty"
         );
 
-        let b_host = self.download_exec(b).await?;
-        let a_host = self.download_exec(a).await?;
-        let a0 = *a_host
-            .data
-            .first()
-            .ok_or_else(|| anyhow!("iir_filter: denominator coefficients cannot be empty"))?;
-        ensure!(
-            a0 != 0.0,
-            "iir_filter: denominator coefficient a(1) must be non-zero"
-        );
-
         let order = nb.max(na);
         ensure!(
             order <= u32::MAX as usize,
             "iir_filter: filter order exceeds GPU limits"
         );
 
-        let mut b_norm = vec![0.0f64; order];
-        let mut a_norm = vec![0.0f64; order];
-        for i in 0..order {
-            let b_coeff = if i < nb { b_host.data[i] } else { 0.0 };
-            b_norm[i] = b_coeff / a0;
-            if i == 0 {
-                a_norm[0] = 1.0;
-            } else {
-                let a_coeff = if i < na { a_host.data[i] } else { 0.0 };
-                a_norm[i] = a_coeff / a0;
+        let coefficient_plan = if unit_denominator {
+            ensure!(
+                na == 1,
+                "iir_filter: unit-denominator FIR path requires scalar denominator"
+            );
+            IirCoefficientPlan::UnitDenominatorFir
+        } else {
+            let b_host = self.download_exec(b).await?;
+            let a_host = self.download_exec(a).await?;
+            let a0 = *a_host
+                .data
+                .first()
+                .ok_or_else(|| anyhow!("iir_filter: denominator coefficients cannot be empty"))?;
+            ensure!(
+                a0 != 0.0,
+                "iir_filter: denominator coefficient a(1) must be non-zero"
+            );
+
+            let mut b_norm = vec![0.0f64; order];
+            let mut a_norm = vec![0.0f64; order];
+            for i in 0..order {
+                let b_coeff = if i < nb { b_host.data[i] } else { 0.0 };
+                b_norm[i] = b_coeff / a0;
+                if i == 0 {
+                    a_norm[0] = 1.0;
+                } else {
+                    let a_coeff = if i < na { a_host.data[i] } else { 0.0 };
+                    a_norm[i] = a_coeff / a0;
+                }
             }
-        }
+            IirCoefficientPlan::Normalized {
+                b: b_norm,
+                a: a_norm,
+            }
+        };
 
         let state_len = order.saturating_sub(1);
 
@@ -607,6 +898,22 @@ impl WgpuProvider {
         );
         let dim_idx = dim;
         let dim_len = shape_ext[dim_idx];
+        let x_lane_factor = match x_storage {
+            GpuTensorStorage::Real => 1usize,
+            GpuTensorStorage::ComplexInterleaved => 2usize,
+        };
+        let signal_logical_len = product_checked(&shape_ext)
+            .ok_or_else(|| anyhow!("iir_filter: tensor exceeds GPU limits"))?;
+        let signal_raw_len = signal_logical_len
+            .checked_mul(x_lane_factor)
+            .ok_or_else(|| anyhow!("iir_filter: signal length overflow"))?;
+        ensure!(
+            entry_x.len == signal_raw_len,
+            "iir_filter: signal raw length mismatch (shape implies {} logical elements, buffer has {}, lane factor {})",
+            signal_logical_len,
+            entry_x.len,
+            x_lane_factor
+        );
 
         let leading = if dim_idx == 0 {
             1usize
@@ -648,6 +955,11 @@ impl WgpuProvider {
                 zi_entry.precision == self.precision,
                 "iir_filter: initial conditions use incompatible precision"
             );
+            let zi_storage = effective_storage(zi_handle, zi_entry.storage);
+            ensure!(
+                zi_storage == x_storage,
+                "iir_filter: initial conditions storage must match the signal"
+            );
             ensure!(
                 shapes_compatible(&state_shape, &zi_entry.shape),
                 "iir_filter: initial conditions are not compatible with the requested dimension"
@@ -670,18 +982,25 @@ impl WgpuProvider {
                     zi_entry.len
                 );
             } else {
+                let expected_zi_len = state_total
+                    .checked_mul(x_lane_factor)
+                    .ok_or_else(|| anyhow!("iir_filter: initial state length overflow"))?;
                 ensure!(
-                    zi_entry.len == state_total,
-                    "iir_filter: initial state vector length mismatch (expected {}, found {})",
-                    state_total,
+                    zi_entry.len == expected_zi_len,
+                    "iir_filter: initial state vector raw length mismatch (expected {}, found {})",
+                    expected_zi_len,
                     zi_entry.len
                 );
             }
         }
 
         ensure!(
-            entry_x.len <= u32::MAX as usize,
+            signal_logical_len <= u32::MAX as usize,
             "iir_filter: signal length exceeds GPU limits"
+        );
+        ensure!(
+            entry_x.len <= u32::MAX as usize,
+            "iir_filter: signal raw buffer length exceeds GPU limits"
         );
         ensure!(
             leading <= u32::MAX as usize
@@ -707,30 +1026,48 @@ impl WgpuProvider {
         } else {
             state_len
                 .checked_mul(channel_count)
+                .and_then(|value| value.checked_mul(x_lane_factor))
                 .ok_or_else(|| anyhow!("iir_filter: state buffer length overflow"))?
         };
+        let state_total_raw = state_total
+            .checked_mul(x_lane_factor)
+            .ok_or_else(|| anyhow!("iir_filter: final state length overflow"))?;
         ensure!(
             state_buffer_len <= u32::MAX as usize,
             "iir_filter: state buffer length exceeds GPU limits"
         );
+        ensure!(
+            state_total_raw <= u32::MAX as usize,
+            "iir_filter: filter state size exceeds GPU limits"
+        );
 
         let mut cleanup_handles: Vec<GpuTensorHandle> = Vec::new();
         let result = (|| -> Result<ProviderIirFilterResult> {
-            let b_shape = [order, 1usize];
-            let b_view = HostTensorView {
-                data: &b_norm,
-                shape: &b_shape,
-            };
-            let b_norm_handle = self.upload_exec(&b_view)?;
-            cleanup_handles.push(b_norm_handle.clone());
+            let (b_norm_handle, a_norm_handle) = match &coefficient_plan {
+                IirCoefficientPlan::UnitDenominatorFir => {
+                    let a_norm_handle = self.zeros_exec(&[order, 1usize])?;
+                    cleanup_handles.push(a_norm_handle.clone());
+                    (b.clone(), a_norm_handle)
+                }
+                IirCoefficientPlan::Normalized { b, a } => {
+                    let b_shape = [order, 1usize];
+                    let b_view = HostTensorView {
+                        data: b,
+                        shape: &b_shape,
+                    };
+                    let b_norm_handle = self.upload_exec(&b_view)?;
+                    cleanup_handles.push(b_norm_handle.clone());
 
-            let a_shape = [order, 1usize];
-            let a_view = HostTensorView {
-                data: &a_norm,
-                shape: &a_shape,
+                    let a_shape = [order, 1usize];
+                    let a_view = HostTensorView {
+                        data: a,
+                        shape: &a_shape,
+                    };
+                    let a_norm_handle = self.upload_exec(&a_view)?;
+                    cleanup_handles.push(a_norm_handle.clone());
+                    (b_norm_handle, a_norm_handle)
+                }
             };
-            let a_norm_handle = self.upload_exec(&a_view)?;
-            cleanup_handles.push(a_norm_handle.clone());
 
             let b_norm_entry = self.get_entry(&b_norm_handle)?;
             let a_norm_entry = self.get_entry(&a_norm_handle)?;
@@ -739,14 +1076,14 @@ impl WgpuProvider {
             let states_buffer =
                 self.create_storage_buffer(state_buffer_len, "runmat-iir-filter-state");
             let final_state_buffer =
-                self.create_storage_buffer(state_total, "runmat-iir-filter-final");
+                self.create_storage_buffer(state_total_raw, "runmat-iir-filter-final");
 
             let (zi_buffer, zi_present_flag) = if let Some(ref zi_handle) = zi {
                 let zi_entry = self.get_entry(zi_handle)?;
                 (zi_entry.buffer, 1u32)
             } else {
                 (
-                    self.create_storage_buffer(state_total, "runmat-iir-filter-zi"),
+                    self.create_storage_buffer(state_total_raw, "runmat-iir-filter-zi"),
                     0u32,
                 )
             };
@@ -770,13 +1107,13 @@ impl WgpuProvider {
                 trailing: trailing as u32,
                 order: order as u32,
                 state_len: state_len as u32,
-                signal_len: entry_x.len as u32,
+                signal_len: signal_logical_len as u32,
                 channel_count: channel_count as u32,
                 zi_present: zi_present_flag,
                 dim_idx: dim_idx as u32,
                 rank: shape_ext.len() as u32,
                 state_rank: state_shape.len() as u32,
-                _pad: 0,
+                lane_factor: x_lane_factor as u32,
                 signal_shape: signal_shape_arr,
                 state_shape: state_shape_arr,
             };
@@ -836,10 +1173,18 @@ impl WgpuProvider {
                 workgroups,
             );
 
-            let output_handle =
-                self.register_existing_buffer(out_buffer, entry_x.shape.clone(), entry_x.len);
-            let final_state_handle =
-                self.register_existing_buffer(final_state_buffer, state_shape.clone(), state_total);
+            let output_handle = self.register_existing_buffer_with_storage(
+                out_buffer,
+                entry_x.shape.clone(),
+                entry_x.len,
+                x_storage,
+            );
+            let final_state_handle = self.register_existing_buffer_with_storage(
+                final_state_buffer,
+                state_shape.clone(),
+                state_total_raw,
+                x_storage,
+            );
 
             Ok(ProviderIirFilterResult {
                 output: output_handle,
@@ -853,6 +1198,253 @@ impl WgpuProvider {
 
         result
     }
+
+    pub(crate) fn moving_window_exec(
+        &self,
+        request: &ProviderMovingWindowRequest<'_>,
+    ) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(request.input)?;
+        let input_storage = match (
+            runmat_accelerate_api::handle_storage(request.input),
+            entry.storage,
+        ) {
+            (GpuTensorStorage::ComplexInterleaved, _)
+            | (_, GpuTensorStorage::ComplexInterleaved) => GpuTensorStorage::ComplexInterleaved,
+            _ => GpuTensorStorage::Real,
+        };
+        ensure!(
+            input_storage == GpuTensorStorage::Real,
+            "moving_window: complex tensors are not supported"
+        );
+        ensure!(
+            entry.precision == self.precision,
+            "moving_window: mixed precision tensors are not supported"
+        );
+
+        let mut input_shape = entry.shape.clone();
+        if request.dim >= input_shape.len() {
+            input_shape.extend(std::iter::repeat_n(1, request.dim + 1 - input_shape.len()));
+        }
+        ensure!(
+            request.dim < input_shape.len() && request.dim < request.output_shape.len(),
+            "moving_window: dimension exceeds tensor rank"
+        );
+        let input_len = product_checked(&input_shape)
+            .ok_or_else(|| anyhow!("moving_window: input tensor exceeds GPU limits"))?;
+        ensure!(
+            input_len == entry.len,
+            "moving_window: input shape mismatch (expected {} elements, got {})",
+            input_len,
+            entry.len
+        );
+        let output_len = product_checked(request.output_shape)
+            .ok_or_else(|| anyhow!("moving_window: output tensor exceeds GPU limits"))?;
+        let axis_len = input_shape[request.dim];
+        let out_axis_len = request.output_shape[request.dim];
+        let stride_before = if request.dim == 0 {
+            1usize
+        } else {
+            product_checked(&input_shape[..request.dim])
+                .ok_or_else(|| anyhow!("moving_window: stride computation overflow"))?
+                .max(1)
+        };
+        let stride_after = if request.dim + 1 >= input_shape.len() {
+            1usize
+        } else {
+            product_checked(&input_shape[request.dim + 1..])
+                .ok_or_else(|| anyhow!("moving_window: stride computation overflow"))?
+                .max(1)
+        };
+
+        ensure!(
+            output_len <= u32::MAX as usize
+                && axis_len <= u32::MAX as usize
+                && out_axis_len <= u32::MAX as usize
+                && stride_before <= u32::MAX as usize
+                && stride_after <= u32::MAX as usize
+                && request.before <= u32::MAX as usize
+                && request.after <= u32::MAX as usize,
+            "moving_window: tensor exceeds GPU kernel limits"
+        );
+        let max_center = if matches!(request.endpoints, ProviderMovingWindowEndpoints::Discard) {
+            out_axis_len
+                .saturating_sub(1)
+                .checked_add(request.before)
+                .ok_or_else(|| anyhow!("moving_window: center index exceeds GPU kernel limits"))?
+        } else {
+            out_axis_len.saturating_sub(1)
+        };
+        let max_end = max_center
+            .checked_add(request.after)
+            .ok_or_else(|| anyhow!("moving_window: endpoint index exceeds GPU kernel limits"))?;
+        ensure!(
+            axis_len <= WGPU_MOVING_WINDOW_I32_LIMIT
+                && request.before <= WGPU_MOVING_WINDOW_I32_LIMIT
+                && request.after <= WGPU_MOVING_WINDOW_I32_LIMIT
+                && max_center <= WGPU_MOVING_WINDOW_I32_LIMIT
+                && max_end <= WGPU_MOVING_WINDOW_I32_LIMIT,
+            "moving_window: tensor exceeds signed GPU kernel limits"
+        );
+        if matches!(request.op, ProviderMovingWindowOp::Median) {
+            let window_len = request
+                .before
+                .checked_add(request.after)
+                .and_then(|sum| sum.checked_add(1))
+                .ok_or_else(|| anyhow!("moving_window: median window exceeds GPU kernel limits"))?;
+            ensure!(
+                window_len <= WGPU_MOVING_MEDIAN_MAX_WINDOW,
+                "moving_window: median windows above {WGPU_MOVING_MEDIAN_MAX_WINDOW} elements use host fallback"
+            );
+        }
+
+        let out_shape = request.output_shape.to_vec();
+        let out_buffer =
+            self.create_storage_buffer_checked(output_len, "runmat-moving-window-out")?;
+        if output_len == 0 {
+            return Ok(self.register_existing_buffer(out_buffer, out_shape, 0));
+        }
+
+        let op = moving_window_op_code(request.op);
+        let (endpoint, fill_value) = moving_window_endpoint_code(request.endpoints);
+        let nan_mode = match request.nan_mode {
+            ProviderNanMode::Include => 0,
+            ProviderNanMode::Omit => 1,
+        };
+        let normalization = match request.normalization {
+            ProviderStdNormalization::Sample => 0,
+            ProviderStdNormalization::Population => 1,
+        };
+        let shader = build_specialized_moving_window_shader(&MovingWindowShaderSpec {
+            precision: self.precision,
+            output_len,
+            axis_len,
+            out_axis_len,
+            stride_before,
+            before: request.before,
+            after: request.after,
+            op: request.op,
+            endpoints: request.endpoints,
+            nan_mode: request.nan_mode,
+            normalization: request.normalization,
+            fill_value,
+        });
+        let shader_module = self
+            .device_ref()
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("runmat-moving-window-specialized-shader"),
+                source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),
+            });
+        let pipeline_layout =
+            self.device_ref()
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("runmat-moving-window-specialized-layout"),
+                    bind_group_layouts: &[&self.pipelines.moving_window.layout],
+                    push_constant_ranges: &[],
+                });
+        let pipeline = self.device_ref().create_compute_pipeline(
+            &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
+                label: Some("runmat-moving-window-specialized-pipeline"),
+                layout: Some(&pipeline_layout),
+                module: &shader_module,
+                entry_point: "main",
+            },
+        );
+
+        let bind_group = match self.precision {
+            NumericPrecision::F64 => {
+                let params = MovingWindowParamsF64 {
+                    meta0: PackedU32([
+                        output_len as u32,
+                        axis_len as u32,
+                        out_axis_len as u32,
+                        stride_before as u32,
+                    ]),
+                    meta1: PackedU32([
+                        endpoint,
+                        nan_mode,
+                        request.before as u32,
+                        request.after as u32,
+                    ]),
+                    meta2: PackedU32([op, normalization, stride_after as u32, 0]),
+                    fill_value,
+                    _pad1: 0.0,
+                };
+                let params_buffer = self.uniform_buffer(&params, "runmat-moving-window-params");
+                self.device_ref()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-moving-window-bind"),
+                        layout: &self.pipelines.moving_window.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: out_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    })
+            }
+            NumericPrecision::F32 => {
+                let params = MovingWindowParamsF32 {
+                    meta0: PackedU32([
+                        output_len as u32,
+                        axis_len as u32,
+                        out_axis_len as u32,
+                        stride_before as u32,
+                    ]),
+                    meta1: PackedU32([
+                        endpoint,
+                        nan_mode,
+                        request.before as u32,
+                        request.after as u32,
+                    ]),
+                    meta2: PackedU32([op, normalization, stride_after as u32, 0]),
+                    meta3: PackedF32([fill_value as f32, 0.0, 0.0, 0.0]),
+                };
+                let params_buffer = self.uniform_buffer(&params, "runmat-moving-window-params");
+                self.device_ref()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-moving-window-bind"),
+                        layout: &self.pipelines.moving_window.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: out_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    })
+            }
+        };
+
+        let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+            output_len as u32,
+            crate::backend::wgpu::config::WORKGROUP_SIZE,
+        );
+        crate::backend::wgpu::dispatch::diff::run(
+            self.device_ref(),
+            self.queue_ref(),
+            &pipeline,
+            &bind_group,
+            workgroups,
+        );
+
+        Ok(self.register_existing_buffer(out_buffer, out_shape, output_len))
+    }
+
     pub(crate) fn diff_once_exec(
         &self,
         handle: &GpuTensorHandle,
@@ -1016,6 +1608,24 @@ impl WgpuProvider {
         dim: usize,
         spacing: f64,
     ) -> Result<GpuTensorHandle> {
+        self.gradient_exec_with_spacing(handle, dim, GradientSpacingInput::Scalar(spacing))
+    }
+
+    pub(crate) fn gradient_exec_with_coordinates(
+        &self,
+        handle: &GpuTensorHandle,
+        dim: usize,
+        coordinates: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        self.gradient_exec_with_spacing(handle, dim, GradientSpacingInput::Coordinates(coordinates))
+    }
+
+    fn gradient_exec_with_spacing(
+        &self,
+        handle: &GpuTensorHandle,
+        dim: usize,
+        spacing: GradientSpacingInput<'_>,
+    ) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(handle)?;
         let complex_storage = entry.storage == GpuTensorStorage::ComplexInterleaved
             || runmat_accelerate_api::handle_storage(handle)
@@ -1039,6 +1649,25 @@ impl WgpuProvider {
         }
 
         let len_dim = ext_shape[dim];
+        let coordinate_entry = match spacing {
+            GradientSpacingInput::Coordinates(coordinates) => {
+                let coordinate_entry = self.get_entry(coordinates)?;
+                ensure!(
+                    coordinate_entry.storage == GpuTensorStorage::Real
+                        && runmat_accelerate_api::handle_storage(coordinates)
+                            == GpuTensorStorage::Real,
+                    "gradient: coordinate-vector spacing must be real"
+                );
+                ensure!(
+                    coordinate_entry.len == len_dim,
+                    "gradient: coordinate-vector spacing length {} does not match dimension length {}",
+                    coordinate_entry.len,
+                    len_dim
+                );
+                Some(coordinate_entry)
+            }
+            GradientSpacingInput::Scalar(_) => None,
+        };
         let mut out_shape = normalize_gradient_shape(&entry.shape, logical_len);
         if out_shape.is_empty() {
             out_shape = vec![0, 0];
@@ -1112,7 +1741,10 @@ impl WgpuProvider {
                     segment_len: len_dim as u32,
                     block: kernel_block as u32,
                     total: entry.len as u32,
-                    spacing,
+                    spacing: match spacing {
+                        GradientSpacingInput::Scalar(spacing) => spacing,
+                        GradientSpacingInput::Coordinates(_) => 0.0,
+                    },
                     _pad0: 0.0,
                     _pad1: 0.0,
                     _pad2: 0.0,
@@ -1127,32 +1759,71 @@ impl WgpuProvider {
                         kernel_block as u32,
                         entry.len as u32,
                     ]),
-                    meta1: crate::backend::wgpu::params::PackedF32([spacing as f32, 0.0, 0.0, 0.0]),
+                    meta1: crate::backend::wgpu::params::PackedF32([
+                        match spacing {
+                            GradientSpacingInput::Scalar(spacing) => spacing as f32,
+                            GradientSpacingInput::Coordinates(_) => 0.0,
+                        },
+                        0.0,
+                        0.0,
+                        0.0,
+                    ]),
                 },
                 "runmat-gradient-params",
             ),
         };
 
-        let bind_group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-gradient-bind"),
-                layout: &self.pipelines.gradient.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: out_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
+        let (bind_group, pipeline) = if let Some(coordinate_entry) = coordinate_entry.as_ref() {
+            (
+                self.device_ref()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-gradient-coordinates-bind"),
+                        layout: &self.pipelines.gradient_coordinates.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: out_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: coordinate_entry.buffer.as_ref().as_entire_binding(),
+                            },
+                        ],
+                    }),
+                &self.pipelines.gradient_coordinates.pipeline,
+            )
+        } else {
+            (
+                self.device_ref()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-gradient-bind"),
+                        layout: &self.pipelines.gradient.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: out_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    }),
+                &self.pipelines.gradient.pipeline,
+            )
+        };
 
         let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
             entry.len as u32,
@@ -1161,7 +1832,7 @@ impl WgpuProvider {
         crate::backend::wgpu::dispatch::gradient::run(
             self.device_ref(),
             self.queue_ref(),
-            &self.pipelines.gradient.pipeline,
+            pipeline,
             &bind_group,
             workgroups,
         );
@@ -1318,6 +1989,251 @@ impl WgpuProvider {
             "runmat-cumsum-pass",
         );
         Ok(self.register_existing_buffer(out_buffer, entry.shape, entry.len))
+    }
+
+    pub(crate) fn trapz_exec(
+        &self,
+        handle: &GpuTensorHandle,
+        dim: usize,
+        spacing: ProviderTrapezoidSpacing<'_>,
+    ) -> Result<GpuTensorHandle> {
+        self.trapezoid_exec(handle, dim, spacing, false)
+    }
+
+    pub(crate) fn cumtrapz_exec(
+        &self,
+        handle: &GpuTensorHandle,
+        dim: usize,
+        spacing: ProviderTrapezoidSpacing<'_>,
+    ) -> Result<GpuTensorHandle> {
+        self.trapezoid_exec(handle, dim, spacing, true)
+    }
+
+    fn trapezoid_exec(
+        &self,
+        handle: &GpuTensorHandle,
+        dim: usize,
+        spacing: ProviderTrapezoidSpacing<'_>,
+        cumulative: bool,
+    ) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(handle)?;
+        ensure!(
+            entry.precision == self.precision,
+            "trapezoid: mixed precision tensors are not supported"
+        );
+        let handle_storage = runmat_accelerate_api::handle_storage(handle);
+        ensure!(
+            entry.storage == handle_storage,
+            "trapezoid: input storage metadata mismatch"
+        );
+        let lane_factor = match entry.storage {
+            GpuTensorStorage::Real => 1usize,
+            GpuTensorStorage::ComplexInterleaved => 2usize,
+        };
+
+        let mut work_shape = if entry.shape.is_empty() {
+            ensure!(
+                entry.len % lane_factor == 0,
+                "trapezoid: input raw length is not divisible by lane factor"
+            );
+            vec![entry.len / lane_factor]
+        } else {
+            entry.shape.clone()
+        };
+        while work_shape.len() <= dim {
+            work_shape.push(1);
+        }
+        let logical_len = work_shape
+            .iter()
+            .try_fold(1usize, |acc, &value| acc.checked_mul(value))
+            .ok_or_else(|| anyhow!("trapezoid: input too large"))?;
+        let expected_raw_len = logical_len
+            .checked_mul(lane_factor)
+            .ok_or_else(|| anyhow!("trapezoid: input length overflow"))?;
+        ensure!(
+            entry.len == expected_raw_len,
+            "trapezoid: input raw length mismatch (shape implies {} logical elements, buffer has {}, lane factor {})",
+            logical_len,
+            entry.len,
+            lane_factor
+        );
+
+        let segment_len = work_shape[dim];
+        let stride_before = if dim == 0 {
+            1usize
+        } else {
+            work_shape[..dim].iter().copied().product::<usize>().max(1)
+        };
+        let stride_after = if dim + 1 >= work_shape.len() {
+            1usize
+        } else {
+            work_shape[dim + 1..]
+                .iter()
+                .copied()
+                .product::<usize>()
+                .max(1)
+        };
+        let segments = stride_before
+            .checked_mul(stride_after)
+            .ok_or_else(|| anyhow!("trapezoid: segment count exceeds GPU limits"))?;
+        let block = stride_before
+            .checked_mul(segment_len)
+            .ok_or_else(|| anyhow!("trapezoid: segment stride exceeds GPU limits"))?;
+        let mut output_shape = work_shape.clone();
+        if !cumulative {
+            output_shape[dim] = 1;
+        }
+        let output_len = output_shape
+            .iter()
+            .try_fold(1usize, |acc, &value| acc.checked_mul(value))
+            .ok_or_else(|| anyhow!("trapezoid: output too large"))?;
+        let output_raw_len = output_len
+            .checked_mul(lane_factor)
+            .ok_or_else(|| anyhow!("trapezoid: output length overflow"))?;
+
+        ensure!(
+            logical_len <= u32::MAX as usize
+                && entry.len <= u32::MAX as usize
+                && segment_len <= u32::MAX as usize
+                && stride_before <= u32::MAX as usize
+                && segments <= u32::MAX as usize
+                && block <= u32::MAX as usize
+                && output_len <= u32::MAX as usize
+                && output_raw_len <= u32::MAX as usize
+                && lane_factor <= u32::MAX as usize,
+            "trapezoid: tensor too large for GPU kernel"
+        );
+
+        let (spacing_kind, scalar, spacing_buffer) = match spacing {
+            ProviderTrapezoidSpacing::Unit => (0u32, 1.0, entry.buffer.clone()),
+            ProviderTrapezoidSpacing::Scalar(value) => (1u32, value, entry.buffer.clone()),
+            ProviderTrapezoidSpacing::ScalarHandle(spacing_handle) => {
+                let spacing_entry = self.get_entry(spacing_handle)?;
+                ensure!(
+                    spacing_entry.storage == GpuTensorStorage::Real
+                        && runmat_accelerate_api::handle_storage(spacing_handle)
+                            == GpuTensorStorage::Real,
+                    "trapezoid: spacing tensor must be real"
+                );
+                ensure!(spacing_entry.len >= 1, "trapezoid: scalar spacing is empty");
+                (2u32, 0.0, spacing_entry.buffer)
+            }
+            ProviderTrapezoidSpacing::Vector(spacing_handle) => {
+                let spacing_entry = self.get_entry(spacing_handle)?;
+                ensure!(
+                    spacing_entry.storage == GpuTensorStorage::Real
+                        && runmat_accelerate_api::handle_storage(spacing_handle)
+                            == GpuTensorStorage::Real,
+                    "trapezoid: spacing vector must be real"
+                );
+                ensure!(
+                    spacing_entry.len >= segment_len,
+                    "trapezoid: spacing vector is shorter than integration dimension"
+                );
+                (3u32, 0.0, spacing_entry.buffer)
+            }
+            ProviderTrapezoidSpacing::Tensor(spacing_handle) => {
+                let spacing_entry = self.get_entry(spacing_handle)?;
+                ensure!(
+                    spacing_entry.storage == GpuTensorStorage::Real
+                        && runmat_accelerate_api::handle_storage(spacing_handle)
+                            == GpuTensorStorage::Real,
+                    "trapezoid: spacing tensor must be real"
+                );
+                ensure!(
+                    spacing_entry.len >= logical_len,
+                    "trapezoid: spacing tensor is smaller than input"
+                );
+                (4u32, 0.0, spacing_entry.buffer)
+            }
+        };
+
+        let out_buffer = self.create_storage_buffer(output_raw_len, "runmat-trapezoid-out");
+        let params_buffer = match self.precision {
+            NumericPrecision::F64 => {
+                let params = TrapezoidParamsF64 {
+                    segment_len: segment_len as u32,
+                    segments: segments as u32,
+                    stride_before: stride_before as u32,
+                    block: block as u32,
+                    total_len: logical_len as u32,
+                    output_len: output_len as u32,
+                    spacing_kind,
+                    mode: if cumulative { 1 } else { 0 },
+                    lane_factor: lane_factor as u32,
+                    _pad_u32_0: 0,
+                    _pad_u32_1: 0,
+                    _pad_u32_2: 0,
+                    spacing_scalar: scalar,
+                    _pad0: 0.0,
+                    _pad1: 0.0,
+                    _pad2: 0.0,
+                };
+                self.uniform_buffer(&params, "runmat-trapezoid-params")
+            }
+            NumericPrecision::F32 => {
+                let params = TrapezoidParamsF32 {
+                    meta0: PackedU32([
+                        segment_len as u32,
+                        segments as u32,
+                        stride_before as u32,
+                        block as u32,
+                    ]),
+                    meta1: PackedU32([
+                        logical_len as u32,
+                        output_len as u32,
+                        spacing_kind,
+                        if cumulative { 1 } else { 0 },
+                    ]),
+                    meta2: PackedU32([lane_factor as u32, 0, 0, 0]),
+                    scalar: PackedF32([scalar as f32, 0.0, 0.0, 0.0]),
+                };
+                self.uniform_buffer(&params, "runmat-trapezoid-params")
+            }
+        };
+        let bind_group = self
+            .device_ref()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("runmat-trapezoid-bind"),
+                layout: &self.pipelines.trapezoid.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: entry.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: out_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: params_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: spacing_buffer.as_ref().as_entire_binding(),
+                    },
+                ],
+            });
+        let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+            segments as u32,
+            crate::backend::wgpu::config::WORKGROUP_SIZE,
+        );
+        crate::backend::wgpu::dispatch::scan::run(
+            self.device_ref(),
+            self.queue_ref(),
+            &self.pipelines.trapezoid.pipeline,
+            &bind_group,
+            groups,
+            "runmat-trapezoid-encoder",
+            "runmat-trapezoid-pass",
+        );
+        Ok(self.register_existing_buffer_with_storage(
+            out_buffer,
+            output_shape,
+            output_raw_len,
+            entry.storage,
+        ))
     }
     pub(crate) fn cumprod_exec(
         &self,
@@ -1862,14 +2778,20 @@ fn spectral_range_shader_mode(range: ProviderSpectralRange) -> SpectralRangeShad
 
 #[cfg(test)]
 mod tests {
-    use crate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
+    use crate::backend::wgpu::provider::{
+        register_wgpu_provider, WgpuProvider, WgpuProviderOptions,
+    };
     use num_complex::Complex;
     use runmat_accelerate_api::{
         AccelProvider, GpuTensorStorage, HostTensorView, ProviderEnvelopeMethod,
-        ProviderEnvelopeRequest, ProviderHilbertRequest,
+        ProviderEnvelopeRequest, ProviderHilbertRequest, ProviderIirFilterOptions,
+        ProviderMovingWindowEndpoints, ProviderMovingWindowOp, ProviderMovingWindowRequest,
+        ProviderNanMode, ProviderStdNormalization, ProviderTrapezoidSpacing,
     };
-    use runmat_builtins::ComplexTensor;
-    use runmat_runtime::builtins::math::reduction::gradient_complex_tensor_host;
+    use runmat_builtins::{ComplexTensor, Tensor};
+    use runmat_runtime::builtins::math::reduction::{
+        gradient_complex_tensor_host, gradient_real_tensor_host_with_coordinates,
+    };
     use rustfft::FftPlanner;
     use std::sync::{Mutex, OnceLock};
 
@@ -1878,7 +2800,10 @@ mod tests {
         F: FnOnce(&'static dyn AccelProvider) -> R,
     {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        let _guard = LOCK.get_or_init(|| Mutex::new(())).lock().expect("lock");
+        let _guard = LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
             return None;
         };
@@ -1908,6 +2833,103 @@ mod tests {
             upper.data
         })
         .unwrap_or_default()
+    }
+
+    #[test]
+    fn moving_window_provider_runs_count_window_reductions_on_wgpu() {
+        let Some(()) = with_wgpu_provider(|provider| {
+            let input = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 2.0, f64::NAN, 4.0],
+                    shape: &[1, 4],
+                })
+                .expect("upload moving input");
+            let sum = pollster::block_on(provider.moving_window(&ProviderMovingWindowRequest {
+                input: &input,
+                output_shape: &[1, 4],
+                dim: 1,
+                before: 1,
+                after: 1,
+                op: ProviderMovingWindowOp::Sum,
+                endpoints: ProviderMovingWindowEndpoints::Shrink,
+                nan_mode: ProviderNanMode::Omit,
+                normalization: ProviderStdNormalization::Sample,
+            }))
+            .expect("moving window");
+            let host = pollster::block_on(provider.download(&sum)).expect("download moving");
+            assert_eq!(host.shape, vec![1, 4]);
+            assert_eq!(host.data, vec![3.0, 3.0, 6.0, 4.0]);
+
+            let var_input = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 2.0],
+                    shape: &[1, 2],
+                })
+                .expect("upload var input");
+            let var = pollster::block_on(provider.moving_window(&ProviderMovingWindowRequest {
+                input: &var_input,
+                output_shape: &[1, 2],
+                dim: 1,
+                before: 1,
+                after: 1,
+                op: ProviderMovingWindowOp::Var,
+                endpoints: ProviderMovingWindowEndpoints::Fill(0.0),
+                nan_mode: ProviderNanMode::Include,
+                normalization: ProviderStdNormalization::Sample,
+            }))
+            .expect("moving var");
+            let host = pollster::block_on(provider.download(&var)).expect("download var");
+            assert_eq!(host.shape, vec![1, 2]);
+            assert!((host.data[0] - 1.0).abs() < 1e-12);
+            assert!((host.data[1] - 1.0).abs() < 1e-12);
+
+            let median_input = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, f64::NAN, 3.0, 9.0],
+                    shape: &[1, 4],
+                })
+                .expect("upload median input");
+            let median = pollster::block_on(provider.moving_window(&ProviderMovingWindowRequest {
+                input: &median_input,
+                output_shape: &[1, 4],
+                dim: 1,
+                before: 1,
+                after: 1,
+                op: ProviderMovingWindowOp::Median,
+                endpoints: ProviderMovingWindowEndpoints::Shrink,
+                nan_mode: ProviderNanMode::Omit,
+                normalization: ProviderStdNormalization::Sample,
+            }))
+            .expect("moving median");
+            let host = pollster::block_on(provider.download(&median)).expect("download median");
+            assert_eq!(host.shape, vec![1, 4]);
+            for (actual, expected) in host.data.iter().zip([1.0, 2.0, 6.0, 6.0]) {
+                assert!((*actual - expected).abs() < 1e-12);
+            }
+
+            let oversized =
+                pollster::block_on(provider.moving_window(&ProviderMovingWindowRequest {
+                    input: &median_input,
+                    output_shape: &[1, 4],
+                    dim: 1,
+                    before: super::WGPU_MOVING_MEDIAN_MAX_WINDOW,
+                    after: 0,
+                    op: ProviderMovingWindowOp::Median,
+                    endpoints: ProviderMovingWindowEndpoints::Shrink,
+                    nan_mode: ProviderNanMode::Omit,
+                    normalization: ProviderStdNormalization::Sample,
+                }));
+            assert!(oversized.is_err());
+
+            provider.free(&input).ok();
+            provider.free(&sum).ok();
+            provider.free(&var_input).ok();
+            provider.free(&var).ok();
+            provider.free(&median_input).ok();
+            provider.free(&median).ok();
+        }) else {
+            return;
+        };
     }
 
     fn run_hilbert(
@@ -2242,5 +3264,250 @@ mod tests {
         )
         .expect("host gradient");
         assert_complex_slices_close(&out, &expected.data, 1.0e-5);
+    }
+
+    #[test]
+    fn gradient_provider_coordinate_spacing_matches_host_and_stays_resident() {
+        with_wgpu_provider(|provider| {
+            let input = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 4.0, 9.0],
+                    shape: &[1, 3],
+                })
+                .expect("upload input");
+            let coordinates = provider
+                .upload(&HostTensorView {
+                    data: &[0.0, 1.0, 3.0],
+                    shape: &[1, 3],
+                })
+                .expect("upload coordinates");
+            let output = provider
+                .gradient_dim_with_coordinates(&input, 1, &coordinates)
+                .expect("gradient");
+            let gathered = pollster::block_on(provider.download(&output)).expect("download");
+            let expected = gradient_real_tensor_host_with_coordinates(
+                Tensor::new(vec![1.0, 4.0, 9.0], vec![1, 3]).unwrap(),
+                2,
+                vec![0.0, 1.0, 3.0],
+            )
+            .expect("host gradient");
+            provider.free(&input).ok();
+            provider.free(&coordinates).ok();
+            provider.free(&output).ok();
+            assert_eq!(gathered.shape, expected.shape);
+            let tol = match provider.precision() {
+                runmat_accelerate_api::ProviderPrecision::F64 => 1.0e-10,
+                runmat_accelerate_api::ProviderPrecision::F32 => 2.0e-6,
+            };
+            for (idx, (actual, expected)) in gathered.data.iter().zip(expected.data).enumerate() {
+                assert!(
+                    (*actual - expected).abs() < tol * expected.abs().max(1.0),
+                    "gradient mismatch at {idx}: actual={actual} expected={expected}"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn iir_filter_provider_preserves_complex_storage_and_filters_lanes() {
+        with_wgpu_provider(|provider| {
+            let b = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 1.0],
+                    shape: &[1, 2],
+                })
+                .expect("upload numerator");
+            let a = provider
+                .upload(&HostTensorView {
+                    data: &[1.0],
+                    shape: &[1, 1],
+                })
+                .expect("upload denominator");
+            let data = [1.0, 10.0, 2.0, 20.0, 3.0, 30.0];
+            let x = provider
+                .upload(&HostTensorView {
+                    data: &data,
+                    shape: &[1, 3],
+                })
+                .expect("upload signal");
+            runmat_accelerate_api::set_handle_storage(&x, GpuTensorStorage::ComplexInterleaved);
+
+            let result = pollster::block_on(provider.iir_filter(
+                &b,
+                &a,
+                &x,
+                ProviderIirFilterOptions {
+                    dim: 1,
+                    zi: None,
+                    unit_denominator: false,
+                },
+            ))
+            .expect("iir filter");
+            let output = pollster::block_on(provider.download(&result.output)).expect("download");
+            let final_state =
+                pollster::block_on(provider.download(result.final_state.as_ref().unwrap()))
+                    .expect("download state");
+            provider.free(&b).ok();
+            provider.free(&a).ok();
+            provider.free(&x).ok();
+            provider.free(&result.output).ok();
+            provider.free(result.final_state.as_ref().unwrap()).ok();
+
+            assert_eq!(output.storage, GpuTensorStorage::ComplexInterleaved);
+            assert_eq!(output.shape, vec![1, 3]);
+            assert_eq!(output.data, vec![1.0, 10.0, 3.0, 30.0, 5.0, 50.0]);
+            assert_eq!(final_state.storage, GpuTensorStorage::ComplexInterleaved);
+            assert_eq!(final_state.shape, vec![1, 1]);
+            assert_eq!(final_state.data, vec![3.0, 30.0]);
+        });
+    }
+
+    #[test]
+    fn iir_filter_unit_denominator_uses_resident_numerator_without_download() {
+        let Ok(provider) = WgpuProvider::new(WgpuProviderOptions::default()) else {
+            return;
+        };
+        {
+            let provider: &dyn AccelProvider = &provider;
+            let b = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 1.0],
+                    shape: &[1, 2],
+                })
+                .expect("upload numerator");
+            let a = provider
+                .upload(&HostTensorView {
+                    data: &[1.0],
+                    shape: &[1, 1],
+                })
+                .expect("upload denominator");
+            let x = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 2.0, 3.0],
+                    shape: &[1, 3],
+                })
+                .expect("upload signal");
+            provider.reset_telemetry();
+
+            let result = pollster::block_on(provider.iir_filter(
+                &b,
+                &a,
+                &x,
+                ProviderIirFilterOptions {
+                    dim: 1,
+                    zi: None,
+                    unit_denominator: true,
+                },
+            ))
+            .expect("iir filter");
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+            let output = pollster::block_on(provider.download(&result.output)).expect("download");
+            provider.free(&b).ok();
+            provider.free(&a).ok();
+            provider.free(&x).ok();
+            provider.free(&result.output).ok();
+            provider.free(result.final_state.as_ref().unwrap()).ok();
+
+            assert_eq!(output.shape, vec![1, 3]);
+            assert_eq!(output.data, vec![1.0, 3.0, 5.0]);
+        }
+    }
+
+    #[test]
+    fn trapezoid_provider_trapz_vector_spacing_matches_host() {
+        with_wgpu_provider(|provider| {
+            let input = provider
+                .upload(&HostTensorView {
+                    data: &[0.0, 1.0, 2.0],
+                    shape: &[1, 3],
+                })
+                .expect("upload input");
+            let spacing = provider
+                .upload(&HostTensorView {
+                    data: &[0.0, 1.0, 3.0],
+                    shape: &[1, 3],
+                })
+                .expect("upload spacing");
+            let output = provider
+                .trapz_dim(&input, 1, ProviderTrapezoidSpacing::Vector(&spacing))
+                .expect("trapz");
+            let gathered = pollster::block_on(provider.download(&output)).expect("download");
+            provider.free(&input).ok();
+            provider.free(&spacing).ok();
+            provider.free(&output).ok();
+            assert_eq!(gathered.shape, vec![1, 1]);
+            assert!((gathered.data[0] - 3.5).abs() < 1.0e-5);
+        });
+    }
+
+    #[test]
+    fn trapezoid_provider_cumtrapz_tensor_spacing_matches_host() {
+        with_wgpu_provider(|provider| {
+            let input = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 4.0, 2.0, 5.0, 3.0, 6.0],
+                    shape: &[2, 3],
+                })
+                .expect("upload input");
+            let spacing = provider
+                .upload(&HostTensorView {
+                    data: &[0.0, 0.0, 1.0, 1.0, 3.0, 3.0],
+                    shape: &[2, 3],
+                })
+                .expect("upload spacing");
+            let output = provider
+                .cumtrapz_dim(&input, 1, ProviderTrapezoidSpacing::Tensor(&spacing))
+                .expect("cumtrapz");
+            let gathered = pollster::block_on(provider.download(&output)).expect("download");
+            provider.free(&input).ok();
+            provider.free(&spacing).ok();
+            provider.free(&output).ok();
+            assert_eq!(gathered.shape, vec![2, 3]);
+            assert_eq!(gathered.data.len(), 6);
+            let expected = [0.0, 0.0, 1.5, 4.5, 6.5, 15.5];
+            for (idx, (actual, expected)) in gathered.data.iter().zip(expected).enumerate() {
+                assert!(
+                    (*actual - expected).abs() < 1.0e-5,
+                    "cumtrapz mismatch at {idx}: actual={actual} expected={expected}"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn trapezoid_provider_preserves_complex_storage_and_integrates_lanes() {
+        with_wgpu_provider(|provider| {
+            let data = [1.0, 1.0, 2.0, 2.0, 3.0, 3.0];
+            let input = provider
+                .upload(&HostTensorView {
+                    data: &data,
+                    shape: &[1, 3],
+                })
+                .expect("upload input");
+            runmat_accelerate_api::set_handle_storage(&input, GpuTensorStorage::ComplexInterleaved);
+
+            let trapz = provider
+                .trapz_dim(&input, 1, ProviderTrapezoidSpacing::Unit)
+                .expect("trapz");
+            let cumtrapz = provider
+                .cumtrapz_dim(&input, 1, ProviderTrapezoidSpacing::Unit)
+                .expect("cumtrapz");
+
+            let trapz_host = pollster::block_on(provider.download(&trapz)).expect("download trapz");
+            let cumtrapz_host =
+                pollster::block_on(provider.download(&cumtrapz)).expect("download cumtrapz");
+
+            provider.free(&input).ok();
+            provider.free(&trapz).ok();
+            provider.free(&cumtrapz).ok();
+
+            assert_eq!(trapz_host.storage, GpuTensorStorage::ComplexInterleaved);
+            assert_eq!(trapz_host.shape, vec![1, 1]);
+            assert_eq!(trapz_host.data, vec![4.0, 4.0]);
+            assert_eq!(cumtrapz_host.storage, GpuTensorStorage::ComplexInterleaved);
+            assert_eq!(cumtrapz_host.shape, vec![1, 3]);
+            assert_eq!(cumtrapz_host.data, vec![0.0, 0.0, 1.5, 1.5, 4.0, 4.0]);
+        });
     }
 }

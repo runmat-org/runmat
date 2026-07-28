@@ -1,0 +1,61 @@
+{
+  "title": "secondordercone",
+  "category": "math/optim",
+  "keywords": [
+    "secondordercone",
+    "coneprog",
+    "second-order cone",
+    "SOCP",
+    "optimization"
+  ],
+  "summary": "Create a second-order cone constraint descriptor for coneprog.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "This builtin constructs host solver metadata. GPU-resident numeric inputs are gathered before validation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::optim::coneprog::tests",
+    "integration": null
+  },
+  "description": "`secondordercone(A,b,d,gamma)` creates a constraint descriptor for `norm(A*x + b) <= d'*x + gamma`. Pass the result, or a cell array of such results, to `coneprog`.",
+  "behaviors": [
+    "`A` must be a nonempty numeric matrix.",
+    "`b` must be a numeric vector with length equal to `size(A,1)`.",
+    "`d` must be a numeric vector with length equal to `size(A,2)`.",
+    "`gamma` must be a finite numeric scalar.",
+    "The returned descriptor is a host struct with `A`, `b`, `d`, `gamma`, and `Type` fields."
+  ],
+  "examples": [
+    {
+      "description": "Create a unit-disk cone",
+      "input": "soc = secondordercone(eye(2), [0; 0], [0; 0], 1)",
+      "output": "soc =\n  struct with fields:\n      A: [2x2 double]\n      b: [2x1 double]\n      d: [2x1 double]\n  gamma: 1\n   Type: \"secondordercone\""
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Can I pass multiple cones to coneprog?",
+      "answer": "Yes. Pass a cell array containing multiple `secondordercone` descriptors."
+    }
+  ],
+  "links": [
+    {
+      "label": "coneprog",
+      "url": "./coneprog"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/optim/coneprog.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/coneprog.rs"
+  }
+}

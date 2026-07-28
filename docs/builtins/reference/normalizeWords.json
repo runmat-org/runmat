@@ -1,0 +1,114 @@
+{
+  "title": "normalizeWords",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "normalizeWords",
+    "stem",
+    "lemma",
+    "lemmatize",
+    "text analytics",
+    "words"
+  ],
+  "summary": "Stem or lemmatize words and tokenized documents.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`normalizeWords` operates on host-resident text containers and does not use provider kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 5,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::normalize::tests",
+    "integration": null
+  },
+  "description": "`normalizeWords(words)` reduces each standalone word to a root form. `normalizeWords(documents)` updates RunMat `tokenizedDocument` compatibility objects while preserving document shape and metadata.",
+  "behaviors": [
+    "`normalizeWords(words)` uses English stemming by default.",
+    "`normalizeWords(words, 'Language', language)` accepts `\"en\"` for English or `\"de\"` for German on standalone word input.",
+    "`normalizeWords(___, 'Style', style)` accepts `\"stem\"` or `\"lemma\"`; English lemmatization uses RunMat's lightweight compatibility rule set for standalone words and tokenized documents.",
+    "`normalizeWords(documents)` normalizes tokens whose derived token type is `letters` or `other`, and preserves punctuation, URLs, hashtags, mentions, and emoticons.",
+    "For `tokenizedDocument` input, RunMat uses the object's `Language` metadata. The `Language` name-value option is only accepted for standalone word input.",
+    "String arrays return string arrays with the same shape.",
+    "Character vectors and character arrays return character arrays; multi-row character arrays are treated as one word per row and padded after normalization.",
+    "Cell arrays preserve the cell shape and preserve scalar string versus character-vector element types.",
+    "Each text element must contain a single word. Multi-word elements raise `RunMat:normalizeWords:InvalidInput`.",
+    "Missing string values are preserved.",
+    "RunMat supports lightweight English and German `tokenizedDocument` normalization. Japanese/Korean MeCab-backed token details, full dictionary-backed and part-of-speech-aware lemmatization, and exact MathWorks dictionary identity remain tracked by the broader Text Analytics compatibility issue.",
+    "English stemming follows a Porter-style algorithm. German stemming is conservative and intended for compatibility with common preprocessing workflows, not exact release-to-release MathWorks dictionary identity."
+  ],
+  "examples": [
+    {
+      "description": "Stem Words In A String Array",
+      "input": "words = [\"a\" \"strongly\" \"worded\" \"collection\" \"of\" \"words\"];\nnewWords = normalizeWords(words)",
+      "output": "newWords = 1x6 string\n    \"a\"    \"strongli\"    \"word\"    \"collect\"    \"of\"    \"word\""
+    },
+    {
+      "description": "Lemmatize English Words",
+      "input": "words = [\"building\" \"has\" \"floors\"];\nnewWords = normalizeWords(words, \"Style\", \"lemma\")",
+      "output": "newWords = 1x3 string\n    \"build\"    \"have\"    \"floor\""
+    },
+    {
+      "description": "Stem German Words",
+      "input": "words = [\"Morgen\"; \"guter\"];\nnewWords = normalizeWords(words, \"Language\", \"de\")",
+      "output": "newWords = 2x1 string\n    \"morg\"\n    \"gut\""
+    },
+    {
+      "description": "Stem Tokenized Documents",
+      "input": "documents = tokenizedDocument(\"a strongly worded collection of words\");\nnewDocuments = normalizeWords(documents)",
+      "output": "`newDocuments` is a tokenizedDocument containing `a strongli word collect of word`."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `normalizeWords` support tokenizedDocument input?",
+      "answer": "Yes, for RunMat's lightweight English and German `tokenizedDocument` compatibility objects. It preserves complex tokens and punctuation and normalizes derived `letters` and `other` tokens."
+    },
+    {
+      "question": "Can standalone words use Japanese or Korean?",
+      "answer": "No. RunMat rejects Japanese and Korean standalone word normalization with an error that points to the remaining tokenizedDocument work."
+    },
+    {
+      "question": "Does `normalizeWords` execute on the GPU?",
+      "answer": "No. Word normalization operates on host strings and has no `runmat-accelerate` provider path."
+    }
+  ],
+  "links": [
+    {
+      "label": "stopWords",
+      "url": "./stopWords"
+    },
+    {
+      "label": "erasePunctuation",
+      "url": "./erasePunctuation"
+    },
+    {
+      "label": "extractHTMLText",
+      "url": "./extractHTMLText"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "updatedDocuments = normalizeWords(documents)\nupdatedWords = normalizeWords(words)\nupdatedWords = normalizeWords(words, 'Language', language)\n___ = normalizeWords(___, 'Style', style)",
+      "output": "`updatedDocuments` is a tokenizedDocument compatibility object. `updatedWords` preserves string-array shape and cell-array shape. Character arrays preserve row count and are repadded after normalization."
+    },
+    "points": [
+      "`documents` must be a RunMat `tokenizedDocument` object.",
+      "`words` may be a string scalar, string array, character vector, character array, or cell array containing scalar string or character-vector elements.",
+      "`language` must be `\"en\"` or `\"de\"` for standalone word input.",
+      "`style` must be `\"stem\"` or `\"lemma\"`; `\"lemma\"` supports English in this compatibility slice."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/normalize.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/normalize.rs"
+  },
+  "gpu_residency": "`normalizeWords` operates on host-resident text and has no provider kernel."
+}

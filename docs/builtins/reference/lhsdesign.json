@@ -1,0 +1,45 @@
+{
+  "title": "lhsdesign",
+  "category": "stats/random",
+  "keywords": ["lhsdesign", "latin hypercube", "design of experiments", "random", "statistics"],
+  "summary": "Generate Latin hypercube sample designs.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "Latin hypercube designs are generated on the host from RunMat's global random stream."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::random::lhsdesign::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`lhsdesign(n,p)` returns an `n`-by-`p` Latin hypercube design with one sample in each stratum of every column.",
+  "behaviors": [
+    "`n` and `p` must be positive integer scalars.",
+    "`\"Smooth\",\"on\"` jitters points uniformly within each stratum. `\"Smooth\",\"off\"` places points at stratum midpoints.",
+    "`\"Criterion\"` supports `\"maximin\"`, `\"correlation\"`, and `\"none\"`; the correlation criterion uses midpoint strata, matching MATLAB's discrete correlation-optimized design behavior.",
+    "`\"Iterations\",k` generates multiple candidate designs for optimized criteria and keeps the best scored candidate.",
+    "The result uses column-major `n`-by-`p` shape and values in the open interval `(0,1)`."
+  ],
+  "examples": [
+    { "description": "Default maximin design", "input": "X = lhsdesign(20, 4)" },
+    {
+      "description": "Midpoint design with correlation criterion",
+      "input": "X = lhsdesign(12, 3, \"Smooth\", \"off\", \"Criterion\", \"correlation\", \"Iterations\", 20)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does lhsdesign use RunMat's rng state?",
+      "answer": "Yes. It consumes values from the same global random stream as rand, datasample, and randsample."
+    }
+  ],
+  "links": [{ "label": "datasample", "url": "./datasample" }, { "label": "randsample", "url": "./randsample" }],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/random/lhsdesign.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/random/lhsdesign.rs"
+  }
+}

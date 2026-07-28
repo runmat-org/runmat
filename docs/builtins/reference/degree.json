@@ -1,0 +1,11 @@
+{
+  "title": "degree",
+  "category": "graph",
+  "keywords": ["degree", "graph", "nodes"],
+  "summary": "Return graph node degree counts.",
+  "status": "implemented",
+  "tested": {"unit": "builtins::graph::tests"},
+  "description": "`degree(G)` returns a column vector of degree counts. For digraphs, it returns total in-degree plus out-degree.",
+  "signatures": [{"label": "d = degree(G)", "description": "Return one degree value per node."}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/graph/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/graph/mod.rs"}
+}

@@ -1,0 +1,119 @@
+{
+  "title": "setxor",
+  "category": "array/sorting_sets",
+  "keywords": [
+    "setxor",
+    "symmetric difference",
+    "exclusive or",
+    "stable",
+    "rows",
+    "indices",
+    "gpu"
+  ],
+  "summary": "Return values or rows that appear in exactly one of two inputs.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "GPU tensors are gathered to host memory and processed with the CPU implementation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::sorting_sets::setxor::tests",
+    "integration": "builtins::array::sorting_sets::setxor::tests::setxor_gpu_roundtrip"
+  },
+  "description": "`setxor(A, B)` returns the symmetric difference of two arrays: values or rows that occur in `A` or `B`, but not both. Results are sorted by default and can be returned in first-seen order with `'stable'`.",
+  "behaviors": [
+    "`setxor(A, B)` flattens inputs column-major, removes duplicate non-NaN values within each input, and returns the sorted symmetric difference. Element outputs are row vectors when both inputs are row vectors; otherwise they are column vectors.",
+    "`[C, IA, IB] = setxor(A, B)` returns one-based indices so `C` is a sorted or stable combination of `A(IA)` and `B(IB)`.",
+    "`setxor(A, B, 'stable')` preserves first-seen order: exclusive values from `A` appear first, followed by exclusive values from `B`.",
+    "`setxor(A, B, 'rows')` treats each row as one set element. Numeric, complex, character, and string row inputs must have matching column counts.",
+    "Numeric outputs preserve matching input classes. A double input may be combined with one nondouble numeric class, in which case the nondouble class is preserved; two different nondouble classes are rejected.",
+    "Character arrays can be compared with numeric character-code arrays. String arrays can be compared with character vectors by treating each character row as a string scalar.",
+    "`NaN` values are treated as distinct, matching MATLAB `setxor` behavior.",
+    "Legacy flags (`'legacy'`, `'R2012a'`) and requests for more than three outputs are rejected; RunMat implements modern MATLAB semantics."
+  ],
+  "examples": [
+    {
+      "description": "Symmetric difference of two numeric vectors",
+      "input": "A = [5 1 3 3 3];\nB = [4 1 2];\n[C, IA, IB] = setxor(A, B)",
+      "output": "C =\n     2     3     4     5\nIA =\n     3\n     1\nIB =\n     3\n     1"
+    },
+    {
+      "description": "Preserving input order",
+      "input": "[C, IA, IB] = setxor([5 1 3 3 3], [4 1 2], 'stable')",
+      "output": "C =\n     5     3     4     2\nIA =\n     1\n     3\nIB =\n     1\n     3"
+    },
+    {
+      "description": "Symmetric difference of rows",
+      "input": "A = [7 8 9; 7 7 1; 7 7 1; 1 2 3; 4 5 6];\nB = [1 2 3; 4 5 6; 7 7 2];\n[C, IA, IB] = setxor(A, B, 'rows')",
+      "output": "C =\n     7     7     1\n     7     7     2\n     7     8     9\nIA =\n     2\n     1\nIB =\n     3"
+    },
+    {
+      "description": "NaN values remain distinct",
+      "input": "C = setxor([5 NaN NaN], [5 NaN NaN])",
+      "output": "C =\n   NaN   NaN   NaN   NaN"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What ordering does `setxor` use by default?",
+      "answer": "Results are sorted ascending by default. Specify `'stable'` to preserve the first occurrence order from `A` followed by `B`."
+    },
+    {
+      "question": "How are `IA` and `IB` defined?",
+      "answer": "`IA` indexes exclusive values or rows from `A`, and `IB` indexes exclusive values or rows from `B`. Both use MATLAB's one-based indexing."
+    },
+    {
+      "question": "Can I use `setxor` with rows?",
+      "answer": "Yes. Use `'rows'` for numeric, complex, character, or string matrices with matching column counts."
+    },
+    {
+      "question": "How are `NaN` values handled?",
+      "answer": "Unlike several other set helpers, MATLAB `setxor` treats `NaN` values as distinct. RunMat preserves that behavior."
+    },
+    {
+      "question": "Does GPU execution change results?",
+      "answer": "No. GPU tensors are gathered to host memory and evaluated by the same CPU implementation used for ordinary tensors."
+    }
+  ],
+  "links": [
+    {
+      "label": "union",
+      "url": "./union"
+    },
+    {
+      "label": "intersect",
+      "url": "./intersect"
+    },
+    {
+      "label": "setdiff",
+      "url": "./setdiff"
+    },
+    {
+      "label": "unique",
+      "url": "./unique"
+    },
+    {
+      "label": "ismember",
+      "url": "./ismember"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/sorting_sets/setxor.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/sorting_sets/setxor.rs"
+  },
+  "gpu_behavior": [
+    "`setxor` is registered as a residency sink. Host execution is authoritative today, and GPU inputs are gathered before set semantics are evaluated."
+  ]
+}

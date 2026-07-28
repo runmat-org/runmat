@@ -1,0 +1,75 @@
+{
+  "title": "yscale",
+  "category": "plotting",
+  "keywords": [
+    "yscale",
+    "y axis scale",
+    "log scale",
+    "axes"
+  ],
+  "summary": "Query or set the Y-axis scale for the current axes or a specified axes handle.",
+  "status": "done",
+  "version_added": "0.5.3",
+  "tests": {
+    "unit": "builtins::plotting::yscale::tests"
+  },
+  "description": "`yscale` controls whether the Y axis is displayed on a linear or logarithmic scale. It supports query, explicit scale assignment, command-form style string arguments, and explicit axes-target forms.",
+  "syntax": [
+    "scale = yscale()",
+    "yscale(scale)",
+    "yscale(ax, scale)"
+  ],
+  "arguments": [
+    {
+      "name": "scale",
+      "type": "'linear' | 'log'",
+      "description": "Scale value to apply to the Y axis."
+    },
+    {
+      "name": "ax",
+      "type": "axes handle",
+      "description": "Target axes handle. If omitted, the current axes are used."
+    }
+  ],
+  "examples": [
+    {
+      "description": "Switch the Y axis to logarithmic scale",
+      "input": "plot(1:100, (1:100).^2);\nyscale('log');\nyscale()",
+      "output": "ans = 'log'"
+    },
+    {
+      "description": "Apply scale to a specific subplot",
+      "input": "ax = subplot(1, 2, 2);\nplot(ax, 1:100, exp((1:100)/20));\nyscale(ax, 'log');",
+      "output": "% Only the target axes receives logarithmic Y scaling"
+    }
+  ],
+  "notes": [
+    "`yscale` shares state with the axes `YScale` property, so `set(gca, 'YScale', 'log')` and `yscale('log')` are equivalent.",
+    "Passing an explicit axes handle updates that axes without changing the current axes selection."
+  ],
+  "gpu_residency": "`yscale` reads and writes axes metadata. The renderer applies log mapping in its direct GPU coordinate path without gathering GPU-resident plot data.",
+  "related": [
+    {
+      "label": "xscale",
+      "url": "./xscale"
+    },
+    {
+      "label": "semilogy",
+      "url": "./semilogy"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    }
+  ],
+  "implemented_in": [
+    {
+      "label": "crates/runmat-runtime/src/builtins/plotting/ops/yscale.rs",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/yscale.rs"
+    }
+  ]
+}

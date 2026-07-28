@@ -40,6 +40,7 @@
     "`max(X, [], ..., 'omitnan')` ignores `NaN` values inside each slice. If every element in a slice is `NaN`, the result for that slice is `NaN` and the index is `NaN`.",
     "`max(X, [], ..., 'includenan')` (default) propagates `NaN` whenever a slice contains any `NaN` element, returning the index of the first `NaN`.",
     "`max(A, B)` performs elementwise comparison using MATLAB's implicit expansion rules. The second output indicates whether the maximum came from `A` (index `1`) or `B` (index `2`).",
+    "`max(A, B, 'omitnan')` performs pairwise comparison while choosing the non-NaN side when exactly one operand is `NaN`.",
     "Complex inputs follow MATLAB ordering: `'ComparisonMethod','auto'` (default) compares magnitudes and breaks ties using phase angles, while `'real'` compares real components first. `'abs'` is an explicit alias for magnitude ordering on real and complex inputs."
   ],
   "examples": [

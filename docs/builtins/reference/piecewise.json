@@ -1,0 +1,62 @@
+{
+  "title": "piecewise",
+  "category": "math/symbolic",
+  "keywords": [
+    "piecewise",
+    "symbolic",
+    "condition",
+    "syms"
+  ],
+  "summary": "Construct a scalar symbolic piecewise expression.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`piecewise` constructs host-only symbolic expressions and does not participate in GPU fusion."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::symbolic::piecewise::tests",
+    "integration": "runmat_vm::tests::symbolic::symbolic_syms_piecewise_repro_binds_workspace_variables"
+  },
+  "description": "`piecewise` currently materializes scalar symbolic condition/value arguments as a symbolic function expression. It is intended for workflows that start with `syms` and need to preserve symbolic expressions for later symbolic operations.",
+  "behaviors": [
+    "Accepts symbolic arguments and scalar numeric, integer, or logical constants.",
+    "Returns a scalar symbolic expression such as `piecewise(lt(abs(t), 2), 1, gt(abs(t), 2), 0)`.",
+    "Does not yet evaluate symbolic conditions or simplify branches.",
+    "Rejects non-scalar arrays and unsupported argument types with a `RunMat:piecewise:InvalidInput` diagnostic."
+  ],
+  "examples": [
+    {
+      "description": "Construct a symbolic piecewise expression",
+      "input": "syms t\nf = piecewise(abs(t)<2, 1, abs(t)>2, 0)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `piecewise` implement full Symbolic Math Toolbox simplification?",
+      "answer": "No. It preserves scalar symbolic piecewise expressions so scripts can continue past declaration and expression-construction steps."
+    }
+  ],
+  "links": [
+    {
+      "label": "syms",
+      "url": "./syms"
+    },
+    {
+      "label": "sym",
+      "url": "./sym"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/symbolic/piecewise.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/symbolic/piecewise.rs"
+  }
+}

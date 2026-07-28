@@ -318,7 +318,7 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
                 &x_axis,
                 &y_axis,
                 handle,
-                color_map,
+                color_map.clone(),
                 base_z,
                 &level_spec,
             ) {
@@ -331,7 +331,7 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
                             &x_axis,
                             &y_axis,
                             handle,
-                            color_map,
+                            color_map.clone(),
                             base_z,
                             &level_spec,
                             &line_color,
@@ -366,7 +366,7 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
             &x_axis,
             &y_axis,
             &grid,
-            color_map,
+            color_map.clone(),
             base_z,
             &level_spec,
         )
@@ -426,6 +426,7 @@ pub(crate) mod tests {
     fn tensor_from(data: &[f64]) -> Tensor {
         Tensor {
             data: data.to_vec(),
+            integer_data: None,
             shape: vec![data.len()],
             rows: data.len(),
             cols: 1,
@@ -436,6 +437,7 @@ pub(crate) mod tests {
     fn matrix_from(data: &[f64], rows: usize, cols: usize) -> Tensor {
         Tensor {
             data: data.to_vec(),
+            integer_data: None,
             shape: vec![rows, cols],
             rows,
             cols,
@@ -505,6 +507,7 @@ pub(crate) mod tests {
         let handle = contourf_builtin(
             Value::Tensor(Tensor {
                 data: vec![0.0, 1.0, 1.0, 0.0],
+                integer_data: None,
                 shape: vec![2, 2],
                 rows: 2,
                 cols: 2,
@@ -525,6 +528,7 @@ pub(crate) mod tests {
                 Value::Tensor(tensor_from(&[0.0, 1.0])),
                 Value::Tensor(Tensor {
                     data: vec![0.0, 1.0, 1.0, 0.0],
+                    integer_data: None,
                     shape: vec![2, 2],
                     rows: 2,
                     cols: 2,

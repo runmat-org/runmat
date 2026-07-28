@@ -3,6 +3,7 @@ use futures::executor::block_on;
 use std::path::{Path, PathBuf};
 
 const DEEP_SEMANTIC_TEST_STACK_BYTES: usize = 32 * 1024 * 1024;
+static TIMER_CORE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 struct CwdGuard {
     original: PathBuf,
@@ -253,7 +254,7 @@ fn outcome_has_upsert_name(outcome: &abi::ExecutionOutcome, name: &str) -> bool 
 
 #[test]
 fn captures_basic_workspace_assignments() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let result = execute_text_request(&mut session, "x = 42;").expect("exec succeeds");
     assert!(
         result.workspace_delta.upserts.iter().any(|upsert| {
@@ -268,7 +269,7 @@ fn captures_basic_workspace_assignments() {
 
 #[test]
 fn execute_outcome_exposes_runtime_flow() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = execute_text_request(&mut session, "1 + 1").expect("exec succeeds");
     assert!(
         matches!(outcome.flow, abi::RuntimeFlow::Single(_)),
@@ -280,7 +281,7 @@ fn execute_outcome_exposes_runtime_flow() {
 
 #[test]
 fn execute_outcome_exposes_workspace_upserts() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = execute_text_request(&mut session, "x = 42;").expect("exec succeeds");
     let upsert = outcome
         .workspace_delta
@@ -298,7 +299,7 @@ fn execute_outcome_exposes_workspace_upserts() {
 
 #[test]
 fn execute_text_request_accepts_function_arguments_block_syntax() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = typed(x)
             arguments
@@ -317,7 +318,7 @@ fn execute_text_request_accepts_function_arguments_block_syntax() {
 
 #[test]
 fn execute_text_request_accepts_function_arguments_input_block_attribute() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = typed(x)
             arguments (Input)
@@ -336,7 +337,7 @@ fn execute_text_request_accepts_function_arguments_input_block_attribute() {
 
 #[test]
 fn execute_text_request_enforces_function_arguments_size_and_class() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = typed(x)
             arguments
@@ -368,7 +369,7 @@ fn execute_text_request_enforces_function_arguments_size_and_class() {
 
 #[test]
 fn execute_text_request_rejects_arguments_block_unknown_parameter_declaration() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = typed(x)
             arguments
@@ -390,7 +391,7 @@ fn execute_text_request_rejects_arguments_block_unknown_parameter_declaration() 
 
 #[test]
 fn execute_text_request_enforces_arguments_must_be_finite_validator() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = typed(x)
             arguments
@@ -416,7 +417,7 @@ fn execute_text_request_enforces_arguments_must_be_finite_validator() {
 
 #[test]
 fn execute_text_request_treats_single_token_arguments_constraint_as_class_name() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = typed(x)
             arguments
@@ -436,7 +437,7 @@ fn execute_text_request_treats_single_token_arguments_constraint_as_class_name()
 
 #[test]
 fn execute_text_request_must_be_finite_accepts_char_and_logical() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = typed(x)
             arguments
@@ -468,7 +469,7 @@ fn execute_text_request_must_be_finite_accepts_char_and_logical() {
 
 #[test]
 fn execute_text_request_enforces_arguments_must_be_text_validator() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = typed(x)
             arguments
@@ -506,7 +507,7 @@ fn execute_text_request_enforces_arguments_must_be_text_validator() {
 
 #[test]
 fn execute_text_request_enforces_arguments_must_be_nonempty_validator() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = typed(x)
             arguments
@@ -544,7 +545,7 @@ fn execute_text_request_enforces_arguments_must_be_nonempty_validator() {
 
 #[test]
 fn execute_text_request_enforces_arguments_must_be_scalar_or_empty_validator() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = typed(x)
             arguments
@@ -576,7 +577,7 @@ fn execute_text_request_enforces_arguments_must_be_scalar_or_empty_validator() {
 
 #[test]
 fn execute_text_request_enforces_arguments_must_be_real_validator() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = typed(x)
             arguments
@@ -608,7 +609,7 @@ fn execute_text_request_enforces_arguments_must_be_real_validator() {
 
 #[test]
 fn execute_text_request_enforces_arguments_must_be_integer_validator() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = typed(x)
             arguments
@@ -640,7 +641,7 @@ fn execute_text_request_enforces_arguments_must_be_integer_validator() {
 
 #[test]
 fn execute_text_request_enforces_arguments_must_be_positive_validator() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = typed(x)
             arguments
@@ -672,7 +673,7 @@ fn execute_text_request_enforces_arguments_must_be_positive_validator() {
 
 #[test]
 fn execute_text_request_enforces_arguments_must_be_nonnegative_validator() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = typed(x)
             arguments
@@ -704,7 +705,7 @@ fn execute_text_request_enforces_arguments_must_be_nonnegative_validator() {
 
 #[test]
 fn execute_text_request_enforces_arguments_must_be_nonzero_validator() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = typed(x)
             arguments
@@ -730,7 +731,7 @@ fn execute_text_request_enforces_arguments_must_be_nonzero_validator() {
 
 #[test]
 fn execute_text_request_enforces_arguments_must_be_nonpositive_validator() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = typed(x)
             arguments
@@ -762,7 +763,7 @@ fn execute_text_request_enforces_arguments_must_be_nonpositive_validator() {
 
 #[test]
 fn execute_text_request_enforces_arguments_must_be_negative_validator() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = typed(x)
             arguments
@@ -794,7 +795,7 @@ fn execute_text_request_enforces_arguments_must_be_negative_validator() {
 
 #[test]
 fn execute_text_request_enforces_arguments_must_be_greater_than_or_equal_validator() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = typed(x)
             arguments
@@ -826,7 +827,7 @@ fn execute_text_request_enforces_arguments_must_be_greater_than_or_equal_validat
 
 #[test]
 fn execute_text_request_enforces_arguments_must_be_less_than_or_equal_validator() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = typed(x)
             arguments
@@ -852,7 +853,7 @@ fn execute_text_request_enforces_arguments_must_be_less_than_or_equal_validator(
 
 #[test]
 fn execute_text_request_arguments_validator_threshold_supports_unary_minus_literal() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = typed(x)
             arguments
@@ -878,7 +879,7 @@ fn execute_text_request_arguments_validator_threshold_supports_unary_minus_liter
 
 #[test]
 fn execute_text_request_enforces_arguments_must_be_greater_than_and_less_than_validators() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = gtcheck(x)
             arguments
@@ -922,7 +923,7 @@ fn execute_text_request_enforces_arguments_must_be_greater_than_and_less_than_va
 
 #[test]
 fn execute_text_request_rejects_arguments_block_unknown_validator() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = typed(x)
             arguments
@@ -944,7 +945,7 @@ fn execute_text_request_rejects_arguments_block_unknown_validator() {
 
 #[test]
 fn execute_text_request_rejects_arguments_block_unsupported_trailing_syntax() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = typed(x)
             arguments
@@ -966,7 +967,7 @@ fn execute_text_request_rejects_arguments_block_unsupported_trailing_syntax() {
 
 #[test]
 fn execute_text_request_rejects_advanced_arguments_block_kinds() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let repeating_source = r#"
         function y = typed(x, varargin)
             arguments (Repeating)
@@ -1008,7 +1009,7 @@ fn execute_text_request_rejects_advanced_arguments_block_kinds() {
 
 #[test]
 fn execute_text_request_rejects_arguments_block_name_value_declaration() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = typed(opts)
             arguments
@@ -1031,7 +1032,7 @@ fn execute_text_request_rejects_arguments_block_name_value_declaration() {
 
 #[test]
 fn execute_text_request_rejects_arguments_block_duplicate_declarations() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = typed(x)
             arguments
@@ -1054,7 +1055,7 @@ fn execute_text_request_rejects_arguments_block_duplicate_declarations() {
 
 #[test]
 fn execute_text_request_supports_arguments_default_for_omitted_input() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = typed(x)
             arguments
@@ -1080,7 +1081,7 @@ fn execute_text_request_supports_arguments_default_for_omitted_input() {
 
 #[test]
 fn execute_text_request_supports_arguments_signed_numeric_default_for_omitted_input() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = typed(x)
             arguments
@@ -1106,7 +1107,7 @@ fn execute_text_request_supports_arguments_signed_numeric_default_for_omitted_in
 
 #[test]
 fn execute_text_request_rejects_arguments_default_non_literal_expression() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = typed(x)
             arguments
@@ -1128,7 +1129,7 @@ fn execute_text_request_rejects_arguments_default_non_literal_expression() {
 
 #[test]
 fn execute_text_request_supports_arguments_empty_array_default_for_omitted_input() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function y = typed(x)
             arguments
@@ -1154,7 +1155,7 @@ fn execute_text_request_supports_arguments_empty_array_default_for_omitted_input
 
 #[test]
 fn execute_text_request_supports_multi_assign_index_cell_targets() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function varargout = pair(x)
             varargout{1} = x + 1;
@@ -1191,7 +1192,7 @@ fn execute_text_request_supports_multi_assign_index_cell_targets() {
 
 #[test]
 fn execute_text_request_supports_cell_brace_range_assignment_from_multi_output_call() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         c = {0, 0};
         c{1:2} = pair(10);
@@ -1217,7 +1218,7 @@ fn execute_text_request_supports_cell_brace_range_assignment_from_multi_output_c
 
 #[test]
 fn execute_text_request_supports_nested_varargout_forwarding_with_nargout_slice() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         [a,b] = outer(5);
         function varargout = outer(x)
@@ -1243,7 +1244,7 @@ fn execute_text_request_supports_nested_varargout_forwarding_with_nargout_slice(
 
 #[test]
 fn execute_text_request_supports_nested_varargout_forwarding_with_nargout_slice_via_feval() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         [a,b] = outer(5);
         function varargout = outer(x)
@@ -1269,7 +1270,7 @@ fn execute_text_request_supports_nested_varargout_forwarding_with_nargout_slice_
 
 #[test]
 fn execute_text_request_supports_nested_varargout_forwarding_with_nargout_slice_via_nested_feval() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         [a,b] = outer(5);
         function varargout = outer(x)
@@ -1296,8 +1297,7 @@ fn execute_text_request_supports_nested_varargout_forwarding_with_nargout_slice_
 #[test]
 fn execute_text_request_supports_direct_recursive_function() {
     run_deep_semantic_test(|| {
-        let mut session =
-            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        let mut session = RunMatSession::with_options(false, false).expect("session init");
         let source = r#"
             y = fact(5);
             function out = fact(n)
@@ -1320,8 +1320,7 @@ fn execute_text_request_supports_direct_recursive_function() {
 #[test]
 fn execute_text_request_supports_dynamic_recursive_function_routes() {
     run_deep_semantic_test(|| {
-        let mut session =
-            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        let mut session = RunMatSession::with_options(false, false).expect("session init");
         let source = r#"
             h = @fact_handle;
             a = h(5);
@@ -1357,7 +1356,7 @@ fn execute_text_request_supports_dynamic_recursive_function_routes() {
 
 #[test]
 fn execute_text_request_supports_arity_check_helpers() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         ok = guarded(1, 2, 3);
         try
@@ -1426,7 +1425,7 @@ fn execute_text_request_supports_arity_check_helpers() {
 
 #[test]
 fn execute_text_request_supports_dynamic_arity_check_helpers() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         ok = guarded_inputs(1, 2);
         one = guarded_outputs(1);
@@ -1496,7 +1495,7 @@ fn execute_path_request_supports_mfilename_name_and_fullpath() {
     let mut expected_full = source_path.clone();
     expected_full.set_extension("");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute path source");
     assert!(outcome_has_named_upsert(
@@ -1543,7 +1542,7 @@ end
     )
     .expect("write main source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute path source");
     assert!(outcome_has_named_upsert(
@@ -1617,7 +1616,7 @@ roots = ["."]
     )
     .expect("write main source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd = push_cwd(tmp.path());
     let source_root = std::env::current_dir().expect("read temp cwd");
     let outcome = execute_path_request(&mut session, "main.m").expect("exec");
@@ -1673,7 +1672,7 @@ roots = ["."]
 
 #[test]
 fn execute_text_request_supports_functions_metadata_builtin() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         from_text = functions(str2func("sin"));
         text_name = getfield(from_text, "function");
@@ -1713,7 +1712,7 @@ fn execute_text_request_supports_functions_metadata_builtin() {
 
 #[test]
 fn execute_text_request_supports_inputname_builtin() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         alpha = 10;
         beta = 20;
@@ -1820,7 +1819,7 @@ end
     )
     .expect("write main source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome =
         execute_path_request(&mut session, main_path.to_string_lossy().as_ref()).expect("exec");
     let assert_named = |name: &str, expected: runmat_builtins::Value| {
@@ -1844,7 +1843,7 @@ end
 
 #[test]
 fn execute_text_request_inputname_handles_nested_and_expanded_arguments() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         alpha = 10;
         beta = 20;
@@ -1884,7 +1883,7 @@ fn execute_text_request_inputname_handles_nested_and_expanded_arguments() {
 
 #[test]
 fn execute_text_request_supports_localfunctions_builtin() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         handles = localfunctions();
         h1 = handles{1};
@@ -1909,7 +1908,7 @@ fn execute_text_request_supports_localfunctions_builtin() {
 
 #[test]
 fn execute_request_supports_command_syntax_rewrites_through_semantic_pipeline() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
             name: "command-syntax-semantic.m".to_string(),
@@ -1946,7 +1945,7 @@ fn execute_request_supports_command_syntax_rewrites_through_semantic_pipeline() 
 
 #[test]
 fn execute_text_request_resolves_bare_tic_toc_as_zero_arg_builtins() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         tic;
         pause(0.001);
@@ -1996,7 +1995,7 @@ fn execute_text_request_resolves_bare_tic_toc_as_zero_arg_builtins() {
 
 #[test]
 fn execute_request_rejects_command_syntax_in_strict_mode() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let err = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
             name: "command-syntax-strict.m".to_string(),
@@ -2023,7 +2022,7 @@ fn execute_request_rejects_command_syntax_in_strict_mode() {
 
 #[test]
 fn execute_request_supports_warning_off_all_command_rewrite() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
             name: "command-warning-off-all.m".to_string(),
@@ -2045,7 +2044,7 @@ fn execute_request_supports_warning_off_all_command_rewrite() {
 
 #[test]
 fn execute_request_supports_clearvars_name_command_rewrite() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(
         session.execute_request(abi::ExecutionRequest {
             source: abi::SourceInput::Text {
@@ -2075,7 +2074,7 @@ fn execute_request_supports_clearvars_name_command_rewrite() {
 
 #[test]
 fn execute_request_supports_close_all_command_rewrite() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
             name: "command-close-all.m".to_string(),
@@ -2096,8 +2095,25 @@ fn execute_request_supports_close_all_command_rewrite() {
 }
 
 #[test]
+fn execute_request_supports_bare_close_without_current_figure() {
+    let _guard = runmat_runtime::builtins::plotting::lock_plot_test_context();
+    runmat_runtime::builtins::plotting::reset_plot_state();
+    assert!(runmat_runtime::builtins::plotting::figure_handles().is_empty());
+
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let outcome = execute_text_request(&mut session, "clc; clear; close; ok = 1;")
+        .expect("bare close should be safe when no figures exist");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "ok",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(runmat_runtime::builtins::plotting::figure_handles().is_empty());
+}
+
+#[test]
 fn execute_request_supports_clearvars_except_command_rewrite() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
             name: "command-clearvars-except.m".to_string(),
@@ -2131,7 +2147,7 @@ fn execute_request_supports_clearvars_except_command_rewrite() {
 
 #[test]
 fn execute_request_rejects_clearvars_except_without_names_command_rewrite() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
             name: "command-clearvars-except-missing.m".to_string(),
@@ -2155,7 +2171,7 @@ fn execute_request_rejects_clearvars_except_without_names_command_rewrite() {
 
 #[test]
 fn compile_input_lowers_print_command_dash_and_dotted_args_to_semantic_builtin_call() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let prepared = session
         .compile_input("print -dpng out.v1;")
         .expect("print command syntax should compile");
@@ -2190,7 +2206,7 @@ fn compile_input_lowers_print_command_dash_and_dotted_args_to_semantic_builtin_c
 
 #[test]
 fn compile_input_lowers_format_command_keyword_to_semantic_builtin_call() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let prepared = session
         .compile_input("format long;")
         .expect("format command syntax should compile");
@@ -2217,7 +2233,7 @@ fn compile_input_lowers_format_command_keyword_to_semantic_builtin_call() {
 
 #[test]
 fn execute_request_supports_format_command_rewrite_through_semantic_pipeline() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
             name: "command-format-long.m".to_string(),
@@ -2239,7 +2255,7 @@ fn execute_request_supports_format_command_rewrite_through_semantic_pipeline() {
 
 #[test]
 fn compile_input_lowers_grid_command_keyword_to_semantic_builtin_call() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let prepared = session
         .compile_input("grid on;")
         .expect("grid command syntax should compile");
@@ -2266,7 +2282,7 @@ fn compile_input_lowers_grid_command_keyword_to_semantic_builtin_call() {
 
 #[test]
 fn compile_input_lowers_box_command_keyword_to_semantic_builtin_call() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let prepared = session
         .compile_input("box off;")
         .expect("box command syntax should compile");
@@ -2293,7 +2309,7 @@ fn compile_input_lowers_box_command_keyword_to_semantic_builtin_call() {
 
 #[test]
 fn compile_input_lowers_axis_command_keyword_to_semantic_builtin_call() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let prepared = session
         .compile_input("axis tight;")
         .expect("axis command syntax should compile");
@@ -2324,8 +2340,7 @@ fn compile_input_lowers_colormap_command_keyword_to_semantic_builtin_call() {
         "parula", "viridis", "plasma", "inferno", "magma", "turbo", "jet", "hot", "cool", "spring",
         "summer", "autumn", "winter", "gray", "grey", "bone", "copper", "pink", "lines",
     ] {
-        let mut session =
-            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        let mut session = RunMatSession::with_options(false, false).expect("session init");
         let source = format!("colormap {colormap_name};");
         let prepared = session
             .compile_input(&source)
@@ -2354,7 +2369,7 @@ fn compile_input_lowers_colormap_command_keyword_to_semantic_builtin_call() {
 
 #[test]
 fn compile_input_rejects_unsupported_hsv_colormap_command_keyword() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let err = match session.compile_input("colormap hsv;") {
         Ok(_) => panic!("unsupported hsv colormap command syntax should fail"),
         Err(err) => err,
@@ -2373,7 +2388,7 @@ fn compile_input_rejects_unsupported_hsv_colormap_command_keyword() {
 
 #[test]
 fn compile_input_lowers_shading_command_keyword_to_semantic_builtin_call() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let prepared = session
         .compile_input("shading interp;")
         .expect("shading command syntax should compile");
@@ -2400,7 +2415,7 @@ fn compile_input_lowers_shading_command_keyword_to_semantic_builtin_call() {
 
 #[test]
 fn compile_input_lowers_colorbar_command_without_args_to_semantic_builtin_call() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let prepared = session
         .compile_input("colorbar;")
         .expect("colorbar command syntax should compile");
@@ -2419,7 +2434,7 @@ fn compile_input_lowers_colorbar_command_without_args_to_semantic_builtin_call()
 
 #[test]
 fn compile_input_lowers_colorbar_command_keyword_to_semantic_builtin_call() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let prepared = session
         .compile_input("colorbar off;")
         .expect("colorbar command syntax should compile");
@@ -2446,7 +2461,7 @@ fn compile_input_lowers_colorbar_command_keyword_to_semantic_builtin_call() {
 
 #[test]
 fn compile_input_rewrites_ident_paren_call_to_index_when_binding_shadows_callable() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "foo = [10, 20, 30]; y = foo(2);";
     let prepared = session
         .compile_input(source)
@@ -2481,7 +2496,7 @@ fn compile_input_rewrites_ident_paren_call_to_index_when_binding_shadows_callabl
 
 #[test]
 fn execute_outcome_exposes_workspace_removals_and_effects() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(&mut session, "x = 1; y = 2;").expect("seed workspace");
     let outcome = execute_text_request(&mut session, "clear x;").expect("clear succeeds");
 
@@ -2501,7 +2516,7 @@ fn execute_outcome_exposes_workspace_removals_and_effects() {
 
 #[test]
 fn execute_request_uses_request_workspace_handle() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let workspace = abi::WorkspaceHandle(uuid::Uuid::from_u128(7));
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
@@ -2527,7 +2542,7 @@ fn execute_request_uses_request_workspace_handle() {
 
 #[test]
 fn execute_request_honors_zero_requested_outputs() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
             name: "request-zero-output.m".to_string(),
@@ -2547,7 +2562,7 @@ fn execute_request_honors_zero_requested_outputs() {
 
 #[test]
 fn execute_request_path_error_returns_resolved_source_context() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let dir = tempfile::tempdir().expect("tempdir");
     let source_path = dir.path().join("source-context-error.m");
     let source_text = "missing_name_for_source_context\nx = 1;\n";
@@ -2579,7 +2594,7 @@ fn execute_request_path_error_returns_resolved_source_context() {
 #[test]
 fn execute_request_path_source_context_is_relative_to_cwd() {
     let _guard = cwd_lock();
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let dir = tempfile::tempdir().expect("tempdir");
     std::fs::create_dir_all(dir.path().join("nested")).expect("create nested dir");
     let source_path = dir.path().join("nested/runtime-relative.m");
@@ -2627,7 +2642,7 @@ fn execute_request_path_source_context_is_relative_to_cwd() {
 
 #[test]
 fn execute_request_runtime_diagnostic_preserves_span_and_callstack() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "x = [1];\ny = x(2);\n";
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
@@ -2659,7 +2674,7 @@ fn execute_request_runtime_diagnostic_preserves_span_and_callstack() {
 
 #[test]
 fn execute_request_honors_top_level_await_host_policy() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let err = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
             name: "request-await-policy.m".to_string(),
@@ -2686,7 +2701,7 @@ fn execute_request_honors_top_level_await_host_policy() {
 
 #[test]
 fn compile_input_uses_semantic_vm_when_supported() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let prepared = session
         .compile_input("x = [1 2; 3 4]; y = x(:, 2);")
         .expect("compile");
@@ -2698,7 +2713,7 @@ fn compile_input_uses_semantic_vm_when_supported() {
 
 #[test]
 fn compile_input_records_mir_analysis_facts() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let prepared = session
         .compile_input("x = [1 2; 3 4]; y = x(:, 2);")
         .expect("compile");
@@ -2734,7 +2749,7 @@ roots = ["."]
     .expect("write dependency symbol");
     std::fs::write(tmp.path().join("main.m"), "import pkg.*; foo()").expect("write main source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
     let prepared = session
         .compile_input_for_source_name(&source_name, "import stats.*; y = summarize(1);")
@@ -2783,7 +2798,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -2829,7 +2844,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -2899,7 +2914,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -2986,8 +3001,7 @@ amt = c.amount;
             )
             .expect("write main source");
 
-            let mut session =
-                RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+            let mut session = RunMatSession::with_options(false, false).expect("session init");
             let source_path = tmp.path().join("main.m");
             let outcome =
                 execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
@@ -3069,7 +3083,7 @@ ux = u.x;
     )
     .expect("write single-file source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = execute_path_request(&mut session, source.to_string_lossy().as_ref())
         .expect("execute script");
 
@@ -3130,8 +3144,7 @@ v = c.amount;
             )
             .expect("write single-file source");
 
-            let mut session =
-                RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+            let mut session = RunMatSession::with_options(false, false).expect("session init");
             let outcome = execute_path_request(&mut session, source.to_string_lossy().as_ref())
                 .expect("execute script");
 
@@ -3178,7 +3191,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -3210,7 +3223,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -3258,7 +3271,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -3268,11 +3281,10 @@ end
         "g",
         &runmat_builtins::Value::Num(1.0)
     ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "v",
-        &runmat_builtins::Value::Bool(false)
-    ));
+    assert!(
+        outcome_has_named_upsert(&outcome, "v", &runmat_builtins::Value::Bool(false)),
+        "delete should invalidate the original handle; outcome={outcome:?}"
+    );
 }
 
 #[test]
@@ -3317,7 +3329,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -3362,7 +3374,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -3421,7 +3433,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -3435,7 +3447,7 @@ end
 
 #[test]
 fn compile_local_function_global_decl_emits_named_global_workspace_effect() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "global G; G = 0; y = on_tick(1,2);\nfunction out = on_tick(a,b)\n  global G; G = G + 1; out = 77;\nend";
     let prepared = session.compile_input(source).expect("compile");
     let fid = prepared
@@ -3501,7 +3513,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -3534,7 +3546,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execution should complete with diagnostic");
@@ -3567,7 +3579,7 @@ end
     std::fs::write(tmp.path().join("main.m"), "c = Color.Red; cls = class(c);")
         .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -3600,7 +3612,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -3633,7 +3645,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -3671,7 +3683,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -3719,7 +3731,7 @@ end
     .expect("write class source");
     std::fs::write(tmp.path().join("main.m"), "b = B();").expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execution should complete with diagnostic");
@@ -3751,7 +3763,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -3783,7 +3795,7 @@ end
     .expect("write class source");
     std::fs::write(tmp.path().join("main.m"), "a = A();").expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -3829,7 +3841,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -3880,7 +3892,7 @@ end
     .expect("write class source");
     std::fs::write(tmp.path().join("main.m"), "b = B();").expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -3930,7 +3942,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -3988,7 +4000,7 @@ end
     .expect("write class source");
     std::fs::write(tmp.path().join("main.m"), "b = B(); y = b.f();").expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -4029,7 +4041,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -4082,7 +4094,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -4120,7 +4132,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -4172,7 +4184,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -4216,7 +4228,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -4263,7 +4275,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -4309,7 +4321,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -4368,7 +4380,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -4437,7 +4449,7 @@ y = b.x;
     )
     .expect("write main.m");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd_guard = push_cwd(root);
     let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
     assert!(
@@ -4448,7 +4460,7 @@ y = b.x;
 
 #[test]
 fn compile_input_lowers_super_constructor_to_semantic_super_instruction() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
 classdef A < handle
   methods
@@ -4528,7 +4540,7 @@ end
     .expect("write class source");
     std::fs::write(tmp.path().join("main.m"), "b = B(); v = b.f();").expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -4542,7 +4554,7 @@ end
 
 #[test]
 fn compile_input_lowers_super_method_to_semantic_super_instruction() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
 classdef A
   methods
@@ -4623,7 +4635,7 @@ end
     .expect("write class source");
     std::fs::write(tmp.path().join("main.m"), "b = B(); v = f(b);").expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -4681,7 +4693,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -4737,7 +4749,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -4790,7 +4802,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -4835,7 +4847,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -4871,7 +4883,7 @@ end
     .expect("write class source");
     std::fs::write(tmp.path().join("main.m"), "c = C(); b = pvt(c);").expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execution should complete with diagnostic");
@@ -4913,7 +4925,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -4952,7 +4964,7 @@ end
     .expect("write class source");
     std::fs::write(tmp.path().join("main.m"), "y = C.reveal();").expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -4997,7 +5009,7 @@ end
             .expect("write script source");
 
             let mut session =
-                RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+                RunMatSession::with_options(false, false).expect("session init");
             let source_path = tmp.path().join("main.m");
             let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
                 .expect("execute script");
@@ -5047,7 +5059,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -5084,7 +5096,7 @@ end
     std::fs::write(tmp.path().join("main.m"), "a = S.f(3); b = f(3);")
         .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execution should complete with diagnostic");
@@ -5118,7 +5130,7 @@ end
     std::fs::write(tmp.path().join("main.m"), "import S.*; a = f(3);")
         .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -5156,7 +5168,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -5199,7 +5211,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -5236,7 +5248,7 @@ end
     std::fs::write(tmp.path().join("main.m"), "import S.*; h = @f; a = h(3);")
         .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -5268,7 +5280,7 @@ end
     std::fs::write(tmp.path().join("main.m"), "import S.f; h = @f; a = h(3);")
         .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -5313,7 +5325,7 @@ end
     std::fs::write(tmp.path().join("main.m"), "import A.*; import B.*; h = @f;")
         .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let err = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect_err("ambiguous static handle import should fail");
@@ -5359,7 +5371,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let err = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect_err("ambiguous wildcard static method should fail semantic resolution");
@@ -5398,7 +5410,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -5443,7 +5455,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -5510,7 +5522,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -5593,8 +5605,7 @@ end
                 )
                 .expect("write script source");
 
-                let mut session =
-                    RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+                let mut session = RunMatSession::with_options(false, false).expect("session init");
                 let source_path = tmp.path().join("main.m");
                 let outcome =
                     execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
@@ -5650,7 +5661,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -5673,6 +5684,70 @@ end
         &outcome,
         "d",
         &runmat_builtins::Value::Num(12.0)
+    ));
+}
+
+#[test]
+fn execute_manifest_project_resolves_class_folder_constructor_as_class_identity() {
+    let _guard = cwd_lock();
+    let project = tempfile::TempDir::new().expect("tempdir");
+    let root = project.path();
+    std::fs::create_dir_all(root.join("src/@Report")).expect("create class folder");
+    std::fs::write(
+        root.join("runmat.toml"),
+        r#"
+[package]
+name = "sales_report"
+
+[sources]
+roots = ["src"]
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        root.join("src/@Report/Report.m"),
+        r#"
+classdef Report
+  properties
+    Name
+    Total
+  end
+  methods
+    function obj = Report(name, total)
+      obj.Name = name;
+      obj.Total = total;
+    end
+    function value = title(obj)
+      value = obj.Name;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class constructor");
+    let main = root.join("src/analyze_sales.m");
+    std::fs::write(
+        &main,
+        "report = Report(\"sales\", 42); label = report.title(); total = report.Total;",
+    )
+    .expect("write entry source");
+
+    let _cwd = push_cwd(root);
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let outcome = execute_path_request(&mut session, "src/analyze_sales.m")
+        .expect("class-folder constructor should execute");
+    assert!(
+        outcome_has_named_upsert(
+            &outcome,
+            "label",
+            &runmat_builtins::Value::String("sales".into())
+        ),
+        "class-folder method should return the constructed property; outcome={outcome:?}"
+    );
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "total",
+        &runmat_builtins::Value::Num(42.0)
     ));
 }
 
@@ -5716,7 +5791,7 @@ y = o(2);
     )
     .expect("write main.m");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd_guard = push_cwd(root);
     let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
     assert!(
@@ -5774,7 +5849,7 @@ y = o(2);
     )
     .expect("write main.m");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd_guard = push_cwd(root);
     let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
     assert!(
@@ -5828,7 +5903,7 @@ d = c.data(3);
     )
     .expect("write main.m");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd_guard = push_cwd(root);
     let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
     assert!(outcome_has_named_upsert(
@@ -5910,8 +5985,7 @@ total = c.amount;
             )
             .expect("write main source");
 
-            let mut session =
-                RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+            let mut session = RunMatSession::with_options(false, false).expect("session init");
             let source_path = tmp.path().join("main.m");
             let outcome =
                 execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
@@ -5990,7 +6064,7 @@ ux = u.x;
     )
     .expect("write main source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -6058,7 +6132,7 @@ ok = isa(o,'pkg.sub.C');
     )
     .expect("write main source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -6130,7 +6204,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -6185,7 +6259,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -6245,7 +6319,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -6305,7 +6379,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -6349,7 +6423,7 @@ fn execute_path_request_reports_import_ambiguous_for_unqualified_class_construct
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let err = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect_err("ambiguous wildcard-import class constructor should fail compilation");
@@ -6378,7 +6452,7 @@ fn execute_path_request_bare_non_loader_identifier_does_not_probe_constructor_wi
     std::fs::write(tmp.path().join("main.m"), "import pkg.*; import pkg2.*; C;")
         .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let err = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect_err("bare C should fail as an undefined variable, not import ambiguity");
@@ -6428,7 +6502,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -6464,7 +6538,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -6503,7 +6577,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -6537,7 +6611,7 @@ fn execute_path_request_reports_import_ambiguous_for_constructor_function_handle
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let err = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect_err("ambiguous wildcard-import constructor handle should fail compilation");
@@ -6580,7 +6654,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -6630,7 +6704,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -6666,7 +6740,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -6706,7 +6780,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -6765,7 +6839,7 @@ end
             .expect("write script source");
 
             let mut session =
-                RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+                RunMatSession::with_options(false, false).expect("session init");
             let source_path = tmp.path().join("main.m");
             let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
                 .expect("execute script");
@@ -6812,7 +6886,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -6855,7 +6929,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -6890,7 +6964,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -6929,7 +7003,7 @@ p = Vec2(3, 4); c = class(p); m = p.magnitude(); ok = isa(p, 'Vec2');
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -6961,7 +7035,7 @@ fn execute_path_request_supports_new_object_builtin_for_registered_classes() {
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -7021,7 +7095,7 @@ b = d.getx();
     )
     .expect("write main.m");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd_guard = push_cwd(root);
     let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
     assert!(outcome_has_named_upsert(
@@ -7076,7 +7150,7 @@ y = d.x;
     )
     .expect("write main.m");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd_guard = push_cwd(root);
     let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
     assert!(outcome_has_named_upsert(
@@ -7111,7 +7185,7 @@ end
 
     std::fs::write(root.join("main.m"), "c = C(); y = c.getv();").expect("write main.m");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd_guard = push_cwd(root);
     let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
     assert!(outcome_has_named_upsert(
@@ -7149,7 +7223,7 @@ end
 
     std::fs::write(root.join("main.m"), "c = C(1); c.x = 9; y = c.x;").expect("write main.m");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd_guard = push_cwd(root);
     let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
     assert!(outcome_has_named_upsert(
@@ -7180,7 +7254,7 @@ end
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
@@ -7203,7 +7277,7 @@ end
 
 #[test]
 fn compile_input_reports_import_ambiguity_identifier() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let err = match session.compile_input("import PkgF.foo; import PkgG.foo; y = foo();") {
         Ok(_) => panic!("ambiguous specific imports should fail compilation"),
         Err(err) => err,
@@ -7216,7 +7290,7 @@ fn compile_input_reports_import_ambiguity_identifier() {
 
 #[test]
 fn compile_input_reports_duplicate_import_identifier() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let err = match session.compile_input("import Point.*; import Point.*; y = 1;") {
         Ok(_) => panic!("duplicate imports should fail compilation"),
         Err(err) => err,
@@ -7250,7 +7324,7 @@ roots = ["."]
     .expect("write package function");
     std::fs::write(tmp.path().join("main.m"), "x = 1;").expect("write main source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd = push_cwd(tmp.path());
     let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
     let outcome = execute_path_request(&mut session, &source_name).expect("exec succeeds");
@@ -7286,7 +7360,7 @@ roots = ["."]
     std::fs::write(tmp.path().join("main.m"), "import pkg.*; r = foo(40);")
         .expect("write main source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd = push_cwd(tmp.path());
     let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
     let outcome = execute_path_request(&mut session, &source_name).expect("exec succeeds");
@@ -7328,7 +7402,7 @@ roots = ["."]
     std::fs::write(tmp.path().join("main.m"), "import pkg.*; r = foo(40);")
         .expect("write main source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd = push_cwd(tmp.path());
     let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
@@ -7367,7 +7441,7 @@ roots = ["."]
     .expect("write helper function");
     std::fs::write(tmp.path().join("main.m"), "r = add1(41);").expect("write main source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd = push_cwd(tmp.path());
     let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
@@ -7410,7 +7484,7 @@ roots = ["."]
     )
     .expect("write main source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd = push_cwd(tmp.path());
     let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
@@ -7438,7 +7512,7 @@ fn execute_path_request_resolves_private_function_without_manifest_for_parent_so
     .expect("write private helper");
     std::fs::write(tmp.path().join("main.m"), "r = helper(41);").expect("write main source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd = push_cwd(tmp.path());
     let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
@@ -7482,7 +7556,7 @@ roots = ["."]
     )
     .expect("write sub source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd = push_cwd(tmp.path());
     let outcome = execute_path_request(&mut session, "sub/main.m").expect("exec succeeds");
 
@@ -7537,7 +7611,7 @@ roots = ["."]
     )
     .expect("write sub source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd = push_cwd(tmp.path());
     let parent_outcome = execute_path_request(&mut session, "main.m").expect("parent succeeds");
     assert!(
@@ -7587,7 +7661,7 @@ roots = ["."]
     )
     .expect("write main source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd = push_cwd(tmp.path());
     let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
@@ -7627,7 +7701,7 @@ roots = ["."]
     .expect("write private helper");
     std::fs::write(tmp.path().join("main.m"), "r = helper(41);").expect("write main source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd = push_cwd(tmp.path());
     let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
@@ -7677,7 +7751,7 @@ roots = ["."]
     )
     .expect("write main source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd = push_cwd(tmp.path());
     let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
@@ -7737,7 +7811,7 @@ roots = ["."]
     )
     .expect("write main source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd = push_cwd(tmp.path());
     let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
@@ -7773,7 +7847,7 @@ roots = ["."]
     )
     .expect("write package private helper");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd = push_cwd(tmp.path());
     let outcome = execute_path_request(&mut session, "+pkg/main.m").expect("exec succeeds");
 
@@ -7809,7 +7883,7 @@ roots = ["."]
     )
     .expect("write class private helper");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd = push_cwd(tmp.path());
     let outcome = execute_path_request(&mut session, "@C/main.m").expect("exec succeeds");
 
@@ -7855,8 +7929,7 @@ roots = ["."]
         )
         .expect("write root source");
 
-        let mut session =
-            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        let mut session = RunMatSession::with_options(false, false).expect("session init");
         let _cwd = push_cwd(tmp.path());
         let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
@@ -7919,8 +7992,7 @@ roots = ["."]
         )
         .expect("write root source");
 
-        let mut session =
-            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        let mut session = RunMatSession::with_options(false, false).expect("session init");
         let _cwd = push_cwd(tmp.path());
         let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
@@ -7979,8 +8051,7 @@ roots = ["."]
         )
         .expect("write root source");
 
-        let mut session =
-            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        let mut session = RunMatSession::with_options(false, false).expect("session init");
         let _cwd = push_cwd(tmp.path());
         let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
@@ -8038,8 +8109,7 @@ roots = ["."]
         )
         .expect("write root source");
 
-        let mut session =
-            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        let mut session = RunMatSession::with_options(false, false).expect("session init");
         let _cwd = push_cwd(tmp.path());
         let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
@@ -8081,7 +8151,7 @@ roots = ["."]
     .expect("write package function");
     std::fs::write(tmp.path().join("main.m"), "r = pkg.foo();").expect("write main source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd = push_cwd(tmp.path());
     let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
     let outcome = execute_path_request(&mut session, &source_name).expect("exec succeeds");
@@ -8099,7 +8169,7 @@ roots = ["."]
 }
 
 #[test]
-fn execute_outcome_wildcard_import_without_manifest_reports_unresolved_function() {
+fn execute_outcome_wildcard_import_resolves_from_loose_package_folder() {
     let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
@@ -8108,21 +8178,24 @@ fn execute_outcome_wildcard_import_without_manifest_reports_unresolved_function(
         "function y = foo(); y = 42; end",
     )
     .expect("write package function");
-    std::fs::write(tmp.path().join("main.m"), "import pkg.*; foo()").expect("write main source");
+    std::fs::write(tmp.path().join("main.m"), "import pkg.*; value = foo();")
+        .expect("write main source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd = push_cwd(tmp.path());
     let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
     let outcome = execute_path_request(&mut session, &source_name).expect("exec succeeds");
 
     assert!(
-        outcome
-            .diagnostics
-            .iter()
-            .any(|d| d.code == "RunMat:UndefinedFunction" && d.message.contains("foo")),
-        "wildcard import without manifest should not resolve package symbols; diagnostics={:?}",
+        outcome.diagnostics.is_empty(),
+        "MATLAB package folders are valid loose-folder lookup roots; diagnostics={:?}",
         outcome.diagnostics
     );
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "value",
+        &runmat_builtins::Value::Num(42.0)
+    ));
 }
 
 #[test]
@@ -8148,7 +8221,7 @@ roots = ["."]
     .expect("write helper function");
     std::fs::write(tmp.path().join("main.m"), "add1(41)").expect("write main source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd = push_cwd(tmp.path());
     let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
     let outcome = execute_path_request(&mut session, &source_name).expect("exec succeeds");
@@ -8171,7 +8244,7 @@ fn execute_path_request_resolves_sibling_function_file() {
     .expect("write outer function");
     std::fs::write(tmp.path().join("main.m"), "r = outer(5);").expect("write main source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd = push_cwd(tmp.path());
     let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
     let outcome = execute_path_request(&mut session, &source_name).expect("exec succeeds");
@@ -8198,7 +8271,7 @@ fn execute_path_request_resolves_sibling_function_with_arguments_block_validatio
     )
     .expect("write main source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd = push_cwd(tmp.path());
     let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
     let outcome = execute_path_request(&mut session, &source_name).expect("exec succeeds");
@@ -8246,7 +8319,7 @@ roots = ["."]
     )
     .expect("write main source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd = push_cwd(tmp.path());
     let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
@@ -8298,7 +8371,7 @@ roots = ["."]
     .expect("write package typed function");
     std::fs::write(tmp.path().join("main.m"), "r = pkg.typed(3, 4);").expect("write main source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd = push_cwd(tmp.path());
     let err = execute_path_request(&mut session, "main.m")
         .expect_err("expected semantic failure for package advanced arguments block");
@@ -8330,7 +8403,7 @@ roots = ["."]
         .expect("write invalid helper function");
     std::fs::write(tmp.path().join("main.m"), "x = 1;").expect("write main source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
     let outcome = execute_text_request_named_source(&mut session, &source_name, "v = 1;")
         .expect("exec succeeds");
@@ -8353,7 +8426,7 @@ fn execute_outcome_load_statement_assigns_workspace_bindings_with_semicolon() {
     );
     std::fs::write(&source_path, &source).expect("write source file");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_name = source_path.to_string_lossy().to_string();
     let outcome = execute_text_request_named_source(&mut session, &source_name, &source)
         .expect("exec succeeds");
@@ -8376,7 +8449,7 @@ fn execute_outcome_load_statement_assigns_workspace_bindings_without_semicolon()
     );
     std::fs::write(&source_path, &source).expect("write source file");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_name = source_path.to_string_lossy().to_string();
     let outcome = execute_text_request_named_source(&mut session, &source_name, &source)
         .expect("exec succeeds");
@@ -8397,7 +8470,7 @@ fn execute_load_statement_assigns_workspace_bindings_with_semicolon() {
         "x = 42; save('{mat_path_literal}', 'x'); clear x; load('{mat_path_literal}'); y = x;"
     );
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(&mut session, &source).expect("exec succeeds");
     let outcome = execute_text_request(&mut session, "z = y;").expect("follow-up succeeds");
 
@@ -8411,7 +8484,7 @@ fn execute_load_statement_assigns_workspace_bindings_with_semicolon() {
 
 #[test]
 fn compile_input_reports_isolated_capture_identifier() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let err = match session.compile_input(
         "function y = outer(x); isolated function z = inner(); z = x; end; y = 1; end",
     ) {
@@ -8429,7 +8502,7 @@ fn compile_input_reports_isolated_capture_identifier() {
 
 #[test]
 fn compile_input_reports_class_self_inheritance_identifier() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let err = match session.compile_input("classdef A < A; end") {
         Ok(_) => panic!("class self-inheritance should fail semantic compilation"),
         Err(err) => err,
@@ -8445,7 +8518,7 @@ fn compile_input_reports_class_self_inheritance_identifier() {
 
 #[test]
 fn compile_input_reports_duplicate_class_member_identifier() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
 classdef A
     properties
@@ -8469,7 +8542,7 @@ end
 
 #[test]
 fn compile_input_reports_class_member_name_conflict_identifier() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
 classdef A
     properties
@@ -8497,7 +8570,7 @@ end
 
 #[test]
 fn compile_input_reports_cell_assignment_colon_selector_identifier() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let err = match session.compile_input("c = {1,2;3,4}; c{:,2} = 9;") {
         Ok(_) => panic!("brace assignment with colon selector should fail compilation"),
         Err(err) => err,
@@ -8548,7 +8621,7 @@ roots = ["."]
     .expect("write dependency function");
     std::fs::write(tmp.path().join("main.m"), "x = 1;").expect("write main source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
     let prepared = session
         .compile_input_for_source_name(&source_name, "import statsdep.*; y = summarize(1);")
@@ -8603,7 +8676,7 @@ roots = ["."]
     .expect("write dependency function");
     std::fs::write(tmp.path().join("main.m"), "x = 1;").expect("write main source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
     let prepared = session
         .compile_input_for_source_name(&source_name, "import statsdep.*; f = @summarize;")
@@ -8655,7 +8728,7 @@ roots = ["."]
     )
     .expect("write package function");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd = push_cwd(tmp.path());
     let prepared = session
         .compile_input_for_source_name("remote:scripts/main.m", "import stats.*; y = summarize(1);")
@@ -8694,7 +8767,7 @@ roots = ["."]
     )
     .expect("write package function");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let _cwd = push_cwd(tmp.path());
     let prepared = session
         .compile_input_for_source_name("remote:main.m", "import stats.*; y = summarize(1);")
@@ -8713,7 +8786,7 @@ roots = ["."]
 
 #[test]
 fn end_offset_indexing_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "A = [1, 2, 3]; y = A(end-1);";
     let prepared = session.compile_input(source).expect("compile end indexing");
     assert!(
@@ -8732,7 +8805,7 @@ fn end_offset_indexing_uses_semantic_vm() {
 
 #[test]
 fn end_offset_assignment_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "A = [1, 2, 3]; A(end-1) = 9; y = A(2);";
     let prepared = session
         .compile_input(source)
@@ -8753,7 +8826,7 @@ fn end_offset_assignment_uses_semantic_vm() {
 
 #[test]
 fn indexed_deletion_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "A = [1, 2, 3]; A(2) = []; y = A(2);";
     let prepared = session
         .compile_input(source)
@@ -8782,7 +8855,7 @@ fn indexed_deletion_uses_semantic_vm() {
 
 #[test]
 fn cell_brace_empty_assignment_is_not_deletion_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "C = {1, 2}; C{1} = []; y = C{2};";
     let prepared = session
         .compile_input(source)
@@ -8811,7 +8884,7 @@ fn cell_brace_empty_assignment_is_not_deletion_uses_semantic_vm() {
 
 #[test]
 fn complex_matrix_literal_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "A = [1+1i, 2+2i, 3+3i]; y = A(2);";
     let prepared = session
         .compile_input(source)
@@ -8832,7 +8905,7 @@ fn complex_matrix_literal_uses_semantic_vm() {
 
 #[test]
 fn complex_indexed_deletion_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "A = [1+1i, 2+2i, 3+3i]; A(2) = []; y = A(2);";
     let prepared = session
         .compile_input(source)
@@ -8853,7 +8926,7 @@ fn complex_indexed_deletion_uses_semantic_vm() {
 
 #[test]
 fn real_tensor_complex_assignment_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "A = [1, 2, 3]; A(2) = 4+5i; y = A(2);";
     let prepared = session
         .compile_input(source)
@@ -8874,7 +8947,7 @@ fn real_tensor_complex_assignment_uses_semantic_vm() {
 
 #[test]
 fn real_tensor_2d_complex_assignment_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "A = [1, 2; 3, 4]; A(1, 2) = 5+6i; y = A(1, 2);";
     let prepared = session
         .compile_input(source)
@@ -8895,7 +8968,7 @@ fn real_tensor_2d_complex_assignment_uses_semantic_vm() {
 
 #[test]
 fn cell_paren_deletion_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "C = {1, 2, 3}; C(2) = []; y = C{2};";
     let prepared = session
         .compile_input(source)
@@ -8916,7 +8989,7 @@ fn cell_paren_deletion_uses_semantic_vm() {
 
 #[test]
 fn cell_paren_assignment_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "C = {1, 2, 3}; C(2) = {4}; y = C{2};";
     let prepared = session
         .compile_input(source)
@@ -8937,7 +9010,7 @@ fn cell_paren_assignment_uses_semantic_vm() {
 
 #[test]
 fn cell_2d_paren_assignment_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "C = {1, 2; 3, 4}; C(1, 2) = {9}; y = C{1, 2};";
     let prepared = session
         .compile_input(source)
@@ -8958,7 +9031,7 @@ fn cell_2d_paren_assignment_uses_semantic_vm() {
 
 #[test]
 fn cell_2d_linear_indexing_is_column_major_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "C = {1, 2; 3, 4}; y = C{3};";
     let prepared = session
         .compile_input(source)
@@ -8979,7 +9052,7 @@ fn cell_2d_linear_indexing_is_column_major_uses_semantic_vm() {
 
 #[test]
 fn cell_2d_expansion_is_column_major_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "C = {1, 2; 3, 4}; [a, b, c, d] = C{:}; y = c;";
     let prepared = session
         .compile_input(source)
@@ -9000,7 +9073,7 @@ fn cell_2d_expansion_is_column_major_uses_semantic_vm() {
 
 #[test]
 fn if_else_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "x = 2; if x > 1; y = 10; else; y = 20; end";
     let prepared = session.compile_input(source).expect("compile if else");
     assert!(
@@ -9019,7 +9092,7 @@ fn if_else_uses_semantic_vm() {
 
 #[test]
 fn switch_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "x = 2; switch x; case 1; y = 10; case 2; y = 20; otherwise; y = 30; end";
     let prepared = session.compile_input(source).expect("compile switch");
     assert!(
@@ -9038,7 +9111,7 @@ fn switch_uses_semantic_vm() {
 
 #[test]
 fn global_statement_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "global g; g = 7; y = g;";
     let prepared = session.compile_input(source).expect("compile global");
     assert!(
@@ -9057,7 +9130,7 @@ fn global_statement_uses_semantic_vm() {
 
 #[test]
 fn range_slice_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "A = [1, 2, 3, 4]; B = A(2:3); y = B(2);";
     let prepared = session.compile_input(source).expect("compile range slice");
     assert!(
@@ -9085,7 +9158,7 @@ fn range_slice_uses_semantic_vm() {
 
 #[test]
 fn end_expression_user_function_call_uses_semantic_identity() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source =
         "function y = pick(n)\n  y = n;\nend\nx = [10 20 30 40 50 60 70 80]; a = x(pick(end-3));";
     let prepared = session
@@ -9133,7 +9206,7 @@ fn end_expression_user_function_call_uses_semantic_identity() {
 
 #[test]
 fn end_expression_session_function_call_uses_semantic_identity() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(
         &mut session,
         "seed = 0;\nfunction y = pick(n)\n  y = n;\nend",
@@ -9188,7 +9261,7 @@ fn end_expression_session_function_call_uses_semantic_identity() {
 
 #[test]
 fn for_range_loop_uses_semantic_vm_without_rerunning_prefix() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(&mut session, "prefix = 0;").expect("seed prefix");
     let source = "prefix = prefix + 1; s = 0; for i = 1:3; s = s + i; end; y = s + prefix;";
     let prepared = session.compile_input(source).expect("compile for loop");
@@ -9220,7 +9293,7 @@ fn for_range_loop_uses_semantic_vm_without_rerunning_prefix() {
 
 #[test]
 fn clear_before_for_range_loop_does_not_panic_on_hidden_loop_slots() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "clear; n = 3; s = 0; for i = 1:n; s = s + i; end; y = s;";
     let prepared = session.compile_input(source).expect("compile for loop");
     assert!(
@@ -9242,7 +9315,7 @@ fn clear_before_for_range_loop_does_not_panic_on_hidden_loop_slots() {
 
 #[test]
 fn clear_before_indexed_for_loop_does_not_panic_on_hidden_loop_slots() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "\
         clear; \
         L = pi; \
@@ -9281,7 +9354,7 @@ fn clear_before_indexed_for_loop_does_not_panic_on_hidden_loop_slots() {
 
 #[test]
 fn while_loop_uses_semantic_vm_without_rerunning_prefix() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "x = 0; while x < 3; x = x + 1; end; y = x;";
     let prepared = session.compile_input(source).expect("compile while loop");
     assert!(
@@ -9300,7 +9373,7 @@ fn while_loop_uses_semantic_vm_without_rerunning_prefix() {
 
 #[test]
 fn range_assignment_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "A = [1, 2, 3, 4]; A(2:3) = 9; y = A(3);";
     let prepared = session
         .compile_input(source)
@@ -9338,7 +9411,7 @@ fn range_assignment_uses_semantic_vm() {
 
 #[test]
 fn range_assignment_vector_rhs_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "A = [1, 2, 3, 4]; A(2:3) = [8, 9]; y = A(3);";
     let prepared = session
         .compile_input(source)
@@ -9376,7 +9449,7 @@ fn range_assignment_vector_rhs_uses_semantic_vm() {
 
 #[test]
 fn range_deletion_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "A = [1, 2, 3, 4]; A(2:3) = []; y = A(2);";
     let prepared = session
         .compile_input(source)
@@ -9407,7 +9480,7 @@ fn range_deletion_uses_semantic_vm() {
 
 #[test]
 fn range_complex_assignment_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "A = [1, 2, 3, 4]; A(2:3) = 8+9i; y = A(3);";
     let prepared = session
         .compile_input(source)
@@ -9428,7 +9501,7 @@ fn range_complex_assignment_uses_semantic_vm() {
 
 #[test]
 fn logical_indexing_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "A = [10, 20, 30]; B = A([true, false, true]); y = B(2);";
     let prepared = session
         .compile_input(source)
@@ -9457,7 +9530,7 @@ fn logical_indexing_uses_semantic_vm() {
 
 #[test]
 fn logical_assignment_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "A = [10, 20, 30]; A([true, false, true]) = 5; y = A(3);";
     let prepared = session
         .compile_input(source)
@@ -9486,7 +9559,7 @@ fn logical_assignment_uses_semantic_vm() {
 
 #[test]
 fn mixed_logical_numeric_matrix_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "A = [true, 2, false]; y = A(2);";
     let prepared = session
         .compile_input(source)
@@ -9507,7 +9580,7 @@ fn mixed_logical_numeric_matrix_uses_semantic_vm() {
 
 #[test]
 fn mixed_logical_complex_matrix_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "A = [true, 2+3i, false]; y = A(1);";
     let prepared = session
         .compile_input(source)
@@ -9528,7 +9601,7 @@ fn mixed_logical_complex_matrix_uses_semantic_vm() {
 
 #[test]
 fn cell_2d_range_expansion_is_column_major_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "C = {1, 2; 3, 4}; [a, b] = C{2:3}; y = b;";
     let prepared = session
         .compile_input(source)
@@ -9549,7 +9622,7 @@ fn cell_2d_range_expansion_is_column_major_uses_semantic_vm() {
 
 #[test]
 fn cell_range_paren_assignment_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "C = {1, 2, 3, 4}; C(2:3) = {8, 9}; y = C{3};";
     let prepared = session
         .compile_input(source)
@@ -9587,7 +9660,7 @@ fn cell_range_paren_assignment_uses_semantic_vm() {
 
 #[test]
 fn cell_range_deletion_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "C = {1, 2, 3, 4}; C(2:3) = []; y = C{2};";
     let prepared = session
         .compile_input(source)
@@ -9618,7 +9691,7 @@ fn cell_range_deletion_uses_semantic_vm() {
 
 #[test]
 fn cell_colon_paren_assignment_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "C = {1, 2}; C(:) = {8, 9}; y = C{2};";
     let prepared = session
         .compile_input(source)
@@ -9647,7 +9720,7 @@ fn cell_colon_paren_assignment_uses_semantic_vm() {
 
 #[test]
 fn workspace_read_across_submissions_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(&mut session, "x = 42;").expect("seed workspace");
 
     let prepared = session.compile_input("x").expect("compile workspace read");
@@ -9666,7 +9739,7 @@ fn workspace_read_across_submissions_uses_semantic_vm() {
 
 #[test]
 fn dynamic_workspace_eval_mutates_and_reads_current_workspace() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         eval('dyn_x = 41;');
         dyn_y = eval('dyn_x + 1');
@@ -9692,8 +9765,424 @@ fn dynamic_workspace_eval_mutates_and_reads_current_workspace() {
 }
 
 #[test]
+fn dynamic_workspace_evalc_captures_console_without_stream_leak() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let source = r#"
+        [captured, value] = evalc('evalc_x = 5; disp(evalc_x); evalc_x + 2');
+        after = value + 5;
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    let captured =
+        outcome_named_upsert_value(&outcome, "captured").expect("captured should be assigned");
+    assert_eq!(captured, &runmat_builtins::Value::String("5\n".into()));
+    assert_eq!(stdout_text(&outcome), "");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "value",
+        &runmat_builtins::Value::Num(7.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "after",
+        &runmat_builtins::Value::Num(12.0)
+    ));
+
+    let outcome = execute_text_request(&mut session, "evalc_x").expect("read evalc workspace var");
+    let value = outcome
+        .flow
+        .durable_workspace_value()
+        .expect("evalc assignment should persist");
+    assert_eq!(*value, runmat_builtins::Value::Num(5.0));
+}
+
+#[test]
+fn dynamic_workspace_evalc_returns_empty_capture_for_silent_source() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let outcome = execute_text_request(&mut session, "captured = evalc('silent_x = 9;');")
+        .expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "captured",
+        &runmat_builtins::Value::String(String::new())
+    ));
+
+    let outcome = execute_text_request(&mut session, "silent_x").expect("read workspace");
+    let value = outcome
+        .flow
+        .durable_workspace_value()
+        .expect("silent evalc assignment should persist");
+    assert_eq!(*value, runmat_builtins::Value::Num(9.0));
+}
+
+#[test]
+fn dynamic_workspace_evalc_captures_implicit_expression_display() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let outcome =
+        execute_text_request(&mut session, "captured = evalc('2 + 3');").expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "captured",
+        &runmat_builtins::Value::String("5\n".into())
+    ));
+    assert_eq!(stdout_text(&outcome), "");
+}
+
+#[test]
+fn dynamic_workspace_evalc_rejects_more_outputs_than_source_produces() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let outcome = execute_text_request(&mut session, "[captured, a, b] = evalc('disp(1)');")
+        .expect("exec returns diagnostics");
+    assert!(outcome.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "RunMat:EvalcTooManyOutputs"
+            && diagnostic.message.contains("requested 3 output arguments")
+    }));
+}
+
+#[test]
+fn runtests_runs_script_test_file_and_restores_workspace() {
+    let _guard = cwd_lock();
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let _cwd = push_cwd(tmp.path());
+    std::fs::write(
+        tmp.path().join("testSmoke.m"),
+        "assert(1); leaked_from_test = 99;",
+    )
+    .expect("write test");
+
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        "sentinel = 3; results = runtests('testSmoke.m'); leakVisible = exist('leaked_from_test','var'); after = sentinel + 4;",
+    )
+    .expect("exec succeeds");
+
+    let results =
+        outcome_named_upsert_value(&outcome, "results").expect("results should be assigned");
+    let runmat_builtins::Value::Object(obj) = results else {
+        panic!("expected scalar TestResult object, got {results:?}");
+    };
+    assert!(obj.is_class("matlab.unittest.TestResult"));
+    assert_eq!(
+        obj.properties.get("Passed"),
+        Some(&runmat_builtins::Value::Bool(true))
+    );
+    assert_eq!(
+        obj.properties.get("Failed"),
+        Some(&runmat_builtins::Value::Bool(false))
+    );
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "leakVisible",
+        &runmat_builtins::Value::Num(0.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "after",
+        &runmat_builtins::Value::Num(7.0)
+    ));
+}
+
+#[test]
+fn runtests_records_failing_script_test_as_result() {
+    let _guard = cwd_lock();
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let _cwd = push_cwd(tmp.path());
+    std::fs::write(tmp.path().join("testFailure.m"), "assert(false, 'boom');").expect("write test");
+
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let outcome = execute_text_request(&mut session, "results = runtests('testFailure.m');")
+        .expect("exec succeeds");
+    assert!(
+        outcome.diagnostics.is_empty(),
+        "runtests should convert test failure into a result, got {:?}",
+        outcome.diagnostics
+    );
+
+    let results =
+        outcome_named_upsert_value(&outcome, "results").expect("results should be assigned");
+    let runmat_builtins::Value::Object(obj) = results else {
+        panic!("expected scalar TestResult object, got {results:?}");
+    };
+    assert_eq!(
+        obj.properties.get("Passed"),
+        Some(&runmat_builtins::Value::Bool(false))
+    );
+    assert_eq!(
+        obj.properties.get("Failed"),
+        Some(&runmat_builtins::Value::Bool(true))
+    );
+    let details = obj.properties.get("Details").expect("details").to_string();
+    assert!(details.contains("boom"), "details were {details:?}");
+}
+
+#[test]
+fn runtests_discovers_subfolder_tests_when_requested() {
+    let _guard = cwd_lock();
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let _cwd = push_cwd(tmp.path());
+    std::fs::create_dir_all(tmp.path().join("nested")).expect("create nested");
+    std::fs::write(tmp.path().join("testRoot.m"), "assert(1);").expect("write root test");
+    std::fs::write(tmp.path().join("nested").join("testChild.m"), "assert(1);")
+        .expect("write child test");
+
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        "results = runtests('.', 'IncludeSubfolders', true);",
+    )
+    .expect("exec succeeds");
+
+    let results =
+        outcome_named_upsert_value(&outcome, "results").expect("results should be assigned");
+    let runmat_builtins::Value::Cell(cell) = results else {
+        panic!("expected result cell array, got {results:?}");
+    };
+    assert_eq!((cell.rows, cell.cols), (1, 2));
+    for value in &cell.data {
+        let runmat_builtins::Value::Object(obj) = value else {
+            panic!("expected TestResult object, got {value:?}");
+        };
+        assert_eq!(
+            obj.properties.get("Passed"),
+            Some(&runmat_builtins::Value::Bool(true))
+        );
+    }
+}
+
+#[test]
+fn runtests_no_arg_discovers_current_folder_without_recursing() {
+    let _guard = cwd_lock();
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let _cwd = push_cwd(tmp.path());
+    std::fs::create_dir_all(tmp.path().join("nested")).expect("create nested");
+    std::fs::write(tmp.path().join("testRoot.m"), "assert(1);").expect("write root test");
+    std::fs::write(
+        tmp.path().join("nested").join("testChild.m"),
+        "assert(false);",
+    )
+    .expect("write child test");
+
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let outcome = execute_text_request(&mut session, "results = runtests;")
+        .expect("no-arg runtests succeeds");
+
+    let results =
+        outcome_named_upsert_value(&outcome, "results").expect("results should be assigned");
+    let runmat_builtins::Value::Object(obj) = results else {
+        panic!("expected only root TestResult object, got {results:?}");
+    };
+    assert_eq!(
+        obj.properties.get("Passed"),
+        Some(&runmat_builtins::Value::Bool(true))
+    );
+}
+
+#[test]
+fn runtests_basefolder_constrains_relative_target_resolution() {
+    let _guard = cwd_lock();
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let _cwd = push_cwd(tmp.path());
+    std::fs::create_dir_all(tmp.path().join("suite")).expect("create suite");
+    std::fs::write(tmp.path().join("testScoped.m"), "assert(false);").expect("write root test");
+    std::fs::write(tmp.path().join("suite").join("testScoped.m"), "assert(1);")
+        .expect("write suite test");
+
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        "results = runtests('testScoped', 'BaseFolder', 'suite');",
+    )
+    .expect("basefolder runtests succeeds");
+    let results =
+        outcome_named_upsert_value(&outcome, "results").expect("results should be assigned");
+    let runmat_builtins::Value::Object(obj) = results else {
+        panic!("expected suite TestResult object, got {results:?}");
+    };
+    assert_eq!(
+        obj.properties.get("Passed"),
+        Some(&runmat_builtins::Value::Bool(true))
+    );
+    let test_file = obj
+        .properties
+        .get("TestFile")
+        .expect("test file")
+        .to_string();
+    assert!(test_file.contains("suite"), "test file was {test_file:?}");
+}
+
+#[test]
+fn runtests_accepts_useparallel_false() {
+    let _guard = cwd_lock();
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let _cwd = push_cwd(tmp.path());
+    std::fs::write(tmp.path().join("testSerial.m"), "assert(1);").expect("write test");
+
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        "results = runtests('testSerial.m', 'UseParallel', false);",
+    )
+    .expect("exec succeeds");
+    assert!(
+        outcome.diagnostics.is_empty(),
+        "UseParallel=false should be accepted, got {:?}",
+        outcome.diagnostics
+    );
+}
+
+#[test]
+fn runtests_runs_zero_argument_function_tests() {
+    let _guard = cwd_lock();
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let _cwd = push_cwd(tmp.path());
+    std::fs::write(
+        tmp.path().join("functionTests.m"),
+        r#"
+function helper()
+end
+
+function testAlpha()
+  assert(1);
+end
+
+function out = betaTest()
+  out = 0;
+  assert(1);
+end
+"#,
+    )
+    .expect("write function test file");
+
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let outcome = execute_text_request(&mut session, "results = runtests('functionTests.m');")
+        .expect("exec succeeds");
+    let results =
+        outcome_named_upsert_value(&outcome, "results").expect("results should be assigned");
+    let runmat_builtins::Value::Cell(cell) = results else {
+        panic!("expected function test result cell, got {results:?}");
+    };
+    assert_eq!((cell.rows, cell.cols), (1, 2));
+    for value in &cell.data {
+        let runmat_builtins::Value::Object(obj) = value else {
+            panic!("expected TestResult object, got {value:?}");
+        };
+        assert_eq!(
+            obj.properties.get("Passed"),
+            Some(&runmat_builtins::Value::Bool(true))
+        );
+    }
+}
+
+#[test]
+fn runtests_rejects_parallel_execution_option() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let outcome = execute_text_request(&mut session, "results = runtests('UseParallel', true);")
+        .expect("exec returns diagnostics");
+    assert!(outcome.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "RunMat:runtests:UnsupportedOption"
+            && diagnostic.message.contains("UseParallel=true")
+    }));
+}
+
+#[test]
+fn timer_constructs_finds_starts_and_deletes_through_vm() {
+    let _timer_lock = TIMER_CORE_TEST_LOCK.lock().unwrap();
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let source = r#"
+        t = timer('Name', 'clientTimer', 'Tag', 'clientBatch', 'TimerFcn', @(src, evt) 0);
+        f = timerfind('Tag', 'clientBatch');
+        foundName = f.Name;
+        start(t);
+        tasks = t.TasksExecuted;
+        running = t.Running;
+        delete(t);
+        validAfterDelete = isvalid(t);
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("timer workflow succeeds");
+    assert!(
+        outcome.diagnostics.is_empty(),
+        "timer workflow diagnostics: {:?}; upserts: {:?}",
+        outcome.diagnostics,
+        outcome.workspace_delta.upserts
+    );
+
+    assert_eq!(
+        outcome_named_upsert_value(&outcome, "foundName"),
+        Some(&runmat_builtins::Value::String("clientTimer".into()))
+    );
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "tasks",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "running",
+        &runmat_builtins::Value::String("off".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "validAfterDelete",
+        &runmat_builtins::Value::Bool(false)
+    ));
+}
+
+#[test]
+fn timer_member_method_start_works_through_vm() {
+    let _timer_lock = TIMER_CORE_TEST_LOCK.lock().unwrap();
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let source = r#"
+        t = timer('TimerFcn', @(src, evt) 0);
+        t.start();
+        tasks = t.TasksExecuted;
+        running = t.Running;
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("timer member start succeeds");
+    assert!(
+        outcome.diagnostics.is_empty(),
+        "timer member workflow diagnostics: {:?}; upserts: {:?}",
+        outcome.diagnostics,
+        outcome.workspace_delta.upserts
+    );
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "tasks",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "running",
+        &runmat_builtins::Value::String("off".into())
+    ));
+}
+
+#[test]
+fn timer_rejects_invalid_post_construction_assignments_through_vm() {
+    let _timer_lock = TIMER_CORE_TEST_LOCK.lock().unwrap();
+    for (source, expected) in [
+        ("t = timer; t.Period = 0;", "Period must be a finite scalar"),
+        (
+            "t = timer; t.TimerFcn = 42;",
+            "TimerFcn must be text, a function handle, or a callback cell array",
+        ),
+    ] {
+        let mut session = RunMatSession::with_options(false, false).expect("session init");
+        let outcome =
+            execute_text_request(&mut session, source).expect("assignment failure is diagnostic");
+        assert!(
+            outcome
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains(expected)),
+            "missing timer assignment diagnostic containing {expected:?}; diagnostics: {:?}",
+            outcome.diagnostics
+        );
+    }
+}
+
+#[test]
 fn dynamic_workspace_eval_error_does_not_commit_partial_mutations() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         seed = 5;
         try
@@ -9730,7 +10219,7 @@ fn dynamic_workspace_eval_error_does_not_commit_partial_mutations() {
 
 #[test]
 fn dynamic_workspace_evalin_base_and_assignin_update_base_workspace() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         assignin('base', 'base_x', 7);
         base_y = evalin('base', 'base_x + 1');
@@ -9757,7 +10246,7 @@ fn dynamic_workspace_evalin_base_and_assignin_update_base_workspace() {
 
 #[test]
 fn dynamic_workspace_evalin_caller_from_function_targets_script_workspace() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         outer_x = 5;
         y = helper();
@@ -9790,8 +10279,7 @@ fn dynamic_workspace_evalin_caller_from_function_targets_script_workspace() {
 #[test]
 fn dynamic_workspace_evalin_caller_from_nested_function_targets_parent_function_workspace() {
     run_deep_semantic_test(|| {
-        let mut session =
-            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        let mut session = RunMatSession::with_options(false, false).expect("session init");
         let source = r#"
             outer_y = outer();
 
@@ -9833,7 +10321,7 @@ fn dynamic_workspace_evalin_base_and_assignin_base_work_from_path_source_functio
     )
     .expect("write dynamic workspace path source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute path source");
     assert!(outcome_has_named_upsert(
@@ -9862,14 +10350,17 @@ fn dynamic_workspace_eval_preserves_source_context_in_path_source() {
     )
     .expect("write dynamic workspace mfilename source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute path source");
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "eval_name",
-        &runmat_builtins::Value::String("dynamic_workspace_mfilename".into())
-    ));
+    assert!(
+        outcome_has_named_upsert(
+            &outcome,
+            "eval_name",
+            &runmat_builtins::Value::String("dynamic_workspace_mfilename".into())
+        ),
+        "eval should inherit the active file identity; outcome={outcome:?}"
+    );
 
     let assert_named_path = |name: &str, expected: PathBuf| {
         let actual = outcome_named_upsert_value(&outcome, name)
@@ -9940,7 +10431,7 @@ fn dynamic_workspace_eval_resolves_active_registry_functions() {
     )
     .expect("write package helper");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute path source");
     assert!(outcome_has_named_upsert(
@@ -9990,7 +10481,7 @@ fn dynamic_workspace_eval_does_not_discover_files_outside_active_registry() {
         "function out = hidden_helper(x)\n  out = x + 1;\nend\n",
     )
     .expect("write hidden helper");
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("exec succeeds");
     assert!(outcome_has_named_upsert(
@@ -10006,7 +10497,7 @@ fn dynamic_workspace_eval_does_not_discover_files_outside_active_registry() {
 
 #[test]
 fn dynamic_workspace_execute_request_can_disable_dynamic_eval_host_policy() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
             name: "dynamic-eval-policy.m".to_string(),
@@ -10032,7 +10523,7 @@ fn dynamic_workspace_execute_request_can_disable_dynamic_eval_host_policy() {
 
 #[test]
 fn dynamic_workspace_execute_request_dynamic_eval_policy_does_not_block_assignin() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
             name: "dynamic-eval-policy-assignin.m".to_string(),
@@ -10058,7 +10549,7 @@ fn dynamic_workspace_execute_request_dynamic_eval_policy_does_not_block_assignin
 
 #[test]
 fn dynamic_workspace_evalin_invalid_selector_is_catchable() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         try
             evalin('workspace', '1');
@@ -10092,7 +10583,7 @@ fn run_executes_script_file_in_current_workspace() {
     .expect("write worker script");
     let _cwd = push_cwd(temp.path());
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = execute_text_request(
         &mut session,
         r#"
@@ -10130,7 +10621,7 @@ fn run_exposes_script_variables_to_following_call_syntax() {
     .expect("write worker script");
     let _cwd = push_cwd(temp.path());
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = execute_text_request(
         &mut session,
         r#"
@@ -10194,7 +10685,7 @@ fn run_script_variables_shadow_builtin_constants() {
     std::fs::write(temp.path().join("constant_worker.m"), "pi = 4;\n").expect("write worker");
     let _cwd = push_cwd(temp.path());
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = execute_text_request(
         &mut session,
         r#"
@@ -10241,7 +10732,7 @@ shadowed_static_value = runStaticShadowValue;
     .expect("write main script");
     let _cwd = push_cwd(temp.path());
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = temp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("post-run static property shadowing succeeds");
@@ -10280,7 +10771,7 @@ fallback_static_value = runStaticFallbackValue;
     .expect("write main script");
     let _cwd = push_cwd(temp.path());
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = temp.path().join("main.m");
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("post-run static property fallback succeeds");
@@ -10305,7 +10796,7 @@ fn run_replays_script_stdout_to_request_streams() {
     .expect("write display worker");
     let _cwd = push_cwd(temp.path());
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome =
         execute_text_request(&mut session, "run('display_worker');").expect("run display worker");
     let stdout = outcome
@@ -10331,7 +10822,7 @@ fn run_command_syntax_resolves_scripts_on_search_path() {
     std::fs::write(scripts.join("path_worker.m"), "path_value = 17;\n").expect("write path worker");
     let _cwd = push_cwd(temp.path());
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = execute_text_request(
         &mut session,
         r#"
@@ -10369,7 +10860,7 @@ fn addpath_command_syntax_resolves_scripts_on_search_path() {
     let _cwd = push_cwd(temp.path());
     let _path = push_path_state("");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = execute_text_request(
         &mut session,
         r#"
@@ -10394,7 +10885,7 @@ fn filesystem_command_syntax_executes_path_word_builtins() {
     std::fs::write(temp.path().join("seed.txt"), "provider text").expect("write seed file");
     let _cwd = push_cwd(temp.path());
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = execute_text_request(
         &mut session,
         r#"
@@ -10438,7 +10929,7 @@ fn run_preserves_script_source_context() {
     .expect("write context worker");
     let _cwd = push_cwd(temp.path());
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome =
         execute_text_request(&mut session, "run('context_worker');").expect("run context worker");
     assert!(outcome_has_named_upsert(
@@ -10482,7 +10973,7 @@ fn run_error_commits_script_mutations_before_the_error() {
     .expect("write failing worker");
     let _cwd = push_cwd(temp.path());
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = execute_text_request(
         &mut session,
         r#"
@@ -10522,7 +11013,7 @@ fn run_missing_file_and_output_errors_are_catchable() {
         .expect("write empty worker");
     let _cwd = push_cwd(temp.path());
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = execute_text_request(
         &mut session,
         r#"
@@ -10582,7 +11073,7 @@ fn run_respects_dynamic_eval_host_policy() {
     .expect("write worker");
     let _cwd = push_cwd(temp.path());
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
             name: "run-policy.m".to_string(),
@@ -10608,7 +11099,7 @@ fn run_respects_dynamic_eval_host_policy() {
 
 #[test]
 fn char_literal_assignment_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let prepared = session
         .compile_input("w = 'hello';")
         .expect("compile char literal assignment");
@@ -10624,7 +11115,7 @@ fn char_literal_assignment_uses_semantic_vm() {
 
 #[test]
 fn direct_display_builtins_use_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let prepared = session
         .compile_input("disp('alpha')")
         .expect("compile disp call");
@@ -10659,8 +11150,64 @@ fn direct_display_builtins_use_semantic_vm() {
 }
 
 #[test]
+fn diary_logs_command_window_output_to_file_provider() {
+    let _cwd_lock = cwd_lock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let _cwd = push_cwd(temp.path());
+    runmat_runtime::console::set_diary_enabled(false);
+
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "diary runmat_session.log; disp('diary-line'); diary off;",
+    )
+    .expect("diary request succeeds");
+
+    let text = std::fs::read_to_string(temp.path().join("runmat_session.log")).expect("read diary");
+    assert!(text.contains("diary-line\n"), "diary text was {text:?}");
+    assert!(!runmat_runtime::console::diary_enabled());
+}
+
+#[test]
+fn diary_state_is_isolated_between_sessions() {
+    let _cwd_lock = cwd_lock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let _cwd = push_cwd(temp.path());
+
+    let mut session_a = RunMatSession::with_options(false, false).expect("session init");
+    let mut session_b = RunMatSession::with_options(false, false).expect("session init");
+
+    execute_text_request(&mut session_a, "diary session_a.log; disp('from-a-1');")
+        .expect("session a starts diary");
+    execute_text_request(&mut session_b, "disp('from-b');").expect("session b writes stdout");
+    execute_text_request(&mut session_a, "disp('from-a-2'); diary off;")
+        .expect("session a stops diary");
+
+    let text = std::fs::read_to_string(temp.path().join("session_a.log")).expect("read diary");
+    assert!(text.contains("from-a-1\n"), "diary text was {text:?}");
+    assert!(text.contains("from-a-2\n"), "diary text was {text:?}");
+    assert!(!text.contains("from-b"), "diary text was {text:?}");
+}
+
+#[test]
+fn diary_rejects_explicit_outputs() {
+    let _cwd_lock = cwd_lock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let _cwd = push_cwd(temp.path());
+    runmat_runtime::console::set_diary_enabled(false);
+
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let outcome = execute_text_request(&mut session, "out = diary('session.log');")
+        .expect("exec returns diagnostics");
+    assert!(outcome.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "RunMat:diary:TooManyOutputs"
+            && diagnostic.message.contains("expected no output arguments")
+    }));
+}
+
+#[test]
 fn simple_builtin_call_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let prepared = session.compile_input("sin(0)").expect("compile sin call");
     assert!(
         prepared.bytecode.layout.is_some(),
@@ -10677,7 +11224,7 @@ fn simple_builtin_call_uses_semantic_vm() {
 
 #[test]
 fn null_row_reduction_builtin_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "A = [1 2 3; 2 4 6]; Z = null(A, 'r');";
     let prepared = session.compile_input(source).expect("compile null call");
     assert!(
@@ -10695,7 +11242,7 @@ fn null_row_reduction_builtin_uses_semantic_vm() {
 
 #[test]
 fn multi_assign_deal_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let prepared = session
         .compile_input("[a, b] = deal(1, 2)")
         .expect("compile multi-assign");
@@ -10724,7 +11271,7 @@ fn multi_assign_deal_uses_semantic_vm() {
 
 #[test]
 fn elementwise_logical_ops_use_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "a = 1 & 0; b = 1 | 0; c = ~0;";
     let prepared = session
         .compile_input(source)
@@ -10782,7 +11329,7 @@ fn elementwise_logical_ops_use_semantic_vm() {
 
 #[test]
 fn short_circuit_logical_ops_use_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "a = 0 && 1; b = 1 || 0;";
     let prepared = session
         .compile_input(source)
@@ -10805,7 +11352,7 @@ fn short_circuit_logical_ops_use_semantic_vm() {
 
 #[test]
 fn metaclass_literal_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "c = ?Point;";
     let prepared = session
         .compile_input(source)
@@ -10824,7 +11371,7 @@ fn metaclass_literal_uses_semantic_vm() {
 
 #[test]
 fn builtin_function_handle_call_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "A = [0, pi/2]; B = arrayfun(@sin, A);";
     let prepared = session
         .compile_input(source)
@@ -10842,7 +11389,7 @@ fn builtin_function_handle_call_uses_semantic_vm() {
 
 #[test]
 fn anonymous_function_handle_call_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "A = [1, 2, 3]; B = arrayfun(@(x) x.^2, A);";
     let prepared = session
         .compile_input(source)
@@ -10869,7 +11416,7 @@ fn anonymous_function_handle_call_uses_semantic_vm() {
 
 #[test]
 fn local_function_call_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "y = inc(2);\nfunction z = inc(x)\n  z = x + 1;\nend";
     let prepared = session
         .compile_input(source)
@@ -10887,7 +11434,7 @@ fn local_function_call_uses_semantic_vm() {
 
 #[test]
 fn builtin_call_with_cell_expansion_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "C = {1, 2}; y = plus(C{:});";
     let prepared = session
         .compile_input(source)
@@ -10906,7 +11453,7 @@ fn builtin_call_with_cell_expansion_uses_semantic_vm() {
 
 #[test]
 fn builtin_call_with_paren_index_argument_does_not_infer_expansion() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "T = [1, 2; 3, 4]; y = max(T(:));";
     let prepared = session
         .compile_input(source)
@@ -10931,7 +11478,7 @@ fn builtin_call_with_paren_index_argument_does_not_infer_expansion() {
 
 #[test]
 fn builtin_call_with_cell_end_expansion_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "C = {1, 2}; y = plus(C{end}, 1);";
     let prepared = session
         .compile_input(source)
@@ -10950,7 +11497,7 @@ fn builtin_call_with_cell_end_expansion_uses_semantic_vm() {
 
 #[test]
 fn builtin_call_with_cell_end_offset_expansion_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "C = {1, 2, 3}; y = plus(C{end-1}, 1);";
     let prepared = session
         .compile_input(source)
@@ -10970,7 +11517,7 @@ fn builtin_call_with_cell_end_offset_expansion_uses_semantic_vm() {
 
 #[test]
 fn multi_assign_builtin_with_cell_expansion_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "C = {1, 2}; [a, b] = deal(C{:});";
     let prepared = session
         .compile_input(source)
@@ -10993,7 +11540,7 @@ fn multi_assign_builtin_with_cell_expansion_uses_semantic_vm() {
 
 #[test]
 fn multi_assign_cell_expansion_rhs_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "C = {1, 2}; [a, b] = C{:};";
     let prepared = session
         .compile_input(source)
@@ -11016,7 +11563,7 @@ fn multi_assign_cell_expansion_rhs_uses_semantic_vm() {
 
 #[test]
 fn multi_assign_cell_end_rhs_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "C = {1, 2}; [a] = C{end};";
     let prepared = session
         .compile_input(source)
@@ -11037,7 +11584,7 @@ fn multi_assign_cell_end_rhs_uses_semantic_vm() {
 
 #[test]
 fn multi_assign_cell_end_offset_rhs_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "C = {1, 2, 3}; [a] = C{end-1};";
     let prepared = session
         .compile_input(source)
@@ -11058,7 +11605,7 @@ fn multi_assign_cell_end_offset_rhs_uses_semantic_vm() {
 
 #[test]
 fn cell_end_indexing_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "C = {1, 2}; y = C{end};";
     let prepared = session
         .compile_input(source)
@@ -11077,7 +11624,7 @@ fn cell_end_indexing_uses_semantic_vm() {
 
 #[test]
 fn cell_end_offset_indexing_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "C = {1, 2, 3}; y = C{end-1};";
     let prepared = session
         .compile_input(source)
@@ -11098,7 +11645,7 @@ fn cell_end_offset_indexing_uses_semantic_vm() {
 
 #[test]
 fn cell_end_assignment_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "C = {1, 2}; C{end} = 9; y = C{2};";
     let prepared = session
         .compile_input(source)
@@ -11117,7 +11664,7 @@ fn cell_end_assignment_uses_semantic_vm() {
 
 #[test]
 fn cell_end_offset_assignment_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "C = {1, 2, 3}; C{end-1} = 9; y = C{2};";
     let prepared = session
         .compile_input(source)
@@ -11136,7 +11683,7 @@ fn cell_end_offset_assignment_uses_semantic_vm() {
 
 #[test]
 fn cell_end_offset_range_paren_assignment_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "C = {1, 2, 3, 4}; C(1:end-1) = {9, 8, 7}; y = C{3};";
     let prepared = session
         .compile_input(source)
@@ -11165,7 +11712,7 @@ fn cell_end_offset_range_paren_assignment_uses_semantic_vm() {
 
 #[test]
 fn cell_end_offset_range_paren_deletion_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "C = {1, 2, 3, 4}; C(1:end-1) = []; y = C{1};";
     let prepared = session
         .compile_input(source)
@@ -11194,7 +11741,7 @@ fn cell_end_offset_range_paren_deletion_uses_semantic_vm() {
 
 #[test]
 fn end_offset_range_deletion_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "A = [1, 2, 3, 4]; A(1:end-1) = []; y = A(1);";
     let prepared = session
         .compile_input(source)
@@ -11223,7 +11770,7 @@ fn end_offset_range_deletion_uses_semantic_vm() {
 
 #[test]
 fn feval_anonymous_handle_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "f = @(x) x + 1; y = feval(f, 2);";
     let prepared = session.compile_input(source).expect("compile feval call");
     assert!(
@@ -11255,7 +11802,7 @@ fn feval_anonymous_handle_uses_semantic_vm() {
 
 #[test]
 fn feval_string_local_function_uses_semantic_handle() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "y = feval('inc', 2);\nfunction z = inc(x)\n  z = x + 1;\nend";
     let prepared = session
         .compile_input(source)
@@ -11276,7 +11823,7 @@ fn feval_string_local_function_uses_semantic_handle() {
 
 #[test]
 fn dynamic_function_handle_call_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "f = @sin; y = f(0);";
     let prepared = session
         .compile_input(source)
@@ -11311,7 +11858,7 @@ fn dynamic_function_handle_call_uses_semantic_vm() {
 
 #[test]
 fn dynamic_function_handle_tensor_arg_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "f = @sum; y = f([1, 2, 3]);";
     let prepared = session
         .compile_input(source)
@@ -11339,7 +11886,7 @@ fn dynamic_function_handle_tensor_arg_uses_semantic_vm() {
 
 #[test]
 fn local_function_handle_uses_semantic_handle() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "f = @inc; y = f(2);\nfunction z = inc(x)\n  z = x + 1;\nend";
     let prepared = session
         .compile_input(source)
@@ -11367,7 +11914,7 @@ fn local_function_handle_uses_semantic_handle() {
 
 #[test]
 fn dynamic_anonymous_handle_call_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "f = @(x) x + 1; y = f(2);";
     let prepared = session
         .compile_input(source)
@@ -11388,7 +11935,7 @@ fn dynamic_anonymous_handle_call_uses_semantic_vm() {
 
 #[test]
 fn local_function_multi_output_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "[a, b] = pair(2);\nfunction [x, y] = pair(n)\n  x = n;\n  y = n + 1;\nend";
     let prepared = session
         .compile_input(source)
@@ -11411,7 +11958,7 @@ fn local_function_multi_output_uses_semantic_vm() {
 
 #[test]
 fn dynamic_function_handle_multi_output_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source =
         "f = @pair; [a, b] = feval(f, 2);\nfunction [x, y] = pair(n)\n  x = n;\n  y = n + 1;\nend";
     let prepared = session
@@ -11443,7 +11990,7 @@ fn dynamic_function_handle_multi_output_uses_semantic_vm() {
 
 #[test]
 fn dynamic_function_handle_multi_output_with_expansion_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "f = @pair; C = {2}; [a, b] = feval(f, C{:});\nfunction [x, y] = pair(n)\n  x = n;\n  y = n + 1;\nend";
     let prepared = session
         .compile_input(source)
@@ -11474,7 +12021,7 @@ fn dynamic_function_handle_multi_output_with_expansion_uses_semantic_vm() {
 
 #[test]
 fn try_catch_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "try\n  error('boom');\n  y = 1;\ncatch\n  y = 2;\nend";
     let prepared = session.compile_input(source).expect("compile try/catch");
     assert!(
@@ -11499,7 +12046,7 @@ fn try_catch_uses_semantic_vm() {
 
 #[test]
 fn try_catch_binding_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "try\n  error('boom');\ncatch err\n  y = err.message;\nend";
     let prepared = session
         .compile_input(source)
@@ -11537,7 +12084,7 @@ fn try_catch_binding_uses_semantic_vm() {
 
 #[test]
 fn indexed_member_slice_assignment_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "s = struct(); s.a = [1 2 3]; s.a(2:3) = [4 5]; y = s.a(3);";
     let prepared = session
         .compile_input(source)
@@ -11565,7 +12112,7 @@ fn indexed_member_slice_assignment_uses_semantic_vm() {
 
 #[test]
 fn dotted_member_index_call_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "s = struct(); s.a = [1 2 3]; y = s.a(2);";
     let prepared = session
         .compile_input(source)
@@ -11596,7 +12143,7 @@ fn dotted_member_index_call_uses_semantic_vm() {
 
 #[test]
 fn dotted_member_index_expansion_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "s = struct(); s.a = [10 20 30]; C = {2}; y = s.a(C{:});";
     let prepared = session
         .compile_input(source)
@@ -11623,7 +12170,7 @@ fn dotted_member_index_expansion_uses_semantic_vm() {
 
 #[test]
 fn feval_with_cell_expansion_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "f = @(x) x + 1; C = {2}; y = feval(f, C{:});";
     let prepared = session
         .compile_input(source)
@@ -11657,7 +12204,7 @@ fn feval_with_cell_expansion_uses_semantic_vm() {
 
 #[test]
 fn feval_with_2d_cell_expansion_is_column_major_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "f = @(a, b, c, d) c; C = {1, 2; 3, 4}; y = feval(f, C{:});";
     let prepared = session
         .compile_input(source)
@@ -11684,7 +12231,7 @@ fn feval_with_2d_cell_expansion_is_column_major_uses_semantic_vm() {
 
 #[test]
 fn local_function_with_cell_expansion_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "C = {2}; y = inc(C{:});\nfunction z = inc(x)\n  z = x + 1;\nend";
     let prepared = session
         .compile_input(source)
@@ -11702,7 +12249,7 @@ fn local_function_with_cell_expansion_uses_semantic_vm() {
 
 #[test]
 fn cellfun_named_local_function_uses_semantic_callback() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source =
         "C = {2}; B = cellfun('inc', C); y = B(1);\nfunction z = inc(x)\n  z = x + 1;\nend";
     let prepared = session
@@ -11736,7 +12283,7 @@ fn cellfun_named_local_function_uses_semantic_callback() {
 
 #[test]
 fn cellfun_runtime_string_callback_uses_semantic_resolver() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "name = 'inc'; C = {2}; B = cellfun(name, C); y = B(1);\nfunction z = inc(x)\n  z = x + 1;\nend";
     let prepared = session
         .compile_input(source)
@@ -11757,7 +12304,7 @@ fn cellfun_runtime_string_callback_uses_semantic_resolver() {
 
 #[test]
 fn cellfun_session_function_uses_semantic_registry() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(
         &mut session,
         "seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend",
@@ -11812,7 +12359,7 @@ fn cellfun_session_function_uses_semantic_registry() {
 
 #[test]
 fn arrayfun_named_local_function_uses_semantic_callback() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source =
         "A = [2, 3]; B = arrayfun('inc', A); y = B(2);\nfunction z = inc(x)\n  z = x + 1;\nend";
     let prepared = session
@@ -11834,7 +12381,7 @@ fn arrayfun_named_local_function_uses_semantic_callback() {
 
 #[test]
 fn arrayfun_session_function_uses_semantic_registry() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(
         &mut session,
         "seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend",
@@ -11861,7 +12408,7 @@ fn arrayfun_session_function_uses_semantic_registry() {
 
 #[test]
 fn arrayfun_runtime_string_callback_uses_semantic_resolver() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "name = 'inc'; A = [2, 3]; B = arrayfun(name, A); y = B(2);\nfunction z = inc(x)\n  z = x + 1;\nend";
     let prepared = session
         .compile_input(source)
@@ -11882,7 +12429,7 @@ fn arrayfun_runtime_string_callback_uses_semantic_resolver() {
 
 #[test]
 fn cellfun_unresolved_external_callback_reports_undefined_function_identifier() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = execute_text_request(&mut session, "C = {2}; y = cellfun('pkg.callback', C);")
         .expect("unresolved external cellfun callback should surface a runtime diagnostic");
     assert!(outcome.diagnostics.iter().any(|diagnostic| {
@@ -11893,7 +12440,7 @@ fn cellfun_unresolved_external_callback_reports_undefined_function_identifier() 
 
 #[test]
 fn arrayfun_unresolved_external_callback_reports_undefined_function_identifier() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome =
         execute_text_request(&mut session, "A = [2, 3]; y = arrayfun('pkg.callback', A);")
             .expect("unresolved external arrayfun callback should surface a runtime diagnostic");
@@ -11905,7 +12452,7 @@ fn arrayfun_unresolved_external_callback_reports_undefined_function_identifier()
 
 #[test]
 fn command_form_clc_clears_without_ans_display() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
 
     let outcome = execute_text_request(&mut session, "clc").expect("clc succeeds");
 
@@ -11925,7 +12472,7 @@ fn command_form_clc_clears_without_ans_display() {
 
 #[test]
 fn direct_session_function_call_uses_semantic_registry() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(
         &mut session,
         "seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend",
@@ -11952,7 +12499,7 @@ fn direct_session_function_call_uses_semantic_registry() {
 
 #[test]
 fn expression_statement_zero_output_local_function_requests_zero_outputs() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "function show_value(x)\n  disp(x)\nend\nshow_value(7)";
 
     let prepared = session
@@ -11980,7 +12527,7 @@ fn expression_statement_zero_output_local_function_requests_zero_outputs() {
 
 #[test]
 fn expression_statement_zero_output_nested_function_requests_zero_outputs() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source =
         "function outer()\n  inner(9)\n  function inner(x)\n    disp(x)\n  end\nend\nouter()";
 
@@ -12009,7 +12556,7 @@ fn expression_statement_zero_output_nested_function_requests_zero_outputs() {
 
 #[test]
 fn expression_statement_zero_output_persisted_function_requests_zero_outputs() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(&mut session, "function show_value(x)\n  disp(x)\nend")
         .expect("define session function");
 
@@ -12034,7 +12581,7 @@ fn expression_statement_zero_output_persisted_function_requests_zero_outputs() {
 
 #[test]
 fn expression_statement_persisted_function_arity_survives_local_function_id_collision() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(&mut session, "function y = inc(x)\n  y = x + 1;\nend")
         .expect("define session function");
     let source = "function local_zero()\nend\ninc(2)";
@@ -12073,7 +12620,7 @@ fn expression_statement_persisted_function_arity_survives_local_function_id_coll
 
 #[test]
 fn dynamic_eval_zero_output_persisted_function_requests_zero_outputs() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(&mut session, "function show_value(x)\n  disp(x)\nend")
         .expect("define session function");
 
@@ -12088,7 +12635,7 @@ fn dynamic_eval_zero_output_persisted_function_requests_zero_outputs() {
 
 #[test]
 fn dynamic_eval_persisted_function_call_survives_eval_local_function_id_collision() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(&mut session, "function show_value(x)\n  disp(x)\nend")
         .expect("define session function");
 
@@ -12105,8 +12652,7 @@ fn dynamic_eval_persisted_function_call_survives_eval_local_function_id_collisio
 #[test]
 fn dynamic_eval_persisted_function_handle_survives_eval_local_function_id_collision() {
     run_deep_semantic_test(|| {
-        let mut session =
-            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        let mut session = RunMatSession::with_options(false, false).expect("session init");
         execute_text_request(&mut session, "function y = inc(x)\n  y = x + 1;\nend")
             .expect("define session function");
 
@@ -12126,7 +12672,7 @@ fn dynamic_eval_persisted_function_handle_survives_eval_local_function_id_collis
 
 #[test]
 fn identifier_statement_zero_output_local_function_requests_zero_outputs() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "function show_zero()\n  disp(5)\nend\nshow_zero";
 
     let prepared = session
@@ -12150,7 +12696,7 @@ fn identifier_statement_zero_output_local_function_requests_zero_outputs() {
 
 #[test]
 fn identifier_statement_zero_output_persisted_function_requests_zero_outputs() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(&mut session, "function show_zero()\n  disp(6)\nend")
         .expect("define session function");
 
@@ -12175,7 +12721,7 @@ fn identifier_statement_zero_output_persisted_function_requests_zero_outputs() {
 
 #[test]
 fn expression_statement_shadowed_zero_output_function_name_indexes_variable() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "function foo()\n  disp(100)\nend\nfoo = [10 20];\nfoo(2)";
 
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
@@ -12193,7 +12739,7 @@ fn expression_statement_shadowed_zero_output_function_name_indexes_variable() {
 
 #[test]
 fn expression_statement_one_output_function_keeps_ans_display() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "function y = inc(x)\n  y = x + 1;\nend\ninc(2)";
 
     let prepared = session
@@ -12227,7 +12773,7 @@ fn expression_statement_one_output_function_keeps_ans_display() {
 
 #[test]
 fn expression_statement_varargout_function_keeps_ans_display() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source =
         "function varargout = first_value(x)\n  varargout{1} = x + 1;\nend\nfirst_value(4)";
 
@@ -12262,7 +12808,7 @@ fn expression_statement_varargout_function_keeps_ans_display() {
 
 #[test]
 fn direct_session_function_multi_output_uses_semantic_registry() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(
         &mut session,
         "seed = 0;\nfunction [x, y] = pair(n)\n  x = n;\n  y = n + 1;\nend",
@@ -12293,7 +12839,7 @@ fn direct_session_function_multi_output_uses_semantic_registry() {
 
 #[test]
 fn direct_session_function_cell_expansion_uses_semantic_registry() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(
         &mut session,
         "seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend",
@@ -12321,7 +12867,7 @@ fn direct_session_function_cell_expansion_uses_semantic_registry() {
 
 #[test]
 fn direct_session_function_expansion_multi_output_uses_semantic_registry() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(
         &mut session,
         "seed = 0;\nfunction [x, y] = pair(n)\n  x = n;\n  y = n + 1;\nend",
@@ -12353,7 +12899,7 @@ fn direct_session_function_expansion_multi_output_uses_semantic_registry() {
 
 #[test]
 fn session_function_handle_uses_semantic_registry() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(
         &mut session,
         "seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend",
@@ -12400,7 +12946,7 @@ fn session_function_handle_uses_semantic_registry() {
 
 #[test]
 fn function_handle_name_value_arguments_execute_as_name_value_pairs() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function [n, first_name, first_value, second_name, second_value] = collect(varargin)
             n = nargin;
@@ -12457,7 +13003,7 @@ fn function_handle_name_value_arguments_execute_as_name_value_pairs() {
 
 #[test]
 fn one_output_function_handle_name_value_call_uses_dynamic_dispatch() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function n = count_inputs(varargin)
             n = nargin;
@@ -12488,7 +13034,7 @@ fn one_output_function_handle_name_value_call_uses_dynamic_dispatch() {
 
 #[test]
 fn name_value_brace_value_executes_as_single_value_argument() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         function [n, value] = collect(varargin)
             n = nargin;
@@ -12525,7 +13071,7 @@ fn name_value_brace_value_executes_as_single_value_argument() {
 
 #[test]
 fn session_function_handle_feval_multi_output_uses_semantic_registry() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(
         &mut session,
         "seed = 0;\nfunction [x, y] = pair(n)\n  x = n;\n  y = n + 1;\nend",
@@ -12557,7 +13103,7 @@ fn session_function_handle_feval_multi_output_uses_semantic_registry() {
 
 #[test]
 fn session_feval_string_multi_output_uses_semantic_registry() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(
         &mut session,
         "seed = 0;\nfunction [x, y] = pair(n)\n  x = n;\n  y = n + 1;\nend",
@@ -12596,7 +13142,7 @@ fn session_feval_string_multi_output_uses_semantic_registry() {
 
 #[test]
 fn session_function_handle_feval_expansion_uses_semantic_registry() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(
         &mut session,
         "seed = 0;\nfunction z = add2(a, b)\n  z = a + b;\nend",
@@ -12624,7 +13170,7 @@ fn session_function_handle_feval_expansion_uses_semantic_registry() {
 
 #[test]
 fn session_feval_string_expansion_uses_semantic_registry() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(
         &mut session,
         "seed = 0;\nfunction z = add2(a, b)\n  z = a + b;\nend",
@@ -12659,7 +13205,7 @@ fn session_feval_string_expansion_uses_semantic_registry() {
 
 #[test]
 fn session_function_handle_feval_expansion_multi_output_uses_semantic_registry() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(
         &mut session,
         "seed = 0;\nfunction [x, y] = pair(n)\n  x = n;\n  y = n + 1;\nend",
@@ -12692,7 +13238,7 @@ fn session_function_handle_feval_expansion_multi_output_uses_semantic_registry()
 
 #[test]
 fn session_feval_string_expansion_multi_output_uses_semantic_registry() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(
         &mut session,
         "seed = 0;\nfunction [x, y] = pair(n)\n  x = n;\n  y = n + 1;\nend",
@@ -12731,7 +13277,7 @@ fn session_feval_string_expansion_multi_output_uses_semantic_registry() {
 
 #[test]
 fn session_semantic_registry_replaces_redefined_function() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(
         &mut session,
         "seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend",
@@ -12767,7 +13313,7 @@ fn session_semantic_registry_replaces_redefined_function() {
 
 #[test]
 fn session_semantic_registry_retires_replaced_source_group() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(
         &mut session,
         "seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend\nfunction z = dec(x)\n  z = x - 1;\nend",
@@ -12802,7 +13348,7 @@ fn session_semantic_registry_retires_replaced_source_group() {
 
 #[test]
 fn local_function_multi_output_with_cell_expansion_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source =
         "C = {2}; [a, b] = pair(C{:});\nfunction [x, y] = pair(n)\n  x = n;\n  y = n + 1;\nend";
     let prepared = session
@@ -12825,7 +13371,7 @@ fn local_function_multi_output_with_cell_expansion_uses_semantic_vm() {
 
 #[test]
 fn struct_member_access_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "s = struct(); s.a = 3; y = s.a;";
     let prepared = session
         .compile_input(source)
@@ -12844,7 +13390,7 @@ fn struct_member_access_uses_semantic_vm() {
 
 #[test]
 fn nested_struct_member_assignment_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "s = struct(); s.a.b = 3; y = s.a.b;";
     let prepared = session
         .compile_input(source)
@@ -12863,7 +13409,7 @@ fn nested_struct_member_assignment_uses_semantic_vm() {
 
 #[test]
 fn nested_dynamic_member_assignment_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "s = struct(); name = 'a'; s.(name).b = 4; y = s.a.b;";
     let prepared = session
         .compile_input(source)
@@ -12882,7 +13428,7 @@ fn nested_dynamic_member_assignment_uses_semantic_vm() {
 
 #[test]
 fn indexed_cell_member_assignment_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "C = {struct()}; C{1}.a = 5; y = C{1}.a;";
     let prepared = session
         .compile_input(source)
@@ -12901,7 +13447,7 @@ fn indexed_cell_member_assignment_uses_semantic_vm() {
 
 #[test]
 fn cell_member_access_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "C = {struct(), struct()}; C{1}.a = 5; C{2}.a = 6; D = C.a; y = D{2};";
     let prepared = session
         .compile_input(source)
@@ -12920,7 +13466,7 @@ fn cell_member_access_uses_semantic_vm() {
 
 #[test]
 fn cell_member_assignment_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "C = {struct(), struct()}; C.a = 9; y = C{2}.a;";
     let prepared = session
         .compile_input(source)
@@ -12939,7 +13485,7 @@ fn cell_member_assignment_uses_semantic_vm() {
 
 #[test]
 fn indexed_cell_end_offset_member_assignment_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "C = {struct(), struct(), struct()}; C{end-1}.a = 7; y = C{2}.a;";
     let prepared = session
         .compile_input(source)
@@ -12958,7 +13504,7 @@ fn indexed_cell_end_offset_member_assignment_uses_semantic_vm() {
 
 #[test]
 fn scalar_struct_paren_member_assignment_uses_semantic_vm() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "s = struct(); s(1).a = 5; y = s(1).a;";
     let prepared = session
         .compile_input(source)
@@ -12977,7 +13523,7 @@ fn scalar_struct_paren_member_assignment_uses_semantic_vm() {
 
 #[test]
 fn workspace_reports_datetime_array_shape() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(
         &mut session,
         "d = datetime([739351; 739352], 'ConvertFrom', 'datenum');",
@@ -12994,8 +13540,7 @@ fn workspace_reports_datetime_array_shape() {
 
 #[test]
 fn workspace_state_roundtrip_replace_only() {
-    let mut source_session =
-        RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut source_session = RunMatSession::with_options(false, false).expect("session init");
     let _ =
         execute_text_request(&mut source_session, "x = 42; y = [1, 2, 3];").expect("exec succeeds");
 
@@ -13003,8 +13548,7 @@ fn workspace_state_roundtrip_replace_only() {
         .expect("workspace export")
         .expect("workspace bytes");
 
-    let mut restore_session =
-        RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut restore_session = RunMatSession::with_options(false, false).expect("session init");
     let _ = execute_text_request(&mut restore_session, "z = 99;").expect("seed workspace");
     restore_session
         .import_workspace_state(&bytes)
@@ -13042,7 +13586,7 @@ fn workspace_state_roundtrip_replace_only() {
 
 #[test]
 fn workspace_state_import_rejects_invalid_payload() {
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let err = session
         .import_workspace_state(&[1, 2, 3, 4])
         .expect_err("invalid payload should be rejected");

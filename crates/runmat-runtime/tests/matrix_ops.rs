@@ -169,10 +169,10 @@ fn test_builtin_dispatch() {
 
     // Test comparison
     let result = call_builtin("gt", &[Value::Num(3.0), Value::Num(2.0)]).unwrap();
-    assert_eq!(result, Value::Num(1.0));
+    assert_eq!(result, Value::Bool(true));
 
     let result = call_builtin("lt", &[Value::Num(1.0), Value::Num(2.0)]).unwrap();
-    assert_eq!(result, Value::Num(1.0));
+    assert_eq!(result, Value::Bool(true));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

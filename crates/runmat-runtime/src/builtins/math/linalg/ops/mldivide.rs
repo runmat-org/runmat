@@ -17,6 +17,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::math::elementwise::integer_arithmetic::{try_integer_binary, IntegerBinaryOp};
 use crate::builtins::math::linalg::type_resolvers::left_divide_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -162,6 +163,15 @@ async fn mldivide_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 }
 
 pub(crate) async fn mldivide_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Value> {
+    if contains_integer(lhs) || contains_integer(rhs) {
+        let lhs_host = crate::dispatcher::gather_if_needed_async(lhs)
+            .await
+            .map_err(map_control_flow)?;
+        let rhs_host = crate::dispatcher::gather_if_needed_async(rhs)
+            .await
+            .map_err(map_control_flow)?;
+        return mldivide_cpu(lhs_host, rhs_host);
+    }
     if let Some(result) = try_gpu_mldivide(lhs, rhs).await? {
         return Ok(result);
     }
@@ -176,6 +186,13 @@ pub(crate) async fn mldivide_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Val
 }
 
 async fn try_gpu_mldivide(lhs: &Value, rhs: &Value) -> BuiltinResult<Option<Value>> {
+    // A configured accelerator must not change the residency of an otherwise
+    // host-only operation. Only continue on the GPU when at least one operand
+    // is already resident there.
+    if !matches!(lhs, Value::GpuTensor(_)) && !matches!(rhs, Value::GpuTensor(_)) {
+        return Ok(None);
+    }
+
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
         None => return Ok(None),
@@ -213,6 +230,18 @@ async fn try_gpu_mldivide(lhs: &Value, rhs: &Value) -> BuiltinResult<Option<Valu
 }
 
 fn mldivide_cpu(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    if contains_integer(&lhs) || contains_integer(&rhs) {
+        if !scalar_divide_input(&lhs) {
+            return Err(mldivide_invalid_input(
+                "mldivide: integer inputs are only supported for scalar left division",
+            ));
+        }
+        if let Some(result) = try_integer_binary(&rhs, &lhs, IntegerBinaryOp::Divide, NAME)
+            .map_err(mldivide_invalid_input)?
+        {
+            return Ok(result);
+        }
+    }
     let lhs_numeric = classify_numeric(lhs)?;
     let rhs_numeric = classify_numeric(rhs)?;
 
@@ -235,6 +264,23 @@ fn mldivide_cpu(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
             let result = mldivide_complex(&lhs_c, &rhs_c)?;
             Ok(complex_tensor_into_value(result))
         }
+    }
+}
+
+fn contains_integer(value: &Value) -> bool {
+    match value {
+        Value::Int(_) => true,
+        Value::Tensor(tensor) => tensor.integer_storage().is_some(),
+        _ => false,
+    }
+}
+
+fn scalar_divide_input(value: &Value) -> bool {
+    match value {
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
+        Value::Tensor(tensor) => tensor::is_scalar_tensor(tensor),
+        Value::LogicalArray(logical) => logical.data.len() == 1,
+        _ => false,
     }
 }
 
@@ -518,7 +564,7 @@ pub(crate) mod tests {
     }
 
     use num_complex::Complex64;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Type};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -581,6 +627,34 @@ pub(crate) mod tests {
             Value::Tensor(out) => assert_eq!(out.data, vec![1.0, 2.0, 3.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn integer_scalar_left_division_preserves_uint64_storage() {
+        let values =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]), vec![1, 2])
+                .expect("integer values");
+        let result = mldivide_builtin(Value::Num(2.0), Value::Tensor(values)).expect("mldivide");
+        assert_eq!(
+            result,
+            Value::Tensor(
+                Tensor::new_integer(
+                    IntegerStorage::U64(vec![1_u64 << 63, 1_u64 << 62]),
+                    vec![1, 2],
+                )
+                .expect("integer result")
+            )
+        );
+    }
+
+    #[test]
+    fn integer_matrix_left_division_is_rejected() {
+        let coefficients = Tensor::new_integer(IntegerStorage::I32(vec![1, 0, 0, 1]), vec![2, 2])
+            .expect("integer coefficients");
+        let err = mldivide_builtin(Value::Tensor(coefficients), Value::Int(IntValue::I32(1)))
+            .expect_err("integer matrix solve must reject");
+        assert_eq!(err.identifier(), MLDIVIDE_ERROR_INVALID_INPUT.identifier);
+        assert!(err.message().contains("only supported for scalar"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

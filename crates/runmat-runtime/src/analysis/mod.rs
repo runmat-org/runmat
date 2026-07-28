@@ -24,18 +24,37 @@ use runmat_analysis_fea::{
     fea_fsi_interface_traction_field_id, fea_fsi_structural_displacement_field_id,
     run_electromagnetic_with_options, run_linear_static_with_options, run_modal_with_options,
     run_nonlinear_with_options, run_thermal_with_options, run_transient_with_options,
-    ComputeBackend, ElectromagneticSolveOptions, FeaProgressEvent, FeaProgressHandler,
-    FeaProgressPhase, FeaProgressStatus, FeaRunError, FeaRunResult, LinearStaticSolveOptions,
-    ModalSolveOptions, ThermalSolveOptions, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
-    FEA_FIELD_ACOUSTIC_PHASE, FEA_FIELD_ACOUSTIC_PRESSURE_IMAG,
-    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_ACOUSTIC_PRESSURE_REAL,
-    FEA_FIELD_ACOUSTIC_SOUND_PRESSURE_LEVEL_DB, FEA_FIELD_CFD_PRESSURE,
-    FEA_FIELD_CFD_RESIDUAL_CONTINUITY, FEA_FIELD_CFD_RESIDUAL_MOMENTUM,
+    ComputeBackend, ElectromagneticSolveOptions, FeaProgressHandler, FeaRunError, FeaRunResult,
+    LinearStaticSolveOptions, ModalSolveOptions, ThermalSolveOptions,
+    FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PHASE,
+    FEA_FIELD_ACOUSTIC_PRESSURE_IMAG, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
+    FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_ACOUSTIC_SOUND_PRESSURE_LEVEL_DB,
+    FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_RESIDUAL_CONTINUITY, FEA_FIELD_CFD_RESIDUAL_MOMENTUM,
     FEA_FIELD_CFD_REYNOLDS_NUMBER, FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CFD_VORTICITY,
     FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
+    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
+    FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
+    FEA_FIELD_STRUCTURAL_ROTATION, FEA_FIELD_STRUCTURAL_STRAIN,
+    FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY, FEA_FIELD_STRUCTURAL_STRESS,
+    FEA_FIELD_STRUCTURAL_VON_MISES,
 };
-use runmat_geometry_core::{GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
-use runmat_meshing_core::{ElementFamilyHint, MeshConnectivityClass};
+use runmat_geometry_core::{EntityKind, GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
+use runmat_meshing::{
+    generate_analysis_mesh, generate_analysis_mesh_with_sizing, ElementFamilyHint,
+    MeshConnectivityClass,
+};
+use runmat_meshing_core::{
+    build_refinement_markers_from_samples, plan_refinement_indicators, AdaptiveConvergenceStatus,
+    AdaptiveIterationSummary, AnalysisFieldTopologyDescriptor, AnalysisFieldTopologyLocation,
+    AnalysisMeshArtifact, AnalysisMeshValidationOptions, MeshSizingField, MeshTargetSize,
+    RefinementIndicatorAvailability, RefinementIndicatorSample, RefinementMarkerOptions,
+    RefinementStrategy, SizingFieldUpdate, SourceEntityKind, VolumeMeshingOptions,
+    TETRAHEDRON4_FIELD_ELEMENT_KIND,
+};
+use runmat_meshing_evidence::{
+    build_mesh_authoring_summary, build_mesh_evidence_artifact,
+    build_mesh_evidence_artifact_with_validation_evidence, MeshValidationEvidence,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -64,11 +83,13 @@ use policy::{
 
 mod contracts;
 mod fea_document;
+mod fea_document_authoring;
 #[cfg(feature = "plot-core")]
 mod figures;
 mod policy;
 mod promotion;
 pub mod storage;
+mod study_authoring;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FeaRuntimeConfig {
@@ -148,15 +169,24 @@ fn install_fea_solver_context() -> runmat_analysis_fea::FeaProgressContextGuard 
 }
 
 pub use contracts::{
-    AnalysisAcousticRunOptions, AnalysisCfdRunOptions, AnalysisChtRunOptions,
-    AnalysisCreateModelIntentSpec, AnalysisCreateModelPrepContext, AnalysisCreateModelProfile,
-    AnalysisElectromagneticRunOptions, AnalysisFieldDescriptor, AnalysisFieldKind,
-    AnalysisFieldLocation, AnalysisFieldStorage, AnalysisFsiRunOptions, AnalysisModalRunOptions,
-    AnalysisNonlinearRunOptions, AnalysisRenderMesh, AnalysisRenderTopology,
-    AnalysisRenderTopologySource, AnalysisResultsCompareData, AnalysisResultsCompareQuery,
-    AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunKind,
-    AnalysisRunOptions, AnalysisRunPrepContext, AnalysisRunResult, AnalysisStudyIssue,
-    AnalysisStudyPlanData, AnalysisStudyRunData, AnalysisStudySpec, AnalysisStudySweepData,
+    analysis_runtime_physics_profile_catalog, AnalysisAcousticRunOptions, AnalysisCfdRunOptions,
+    AnalysisChtRunOptions, AnalysisCreateModelIntentSpec, AnalysisCreateModelPrepContext,
+    AnalysisCreateModelProfile, AnalysisDiagnosticsArtifactPayload, AnalysisDocumentCheckResult,
+    AnalysisDocumentKind, AnalysisDocumentRunResult, AnalysisElectromagneticRunOptions,
+    AnalysisFieldDescriptor, AnalysisFieldDescriptorsArtifactPayload, AnalysisFieldKind,
+    AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPagingDescriptor,
+    AnalysisFieldRequestOptions, AnalysisFieldStorage, AnalysisFieldStorageRef,
+    AnalysisFsiRunOptions, AnalysisModalRunOptions, AnalysisNonlinearRunOptions,
+    AnalysisObjectArtifactMetadata, AnalysisRenderMesh, AnalysisRenderRegion,
+    AnalysisRenderTopology, AnalysisRenderTopologySource, AnalysisRenderTriangleRange,
+    AnalysisResultsCompareData, AnalysisResultsCompareQuery, AnalysisResultsData,
+    AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunDatasetFieldPagingPolicy,
+    AnalysisRunDatasetPayload, AnalysisRunDatasetStudyRef, AnalysisRunKind, AnalysisRunOptions,
+    AnalysisRunPrepContext, AnalysisRunResult, AnalysisRuntimeCapabilities,
+    AnalysisRuntimePhysicsProfileCatalogEntry, AnalysisRuntimePhysicsProfileDefaultOutput,
+    AnalysisStudyAuthoringData, AnalysisStudyAuthoringEvidence, AnalysisStudyAuthoringIntent,
+    AnalysisStudyDiagramObservation, AnalysisStudyIssue, AnalysisStudyPlanData,
+    AnalysisStudyRunData, AnalysisStudySpec, AnalysisStudySweepData,
     AnalysisStudySweepFailureEntry, AnalysisStudySweepPlanData, AnalysisStudySweepPlanEntry,
     AnalysisStudySweepRunEntry, AnalysisStudySweepSpec, AnalysisStudySweepValidateData,
     AnalysisStudySweepValidateEntry, AnalysisStudyValidateResult, AnalysisThermalRunOptions,
@@ -168,20 +198,34 @@ pub use contracts::{
     PrepCalibrationProfile, QualityGate, QualityPolicy, QualityReason, QualityReasonCode,
     RunProvenance, RunStatus, ThermalResultsData, ThermoFieldInterpolationMode, ThermoFieldSource,
     ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
-    TransientIntegrationMethod, TransientResultsData,
+    TransientIntegrationMethod, TransientResultsData, ANALYSIS_ARTIFACT_MANIFEST_KIND,
+    ANALYSIS_DATASET_ARTIFACT_KIND, ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND,
+    ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION, ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT,
+    ANALYSIS_FIELD_DEFAULT_PAGE_SIZE, ANALYSIS_FIELD_DESCRIPTORS_ARTIFACT_KIND,
+    ANALYSIS_FIELD_DESCRIPTORS_SCHEMA_VERSION, ANALYSIS_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION,
+    ANALYSIS_RUN_DATASET_KIND, ANALYSIS_RUN_DATASET_SCHEMA_VERSION,
 };
 pub use fea_document::{
     is_fea_file_path, load_fea_document_from_path_async, parse_and_resolve_fea_document,
     FeaResolvedDocument,
 };
+pub use fea_document_authoring::{
+    apply_fea_study_document_operation, apply_fea_study_document_operation_typed,
+    summarize_fea_study_document, FeaStudyDocumentOperation, FeaStudyDocumentOperationOutput,
+    FEA_STUDY_DOCUMENT_OPERATION_NAMES,
+};
 #[cfg(feature = "plot-core")]
 pub use figures::{
-    analysis_generate_study_run_figures, AnalysisFigureGenerationOptions, AnalysisGeneratedFigure,
-    AnalysisGeneratedFigureKind,
+    analysis_generate_study_run_figures, AnalysisFigureGenerationOptions, AnalysisFigureMeshSource,
+    AnalysisGeneratedFigure, AnalysisGeneratedFigureKind,
 };
+pub use runmat_analysis_fea::{FeaProgressEvent, FeaProgressPhase, FeaProgressStatus};
+pub use study_authoring::analysis_author_study_op;
 
 const ANALYSIS_CREATE_MODEL_OPERATION: &str = "fea.create_model";
 const ANALYSIS_CREATE_MODEL_OP_VERSION: &str = "fea.create_model/v1";
+const ANALYSIS_AUTHOR_STUDY_OPERATION: &str = "fea.author_study";
+const ANALYSIS_AUTHOR_STUDY_OP_VERSION: &str = "fea.author_study/v1";
 const ANALYSIS_VALIDATE_STUDY_OPERATION: &str = "fea.validate_study";
 const ANALYSIS_VALIDATE_STUDY_OP_VERSION: &str = "fea.validate_study/v1";
 const ANALYSIS_PLAN_STUDY_OPERATION: &str = "fea.plan_study";
@@ -266,6 +310,22 @@ fn map_fea_run_error(
                 ("geometry_id".to_string(), model.geometry_id.clone()),
             ]),
         ),
+        FeaRunError::Assembly(message) => operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_LINEAR_STATIC.ASSEMBLY_FAILED",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            message,
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("geometry_id".to_string(), model.geometry_id.clone()),
+            ]),
+        ),
     }
 }
 
@@ -280,8 +340,13 @@ fn reject_moment_loads_for_run_family(
     if let Some(load) = model
         .loads
         .iter()
-        .find(|load| matches!(load.kind, LoadKind::Moment { .. }))
+        .find(|load| matches!(load.kind, LoadKind::Moment { .. } | LoadKind::Wrench { .. }))
     {
+        let load_kind = match load.kind {
+            LoadKind::Moment { .. } => "moment",
+            LoadKind::Wrench { .. } => "wrench",
+            _ => "structural",
+        };
         return Err(operation_error(
             operation,
             op_version,
@@ -292,7 +357,7 @@ fn reject_moment_loads_for_run_family(
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            format!("moment loads are structural loads and cannot be used as {family} loads"),
+            format!("{load_kind} loads are structural loads and cannot be used as {family} loads"),
             BTreeMap::from([
                 ("analysis_model_id".to_string(), model.model_id.0.clone()),
                 ("load_id".to_string(), load.load_id.clone()),
@@ -545,6 +610,7 @@ pub fn analysis_create_model_op(
     if matches!(
         intent.profile,
         AnalysisCreateModelProfile::ElectromagneticStatic
+            | AnalysisCreateModelProfile::ElectroThermalCoupled
     ) {
         for material in &mut inferred_materials {
             material.electrical = Some(runmat_analysis_core::MaterialElectricalModel::default());
@@ -594,6 +660,26 @@ pub fn analysis_create_model_op(
             },
             vec![AnalysisStep {
                 step_id: "step_default_thermo_mech".to_string(),
+                kind: AnalysisStepKind::Transient,
+            }],
+        ),
+        AnalysisCreateModelProfile::ElectroThermalCoupled => (
+            BoundaryCondition {
+                bc_id: "bc_default_electro_thermal_ground".to_string(),
+                region_id: fixed_region_id,
+                kind: BoundaryConditionKind::VectorPotentialGround,
+            },
+            LoadCase {
+                load_id: "load_default_electro_thermal_current".to_string(),
+                region_id: load_region_id,
+                kind: LoadKind::CoilCurrent {
+                    current_a: 50.0,
+                    phase_rad: 0.0,
+                    amplitude_scale: 1.0,
+                },
+            },
+            vec![AnalysisStep {
+                step_id: "step_default_electro_thermal".to_string(),
                 kind: AnalysisStepKind::Transient,
             }],
         ),
@@ -906,6 +992,27 @@ pub fn analysis_create_model_op(
         }
         _ => None,
     };
+    let electro_thermal = match intent.profile {
+        AnalysisCreateModelProfile::ElectroThermalCoupled => {
+            Some(runmat_analysis_core::ElectroThermalDomain {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_voltage_v: 24.0,
+                region_conductivity_scales: Vec::new(),
+                time_profile: vec![
+                    runmat_analysis_core::ElectroTimeProfilePoint {
+                        normalized_time: 0.0,
+                        current_scale: 0.5,
+                    },
+                    runmat_analysis_core::ElectroTimeProfilePoint {
+                        normalized_time: 1.0,
+                        current_scale: 1.0,
+                    },
+                ],
+            })
+        }
+        _ => None,
+    };
 
     let mut boundary_conditions = vec![default_bc];
     if matches!(
@@ -955,7 +1062,7 @@ pub fn analysis_create_model_op(
         material_assignments: inferred_assignments,
         structural: None,
         thermo_mechanical,
-        electro_thermal: None,
+        electro_thermal,
         electromagnetic,
         cfd,
         interfaces: Vec::new(),
@@ -1148,6 +1255,14 @@ pub fn analysis_run_study_op(
     let run_operation = run_operation_for_kind(spec.run_kind).to_string();
     let run_op_version = run_operation_version_for_kind(spec.run_kind).to_string();
     let operation_sequence = study_operation_sequence(spec, &run_op_version);
+    let analysis_mesh_artifact =
+        generate_and_persist_study_analysis_mesh(spec, &study_fingerprint, &context)?;
+    let analysis_mesh_artifact_path = analysis_mesh_artifact
+        .as_ref()
+        .map(|artifact| artifact.path.clone());
+    let analysis_mesh_evidence_artifact_path = analysis_mesh_artifact
+        .as_ref()
+        .map(|artifact| artifact.evidence_path.clone());
 
     let study_prep = crate::geometry::geometry_prep_for_analysis_op(
         &spec.geometry,
@@ -1176,19 +1291,58 @@ pub fn analysis_run_study_op(
         &ReferenceFrame::Global,
         context.clone(),
     )?;
-    let (run_envelope, resolved_run_options, resolved_electromagnetic_run_options) = match spec
-        .run_kind
-    {
+    let (
+        run_envelope,
+        resolved_run_options,
+        resolved_electromagnetic_run_options,
+        refined_analysis_mesh_artifact,
+    ) = match spec.run_kind {
         AnalysisRunKind::LinearStatic => {
             let mut options = spec.linear_static_run_options.clone().unwrap_or_default();
             attach_prep_artifact_to_run_options(&mut options, &study_prep_artifact_id);
-            let run = analysis_run_linear_static_with_options(
+            attach_analysis_mesh_artifact_to_run_options(
+                &mut options,
+                analysis_mesh_artifact_path.as_deref(),
+            );
+            let initial_run = analysis_run_linear_static_with_options(
                 &model,
                 spec.backend,
                 options.clone(),
                 context.clone(),
             )?;
-            Ok((run, run_options_to_json(&options), None))
+            let refinement_candidate_path = analysis_mesh_artifact
+                .as_ref()
+                .filter(|artifact| artifact.allow_refinement)
+                .map(|artifact| artifact.path.as_str());
+            let refined_analysis_mesh_artifact = generate_and_persist_refined_study_analysis_mesh(
+                spec,
+                &study_fingerprint,
+                refinement_candidate_path,
+                &context,
+            )?;
+            if let Some(refined_artifact) = refined_analysis_mesh_artifact.as_ref() {
+                let mut refined_options = options.clone();
+                refined_options.analysis_mesh_artifact_path = Some(refined_artifact.path.clone());
+                let refined_run = analysis_run_linear_static_with_options(
+                    &model,
+                    spec.backend,
+                    refined_options.clone(),
+                    context.clone(),
+                )?;
+                Ok((
+                    refined_run,
+                    run_options_to_json(&refined_options),
+                    None,
+                    refined_analysis_mesh_artifact,
+                ))
+            } else {
+                Ok((
+                    initial_run,
+                    run_options_to_json(&options),
+                    None,
+                    refined_analysis_mesh_artifact,
+                ))
+            }
         }
         AnalysisRunKind::Modal => {
             let mut options = spec.modal_run_options.clone().unwrap_or_default();
@@ -1199,7 +1353,7 @@ pub fn analysis_run_study_op(
                 options.clone(),
                 context.clone(),
             )?;
-            Ok((run, run_options_to_json(&options), None))
+            Ok((run, run_options_to_json(&options), None, None))
         }
         AnalysisRunKind::Acoustic => {
             let mut options = spec.acoustic_run_options.clone().unwrap_or_default();
@@ -1210,7 +1364,7 @@ pub fn analysis_run_study_op(
                 options.clone(),
                 context.clone(),
             )?;
-            Ok((run, run_options_to_json(&options), None))
+            Ok((run, run_options_to_json(&options), None, None))
         }
         AnalysisRunKind::Thermal => {
             let mut options = spec.thermal_run_options.clone().unwrap_or_default();
@@ -1221,7 +1375,7 @@ pub fn analysis_run_study_op(
                 options.clone(),
                 context.clone(),
             )?;
-            Ok((run, run_options_to_json(&options), None))
+            Ok((run, run_options_to_json(&options), None, None))
         }
         AnalysisRunKind::Transient => {
             let mut options = spec.transient_run_options.clone().unwrap_or_default();
@@ -1232,7 +1386,7 @@ pub fn analysis_run_study_op(
                 options.clone(),
                 context.clone(),
             )?;
-            Ok((run, run_options_to_json(&options), None))
+            Ok((run, run_options_to_json(&options), None, None))
         }
         AnalysisRunKind::Cfd => {
             let mut options = spec.cfd_run_options.clone().unwrap_or_default();
@@ -1243,7 +1397,7 @@ pub fn analysis_run_study_op(
                 options.clone(),
                 context.clone(),
             )?;
-            Ok((run, run_options_to_json(&options), None))
+            Ok((run, run_options_to_json(&options), None, None))
         }
         AnalysisRunKind::Cht => {
             let mut options = spec.cht_run_options.clone().unwrap_or_default();
@@ -1254,7 +1408,7 @@ pub fn analysis_run_study_op(
                 options.clone(),
                 context.clone(),
             )?;
-            Ok((run, run_options_to_json(&options), None))
+            Ok((run, run_options_to_json(&options), None, None))
         }
         AnalysisRunKind::Fsi => {
             let mut options = spec.fsi_run_options.clone().unwrap_or_default();
@@ -1265,7 +1419,7 @@ pub fn analysis_run_study_op(
                 options.clone(),
                 context.clone(),
             )?;
-            Ok((run, run_options_to_json(&options), None))
+            Ok((run, run_options_to_json(&options), None, None))
         }
         AnalysisRunKind::Nonlinear => {
             let mut options = spec.nonlinear_run_options.clone().unwrap_or_default();
@@ -1276,7 +1430,7 @@ pub fn analysis_run_study_op(
                 options.clone(),
                 context.clone(),
             )?;
-            Ok((run, run_options_to_json(&options), None))
+            Ok((run, run_options_to_json(&options), None, None))
         }
         AnalysisRunKind::Electromagnetic => {
             let mut options = spec.electromagnetic_run_options.clone().unwrap_or_default();
@@ -1287,9 +1441,18 @@ pub fn analysis_run_study_op(
                 options.clone(),
                 context.clone(),
             )?;
-            Ok((run, run_options_to_json(&options), Some(options)))
+            Ok((run, run_options_to_json(&options), Some(options), None))
         }
     }?;
+    let refined_analysis_mesh_artifact_path = refined_analysis_mesh_artifact
+        .as_ref()
+        .map(|artifact| artifact.path.clone());
+    let refined_analysis_mesh_evidence_artifact_path = refined_analysis_mesh_artifact
+        .as_ref()
+        .map(|artifact| artifact.evidence_path.clone());
+    let refinement_effect = refined_analysis_mesh_artifact
+        .as_ref()
+        .map(|artifact| artifact.refinement_effect.clone());
 
     let evidence_artifact_path = persist_study_evidence(
         &study_fingerprint,
@@ -1298,9 +1461,15 @@ pub fn analysis_run_study_op(
             "schema_version": "fea_study_run_artifact/v1",
             "study_id": spec.study_id.clone(),
             "model_id": model.model_id.0.clone(),
+            "model_profile": spec.create_model_intent.profile,
             "run_kind": spec.run_kind,
             "backend": spec.backend,
             "prep_artifact_id": study_prep_artifact_id.clone(),
+            "analysis_mesh_artifact_path": analysis_mesh_artifact_path.clone(),
+            "analysis_mesh_evidence_artifact_path": analysis_mesh_evidence_artifact_path.clone(),
+            "refined_analysis_mesh_artifact_path": refined_analysis_mesh_artifact_path.clone(),
+            "refined_analysis_mesh_evidence_artifact_path": refined_analysis_mesh_evidence_artifact_path.clone(),
+            "refinement_effect": refinement_effect,
             "run_options": resolved_run_options.clone(),
             "resolved_electromagnetic_run_options": resolved_electromagnetic_run_options.clone(),
             "study_fingerprint": study_fingerprint.clone(),
@@ -1342,10 +1511,15 @@ pub fn analysis_run_study_op(
         AnalysisStudyRunData {
             study_id: spec.study_id.clone(),
             model_id: model.model_id.0.clone(),
+            model_profile: spec.create_model_intent.profile,
             run_kind: spec.run_kind,
             backend: spec.backend,
             electromagnetic_run_options: resolved_electromagnetic_run_options,
             prep_artifact_id: Some(study_prep_artifact_id),
+            analysis_mesh_artifact_path,
+            analysis_mesh_evidence_artifact_path,
+            refined_analysis_mesh_artifact_path,
+            refined_analysis_mesh_evidence_artifact_path,
             run_options: resolved_run_options,
             study_fingerprint,
             operation_sequence,
@@ -2121,7 +2295,12 @@ pub fn analysis_run_modal_with_options_op(
             result.run_status,
             result.publishable,
             nonlinear.failed_increments,
-            nonlinear.iteration_counts.iter().copied().max().unwrap_or(0),
+            nonlinear
+                .iteration_counts
+                .iter()
+                .copied()
+                .max()
+                .unwrap_or(0),
             nonlinear.line_search_backtracks,
             nonlinear.tangent_rebuild_count,
             nonlinear
@@ -2209,7 +2388,10 @@ pub fn analysis_run_acoustic_with_options_op(
             "fea.run_acoustic requires at least one acoustic material with density and sound-speed data",
             BTreeMap::from([
                 ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                ("material_count".to_string(), model.materials.len().to_string()),
+                (
+                    "material_count".to_string(),
+                    model.materials.len().to_string(),
+                ),
             ]),
         ));
     }
@@ -2675,7 +2857,10 @@ fn solve_acoustic_harmonic(
                     domain.spacing[2],
                     domain.boundary_node_count,
                     domain.average_node_degree(),
-                    source_real.iter().filter(|value| value.abs() > 1.0e-12).count(),
+                    source_real
+                        .iter()
+                        .filter(|value| value.abs() > 1.0e-12)
+                        .count(),
                     domain.volume_m3(),
                 ),
             },
@@ -2729,7 +2914,11 @@ fn solve_acoustic_harmonic(
                     sweep_bandwidth_hz,
                     sweep_peak_pressure_pa,
                     sweep_residual_norm,
-                    if sweep_frequencies_hz.is_empty() { 0.0 } else { 1.0 }
+                    if sweep_frequencies_hz.is_empty() {
+                        0.0
+                    } else {
+                        1.0
+                    }
                 ),
             },
             runmat_analysis_fea::diagnostics::FeaDiagnostic {
@@ -3080,7 +3269,7 @@ fn acoustic_domain_topology(
     let volume_hint = prep_context
         .map(|prep| {
             prep.topology_volume_core_ratio
-                + prep.topology_tet_family_ratio
+                + prep.topology_tetrahedron_family_ratio
                 + prep.topology_hex_family_ratio
         })
         .unwrap_or(0.0);
@@ -9195,6 +9384,18 @@ pub fn analysis_run_linear_static_with_options(
         ANALYSIS_RUN_OP_VERSION,
         &context,
     )?;
+    let analysis_mesh = resolve_analysis_mesh_artifact(
+        options.analysis_mesh_artifact_path.as_deref(),
+        ANALYSIS_RUN_OPERATION,
+        ANALYSIS_RUN_OP_VERSION,
+        &context,
+    )?;
+    let analysis_mesh_validation_evidence = resolve_analysis_mesh_validation_evidence_status(
+        options.analysis_mesh_artifact_path.as_deref(),
+        ANALYSIS_RUN_OPERATION,
+        ANALYSIS_RUN_OP_VERSION,
+        &context,
+    )?;
     let run = run_linear_static_with_options(
         model,
         backend,
@@ -9205,6 +9406,9 @@ pub fn analysis_run_linear_static_with_options(
                 prep_context.as_ref(),
                 options.prep_calibration_profile,
             ),
+            analysis_mesh_artifact_path: options.analysis_mesh_artifact_path.clone(),
+            analysis_mesh: analysis_mesh.clone(),
+            require_analysis_mesh_for_solid: true,
             thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
             electro_thermal_context: to_fea_electro_thermal_context(electro_options),
         },
@@ -9222,11 +9426,44 @@ pub fn analysis_run_linear_static_with_options(
     })?;
 
     let mut run = run;
+    append_solved_adaptive_mesh_summary(
+        options.analysis_mesh_artifact_path.as_deref(),
+        &run.fields,
+    )
+    .map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_OPERATION,
+            ANALYSIS_RUN_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_LINEAR_STATIC.ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to update analysis mesh adaptive summary: {err}"),
+            BTreeMap::from([(
+                "analysis_mesh_artifact_path".to_string(),
+                options
+                    .analysis_mesh_artifact_path
+                    .clone()
+                    .unwrap_or_default(),
+            )]),
+        )
+    })?;
     let mut fallback_events = Vec::new();
     promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
 
     match options.preconditioner_mode {
-        PreconditionerMode::Auto | PreconditionerMode::Jacobi | PreconditionerMode::Ilu => {}
+        PreconditionerMode::Auto | PreconditionerMode::Jacobi => {}
+        PreconditionerMode::Ilu => {
+            if run.preconditioner != "ilu0" {
+                fallback_events.push(format!(
+                    "SOLVER_PRECONDITIONER_FALLBACK:requested=ilu0:using={}",
+                    run.preconditioner
+                ));
+            }
+        }
         PreconditionerMode::Amg => {
             fallback_events
                 .push("SOLVER_PRECONDITIONER_FALLBACK:requested=amg:using=jacobi".to_string());
@@ -9252,13 +9489,36 @@ pub fn analysis_run_linear_static_with_options(
         diag.code
             .starts_with("ANALYSIS_MATERIAL_ASSIGNMENT_CONFLICT_")
     });
-    let result_quality = if run.fields_are_empty() {
-        QualityGate::Fail
-    } else if has_material_assignment_conflict {
-        QualityGate::Warn
-    } else {
-        QualityGate::Pass
-    };
+    let field_topology_reasons =
+        field_topology_quality_reasons(&run.fields, analysis_mesh.as_ref());
+    let solid_mesh_reasons = solid_mesh_quality_reasons(model, analysis_mesh.as_ref());
+    let mesh_validation_reasons =
+        mesh_validation_evidence_quality_reasons(&analysis_mesh_validation_evidence);
+    let missing_solid_mesh_reasons =
+        missing_solid_analysis_mesh_reasons(model, analysis_mesh.as_ref());
+    let solid_mesh_has_failure = solid_mesh_reasons.iter().any(|reason| {
+        matches!(
+            reason.code,
+            QualityReasonCode::SolidMeshNoVolumeElements
+                | QualityReasonCode::SolidMeshUnsupportedElementKind
+                | QualityReasonCode::SolidMeshUnmappedLoadRegion
+                | QualityReasonCode::SolidMeshUnmappedBoundaryConditionRegion
+                | QualityReasonCode::SolidMeshMaterialCoverageIncomplete
+                | QualityReasonCode::SolidMeshRenderTopologyIncomplete
+                | QualityReasonCode::SolidMeshQualityMinJacobianFailed
+        )
+    }) || !mesh_validation_reasons.is_empty();
+    let result_quality =
+        if run.fields_are_empty() || solid_mesh_has_failure || !field_topology_reasons.is_empty() {
+            QualityGate::Fail
+        } else if !missing_solid_mesh_reasons.is_empty()
+            || !solid_mesh_reasons.is_empty()
+            || has_material_assignment_conflict
+        {
+            QualityGate::Warn
+        } else {
+            QualityGate::Pass
+        };
 
     let mut quality_reasons = Vec::new();
     if has_material_assignment_conflict {
@@ -9267,6 +9527,10 @@ pub fn analysis_run_linear_static_with_options(
             detail: "material assignment confidence conflict detected".to_string(),
         });
     }
+    quality_reasons.extend(solid_mesh_reasons);
+    quality_reasons.extend(mesh_validation_reasons);
+    quality_reasons.extend(field_topology_reasons);
+    quality_reasons.extend(missing_solid_mesh_reasons);
     if solver_convergence == QualityGate::Warn {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverNotConverged,
@@ -9319,7 +9583,8 @@ pub fn analysis_run_linear_static_with_options(
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
         run,
-        render_topology: render_topology_from_prep_context(prep_context.as_ref()),
+        render_topology: render_topology_from_analysis_mesh(analysis_mesh.as_ref())
+            .or_else(|| render_topology_from_prep_context(prep_context.as_ref())),
         modal_results: None,
         thermal_results: None,
         transient_results: None,
@@ -9359,6 +9624,482 @@ pub fn analysis_run_linear_static_with_options(
         &context,
         result,
     ))
+}
+
+fn field_topology_quality_reasons(
+    fields: &[AnalysisField],
+    analysis_mesh: Option<&AnalysisMeshArtifact>,
+) -> Vec<QualityReason> {
+    let Some(mesh) = analysis_mesh else {
+        return Vec::new();
+    };
+    fields
+        .iter()
+        .filter_map(|field| primary_solver_mesh_field_expected_count(field, mesh).map(|expected| (field, expected)))
+        .filter_map(|(field, expected)| {
+            let descriptor = AnalysisFieldDescriptor::from_field(field);
+            let actual = descriptor_entity_count(field, &descriptor);
+            (actual != expected).then(|| QualityReason {
+                code: QualityReasonCode::FieldTopologyMismatch,
+                detail: format!(
+                    "field {} topology mismatch: topology_id={} location={:?} element_kind={} expected_entity_count={} actual_entity_count={}",
+                    field.field_id,
+                    descriptor.topology_id.as_deref().unwrap_or("none"),
+                    descriptor.location,
+                    descriptor.element_kind.as_deref().unwrap_or("none"),
+                    expected,
+                    actual
+                ),
+            })
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum MeshValidationEvidenceStatus {
+    NotRequested,
+    Missing { detail: String },
+    Present(Box<MeshValidationEvidence>),
+}
+
+fn mesh_validation_evidence_quality_reasons(
+    validation: &MeshValidationEvidenceStatus,
+) -> Vec<QualityReason> {
+    let validation = match validation {
+        MeshValidationEvidenceStatus::NotRequested => return Vec::new(),
+        MeshValidationEvidenceStatus::Missing { detail } => {
+            return vec![QualityReason {
+                code: QualityReasonCode::SolidMeshValidationEvidenceMissing,
+                detail: format!("analysis mesh evidence is missing: {detail}"),
+            }];
+        }
+        MeshValidationEvidenceStatus::Present(validation) => validation,
+    };
+    if validation.solve_ready {
+        return Vec::new();
+    }
+    let code = validation
+        .validation_error_code
+        .as_deref()
+        .unwrap_or("unknown");
+    let message = validation
+        .validation_error_message
+        .as_deref()
+        .unwrap_or("mesh evidence validation did not include a message");
+    let recovery_detail = mesh_validation_recovery_detail(validation);
+    vec![QualityReason {
+        code: QualityReasonCode::SolidMeshValidationEvidenceFailed,
+        detail: format!(
+            "analysis mesh evidence is not solve-ready: validation_error_code={code}; {message}{recovery_detail}"
+        ),
+    }]
+}
+
+fn mesh_validation_recovery_detail(validation: &MeshValidationEvidence) -> String {
+    let mut details = Vec::<String>::new();
+    if validation.unrecovered_tetrahedron_component_count > 0 {
+        details.push(format!(
+            "unrecovered_tetrahedron_component_count={}",
+            validation.unrecovered_tetrahedron_component_count
+        ));
+    }
+    if validation.unrepaired_exact_quality_total_count > 0
+        || validation.unrepaired_exact_quality_general_cavity_count > 0
+        || validation.unrepaired_exact_quality_boundary_adjacent_count > 0
+        || validation.unrepaired_exact_quality_node_adjacent_count > 0
+        || validation.unrepaired_exact_quality_interior_seed_count > 0
+        || validation.unrepaired_exact_quality_edge_star_count > 0
+    {
+        details.push(format!(
+            "unrepaired_exact_quality_total_count={}",
+            validation.unrepaired_exact_quality_total_count
+        ));
+        details.push(format!(
+            "unrepaired_exact_quality_general_cavity_count={}",
+            validation.unrepaired_exact_quality_general_cavity_count
+        ));
+        details.push(format!(
+            "unrepaired_exact_quality_boundary_adjacent_count={}",
+            validation.unrepaired_exact_quality_boundary_adjacent_count
+        ));
+        details.push(format!(
+            "unrepaired_exact_quality_node_adjacent_count={}",
+            validation.unrepaired_exact_quality_node_adjacent_count
+        ));
+        details.push(format!(
+            "unrepaired_exact_quality_interior_seed_count={}",
+            validation.unrepaired_exact_quality_interior_seed_count
+        ));
+        details.push(format!(
+            "unrepaired_exact_quality_edge_star_count={}",
+            validation.unrepaired_exact_quality_edge_star_count
+        ));
+    }
+    if details.is_empty() {
+        String::new()
+    } else {
+        format!("; {}", details.join("; "))
+    }
+}
+
+fn solid_mesh_quality_reasons(
+    model: &AnalysisModel,
+    analysis_mesh: Option<&AnalysisMeshArtifact>,
+) -> Vec<QualityReason> {
+    let Some(mesh) = analysis_mesh else {
+        return Vec::new();
+    };
+    let mut reasons = Vec::new();
+    if mesh.volume_elements.is_empty() {
+        reasons.push(QualityReason {
+            code: QualityReasonCode::SolidMeshNoVolumeElements,
+            detail: "analysis mesh has no volume elements".to_string(),
+        });
+    }
+    if let Some(element) = mesh
+        .volume_elements
+        .iter()
+        .find(|element| !element.kind.is_supported_for_solid_solve())
+    {
+        reasons.push(QualityReason {
+            code: QualityReasonCode::SolidMeshUnsupportedElementKind,
+            detail: format!(
+                "analysis mesh contains unsupported solid element kind {:?} at element {}",
+                element.kind, element.element_id
+            ),
+        });
+    }
+    if let Some(detail) = material_coverage_gap_detail(model, mesh) {
+        reasons.push(QualityReason {
+            code: QualityReasonCode::SolidMeshMaterialCoverageIncomplete,
+            detail,
+        });
+    }
+    if let Some(detail) = render_topology_gap_detail(mesh) {
+        reasons.push(QualityReason {
+            code: QualityReasonCode::SolidMeshRenderTopologyIncomplete,
+            detail,
+        });
+    }
+    reasons.extend(boundary_region_mapping_reasons(model, mesh));
+    let thresholds = runmat_meshing_core::QualityThresholds::default();
+    if !mesh.quality.min_scaled_jacobian.is_finite()
+        || mesh.quality.min_scaled_jacobian < thresholds.min_scaled_jacobian
+    {
+        reasons.push(QualityReason {
+            code: QualityReasonCode::SolidMeshQualityMinJacobianFailed,
+            detail: format!(
+                "analysis mesh min_scaled_jacobian={} is below threshold {}",
+                mesh.quality.min_scaled_jacobian, thresholds.min_scaled_jacobian
+            ),
+        });
+    }
+    if !mesh.quality.max_aspect_ratio.is_finite()
+        || mesh.quality.max_aspect_ratio > thresholds.max_aspect_ratio
+    {
+        reasons.push(QualityReason {
+            code: QualityReasonCode::SolidMeshQualityAspectRatioWarn,
+            detail: format!(
+                "analysis mesh max_aspect_ratio={} exceeds warning threshold {}",
+                mesh.quality.max_aspect_ratio, thresholds.max_aspect_ratio
+            ),
+        });
+    }
+    if let Some(thresholds) = boundary_projection_warning_thresholds_m(mesh) {
+        if !mesh.quality.max_boundary_projection_error_m.is_finite()
+            || !mesh.quality.mean_boundary_projection_error_m.is_finite()
+            || mesh.quality.max_boundary_projection_error_m > thresholds.max_error_m
+            || mesh.quality.mean_boundary_projection_error_m > thresholds.mean_error_m
+        {
+            reasons.push(QualityReason {
+                code: QualityReasonCode::SolidMeshBoundaryProjectionWarn,
+                detail: format!(
+                    "analysis mesh max_boundary_projection_error_m={} or mean_boundary_projection_error_m={} exceeds warning thresholds max={} mean={}; boundary faces are a carved-grid approximation of the source surface",
+                    mesh.quality.max_boundary_projection_error_m,
+                    mesh.quality.mean_boundary_projection_error_m,
+                    thresholds.max_error_m,
+                    thresholds.mean_error_m
+                ),
+            });
+        }
+    }
+    reasons
+}
+
+fn render_topology_gap_detail(mesh: &AnalysisMeshArtifact) -> Option<String> {
+    if mesh.volume_elements.is_empty() {
+        return None;
+    }
+    let mut renderable_boundary_face_count = 0_usize;
+    for face in &mesh.boundary_faces {
+        if face.kind != runmat_meshing_core::BoundaryElementKind::Tri3 || face.node_ids.len() != 3 {
+            continue;
+        }
+        renderable_boundary_face_count += 1;
+    }
+    if renderable_boundary_face_count == 0 {
+        return Some(format!(
+            "analysis mesh has {} volume elements but no renderable Tri3 boundary faces for solver field visualization",
+            mesh.volume_elements.len()
+        ));
+    }
+    if let Err(err) = validate_analysis_mesh_solver_field_mapping(mesh) {
+        return Some(format!(
+            "analysis mesh render topology is incomplete: renderable_boundary_face_count={} field_mapping_error={}",
+            renderable_boundary_face_count, err
+        ));
+    }
+    None
+}
+
+fn validate_analysis_mesh_solver_field_mapping(mesh: &AnalysisMeshArtifact) -> Result<(), String> {
+    let element_values = vec![0.0_f64; mesh.volume_elements.len()];
+    runmat_meshing::map_volume_scalar_field_to_boundary_faces(mesh, &element_values)
+        .map_err(|err| err.to_string())?;
+    let node_values = vec![[0.0_f64; 3]; mesh.nodes.len()];
+    runmat_meshing::map_nodal_vector_field_to_boundary_nodes(mesh, &node_values)
+        .map_err(|err| err.to_string())?;
+    runmat_meshing::map_nodal_vector_field_to_boundary_faces(mesh, &node_values)
+        .map_err(|err| err.to_string())?;
+    Ok(())
+}
+
+struct BoundaryProjectionWarningThresholds {
+    max_error_m: f64,
+    mean_error_m: f64,
+}
+
+fn boundary_projection_warning_thresholds_m(
+    mesh: &AnalysisMeshArtifact,
+) -> Option<BoundaryProjectionWarningThresholds> {
+    mesh.sizing
+        .global_target_size_m
+        .filter(|target_size_m| target_size_m.is_finite() && *target_size_m > 0.0)
+        .map(|target_size_m| BoundaryProjectionWarningThresholds {
+            max_error_m: target_size_m * 0.5,
+            mean_error_m: target_size_m * 0.25,
+        })
+}
+
+fn missing_solid_analysis_mesh_reasons(
+    model: &AnalysisModel,
+    analysis_mesh: Option<&AnalysisMeshArtifact>,
+) -> Vec<QualityReason> {
+    if analysis_mesh.is_some() || model_has_explicit_structural_elements(model) {
+        return Vec::new();
+    }
+    vec![QualityReason {
+        code: QualityReasonCode::MissingSolidAnalysisMesh,
+        detail: "linear static structural result requires a solver-ready solid analysis mesh"
+            .to_string(),
+    }]
+}
+
+fn model_has_explicit_structural_elements(model: &AnalysisModel) -> bool {
+    model
+        .structural
+        .as_ref()
+        .is_some_and(|structural| !structural.elements.is_empty())
+}
+
+fn boundary_region_mapping_reasons(
+    model: &AnalysisModel,
+    mesh: &AnalysisMeshArtifact,
+) -> Vec<QualityReason> {
+    let boundary_region_ids = mesh
+        .boundary_faces
+        .iter()
+        .flat_map(|face| face.region_ids.iter().map(String::as_str))
+        .collect::<HashSet<_>>();
+    let mut reasons = Vec::new();
+    for load in &model.loads {
+        if !load_requires_boundary_region(&load.kind) {
+            continue;
+        }
+        if !boundary_region_ids.contains(load.region_id.as_str()) {
+            reasons.push(QualityReason {
+                code: QualityReasonCode::SolidMeshUnmappedLoadRegion,
+                detail: format!(
+                    "load `{}` references region `{}` but the analysis mesh has no matching boundary faces",
+                    load.load_id, load.region_id
+                ),
+            });
+        }
+    }
+    for boundary_condition in &model.boundary_conditions {
+        if !boundary_region_ids.contains(boundary_condition.region_id.as_str()) {
+            reasons.push(QualityReason {
+                code: QualityReasonCode::SolidMeshUnmappedBoundaryConditionRegion,
+                detail: format!(
+                    "boundary condition `{}` references region `{}` but the analysis mesh has no matching boundary faces",
+                    boundary_condition.bc_id, boundary_condition.region_id
+                ),
+            });
+        }
+    }
+    reasons
+}
+
+fn load_requires_boundary_region(kind: &LoadKind) -> bool {
+    matches!(
+        kind,
+        LoadKind::Force { .. }
+            | LoadKind::Moment { .. }
+            | LoadKind::Wrench { .. }
+            | LoadKind::Pressure { .. }
+    )
+}
+
+fn material_coverage_gap_detail(
+    model: &AnalysisModel,
+    mesh: &AnalysisMeshArtifact,
+) -> Option<String> {
+    if mesh.volume_elements.is_empty() {
+        return None;
+    }
+    if model.material_assignments.is_empty() {
+        return (model.materials.len() != 1).then(|| {
+            format!(
+                "analysis mesh has {} material regions but model has {} materials and no material assignments",
+                mesh.volume_elements
+                    .iter()
+                    .map(|element| element.material_region_id.as_str())
+                    .collect::<HashSet<_>>()
+                    .len(),
+                model.materials.len()
+            )
+        });
+    }
+    if model.materials.len() == 1 {
+        let material_id = model.materials[0].material_id.as_str();
+        if model
+            .material_assignments
+            .iter()
+            .all(|assignment| assignment.assigned_material_id == material_id)
+        {
+            return None;
+        }
+    }
+    let assigned_region_ids = model
+        .material_assignments
+        .iter()
+        .map(|assignment| assignment.region_id.as_str())
+        .collect::<HashSet<_>>();
+    let mut uncovered = mesh
+        .volume_elements
+        .iter()
+        .map(|element| element.material_region_id.as_str())
+        .filter(|region_id| !assigned_region_ids.contains(region_id))
+        .collect::<Vec<_>>();
+    uncovered.sort_unstable();
+    uncovered.dedup();
+    if uncovered.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "analysis mesh volume material regions are not covered by model material assignments: {}",
+            uncovered.join(",")
+        ))
+    }
+}
+
+fn primary_solver_mesh_field_expected_count(
+    field: &AnalysisField,
+    mesh: &AnalysisMeshArtifact,
+) -> Option<usize> {
+    if matches!(
+        field.field_id.as_str(),
+        FEA_FIELD_STRUCTURAL_ROTATION
+            | FEA_FIELD_STRUCTURAL_REACTION_FORCE
+            | FEA_FIELD_STRUCTURAL_REACTION_MOMENT
+    ) {
+        return None;
+    }
+    if let Some(count) = mesh_field_topology_expected_count(field, mesh) {
+        return Some(count);
+    }
+
+    match field.field_id.as_str() {
+        FEA_FIELD_STRUCTURAL_DISPLACEMENT | FEA_FIELD_STRUCTURAL_NODAL_VON_MISES => {
+            Some(mesh.nodes.len())
+        }
+        FEA_FIELD_STRUCTURAL_STRAIN
+        | FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY
+        | FEA_FIELD_STRUCTURAL_STRESS
+        | FEA_FIELD_STRUCTURAL_VON_MISES => Some(mesh.volume_elements.len()),
+        _ => None,
+    }
+}
+
+fn mesh_field_topology_expected_count(
+    field: &AnalysisField,
+    mesh: &AnalysisMeshArtifact,
+) -> Option<usize> {
+    let descriptor = AnalysisFieldDescriptor::from_field(field);
+    let topology_id = descriptor.topology_id.as_deref()?;
+    let location = mesh_field_topology_location(descriptor.location)?;
+    let element_kind = descriptor.element_kind.as_deref();
+
+    mesh.field_topology
+        .iter()
+        .find(|topology| {
+            topology.topology_id == topology_id
+                && topology.location == location
+                && topology_element_kind_matches(topology, element_kind)
+        })
+        .map(|topology| topology.entity_count)
+}
+
+fn mesh_field_topology_location(
+    location: AnalysisFieldLocation,
+) -> Option<AnalysisFieldTopologyLocation> {
+    match location {
+        AnalysisFieldLocation::Node => Some(AnalysisFieldTopologyLocation::Node),
+        AnalysisFieldLocation::Element => Some(AnalysisFieldTopologyLocation::VolumeElement),
+        AnalysisFieldLocation::BoundaryFace => Some(AnalysisFieldTopologyLocation::BoundaryFace),
+        _ => None,
+    }
+}
+
+fn topology_element_kind_matches(
+    topology: &AnalysisFieldTopologyDescriptor,
+    element_kind: Option<&str>,
+) -> bool {
+    match (
+        topology.element_kind.as_deref(),
+        normalized_mesh_element_kind(element_kind),
+    ) {
+        (None, None) => true,
+        (Some(left), Some(right)) => left == right,
+        (None, Some(_)) => false,
+        (Some(_), None) => false,
+    }
+}
+
+fn normalized_mesh_element_kind(element_kind: Option<&str>) -> Option<&str> {
+    match element_kind {
+        Some("tetrahedron4") => Some(TETRAHEDRON4_FIELD_ELEMENT_KIND),
+        Some(other) => Some(other),
+        None => None,
+    }
+}
+
+fn descriptor_entity_count(field: &AnalysisField, descriptor: &AnalysisFieldDescriptor) -> usize {
+    if descriptor.entity_count > 0 {
+        return descriptor.entity_count;
+    }
+    if matches!(
+        descriptor.location,
+        AnalysisFieldLocation::Global | AnalysisFieldLocation::Mode
+    ) {
+        return field.element_count();
+    }
+    if let Some(first_dim) = field.shape.first().copied() {
+        if field.shape.len() > 1 || descriptor.component_count.is_some() {
+            return first_dim;
+        }
+    }
+    field.element_count()
 }
 
 pub fn analysis_run_electromagnetic_op(
@@ -9871,7 +10612,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
     if result_quality != QualityGate::Pass {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::ElectromagneticSolveQualityLow,
-            detail: "electromagnetic static solve quality below production target".to_string(),
+            detail: "electromagnetic static solve quality below target".to_string(),
         });
     }
     if em_spread_breach {
@@ -12904,6 +13645,15 @@ fn attach_prep_artifact_to_run_options(options: &mut AnalysisRunOptions, prep_ar
     }
 }
 
+fn attach_analysis_mesh_artifact_to_run_options(
+    options: &mut AnalysisRunOptions,
+    analysis_mesh_artifact_path: Option<&str>,
+) {
+    if options.analysis_mesh_artifact_path.is_none() {
+        options.analysis_mesh_artifact_path = analysis_mesh_artifact_path.map(str::to_string);
+    }
+}
+
 fn attach_prep_artifact_to_modal_options(
     options: &mut AnalysisModalRunOptions,
     prep_artifact_id: &str,
@@ -12985,6 +13735,2503 @@ fn attach_prep_artifact_to_electromagnetic_options(
     }
 }
 
+#[derive(Debug, Clone)]
+struct StudyAnalysisMeshArtifact {
+    path: String,
+    evidence_path: String,
+    allow_refinement: bool,
+}
+
+fn generate_and_persist_study_analysis_mesh(
+    spec: &AnalysisStudySpec,
+    study_fingerprint: &str,
+    context: &OperationContext,
+) -> Result<Option<StudyAnalysisMeshArtifact>, OperationErrorEnvelope> {
+    if let Some(path) = spec.analysis_mesh_artifact_path.as_deref() {
+        resolve_analysis_mesh_artifact(
+            Some(path),
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+        )?;
+        let evidence_path = match spec.analysis_mesh_evidence_artifact_path.clone() {
+            Some(path) => path,
+            None => analysis_mesh_evidence_path_from_artifact(path, context)?,
+        };
+        return Ok(Some(StudyAnalysisMeshArtifact {
+            path: path.to_string(),
+            evidence_path,
+            allow_refinement: false,
+        }));
+    }
+
+    let Some(options) = spec.mesh_options.clone() else {
+        return Ok(None);
+    };
+    let options = mesh_options_in_si_units(options, spec.geometry.units);
+    let mut mesh =
+        generate_study_analysis_mesh_with_initial_boundary_focus(spec, &options, context)?;
+    attach_requested_boundary_regions_to_analysis_mesh(spec, &mut mesh);
+    attach_single_material_assignment_to_analysis_mesh(spec, &mut mesh);
+    attach_initial_adaptive_mesh_summary(spec, &options, &mut mesh);
+    let validation_options =
+        analysis_mesh_validation_options_for_generated_mesh(spec, &options, &mesh);
+    runmat_meshing_core::validate_analysis_mesh_with_options(&mesh, validation_options.clone())
+        .map_err(|err| {
+            operation_error(
+                ANALYSIS_RUN_STUDY_OPERATION,
+                ANALYSIS_RUN_STUDY_OP_VERSION,
+                context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RUN_STUDY.MESH_VALIDATION_FAILED",
+                    error_type: OperationErrorType::Validation,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("generated analysis mesh failed validation: {err:?}"),
+                BTreeMap::from([
+                    ("study_id".to_string(), spec.study_id.clone()),
+                    ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
+                    ("mesh_id".to_string(), mesh.mesh_id.clone()),
+                    (
+                        "mesh_validation_code".to_string(),
+                        runmat_meshing_core::analysis_mesh_validation_error_code(&err).to_string(),
+                    ),
+                ]),
+            )
+        })?;
+    let mesh_evidence = build_mesh_evidence_artifact(&mesh, &validation_options);
+    let mesh_authoring_summary = build_mesh_authoring_summary(&mesh_evidence);
+    let evidence_path = persist_study_evidence(
+        study_fingerprint,
+        "mesh_evidence",
+        serde_json::json!({
+            "schema_version": "fea_study_mesh_evidence_artifact/v1",
+            "study_id": spec.study_id.clone(),
+            "geometry_id": spec.geometry.geometry_id.clone(),
+            "geometry_revision": spec.geometry.revision,
+            "analysis_profile": spec.create_model_intent.profile.as_snake_case(),
+            "run_kind": spec.run_kind.as_snake_case(),
+            "refinement_context": analysis_refinement_context(spec),
+            "mesh_options": options,
+            "mesh_validation_options": validation_options,
+            "mesh_authoring_summary": mesh_authoring_summary,
+            "mesh_evidence": mesh_evidence,
+        }),
+    )
+    .map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to persist mesh evidence artifact: {err}"),
+            BTreeMap::from([
+                ("study_id".to_string(), spec.study_id.clone()),
+                ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
+            ]),
+        )
+    })?;
+
+    let mesh_path = persist_study_evidence(
+        study_fingerprint,
+        "analysis_mesh",
+        serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "study_id": spec.study_id.clone(),
+            "geometry_id": spec.geometry.geometry_id.clone(),
+            "geometry_revision": spec.geometry.revision,
+            "mesh_evidence_artifact_path": evidence_path.clone(),
+            "analysis_profile": spec.create_model_intent.profile.as_snake_case(),
+            "run_kind": spec.run_kind.as_snake_case(),
+            "refinement_context": analysis_refinement_context(spec),
+            "mesh_options": options,
+            "mesh_validation_options": validation_options,
+            "sizing_applications": sizing_application_summary(&mesh),
+            "sizing_rejections": sizing_rejection_summary(&mesh),
+            "mesh": mesh,
+        }),
+    )
+    .map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to persist analysis mesh artifact: {err}"),
+            BTreeMap::from([
+                ("study_id".to_string(), spec.study_id.clone()),
+                ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
+            ]),
+        )
+    })?;
+    Ok(Some(StudyAnalysisMeshArtifact {
+        path: mesh_path,
+        evidence_path,
+        allow_refinement: true,
+    }))
+}
+
+fn analysis_mesh_evidence_path_from_artifact(
+    analysis_mesh_artifact_path: &str,
+    context: &OperationContext,
+) -> Result<String, OperationErrorEnvelope> {
+    let bytes = fs_read(analysis_mesh_artifact_path).map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.ANALYSIS_MESH_READ_FAILED",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to read analysis mesh artifact: {err}"),
+            BTreeMap::from([(
+                "analysis_mesh_artifact_path".to_string(),
+                analysis_mesh_artifact_path.to_string(),
+            )]),
+        )
+    })?;
+    let payload = serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.ANALYSIS_MESH_PARSE_FAILED",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to parse analysis mesh artifact: {err}"),
+            BTreeMap::from([(
+                "analysis_mesh_artifact_path".to_string(),
+                analysis_mesh_artifact_path.to_string(),
+            )]),
+        )
+    })?;
+    payload
+        .get("mesh_evidence_artifact_path")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| {
+            operation_error(
+                ANALYSIS_RUN_STUDY_OPERATION,
+                ANALYSIS_RUN_STUDY_OP_VERSION,
+                context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RUN_STUDY.ANALYSIS_MESH_EVIDENCE_MISSING",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                "analysis mesh artifact does not reference a mesh evidence artifact",
+                BTreeMap::from([(
+                    "analysis_mesh_artifact_path".to_string(),
+                    analysis_mesh_artifact_path.to_string(),
+                )]),
+            )
+        })
+}
+
+fn generate_study_analysis_mesh_with_initial_boundary_focus(
+    spec: &AnalysisStudySpec,
+    options: &VolumeMeshingOptions,
+    context: &OperationContext,
+) -> Result<AnalysisMeshArtifact, OperationErrorEnvelope> {
+    let mut mesh = generate_analysis_mesh(&spec.geometry, options.clone()).map_err(|err| {
+        analysis_mesh_generation_error(
+            spec,
+            context,
+            "RM.FEA.RUN_STUDY.MESH_GENERATION_FAILED",
+            format!("failed to generate analysis mesh: {err}"),
+        )
+    })?;
+    attach_requested_boundary_regions_to_analysis_mesh(spec, &mut mesh);
+    attach_single_material_assignment_to_analysis_mesh(spec, &mut mesh);
+    let Some(sizing) = initial_boundary_focus_sizing_field(spec, options, &mesh) else {
+        return Ok(mesh);
+    };
+    let focused_mesh = generate_analysis_mesh_with_sizing(&spec.geometry, options.clone(), &sizing)
+        .map_err(|err| {
+            analysis_mesh_generation_error(
+                spec,
+                context,
+                "RM.FEA.RUN_STUDY.MESH_GENERATION_FAILED",
+                format!("failed to generate analysis mesh with boundary focus sizing: {err}"),
+            )
+        })?;
+    Ok(focused_mesh)
+}
+
+fn analysis_mesh_generation_error(
+    spec: &AnalysisStudySpec,
+    context: &OperationContext,
+    error_code: &'static str,
+    message: String,
+) -> OperationErrorEnvelope {
+    operation_error(
+        ANALYSIS_RUN_STUDY_OPERATION,
+        ANALYSIS_RUN_STUDY_OP_VERSION,
+        context,
+        OperationErrorSpec {
+            error_code,
+            error_type: OperationErrorType::Validation,
+            retryable: false,
+            severity: OperationErrorSeverity::Error,
+        },
+        message,
+        BTreeMap::from([
+            ("study_id".to_string(), spec.study_id.clone()),
+            ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
+        ]),
+    )
+}
+
+fn mesh_options_in_si_units(
+    mut options: VolumeMeshingOptions,
+    geometry_units: UnitSystem,
+) -> VolumeMeshingOptions {
+    let scale = geometry_unit_scale_to_meters(geometry_units);
+    if let MeshTargetSize::LengthM(length) = options.target_size {
+        options.target_size = MeshTargetSize::LengthM(length * scale);
+    }
+    if let Some(min_size_m) = options.min_size_m {
+        options.min_size_m = Some(min_size_m * scale);
+    }
+    if let Some(max_size_m) = options.max_size_m {
+        options.max_size_m = Some(max_size_m * scale);
+    }
+    options
+}
+
+fn analysis_mesh_validation_options_for_study(
+    spec: &AnalysisStudySpec,
+    options: &VolumeMeshingOptions,
+) -> AnalysisMeshValidationOptions {
+    AnalysisMeshValidationOptions {
+        quality: options.validation.quality,
+        max_volume_element_count: Some(options.max_elements),
+        max_volume_component_count: options.validation.max_volume_component_count,
+        expected_bounds_m: geometry_surface_bounds_m(&spec.geometry),
+        expected_volume_m3: geometry_enclosed_volume_m3(&spec.geometry),
+        expected_boundary_area_m2: geometry_surface_area_m2(&spec.geometry),
+        min_bounds_coverage_ratio: options.validation.min_bounds_coverage_ratio,
+        min_volume_coverage_ratio: options.validation.min_volume_coverage_ratio,
+        min_boundary_area_ratio: options.validation.min_boundary_area_ratio,
+        min_boundary_face_recovery_ratio: options.validation.min_boundary_face_recovery_ratio,
+        min_boundary_edge_recovery_ratio: options.validation.min_boundary_edge_recovery_ratio,
+        required_boundary_region_ids: required_boundary_region_ids_for_study(spec),
+        required_material_region_ids: required_material_region_ids_for_study(spec),
+        ..AnalysisMeshValidationOptions::default()
+    }
+}
+
+fn analysis_mesh_validation_options_for_generated_mesh(
+    spec: &AnalysisStudySpec,
+    options: &VolumeMeshingOptions,
+    mesh: &AnalysisMeshArtifact,
+) -> AnalysisMeshValidationOptions {
+    let mut validation = analysis_mesh_validation_options_for_study(spec, options);
+    if !is_solid_mesh_backend(mesh) {
+        validation.min_boundary_edge_recovery_ratio = 0.0;
+    } else if validation.max_volume_component_count.is_none()
+        && mesh.backend.volume_component_count > 0
+    {
+        validation.max_volume_component_count = Some(mesh.backend.volume_component_count);
+    }
+    if is_solid_mesh_backend(mesh) {
+        validation.require_no_unrecovered_tetrahedron_components = true;
+        validation.require_no_unrepaired_exact_quality = true;
+        validation.require_boundary_source_edge_provenance =
+            mesh.backend.plc_input_protected_edge_count > 0;
+        validation.coverage_sample_points_m = solid_body_coverage_sample_points(mesh);
+        validation.min_coverage_sample_ratio = 1.0;
+    }
+    validation
+}
+
+fn analysis_mesh_validation_options_for_loaded_artifact(
+    payload: &serde_json::Value,
+    mesh: &AnalysisMeshArtifact,
+) -> Result<AnalysisMeshValidationOptions, serde_json::Error> {
+    if let Some(validation_value) = payload.get("mesh_validation_options") {
+        return serde_json::from_value::<AnalysisMeshValidationOptions>(validation_value.clone());
+    }
+    let Some(options_value) = payload.get("mesh_options") else {
+        return Ok(AnalysisMeshValidationOptions::default());
+    };
+    let options = serde_json::from_value::<VolumeMeshingOptions>(options_value.clone())?;
+    let mut validation = AnalysisMeshValidationOptions {
+        quality: options.validation.quality,
+        max_volume_element_count: Some(options.max_elements),
+        max_volume_component_count: options.validation.max_volume_component_count,
+        min_bounds_coverage_ratio: options.validation.min_bounds_coverage_ratio,
+        min_volume_coverage_ratio: options.validation.min_volume_coverage_ratio,
+        min_boundary_area_ratio: options.validation.min_boundary_area_ratio,
+        min_boundary_face_recovery_ratio: options.validation.min_boundary_face_recovery_ratio,
+        min_boundary_edge_recovery_ratio: options.validation.min_boundary_edge_recovery_ratio,
+        ..AnalysisMeshValidationOptions::default()
+    };
+    if !is_solid_mesh_backend(mesh) {
+        validation.min_boundary_edge_recovery_ratio = 0.0;
+    } else if validation.max_volume_component_count.is_none()
+        && mesh.backend.volume_component_count > 0
+    {
+        validation.max_volume_component_count = Some(mesh.backend.volume_component_count);
+    }
+    if is_solid_mesh_backend(mesh) {
+        validation.require_no_unrecovered_tetrahedron_components = true;
+        validation.require_no_unrepaired_exact_quality = true;
+        validation.require_boundary_source_edge_provenance =
+            mesh.backend.plc_input_protected_edge_count > 0;
+        validation.coverage_sample_points_m = solid_body_coverage_sample_points(mesh);
+        validation.min_coverage_sample_ratio = 1.0;
+    }
+    Ok(validation)
+}
+
+fn is_solid_mesh_backend(mesh: &AnalysisMeshArtifact) -> bool {
+    mesh.backend.backend == "solid"
+}
+
+fn solid_body_coverage_sample_points(mesh: &AnalysisMeshArtifact) -> Vec<[f64; 3]> {
+    mesh.nodes
+        .iter()
+        .filter(|node| {
+            node.coordinates_m.iter().all(|value| value.is_finite())
+                && node
+                    .provenance
+                    .iter()
+                    .any(|provenance| provenance.source_entity_kind == SourceEntityKind::Body)
+        })
+        .map(|node| node.coordinates_m)
+        .take(64)
+        .collect()
+}
+
+fn geometry_surface_bounds_m(geometry: &GeometryAsset) -> Option<[[f64; 3]; 2]> {
+    let scale = geometry_unit_scale_to_meters(geometry.units);
+    let mut bounds = None::<[[f64; 3]; 2]>;
+    for vertex in geometry
+        .surface_meshes
+        .iter()
+        .flat_map(|surface| surface.vertices.iter())
+    {
+        let point = [vertex[0] * scale, vertex[1] * scale, vertex[2] * scale];
+        if point.iter().any(|coordinate| !coordinate.is_finite()) {
+            continue;
+        }
+        match bounds.as_mut() {
+            Some(bounds) => {
+                for axis in 0..3 {
+                    bounds[0][axis] = bounds[0][axis].min(point[axis]);
+                    bounds[1][axis] = bounds[1][axis].max(point[axis]);
+                }
+            }
+            None => bounds = Some([point, point]),
+        }
+    }
+    bounds
+}
+
+fn geometry_surface_area_m2(geometry: &GeometryAsset) -> Option<f64> {
+    let scale = geometry_unit_scale_to_meters(geometry.units);
+    let mut total_area = 0.0_f64;
+    for surface in &geometry.surface_meshes {
+        for triangle in &surface.triangles {
+            let Some(vertices) = surface_triangle_vertices(surface, *triangle) else {
+                continue;
+            };
+            let area = triangle_area(scale_triangle_vertices(vertices, scale));
+            if area.is_finite() && area > 0.0 {
+                total_area += area;
+            }
+        }
+    }
+    (total_area.is_finite() && total_area > 0.0).then_some(total_area)
+}
+
+fn geometry_enclosed_volume_m3(geometry: &GeometryAsset) -> Option<f64> {
+    let scale = geometry_unit_scale_to_meters(geometry.units);
+    let mut signed_volume = 0.0_f64;
+    for surface in &geometry.surface_meshes {
+        for triangle in &surface.triangles {
+            let Some(vertices) = surface_triangle_vertices(surface, *triangle) else {
+                continue;
+            };
+            let contribution =
+                signed_triangle_volume_from_origin(scale_triangle_vertices(vertices, scale));
+            if contribution.is_finite() {
+                signed_volume += contribution;
+            }
+        }
+    }
+    let volume = signed_volume.abs();
+    (volume.is_finite() && volume > f64::EPSILON).then_some(volume)
+}
+
+fn required_boundary_region_ids_for_study(spec: &AnalysisStudySpec) -> Vec<String> {
+    let Some(model) = spec.model.as_ref() else {
+        return Vec::new();
+    };
+    let mut region_ids = model
+        .loads
+        .iter()
+        .filter(|load| load_requires_boundary_region(&load.kind))
+        .map(|load| load.region_id.clone())
+        .chain(
+            model
+                .boundary_conditions
+                .iter()
+                .map(|condition| condition.region_id.clone()),
+        )
+        .collect::<Vec<_>>();
+    region_ids.sort();
+    region_ids.dedup();
+    region_ids
+}
+
+fn required_material_region_ids_for_study(spec: &AnalysisStudySpec) -> Vec<String> {
+    let Some(model) = spec.model.as_ref() else {
+        return Vec::new();
+    };
+    let mut region_ids = model
+        .material_assignments
+        .iter()
+        .map(|assignment| assignment.region_id.clone())
+        .collect::<Vec<_>>();
+    region_ids.sort();
+    region_ids.dedup();
+    region_ids
+}
+
+fn geometry_unit_scale_to_meters(units: UnitSystem) -> f64 {
+    match units {
+        UnitSystem::Meter | UnitSystem::Unspecified => 1.0,
+        UnitSystem::Millimeter => 0.001,
+        UnitSystem::Inch => 0.0254,
+    }
+}
+
+fn attach_requested_boundary_regions_to_analysis_mesh(
+    spec: &AnalysisStudySpec,
+    mesh: &mut AnalysisMeshArtifact,
+) {
+    let Some(model) = spec.model.as_ref() else {
+        return;
+    };
+    let mut requested_region_ids = model
+        .loads
+        .iter()
+        .filter(|load| load_requires_boundary_region(&load.kind))
+        .map(|load| load.region_id.clone())
+        .chain(
+            model
+                .boundary_conditions
+                .iter()
+                .map(|condition| condition.region_id.clone()),
+        )
+        .collect::<Vec<_>>();
+    requested_region_ids.sort();
+    requested_region_ids.dedup();
+
+    for region_id in requested_region_ids {
+        if analysis_mesh_has_boundary_region(mesh, &region_id) {
+            continue;
+        }
+        let Some(source_centroid) = source_region_surface_centroid(&spec.geometry, &region_id)
+        else {
+            continue;
+        };
+        let Some(face_index) = nearest_analysis_boundary_face_index(mesh, source_centroid) else {
+            continue;
+        };
+        let face = &mut mesh.boundary_faces[face_index];
+        if !face
+            .region_ids
+            .iter()
+            .any(|existing| existing == &region_id)
+        {
+            face.region_ids.push(region_id);
+            face.region_ids.sort();
+            face.region_ids.dedup();
+        }
+    }
+}
+
+fn analysis_mesh_has_boundary_region(mesh: &AnalysisMeshArtifact, region_id: &str) -> bool {
+    mesh.boundary_faces
+        .iter()
+        .any(|face| face.region_ids.iter().any(|existing| existing == region_id))
+}
+
+fn attach_single_material_assignment_to_analysis_mesh(
+    spec: &AnalysisStudySpec,
+    mesh: &mut AnalysisMeshArtifact,
+) {
+    let Some(model) = spec.model.as_ref() else {
+        return;
+    };
+    let mut assigned_region_ids = model
+        .material_assignments
+        .iter()
+        .map(|assignment| assignment.region_id.clone())
+        .collect::<Vec<_>>();
+    assigned_region_ids.sort();
+    assigned_region_ids.dedup();
+    let [region_id] = assigned_region_ids.as_slice() else {
+        return;
+    };
+    if mesh
+        .volume_elements
+        .iter()
+        .any(|element| element.material_region_id == *region_id)
+    {
+        return;
+    }
+    for element in &mut mesh.volume_elements {
+        element.material_region_id = region_id.clone();
+    }
+}
+
+fn source_region_surface_centroid(geometry: &GeometryAsset, region_id: &str) -> Option<[f64; 3]> {
+    let mut weighted = [0.0_f64; 3];
+    let mut total_area = 0.0_f64;
+    for mapping in geometry
+        .region_entity_mappings
+        .iter()
+        .filter(|mapping| mapping.region_id == region_id)
+        .filter(|mapping| matches!(mapping.entity_kind, EntityKind::Face | EntityKind::Element))
+    {
+        let Some(surface) = geometry
+            .surface_meshes
+            .iter()
+            .find(|surface| surface.mesh_id == mapping.mesh_id)
+        else {
+            continue;
+        };
+        for (triangle_index, triangle) in surface.triangles.iter().enumerate() {
+            if !mapping.contains_entity(triangle_index as u64) {
+                continue;
+            }
+            let Some(vertices) = surface_triangle_vertices(surface, *triangle) else {
+                continue;
+            };
+            let area = triangle_area(vertices);
+            if !area.is_finite() || area <= 0.0 {
+                continue;
+            }
+            let centroid = triangle_centroid(vertices);
+            for axis in 0..3 {
+                weighted[axis] += centroid[axis] * area;
+            }
+            total_area += area;
+        }
+    }
+    if total_area <= 0.0 || !total_area.is_finite() {
+        return None;
+    }
+    Some([
+        weighted[0] / total_area,
+        weighted[1] / total_area,
+        weighted[2] / total_area,
+    ])
+}
+
+fn surface_triangle_vertices(
+    surface: &runmat_geometry_core::SurfaceMesh,
+    triangle: [u32; 3],
+) -> Option<[[f64; 3]; 3]> {
+    Some([
+        *surface.vertices.get(triangle[0] as usize)?,
+        *surface.vertices.get(triangle[1] as usize)?,
+        *surface.vertices.get(triangle[2] as usize)?,
+    ])
+}
+
+fn scale_triangle_vertices(vertices: [[f64; 3]; 3], scale: f64) -> [[f64; 3]; 3] {
+    [
+        [
+            vertices[0][0] * scale,
+            vertices[0][1] * scale,
+            vertices[0][2] * scale,
+        ],
+        [
+            vertices[1][0] * scale,
+            vertices[1][1] * scale,
+            vertices[1][2] * scale,
+        ],
+        [
+            vertices[2][0] * scale,
+            vertices[2][1] * scale,
+            vertices[2][2] * scale,
+        ],
+    ]
+}
+
+fn triangle_centroid(vertices: [[f64; 3]; 3]) -> [f64; 3] {
+    [
+        (vertices[0][0] + vertices[1][0] + vertices[2][0]) / 3.0,
+        (vertices[0][1] + vertices[1][1] + vertices[2][1]) / 3.0,
+        (vertices[0][2] + vertices[1][2] + vertices[2][2]) / 3.0,
+    ]
+}
+
+fn triangle_area(vertices: [[f64; 3]; 3]) -> f64 {
+    let ab = [
+        vertices[1][0] - vertices[0][0],
+        vertices[1][1] - vertices[0][1],
+        vertices[1][2] - vertices[0][2],
+    ];
+    let ac = [
+        vertices[2][0] - vertices[0][0],
+        vertices[2][1] - vertices[0][1],
+        vertices[2][2] - vertices[0][2],
+    ];
+    let cross = [
+        ab[1] * ac[2] - ab[2] * ac[1],
+        ab[2] * ac[0] - ab[0] * ac[2],
+        ab[0] * ac[1] - ab[1] * ac[0],
+    ];
+    0.5 * (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt()
+}
+
+fn signed_triangle_volume_from_origin(vertices: [[f64; 3]; 3]) -> f64 {
+    let cross = [
+        vertices[1][1] * vertices[2][2] - vertices[1][2] * vertices[2][1],
+        vertices[1][2] * vertices[2][0] - vertices[1][0] * vertices[2][2],
+        vertices[1][0] * vertices[2][1] - vertices[1][1] * vertices[2][0],
+    ];
+    (vertices[0][0] * cross[0] + vertices[0][1] * cross[1] + vertices[0][2] * cross[2]) / 6.0
+}
+
+fn nearest_analysis_boundary_face_index(
+    mesh: &AnalysisMeshArtifact,
+    point_m: [f64; 3],
+) -> Option<usize> {
+    mesh.boundary_faces
+        .iter()
+        .enumerate()
+        .filter_map(|(index, face)| {
+            let centroid = analysis_boundary_face_centroid(mesh, &face.node_ids)?;
+            Some((index, vector_distance_m(centroid, point_m)))
+        })
+        .filter(|(_, distance)| distance.is_finite())
+        .min_by(|left, right| left.1.total_cmp(&right.1))
+        .map(|(index, _)| index)
+}
+
+fn analysis_boundary_face_centroid(
+    mesh: &AnalysisMeshArtifact,
+    node_ids: &[u32],
+) -> Option<[f64; 3]> {
+    if node_ids.is_empty() {
+        return None;
+    }
+    let mut centroid = [0.0_f64; 3];
+    for node_id in node_ids {
+        let node = mesh.nodes.iter().find(|node| node.node_id == *node_id)?;
+        for (axis, value) in node.coordinates_m.iter().enumerate() {
+            centroid[axis] += *value;
+        }
+    }
+    for value in &mut centroid {
+        *value /= node_ids.len() as f64;
+    }
+    Some(centroid)
+}
+
+#[derive(Debug, Clone)]
+struct RefinedAnalysisMeshArtifact {
+    path: String,
+    evidence_path: String,
+    refinement_effect: serde_json::Value,
+}
+
+fn generate_and_persist_refined_study_analysis_mesh(
+    spec: &AnalysisStudySpec,
+    study_fingerprint: &str,
+    analysis_mesh_artifact_path: Option<&str>,
+    context: &OperationContext,
+) -> Result<Option<RefinedAnalysisMeshArtifact>, OperationErrorEnvelope> {
+    let Some(path) = analysis_mesh_artifact_path else {
+        return Ok(None);
+    };
+    let path_buf = PathBuf::from(path);
+    let bytes = fs_read(path).map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.ANALYSIS_MESH_READ_FAILED",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to read analysis mesh artifact for refinement: {err}"),
+            BTreeMap::from([("analysis_mesh_artifact_path".to_string(), path.to_string())]),
+        )
+    })?;
+    let payload = serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.ANALYSIS_MESH_PARSE_FAILED",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to parse analysis mesh artifact for refinement: {err}"),
+            BTreeMap::from([("analysis_mesh_artifact_path".to_string(), path.to_string())]),
+        )
+    })?;
+    let options = payload
+        .get("mesh_options")
+        .cloned()
+        .map(serde_json::from_value::<runmat_meshing_core::VolumeMeshingOptions>)
+        .transpose()
+        .map_err(|err| {
+            operation_error(
+                ANALYSIS_RUN_STUDY_OPERATION,
+                ANALYSIS_RUN_STUDY_OP_VERSION,
+                context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RUN_STUDY.ANALYSIS_MESH_PARSE_FAILED",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("failed to decode analysis mesh options for refinement: {err}"),
+                BTreeMap::from([("analysis_mesh_artifact_path".to_string(), path.to_string())]),
+            )
+        })?;
+    let Some(options) = options else {
+        return Ok(None);
+    };
+    let mesh: AnalysisMeshArtifact =
+        serde_json::from_value(payload["mesh"].clone()).map_err(|err| {
+            operation_error(
+                ANALYSIS_RUN_STUDY_OPERATION,
+                ANALYSIS_RUN_STUDY_OP_VERSION,
+                context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RUN_STUDY.ANALYSIS_MESH_PARSE_FAILED",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("failed to decode analysis mesh payload for refinement: {err}"),
+                BTreeMap::from([("analysis_mesh_artifact_path".to_string(), path.to_string())]),
+            )
+        })?;
+    let Some(latest_iteration) = mesh.adaptive_iterations.last() else {
+        return Ok(None);
+    };
+    if latest_iteration.convergence_status != AdaptiveConvergenceStatus::Pending
+        || mesh.sizing.samples.is_empty()
+        || mesh.adaptive_iterations.len() >= options.refinement.max_iterations
+    {
+        return Ok(None);
+    }
+
+    let mut refined_mesh =
+        generate_analysis_mesh_with_sizing(&spec.geometry, options.clone(), &mesh.sizing).map_err(
+            |err| {
+                operation_error(
+                    ANALYSIS_RUN_STUDY_OPERATION,
+                    ANALYSIS_RUN_STUDY_OP_VERSION,
+                    context,
+                    OperationErrorSpec {
+                        error_code: "RM.FEA.RUN_STUDY.REFINED_MESH_GENERATION_FAILED",
+                        error_type: OperationErrorType::Validation,
+                        retryable: false,
+                        severity: OperationErrorSeverity::Error,
+                    },
+                    format!("failed to generate refined analysis mesh: {err}"),
+                    BTreeMap::from([
+                        ("study_id".to_string(), spec.study_id.clone()),
+                        ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
+                        ("analysis_mesh_artifact_path".to_string(), path.to_string()),
+                    ]),
+                )
+            },
+        )?;
+    refined_mesh.mesh_id = format!(
+        "{}_refined_{}",
+        refined_mesh.mesh_id,
+        mesh.adaptive_iterations.len()
+    );
+    attach_requested_boundary_regions_to_analysis_mesh(spec, &mut refined_mesh);
+    attach_single_material_assignment_to_analysis_mesh(spec, &mut refined_mesh);
+    refined_mesh.adaptive_iterations = mesh.adaptive_iterations.clone();
+    let refinement_effect = refinement_effect_summary(&mesh, &refined_mesh);
+    let refinement_convergence = runmat_meshing_core::evaluate_adaptive_convergence(
+        &options.refinement,
+        runmat_meshing_core::AdaptiveConvergenceMetrics {
+            completed_iterations: mesh.adaptive_iterations.len(),
+            previous_node_count: Some(mesh.nodes.len()),
+            current_node_count: Some(refined_mesh.nodes.len()),
+            previous_element_count: Some(mesh.volume_elements.len()),
+            current_element_count: Some(refined_mesh.volume_elements.len()),
+            ..runmat_meshing_core::AdaptiveConvergenceMetrics::default()
+        },
+    );
+    if refinement_convergence == AdaptiveConvergenceStatus::Converged
+        && !refinement_effect_topology_changed(&refinement_effect)
+    {
+        mark_latest_adaptive_iteration_converged(
+            &path_buf,
+            payload,
+            mesh,
+            "adaptive refinement produced no topology growth",
+        )
+        .map_err(|err| {
+            operation_error(
+                ANALYSIS_RUN_STUDY_OPERATION,
+                ANALYSIS_RUN_STUDY_OP_VERSION,
+                context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED",
+                    error_type: OperationErrorType::Internal,
+                    retryable: true,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("failed to persist adaptive convergence update: {err}"),
+                BTreeMap::from([
+                    ("study_id".to_string(), spec.study_id.clone()),
+                    ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
+                    ("analysis_mesh_artifact_path".to_string(), path.to_string()),
+                ]),
+            )
+        })?;
+        return Ok(None);
+    }
+    let validation_options =
+        analysis_mesh_validation_options_for_generated_mesh(spec, &options, &refined_mesh);
+    runmat_meshing_core::validate_analysis_mesh_with_options(
+        &refined_mesh,
+        validation_options.clone(),
+    )
+    .map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.REFINED_MESH_VALIDATION_FAILED",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("refined analysis mesh failed validation: {err:?}"),
+            BTreeMap::from([
+                ("study_id".to_string(), spec.study_id.clone()),
+                ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
+                ("mesh_id".to_string(), refined_mesh.mesh_id.clone()),
+                (
+                    "mesh_validation_code".to_string(),
+                    runmat_meshing_core::analysis_mesh_validation_error_code(&err).to_string(),
+                ),
+            ]),
+        )
+    })?;
+
+    let refined_mesh_evidence = build_mesh_evidence_artifact(&refined_mesh, &validation_options);
+    let refined_evidence_path = persist_study_evidence(
+        study_fingerprint,
+        "mesh_evidence_refined",
+        serde_json::json!({
+            "schema_version": "fea_study_mesh_evidence_artifact/v1",
+            "study_id": spec.study_id.clone(),
+            "geometry_id": spec.geometry.geometry_id.clone(),
+            "geometry_revision": spec.geometry.revision,
+            "source_analysis_mesh_artifact_path": path,
+            "analysis_profile": spec.create_model_intent.profile.as_snake_case(),
+            "run_kind": spec.run_kind.as_snake_case(),
+            "refinement_context": analysis_refinement_context(spec),
+            "mesh_options": options,
+            "mesh_validation_options": validation_options,
+            "refinement_effect": refinement_effect.clone(),
+            "mesh_evidence": refined_mesh_evidence,
+        }),
+    )
+    .map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to persist refined mesh evidence artifact: {err}"),
+            BTreeMap::from([
+                ("study_id".to_string(), spec.study_id.clone()),
+                ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
+            ]),
+        )
+    })?;
+
+    persist_study_evidence(
+        study_fingerprint,
+        "analysis_mesh_refined",
+        serde_json::json!({
+            "schema_version": "fea_study_analysis_mesh_artifact/v1",
+            "study_id": spec.study_id.clone(),
+            "geometry_id": spec.geometry.geometry_id.clone(),
+            "geometry_revision": spec.geometry.revision,
+            "source_analysis_mesh_artifact_path": path,
+            "mesh_evidence_artifact_path": refined_evidence_path.clone(),
+            "analysis_profile": spec.create_model_intent.profile.as_snake_case(),
+            "run_kind": spec.run_kind.as_snake_case(),
+            "refinement_context": analysis_refinement_context(spec),
+            "mesh_options": options,
+            "mesh_validation_options": validation_options,
+            "sizing_applications": sizing_application_summary(&refined_mesh),
+            "sizing_rejections": sizing_rejection_summary(&refined_mesh),
+            "refinement_effect": refinement_effect.clone(),
+            "mesh": refined_mesh,
+        }),
+    )
+    .map(|path| {
+        Some(RefinedAnalysisMeshArtifact {
+            path,
+            evidence_path: refined_evidence_path,
+            refinement_effect,
+        })
+    })
+    .map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to persist refined analysis mesh artifact: {err}"),
+            BTreeMap::from([
+                ("study_id".to_string(), spec.study_id.clone()),
+                ("geometry_id".to_string(), spec.geometry.geometry_id.clone()),
+            ]),
+        )
+    })
+}
+
+fn refinement_effect_topology_changed(refinement_effect: &serde_json::Value) -> bool {
+    refinement_effect
+        .get("topology_changed")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(true)
+}
+
+fn mark_latest_adaptive_iteration_converged(
+    analysis_mesh_artifact_path: &PathBuf,
+    mut payload: serde_json::Value,
+    mut mesh: AnalysisMeshArtifact,
+    detail: &str,
+) -> Result<(), String> {
+    let Some(latest_iteration) = mesh.adaptive_iterations.last_mut() else {
+        return Ok(());
+    };
+    latest_iteration.convergence_status = AdaptiveConvergenceStatus::Converged;
+    for indicator in &mut latest_iteration.indicators {
+        if indicator.status == runmat_meshing_core::RefinementIndicatorStatus::Used {
+            indicator.detail = Some(detail.to_string());
+        }
+    }
+    payload["mesh"] = serde_json::to_value(&mesh)
+        .map_err(|err| format!("failed to encode mesh payload: {err}"))?;
+    let bytes = serde_json::to_vec_pretty(&payload)
+        .map_err(|err| format!("failed to encode analysis mesh artifact: {err}"))?;
+    atomic_write_bytes(analysis_mesh_artifact_path, &bytes)?;
+    update_mesh_evidence_from_analysis_mesh_payload(&payload, &mesh)
+}
+
+fn attach_initial_adaptive_mesh_summary(
+    spec: &AnalysisStudySpec,
+    options: &runmat_meshing_core::VolumeMeshingOptions,
+    mesh: &mut AnalysisMeshArtifact,
+) {
+    let defaults = if matches!(options.refinement.strategy, RefinementStrategy::Uniform) {
+        Vec::new()
+    } else {
+        default_refinement_indicators_for_context(
+            spec.create_model_intent.profile.as_snake_case(),
+            spec.run_kind.as_snake_case(),
+        )
+    };
+    if defaults.is_empty()
+        && options.refinement.indicators.namespaces.is_empty()
+        && !matches!(options.refinement.strategy, RefinementStrategy::Uniform)
+    {
+        return;
+    }
+    let availability = defaults
+        .iter()
+        .cloned()
+        .map(|key| RefinementIndicatorAvailability {
+            key,
+            applicable: true,
+            field_available: false,
+        })
+        .collect::<Vec<_>>();
+    let indicators =
+        plan_refinement_indicators(&options.refinement, &defaults, &availability, false, false);
+    let convergence_status = if matches!(options.refinement.strategy, RefinementStrategy::None) {
+        AdaptiveConvergenceStatus::Disabled
+    } else {
+        AdaptiveConvergenceStatus::Pending
+    };
+    mesh.adaptive_iterations.push(AdaptiveIterationSummary {
+        iteration_index: 0,
+        node_count: mesh.nodes.len(),
+        element_count: mesh.volume_elements.len(),
+        convergence_status,
+        indicators,
+        markers: Vec::new(),
+        sizing_update: SizingFieldUpdate::default(),
+    });
+}
+
+fn initial_boundary_focus_sizing_field(
+    spec: &AnalysisStudySpec,
+    options: &runmat_meshing_core::VolumeMeshingOptions,
+    mesh: &AnalysisMeshArtifact,
+) -> Option<MeshSizingField> {
+    if matches!(options.refinement.strategy, RefinementStrategy::None)
+        || options.refinement.max_iterations == 0
+    {
+        return None;
+    }
+    if runmat_meshing_core::select_volume_backend(options).selected
+        != runmat_meshing_core::MeshBackendKind::Solid
+    {
+        return None;
+    }
+    let defaults = if matches!(options.refinement.strategy, RefinementStrategy::Uniform) {
+        Vec::new()
+    } else {
+        default_refinement_indicators_for_context(
+            spec.create_model_intent.profile.as_snake_case(),
+            spec.run_kind.as_snake_case(),
+        )
+    };
+    if defaults.is_empty() && options.refinement.indicators.namespaces.is_empty() {
+        return None;
+    }
+    let context = serde_json::json!({
+        "refinement_context": analysis_refinement_context(spec),
+    });
+    let boundary_load_region_ids =
+        refinement_context_region_ids(&context, "boundary_load_region_ids");
+    let boundary_constraint_region_ids =
+        refinement_context_region_ids(&context, "boundary_constraint_region_ids");
+    let load_focus_options = refinement_marker_options_for_focus(options.refinement.focus.loads);
+    let constraint_focus_options =
+        refinement_marker_options_for_focus(options.refinement.focus.constraints);
+    let has_boundary_load_regions = load_focus_options.is_some()
+        && has_boundary_faces_for_regions(mesh, boundary_load_region_ids.as_slice());
+    let has_boundary_constraint_regions = constraint_focus_options.is_some()
+        && has_boundary_faces_for_regions(mesh, boundary_constraint_region_ids.as_slice());
+    if !has_boundary_load_regions && !has_boundary_constraint_regions {
+        return None;
+    }
+    let availability = defaults
+        .iter()
+        .cloned()
+        .map(|key| {
+            let applicable = key.namespace != "structural"
+                || (key.name != "load_regions" || load_focus_options.is_some())
+                    && (key.name != "constraint_regions" || constraint_focus_options.is_some());
+            let field_available = key.namespace == "structural"
+                && ((key.name == "load_regions" && has_boundary_load_regions)
+                    || (key.name == "constraint_regions" && has_boundary_constraint_regions));
+            RefinementIndicatorAvailability {
+                key,
+                applicable,
+                field_available,
+            }
+        })
+        .collect::<Vec<_>>();
+    let indicators =
+        plan_refinement_indicators(&options.refinement, &defaults, &availability, false, false);
+    let mut sizing_update = SizingFieldUpdate::default();
+    if indicator_was_used(&indicators, "structural", "load_regions") {
+        if let Some(marker_options) = load_focus_options {
+            let samples =
+                structural_boundary_region_samples(mesh, boundary_load_region_ids.as_slice());
+            if let Ok((_, update)) = build_refinement_markers_from_samples(
+                &samples,
+                "structural.load_regions",
+                marker_options,
+            ) {
+                merge_sizing_update(&mut sizing_update, update);
+            }
+        }
+    }
+    if indicator_was_used(&indicators, "structural", "constraint_regions") {
+        if let Some(marker_options) = constraint_focus_options {
+            let samples =
+                structural_boundary_region_samples(mesh, boundary_constraint_region_ids.as_slice());
+            if let Ok((_, update)) = build_refinement_markers_from_samples(
+                &samples,
+                "structural.constraint_regions",
+                marker_options,
+            ) {
+                merge_sizing_update(&mut sizing_update, update);
+            }
+        }
+    }
+    if sizing_update.samples.is_empty()
+        && sizing_update.min_size_m.is_none()
+        && sizing_update.max_size_m.is_none()
+    {
+        return None;
+    }
+    let mut sizing = MeshSizingField::default();
+    sizing_update.apply_to(&mut sizing);
+    Some(sizing)
+}
+
+fn default_refinement_indicators_for_context(
+    profile: &str,
+    run_kind: &str,
+) -> Vec<runmat_meshing_core::RefinementIndicatorKey> {
+    runmat_meshing_core::default_refinement_indicators_for_analysis(profile, run_kind)
+}
+
+fn analysis_refinement_context(spec: &AnalysisStudySpec) -> serde_json::Value {
+    let Some(model) = spec.model.as_ref() else {
+        return serde_json::json!({
+            "boundary_load_region_ids": [],
+            "boundary_constraint_region_ids": [],
+        });
+    };
+
+    let mut load_region_ids = model
+        .loads
+        .iter()
+        .filter(|load| load_requires_boundary_region(&load.kind))
+        .map(|load| load.region_id.clone())
+        .collect::<Vec<_>>();
+    load_region_ids.sort();
+    load_region_ids.dedup();
+
+    let mut constraint_region_ids = model
+        .boundary_conditions
+        .iter()
+        .map(|boundary_condition| boundary_condition.region_id.clone())
+        .collect::<Vec<_>>();
+    constraint_region_ids.sort();
+    constraint_region_ids.dedup();
+
+    serde_json::json!({
+        "boundary_load_region_ids": load_region_ids,
+        "boundary_constraint_region_ids": constraint_region_ids,
+    })
+}
+
+fn append_solved_adaptive_mesh_summary(
+    analysis_mesh_artifact_path: Option<&str>,
+    fields: &[AnalysisField],
+) -> Result<(), String> {
+    let Some(path) = analysis_mesh_artifact_path else {
+        return Ok(());
+    };
+    let path_buf = PathBuf::from(path);
+    let mut payload: serde_json::Value = serde_json::from_slice(
+        &fs_read(&path_buf)
+            .map_err(|err| format!("failed to read analysis mesh artifact: {err}"))?,
+    )
+    .map_err(|err| format!("failed to parse analysis mesh artifact: {err}"))?;
+    let mut mesh: AnalysisMeshArtifact = serde_json::from_value(payload["mesh"].clone())
+        .map_err(|err| format!("failed to decode analysis mesh payload: {err}"))?;
+    let options = payload
+        .get("mesh_options")
+        .cloned()
+        .map(serde_json::from_value::<runmat_meshing_core::VolumeMeshingOptions>)
+        .transpose()
+        .map_err(|err| format!("failed to decode analysis mesh options: {err}"))?;
+    let Some(options) = options.as_ref() else {
+        return Ok(());
+    };
+
+    let profile_label = payload
+        .get("analysis_profile")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            "analysis mesh artifact is missing analysis_profile; regenerate the mesh from the typed .fea study"
+                .to_string()
+        })?;
+    let run_kind_label = payload
+        .get("run_kind")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            "analysis mesh artifact is missing run_kind; regenerate the mesh from the typed .fea study"
+                .to_string()
+        })?;
+    let defaults = if matches!(options.refinement.strategy, RefinementStrategy::Uniform) {
+        Vec::new()
+    } else {
+        default_refinement_indicators_for_context(profile_label, run_kind_label)
+    };
+    if defaults.is_empty()
+        && options.refinement.indicators.namespaces.is_empty()
+        && !matches!(options.refinement.strategy, RefinementStrategy::Uniform)
+    {
+        return Ok(());
+    }
+
+    let von_mises_values = analysis_field_values(fields, FEA_FIELD_STRUCTURAL_VON_MISES);
+    let has_von_mises = von_mises_values
+        .map(|values| values.len() == mesh.volume_elements.len())
+        .unwrap_or(false);
+    let strain_energy_density_values =
+        analysis_field_values(fields, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY);
+    let has_strain_energy_density = strain_energy_density_values
+        .map(|values| values.len() == mesh.volume_elements.len())
+        .unwrap_or(false);
+    let temperature_gradient_values = latest_prefixed_vector_field_magnitudes(
+        fields,
+        "thermal.temperature_gradient.",
+        mesh.volume_elements.len(),
+    );
+    let has_temperature_gradient = temperature_gradient_values.is_some();
+    let heat_flux_values = latest_prefixed_vector_field_magnitudes(
+        fields,
+        "thermal.heat_flux.",
+        mesh.volume_elements.len(),
+    );
+    let has_heat_flux = heat_flux_values.is_some();
+    let magnetic_flux_density_values = analysis_field_magnitudes(
+        fields,
+        "em.magnetic_flux_density_magnitude",
+        mesh.volume_elements.len(),
+    );
+    let has_magnetic_flux_density = magnetic_flux_density_values.is_some();
+    let electric_field_values =
+        analysis_field_magnitudes(fields, "em.electric_field_real", mesh.volume_elements.len());
+    let has_electric_field = electric_field_values.is_some();
+    let current_density_values = analysis_field_magnitudes(
+        fields,
+        "em.current_density_real",
+        mesh.volume_elements.len(),
+    );
+    let has_current_density = current_density_values.is_some();
+    let electromagnetic_energy_density_values =
+        analysis_field_magnitudes(fields, "em.energy_density", mesh.volume_elements.len());
+    let has_electromagnetic_energy_density = electromagnetic_energy_density_values.is_some();
+    let acoustic_pressure_values = analysis_field_magnitudes(
+        fields,
+        FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
+        mesh.volume_elements.len(),
+    );
+    let has_acoustic_pressure = acoustic_pressure_values.is_some();
+    let cfd_velocity_values =
+        analysis_field_magnitudes(fields, FEA_FIELD_CFD_VELOCITY, mesh.volume_elements.len());
+    let has_cfd_velocity = cfd_velocity_values.is_some();
+    let cfd_pressure_values =
+        analysis_field_magnitudes(fields, FEA_FIELD_CFD_PRESSURE, mesh.volume_elements.len());
+    let has_cfd_pressure = cfd_pressure_values.is_some();
+    let cfd_vorticity_values =
+        analysis_field_magnitudes(fields, FEA_FIELD_CFD_VORTICITY, mesh.volume_elements.len());
+    let has_cfd_vorticity = cfd_vorticity_values.is_some();
+    let cfd_wall_shear_values = analysis_field_magnitudes(
+        fields,
+        FEA_FIELD_CFD_WALL_SHEAR_STRESS,
+        mesh.volume_elements.len(),
+    );
+    let has_cfd_wall_shear = cfd_wall_shear_values.is_some();
+    let cht_interface_heat_flux_values = latest_prefixed_vector_field_magnitudes(
+        fields,
+        "cht.interface_heat_flux.",
+        mesh.volume_elements.len(),
+    );
+    let has_cht_interface_heat_flux = cht_interface_heat_flux_values.is_some();
+    let cht_interface_temperature_jump_values = latest_prefixed_vector_field_magnitudes(
+        fields,
+        "cht.interface_temperature_jump.",
+        mesh.volume_elements.len(),
+    );
+    let has_cht_interface_temperature_jump = cht_interface_temperature_jump_values.is_some();
+    let cht_fluid_velocity_values = analysis_field_magnitudes(
+        fields,
+        FEA_FIELD_CHT_FLUID_VELOCITY,
+        mesh.volume_elements.len(),
+    );
+    let has_cht_fluid_velocity = cht_fluid_velocity_values.is_some();
+    let boundary_load_region_ids =
+        refinement_context_region_ids(&payload, "boundary_load_region_ids");
+    let boundary_constraint_region_ids =
+        refinement_context_region_ids(&payload, "boundary_constraint_region_ids");
+    let load_focus_options = refinement_marker_options_for_focus(options.refinement.focus.loads);
+    let constraint_focus_options =
+        refinement_marker_options_for_focus(options.refinement.focus.constraints);
+    let has_boundary_load_regions = load_focus_options.is_some()
+        && has_boundary_faces_for_regions(&mesh, boundary_load_region_ids.as_slice());
+    let has_boundary_constraint_regions = constraint_focus_options.is_some()
+        && has_boundary_faces_for_regions(&mesh, boundary_constraint_region_ids.as_slice());
+    let availability = defaults
+        .iter()
+        .cloned()
+        .map(|key| {
+            let field_available = key.namespace == "structural"
+                && ((key.name == "stress_gradient" && has_von_mises)
+                    || (key.name == "strain_energy_density" && has_strain_energy_density));
+            let applicable = key.namespace != "structural"
+                || (key.name != "load_regions" || load_focus_options.is_some())
+                    && (key.name != "constraint_regions" || constraint_focus_options.is_some());
+            let field_available = field_available
+                || (key.namespace == "structural"
+                    && ((key.name == "load_regions" && has_boundary_load_regions)
+                        || (key.name == "constraint_regions" && has_boundary_constraint_regions)))
+                || (key.namespace == "thermal"
+                    && ((key.name == "temperature_gradient" && has_temperature_gradient)
+                        || (key.name == "heat_flux_gradient" && has_heat_flux)))
+                || (key.namespace == "electromagnetic"
+                    && ((key.name == "flux_density_gradient" && has_magnetic_flux_density)
+                        || (key.name == "electric_field_gradient" && has_electric_field)
+                        || (key.name == "current_density_gradient" && has_current_density)
+                        || (key.name == "energy_density" && has_electromagnetic_energy_density)))
+                || (key.namespace == "acoustic"
+                    && has_acoustic_pressure
+                    && matches!(
+                        key.name.as_str(),
+                        "pressure_gradient" | "pressure_curvature"
+                    ))
+                || (key.namespace == "cfd"
+                    && ((key.name == "velocity_gradient" && has_cfd_velocity)
+                        || (key.name == "pressure_gradient" && has_cfd_pressure)
+                        || (key.name == "vorticity" && has_cfd_vorticity)
+                        || (key.name == "wall_shear" && has_cfd_wall_shear)))
+                || (key.namespace == "cht"
+                    && ((key.name == "interface_heat_flux_jump" && has_cht_interface_heat_flux)
+                        || (key.name == "interface_temperature_jump"
+                            && has_cht_interface_temperature_jump)
+                        || (key.name == "fluid_boundary_layer" && has_cht_fluid_velocity)));
+            RefinementIndicatorAvailability {
+                key,
+                applicable,
+                field_available,
+            }
+        })
+        .collect::<Vec<_>>();
+    let element_budget_reached =
+        options.max_elements > 0 && mesh.volume_elements.len() >= options.max_elements;
+    let indicators = plan_refinement_indicators(
+        &options.refinement,
+        &defaults,
+        &availability,
+        element_budget_reached,
+        false,
+    );
+
+    let mut markers = Vec::new();
+    let mut sizing_update = SizingFieldUpdate::default();
+    if !element_budget_reached && matches!(options.refinement.strategy, RefinementStrategy::Uniform)
+    {
+        let samples = uniform_refinement_samples(&mesh);
+        let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+            &samples,
+            "mesh.uniform_refinement",
+            RefinementMarkerOptions::default(),
+        )
+        .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+        markers.extend(new_markers);
+        merge_sizing_update(&mut sizing_update, new_sizing_update);
+    }
+    let stress_gradient_used = indicator_was_used(&indicators, "structural", "stress_gradient");
+    let strain_energy_density_used =
+        indicator_was_used(&indicators, "structural", "strain_energy_density");
+    let load_regions_used = indicator_was_used(&indicators, "structural", "load_regions");
+    let constraint_regions_used =
+        indicator_was_used(&indicators, "structural", "constraint_regions");
+    let temperature_gradient_used =
+        indicator_was_used(&indicators, "thermal", "temperature_gradient");
+    let heat_flux_gradient_used = indicator_was_used(&indicators, "thermal", "heat_flux_gradient");
+    let electromagnetic_flux_density_used =
+        indicator_was_used(&indicators, "electromagnetic", "flux_density_gradient");
+    let electromagnetic_electric_field_used =
+        indicator_was_used(&indicators, "electromagnetic", "electric_field_gradient");
+    let electromagnetic_current_density_used =
+        indicator_was_used(&indicators, "electromagnetic", "current_density_gradient");
+    let electromagnetic_energy_density_used =
+        indicator_was_used(&indicators, "electromagnetic", "energy_density");
+    let acoustic_pressure_gradient_used =
+        indicator_was_used(&indicators, "acoustic", "pressure_gradient");
+    let acoustic_pressure_curvature_used =
+        indicator_was_used(&indicators, "acoustic", "pressure_curvature");
+    let cfd_velocity_gradient_used = indicator_was_used(&indicators, "cfd", "velocity_gradient");
+    let cfd_pressure_gradient_used = indicator_was_used(&indicators, "cfd", "pressure_gradient");
+    let cfd_vorticity_used = indicator_was_used(&indicators, "cfd", "vorticity");
+    let cfd_wall_shear_used = indicator_was_used(&indicators, "cfd", "wall_shear");
+    let cht_interface_heat_flux_jump_used =
+        indicator_was_used(&indicators, "cht", "interface_heat_flux_jump");
+    let cht_interface_temperature_jump_used =
+        indicator_was_used(&indicators, "cht", "interface_temperature_jump");
+    let cht_fluid_boundary_layer_used =
+        indicator_was_used(&indicators, "cht", "fluid_boundary_layer");
+    if !element_budget_reached && stress_gradient_used {
+        if let Some(values) = von_mises_values {
+            let samples = structural_stress_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "structural.stress_gradient",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if !element_budget_reached && load_regions_used {
+        let samples =
+            structural_boundary_region_samples(&mesh, boundary_load_region_ids.as_slice());
+        if let Some(options) = load_focus_options {
+            let (new_markers, new_sizing_update) =
+                build_refinement_markers_from_samples(&samples, "structural.load_regions", options)
+                    .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if !element_budget_reached && constraint_regions_used {
+        let samples =
+            structural_boundary_region_samples(&mesh, boundary_constraint_region_ids.as_slice());
+        if let Some(options) = constraint_focus_options {
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "structural.constraint_regions",
+                options,
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if !element_budget_reached && strain_energy_density_used {
+        if let Some(values) = strain_energy_density_values {
+            let samples = structural_strain_energy_density_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "structural.strain_energy_density",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if !element_budget_reached && temperature_gradient_used {
+        if let Some(values) = temperature_gradient_values.as_deref() {
+            let samples = thermal_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "thermal.temperature_gradient",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if !element_budget_reached && heat_flux_gradient_used {
+        if let Some(values) = heat_flux_values.as_deref() {
+            let samples = thermal_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "thermal.heat_flux_gradient",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if !element_budget_reached && electromagnetic_flux_density_used {
+        if let Some(values) = magnetic_flux_density_values.as_deref() {
+            let samples = electromagnetic_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "electromagnetic.flux_density_gradient",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if !element_budget_reached && electromagnetic_electric_field_used {
+        if let Some(values) = electric_field_values.as_deref() {
+            let samples = electromagnetic_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "electromagnetic.electric_field_gradient",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if !element_budget_reached && electromagnetic_current_density_used {
+        if let Some(values) = current_density_values.as_deref() {
+            let samples = electromagnetic_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "electromagnetic.current_density_gradient",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if !element_budget_reached && electromagnetic_energy_density_used {
+        if let Some(values) = electromagnetic_energy_density_values.as_deref() {
+            let samples = electromagnetic_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "electromagnetic.energy_density",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if !element_budget_reached && acoustic_pressure_gradient_used {
+        if let Some(values) = acoustic_pressure_values.as_deref() {
+            let samples = acoustic_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "acoustic.pressure_gradient",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if !element_budget_reached && acoustic_pressure_curvature_used {
+        if let Some(values) = acoustic_pressure_values.as_deref() {
+            let samples = acoustic_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "acoustic.pressure_curvature",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if !element_budget_reached && cfd_velocity_gradient_used {
+        if let Some(values) = cfd_velocity_values.as_deref() {
+            let samples = cfd_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "cfd.velocity_gradient",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if !element_budget_reached && cfd_pressure_gradient_used {
+        if let Some(values) = cfd_pressure_values.as_deref() {
+            let samples = cfd_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "cfd.pressure_gradient",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if !element_budget_reached && cfd_vorticity_used {
+        if let Some(values) = cfd_vorticity_values.as_deref() {
+            let samples = cfd_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "cfd.vorticity",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if !element_budget_reached && cfd_wall_shear_used {
+        if let Some(values) = cfd_wall_shear_values.as_deref() {
+            let samples = cfd_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "cfd.wall_shear",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if !element_budget_reached && cht_interface_heat_flux_jump_used {
+        if let Some(values) = cht_interface_heat_flux_values.as_deref() {
+            let samples = cht_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "cht.interface_heat_flux_jump",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if !element_budget_reached && cht_interface_temperature_jump_used {
+        if let Some(values) = cht_interface_temperature_jump_values.as_deref() {
+            let samples = cht_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "cht.interface_temperature_jump",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    if !element_budget_reached && cht_fluid_boundary_layer_used {
+        if let Some(values) = cht_fluid_velocity_values.as_deref() {
+            let samples = cht_element_gradient_samples(&mesh, values);
+            let (new_markers, new_sizing_update) = build_refinement_markers_from_samples(
+                &samples,
+                "cht.fluid_boundary_layer",
+                RefinementMarkerOptions::default(),
+            )
+            .map_err(|err| format!("failed to build refinement markers: {err:?}"))?;
+            markers.extend(new_markers);
+            merge_sizing_update(&mut sizing_update, new_sizing_update);
+        }
+    }
+    let convergence_status = if matches!(options.refinement.strategy, RefinementStrategy::Uniform) {
+        if element_budget_reached {
+            AdaptiveConvergenceStatus::ElementBudgetReached
+        } else if markers.is_empty() {
+            AdaptiveConvergenceStatus::Converged
+        } else {
+            AdaptiveConvergenceStatus::Pending
+        }
+    } else {
+        let marker_change = markers
+            .iter()
+            .map(|marker| marker.weight)
+            .filter(|weight| weight.is_finite())
+            .reduce(f64::max)
+            .unwrap_or(0.0);
+        runmat_meshing_core::evaluate_adaptive_convergence(
+            &options.refinement,
+            runmat_meshing_core::AdaptiveConvergenceMetrics {
+                completed_iterations: mesh.adaptive_iterations.len(),
+                element_budget_reached,
+                field_change: (stress_gradient_used
+                    || load_regions_used
+                    || constraint_regions_used
+                    || temperature_gradient_used
+                    || heat_flux_gradient_used
+                    || electromagnetic_flux_density_used
+                    || electromagnetic_electric_field_used
+                    || electromagnetic_current_density_used
+                    || acoustic_pressure_gradient_used
+                    || acoustic_pressure_curvature_used
+                    || cfd_velocity_gradient_used
+                    || cfd_pressure_gradient_used
+                    || cfd_vorticity_used
+                    || cfd_wall_shear_used
+                    || cht_interface_heat_flux_jump_used
+                    || cht_interface_temperature_jump_used
+                    || cht_fluid_boundary_layer_used)
+                    .then_some(marker_change),
+                energy_change: (strain_energy_density_used || electromagnetic_energy_density_used)
+                    .then_some(marker_change),
+                residual: None,
+                ..runmat_meshing_core::AdaptiveConvergenceMetrics::default()
+            },
+        )
+    };
+
+    let mut updated_sizing = mesh.sizing.clone();
+    sizing_update.clone().apply_to(&mut updated_sizing);
+    mesh.sizing = updated_sizing;
+    mesh.adaptive_iterations.push(AdaptiveIterationSummary {
+        iteration_index: mesh.adaptive_iterations.len(),
+        node_count: mesh.nodes.len(),
+        element_count: mesh.volume_elements.len(),
+        convergence_status,
+        indicators,
+        markers,
+        sizing_update,
+    });
+    payload["mesh"] = serde_json::to_value(&mesh)
+        .map_err(|err| format!("failed to encode mesh payload: {err}"))?;
+    let bytes = serde_json::to_vec_pretty(&payload)
+        .map_err(|err| format!("failed to encode analysis mesh artifact: {err}"))?;
+    atomic_write_bytes(&path_buf, &bytes)?;
+    update_mesh_evidence_from_analysis_mesh_payload(&payload, &mesh)?;
+    Ok(())
+}
+
+fn update_mesh_evidence_from_analysis_mesh_payload(
+    analysis_mesh_payload: &serde_json::Value,
+    mesh: &AnalysisMeshArtifact,
+) -> Result<(), String> {
+    let Some(evidence_path) = analysis_mesh_payload
+        .get("mesh_evidence_artifact_path")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return Ok(());
+    };
+    let evidence_path = PathBuf::from(evidence_path);
+    let mut evidence_payload: serde_json::Value = serde_json::from_slice(
+        &fs_read(&evidence_path)
+            .map_err(|err| format!("failed to read mesh evidence artifact: {err}"))?,
+    )
+    .map_err(|err| format!("failed to parse mesh evidence artifact: {err}"))?;
+    let validation = evidence_payload
+        .get("mesh_evidence")
+        .and_then(|evidence| evidence.get("validation"))
+        .cloned()
+        .map(serde_json::from_value::<MeshValidationEvidence>)
+        .transpose()
+        .map_err(|err| format!("failed to decode mesh evidence validation policy: {err}"))?;
+    let mesh_evidence = if let Some(validation) = validation {
+        build_mesh_evidence_artifact_with_validation_evidence(mesh, validation)
+    } else {
+        let validation_options =
+            analysis_mesh_validation_options_for_loaded_artifact(analysis_mesh_payload, mesh)
+                .map_err(|err| {
+                    format!("failed to decode analysis mesh validation policy: {err}")
+                })?;
+        if let Some(validation_value) = analysis_mesh_payload.get("mesh_validation_options") {
+            evidence_payload["mesh_validation_options"] = validation_value.clone();
+        }
+        build_mesh_evidence_artifact(mesh, &validation_options)
+    };
+    let mesh_authoring_summary = build_mesh_authoring_summary(&mesh_evidence);
+    evidence_payload["mesh_authoring_summary"] = serde_json::to_value(mesh_authoring_summary)
+        .map_err(|err| format!("failed to encode mesh authoring summary: {err}"))?;
+    evidence_payload["mesh_evidence"] = serde_json::to_value(mesh_evidence)
+        .map_err(|err| format!("failed to encode mesh evidence payload: {err}"))?;
+    let bytes = serde_json::to_vec_pretty(&evidence_payload)
+        .map_err(|err| format!("failed to encode mesh evidence artifact: {err}"))?;
+    atomic_write_bytes(&evidence_path, &bytes)
+}
+
+fn analysis_field_values<'a>(fields: &'a [AnalysisField], field_id: &str) -> Option<&'a [f64]> {
+    fields
+        .iter()
+        .find(|field| field.field_id == field_id)
+        .and_then(AnalysisField::as_host_f64)
+}
+
+fn analysis_field_magnitudes(
+    fields: &[AnalysisField],
+    field_id: &str,
+    entity_count: usize,
+) -> Option<Vec<f64>> {
+    let values = analysis_field_values(fields, field_id)?;
+    vector_field_magnitudes(values, entity_count)
+}
+
+fn latest_prefixed_vector_field_magnitudes(
+    fields: &[AnalysisField],
+    field_id_prefix: &str,
+    entity_count: usize,
+) -> Option<Vec<f64>> {
+    fields
+        .iter()
+        .filter_map(|field| {
+            let suffix = field.field_id.strip_prefix(field_id_prefix)?;
+            let snapshot_index = suffix.parse::<usize>().ok()?;
+            let values = field.as_host_f64()?;
+            let magnitudes = vector_field_magnitudes(values, entity_count)?;
+            Some((snapshot_index, magnitudes))
+        })
+        .max_by_key(|(snapshot_index, _)| *snapshot_index)
+        .map(|(_, magnitudes)| magnitudes)
+}
+
+fn vector_field_magnitudes(values: &[f64], entity_count: usize) -> Option<Vec<f64>> {
+    if values.len() == entity_count {
+        return Some(values.to_vec());
+    }
+    if entity_count == 0 || values.len() != entity_count * 3 {
+        return None;
+    }
+    Some(
+        values
+            .chunks_exact(3)
+            .map(|chunk| (chunk[0].powi(2) + chunk[1].powi(2) + chunk[2].powi(2)).sqrt())
+            .collect(),
+    )
+}
+
+fn refinement_context_region_ids(payload: &serde_json::Value, key: &str) -> Vec<String> {
+    payload
+        .get("refinement_context")
+        .and_then(|context| context.get(key))
+        .and_then(serde_json::Value::as_array)
+        .map(|values| {
+            let mut ids = values
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            ids.sort();
+            ids.dedup();
+            ids
+        })
+        .unwrap_or_default()
+}
+
+fn has_boundary_faces_for_regions(mesh: &AnalysisMeshArtifact, region_ids: &[String]) -> bool {
+    !region_ids.is_empty()
+        && mesh.boundary_faces.iter().any(|face| {
+            face.region_ids
+                .iter()
+                .any(|region_id| region_ids.iter().any(|target| target == region_id))
+        })
+}
+
+fn refinement_marker_options_for_focus(
+    focus: runmat_meshing_core::RefinementFocusLevel,
+) -> Option<RefinementMarkerOptions> {
+    match focus {
+        runmat_meshing_core::RefinementFocusLevel::Off => None,
+        runmat_meshing_core::RefinementFocusLevel::Normal => {
+            Some(RefinementMarkerOptions::default())
+        }
+        runmat_meshing_core::RefinementFocusLevel::Fine => Some(RefinementMarkerOptions {
+            target_size_scale: 0.35,
+            max_markers: 96,
+            ..RefinementMarkerOptions::default()
+        }),
+    }
+}
+
+fn indicator_was_used(
+    indicators: &[runmat_meshing_core::RefinementIndicatorSummary],
+    namespace: &str,
+    name: &str,
+) -> bool {
+    indicators.iter().any(|indicator| {
+        indicator.namespace == namespace
+            && indicator.name == name
+            && indicator.status == runmat_meshing_core::RefinementIndicatorStatus::Used
+    })
+}
+
+fn merge_sizing_update(target: &mut SizingFieldUpdate, update: SizingFieldUpdate) {
+    target.samples.extend(update.samples);
+    target.min_size_m = match (target.min_size_m, update.min_size_m) {
+        (Some(left), Some(right)) => Some(left.min(right)),
+        (Some(left), None) => Some(left),
+        (None, Some(right)) => Some(right),
+        (None, None) => None,
+    };
+    target.max_size_m = match (target.max_size_m, update.max_size_m) {
+        (Some(left), Some(right)) => Some(left.max(right)),
+        (Some(left), None) => Some(left),
+        (None, Some(right)) => Some(right),
+        (None, None) => None,
+    };
+}
+
+fn sizing_application_summary(mesh: &AnalysisMeshArtifact) -> serde_json::Value {
+    let mut by_reason = BTreeMap::<String, usize>::new();
+    let mut inserted_breakpoints_by_reason = BTreeMap::<String, usize>::new();
+    let mut uninserted_by_reason = BTreeMap::<String, usize>::new();
+    let mut inserted_breakpoint_count = 0_usize;
+    for application in &mesh.sizing.applied_samples {
+        let reason = application
+            .reason
+            .clone()
+            .unwrap_or_else(|| "unspecified".to_string());
+        *by_reason.entry(reason.clone()).or_default() += 1;
+        if application.inserted_breakpoint_count > 0 {
+            *inserted_breakpoints_by_reason.entry(reason).or_default() +=
+                application.inserted_breakpoint_count;
+        } else {
+            *uninserted_by_reason.entry(reason).or_default() += 1;
+        }
+        inserted_breakpoint_count += application.inserted_breakpoint_count;
+    }
+    let accepted_requested = mesh
+        .backend
+        .tetrahedron_accepted_requested_refinement_point_count;
+    let accepted_location = mesh
+        .backend
+        .tetrahedron_accepted_requested_refinement_location_count;
+    let accepted_interpolated = mesh
+        .backend
+        .tetrahedron_accepted_requested_refinement_interpolated_point_count;
+    let rejected_requested = mesh
+        .backend
+        .tetrahedron_rejected_requested_refinement_point_count;
+    let dropped_requested = mesh
+        .backend
+        .tetrahedron_dropped_requested_refinement_point_count;
+    let mut anisotropic_by_reason = BTreeMap::<String, usize>::new();
+    let mut invalid_anisotropic_by_reason = BTreeMap::<String, usize>::new();
+    for sample in &mesh.sizing.anisotropic_samples {
+        let reason = sample
+            .reason
+            .clone()
+            .unwrap_or_else(|| "unspecified".to_string());
+        *anisotropic_by_reason.entry(reason.clone()).or_default() += 1;
+        if !sample.is_valid_metric() {
+            *invalid_anisotropic_by_reason.entry(reason).or_default() += 1;
+        }
+    }
+    let invalid_anisotropic_count = invalid_anisotropic_by_reason.values().sum::<usize>();
+    serde_json::json!({
+        "total": mesh.sizing.applied_samples.len(),
+        "inserted_breakpoint_count": inserted_breakpoint_count,
+        "by_reason": by_reason,
+        "inserted_breakpoints_by_reason": inserted_breakpoints_by_reason,
+        "uninserted_by_reason": uninserted_by_reason,
+        "anisotropic": {
+            "total": mesh.sizing.anisotropic_samples.len(),
+            "valid_count": mesh.sizing.anisotropic_samples.len().saturating_sub(invalid_anisotropic_count),
+            "invalid_count": invalid_anisotropic_count,
+            "by_reason": anisotropic_by_reason,
+            "invalid_by_reason": invalid_anisotropic_by_reason,
+        },
+        "requested_tetrahedron_refinement": {
+            "requested_count": mesh.backend.tetrahedron_requested_refinement_point_count,
+            "accepted_location_count": accepted_location,
+            "accepted_count": accepted_requested,
+            "accepted_exact_count": accepted_requested.saturating_sub(accepted_interpolated),
+            "accepted_interpolated_count": accepted_interpolated,
+            "rejected_count": rejected_requested,
+            "rejected_by_reason": mesh.backend.tetrahedron_requested_refinement_rejected_by_reason.clone(),
+            "dropped_count": dropped_requested,
+            "dropped_by_reason": mesh.backend.tetrahedron_requested_refinement_dropped_by_reason.clone(),
+            "acceptance_ratio": if mesh.backend.tetrahedron_requested_refinement_point_count > 0 {
+                Some(accepted_requested as f64 / mesh.backend.tetrahedron_requested_refinement_point_count as f64)
+            } else {
+                None
+            },
+            "rejection_ratio": if mesh.backend.tetrahedron_requested_refinement_point_count > 0 {
+                Some(rejected_requested as f64 / mesh.backend.tetrahedron_requested_refinement_point_count as f64)
+            } else {
+                None
+            },
+            "drop_ratio": if mesh.backend.tetrahedron_requested_refinement_point_count > 0 {
+                Some(dropped_requested as f64 / mesh.backend.tetrahedron_requested_refinement_point_count as f64)
+            } else {
+                None
+            },
+            "interpolated_ratio": if accepted_requested > 0 {
+                Some(accepted_interpolated as f64 / accepted_requested as f64)
+            } else {
+                None
+            },
+        },
+    })
+}
+
+fn sizing_rejection_summary(mesh: &AnalysisMeshArtifact) -> serde_json::Value {
+    let mut by_status = BTreeMap::<String, usize>::new();
+    let mut by_reason = BTreeMap::<String, usize>::new();
+    for rejection in &mesh.sizing.rejected_samples {
+        *by_status.entry(rejection.status.clone()).or_default() += 1;
+        let reason = rejection
+            .reason
+            .clone()
+            .unwrap_or_else(|| "unspecified".to_string());
+        *by_reason.entry(reason).or_default() += 1;
+    }
+    serde_json::json!({
+        "total": mesh.sizing.rejected_samples.len(),
+        "by_status": by_status,
+        "by_reason": by_reason,
+    })
+}
+
+fn refinement_effect_summary(
+    source_mesh: &AnalysisMeshArtifact,
+    refined_mesh: &AnalysisMeshArtifact,
+) -> serde_json::Value {
+    let source_node_count = source_mesh.nodes.len();
+    let source_element_count = source_mesh.volume_elements.len();
+    let refined_node_count = refined_mesh.nodes.len();
+    let refined_element_count = refined_mesh.volume_elements.len();
+    serde_json::json!({
+        "source_node_count": source_node_count,
+        "source_element_count": source_element_count,
+        "refined_node_count": refined_node_count,
+        "refined_element_count": refined_element_count,
+        "node_count_delta": refined_node_count as i64 - source_node_count as i64,
+        "element_count_delta": refined_element_count as i64 - source_element_count as i64,
+        "topology_changed": refined_node_count != source_node_count
+            || refined_element_count != source_element_count,
+    })
+}
+
+fn structural_stress_gradient_samples(
+    mesh: &AnalysisMeshArtifact,
+    von_mises_values: &[f64],
+) -> Vec<RefinementIndicatorSample> {
+    structural_element_scalar_gradient_samples(mesh, von_mises_values)
+}
+
+fn structural_strain_energy_density_samples(
+    mesh: &AnalysisMeshArtifact,
+    strain_energy_density_values: &[f64],
+) -> Vec<RefinementIndicatorSample> {
+    structural_element_scalar_gradient_samples(mesh, strain_energy_density_values)
+}
+
+fn thermal_element_gradient_samples(
+    mesh: &AnalysisMeshArtifact,
+    element_values: &[f64],
+) -> Vec<RefinementIndicatorSample> {
+    structural_element_scalar_gradient_samples(mesh, element_values)
+}
+
+fn electromagnetic_element_gradient_samples(
+    mesh: &AnalysisMeshArtifact,
+    element_values: &[f64],
+) -> Vec<RefinementIndicatorSample> {
+    structural_element_scalar_gradient_samples(mesh, element_values)
+}
+
+fn acoustic_element_gradient_samples(
+    mesh: &AnalysisMeshArtifact,
+    element_values: &[f64],
+) -> Vec<RefinementIndicatorSample> {
+    structural_element_scalar_gradient_samples(mesh, element_values)
+}
+
+fn cfd_element_gradient_samples(
+    mesh: &AnalysisMeshArtifact,
+    element_values: &[f64],
+) -> Vec<RefinementIndicatorSample> {
+    structural_element_scalar_gradient_samples(mesh, element_values)
+}
+
+fn cht_element_gradient_samples(
+    mesh: &AnalysisMeshArtifact,
+    element_values: &[f64],
+) -> Vec<RefinementIndicatorSample> {
+    structural_element_scalar_gradient_samples(mesh, element_values)
+}
+
+fn structural_boundary_region_samples(
+    mesh: &AnalysisMeshArtifact,
+    region_ids: &[String],
+) -> Vec<RefinementIndicatorSample> {
+    if region_ids.is_empty() {
+        return Vec::new();
+    }
+    let region_ids = region_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    let mut sampled_entity_ids = HashSet::new();
+    let mut samples = Vec::new();
+    for face in &mesh.boundary_faces {
+        if !face
+            .region_ids
+            .iter()
+            .any(|region_id| region_ids.contains(region_id.as_str()))
+        {
+            continue;
+        }
+        let Some(position_m) = element_centroid_m(mesh, &face.node_ids) else {
+            continue;
+        };
+        let fallback_size = element_characteristic_size_m(mesh, &face.node_ids);
+        if face.adjacent_volume_element_ids.is_empty() {
+            if sampled_entity_ids.insert(face.face_id.clone()) {
+                if let Some(current_size_m) = fallback_size {
+                    samples.push(RefinementIndicatorSample {
+                        entity_id: face.face_id.clone(),
+                        position_m,
+                        indicator_value: 1.0,
+                        current_size_m,
+                    });
+                }
+            }
+            continue;
+        }
+        for element_id in &face.adjacent_volume_element_ids {
+            if !sampled_entity_ids.insert(element_id.clone()) {
+                continue;
+            }
+            let current_size_m = mesh
+                .volume_elements
+                .iter()
+                .find(|element| element.element_id == *element_id)
+                .and_then(|element| element_characteristic_size_m(mesh, &element.node_ids))
+                .or(fallback_size);
+            if let Some(current_size_m) = current_size_m {
+                samples.push(RefinementIndicatorSample {
+                    entity_id: element_id.clone(),
+                    position_m,
+                    indicator_value: 1.0,
+                    current_size_m,
+                });
+            }
+        }
+    }
+    samples
+}
+
+fn structural_element_scalar_gradient_samples(
+    mesh: &AnalysisMeshArtifact,
+    values: &[f64],
+) -> Vec<RefinementIndicatorSample> {
+    if values.len() != mesh.volume_elements.len() {
+        return Vec::new();
+    }
+    mesh.volume_elements
+        .iter()
+        .enumerate()
+        .filter_map(|(index, element)| {
+            let value = *values.get(index)?;
+            let mut indicator = 0.0_f64;
+            for (other_index, other) in mesh.volume_elements.iter().enumerate() {
+                if index == other_index || shared_node_count(&element.node_ids, &other.node_ids) < 3
+                {
+                    continue;
+                }
+                if let Some(other_value) = values.get(other_index) {
+                    indicator = indicator.max((value - *other_value).abs());
+                }
+            }
+            if indicator <= 0.0 {
+                indicator = value.abs();
+            }
+            Some(RefinementIndicatorSample {
+                entity_id: element.element_id.clone(),
+                position_m: element_centroid_m(mesh, &element.node_ids)?,
+                indicator_value: indicator,
+                current_size_m: element_characteristic_size_m(mesh, &element.node_ids)?,
+            })
+        })
+        .collect()
+}
+
+fn uniform_refinement_samples(mesh: &AnalysisMeshArtifact) -> Vec<RefinementIndicatorSample> {
+    mesh.volume_elements
+        .iter()
+        .filter_map(|element| {
+            Some(RefinementIndicatorSample {
+                entity_id: element.element_id.clone(),
+                position_m: element_centroid_m(mesh, &element.node_ids)?,
+                indicator_value: 1.0,
+                current_size_m: element_characteristic_size_m(mesh, &element.node_ids)?,
+            })
+        })
+        .collect()
+}
+
+fn shared_node_count(left: &[u32], right: &[u32]) -> usize {
+    left.iter().filter(|node| right.contains(node)).count()
+}
+
+fn element_centroid_m(mesh: &AnalysisMeshArtifact, node_ids: &[u32]) -> Option<[f64; 3]> {
+    if node_ids.is_empty() {
+        return None;
+    }
+    let mut centroid = [0.0_f64; 3];
+    for node_id in node_ids {
+        let node = mesh.nodes.iter().find(|node| node.node_id == *node_id)?;
+        for (axis, value) in node.coordinates_m.iter().enumerate() {
+            centroid[axis] += *value;
+        }
+    }
+    for value in &mut centroid {
+        *value /= node_ids.len() as f64;
+    }
+    Some(centroid)
+}
+
+fn element_characteristic_size_m(mesh: &AnalysisMeshArtifact, node_ids: &[u32]) -> Option<f64> {
+    let mut max_edge = 0.0_f64;
+    for left_index in 0..node_ids.len() {
+        for right_index in (left_index + 1)..node_ids.len() {
+            let left = mesh
+                .nodes
+                .iter()
+                .find(|node| node.node_id == node_ids[left_index])?
+                .coordinates_m;
+            let right = mesh
+                .nodes
+                .iter()
+                .find(|node| node.node_id == node_ids[right_index])?
+                .coordinates_m;
+            max_edge = max_edge.max(vector_distance_m(left, right));
+        }
+    }
+    (max_edge > 0.0).then_some(max_edge)
+}
+
+fn vector_distance_m(left: [f64; 3], right: [f64; 3]) -> f64 {
+    ((left[0] - right[0]).powi(2) + (left[1] - right[1]).powi(2) + (left[2] - right[2]).powi(2))
+        .sqrt()
+}
+
+fn resolve_analysis_mesh_artifact(
+    analysis_mesh_artifact_path: Option<&str>,
+    operation: &'static str,
+    op_version: &'static str,
+    context: &OperationContext,
+) -> Result<Option<AnalysisMeshArtifact>, OperationErrorEnvelope> {
+    let Some(path) = analysis_mesh_artifact_path else {
+        return Ok(None);
+    };
+    let bytes = fs_read(path).map_err(|err| {
+        operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_LINEAR_STATIC.ANALYSIS_MESH_READ_FAILED",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to read analysis mesh artifact: {err}"),
+            BTreeMap::from([("analysis_mesh_artifact_path".to_string(), path.to_string())]),
+        )
+    })?;
+    let payload = serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|err| {
+        operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_LINEAR_STATIC.ANALYSIS_MESH_PARSE_FAILED",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to parse analysis mesh artifact: {err}"),
+            BTreeMap::from([("analysis_mesh_artifact_path".to_string(), path.to_string())]),
+        )
+    })?;
+    let mesh_value = payload
+        .get("mesh")
+        .cloned()
+        .unwrap_or_else(|| payload.clone());
+    let mesh = serde_json::from_value::<AnalysisMeshArtifact>(mesh_value).map_err(|err| {
+        operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_LINEAR_STATIC.ANALYSIS_MESH_PARSE_FAILED",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to decode analysis mesh artifact: {err}"),
+            BTreeMap::from([("analysis_mesh_artifact_path".to_string(), path.to_string())]),
+        )
+    })?;
+    let validation_options = analysis_mesh_validation_options_for_loaded_artifact(&payload, &mesh)
+        .map_err(|err| {
+            operation_error(
+                operation,
+                op_version,
+                context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RUN_LINEAR_STATIC.ANALYSIS_MESH_PARSE_FAILED",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("failed to decode analysis mesh options: {err}"),
+                BTreeMap::from([("analysis_mesh_artifact_path".to_string(), path.to_string())]),
+            )
+        })?;
+    runmat_meshing_core::validate_analysis_mesh_with_options(&mesh, validation_options).map_err(
+        |err| {
+            operation_error(
+                operation,
+                op_version,
+                context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RUN_LINEAR_STATIC.ANALYSIS_MESH_INVALID",
+                    error_type: OperationErrorType::Validation,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("analysis mesh artifact failed validation: {err:?}"),
+                BTreeMap::from([
+                    ("analysis_mesh_artifact_path".to_string(), path.to_string()),
+                    (
+                        "mesh_validation_code".to_string(),
+                        runmat_meshing_core::analysis_mesh_validation_error_code(&err).to_string(),
+                    ),
+                ]),
+            )
+        },
+    )?;
+    Ok(Some(mesh))
+}
+
+fn resolve_analysis_mesh_validation_evidence_status(
+    analysis_mesh_artifact_path: Option<&str>,
+    operation: &'static str,
+    op_version: &'static str,
+    context: &OperationContext,
+) -> Result<MeshValidationEvidenceStatus, OperationErrorEnvelope> {
+    let Some(path) = analysis_mesh_artifact_path else {
+        return Ok(MeshValidationEvidenceStatus::NotRequested);
+    };
+    let bytes = fs_read(path).map_err(|err| {
+        operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_LINEAR_STATIC.ANALYSIS_MESH_READ_FAILED",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to read analysis mesh artifact: {err}"),
+            BTreeMap::from([("analysis_mesh_artifact_path".to_string(), path.to_string())]),
+        )
+    })?;
+    let payload = serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|err| {
+        operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_LINEAR_STATIC.ANALYSIS_MESH_PARSE_FAILED",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to parse analysis mesh artifact: {err}"),
+            BTreeMap::from([("analysis_mesh_artifact_path".to_string(), path.to_string())]),
+        )
+    })?;
+    let Some(evidence_path) = payload
+        .get("mesh_evidence_artifact_path")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return Ok(MeshValidationEvidenceStatus::Missing {
+            detail: "analysis mesh artifact has no mesh_evidence_artifact_path".to_string(),
+        });
+    };
+    let evidence_bytes = fs_read(evidence_path).map_err(|err| {
+        operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_LINEAR_STATIC.ANALYSIS_MESH_EVIDENCE_READ_FAILED",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to read analysis mesh evidence artifact: {err}"),
+            BTreeMap::from([
+                ("analysis_mesh_artifact_path".to_string(), path.to_string()),
+                (
+                    "analysis_mesh_evidence_artifact_path".to_string(),
+                    evidence_path.to_string(),
+                ),
+            ]),
+        )
+    })?;
+    let evidence_payload =
+        serde_json::from_slice::<serde_json::Value>(&evidence_bytes).map_err(|err| {
+            operation_error(
+                operation,
+                op_version,
+                context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RUN_LINEAR_STATIC.ANALYSIS_MESH_EVIDENCE_PARSE_FAILED",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("failed to parse analysis mesh evidence artifact: {err}"),
+                BTreeMap::from([
+                    ("analysis_mesh_artifact_path".to_string(), path.to_string()),
+                    (
+                        "analysis_mesh_evidence_artifact_path".to_string(),
+                        evidence_path.to_string(),
+                    ),
+                ]),
+            )
+        })?;
+    let Some(validation_value) = evidence_payload
+        .get("mesh_evidence")
+        .and_then(|evidence| evidence.get("validation"))
+        .cloned()
+    else {
+        return Ok(MeshValidationEvidenceStatus::Missing {
+            detail: "mesh evidence artifact has no mesh_evidence.validation payload".to_string(),
+        });
+    };
+    serde_json::from_value::<MeshValidationEvidence>(validation_value)
+        .map(|validation| MeshValidationEvidenceStatus::Present(Box::new(validation)))
+        .map_err(|err| {
+            operation_error(
+                operation,
+                op_version,
+                context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RUN_LINEAR_STATIC.ANALYSIS_MESH_EVIDENCE_PARSE_FAILED",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("failed to decode analysis mesh evidence validation payload: {err}"),
+                BTreeMap::from([
+                    ("analysis_mesh_artifact_path".to_string(), path.to_string()),
+                    (
+                        "analysis_mesh_evidence_artifact_path".to_string(),
+                        evidence_path.to_string(),
+                    ),
+                ]),
+            )
+        })
+}
+
 fn study_evidence_root() -> PathBuf {
     let config = current_fea_runtime_config();
     config
@@ -13054,6 +16301,10 @@ fn fs_create_dir_all(path: impl Into<PathBuf>) -> std::io::Result<()> {
     runmat_filesystem::create_dir_all(path.into())
 }
 
+fn fs_read(path: impl Into<PathBuf>) -> std::io::Result<Vec<u8>> {
+    runmat_filesystem::read(path.into())
+}
+
 fn fs_write(path: impl Into<PathBuf>, bytes: &[u8]) -> std::io::Result<()> {
     runmat_filesystem::write(path.into(), bytes)
 }
@@ -13109,7 +16360,7 @@ fn to_fea_prep_context(
         topology_region_mesh_variance: prep.topology_region_mesh_variance,
         topology_triangle_family_ratio: prep.topology_triangle_family_ratio,
         topology_quad_family_ratio: prep.topology_quad_family_ratio,
-        topology_tet_family_ratio: prep.topology_tet_family_ratio,
+        topology_tetrahedron_family_ratio: prep.topology_tetrahedron_family_ratio,
         topology_hex_family_ratio: prep.topology_hex_family_ratio,
         coordinate_span_x_m: prep.coordinate_span_x_m,
         coordinate_span_y_m: prep.coordinate_span_y_m,
@@ -13167,8 +16418,123 @@ fn render_topology_from_prep_context(
             mesh_id: "solver_surface".to_string(),
             vertices: prep.element_topology_node_coordinates_m.clone(),
             triangles,
+            regions: Vec::new(),
+            vertex_volume_node_indices: (0..prep.element_topology_node_coordinates_m.len())
+                .map(Some)
+                .collect(),
+            triangle_volume_element_indices: Vec::new(),
         }],
     })
+}
+
+fn render_topology_from_analysis_mesh(
+    mesh: Option<&AnalysisMeshArtifact>,
+) -> Option<AnalysisRenderTopology> {
+    let mesh = mesh?;
+    if mesh.nodes.is_empty() || mesh.boundary_faces.is_empty() {
+        return None;
+    }
+    if validate_analysis_mesh_solver_field_mapping(mesh).is_err() {
+        return None;
+    }
+
+    let node_index_by_id = mesh
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| (node.node_id, index as u32))
+        .collect::<HashMap<_, _>>();
+    let volume_index_by_id = mesh
+        .volume_elements
+        .iter()
+        .enumerate()
+        .map(|(index, element)| (element.element_id.as_str(), index))
+        .collect::<HashMap<_, _>>();
+    let face_entries = mesh
+        .boundary_faces
+        .iter()
+        .filter(|face| {
+            face.kind == runmat_meshing_core::BoundaryElementKind::Tri3 && face.node_ids.len() == 3
+        })
+        .filter_map(|face| {
+            let triangle = [
+                *node_index_by_id.get(&face.node_ids[0])?,
+                *node_index_by_id.get(&face.node_ids[1])?,
+                *node_index_by_id.get(&face.node_ids[2])?,
+            ];
+            let volume_element_index = face
+                .adjacent_volume_element_ids
+                .iter()
+                .find_map(|element_id| volume_index_by_id.get(element_id.as_str()).copied());
+            Some((triangle, volume_element_index, face.region_ids.clone()))
+        })
+        .collect::<Vec<_>>();
+    let mut triangles = Vec::with_capacity(face_entries.len());
+    let mut triangle_volume_element_indices = Vec::with_capacity(face_entries.len());
+    let mut region_triangles = BTreeMap::<String, Vec<u32>>::new();
+    for (triangle_index, (triangle, volume_element_index, region_ids)) in
+        face_entries.into_iter().enumerate()
+    {
+        triangles.push(triangle);
+        triangle_volume_element_indices.push(volume_element_index);
+        for region_id in region_ids {
+            region_triangles
+                .entry(region_id)
+                .or_default()
+                .push(triangle_index as u32);
+        }
+    }
+    if triangles.is_empty() {
+        return None;
+    }
+    let regions = render_regions_from_triangle_indices(region_triangles);
+
+    Some(AnalysisRenderTopology {
+        schema_version: "analysis_render_topology/v1".to_string(),
+        source: AnalysisRenderTopologySource::AnalysisMesh,
+        meshes: vec![AnalysisRenderMesh {
+            mesh_id: "analysis_mesh_boundary".to_string(),
+            vertices: mesh.nodes.iter().map(|node| node.coordinates_m).collect(),
+            triangles,
+            regions,
+            vertex_volume_node_indices: (0..mesh.nodes.len()).map(Some).collect(),
+            triangle_volume_element_indices,
+        }],
+    })
+}
+
+fn render_regions_from_triangle_indices(
+    region_triangles: BTreeMap<String, Vec<u32>>,
+) -> Vec<AnalysisRenderRegion> {
+    region_triangles
+        .into_iter()
+        .filter_map(|(region_id, mut triangle_indices)| {
+            triangle_indices.sort_unstable();
+            triangle_indices.dedup();
+            let mut ranges = Vec::<AnalysisRenderTriangleRange>::new();
+            for triangle_index in triangle_indices {
+                if let Some(last) = ranges.last_mut() {
+                    if last.start.saturating_add(last.count) == triangle_index {
+                        last.count = last.count.saturating_add(1);
+                        continue;
+                    }
+                }
+                ranges.push(AnalysisRenderTriangleRange {
+                    start: triangle_index,
+                    count: 1,
+                });
+            }
+            if ranges.is_empty() {
+                return None;
+            }
+            Some(AnalysisRenderRegion {
+                region_id,
+                label: None,
+                tag: Some("boundary".to_string()),
+                triangle_ranges: ranges,
+            })
+        })
+        .collect()
 }
 
 fn triangle_from_element_edges(
@@ -14529,11 +17895,11 @@ fn resolve_run_prep_context(
         .filter(|mesh| mesh.element_family_hint == ElementFamilyHint::Quad)
         .count() as f64
         / mesh_count;
-    let topology_tet_family_ratio = artifact
+    let topology_tetrahedron_family_ratio = artifact
         .prep
         .prepared_meshes
         .iter()
-        .filter(|mesh| mesh.element_family_hint == ElementFamilyHint::Tet)
+        .filter(|mesh| mesh.element_family_hint == ElementFamilyHint::Tetrahedron)
         .count() as f64
         / mesh_count;
     let topology_hex_family_ratio = artifact
@@ -14892,7 +18258,7 @@ fn resolve_run_prep_context(
         topology_region_mesh_variance,
         topology_triangle_family_ratio,
         topology_quad_family_ratio,
-        topology_tet_family_ratio,
+        topology_tetrahedron_family_ratio,
         topology_hex_family_ratio,
         coordinate_span_x_m,
         coordinate_span_y_m,
@@ -15456,6 +18822,16 @@ fn map_validate_error(
         AnalysisValidationError::ZeroMomentVector { load_id } => (
             "RM.FEA.VALIDATE.ZERO_MOMENT",
             format!("moment load {load_id} must have nonzero magnitude"),
+            BTreeMap::from([("load_id".to_string(), load_id)]),
+        ),
+        AnalysisValidationError::InvalidWrench { load_id } => (
+            "RM.FEA.VALIDATE.INVALID_WRENCH",
+            format!("wrench load {load_id} must have finite force, moment, and point components"),
+            BTreeMap::from([("load_id".to_string(), load_id)]),
+        ),
+        AnalysisValidationError::ZeroWrench { load_id } => (
+            "RM.FEA.VALIDATE.ZERO_WRENCH",
+            format!("wrench load {load_id} must have nonzero force or moment"),
             BTreeMap::from([("load_id".to_string(), load_id)]),
         ),
         AnalysisValidationError::UnitMismatch { model, geometry } => (

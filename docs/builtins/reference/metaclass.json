@@ -1,0 +1,80 @@
+{
+  "title": "metaclass",
+  "category": "introspection",
+  "keywords": [
+    "metaclass",
+    "meta.class",
+    "classdef",
+    "object",
+    "introspection"
+  ],
+  "summary": "Return metadata for the runtime class of a value.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Metadata-only builtin. RunMat reads the gpuArray handle class without gathering provider buffers."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::metaclass::tests",
+    "integration": "crates/runmat-vm/tests/functions.rs::metaclass_builtin_script_surface_reports_runtime_class_refs"
+  },
+  "description": "`metaclass(object)` returns RunMat's metadata reference for the runtime class of `object`. RunMat represents MATLAB `matlab.metadata.Class` values as `ClassRef` metadata tokens, the same representation produced by the `?ClassName` parser path.",
+  "behaviors": [
+    "Object and handle-object inputs return a metadata reference for their registered runtime class.",
+    "Text inputs describe the runtime text class. A row character vector returns metadata for `char`; a string scalar or string array returns metadata for `string`.",
+    "Class references are ordinary metadata objects to `metaclass` and return metadata for `meta.class`.",
+    "gpuArray inputs return metadata for `gpuArray` without gathering provider buffers.",
+    "Numeric, logical, cell, struct, function-handle, listener, and MException values return metadata for their RunMat runtime class.",
+    "RunMat does not yet materialize full MATLAB `matlab.metadata.Class` object properties such as `PropertyList`, `MethodList`, or `SuperclassList`; those remain part of the broader metadata-object work."
+  ],
+  "examples": [
+    {
+      "description": "Get metadata for an object",
+      "input": "obj = Point();\nmc = metaclass(obj)",
+      "output": "mc = <class Point>"
+    },
+    {
+      "description": "Text inputs describe text classes",
+      "input": "mc = metaclass('Point')",
+      "output": "mc = <class char>"
+    },
+    {
+      "description": "Use the question-mark operator for class-name metadata",
+      "input": "mc = ?Point",
+      "output": "mc = <class Point>"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `metaclass(\"Point\")` look up the Point class?",
+      "answer": "No. This follows MATLAB semantics: text passed to `metaclass` is a text value, so RunMat returns metadata for `string` or `char`. Use `?Point` or `classref(\"Point\")` for class-name metadata."
+    },
+    {
+      "question": "Is the result a full MATLAB metadata object?",
+      "answer": "Not yet. RunMat returns its existing `ClassRef` metadata token. Static member and method dispatch already use this token, but full metadata property enumeration is still tracked by the object/type-introspection umbrella."
+    }
+  ],
+  "links": [
+    {
+      "label": "class",
+      "url": "./class"
+    },
+    {
+      "label": "superclasses",
+      "url": "./superclasses"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/metaclass.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/metaclass.rs"
+  }
+}

@@ -421,18 +421,6 @@ fn try_pagefun_gpu(operation: &PageOperation, operands: &[Value]) -> BuiltinResu
         return Ok(None);
     }
 
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        // Reassert WGPU provider only when operands are WGPU handles (device_id != 0).
-        if operands
-            .iter()
-            .any(|v| matches!(v, Value::GpuTensor(h) if h.device_id != 0))
-        {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
     let Some(provider) = runmat_accelerate_api::provider() else {
         return Ok(None);
     };
@@ -1056,6 +1044,7 @@ impl TypeName for Value {
             Value::StringArray(_) => "string array",
             Value::CharArray(_) => "char array",
             Value::Symbolic(_) => "sym",
+            Value::SymbolicArray(_) => "symbolic array",
             Value::Tensor(_) => "double array",
             Value::SparseTensor(_) => "sparse double array",
             Value::ComplexTensor(_) => "complex double array",

@@ -1,13 +1,21 @@
 use super::{
     ffi, topology_from_raw, OcctCadFormat, OcctCadPreviewSessionChunk, OcctCadPreviewSessionStart,
-    OcctCadTopology, OcctRawAssemblyNode, OcctRawFaceSemantic, OcctRawTopology,
+    OcctCadTopology, OcctRawAssemblyNode, OcctRawFaceEvaluationSample, OcctRawFaceSemantic,
+    OcctRawTopology,
 };
 use crate::import::{
     GeometryImportBudgetPolicy, GeometryImportContext, GeometryImportError, GeometryImportOptions,
 };
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const DEFAULT_LINEAR_DEFLECTION: f64 = 0.01;
 const DEFAULT_ANGULAR_DEFLECTION: f64 = 0.5;
+const OCCT_IMPORT_CANCELLED_MESSAGE: &str = "OCCT CAD import cancelled";
+static NATIVE_CAD_BACKEND_USED: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn native_cad_backend_was_used() -> bool {
+    NATIVE_CAD_BACKEND_USED.load(Ordering::Relaxed)
+}
 
 pub(crate) fn import_cad_topology(
     path: &str,
@@ -16,6 +24,7 @@ pub(crate) fn import_cad_topology(
     options: &GeometryImportOptions,
     context: &GeometryImportContext,
 ) -> Result<OcctCadTopology, GeometryImportError> {
+    NATIVE_CAD_BACKEND_USED.store(true, Ordering::Relaxed);
     context.check_cancelled()?;
     let cancel_token = ffi::OcctCancelTokenRegistration::new(context.cancellation_flag());
     let linear_deflection = options
@@ -43,7 +52,7 @@ pub(crate) fn import_cad_topology(
             cancel_token_id: cancel_token.id(),
         },
     )
-    .map_err(|err| GeometryImportError::ParseFailed(format!("OCCT CAD import failed: {err}")))?;
+    .map_err(|err| occt_bridge_error("OCCT CAD import failed", err))?;
     context.check_cancelled()?;
 
     payload_to_topology(payload, options, context)
@@ -56,6 +65,7 @@ pub(crate) fn start_cad_preview_session(
     options: &GeometryImportOptions,
     context: &GeometryImportContext,
 ) -> Result<OcctCadPreviewSessionStart, GeometryImportError> {
+    NATIVE_CAD_BACKEND_USED.store(true, Ordering::Relaxed);
     context.check_cancelled()?;
     let cancel_token = ffi::OcctCancelTokenRegistration::new(context.cancellation_flag());
     let payload = ffi::bridge::start_cad_preview_session(
@@ -64,9 +74,7 @@ pub(crate) fn start_cad_preview_session(
         ffi_format(format),
         ffi_import_options(options, cancel_token.id()),
     )
-    .map_err(|err| {
-        GeometryImportError::ParseFailed(format!("OCCT CAD preview session failed: {err}"))
-    })?;
+    .map_err(|err| occt_bridge_error("OCCT CAD preview session failed", err))?;
     context.check_cancelled()?;
     Ok(OcctCadPreviewSessionStart {
         session_id: payload.session_id,
@@ -81,6 +89,7 @@ pub(crate) fn read_cad_preview_session_chunk(
     options: &GeometryImportOptions,
     context: &GeometryImportContext,
 ) -> Result<OcctCadPreviewSessionChunk, GeometryImportError> {
+    NATIVE_CAD_BACKEND_USED.store(true, Ordering::Relaxed);
     context.check_cancelled()?;
     let cancel_token = ffi::OcctCancelTokenRegistration::new(context.cancellation_flag());
     let payload = ffi::bridge::read_cad_preview_session_chunk(
@@ -91,9 +100,7 @@ pub(crate) fn read_cad_preview_session_chunk(
             cancel_token_id: cancel_token.id(),
         },
     )
-    .map_err(|err| {
-        GeometryImportError::ParseFailed(format!("OCCT CAD preview session failed: {err}"))
-    })?;
+    .map_err(|err| occt_bridge_error("OCCT CAD preview session failed", err))?;
     context.check_cancelled()?;
     let topology = payload_to_topology(payload.topology, options, context)?;
     Ok(OcctCadPreviewSessionChunk {
@@ -107,6 +114,15 @@ pub(crate) fn read_cad_preview_session_chunk(
 
 pub(crate) fn close_cad_preview_session(session_id: u64) {
     ffi::bridge::close_cad_preview_session(session_id);
+}
+
+fn occt_bridge_error(operation: &str, err: impl std::fmt::Display) -> GeometryImportError {
+    let message = err.to_string();
+    if message.contains(OCCT_IMPORT_CANCELLED_MESSAGE) {
+        GeometryImportError::Cancelled
+    } else {
+        GeometryImportError::ParseFailed(format!("{operation}: {message}"))
+    }
 }
 
 fn payload_to_topology(
@@ -145,6 +161,18 @@ fn payload_to_topology(
                     material_density: item.material_density,
                     material_density_name: item.material_density_name,
                     material_density_value_type: item.material_density_value_type,
+                })
+                .collect(),
+            face_evaluation_samples: payload
+                .face_evaluation_samples
+                .into_iter()
+                .map(|item| OcctRawFaceEvaluationSample {
+                    face_id: item.face_id,
+                    u: item.u,
+                    v: item.v,
+                    point_m: [item.point_x, item.point_y, item.point_z],
+                    unit_normal: [item.normal_x, item.normal_y, item.normal_z],
+                    projection_error_m: item.projection_error,
                 })
                 .collect(),
             assembly_nodes: payload

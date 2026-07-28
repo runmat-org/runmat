@@ -17,7 +17,7 @@ const tmpDir = mkdtempSync(join(dirname(registryPath), ".runmat-wasm-registry-")
 const tmpRegistry = join(tmpDir, "generated_wasm_registry.rs");
 
 try {
-  console.log("==> generating wasm builtin registry for runmat-runtime/plot-web,occt-wasm-host");
+  console.log("==> generating wasm builtin registry for runmat-runtime/plot-web");
   const result = spawnSync(
     "cargo",
     [
@@ -28,7 +28,7 @@ try {
       "wasm32-unknown-unknown",
       "--no-default-features",
       "--features",
-      "plot-web,occt-wasm-host",
+      "plot-web",
     ],
     {
       cwd: repoRoot,

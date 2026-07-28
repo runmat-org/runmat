@@ -1,0 +1,42 @@
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SolidMaterial {
+    pub youngs_modulus_pa: f64,
+    pub poisson_ratio: f64,
+}
+
+#[derive(Debug, Error, Clone, PartialEq)]
+pub enum SolidMaterialError {
+    #[error("solid material Young's modulus must be positive and finite")]
+    InvalidYoungsModulus,
+    #[error("solid material Poisson ratio must be finite and in (-1, 0.5)")]
+    InvalidPoissonRatio,
+}
+
+impl SolidMaterial {
+    pub fn validate(self) -> Result<(), SolidMaterialError> {
+        if !self.youngs_modulus_pa.is_finite() || self.youngs_modulus_pa <= 0.0 {
+            return Err(SolidMaterialError::InvalidYoungsModulus);
+        }
+        if !self.poisson_ratio.is_finite()
+            || self.poisson_ratio <= -1.0
+            || self.poisson_ratio >= 0.5
+        {
+            return Err(SolidMaterialError::InvalidPoissonRatio);
+        }
+        Ok(())
+    }
+
+    pub fn lame_lambda_pa(self) -> Result<f64, SolidMaterialError> {
+        self.validate()?;
+        Ok(self.youngs_modulus_pa * self.poisson_ratio
+            / ((1.0 + self.poisson_ratio) * (1.0 - 2.0 * self.poisson_ratio)))
+    }
+
+    pub fn shear_modulus_pa(self) -> Result<f64, SolidMaterialError> {
+        self.validate()?;
+        Ok(self.youngs_modulus_pa / (2.0 * (1.0 + self.poisson_ratio)))
+    }
+}

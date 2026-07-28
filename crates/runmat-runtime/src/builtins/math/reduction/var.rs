@@ -283,7 +283,7 @@ enum NormParse {
     descriptor(crate::builtins::math::reduction::var::VAR_DESCRIPTOR),
     builtin_path = "crate::builtins::math::reduction::var"
 )]
-async fn var_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(crate) async fn var_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let parsed = parse_arguments(&rest).await?;
     match value {
         Value::GpuTensor(handle) => var_gpu(handle, &parsed).await,
@@ -720,14 +720,6 @@ fn multi_to_linear(coords: &[usize], shape: &[usize]) -> usize {
 }
 
 async fn var_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Value> {
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        if handle.device_id != 0 {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(device_value) = var_gpu_reduce(provider, &handle, args).await {
             return Ok(Value::GpuTensor(device_value));

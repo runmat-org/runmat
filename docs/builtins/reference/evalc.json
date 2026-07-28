@@ -1,0 +1,103 @@
+{
+  "title": "evalc",
+  "category": "introspection",
+  "keywords": [
+    "evalc",
+    "eval",
+    "capture",
+    "command window",
+    "dynamic workspace"
+  ],
+  "summary": "Evaluate source text in the current workspace and capture command-window output.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs through the VM dynamic-workspace path. It may evaluate code that later uses accelerated operations, but `evalc` itself is a host-side execution and capture boundary."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::dynamic_workspace::tests",
+    "integration": [
+      "dynamic_workspace_evalc_captures_console_without_stream_leak",
+      "dynamic_workspace_evalc_returns_empty_capture_for_silent_source"
+    ]
+  },
+  "description": "`evalc` evaluates source text in the current workspace and returns the text that would have appeared in the command window. Additional requested outputs receive values produced by the evaluated source.",
+  "behaviors": [
+    "`results = evalc(expression)` evaluates `expression` in the current workspace and returns captured stdout/stderr command-window text as a string scalar.",
+    "`[results,varargout] = evalc(expression)` captures command-window text as the first output and forwards values produced by the evaluated source into later outputs.",
+    "The expression argument must be string-like source text accepted by the dynamic workspace evaluator.",
+    "Variables assigned by evaluated source are committed to the current workspace on success and are visible to subsequent requests or dynamic evaluations. Already-lowered later statements in the same request cannot statically bind newly introduced dynamic variables.",
+    "Command-window text produced during the evaluation is diverted into the returned string. It is not emitted to the normal execution stream and is not logged by `diary`.",
+    "Silent source text returns an empty string as the captured output.",
+    "Errors from evaluated source propagate to the caller. Partial workspace mutations are not committed when the dynamic evaluation fails."
+  ],
+  "examples": [
+    {
+      "description": "Capture display output from evaluated source",
+      "input": "txt = evalc('disp(42)')",
+      "output": "txt = \"42\\n\""
+    },
+    {
+      "description": "Capture output while returning an evaluated value",
+      "input": "[txt, value] = evalc('disp(\"gain\"); 6 * 7')",
+      "output": "txt = \"gain\\n\"\nvalue = 42"
+    },
+    {
+      "description": "Persist assignments for later requests",
+      "input": "txt = evalc('scale = 3; disp(scale)');\n% A later request can read scale.",
+      "output": "txt = \"3\\n\""
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `evalc` print captured text to stdout?",
+      "answer": "No. Captured stdout and stderr text is returned as the first output instead of being forwarded to the normal command stream."
+    },
+    {
+      "question": "Does `evalc` write captured text to `diary`?",
+      "answer": "No. Diary logging is disabled inside the active capture scope, matching MATLAB's command-window capture behavior."
+    },
+    {
+      "question": "Where does `evalc` execute the source text?",
+      "answer": "RunMat executes the source in the current workspace through the VM dynamic-workspace path, the same ownership boundary used by `eval`."
+    },
+    {
+      "question": "Can later statements in the same request use variables newly created by `evalc`?",
+      "answer": "Not yet. The assignment is committed to the current workspace on success and is visible to later requests or dynamic evaluations, but already-lowered later statements in the same request cannot statically bind names introduced by dynamic source text."
+    },
+    {
+      "question": "Can `evalc` return values in addition to captured text?",
+      "answer": "Yes. When multiple outputs are requested, the first output is the captured string and later outputs receive values produced by the evaluated source."
+    },
+    {
+      "question": "Does `evalc` have a GPU fast path?",
+      "answer": "No. `evalc` is an execution and capture boundary. Code evaluated inside `evalc` can still call builtins that use acceleration, but `evalc` itself is not a numeric GPU operation."
+    }
+  ],
+  "links": [
+    {
+      "label": "diary",
+      "url": "./diary"
+    },
+    {
+      "label": "disp",
+      "url": "./disp"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/dynamic_workspace.rs` and `crates/runmat-vm/src/call/builtins.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/dynamic_workspace.rs"
+  },
+  "gpu_behavior": [
+    "`evalc` is a host-side dynamic-workspace execution boundary. It does not create GPU kernels or participate in fusion. Evaluated code may still use GPU-capable builtins normally."
+  ]
+}

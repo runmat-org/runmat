@@ -1,0 +1,101 @@
+{
+  "title": "addPartOfSpeechDetails",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "addPartOfSpeechDetails",
+    "tokenizedDocument",
+    "text analytics",
+    "part of speech",
+    "pos"
+  ],
+  "summary": "Add part-of-speech tags to tokenized documents.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`addPartOfSpeechDetails` retokenizes host token strings and updates tokenizedDocument metadata; it does not use provider kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 5,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::pos::tests",
+    "integration": null
+  },
+  "description": "`addPartOfSpeechDetails(documents)` adds part-of-speech metadata to a RunMat `tokenizedDocument` compatibility object. Use `tokenDetails` to view the resulting `PartOfSpeech` column.",
+  "behaviors": [
+    "`documents` must be a RunMat `tokenizedDocument` object.",
+    "`addPartOfSpeechDetails(documents, Name, Value)` supports `RetokenizeMethod`, `Abbreviations`, and `DiscardKnownValues` name-value pairs.",
+    "`RetokenizeMethod` defaults to `\"part-of-speech\"`, which applies common part-of-speech retokenization such as English contractions, `wanna`/`gonna`, ellipses, and dotted initialisms. Use `\"none\"` to keep existing tokens.",
+    "`Abbreviations` is passed through to the sentence-detail prepass when sentence details are absent.",
+    "`DiscardKnownValues` defaults to `false`, so existing known part-of-speech details are preserved while missing or empty entries are filled.",
+    "`DiscardKnownValues`, `true` recomputes every stored tag.",
+    "RunMat tags English and German tokens with deterministic compatibility taggers covering common pronouns, determiners, coordinate and subordinate conjunctions, adpositions, particles, auxiliary verbs, verbs, adverbs, adjectives, nouns, numerals, punctuation, and other token classes.",
+    "If an existing tokenizedDocument object already carries Japanese or Korean language metadata, RunMat currently uses token-class-aware fallback tags and a conservative noun fallback for letter tokens. Public Japanese/Korean tokenizedDocument construction and MeCab-backed part-of-speech models remain tracked.",
+    "Exact MathWorks statistical model parity remains tracked as broader Text Analytics work."
+  ],
+  "examples": [
+    {
+      "description": "Add Part-Of-Speech Details",
+      "input": "documents = tokenizedDocument(\"The dogs are running.\");\ndocuments = addPartOfSpeechDetails(documents);\ntdetails = tokenDetails(documents)",
+      "output": "`tdetails.PartOfSpeech` contains tags such as `\"determiner\"`, `\"noun\"`, `\"auxiliary-verb\"`, `\"verb\"`, and `\"punctuation\"`."
+    },
+    {
+      "description": "Keep Existing Tokens",
+      "input": "documents = addPartOfSpeechDetails(documents, \"RetokenizeMethod\", \"none\")",
+      "output": "`documents` receives part-of-speech details without the part-of-speech retokenization pass."
+    },
+    {
+      "description": "Recompute Part-Of-Speech Details",
+      "input": "documents = addPartOfSpeechDetails(documents, \"DiscardKnownValues\", true)",
+      "output": "`documents` has refreshed part-of-speech details."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `addPartOfSpeechDetails` use a full NLP model?",
+      "answer": "No. This compatibility slice uses deterministic English rules and records exact MathWorks model parity as remaining Text Analytics work."
+    },
+    {
+      "question": "Does `addPartOfSpeechDetails` execute on the GPU?",
+      "answer": "No. It updates host tokenizedDocument metadata."
+    }
+  ],
+  "links": [
+    {
+      "label": "tokenDetails",
+      "url": "./tokenDetails"
+    },
+    {
+      "label": "tokenizedDocument",
+      "url": "./tokenizedDocument"
+    },
+    {
+      "label": "addSentenceDetails",
+      "url": "./addSentenceDetails"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "updatedDocuments = addPartOfSpeechDetails(documents)\nupdatedDocuments = addPartOfSpeechDetails(documents, Name, Value)",
+      "output": "`updatedDocuments` is a `tokenizedDocument` compatibility object."
+    },
+    "points": [
+      "`documents` must be a RunMat `tokenizedDocument` object.",
+      "`Name, Value` pairs may include `RetokenizeMethod`, `Abbreviations`, and `DiscardKnownValues`.",
+      "`DiscardKnownValues` must be a logical scalar or numeric 0/1 scalar.",
+      "Use `tokenDetails(updatedDocuments)` to view the resulting `PartOfSpeech` table column."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/pos.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/pos.rs"
+  },
+  "gpu_residency": "`addPartOfSpeechDetails` updates host tokenizedDocument metadata and has no provider kernel."
+}

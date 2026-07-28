@@ -13,6 +13,7 @@ use crate::builtins::common::gpu_helpers;
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "isequal";
+const ISEQUALN_BUILTIN_NAME: &str = "isequaln";
 
 const ISEQUAL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "tf",
@@ -32,6 +33,12 @@ const ISEQUAL_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
 
 const ISEQUAL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "tf = isequal(A, B, ...)",
+    inputs: &ISEQUAL_INPUTS,
+    outputs: &ISEQUAL_OUTPUT,
+}];
+
+const ISEQUALN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "tf = isequaln(A, B, ...)",
     inputs: &ISEQUAL_INPUTS,
     outputs: &ISEQUAL_OUTPUT,
 }];
@@ -60,25 +67,12 @@ pub const ISEQUAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ISEQUAL_ERRORS,
 };
 
-fn isequal_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
-    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
-    if let Some(identifier) = error.identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
-}
-
-fn isequal_error_with_detail(
-    error: &'static BuiltinErrorDescriptor,
-    detail: impl AsRef<str>,
-) -> RuntimeError {
-    let message = format!("{}: {}", error.message, detail.as_ref());
-    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
-    if let Some(identifier) = error.identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
-}
+pub const ISEQUALN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ISEQUALN_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ISEQUAL_ERRORS,
+};
 
 /// Compares all input values for equality.
 ///
@@ -94,20 +88,45 @@ fn isequal_error_with_detail(
     builtin_path = "crate::builtins::logical::rel::isequal"
 )]
 async fn isequal_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    equality_builtin(args, false, BUILTIN_NAME).await
+}
+
+/// Compares all input values for equality, treating NaN values as equal.
+#[runtime_builtin(
+    name = "isequaln",
+    category = "logical/rel",
+    summary = "Test arrays for equality, treating NaN values as equal.",
+    keywords = "isequaln,equality,comparison,nan,logical",
+    accel = "cpu",
+    descriptor(crate::builtins::logical::rel::isequal::ISEQUALN_DESCRIPTOR),
+    builtin_path = "crate::builtins::logical::rel::isequal"
+)]
+async fn isequaln_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    equality_builtin(args, true, ISEQUALN_BUILTIN_NAME).await
+}
+
+async fn equality_builtin(
+    args: Vec<Value>,
+    nan_equal: bool,
+    builtin_name: &'static str,
+) -> crate::BuiltinResult<Value> {
     if args.len() < 2 {
-        return Err(isequal_error(&ISEQUAL_ERROR_NOT_ENOUGH_INPUTS));
+        return Err(equality_error(
+            builtin_name,
+            &ISEQUAL_ERROR_NOT_ENOUGH_INPUTS,
+        ));
     }
 
     // Gather all values to host if needed
     let mut gathered = Vec::with_capacity(args.len());
     for arg in args {
-        gathered.push(gather_value(arg).await?);
+        gathered.push(gather_value(arg, builtin_name).await?);
     }
 
     // Compare first value against all others
     let first = &gathered[0];
     for other in gathered.iter().skip(1) {
-        if !values_equal(first, other) {
+        if !values_equal(first, other, nan_equal) {
             return Ok(Value::Bool(false));
         }
     }
@@ -115,13 +134,17 @@ async fn isequal_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     Ok(Value::Bool(true))
 }
 
-async fn gather_value(value: Value) -> crate::BuiltinResult<Value> {
+async fn gather_value(value: Value, builtin_name: &'static str) -> crate::BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
             let tensor = gpu_helpers::gather_tensor_async(&handle)
                 .await
                 .map_err(|err| {
-                    isequal_error_with_detail(&ISEQUAL_ERROR_INTERNAL, err.to_string())
+                    equality_error_with_detail(
+                        builtin_name,
+                        &ISEQUAL_ERROR_INTERNAL,
+                        err.to_string(),
+                    )
                 })?;
             Ok(Value::Tensor(tensor))
         }
@@ -131,33 +154,33 @@ async fn gather_value(value: Value) -> crate::BuiltinResult<Value> {
 
 /// Compare two values for equality (same size, class, and content).
 /// NaN values are NOT considered equal.
-fn values_equal(a: &Value, b: &Value) -> bool {
+fn values_equal(a: &Value, b: &Value, nan_equal: bool) -> bool {
     match (a, b) {
         // Numeric scalars
-        (Value::Num(x), Value::Num(y)) => x == y,
+        (Value::Num(x), Value::Num(y)) => floats_equal(*x, *y, nan_equal),
         (Value::Bool(x), Value::Bool(y)) => x == y,
         (Value::Int(x), Value::Int(y)) => x == y,
 
-        // Promote scalar to match types
-        (Value::Num(x), Value::Bool(y)) => *x == if *y { 1.0 } else { 0.0 },
-        (Value::Bool(x), Value::Num(y)) => (if *x { 1.0 } else { 0.0 }) == *y,
-        (Value::Num(x), Value::Int(y)) => *x == y.to_f64(),
-        (Value::Int(x), Value::Num(y)) => x.to_f64() == *y,
-        (Value::Bool(x), Value::Int(y)) => (if *x { 1 } else { 0 }) == y.to_i64(),
-        (Value::Int(x), Value::Bool(y)) => x.to_i64() == if *y { 1 } else { 0 },
-
         // Complex scalars
-        (Value::Complex(ar, ai), Value::Complex(br, bi)) => ar == br && ai == bi,
-        (Value::Num(x), Value::Complex(br, bi)) => *x == *br && *bi == 0.0,
-        (Value::Complex(ar, ai), Value::Num(y)) => *ar == *y && *ai == 0.0,
+        (Value::Complex(ar, ai), Value::Complex(br, bi)) => {
+            floats_equal(*ar, *br, nan_equal) && floats_equal(*ai, *bi, nan_equal)
+        }
+        (Value::Num(x), Value::Complex(br, bi)) => {
+            floats_equal(*x, *br, nan_equal) && floats_equal(*bi, 0.0, nan_equal)
+        }
+        (Value::Complex(ar, ai), Value::Num(y)) => {
+            floats_equal(*ar, *y, nan_equal) && floats_equal(*ai, 0.0, nan_equal)
+        }
 
         // Tensors
-        (Value::Tensor(a), Value::Tensor(b)) => tensors_equal(a, b),
-        (Value::Tensor(t), Value::Num(n)) => scalar_tensor_equal(t, *n),
-        (Value::Num(n), Value::Tensor(t)) => scalar_tensor_equal(t, *n),
+        (Value::Tensor(a), Value::Tensor(b)) => tensors_equal(a, b, nan_equal),
+        (Value::Tensor(t), Value::Num(n)) => scalar_tensor_equal(t, *n, nan_equal),
+        (Value::Num(n), Value::Tensor(t)) => scalar_tensor_equal(t, *n, nan_equal),
 
         // Complex tensors
-        (Value::ComplexTensor(a), Value::ComplexTensor(b)) => complex_tensors_equal(a, b),
+        (Value::ComplexTensor(a), Value::ComplexTensor(b)) => {
+            complex_tensors_equal(a, b, nan_equal)
+        }
 
         // Logical arrays
         (Value::LogicalArray(a), Value::LogicalArray(b)) => logical_arrays_equal(a, b),
@@ -178,35 +201,42 @@ fn values_equal(a: &Value, b: &Value) -> bool {
         }
 
         // Cells
-        (Value::Cell(a), Value::Cell(b)) => a.shape == b.shape && cells_equal(a, b),
+        (Value::Cell(a), Value::Cell(b)) => a.shape == b.shape && cells_equal(a, b, nan_equal),
 
         // Structs
-        (Value::Struct(a), Value::Struct(b)) => structs_equal(a, b),
+        (Value::Struct(a), Value::Struct(b)) => structs_equal(a, b, nan_equal),
 
         // Different types are not equal
         _ => false,
     }
 }
 
-fn tensors_equal(a: &Tensor, b: &Tensor) -> bool {
-    if a.shape != b.shape {
+fn floats_equal(a: f64, b: f64, nan_equal: bool) -> bool {
+    a == b || (nan_equal && a.is_nan() && b.is_nan())
+}
+
+fn tensors_equal(a: &Tensor, b: &Tensor, nan_equal: bool) -> bool {
+    if a.dtype != b.dtype || a.shape != b.shape {
         return false;
     }
     if a.data.len() != b.data.len() {
         return false;
     }
     // NaN != NaN in isequal (use isequaln for NaN equality)
-    a.data.iter().zip(b.data.iter()).all(|(x, y)| x == y)
+    a.data
+        .iter()
+        .zip(b.data.iter())
+        .all(|(x, y)| floats_equal(*x, *y, nan_equal))
 }
 
-fn scalar_tensor_equal(t: &Tensor, n: f64) -> bool {
-    if t.data.len() != 1 {
+fn scalar_tensor_equal(t: &Tensor, n: f64, nan_equal: bool) -> bool {
+    if t.dtype != runmat_builtins::NumericDType::F64 || t.data.len() != 1 {
         return false;
     }
-    t.data[0] == n
+    floats_equal(t.data[0], n, nan_equal)
 }
 
-fn complex_tensors_equal(a: &ComplexTensor, b: &ComplexTensor) -> bool {
+fn complex_tensors_equal(a: &ComplexTensor, b: &ComplexTensor, nan_equal: bool) -> bool {
     if a.shape != b.shape {
         return false;
     }
@@ -216,7 +246,9 @@ fn complex_tensors_equal(a: &ComplexTensor, b: &ComplexTensor) -> bool {
     a.data
         .iter()
         .zip(b.data.iter())
-        .all(|((ar, ai), (br, bi))| ar == br && ai == bi)
+        .all(|((ar, ai), (br, bi))| {
+            floats_equal(*ar, *br, nan_equal) && floats_equal(*ai, *bi, nan_equal)
+        })
 }
 
 fn logical_arrays_equal(a: &LogicalArray, b: &LogicalArray) -> bool {
@@ -244,24 +276,54 @@ fn string_arrays_equal(a: &StringArray, b: &StringArray) -> bool {
     a.data == b.data
 }
 
-fn cells_equal(a: &CellArray, b: &CellArray) -> bool {
+fn cells_equal(a: &CellArray, b: &CellArray, nan_equal: bool) -> bool {
     if a.data.len() != b.data.len() {
         return false;
     }
     a.data
         .iter()
         .zip(b.data.iter())
-        .all(|(x, y)| values_equal(x, y))
+        .all(|(x, y)| values_equal(x, y, nan_equal))
 }
 
-fn structs_equal(a: &runmat_builtins::StructValue, b: &runmat_builtins::StructValue) -> bool {
+fn structs_equal(
+    a: &runmat_builtins::StructValue,
+    b: &runmat_builtins::StructValue,
+    nan_equal: bool,
+) -> bool {
     if a.fields.len() != b.fields.len() {
         return false;
     }
     a.fields
         .iter()
         .zip(b.fields.iter())
-        .all(|((key_a, val_a), (key_b, val_b))| key_a == key_b && values_equal(val_a, val_b))
+        .all(|((key_a, val_a), (key_b, val_b))| {
+            key_a == key_b && values_equal(val_a, val_b, nan_equal)
+        })
+}
+
+fn equality_error(
+    builtin_name: &'static str,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(builtin_name);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn equality_error_with_detail(
+    builtin_name: &'static str,
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let message = format!("{}: {}", error.message, detail.as_ref());
+    let mut builder = build_runtime_error(message).with_builtin(builtin_name);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[cfg(test)]
@@ -272,6 +334,10 @@ pub(crate) mod tests {
 
     fn run_isequal(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(isequal_builtin(args))
+    }
+
+    fn run_isequaln(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+        block_on(isequaln_builtin(args))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -382,6 +448,17 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn isequaln_nan_values_are_equal_recursively() {
+        let t1 = Tensor::new(vec![1.0, f64::NAN], vec![1, 2]).unwrap();
+        let t2 = Tensor::new(vec![1.0, f64::NAN], vec![1, 2]).unwrap();
+        let cells = CellArray::new(vec![Value::Tensor(t1), Value::Num(f64::NAN)], 1, 2).unwrap();
+        let other = CellArray::new(vec![Value::Tensor(t2), Value::Num(f64::NAN)], 1, 2).unwrap();
+        let result = run_isequaln(vec![Value::Cell(cells), Value::Cell(other)]).expect("isequaln");
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn isequal_strings() {
         let result = run_isequal(vec![
             Value::String("hello".into()),
@@ -409,9 +486,26 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn isequal_bool_and_num() {
+    fn isequal_bool_and_num_have_different_classes() {
         let result = run_isequal(vec![Value::Bool(true), Value::Num(1.0)]).expect("isequal");
-        assert_eq!(result, Value::Bool(true));
+        assert_eq!(result, Value::Bool(false));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn isequal_tensor_dtype_must_match() {
+        let double_tensor =
+            Tensor::new_with_dtype(vec![1.0], vec![1, 1], runmat_builtins::NumericDType::F64)
+                .unwrap();
+        let uint32_tensor =
+            Tensor::new_with_dtype(vec![1.0], vec![1, 1], runmat_builtins::NumericDType::U32)
+                .unwrap();
+        let result = run_isequal(vec![
+            Value::Tensor(double_tensor),
+            Value::Tensor(uint32_tensor),
+        ])
+        .expect("isequal");
+        assert_eq!(result, Value::Bool(false));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

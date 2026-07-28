@@ -1,0 +1,1612 @@
+//! MATLAB-compatible `griddedInterpolant` builtin.
+//!
+//! This implements RunMat's gridded interpolant object surface for real dense
+//! data. The object stores compact grid vectors and evaluates through `subsref`
+//! so MATLAB syntax such as `F(xq)` and `F(xq,yq)` works through the normal
+//! object indexing path.
+
+use std::cell::Cell as LocalCell;
+use std::collections::HashMap;
+
+use runmat_builtins::{
+    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CellArray, ClassDef, MethodDef, NumericDType, ObjectInstance, PropertyDef, ResolveContext,
+    Tensor, Type, Value,
+};
+use runmat_macros::runtime_builtin;
+
+use crate::builtins::common::spec::{
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
+    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+};
+use crate::{
+    build_runtime_error, BuiltinResult, RuntimeError, OBJECT_INDEX_MEMBER, OBJECT_INDEX_PAREN,
+    OBJECT_SUBSREF_METHOD,
+};
+
+use super::pp::{
+    build_pchip_pp, build_spline_pp, eval_pp_scalar, Extrapolation, NumericSeries,
+    PiecewisePolynomial,
+};
+
+const CLASS_NAME: &str = "griddedInterpolant";
+const BUILTIN_SUBSREF: &str = "griddedInterpolant.subsref";
+const GRID_VECTORS: &str = "GridVectors";
+const VALUES: &str = "Values";
+const METHOD: &str = "Method";
+const EXTRAPOLATION_METHOD: &str = "ExtrapolationMethod";
+
+thread_local! {
+    static GRIDDED_INTERPOLANT_CLASS_REGISTERED: LocalCell<bool> = const { LocalCell::new(false) };
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InterpMethod {
+    Linear,
+    Nearest,
+    Next,
+    Previous,
+    Pchip,
+    Spline,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExtrapolationMethod {
+    Linear,
+    Nearest,
+    Next,
+    Previous,
+    Pchip,
+    Spline,
+    None,
+}
+
+#[derive(Clone)]
+struct InterpolantSpec {
+    grid_vectors: Vec<Vec<f64>>,
+    values: Tensor,
+    method: InterpMethod,
+    extrapolation: ExtrapolationMethod,
+}
+
+#[derive(Clone)]
+struct Bracket {
+    lo: usize,
+    hi: usize,
+    t: f64,
+}
+
+#[derive(Clone)]
+struct QueryPlan {
+    coords: QueryCoords,
+    shape: Vec<usize>,
+}
+
+#[derive(Clone)]
+enum QueryCoords {
+    Explicit(Vec<Vec<f64>>),
+    FullGrid {
+        vectors: Vec<Vec<f64>>,
+        total: usize,
+    },
+}
+
+impl QueryPlan {
+    fn len(&self) -> usize {
+        match &self.coords {
+            QueryCoords::Explicit(points) => points.len(),
+            QueryCoords::FullGrid { total, .. } => *total,
+        }
+    }
+
+    fn for_each_point(&self, mut f: impl FnMut(&[f64])) {
+        match &self.coords {
+            QueryCoords::Explicit(points) => {
+                for point in points {
+                    f(point);
+                }
+            }
+            QueryCoords::FullGrid { vectors, total } => {
+                for linear in 0..*total {
+                    let subs = unravel_column_major(linear, &self.shape);
+                    let point = subs
+                        .iter()
+                        .enumerate()
+                        .map(|(dim, &idx)| vectors[dim][idx])
+                        .collect::<Vec<_>>();
+                    f(&point);
+                }
+            }
+        }
+    }
+}
+
+const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "F",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Gridded interpolant object.",
+}];
+
+const SUBSREF_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "out",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Indexed value or property.",
+}];
+
+const INPUTS_VARIADIC: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "args",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description:
+        "Grid vectors or full grids, values, interpolation method, and extrapolation method.",
+}];
+
+const SUBSREF_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "griddedInterpolant object.",
+    },
+    BuiltinParamDescriptor {
+        name: "kind",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Indexing kind.",
+    },
+    BuiltinParamDescriptor {
+        name: "payload",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Indexing payload.",
+    },
+];
+
+const SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
+    BuiltinSignatureDescriptor {
+        label: "F = griddedInterpolant",
+        inputs: &[],
+        outputs: &OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "F = griddedInterpolant(V)",
+        inputs: &INPUTS_VARIADIC,
+        outputs: &OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "F = griddedInterpolant(x, v)",
+        inputs: &INPUTS_VARIADIC,
+        outputs: &OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "F = griddedInterpolant(gridVecs, V)",
+        inputs: &INPUTS_VARIADIC,
+        outputs: &OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "F = griddedInterpolant(X1, X2, ..., Xn, V)",
+        inputs: &INPUTS_VARIADIC,
+        outputs: &OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "F = griddedInterpolant(___, Method)",
+        inputs: &INPUTS_VARIADIC,
+        outputs: &OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "F = griddedInterpolant(___, Method, ExtrapolationMethod)",
+        inputs: &INPUTS_VARIADIC,
+        outputs: &OUTPUT,
+    },
+];
+
+const SUBSREF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "out = griddedInterpolant.subsref(obj, kind, payload)",
+    inputs: &SUBSREF_INPUTS,
+    outputs: &SUBSREF_OUTPUT,
+}];
+
+const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GRIDDEDINTERPOLANT.INVALID_INPUT",
+    identifier: Some("RunMat:griddedInterpolant:InvalidInput"),
+    when: "Grid, value, method, or query inputs are invalid.",
+    message: "griddedInterpolant: invalid input",
+};
+
+const ERROR_UNSUPPORTED_METHOD: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GRIDDEDINTERPOLANT.UNSUPPORTED_METHOD",
+    identifier: Some("RunMat:griddedInterpolant:UnsupportedMethod"),
+    when: "The requested interpolation or extrapolation method is not implemented by RunMat.",
+    message: "griddedInterpolant: unsupported interpolation method",
+};
+
+const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GRIDDEDINTERPOLANT.INTERNAL",
+    identifier: Some("RunMat:griddedInterpolant:Internal"),
+    when: "Object construction, property access, or interpolation output construction fails.",
+    message: "griddedInterpolant: internal error",
+};
+
+const ERRORS: [BuiltinErrorDescriptor; 3] = [
+    ERROR_INVALID_INPUT,
+    ERROR_UNSUPPORTED_METHOD,
+    ERROR_INTERNAL,
+];
+
+pub const GRIDDED_INTERPOLANT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+
+pub const GRIDDED_INTERPOLANT_SUBSREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SUBSREF_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::MethodOnly,
+    errors: &ERRORS,
+};
+
+#[runmat_macros::register_gpu_spec(
+    builtin_path = "crate::builtins::math::interpolation::gridded_interpolant"
+)]
+pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
+    name: CLASS_NAME,
+    op_kind: GpuOpKind::Custom("gridded-interpolation"),
+    supported_precisions: &[],
+    broadcast: BroadcastSemantics::Matlab,
+    provider_hooks: &[],
+    constant_strategy: ConstantStrategy::InlineLiteral,
+    residency: ResidencyPolicy::GatherImmediately,
+    nan_mode: ReductionNaN::Include,
+    two_pass_threshold: None,
+    workgroup_size: None,
+    accepts_nan_mode: false,
+    notes: "griddedInterpolant currently stores host tensors and evaluates through the runtime object indexing path.",
+};
+
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::math::interpolation::gridded_interpolant"
+)]
+pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
+    name: CLASS_NAME,
+    shape: ShapeRequirements::Any,
+    constant_strategy: ConstantStrategy::InlineLiteral,
+    elementwise: None,
+    reduction: None,
+    emits_nan: true,
+    notes: "Interpolant object construction and evaluation are runtime sinks.",
+};
+
+fn gridded_interpolant_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
+    Type::Unknown
+}
+
+fn gridded_error(
+    descriptor: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", descriptor.message, detail.as_ref()))
+        .with_builtin(CLASS_NAME);
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn invalid(detail: impl AsRef<str>) -> RuntimeError {
+    gridded_error(&ERROR_INVALID_INPUT, detail)
+}
+
+fn unsupported(detail: impl AsRef<str>) -> RuntimeError {
+    gridded_error(&ERROR_UNSUPPORTED_METHOD, detail)
+}
+
+fn internal(detail: impl AsRef<str>) -> RuntimeError {
+    gridded_error(&ERROR_INTERNAL, detail)
+}
+
+fn ensure_gridded_interpolant_class_registered() {
+    GRIDDED_INTERPOLANT_CLASS_REGISTERED.with(|registered| {
+        if registered.get() {
+            return;
+        }
+        let mut properties = HashMap::new();
+        for name in [GRID_VECTORS, VALUES, METHOD, EXTRAPOLATION_METHOD] {
+            properties.insert(
+                name.to_string(),
+                PropertyDef {
+                    name: name.to_string(),
+                    is_static: false,
+                    is_constant: false,
+                    is_dependent: false,
+                    get_access: Access::Public,
+                    set_access: Access::Public,
+                    default_value: None,
+                },
+            );
+        }
+        let mut methods = HashMap::new();
+        methods.insert(
+            OBJECT_SUBSREF_METHOD.to_string(),
+            MethodDef {
+                name: OBJECT_SUBSREF_METHOD.to_string(),
+                is_static: false,
+                is_abstract: false,
+                is_sealed: false,
+                access: Access::Public,
+                function_name: BUILTIN_SUBSREF.to_string(),
+                implicit_class_argument: None,
+            },
+        );
+        runmat_builtins::register_class(ClassDef {
+            name: CLASS_NAME.to_string(),
+            parent: None,
+            properties,
+            methods,
+        });
+        registered.set(true);
+    });
+}
+
+#[runtime_builtin(
+    name = "griddedInterpolant",
+    category = "math/interpolation",
+    summary = "Create a gridded data interpolant object.",
+    keywords = "griddedInterpolant,interpolation,grid,linear,nearest,object",
+    type_resolver(gridded_interpolant_type),
+    descriptor(
+        crate::builtins::math::interpolation::gridded_interpolant::GRIDDED_INTERPOLANT_DESCRIPTOR
+    ),
+    builtin_path = "crate::builtins::math::interpolation::gridded_interpolant"
+)]
+async fn gridded_interpolant_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_gridded_interpolant_class_registered();
+    let spec = parse_constructor(args)?;
+    Ok(Value::Object(spec_to_object(spec)?))
+}
+
+#[runtime_builtin(
+    name = "griddedInterpolant.subsref",
+    type_resolver(gridded_interpolant_type),
+    descriptor(
+        crate::builtins::math::interpolation::gridded_interpolant::GRIDDED_INTERPOLANT_SUBSREF_DESCRIPTOR
+    ),
+    builtin_path = "crate::builtins::math::interpolation::gridded_interpolant"
+)]
+async fn gridded_interpolant_subsref(
+    obj: Value,
+    kind: String,
+    payload: Value,
+) -> BuiltinResult<Value> {
+    match kind.as_str() {
+        OBJECT_INDEX_MEMBER => gridded_member(obj, payload),
+        OBJECT_INDEX_PAREN => {
+            let spec = object_to_spec(&obj)?;
+            let query_args = payload_to_args(payload)?;
+            evaluate_interpolant(&spec, query_args)
+        }
+        other => Err(invalid(format!("unsupported indexing kind '{other}'"))),
+    }
+}
+
+fn parse_constructor(mut args: Vec<Value>) -> BuiltinResult<InterpolantSpec> {
+    let (method, extrapolation) = parse_trailing_methods(&mut args)?;
+    match args.len() {
+        0 => Ok(InterpolantSpec {
+            grid_vectors: Vec::new(),
+            values: Tensor::new(Vec::new(), vec![0, 0]).map_err(internal)?,
+            method,
+            extrapolation,
+        }),
+        1 => {
+            let values = normalize_default_values(numeric_tensor(args.remove(0), "V")?)?;
+            let grid_vectors = default_grid_vectors(&values);
+            validate_grid_value_shape(&grid_vectors, &values, method, extrapolation)?;
+            Ok(InterpolantSpec {
+                grid_vectors,
+                values,
+                method,
+                extrapolation,
+            })
+        }
+        2 => {
+            let values_arg = args.pop().expect("values");
+            let grid_arg = args.pop().expect("grid");
+            let values = numeric_tensor(values_arg, "V")?;
+            let grid_vectors = match grid_arg {
+                Value::Cell(cell) => grid_vectors_from_cell(cell)?,
+                other => vec![numeric_vector(other, "x")?],
+            };
+            let values = normalize_values_for_grid(&grid_vectors, values)?;
+            validate_grid_value_shape(&grid_vectors, &values, method, extrapolation)?;
+            Ok(InterpolantSpec {
+                grid_vectors,
+                values,
+                method,
+                extrapolation,
+            })
+        }
+        _ => {
+            let values = numeric_tensor(args.pop().expect("values"), "V")?;
+            let grid_vectors = full_grid_vectors(args, &values)?;
+            let values = normalize_values_for_grid(&grid_vectors, values)?;
+            validate_grid_value_shape(&grid_vectors, &values, method, extrapolation)?;
+            Ok(InterpolantSpec {
+                grid_vectors,
+                values,
+                method,
+                extrapolation,
+            })
+        }
+    }
+}
+
+fn parse_trailing_methods(
+    args: &mut Vec<Value>,
+) -> BuiltinResult<(InterpMethod, ExtrapolationMethod)> {
+    let mut names = Vec::new();
+    while names.len() < 2 {
+        let Some(name) = args.last().and_then(text_from_value) else {
+            break;
+        };
+        if !is_method_name(&name) {
+            break;
+        }
+        names.push(name);
+        args.pop();
+    }
+    names.reverse();
+    let method = if let Some(name) = names.first() {
+        parse_interp_method(name)?
+    } else {
+        InterpMethod::Linear
+    };
+    let extrapolation = if let Some(name) = names.get(1) {
+        parse_extrap_method(name)?
+    } else {
+        match method {
+            InterpMethod::Linear => ExtrapolationMethod::Linear,
+            InterpMethod::Nearest => ExtrapolationMethod::Nearest,
+            InterpMethod::Next => ExtrapolationMethod::Next,
+            InterpMethod::Previous => ExtrapolationMethod::Previous,
+            InterpMethod::Pchip => ExtrapolationMethod::Pchip,
+            InterpMethod::Spline => ExtrapolationMethod::Spline,
+        }
+    };
+    Ok((method, extrapolation))
+}
+
+fn is_method_name(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "linear"
+            | "nearest"
+            | "next"
+            | "previous"
+            | "none"
+            | "pchip"
+            | "cubic"
+            | "makima"
+            | "spline"
+    )
+}
+
+fn parse_interp_method(name: &str) -> BuiltinResult<InterpMethod> {
+    match name.to_ascii_lowercase().as_str() {
+        "linear" => Ok(InterpMethod::Linear),
+        "nearest" => Ok(InterpMethod::Nearest),
+        "next" => Ok(InterpMethod::Next),
+        "previous" => Ok(InterpMethod::Previous),
+        "pchip" => Ok(InterpMethod::Pchip),
+        "cubic" => Err(unsupported(
+            "method 'cubic' is not yet implemented for griddedInterpolant",
+        )),
+        "spline" => Ok(InterpMethod::Spline),
+        "makima" => Err(unsupported(
+            "method 'makima' is not yet implemented for griddedInterpolant",
+        )),
+        "none" => Err(invalid("'none' is only valid as an extrapolation method")),
+        other => Err(invalid(format!("unknown interpolation method '{other}'"))),
+    }
+}
+
+fn parse_extrap_method(name: &str) -> BuiltinResult<ExtrapolationMethod> {
+    match name.to_ascii_lowercase().as_str() {
+        "linear" => Ok(ExtrapolationMethod::Linear),
+        "nearest" => Ok(ExtrapolationMethod::Nearest),
+        "next" => Ok(ExtrapolationMethod::Next),
+        "previous" => Ok(ExtrapolationMethod::Previous),
+        "pchip" => Ok(ExtrapolationMethod::Pchip),
+        "cubic" => Err(unsupported(
+            "extrapolation method 'cubic' is not yet implemented for griddedInterpolant",
+        )),
+        "spline" => Ok(ExtrapolationMethod::Spline),
+        "none" => Ok(ExtrapolationMethod::None),
+        "makima" => Err(unsupported(
+            "extrapolation method 'makima' is not yet implemented for griddedInterpolant",
+        )),
+        other => Err(invalid(format!("unknown extrapolation method '{other}'"))),
+    }
+}
+
+fn text_from_value(value: &Value) -> Option<String> {
+    match value {
+        Value::String(s) => Some(s.clone()),
+        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data.iter().collect()),
+        _ => None,
+    }
+}
+
+fn numeric_tensor(value: Value, name: &str) -> BuiltinResult<Tensor> {
+    match value {
+        Value::Num(x) => Tensor::new(vec![x], vec![1, 1]).map_err(internal),
+        Value::Tensor(tensor) if matches!(tensor.dtype, NumericDType::F64 | NumericDType::F32) => {
+            Ok(tensor)
+        }
+        Value::Tensor(_) => Err(invalid(format!("{name} must be a single or double array"))),
+        other => Err(invalid(format!(
+            "{name} must be a real numeric array, got {other:?}"
+        ))),
+    }
+}
+
+fn numeric_vector(value: Value, name: &str) -> BuiltinResult<Vec<f64>> {
+    match value {
+        Value::Num(x) => Ok(vec![x]),
+        Value::Tensor(tensor)
+            if is_vector_shape(&tensor.shape)
+                && matches!(tensor.dtype, NumericDType::F64 | NumericDType::F32) =>
+        {
+            Ok(tensor.data)
+        }
+        Value::Tensor(tensor) if is_vector_shape(&tensor.shape) => {
+            Err(invalid(format!("{name} must be a single or double vector")))
+        }
+        Value::Tensor(_) => Err(invalid(format!("{name} must be a vector"))),
+        other => Err(invalid(format!(
+            "{name} must be a real numeric vector, got {other:?}"
+        ))),
+    }
+}
+
+fn normalize_default_values(values: Tensor) -> BuiltinResult<Tensor> {
+    if is_vector_shape(&values.shape) && values.shape.first().copied().unwrap_or(1) == 1 {
+        let len = values.data.len();
+        Tensor::new_with_dtype(values.data, vec![len, 1], values.dtype).map_err(internal)
+    } else {
+        Ok(values)
+    }
+}
+
+fn normalize_values_for_grid(grid_vectors: &[Vec<f64>], values: Tensor) -> BuiltinResult<Tensor> {
+    if grid_vectors.len() == 1
+        && is_vector_shape(&values.shape)
+        && values.data.len() == grid_vectors[0].len()
+        && values.shape.first().copied().unwrap_or(1) == 1
+    {
+        Tensor::new_with_dtype(values.data, vec![grid_vectors[0].len(), 1], values.dtype)
+            .map_err(internal)
+    } else {
+        Ok(values)
+    }
+}
+
+fn is_vector_shape(shape: &[usize]) -> bool {
+    shape.is_empty() || shape.iter().filter(|&&dim| dim > 1).count() <= 1
+}
+
+fn grid_vectors_from_cell(cell: CellArray) -> BuiltinResult<Vec<Vec<f64>>> {
+    if cell.data.is_empty() {
+        return Err(invalid("gridVecs must contain at least one grid vector"));
+    }
+    cell.data
+        .into_iter()
+        .enumerate()
+        .map(|(idx, value)| numeric_vector(value, &format!("gridVecs{{{}}}", idx + 1)))
+        .collect()
+}
+
+fn default_grid_vectors(values: &Tensor) -> Vec<Vec<f64>> {
+    let dims = effective_grid_rank(&values.shape);
+    (0..dims)
+        .map(|dim| {
+            let len = values.shape.get(dim).copied().unwrap_or(1);
+            (1..=len).map(|value| value as f64).collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn effective_grid_rank(shape: &[usize]) -> usize {
+    match shape.len() {
+        0 => 1,
+        1 => 1,
+        2 if shape[0] == 1 || shape[1] == 1 => 1,
+        _ => shape.len().max(1),
+    }
+}
+
+fn full_grid_vectors(grids: Vec<Value>, values: &Tensor) -> BuiltinResult<Vec<Vec<f64>>> {
+    if grids.is_empty() {
+        return Err(invalid("full-grid syntax requires at least one grid array"));
+    }
+    let mut tensors: Vec<Tensor> = Vec::with_capacity(grids.len());
+    for (idx, grid) in grids.into_iter().enumerate() {
+        let tensor = numeric_tensor(grid, &format!("X{}", idx + 1))?;
+        if let Some(first) = tensors.first() {
+            if tensor.shape != first.shape {
+                return Err(invalid("full-grid arrays must have matching shapes"));
+            }
+        }
+        tensors.push(tensor);
+    }
+    let grid_rank = tensors.len();
+    let grid_shape = tensors[0].shape.clone();
+    if grid_shape.len() != grid_rank {
+        return Err(invalid(
+            "full-grid arrays must have one dimension per grid variable",
+        ));
+    }
+    if values.shape.len() < grid_rank || values.shape[..grid_rank] != grid_shape[..] {
+        return Err(invalid(
+            "full-grid arrays must match the leading shape of V",
+        ));
+    }
+    let mut vectors = Vec::with_capacity(grid_rank);
+    for (dim, tensor) in tensors.iter().enumerate() {
+        let len = grid_shape[dim];
+        let mut vector = Vec::with_capacity(len);
+        for idx in 0..len {
+            let mut subs = vec![0; grid_rank];
+            subs[dim] = idx;
+            vector.push(tensor.data[column_major_offset(&subs, &tensor.shape)]);
+        }
+        vectors.push(vector);
+    }
+    validate_rectilinear_full_grids(&tensors, &vectors, &grid_shape)?;
+    Ok(vectors)
+}
+
+fn validate_rectilinear_full_grids(
+    tensors: &[Tensor],
+    vectors: &[Vec<f64>],
+    shape: &[usize],
+) -> BuiltinResult<()> {
+    let total = shape
+        .iter()
+        .copied()
+        .try_fold(1usize, |acc, len| acc.checked_mul(len))
+        .ok_or_else(|| invalid("full-grid size exceeds platform limits"))?;
+    for linear in 0..total {
+        let subs = unravel_column_major(linear, shape);
+        for (dim, tensor) in tensors.iter().enumerate() {
+            let actual = tensor.data[linear];
+            let expected = vectors[dim][subs[dim]];
+            if actual != expected {
+                return Err(invalid(
+                    "full-grid arrays must be rectilinear ndgrid-style arrays",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_grid_value_shape(
+    grid_vectors: &[Vec<f64>],
+    values: &Tensor,
+    method: InterpMethod,
+    extrapolation: ExtrapolationMethod,
+) -> BuiltinResult<()> {
+    if grid_vectors.is_empty() {
+        return Ok(());
+    }
+    validate_method_support(grid_vectors, method, extrapolation)?;
+    if grid_vectors.len() > values.shape.len().max(1) {
+        return Err(invalid("number of grid vectors exceeds V rank"));
+    }
+    for (dim, grid) in grid_vectors.iter().enumerate() {
+        if grid.len() < 2 {
+            return Err(invalid("each grid vector must contain at least two points"));
+        }
+        if grid.iter().any(|value| !value.is_finite()) {
+            return Err(invalid("grid vectors must contain finite values"));
+        }
+        if !grid.windows(2).all(|pair| pair[0] < pair[1]) {
+            return Err(invalid("grid vectors must be strictly increasing"));
+        }
+        let expected = values.shape.get(dim).copied().unwrap_or(1);
+        if grid.len() != expected {
+            return Err(invalid(format!(
+                "grid vector {} length {} does not match V dimension {} length {}",
+                dim + 1,
+                grid.len(),
+                dim + 1,
+                expected
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_method_support(
+    grid_vectors: &[Vec<f64>],
+    method: InterpMethod,
+    extrapolation: ExtrapolationMethod,
+) -> BuiltinResult<()> {
+    let rank = grid_vectors.len();
+    if is_step_method(method) && rank != 1 {
+        return Err(unsupported(
+            "next and previous griddedInterpolant methods are currently supported for 1-D grids",
+        ));
+    }
+    if is_step_extrapolation(extrapolation) && rank != 1 {
+        return Err(unsupported(
+            "next and previous extrapolation methods are currently supported for 1-D grids",
+        ));
+    }
+    if is_piecewise_method(method) && rank != 1 {
+        return Err(unsupported(
+            "pchip and spline griddedInterpolant methods are currently supported for 1-D grids",
+        ));
+    }
+    if is_piecewise_extrapolation(extrapolation) && rank != 1 {
+        return Err(unsupported(
+            "pchip and spline extrapolation methods are currently supported for 1-D grids",
+        ));
+    }
+    match extrapolation {
+        ExtrapolationMethod::Pchip if method != InterpMethod::Pchip => {
+            return Err(unsupported(
+                "pchip extrapolation currently requires pchip interpolation",
+            ))
+        }
+        ExtrapolationMethod::Spline if method != InterpMethod::Spline => {
+            return Err(unsupported(
+                "spline extrapolation currently requires spline interpolation",
+            ))
+        }
+        _ => {}
+    }
+    if (method == InterpMethod::Pchip || extrapolation == ExtrapolationMethod::Pchip)
+        && grid_vectors[0].len() < 4
+    {
+        return Err(invalid("pchip requires at least four grid points"));
+    }
+    Ok(())
+}
+
+fn spec_to_object(spec: InterpolantSpec) -> BuiltinResult<ObjectInstance> {
+    let mut object = ObjectInstance::new(CLASS_NAME.to_string());
+    let grid_cells = spec
+        .grid_vectors
+        .iter()
+        .map(|grid| {
+            Tensor::new(grid.clone(), vec![grid.len(), 1])
+                .map(Value::Tensor)
+                .map_err(internal)
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    object.properties.insert(
+        GRID_VECTORS.to_string(),
+        Value::Cell(
+            CellArray::new_with_shape(grid_cells, vec![1, spec.grid_vectors.len()])
+                .map_err(internal)?,
+        ),
+    );
+    object
+        .properties
+        .insert(VALUES.to_string(), Value::Tensor(spec.values));
+    object.properties.insert(
+        METHOD.to_string(),
+        Value::String(interp_method_name(spec.method).to_string()),
+    );
+    object.properties.insert(
+        EXTRAPOLATION_METHOD.to_string(),
+        Value::String(extrap_method_name(spec.extrapolation).to_string()),
+    );
+    Ok(object)
+}
+
+fn object_to_spec(value: &Value) -> BuiltinResult<InterpolantSpec> {
+    let Value::Object(object) = value else {
+        return Err(invalid("receiver must be a griddedInterpolant object"));
+    };
+    if !object.is_class(CLASS_NAME) {
+        return Err(invalid("receiver must be a griddedInterpolant object"));
+    }
+    let grid_vectors = match object.properties.get(GRID_VECTORS) {
+        Some(Value::Cell(cell)) => cell
+            .data
+            .iter()
+            .cloned()
+            .map(|value| numeric_vector(value, GRID_VECTORS))
+            .collect::<BuiltinResult<Vec<_>>>()?,
+        _ => return Err(internal("object is missing GridVectors")),
+    };
+    let values = match object.properties.get(VALUES) {
+        Some(Value::Tensor(tensor)) => tensor.clone(),
+        _ => return Err(internal("object is missing Values")),
+    };
+    let method = match object.properties.get(METHOD).and_then(text_from_value) {
+        Some(name) => parse_interp_method(&name)?,
+        None => return Err(internal("object is missing Method")),
+    };
+    let extrapolation = match object
+        .properties
+        .get(EXTRAPOLATION_METHOD)
+        .and_then(text_from_value)
+    {
+        Some(name) => parse_extrap_method(&name)?,
+        None => return Err(internal("object is missing ExtrapolationMethod")),
+    };
+    validate_grid_value_shape(&grid_vectors, &values, method, extrapolation)?;
+    Ok(InterpolantSpec {
+        grid_vectors,
+        values,
+        method,
+        extrapolation,
+    })
+}
+
+fn gridded_member(obj: Value, payload: Value) -> BuiltinResult<Value> {
+    let field = text_from_value(&payload).ok_or_else(|| invalid("property name must be text"))?;
+    let Value::Object(object) = obj else {
+        return Err(invalid("receiver must be a griddedInterpolant object"));
+    };
+    if !object.is_class(CLASS_NAME) {
+        return Err(invalid("receiver must be a griddedInterpolant object"));
+    }
+    object
+        .properties
+        .get(&field)
+        .cloned()
+        .ok_or_else(|| invalid(format!("unknown griddedInterpolant property '{field}'")))
+}
+
+fn payload_to_args(payload: Value) -> BuiltinResult<Vec<Value>> {
+    match payload {
+        Value::Cell(cell) => Ok(cell.data),
+        other => Err(invalid(format!(
+            "indexing payload must be a cell array, got {other:?}"
+        ))),
+    }
+}
+
+fn evaluate_interpolant(spec: &InterpolantSpec, args: Vec<Value>) -> BuiltinResult<Value> {
+    if spec.grid_vectors.is_empty() {
+        return Err(invalid("cannot evaluate an empty griddedInterpolant"));
+    }
+    validate_grid_value_shape(
+        &spec.grid_vectors,
+        &spec.values,
+        spec.method,
+        spec.extrapolation,
+    )?;
+    let plan = parse_query_plan(&spec.grid_vectors, args)?;
+    let grid_rank = spec.grid_vectors.len();
+    let grid_size = spec
+        .grid_vectors
+        .iter()
+        .map(Vec::len)
+        .try_fold(1usize, |acc, len| acc.checked_mul(len))
+        .ok_or_else(|| invalid("grid size exceeds platform limits"))?;
+    let mut extra_shape = if spec.values.shape.len() > grid_rank {
+        spec.values.shape[grid_rank..].to_vec()
+    } else {
+        Vec::new()
+    };
+    while extra_shape.last() == Some(&1) {
+        extra_shape.pop();
+    }
+    let extra_count = extra_shape
+        .iter()
+        .copied()
+        .try_fold(1usize, |acc, len| acc.checked_mul(len))
+        .ok_or_else(|| invalid("value size exceeds platform limits"))?;
+    let mut out_shape = plan.shape.clone();
+    out_shape.extend(extra_shape);
+    if out_shape.is_empty() {
+        out_shape.push(1);
+    }
+    if is_piecewise_method(spec.method) {
+        return evaluate_piecewise_interpolant(spec, &plan, grid_size, extra_count, out_shape);
+    }
+    let mut out = Vec::with_capacity(plan.len() * extra_count);
+    for series in 0..extra_count {
+        let series_offset = series * grid_size;
+        plan.for_each_point(|point| out.push(interpolate_point(spec, point, series_offset)));
+    }
+    finish_interpolant_output(out, out_shape, spec.values.dtype)
+}
+
+fn evaluate_piecewise_interpolant(
+    spec: &InterpolantSpec,
+    plan: &QueryPlan,
+    grid_size: usize,
+    extra_count: usize,
+    out_shape: Vec<usize>,
+) -> BuiltinResult<Value> {
+    let x = &spec.grid_vectors[0];
+    let mut out = Vec::with_capacity(plan.len() * extra_count);
+    for series in 0..extra_count {
+        let series_offset = series * grid_size;
+        let y = spec.values.data[series_offset..series_offset + grid_size].to_vec();
+        let series_data = NumericSeries {
+            x: x.clone(),
+            y,
+            series: 1,
+            trailing_shape: Vec::new(),
+        };
+        let pp =
+            match spec.method {
+                InterpMethod::Pchip => build_pchip_pp(&series_data, CLASS_NAME)
+                    .map_err(|err| internal(err.message()))?,
+                InterpMethod::Spline => build_spline_pp(&series_data, CLASS_NAME)
+                    .map_err(|err| internal(err.message()))?,
+                _ => unreachable!("piecewise evaluator only handles higher-order methods"),
+            };
+        plan.for_each_point(|point| {
+            out.push(evaluate_piecewise_scalar(
+                spec,
+                &pp,
+                point[0],
+                series_offset,
+            ));
+        });
+    }
+    finish_interpolant_output(out, out_shape, spec.values.dtype)
+}
+
+fn finish_interpolant_output(
+    mut out: Vec<f64>,
+    out_shape: Vec<usize>,
+    dtype: NumericDType,
+) -> BuiltinResult<Value> {
+    if out.len() == 1 && dtype == NumericDType::F64 {
+        Ok(Value::Num(out[0]))
+    } else {
+        if dtype == NumericDType::F32 {
+            for value in &mut out {
+                *value = *value as f32 as f64;
+            }
+        }
+        Tensor::new_with_dtype(out, out_shape, dtype)
+            .map(Value::Tensor)
+            .map_err(internal)
+    }
+}
+
+fn parse_query_plan(grid_vectors: &[Vec<f64>], args: Vec<Value>) -> BuiltinResult<QueryPlan> {
+    let ndim = grid_vectors.len();
+    if args.len() == 1 {
+        if let Value::Cell(cell) = args[0].clone() {
+            let query_vectors = grid_vectors_from_cell(cell)?;
+            if query_vectors.len() != ndim {
+                return Err(invalid(
+                    "query grid vector count must match interpolant dimension",
+                ));
+            }
+            return full_query_grid(query_vectors);
+        }
+        if ndim == 1 {
+            let (values, shape) = numeric_query_values(args.into_iter().next().unwrap(), "Xq")?;
+            return Ok(QueryPlan {
+                coords: QueryCoords::Explicit(
+                    values.into_iter().map(|value| vec![value]).collect(),
+                ),
+                shape,
+            });
+        }
+        let tensor = numeric_tensor(args.into_iter().next().unwrap(), "Xq")?;
+        if tensor.shape.len() != 2 {
+            return Err(invalid(
+                "matrix query must be a two-dimensional m-by-n array",
+            ));
+        }
+        if tensor.cols() != ndim {
+            return Err(invalid(
+                "matrix query must have one column per grid dimension",
+            ));
+        }
+        let mut points = Vec::with_capacity(tensor.rows());
+        for row in 0..tensor.rows() {
+            let mut point = Vec::with_capacity(ndim);
+            for col in 0..ndim {
+                point.push(tensor.data[row + col * tensor.rows()]);
+            }
+            points.push(point);
+        }
+        return Ok(QueryPlan {
+            coords: QueryCoords::Explicit(points),
+            shape: vec![tensor.rows(), 1],
+        });
+    }
+    if args.len() != ndim {
+        return Err(invalid(format!(
+            "expected {ndim} query arguments, got {}",
+            args.len()
+        )));
+    }
+    let mut values_by_dim = Vec::with_capacity(ndim);
+    let mut query_shape = None;
+    for (dim, arg) in args.into_iter().enumerate() {
+        let (values, shape) = numeric_query_values(arg, &format!("Xq{}", dim + 1))?;
+        if let Some(expected) = &query_shape {
+            if expected != &shape {
+                return Err(invalid("query arrays must have matching shapes"));
+            }
+        } else {
+            query_shape = Some(shape);
+        }
+        values_by_dim.push(values);
+    }
+    let shape = query_shape.unwrap_or_else(|| vec![0, 0]);
+    let count = values_by_dim.first().map_or(0, Vec::len);
+    let mut points = Vec::with_capacity(count);
+    for idx in 0..count {
+        points.push((0..ndim).map(|dim| values_by_dim[dim][idx]).collect());
+    }
+    Ok(QueryPlan {
+        coords: QueryCoords::Explicit(points),
+        shape,
+    })
+}
+
+fn numeric_query_values(value: Value, name: &str) -> BuiltinResult<(Vec<f64>, Vec<usize>)> {
+    match value {
+        Value::Num(x) => Ok((vec![x], vec![1, 1])),
+        Value::Tensor(tensor) if matches!(tensor.dtype, NumericDType::F64 | NumericDType::F32) => {
+            Ok((tensor.data, tensor.shape))
+        }
+        Value::Tensor(_) => Err(invalid(format!("{name} must be single or double"))),
+        other => Err(invalid(format!("{name} must be numeric, got {other:?}"))),
+    }
+}
+
+fn full_query_grid(query_vectors: Vec<Vec<f64>>) -> BuiltinResult<QueryPlan> {
+    let shape = query_vectors.iter().map(Vec::len).collect::<Vec<_>>();
+    let total = shape
+        .iter()
+        .copied()
+        .try_fold(1usize, |acc, len| acc.checked_mul(len))
+        .ok_or_else(|| invalid("query grid size exceeds platform limits"))?;
+    Ok(QueryPlan {
+        coords: QueryCoords::FullGrid {
+            vectors: query_vectors,
+            total,
+        },
+        shape,
+    })
+}
+
+fn interpolate_point(spec: &InterpolantSpec, point: &[f64], series_offset: usize) -> f64 {
+    if point.iter().any(|value| value.is_nan()) {
+        return f64::NAN;
+    }
+    if point_outside_grid(spec, point) {
+        return extrapolate_point(spec, point, series_offset);
+    }
+    match spec.method {
+        InterpMethod::Linear => interpolate_linear(spec, point, series_offset),
+        InterpMethod::Nearest => interpolate_nearest(spec, point, series_offset),
+        InterpMethod::Next => interpolate_step(spec, point[0], series_offset, true),
+        InterpMethod::Previous => interpolate_step(spec, point[0], series_offset, false),
+        InterpMethod::Pchip | InterpMethod::Spline => {
+            unreachable!("higher-order methods use evaluate_piecewise_interpolant")
+        }
+    }
+}
+
+fn point_outside_grid(spec: &InterpolantSpec, point: &[f64]) -> bool {
+    point.iter().enumerate().any(|(dim, coord)| {
+        *coord < spec.grid_vectors[dim][0]
+            || *coord > spec.grid_vectors[dim][spec.grid_vectors[dim].len() - 1]
+    })
+}
+
+fn extrapolate_point(spec: &InterpolantSpec, point: &[f64], series_offset: usize) -> f64 {
+    match spec.extrapolation {
+        ExtrapolationMethod::None => f64::NAN,
+        ExtrapolationMethod::Linear => interpolate_linear(spec, point, series_offset),
+        ExtrapolationMethod::Nearest => interpolate_nearest(spec, point, series_offset),
+        ExtrapolationMethod::Next => interpolate_step(spec, point[0], series_offset, true),
+        ExtrapolationMethod::Previous => interpolate_step(spec, point[0], series_offset, false),
+        ExtrapolationMethod::Pchip | ExtrapolationMethod::Spline => {
+            unreachable!("piecewise extrapolation uses evaluate_piecewise_interpolant")
+        }
+    }
+}
+
+fn is_piecewise_method(method: InterpMethod) -> bool {
+    matches!(method, InterpMethod::Pchip | InterpMethod::Spline)
+}
+
+fn is_step_method(method: InterpMethod) -> bool {
+    matches!(method, InterpMethod::Next | InterpMethod::Previous)
+}
+
+fn is_step_extrapolation(method: ExtrapolationMethod) -> bool {
+    matches!(
+        method,
+        ExtrapolationMethod::Next | ExtrapolationMethod::Previous
+    )
+}
+
+fn is_piecewise_extrapolation(method: ExtrapolationMethod) -> bool {
+    matches!(
+        method,
+        ExtrapolationMethod::Pchip | ExtrapolationMethod::Spline
+    )
+}
+
+fn evaluate_piecewise_scalar(
+    spec: &InterpolantSpec,
+    pp: &PiecewisePolynomial,
+    coord: f64,
+    series_offset: usize,
+) -> f64 {
+    if coord.is_nan() {
+        return f64::NAN;
+    }
+    let grid = &spec.grid_vectors[0];
+    let in_range = coord >= grid[0] && coord <= grid[grid.len() - 1];
+    if !in_range {
+        match spec.extrapolation {
+            ExtrapolationMethod::None => return f64::NAN,
+            ExtrapolationMethod::Nearest => {
+                let idx = if coord < grid[0] { 0 } else { grid.len() - 1 };
+                return spec.values.data[series_offset + idx];
+            }
+            ExtrapolationMethod::Next => {
+                return interpolate_step(spec, coord, series_offset, true);
+            }
+            ExtrapolationMethod::Previous => {
+                return interpolate_step(spec, coord, series_offset, false);
+            }
+            ExtrapolationMethod::Linear => {
+                return interpolate_linear(spec, &[coord], series_offset);
+            }
+            ExtrapolationMethod::Pchip | ExtrapolationMethod::Spline => {}
+        }
+    }
+    eval_pp_scalar(pp, 0, coord, &Extrapolation::Extrapolate)
+}
+
+fn interpolate_linear(spec: &InterpolantSpec, point: &[f64], series_offset: usize) -> f64 {
+    let mut brackets = Vec::with_capacity(point.len());
+    for (dim, &coord) in point.iter().enumerate() {
+        let Some(bracket) = bracket_for_linear(&spec.grid_vectors[dim], coord, spec.extrapolation)
+        else {
+            return f64::NAN;
+        };
+        brackets.push(bracket);
+    }
+    if brackets.len() >= usize::BITS as usize {
+        return f64::NAN;
+    }
+    let corners = 1usize << brackets.len();
+    let mut acc = 0.0;
+    for corner in 0..corners {
+        let mut weight = 1.0;
+        let mut subs = Vec::with_capacity(brackets.len());
+        for (dim, bracket) in brackets.iter().enumerate() {
+            if (corner >> dim) & 1 == 0 {
+                weight *= 1.0 - bracket.t;
+                subs.push(bracket.lo);
+            } else {
+                weight *= bracket.t;
+                subs.push(bracket.hi);
+            }
+        }
+        acc += weight
+            * spec.values.data[series_offset + column_major_offset(&subs, &spec.values.shape)];
+    }
+    acc
+}
+
+fn bracket_for_linear(
+    grid: &[f64],
+    coord: f64,
+    extrapolation: ExtrapolationMethod,
+) -> Option<Bracket> {
+    if coord < grid[0] || coord > grid[grid.len() - 1] {
+        match extrapolation {
+            ExtrapolationMethod::None => return None,
+            ExtrapolationMethod::Nearest => {
+                let idx = if coord < grid[0] { 0 } else { grid.len() - 1 };
+                return Some(Bracket {
+                    lo: idx,
+                    hi: idx,
+                    t: 0.0,
+                });
+            }
+            _ => {}
+        }
+    }
+    let lo = if coord <= grid[0] {
+        0
+    } else if coord >= grid[grid.len() - 1] {
+        grid.len() - 2
+    } else {
+        match grid.binary_search_by(|probe| probe.partial_cmp(&coord).unwrap()) {
+            Ok(idx) => {
+                return Some(Bracket {
+                    lo: idx,
+                    hi: idx,
+                    t: 0.0,
+                })
+            }
+            Err(idx) => idx - 1,
+        }
+    };
+    let hi = lo + 1;
+    let t = (coord - grid[lo]) / (grid[hi] - grid[lo]);
+    Some(Bracket { lo, hi, t })
+}
+
+fn interpolate_nearest(spec: &InterpolantSpec, point: &[f64], series_offset: usize) -> f64 {
+    let mut subs = Vec::with_capacity(point.len());
+    for (dim, &coord) in point.iter().enumerate() {
+        let Some(idx) = nearest_index(&spec.grid_vectors[dim], coord, spec.extrapolation) else {
+            return f64::NAN;
+        };
+        subs.push(idx);
+    }
+    spec.values.data[series_offset + column_major_offset(&subs, &spec.values.shape)]
+}
+
+fn nearest_index(grid: &[f64], coord: f64, extrapolation: ExtrapolationMethod) -> Option<usize> {
+    if coord < grid[0] {
+        return (extrapolation != ExtrapolationMethod::None).then_some(0);
+    }
+    if coord > grid[grid.len() - 1] {
+        return (extrapolation != ExtrapolationMethod::None).then_some(grid.len() - 1);
+    }
+    match grid.binary_search_by(|probe| probe.partial_cmp(&coord).unwrap()) {
+        Ok(idx) => Some(idx),
+        Err(idx) => {
+            let lo = idx - 1;
+            let hi = idx;
+            if coord - grid[lo] < grid[hi] - coord {
+                Some(lo)
+            } else {
+                Some(hi)
+            }
+        }
+    }
+}
+
+fn interpolate_step(spec: &InterpolantSpec, coord: f64, series_offset: usize, next: bool) -> f64 {
+    let grid = &spec.grid_vectors[0];
+    if coord < grid[0] || coord > grid[grid.len() - 1] {
+        if spec.extrapolation == ExtrapolationMethod::None {
+            return f64::NAN;
+        }
+        let idx = if coord < grid[0] { 0 } else { grid.len() - 1 };
+        return spec.values.data[series_offset + idx];
+    }
+    let idx = match grid.binary_search_by(|probe| probe.partial_cmp(&coord).unwrap()) {
+        Ok(idx) => idx,
+        Err(idx) if next => idx,
+        Err(idx) => idx.saturating_sub(1),
+    };
+    spec.values.data[series_offset + idx.min(grid.len() - 1)]
+}
+
+fn column_major_offset(subs: &[usize], shape: &[usize]) -> usize {
+    let mut stride = 1usize;
+    let mut offset = 0usize;
+    for (dim, &sub) in subs.iter().enumerate() {
+        offset += sub * stride;
+        stride *= shape.get(dim).copied().unwrap_or(1);
+    }
+    offset
+}
+
+fn unravel_column_major(mut linear: usize, shape: &[usize]) -> Vec<usize> {
+    shape
+        .iter()
+        .map(|&dim| {
+            let sub = if dim == 0 { 0 } else { linear % dim };
+            if dim > 0 {
+                linear /= dim;
+            }
+            sub
+        })
+        .collect()
+}
+
+fn interp_method_name(method: InterpMethod) -> &'static str {
+    match method {
+        InterpMethod::Linear => "linear",
+        InterpMethod::Nearest => "nearest",
+        InterpMethod::Next => "next",
+        InterpMethod::Previous => "previous",
+        InterpMethod::Pchip => "pchip",
+        InterpMethod::Spline => "spline",
+    }
+}
+
+fn extrap_method_name(method: ExtrapolationMethod) -> &'static str {
+    match method {
+        ExtrapolationMethod::Linear => "linear",
+        ExtrapolationMethod::Nearest => "nearest",
+        ExtrapolationMethod::Next => "next",
+        ExtrapolationMethod::Previous => "previous",
+        ExtrapolationMethod::Pchip => "pchip",
+        ExtrapolationMethod::Spline => "spline",
+        ExtrapolationMethod::None => "none",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::executor::block_on;
+
+    fn row(values: &[f64]) -> Value {
+        Value::Tensor(Tensor::new(values.to_vec(), vec![1, values.len()]).unwrap())
+    }
+
+    fn col(values: &[f64]) -> Value {
+        Value::Tensor(Tensor::new(values.to_vec(), vec![values.len(), 1]).unwrap())
+    }
+
+    fn call(args: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(gridded_interpolant_builtin(args))
+    }
+
+    fn subsref(obj: Value, args: Vec<Value>) -> BuiltinResult<Value> {
+        let len = args.len();
+        let payload = Value::Cell(CellArray::new_with_shape(args, vec![1, len]).unwrap());
+        block_on(gridded_interpolant_subsref(
+            obj,
+            OBJECT_INDEX_PAREN.to_string(),
+            payload,
+        ))
+    }
+
+    #[test]
+    fn constructor_returns_object_with_properties() {
+        let value = call(vec![row(&[10.0, 20.0, 40.0])]).unwrap();
+        let Value::Object(obj) = value else {
+            panic!("expected object");
+        };
+        assert_eq!(obj.class_name, CLASS_NAME);
+        assert_eq!(
+            obj.properties.get(METHOD),
+            Some(&Value::String("linear".to_string()))
+        );
+        assert!(matches!(
+            obj.properties.get(GRID_VECTORS),
+            Some(Value::Cell(_))
+        ));
+    }
+
+    #[test]
+    fn one_dimensional_linear_interpolation_and_none_extrapolation() {
+        let obj = call(vec![
+            col(&[0.0, 1.0, 2.0]),
+            col(&[0.0, 10.0, 40.0]),
+            Value::String("linear".to_string()),
+            Value::String("none".to_string()),
+        ])
+        .unwrap();
+        match subsref(obj, vec![row(&[-1.0, 0.5, 1.5, 3.0])]).unwrap() {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![1, 4]);
+                assert!(tensor.data[0].is_nan());
+                assert_eq!(tensor.data[1], 5.0);
+                assert_eq!(tensor.data[2], 25.0);
+                assert!(tensor.data[3].is_nan());
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn default_grid_and_nearest_method_work() {
+        let obj = call(vec![
+            row(&[10.0, 20.0, 40.0]),
+            Value::String("nearest".to_string()),
+        ])
+        .unwrap();
+        match subsref(obj, vec![row(&[1.2, 2.6])]).unwrap() {
+            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![10.0, 40.0]),
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn two_dimensional_grid_vectors_interpolate() {
+        let grid = CellArray::new_with_shape(vec![col(&[0.0, 1.0]), col(&[0.0, 2.0])], vec![1, 2])
+            .unwrap();
+        let values = Tensor::new(vec![0.0, 10.0, 20.0, 30.0], vec![2, 2]).unwrap();
+        let obj = call(vec![Value::Cell(grid), Value::Tensor(values)]).unwrap();
+        match subsref(obj, vec![Value::Num(0.5), Value::Num(1.0)]).unwrap() {
+            Value::Num(value) => assert_eq!(value, 15.0),
+            other => panic!("expected scalar, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn one_dimensional_spline_uses_piecewise_polynomial_path() {
+        let obj = call(vec![
+            col(&[1.0, 2.0, 3.0]),
+            col(&[1.0, 4.0, 9.0]),
+            Value::String("spline".to_string()),
+        ])
+        .unwrap();
+        match subsref(obj, vec![Value::Num(1.5)]).unwrap() {
+            Value::Num(value) => assert!((value - 2.25).abs() < 1.0e-10),
+            other => panic!("expected scalar, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn one_dimensional_pchip_preserves_samples_and_nearest_extrapolates() {
+        let obj = call(vec![
+            col(&[1.0, 2.0, 3.0, 4.0]),
+            col(&[0.0, 1.0, 1.5, 1.75]),
+            Value::String("pchip".to_string()),
+            Value::String("nearest".to_string()),
+        ])
+        .unwrap();
+        match subsref(obj, vec![row(&[0.0, 3.0, 5.0])]).unwrap() {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.data[0], 0.0);
+                assert_eq!(tensor.data[1], 1.5);
+                assert_eq!(tensor.data[2], 1.75);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn extrapolation_method_is_independent_from_interpolation_method() {
+        let obj = call(vec![
+            col(&[0.0, 1.0, 2.0]),
+            col(&[0.0, 10.0, 40.0]),
+            Value::String("nearest".to_string()),
+            Value::String("linear".to_string()),
+        ])
+        .unwrap();
+        match subsref(obj, vec![row(&[-1.0, 0.4, 3.0])]).unwrap() {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.data[0], -10.0);
+                assert_eq!(tensor.data[1], 0.0);
+                assert_eq!(tensor.data[2], 70.0);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unsupported_cubic_method_is_explicit() {
+        let err = call(vec![
+            row(&[10.0, 20.0, 40.0]),
+            Value::String("cubic".to_string()),
+        ])
+        .expect_err("cubic is not implemented yet");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:griddedInterpolant:UnsupportedMethod")
+        );
+    }
+
+    #[test]
+    fn higher_order_methods_reject_nd_grids_explicitly() {
+        let grid = CellArray::new_with_shape(vec![col(&[0.0, 1.0]), col(&[0.0, 2.0])], vec![1, 2])
+            .unwrap();
+        let values = Tensor::new(vec![0.0, 10.0, 20.0, 30.0], vec![2, 2]).unwrap();
+        let err = call(vec![
+            Value::Cell(grid),
+            Value::Tensor(values),
+            Value::String("spline".to_string()),
+        ])
+        .expect_err("N-D spline is not implemented");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:griddedInterpolant:UnsupportedMethod")
+        );
+    }
+
+    #[test]
+    fn pchip_requires_four_grid_points() {
+        let err = call(vec![
+            col(&[1.0, 2.0, 3.0]),
+            col(&[1.0, 4.0, 9.0]),
+            Value::String("pchip".to_string()),
+        ])
+        .expect_err("pchip requires four points");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:griddedInterpolant:InvalidInput")
+        );
+    }
+
+    #[test]
+    fn full_grid_constructor_rejects_non_rectilinear_arrays() {
+        let x_grid = Tensor::new(vec![0.0, 1.0, 0.0, 2.0], vec![2, 2]).unwrap();
+        let y_grid = Tensor::new(vec![0.0, 0.0, 2.0, 2.0], vec![2, 2]).unwrap();
+        let values = Tensor::new(vec![0.0, 10.0, 20.0, 30.0], vec![2, 2]).unwrap();
+        let err = call(vec![
+            Value::Tensor(x_grid),
+            Value::Tensor(y_grid),
+            Value::Tensor(values),
+        ])
+        .expect_err("malformed full grid should be rejected");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:griddedInterpolant:InvalidInput")
+        );
+    }
+
+    #[test]
+    fn rowwise_matrix_query_requires_two_dimensions() {
+        let grid = CellArray::new_with_shape(vec![col(&[0.0, 1.0]), col(&[0.0, 2.0])], vec![1, 2])
+            .unwrap();
+        let values = Tensor::new(vec![0.0, 10.0, 20.0, 30.0], vec![2, 2]).unwrap();
+        let obj = call(vec![Value::Cell(grid), Value::Tensor(values)]).unwrap();
+        let query = Tensor::new(vec![0.0, 0.0, 1.0, 2.0], vec![2, 2, 1]).unwrap();
+        let err = subsref(obj, vec![Value::Tensor(query)])
+            .expect_err("row-wise matrix query must be 2-D");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:griddedInterpolant:InvalidInput")
+        );
+    }
+
+    #[test]
+    fn mutated_object_properties_are_revalidated_before_evaluation() {
+        let value = call(vec![row(&[1.0, 2.0, 3.0])]).unwrap();
+        let Value::Object(mut obj) = value else {
+            panic!("expected object");
+        };
+        obj.properties.insert(
+            VALUES.to_string(),
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+        );
+        let err = subsref(Value::Object(obj), vec![Value::Num(2.0)])
+            .expect_err("invalid object state should be rejected");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:griddedInterpolant:InvalidInput")
+        );
+    }
+
+    #[test]
+    fn member_subsref_returns_public_properties() {
+        let obj = call(vec![row(&[1.0, 2.0, 3.0])]).unwrap();
+        let value = block_on(gridded_interpolant_subsref(
+            obj,
+            OBJECT_INDEX_MEMBER.to_string(),
+            Value::String(VALUES.to_string()),
+        ))
+        .unwrap();
+        assert!(matches!(value, Value::Tensor(_)));
+    }
+
+    #[test]
+    fn unsupported_makima_method_is_explicit() {
+        let err = call(vec![
+            row(&[1.0, 2.0, 3.0]),
+            Value::String("makima".to_string()),
+        ])
+        .expect_err("makima is not implemented yet");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:griddedInterpolant:UnsupportedMethod")
+        );
+    }
+}

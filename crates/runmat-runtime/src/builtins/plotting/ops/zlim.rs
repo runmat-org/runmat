@@ -122,6 +122,7 @@ mod tests {
 
         let _ = zlim_builtin(vec![Value::Tensor(runmat_builtins::Tensor {
             data: vec![-1.0, 1.0],
+            integer_data: None,
             shape: vec![1, 2],
             rows: 1,
             cols: 2,

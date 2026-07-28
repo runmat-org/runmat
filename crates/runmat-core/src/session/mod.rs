@@ -1,7 +1,9 @@
 use anyhow::Result;
 use runmat_builtins::{self, Value};
 use runmat_gc::{gc_configure, gc_stats, GcConfig};
-use tracing::{debug, info, info_span, warn};
+#[cfg(feature = "jit")]
+use tracing::warn;
+use tracing::{debug, info, info_span};
 
 use runmat_hir::{LoweringContext, LoweringResult, SourceId};
 use runmat_lexer::{tokenize_detailed, Token as LexToken};
@@ -10,17 +12,11 @@ use runmat_runtime::{build_runtime_error, gather_if_needed_async, RuntimeError};
 use runmat_runtime::{
     runtime_export_workspace_state, runtime_import_workspace_state, WorkspaceReplayMode,
 };
-#[cfg(target_arch = "wasm32")]
-use runmat_snapshot::SnapshotBuilder;
-use runmat_snapshot::{Snapshot, SnapshotConfig, SnapshotLoader};
 use runmat_time::Instant;
 #[cfg(feature = "jit")]
 use runmat_turbine::TurbineEngine;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
-#[cfg(not(target_arch = "wasm32"))]
-use std::path::Path;
-use std::rc::Rc;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -50,8 +46,8 @@ use crate::{
 
 mod compile;
 mod config;
+mod init;
 mod run;
-mod snapshot;
 mod workspace;
 
 /// Host-agnostic RunMat execution session (parser + interpreter + optional JIT).
@@ -78,8 +74,6 @@ pub struct RunMatSession {
     next_semantic_function_id: usize,
     /// Interned source pool for user-defined functions
     source_pool: SourcePool,
-    /// Loaded snapshot for standard library preloading
-    snapshot: Option<Rc<Snapshot>>,
     /// Cooperative cancellation flag shared with the runtime.
     interrupt_flag: Arc<AtomicBool>,
     /// Tracks whether an execution is currently active.
@@ -107,6 +101,8 @@ pub struct RunMatSession {
     dynamic_eval_enabled: bool,
     /// Persisted numeric display format for this session (survives across executions).
     format_mode: runmat_builtins::FormatMode,
+    /// Persisted diary logging state for this session (survives across executions).
+    diary_state: runmat_runtime::console::DiaryStateSnapshot,
     /// Preloaded companion statements discovered asynchronously by the request path.
     pending_companion_source_discovery: Option<compile::CompanionSourceDiscovery>,
 }
@@ -168,6 +164,36 @@ impl Drop for ActiveExecutionGuard {
             if let Some(flag) = self.flag.as_mut() {
                 *flag = false;
             }
+        }
+    }
+}
+
+struct SessionDiaryStateGuard {
+    session_state: *mut runmat_runtime::console::DiaryStateSnapshot,
+    previous_state: Option<runmat_runtime::console::DiaryStateSnapshot>,
+}
+
+impl SessionDiaryStateGuard {
+    fn new(session: &mut RunMatSession) -> Self {
+        let previous_state =
+            runmat_runtime::console::replace_diary_state(session.diary_state.clone());
+        Self {
+            session_state: &mut session.diary_state,
+            previous_state: Some(previous_state),
+        }
+    }
+}
+
+impl Drop for SessionDiaryStateGuard {
+    fn drop(&mut self) {
+        let current_state = runmat_runtime::console::diary_state_snapshot();
+        unsafe {
+            if let Some(session_state) = self.session_state.as_mut() {
+                *session_state = current_state;
+            }
+        }
+        if let Some(previous_state) = self.previous_state.take() {
+            runmat_runtime::console::replace_diary_state(previous_state);
         }
     }
 }

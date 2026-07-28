@@ -1,13 +1,21 @@
 use glam::{Vec3, Vec4};
-use runmat_analysis_core::{AnalysisField, AnalysisFieldValues};
+use runmat_analysis_core::{
+    AnalysisField, AnalysisFieldValues, AnalysisModel, BoundaryConditionKind, LoadKind,
+};
+use runmat_analysis_fea::contracts::{
+    FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
+    FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+};
+use runmat_geometry_core::UnitSystem;
 use runmat_plot::plots::{
     BarChart, Figure, LinePlot, MeshDeformation, MeshEdgeMode, MeshFieldLocation, MeshPlot,
-    MeshScalarField, MeshVectorField, PlotElement,
+    MeshRegion, MeshScalarField, MeshTriangleRange, MeshVectorField, PlotElement,
 };
 
 use super::contracts::{
-    AnalysisRenderTopology, AnalysisResultsCompareData, AnalysisResultsCompareQuery,
-    AnalysisRunKind, AnalysisRunResult, AnalysisStudySpec, AnalysisTrendsData, AnalysisTrendsQuery,
+    AnalysisFieldDescriptor, AnalysisFieldKind, AnalysisFieldLocation, AnalysisRenderTopology,
+    AnalysisResultsCompareData, AnalysisResultsCompareQuery, AnalysisRunKind, AnalysisRunResult,
+    AnalysisStudySpec, AnalysisTrendsData, AnalysisTrendsQuery,
 };
 use super::{analysis_results_compare_op, analysis_trends_op, collect_analysis_result_fields};
 use super::{run_kind, storage};
@@ -17,6 +25,7 @@ use crate::operations::OperationContext;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnalysisGeneratedFigureKind {
     MeshResult,
+    Summary,
     Convergence,
     Modal,
     Electromagnetic,
@@ -29,8 +38,17 @@ pub struct AnalysisGeneratedFigure {
     pub kind: AnalysisGeneratedFigureKind,
     pub title: String,
     pub field_ids: Vec<String>,
+    pub topology_ids: Vec<String>,
     pub warnings: Vec<String>,
     pub figure: Figure,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnalysisFigureMeshSource {
+    Auto,
+    Solver,
+    Cad,
+    CadReference,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +58,9 @@ pub struct AnalysisFigureGenerationOptions {
     pub max_mesh_result_figures: usize,
     pub max_mesh_geometry_bytes: usize,
     pub edge_overlay_triangle_limit: usize,
+    pub mesh_source: AnalysisFigureMeshSource,
+    pub show_solver_mesh_edges: bool,
+    pub apply_deformation_overlay: bool,
     pub include_comparison: bool,
     pub include_trends: bool,
 }
@@ -52,6 +73,9 @@ impl Default for AnalysisFigureGenerationOptions {
             max_mesh_result_figures: 4,
             max_mesh_geometry_bytes: 256 * 1024 * 1024,
             edge_overlay_triangle_limit: 250_000,
+            mesh_source: AnalysisFigureMeshSource::Auto,
+            show_solver_mesh_edges: false,
+            apply_deformation_overlay: true,
             include_comparison: true,
             include_trends: true,
         }
@@ -63,6 +87,8 @@ struct MeshCounts {
     plot_index: usize,
     vertices: usize,
     triangles: usize,
+    vertex_volume_node_indices: Vec<Option<usize>>,
+    triangle_volume_element_indices: Vec<Option<usize>>,
 }
 
 #[derive(Debug, Clone)]
@@ -97,7 +123,8 @@ pub fn analysis_generate_study_run_figures(
 ) -> Result<Vec<AnalysisGeneratedFigure>, String> {
     let current = storage::load_run_result(run_id)?
         .ok_or_else(|| format!("FEA run_id '{run_id}' was not found"))?;
-    let mut figures = generate_run_figures(&study.geometry, &current, options);
+    let mut figures =
+        generate_run_figures(&study.geometry, study.model.as_ref(), &current, options);
 
     if options.include_comparison {
         if let Some(previous) = previous_run_of_kind(&current)? {
@@ -129,17 +156,20 @@ pub fn analysis_generate_study_run_figures(
 
 fn generate_run_figures(
     geometry: &runmat_geometry_core::GeometryAsset,
+    model: Option<&AnalysisModel>,
     run: &AnalysisRunResult,
     options: AnalysisFigureGenerationOptions,
 ) -> Vec<AnalysisGeneratedFigure> {
     let mut figures = Vec::new();
-    figures.extend(mesh_result_figures(geometry, run, options));
+    figures.extend(mesh_result_figures(geometry, model, run, options));
+    figures.extend(summary_figures(run));
     figures.extend(convergence_figures(run));
     figures
 }
 
 fn mesh_result_figures(
     geometry: &runmat_geometry_core::GeometryAsset,
+    model: Option<&AnalysisModel>,
     run: &AnalysisRunResult,
     options: AnalysisFigureGenerationOptions,
 ) -> Vec<AnalysisGeneratedFigure> {
@@ -175,18 +205,22 @@ fn mesh_result_figures(
                     AnalysisGeneratedFigureKind::MeshResult,
                     "FEA result visualization",
                     "Solver render topology and geometry preview are unavailable".to_string(),
-                )]
+                )];
             }
         };
-    let mesh_counts = collect_mesh_counts(&probe);
+    let mesh_counts = collect_mesh_counts_with_topology(&probe, render_topology);
     if mesh_counts.is_empty() {
         return Vec::new();
     }
 
-    let deformation = fields
-        .iter()
-        .filter(|field| is_deformation_candidate(&field.field_id))
-        .find_map(|field| deformation_overlay(field, &mesh_counts, &probe, options));
+    let deformation = if options.apply_deformation_overlay {
+        fields
+            .iter()
+            .filter(|field| is_deformation_candidate(&field.field_id))
+            .find_map(|field| deformation_overlay(field, &mesh_counts, &probe, options))
+    } else {
+        None
+    };
 
     let mut figures = Vec::new();
     if let Some(deformation) = deformation.as_ref() {
@@ -203,6 +237,7 @@ fn mesh_result_figures(
                     kind: AnalysisGeneratedFigureKind::MeshResult,
                     title: format!("FEA deformed shape: {}", deformation.field_id),
                     field_ids: vec![deformation.field_id.clone()],
+                    topology_ids: topology_ids_for_field_ids([deformation.field_id.as_str()]),
                     warnings,
                     figure,
                 });
@@ -210,11 +245,15 @@ fn mesh_result_figures(
         }
     }
 
+    let mut topology_warnings = Vec::new();
     for field in &fields {
         if figures.len() >= per_run_mesh_figure_limit {
             break;
         }
         let Some(scalar) = scalar_overlay(field, &mesh_counts, options) else {
+            if let Some(warning) = field_topology_mismatch_warning(field, &mesh_counts) {
+                topology_warnings.push(warning);
+            }
             continue;
         };
         let title = format!("FEA scalar field: {}", scalar.field_id);
@@ -237,6 +276,7 @@ fn mesh_result_figures(
             kind: AnalysisGeneratedFigureKind::MeshResult,
             title,
             field_ids: vec![scalar.field_id],
+            topology_ids: topology_ids_for_fields(std::iter::once(field)),
             warnings,
             figure,
         });
@@ -247,6 +287,9 @@ fn mesh_result_figures(
             break;
         }
         let Some(vector) = vector_overlay(field, &mesh_counts, options) else {
+            if let Some(warning) = field_topology_mismatch_warning(field, &mesh_counts) {
+                topology_warnings.push(warning);
+            }
             continue;
         };
         let title = format!("FEA vector field: {}", vector.field_id);
@@ -268,12 +311,33 @@ fn mesh_result_figures(
             kind: AnalysisGeneratedFigureKind::MeshResult,
             title,
             field_ids: vec![vector.field_id],
+            topology_ids: topology_ids_for_fields(std::iter::once(field)),
             warnings,
             figure,
         });
     }
 
+    if figures.len() < per_run_mesh_figure_limit {
+        if let Some(figure) = boundary_region_figure(
+            geometry,
+            render_topology,
+            model,
+            options,
+            shared_warnings.clone(),
+        ) {
+            figures.push(figure);
+        }
+    }
+
     if figures.is_empty() {
+        if let Some(warning) = topology_warnings.first() {
+            figures.push(warning_line_figure(
+                AnalysisGeneratedFigureKind::MeshResult,
+                "FEA field topology mismatch",
+                warning.clone(),
+            ));
+            return figures;
+        }
         if let Some(figure) = base_mesh_figure(
             geometry,
             render_topology,
@@ -284,6 +348,7 @@ fn mesh_result_figures(
                 kind: AnalysisGeneratedFigureKind::MeshResult,
                 title: format!("FEA geometry result: {}", run.run_id),
                 field_ids: Vec::new(),
+                topology_ids: Vec::new(),
                 warnings: shared_warnings,
                 figure,
             });
@@ -291,6 +356,309 @@ fn mesh_result_figures(
     }
 
     figures
+}
+
+fn boundary_region_figure(
+    geometry: &runmat_geometry_core::GeometryAsset,
+    render_topology: Option<&AnalysisRenderTopology>,
+    model: Option<&AnalysisModel>,
+    options: AnalysisFigureGenerationOptions,
+    mut warnings: Vec<String>,
+) -> Option<AnalysisGeneratedFigure> {
+    let model = model?;
+    let regions = authored_boundary_regions(model);
+    if regions.is_empty() {
+        return None;
+    }
+
+    let mut figure = base_mesh_figure(
+        geometry,
+        render_topology,
+        "FEA boundary regions".to_string(),
+        options,
+    )?;
+
+    let mut present = Vec::<String>::new();
+    for index in 0..figure.plots().count() {
+        let Some(PlotElement::Mesh(mesh)) = figure.get_plot_mut(index) else {
+            continue;
+        };
+        for region in &regions {
+            if mesh
+                .regions()
+                .iter()
+                .any(|mesh_region| mesh_region.region_id == region.region_id)
+            {
+                if !present.iter().any(|existing| existing == &region.region_id) {
+                    present.push(region.region_id.clone());
+                }
+                if mesh.highlighted_region_id().is_none() {
+                    mesh.set_highlighted_region_id(Some(region.region_id.clone()));
+                    mesh.set_highlight_color(region.highlight_color);
+                }
+            }
+        }
+        attach_authored_load_vectors(mesh, &regions, &mut warnings);
+    }
+
+    for region in &regions {
+        if !present.iter().any(|existing| existing == &region.region_id) {
+            warnings.push(format!(
+                "authored {} region '{}' is not present in solver render topology",
+                region.role, region.region_id
+            ));
+        }
+    }
+
+    if present.is_empty() && warnings.is_empty() {
+        return None;
+    }
+
+    Some(AnalysisGeneratedFigure {
+        kind: AnalysisGeneratedFigureKind::MeshResult,
+        title: "FEA boundary regions".to_string(),
+        field_ids: Vec::new(),
+        topology_ids: vec!["analysis_mesh".to_string()],
+        warnings,
+        figure,
+    })
+}
+
+#[derive(Debug, Clone)]
+struct AuthoredBoundaryRegion {
+    region_id: String,
+    role: &'static str,
+    highlight_color: Vec4,
+    load_vector: Option<Vec3>,
+    pressure_sign: Option<f32>,
+}
+
+fn authored_boundary_regions(model: &AnalysisModel) -> Vec<AuthoredBoundaryRegion> {
+    let mut regions = Vec::<AuthoredBoundaryRegion>::new();
+    for load in &model.loads {
+        if !load_kind_requires_boundary_region(&load.kind) {
+            continue;
+        }
+        push_authored_boundary_region(
+            &mut regions,
+            &load.region_id,
+            "load",
+            Vec4::new(0.98, 0.30, 0.54, 1.0),
+            load_vector_for_kind(&load.kind),
+            pressure_sign_for_kind(&load.kind),
+        );
+    }
+    for boundary_condition in &model.boundary_conditions {
+        if !boundary_condition_kind_uses_boundary_region(&boundary_condition.kind) {
+            continue;
+        }
+        push_authored_boundary_region(
+            &mut regions,
+            &boundary_condition.region_id,
+            "constraint",
+            Vec4::new(0.18, 0.78, 0.48, 1.0),
+            None,
+            None,
+        );
+    }
+    regions
+}
+
+fn push_authored_boundary_region(
+    regions: &mut Vec<AuthoredBoundaryRegion>,
+    region_id: &str,
+    role: &'static str,
+    highlight_color: Vec4,
+    load_vector: Option<Vec3>,
+    pressure_sign: Option<f32>,
+) {
+    if region_id.trim().is_empty()
+        || regions
+            .iter()
+            .any(|existing| existing.region_id == region_id && existing.role == role)
+    {
+        return;
+    }
+    regions.push(AuthoredBoundaryRegion {
+        region_id: region_id.to_string(),
+        role,
+        highlight_color,
+        load_vector,
+        pressure_sign,
+    });
+}
+
+fn load_kind_requires_boundary_region(kind: &LoadKind) -> bool {
+    matches!(
+        kind,
+        LoadKind::Force { .. }
+            | LoadKind::Moment { .. }
+            | LoadKind::Wrench { .. }
+            | LoadKind::Pressure { .. }
+    )
+}
+
+fn boundary_condition_kind_uses_boundary_region(_kind: &BoundaryConditionKind) -> bool {
+    true
+}
+
+fn load_vector_for_kind(kind: &LoadKind) -> Option<Vec3> {
+    let vector = match kind {
+        LoadKind::Force { fx, fy, fz } => {
+            Vec3::new(f64_to_f32(*fx)?, f64_to_f32(*fy)?, f64_to_f32(*fz)?)
+        }
+        LoadKind::Moment { mx, my, mz } => {
+            Vec3::new(f64_to_f32(*mx)?, f64_to_f32(*my)?, f64_to_f32(*mz)?)
+        }
+        LoadKind::Wrench { fx, fy, fz, .. } => {
+            Vec3::new(f64_to_f32(*fx)?, f64_to_f32(*fy)?, f64_to_f32(*fz)?)
+        }
+        _ => return None,
+    };
+    if vector.length_squared().is_finite() && vector.length_squared() > f32::EPSILON {
+        Some(vector.normalize())
+    } else if let LoadKind::Wrench { mx, my, mz, .. } = kind {
+        let moment = Vec3::new(f64_to_f32(*mx)?, f64_to_f32(*my)?, f64_to_f32(*mz)?);
+        if moment.length_squared().is_finite() && moment.length_squared() > f32::EPSILON {
+            Some(moment.normalize())
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
+fn pressure_sign_for_kind(kind: &LoadKind) -> Option<f32> {
+    match kind {
+        LoadKind::Pressure { magnitude_pa } => {
+            let magnitude = f64_to_f32(*magnitude_pa)?;
+            if magnitude.is_finite() && magnitude.abs() > f32::EPSILON {
+                Some(-magnitude.signum())
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn attach_authored_load_vectors(
+    mesh: &mut MeshPlot,
+    regions: &[AuthoredBoundaryRegion],
+    warnings: &mut Vec<String>,
+) {
+    let mut vectors = vec![Vec3::ZERO; mesh.triangles().len()];
+    let mut has_vector = false;
+    for region in regions {
+        if region.load_vector.is_none() && region.pressure_sign.is_none() {
+            continue;
+        }
+        let Some(mesh_region) = mesh
+            .regions()
+            .iter()
+            .find(|mesh_region| mesh_region.region_id == region.region_id)
+        else {
+            continue;
+        };
+        for triangle_index in 0..vectors.len() {
+            if mesh_region.contains_triangle(triangle_index as u32) {
+                let Some(vector) = region.load_vector.or_else(|| {
+                    region.pressure_sign.and_then(|sign| {
+                        triangle_unit_normal(mesh, triangle_index).map(|normal| normal * sign)
+                    })
+                }) else {
+                    continue;
+                };
+                vectors[triangle_index] = vector;
+                has_vector = true;
+            }
+        }
+    }
+    if !has_vector {
+        return;
+    }
+    let mut field = MeshVectorField::new(
+        "authored.boundary_load_direction",
+        MeshFieldLocation::Triangle,
+        vectors,
+    );
+    field.label = Some("Authored boundary load direction".to_string());
+    field.scale = vector_scale(&field.vectors);
+    if let Err(err) = mesh.set_vector_field(Some(field)) {
+        warnings.push(format!(
+            "failed to attach authored boundary load vectors: {err}"
+        ));
+    }
+}
+
+fn triangle_unit_normal(mesh: &MeshPlot, triangle_index: usize) -> Option<Vec3> {
+    let triangle = *mesh.triangles().get(triangle_index)?;
+    let a = *mesh.vertices().get(triangle[0] as usize)?;
+    let b = *mesh.vertices().get(triangle[1] as usize)?;
+    let c = *mesh.vertices().get(triangle[2] as usize)?;
+    let normal = (b - a).cross(c - a);
+    if normal.length_squared().is_finite() && normal.length_squared() > f32::EPSILON {
+        Some(normal.normalize())
+    } else {
+        None
+    }
+}
+
+fn summary_figures(run: &AnalysisRunResult) -> Vec<AnalysisGeneratedFigure> {
+    let fields = collect_analysis_result_fields(run);
+    let Some(figure) = structural_result_summary_figure(&fields) else {
+        return Vec::new();
+    };
+    vec![figure]
+}
+
+fn structural_result_summary_figure(fields: &[AnalysisField]) -> Option<AnalysisGeneratedFigure> {
+    let mut labels = Vec::new();
+    let mut values = Vec::new();
+    let mut field_ids = Vec::new();
+
+    if let Some(value) = vector_field_total_magnitude(fields, FEA_FIELD_STRUCTURAL_REACTION_FORCE) {
+        labels.push("Reaction force norm".to_string());
+        values.push(value);
+        field_ids.push(FEA_FIELD_STRUCTURAL_REACTION_FORCE.to_string());
+    }
+    if let Some(value) = vector_field_total_magnitude(fields, FEA_FIELD_STRUCTURAL_REACTION_MOMENT)
+    {
+        labels.push("Reaction moment norm".to_string());
+        values.push(value);
+        field_ids.push(FEA_FIELD_STRUCTURAL_REACTION_MOMENT.to_string());
+    }
+    if let Some(value) = scalar_field_value(fields, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY) {
+        labels.push("Total strain energy".to_string());
+        values.push(value);
+        field_ids.push(FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY.to_string());
+    }
+    if let Some(value) = scalar_field_value(fields, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM) {
+        labels.push("Residual norm".to_string());
+        values.push(value);
+        field_ids.push(FEA_FIELD_STRUCTURAL_RESIDUAL_NORM.to_string());
+    }
+
+    if labels.is_empty() {
+        return None;
+    }
+    let mut chart = BarChart::new(labels, values).ok()?;
+    chart.label = Some("Structural summary".to_string());
+    chart.color = Vec4::new(0.30, 0.64, 0.58, 1.0);
+    let mut figure = Figure::new()
+        .with_title("FEA structural result summary")
+        .with_labels("Metric", "Value")
+        .with_grid(true);
+    figure.add_bar_chart(chart);
+    Some(AnalysisGeneratedFigure {
+        kind: AnalysisGeneratedFigureKind::Summary,
+        title: "FEA structural result summary".to_string(),
+        field_ids,
+        topology_ids: Vec::new(),
+        warnings: Vec::new(),
+        figure,
+    })
 }
 
 fn convergence_figures(run: &AnalysisRunResult) -> Vec<AnalysisGeneratedFigure> {
@@ -316,6 +684,7 @@ fn convergence_figures(run: &AnalysisRunResult) -> Vec<AnalysisGeneratedFigure> 
                         .iter()
                         .map(|field| field.field_id.clone())
                         .collect(),
+                    topology_ids: topology_ids_for_fields(modal.mode_shapes.iter()),
                     warnings: Vec::new(),
                     figure,
                 });
@@ -541,6 +910,7 @@ fn comparison_figure(data: &AnalysisResultsCompareData) -> Option<AnalysisGenera
         kind: AnalysisGeneratedFigureKind::Comparison,
         title: "FEA run comparison".to_string(),
         field_ids: Vec::new(),
+        topology_ids: Vec::new(),
         warnings: Vec::new(),
         figure,
     })
@@ -575,6 +945,7 @@ fn trend_figures(data: &AnalysisTrendsData) -> Vec<AnalysisGeneratedFigure> {
                 kind: AnalysisGeneratedFigureKind::Trend,
                 title: "FEA solve time trends".to_string(),
                 field_ids: Vec::new(),
+                topology_ids: Vec::new(),
                 warnings: Vec::new(),
                 figure,
             });
@@ -598,6 +969,7 @@ fn trend_figures(data: &AnalysisTrendsData) -> Vec<AnalysisGeneratedFigure> {
             kind: AnalysisGeneratedFigureKind::Trend,
             title: "FEA publishable result trends".to_string(),
             field_ids: Vec::new(),
+            topology_ids: Vec::new(),
             warnings: Vec::new(),
             figure,
         });
@@ -622,20 +994,109 @@ fn base_mesh_figure_for_run_source(
     options: AnalysisFigureGenerationOptions,
 ) -> Option<Figure> {
     let title = title.into();
-    if let Some(topology) = render_topology {
-        if let Ok(figure) = render_topology_figure(topology, title.clone(), options) {
-            return Some(figure);
+    match options.mesh_source {
+        AnalysisFigureMeshSource::Auto => {
+            if let Some(figure) =
+                cad_reference_mesh_figure(geometry, render_topology, title.clone(), options)
+            {
+                return Some(figure);
+            }
+            if let Some(topology) = render_topology {
+                if let Ok(figure) = render_topology_figure(topology, title.clone(), options) {
+                    return Some(figure);
+                }
+            }
+            geometry_preview_figure(
+                geometry,
+                title,
+                GeometryPreviewFigureOptions {
+                    edge_overlay_triangle_limit: options.edge_overlay_triangle_limit,
+                    ..GeometryPreviewFigureOptions::default()
+                },
+            )
+            .ok()
+        }
+        AnalysisFigureMeshSource::Solver => render_topology
+            .and_then(|topology| render_topology_figure(topology, title, options).ok()),
+        AnalysisFigureMeshSource::Cad => geometry_preview_figure(
+            geometry,
+            title,
+            GeometryPreviewFigureOptions {
+                edge_overlay_triangle_limit: options.edge_overlay_triangle_limit,
+                presentation: crate::geometry::GeometryPreviewPresentation::Cad,
+                ..GeometryPreviewFigureOptions::default()
+            },
+        )
+        .ok(),
+        AnalysisFigureMeshSource::CadReference => {
+            cad_reference_mesh_figure(geometry, render_topology, title.clone(), options).or_else(
+                || {
+                    render_topology
+                        .and_then(|topology| render_topology_figure(topology, title, options).ok())
+                },
+            )
         }
     }
-    geometry_preview_figure(
+}
+
+fn cad_reference_mesh_figure(
+    geometry: &runmat_geometry_core::GeometryAsset,
+    render_topology: Option<&AnalysisRenderTopology>,
+    title: impl Into<String>,
+    options: AnalysisFigureGenerationOptions,
+) -> Option<Figure> {
+    let title = title.into();
+    let mut figure = geometry_preview_figure(
         geometry,
-        title,
+        title.clone(),
         GeometryPreviewFigureOptions {
             edge_overlay_triangle_limit: options.edge_overlay_triangle_limit,
+            presentation: crate::geometry::GeometryPreviewPresentation::Cad,
             ..GeometryPreviewFigureOptions::default()
         },
     )
-    .ok()
+    .ok()?;
+    normalize_geometry_meshes_to_solver_units(&mut figure, geometry.units);
+    if let Some(topology) = render_topology {
+        if let Ok(solver) = render_topology_figure(topology, title, options) {
+            append_mesh_plots(&mut figure, &solver);
+        }
+    }
+    Some(figure)
+}
+
+fn normalize_geometry_meshes_to_solver_units(figure: &mut Figure, units: UnitSystem) {
+    let scale = geometry_unit_scale_to_meters(units);
+    if (scale - 1.0).abs() <= f32::EPSILON {
+        return;
+    }
+    for index in 0..figure.plots().count() {
+        let Some(PlotElement::Mesh(mesh)) = figure.get_plot_mut(index) else {
+            continue;
+        };
+        let vertices = mesh
+            .vertices()
+            .iter()
+            .map(|vertex| *vertex * scale)
+            .collect::<Vec<_>>();
+        let _ = mesh.set_vertices(vertices);
+    }
+}
+
+fn geometry_unit_scale_to_meters(units: UnitSystem) -> f32 {
+    match units {
+        UnitSystem::Unspecified | UnitSystem::Meter => 1.0,
+        UnitSystem::Millimeter => 0.001,
+        UnitSystem::Inch => 0.0254,
+    }
+}
+
+fn append_mesh_plots(target: &mut Figure, source: &Figure) {
+    for plot in source.plots() {
+        if let PlotElement::Mesh(mesh) = plot {
+            target.add_mesh_plot((**mesh).clone());
+        }
+    }
 }
 
 fn render_topology_figure(
@@ -676,6 +1137,7 @@ fn render_topology_figure(
             .collect::<Result<Vec<_>, String>>()?;
         let mut plot = MeshPlot::new(vertices, mesh.triangles.clone())?;
         plot.set_mesh_id(Some(mesh.mesh_id.clone()));
+        plot.set_regions(render_mesh_regions(&mesh.regions));
         plot.set_label(Some(format!(
             "{}: {} solver triangles",
             mesh.mesh_id,
@@ -684,12 +1146,14 @@ fn render_topology_figure(
         plot.set_face_color(Vec4::new(0.34, 0.57, 0.82, 1.0));
         plot.set_edge_color(Vec4::new(0.88, 0.93, 0.98, 0.82));
         plot.set_face_alpha(0.94);
-        if mesh.triangles.len() > options.edge_overlay_triangle_limit {
-            plot.set_edge_mode(MeshEdgeMode::None);
-            plot.set_edge_width(0.0);
-        } else {
+        if options.show_solver_mesh_edges
+            && mesh.triangles.len() <= options.edge_overlay_triangle_limit
+        {
             plot.set_edge_mode(MeshEdgeMode::All);
             plot.set_edge_width(0.28);
+        } else {
+            plot.set_edge_mode(MeshEdgeMode::None);
+            plot.set_edge_width(0.0);
         }
         figure.add_mesh_plot(plot);
     }
@@ -701,19 +1165,178 @@ fn render_topology_figure(
     }
 }
 
+fn render_mesh_regions(regions: &[super::contracts::AnalysisRenderRegion]) -> Vec<MeshRegion> {
+    regions
+        .iter()
+        .filter_map(|region| {
+            let ranges = region
+                .triangle_ranges
+                .iter()
+                .filter(|range| range.count > 0)
+                .map(|range| MeshTriangleRange::new(range.start, range.count))
+                .collect::<Vec<_>>();
+            if ranges.is_empty() {
+                return None;
+            }
+            Some(MeshRegion::new(
+                region.region_id.clone(),
+                region.label.clone(),
+                region.tag.clone(),
+                ranges,
+            ))
+        })
+        .collect()
+}
+
 fn collect_mesh_counts(figure: &Figure) -> Vec<MeshCounts> {
-    figure
-        .plots()
-        .enumerate()
-        .filter_map(|(plot_index, plot)| match plot {
-            PlotElement::Mesh(mesh) => Some(MeshCounts {
+    collect_mesh_counts_with_topology(figure, None)
+}
+
+fn collect_mesh_counts_with_topology(
+    figure: &Figure,
+    topology: Option<&AnalysisRenderTopology>,
+) -> Vec<MeshCounts> {
+    let mut counts = Vec::new();
+    let mut mesh_ordinal = 0usize;
+    for (plot_index, plot) in figure.plots().enumerate() {
+        if let PlotElement::Mesh(mesh) = plot {
+            let topology_mesh = topology.and_then(|topology| {
+                topology
+                    .meshes
+                    .iter()
+                    .find(|render_mesh| mesh.mesh_id() == Some(render_mesh.mesh_id.as_str()))
+                    .or_else(|| {
+                        if mesh.mesh_id().is_none() {
+                            topology.meshes.get(mesh_ordinal)
+                        } else {
+                            None
+                        }
+                    })
+            });
+            if topology.is_some() && topology_mesh.is_none() {
+                continue;
+            }
+            let triangle_volume_element_indices = topology_mesh
+                .filter(|render_mesh| {
+                    render_mesh.triangle_volume_element_indices.len() == mesh.triangles().len()
+                })
+                .map(|render_mesh| render_mesh.triangle_volume_element_indices.clone())
+                .unwrap_or_default();
+            let vertex_volume_node_indices = topology_mesh
+                .filter(|render_mesh| {
+                    render_mesh.vertex_volume_node_indices.len() == mesh.vertices().len()
+                })
+                .map(|render_mesh| render_mesh.vertex_volume_node_indices.clone())
+                .unwrap_or_default();
+            counts.push(MeshCounts {
                 plot_index,
                 vertices: mesh.vertices().len(),
                 triangles: mesh.triangles().len(),
-            }),
-            _ => None,
-        })
-        .collect()
+                vertex_volume_node_indices,
+                triangle_volume_element_indices,
+            });
+            if topology_mesh.is_some() {
+                mesh_ordinal += 1;
+            }
+        }
+    }
+    counts
+}
+
+fn field_topology_mismatch_warning(field: &AnalysisField, meshes: &[MeshCounts]) -> Option<String> {
+    let values = host_values(field)?;
+    if values.is_empty() || meshes.is_empty() {
+        return None;
+    }
+    let descriptor = AnalysisFieldDescriptor::from_field(field);
+    let topology_id = descriptor.topology_id.as_deref()?;
+    let actual_entities = field_entity_count(field, &descriptor, values.len());
+    if topology_id == "analysis_mesh" {
+        match descriptor.location {
+            AnalysisFieldLocation::Element => {
+                if element_field_maps_to_render_triangles(meshes, actual_entities) {
+                    return None;
+                }
+            }
+            AnalysisFieldLocation::Node => {
+                if node_field_maps_to_render_vertices(meshes, actual_entities) {
+                    return None;
+                }
+            }
+            _ => {}
+        }
+    }
+    let total_vertices = meshes.iter().map(|mesh| mesh.vertices).sum::<usize>();
+    let total_triangles = meshes.iter().map(|mesh| mesh.triangles).sum::<usize>();
+    let (location, expected_entities) = match descriptor.location {
+        AnalysisFieldLocation::Node => ("node", total_vertices),
+        AnalysisFieldLocation::Element | AnalysisFieldLocation::BoundaryFace => {
+            ("element", total_triangles)
+        }
+        AnalysisFieldLocation::Edge
+        | AnalysisFieldLocation::InterfaceFace
+        | AnalysisFieldLocation::Mode
+        | AnalysisFieldLocation::Global
+        | AnalysisFieldLocation::Unknown => return None,
+    };
+    if actual_entities == expected_entities && topology_id != "analysis_mesh" {
+        return None;
+    }
+    Some(format!(
+        "field '{}' uses topology_id={} location={} element_kind={} value_count={} render_vertex_count={} render_triangle_count={}; cannot map field to the current render mesh",
+        field.field_id,
+        topology_id,
+        location,
+        descriptor.element_kind.as_deref().unwrap_or("none"),
+        actual_entities,
+        total_vertices,
+        total_triangles
+    ))
+}
+
+fn element_field_maps_to_render_triangles(meshes: &[MeshCounts], element_count: usize) -> bool {
+    if element_count == 0 || meshes.is_empty() {
+        return false;
+    }
+    meshes.iter().all(|mesh| {
+        mesh.triangle_volume_element_indices.len() == mesh.triangles
+            && mesh
+                .triangle_volume_element_indices
+                .iter()
+                .all(|index| index.is_some_and(|index| index < element_count))
+    })
+}
+
+fn node_field_maps_to_render_vertices(meshes: &[MeshCounts], node_count: usize) -> bool {
+    if node_count == 0 || meshes.is_empty() {
+        return false;
+    }
+    meshes.iter().all(|mesh| {
+        mesh.vertex_volume_node_indices.len() == mesh.vertices
+            && mesh
+                .vertex_volume_node_indices
+                .iter()
+                .all(|index| index.is_some_and(|index| index < node_count))
+    })
+}
+
+fn field_entity_count(
+    field: &AnalysisField,
+    descriptor: &AnalysisFieldDescriptor,
+    value_count: usize,
+) -> usize {
+    if matches!(
+        descriptor.location,
+        AnalysisFieldLocation::Global | AnalysisFieldLocation::Mode
+    ) {
+        return value_count;
+    }
+    if let Some(first_dim) = field.shape.first().copied() {
+        if field.shape.len() > 1 || descriptor.component_count.is_some() {
+            return first_dim;
+        }
+    }
+    value_count
 }
 
 fn scalar_overlay(
@@ -722,6 +1345,21 @@ fn scalar_overlay(
     options: AnalysisFigureGenerationOptions,
 ) -> Option<ScalarOverlay> {
     let values = host_values(field)?;
+    let descriptor = AnalysisFieldDescriptor::from_field(field);
+    if descriptor.topology_id.as_deref() == Some("analysis_mesh") {
+        return match (&descriptor.kind, descriptor.location) {
+            (AnalysisFieldKind::Scalar, AnalysisFieldLocation::Node) => {
+                scalar_overlay_from_node_values(field, meshes, options)
+            }
+            (AnalysisFieldKind::Scalar, AnalysisFieldLocation::Element) => {
+                scalar_overlay_from_element_values(field, meshes, options)
+            }
+            (AnalysisFieldKind::Vector, AnalysisFieldLocation::Node) => {
+                scalar_overlay_from_node_vector_magnitudes(field, meshes, options)
+            }
+            _ => None,
+        };
+    }
     let total_vertices = meshes.iter().map(|mesh| mesh.vertices).sum::<usize>();
     let total_triangles = meshes.iter().map(|mesh| mesh.triangles).sum::<usize>();
     if values.len() == total_vertices {
@@ -732,6 +1370,9 @@ fn scalar_overlay(
             options,
         );
     }
+    if let Some(overlay) = scalar_overlay_from_node_values(field, meshes, options) {
+        return Some(overlay);
+    }
     if values.len() == total_triangles {
         return scalar_overlay_from_values(
             field,
@@ -739,6 +1380,9 @@ fn scalar_overlay(
             meshes.iter().map(|mesh| mesh.triangles),
             options,
         );
+    }
+    if let Some(overlay) = scalar_overlay_from_element_values(field, meshes, options) {
+        return Some(overlay);
     }
     if let Some(vectors) = vectors_for_count(field, total_vertices) {
         if total_vertices <= options.max_overlay_values {
@@ -769,6 +1413,127 @@ fn scalar_overlay(
         }
     }
     None
+}
+
+fn scalar_overlay_from_node_vector_magnitudes(
+    field: &AnalysisField,
+    meshes: &[MeshCounts],
+    options: AnalysisFigureGenerationOptions,
+) -> Option<ScalarOverlay> {
+    let descriptor = AnalysisFieldDescriptor::from_field(field);
+    if descriptor.location != AnalysisFieldLocation::Node
+        || descriptor.topology_id.as_deref() != Some("analysis_mesh")
+    {
+        return None;
+    }
+    let entity_count = field.shape.first().copied()?;
+    let vectors = vectors_for_count(field, entity_count)?;
+    let total_vertices = meshes.iter().map(|mesh| mesh.vertices).sum::<usize>();
+    if total_vertices > options.max_overlay_values {
+        return None;
+    }
+    let mut chunks = Vec::with_capacity(meshes.len());
+    for mesh in meshes {
+        if mesh.vertex_volume_node_indices.len() != mesh.vertices {
+            return None;
+        }
+        let mut chunk = Vec::with_capacity(mesh.vertices);
+        for node_index in &mesh.vertex_volume_node_indices {
+            let node_index = (*node_index)?;
+            chunk.push(vectors.get(node_index)?.length());
+        }
+        chunks.push(chunk);
+    }
+    Some(ScalarOverlay {
+        field_id: format!("{}.magnitude", field.field_id),
+        label: format!("{} magnitude boundary projection", field.field_id),
+        location: MeshFieldLocation::Vertex,
+        chunks,
+    })
+}
+
+fn scalar_overlay_from_element_values(
+    field: &AnalysisField,
+    meshes: &[MeshCounts],
+    options: AnalysisFigureGenerationOptions,
+) -> Option<ScalarOverlay> {
+    let values = host_values(field)?;
+    let descriptor = AnalysisFieldDescriptor::from_field(field);
+    if descriptor.location != AnalysisFieldLocation::Element
+        || descriptor.topology_id.as_deref() != Some("analysis_mesh")
+        || field_entity_count(field, &descriptor, values.len()) != values.len()
+    {
+        return None;
+    }
+    let total_triangles = meshes.iter().map(|mesh| mesh.triangles).sum::<usize>();
+    if total_triangles > options.max_overlay_values {
+        return None;
+    }
+    let values = values
+        .iter()
+        .copied()
+        .map(f64_to_f32)
+        .collect::<Option<Vec<_>>>()?;
+    let mut chunks = Vec::with_capacity(meshes.len());
+    for mesh in meshes {
+        if mesh.triangle_volume_element_indices.len() != mesh.triangles {
+            return None;
+        }
+        let mut chunk = Vec::with_capacity(mesh.triangles);
+        for element_index in &mesh.triangle_volume_element_indices {
+            let element_index = (*element_index)?;
+            chunk.push(*values.get(element_index)?);
+        }
+        chunks.push(chunk);
+    }
+    Some(ScalarOverlay {
+        field_id: field.field_id.clone(),
+        label: format!("{} boundary projection", field.field_id),
+        location: MeshFieldLocation::Triangle,
+        chunks,
+    })
+}
+
+fn scalar_overlay_from_node_values(
+    field: &AnalysisField,
+    meshes: &[MeshCounts],
+    options: AnalysisFigureGenerationOptions,
+) -> Option<ScalarOverlay> {
+    let values = host_values(field)?;
+    let descriptor = AnalysisFieldDescriptor::from_field(field);
+    if descriptor.location != AnalysisFieldLocation::Node
+        || descriptor.topology_id.as_deref() != Some("analysis_mesh")
+        || field_entity_count(field, &descriptor, values.len()) != values.len()
+    {
+        return None;
+    }
+    let total_vertices = meshes.iter().map(|mesh| mesh.vertices).sum::<usize>();
+    if total_vertices > options.max_overlay_values {
+        return None;
+    }
+    let values = values
+        .iter()
+        .copied()
+        .map(f64_to_f32)
+        .collect::<Option<Vec<_>>>()?;
+    let mut chunks = Vec::with_capacity(meshes.len());
+    for mesh in meshes {
+        if mesh.vertex_volume_node_indices.len() != mesh.vertices {
+            return None;
+        }
+        let mut chunk = Vec::with_capacity(mesh.vertices);
+        for node_index in &mesh.vertex_volume_node_indices {
+            let node_index = (*node_index)?;
+            chunk.push(*values.get(node_index)?);
+        }
+        chunks.push(chunk);
+    }
+    Some(ScalarOverlay {
+        field_id: field.field_id.clone(),
+        label: format!("{} boundary projection", field.field_id),
+        location: MeshFieldLocation::Vertex,
+        chunks,
+    })
 }
 
 fn scalar_overlay_from_values<I>(
@@ -802,6 +1567,14 @@ fn vector_overlay(
     meshes: &[MeshCounts],
     options: AnalysisFigureGenerationOptions,
 ) -> Option<VectorOverlay> {
+    let descriptor = AnalysisFieldDescriptor::from_field(field);
+    if descriptor.topology_id.as_deref() == Some("analysis_mesh")
+        && descriptor.kind == AnalysisFieldKind::Vector
+        && descriptor.location == AnalysisFieldLocation::Node
+    {
+        return vector_overlay_from_node_values(field, meshes, options);
+    }
+
     let total_vertices = meshes.iter().map(|mesh| mesh.vertices).sum::<usize>();
     if let Some(vectors) = vectors_for_count(field, total_vertices) {
         if total_vertices <= options.max_overlay_values {
@@ -814,6 +1587,9 @@ fn vector_overlay(
                 stride,
             });
         }
+    }
+    if let Some(overlay) = vector_overlay_from_node_values(field, meshes, options) {
+        return Some(overlay);
     }
 
     let total_triangles = meshes.iter().map(|mesh| mesh.triangles).sum::<usize>();
@@ -832,6 +1608,44 @@ fn vector_overlay(
     None
 }
 
+fn vector_overlay_from_node_values(
+    field: &AnalysisField,
+    meshes: &[MeshCounts],
+    options: AnalysisFigureGenerationOptions,
+) -> Option<VectorOverlay> {
+    let descriptor = AnalysisFieldDescriptor::from_field(field);
+    if descriptor.location != AnalysisFieldLocation::Node
+        || descriptor.topology_id.as_deref() != Some("analysis_mesh")
+    {
+        return None;
+    }
+    let entity_count = field.shape.first().copied()?;
+    let vectors = vectors_for_count(field, entity_count)?;
+    let total_vertices = meshes.iter().map(|mesh| mesh.vertices).sum::<usize>();
+    if total_vertices > options.max_overlay_values {
+        return None;
+    }
+    let mut chunks = Vec::with_capacity(meshes.len());
+    for mesh in meshes {
+        if mesh.vertex_volume_node_indices.len() != mesh.vertices {
+            return None;
+        }
+        let mut chunk = Vec::with_capacity(mesh.vertices);
+        for node_index in &mesh.vertex_volume_node_indices {
+            let node_index = (*node_index)?;
+            chunk.push(*vectors.get(node_index)?);
+        }
+        chunks.push(chunk);
+    }
+    Some(VectorOverlay {
+        field_id: field.field_id.clone(),
+        label: format!("{} boundary projection", field.field_id),
+        location: MeshFieldLocation::Vertex,
+        chunks,
+        stride: glyph_stride(total_vertices, options.max_vector_glyphs),
+    })
+}
+
 fn deformation_overlay(
     field: &AnalysisField,
     meshes: &[MeshCounts],
@@ -842,12 +1656,63 @@ fn deformation_overlay(
     if total_vertices > options.max_overlay_values {
         return None;
     }
-    let vectors = vectors_for_count(field, total_vertices)?;
-    let scale = deformation_scale(&vectors, figure);
+    let descriptor = AnalysisFieldDescriptor::from_field(field);
+    if descriptor.topology_id.as_deref() == Some("analysis_mesh")
+        && descriptor.kind == AnalysisFieldKind::Vector
+        && descriptor.location == AnalysisFieldLocation::Node
+    {
+        return deformation_overlay_from_node_values(field, meshes, figure, options);
+    }
+    if let Some(vectors) = vectors_for_count(field, total_vertices) {
+        let scale = deformation_scale(&vectors, figure);
+        return Some(DeformationOverlay {
+            field_id: field.field_id.clone(),
+            label: field.field_id.clone(),
+            chunks: split_vec3(&vectors, meshes.iter().map(|mesh| mesh.vertices))?,
+            scale,
+        });
+    }
+    None
+}
+
+fn deformation_overlay_from_node_values(
+    field: &AnalysisField,
+    meshes: &[MeshCounts],
+    figure: &Figure,
+    options: AnalysisFigureGenerationOptions,
+) -> Option<DeformationOverlay> {
+    let total_vertices = meshes.iter().map(|mesh| mesh.vertices).sum::<usize>();
+    if total_vertices > options.max_overlay_values {
+        return None;
+    }
+    let descriptor = AnalysisFieldDescriptor::from_field(field);
+    if descriptor.location != AnalysisFieldLocation::Node
+        || descriptor.topology_id.as_deref() != Some("analysis_mesh")
+    {
+        return None;
+    }
+    let entity_count = field.shape.first().copied()?;
+    let vectors = vectors_for_count(field, entity_count)?;
+    let mut projected = Vec::with_capacity(total_vertices);
+    let mut chunks = Vec::with_capacity(meshes.len());
+    for mesh in meshes {
+        if mesh.vertex_volume_node_indices.len() != mesh.vertices {
+            return None;
+        }
+        let mut chunk = Vec::with_capacity(mesh.vertices);
+        for node_index in &mesh.vertex_volume_node_indices {
+            let node_index = (*node_index)?;
+            let vector = *vectors.get(node_index)?;
+            projected.push(vector);
+            chunk.push(vector);
+        }
+        chunks.push(chunk);
+    }
+    let scale = deformation_scale(&projected, figure);
     Some(DeformationOverlay {
         field_id: field.field_id.clone(),
-        label: field.field_id.clone(),
-        chunks: split_vec3(&vectors, meshes.iter().map(|mesh| mesh.vertices))?,
+        label: format!("{} boundary projection", field.field_id),
+        chunks,
         scale,
     })
 }
@@ -999,6 +1864,7 @@ fn line_figure(
     AnalysisGeneratedFigure {
         kind,
         title: title.to_string(),
+        topology_ids: topology_ids_for_field_ids(field_ids.iter().map(String::as_str)),
         field_ids,
         warnings,
         figure,
@@ -1022,9 +1888,30 @@ fn warning_line_figure(
         kind,
         title: title.to_string(),
         field_ids: Vec::new(),
+        topology_ids: Vec::new(),
         warnings: vec![warning],
         figure,
     }
+}
+
+fn topology_ids_for_fields<'a>(fields: impl IntoIterator<Item = &'a AnalysisField>) -> Vec<String> {
+    let mut ids = Vec::new();
+    for field in fields {
+        if let Some(topology_id) = AnalysisFieldDescriptor::from_field(field).topology_id {
+            if !ids.iter().any(|existing| existing == &topology_id) {
+                ids.push(topology_id);
+            }
+        }
+    }
+    ids
+}
+
+fn topology_ids_for_field_ids<'a>(field_ids: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+    let fields = field_ids
+        .into_iter()
+        .map(|field_id| AnalysisField::host_f64(field_id, vec![1], vec![0.0]))
+        .collect::<Vec<_>>();
+    topology_ids_for_fields(fields.iter())
 }
 
 fn previous_run_of_kind(current: &AnalysisRunResult) -> Result<Option<AnalysisRunResult>, String> {
@@ -1042,6 +1929,35 @@ fn host_values(field: &AnalysisField) -> Option<&[f64]> {
         AnalysisFieldValues::HostF64(values) => Some(values.as_slice()),
         AnalysisFieldValues::DeviceRef(_) => None,
     }
+}
+
+fn field_by_id<'a>(fields: &'a [AnalysisField], field_id: &str) -> Option<&'a AnalysisField> {
+    fields.iter().find(|field| field.field_id == field_id)
+}
+
+fn scalar_field_value(fields: &[AnalysisField], field_id: &str) -> Option<f64> {
+    let field = field_by_id(fields, field_id)?;
+    let values = host_values(field)?;
+    if values.len() != 1 {
+        return None;
+    }
+    values.first().copied().filter(|value| value.is_finite())
+}
+
+fn vector_field_total_magnitude(fields: &[AnalysisField], field_id: &str) -> Option<f64> {
+    let field = field_by_id(fields, field_id)?;
+    let values = host_values(field)?;
+    if values.is_empty() || !values.len().is_multiple_of(3) {
+        return None;
+    }
+    let mut total = [0.0_f64; 3];
+    for chunk in values.chunks_exact(3) {
+        total[0] += chunk[0];
+        total[1] += chunk[1];
+        total[2] += chunk[2];
+    }
+    let magnitude = (total[0] * total[0] + total[1] * total[1] + total[2] * total[2]).sqrt();
+    magnitude.is_finite().then_some(magnitude)
 }
 
 fn vectors_for_count(field: &AnalysisField, count: usize) -> Option<Vec<Vec3>> {
@@ -1265,5 +2181,1259 @@ fn run_kind_label(kind: AnalysisRunKind) -> &'static str {
         AnalysisRunKind::Fsi => "FSI",
         AnalysisRunKind::Nonlinear => "Nonlinear",
         AnalysisRunKind::Electromagnetic => "Electromagnetic",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_analysis_core::{
+        AnalysisModelId, AnalysisStep, AnalysisStepKind, BoundaryCondition, LoadCase,
+        ReferenceFrame,
+    };
+
+    fn simple_run_result(
+        fields: Vec<AnalysisField>,
+        render_topology: AnalysisRenderTopology,
+    ) -> AnalysisRunResult {
+        AnalysisRunResult {
+            run_id: "run_test".to_string(),
+            run: runmat_analysis_fea::FeaRunResult {
+                backend: runmat_analysis_fea::ComputeBackend::Cpu,
+                solver_backend: "cpu".to_string(),
+                solver_device_apply_k_ratio: 0.0,
+                solver_method: "test_solver".to_string(),
+                preconditioner: "none".to_string(),
+                solver_host_sync_count: 0,
+                diagnostics: Vec::new(),
+                fields,
+            },
+            render_topology: Some(render_topology),
+            modal_results: None,
+            thermal_results: None,
+            transient_results: None,
+            nonlinear_results: None,
+            electromagnetic_results: None,
+            model_validity: crate::analysis::contracts::QualityGate::Pass,
+            solver_convergence: crate::analysis::contracts::QualityGate::Pass,
+            result_quality: crate::analysis::contracts::QualityGate::Pass,
+            run_status: crate::analysis::contracts::RunStatus::Publishable,
+            publishable: true,
+            quality_reasons: Vec::new(),
+            provenance: crate::analysis::contracts::RunProvenance {
+                backend: runmat_analysis_fea::ComputeBackend::Cpu,
+                solver_backend: "cpu".to_string(),
+                solver_device_apply_k_ratio: 0.0,
+                solver_host_sync_count: 0,
+                precision_mode: "double".to_string(),
+                deterministic_mode: true,
+                solver_method: "test_solver".to_string(),
+                preconditioner: "none".to_string(),
+                quality_policy: "strict".to_string(),
+                fallback_events: Vec::new(),
+            },
+        }
+    }
+
+    fn simple_geometry_asset() -> runmat_geometry_core::GeometryAsset {
+        simple_geometry_asset_with_units(runmat_geometry_core::UnitSystem::Meter)
+    }
+
+    fn simple_geometry_asset_with_units(
+        units: runmat_geometry_core::UnitSystem,
+    ) -> runmat_geometry_core::GeometryAsset {
+        runmat_geometry_core::GeometryAsset {
+            geometry_id: "geometry".to_string(),
+            source: runmat_geometry_core::GeometrySource {
+                path: "/tmp/generic.step".to_string(),
+                sha256: "hash".to_string(),
+                importer_version: "test/v1".to_string(),
+            },
+            source_geometry: runmat_geometry_core::SourceGeometry {
+                kind: runmat_geometry_core::SourceGeometryKind::Mesh,
+                assembly: None,
+                material_evidence: Vec::new(),
+                cad_evaluators: Vec::new(),
+            },
+            tessellation_profile: runmat_geometry_core::TessellationProfile::default(),
+            units,
+            revision: 1,
+            meshes: vec![runmat_geometry_core::MeshDescriptor {
+                mesh_id: "cad_surface".to_string(),
+                kind: runmat_geometry_core::MeshKind::Surface,
+                vertex_count: 3,
+                element_count: 1,
+            }],
+            surface_meshes: vec![runmat_geometry_core::SurfaceMesh::new(
+                "cad_surface",
+                vec![[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 2.0, 0.0]],
+                vec![[0, 1, 2]],
+            )],
+            regions: Vec::new(),
+            region_entity_mappings: Vec::new(),
+            diagnostics: Vec::new(),
+        }
+    }
+
+    fn simple_boundary_region_model() -> AnalysisModel {
+        AnalysisModel {
+            model_id: AnalysisModelId("model".to_string()),
+            geometry_id: "geometry".to_string(),
+            geometry_revision: 1,
+            units: runmat_geometry_core::UnitSystem::Meter,
+            frame: ReferenceFrame::Global,
+            materials: Vec::new(),
+            material_assignments: Vec::new(),
+            structural: None,
+            thermo_mechanical: None,
+            electro_thermal: None,
+            electromagnetic: None,
+            cfd: None,
+            interfaces: Vec::new(),
+            boundary_conditions: vec![BoundaryCondition {
+                bc_id: "fixed_bc".to_string(),
+                region_id: "fixed".to_string(),
+                kind: BoundaryConditionKind::Fixed,
+            }],
+            loads: vec![
+                LoadCase {
+                    load_id: "force_load".to_string(),
+                    region_id: "loaded".to_string(),
+                    kind: LoadKind::Force {
+                        fx: 0.0,
+                        fy: 0.0,
+                        fz: -1.0,
+                    },
+                },
+                LoadCase {
+                    load_id: "body_force".to_string(),
+                    region_id: "volume_only".to_string(),
+                    kind: LoadKind::BodyForce {
+                        gx: 0.0,
+                        gy: 0.0,
+                        gz: -9.81,
+                    },
+                },
+            ],
+            steps: vec![AnalysisStep {
+                step_id: "static_step".to_string(),
+                kind: AnalysisStepKind::Static,
+            }],
+        }
+    }
+
+    fn simple_pressure_region_model() -> AnalysisModel {
+        let mut model = simple_boundary_region_model();
+        model.boundary_conditions.clear();
+        model.loads = vec![LoadCase {
+            load_id: "pressure_load".to_string(),
+            region_id: "pressurized".to_string(),
+            kind: LoadKind::Pressure { magnitude_pa: 5.0 },
+        }];
+        model
+    }
+
+    fn simple_moment_region_model() -> AnalysisModel {
+        let mut model = simple_boundary_region_model();
+        model.boundary_conditions.clear();
+        model.loads = vec![LoadCase {
+            load_id: "axis_load".to_string(),
+            region_id: "axis_region".to_string(),
+            kind: LoadKind::Moment {
+                mx: 0.0,
+                my: 2.0,
+                mz: 0.0,
+            },
+        }];
+        model
+    }
+
+    fn simple_wrench_moment_region_model() -> AnalysisModel {
+        let mut model = simple_boundary_region_model();
+        model.boundary_conditions.clear();
+        model.loads = vec![LoadCase {
+            load_id: "wrench_axis_load".to_string(),
+            region_id: "wrench_axis_region".to_string(),
+            kind: LoadKind::Wrench {
+                fx: 0.0,
+                fy: 0.0,
+                fz: 0.0,
+                mx: 0.0,
+                my: 0.0,
+                mz: 4.0,
+                px: 0.0,
+                py: 0.0,
+                pz: 0.0,
+            },
+        }];
+        model
+    }
+
+    fn simple_render_topology() -> AnalysisRenderTopology {
+        AnalysisRenderTopology {
+            schema_version: "analysis_render_topology/v1".to_string(),
+            source: crate::analysis::contracts::AnalysisRenderTopologySource::SolverPrep,
+            meshes: vec![crate::analysis::contracts::AnalysisRenderMesh {
+                mesh_id: "analysis_mesh".to_string(),
+                vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                triangles: vec![[0, 1, 2]],
+                regions: Vec::new(),
+                vertex_volume_node_indices: vec![Some(0), Some(1), Some(2)],
+                triangle_volume_element_indices: Vec::new(),
+            }],
+        }
+    }
+
+    fn mapped_render_topology(
+        vertex_volume_node_indices: Vec<Option<usize>>,
+        triangle_volume_element_indices: Vec<Option<usize>>,
+    ) -> AnalysisRenderTopology {
+        AnalysisRenderTopology {
+            schema_version: "analysis_render_topology/v1".to_string(),
+            source: crate::analysis::contracts::AnalysisRenderTopologySource::AnalysisMesh,
+            meshes: vec![crate::analysis::contracts::AnalysisRenderMesh {
+                mesh_id: "analysis_mesh".to_string(),
+                vertices: vec![
+                    [0.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                    [0.0, 0.0, 1.0],
+                ],
+                triangles: vec![[0, 1, 2], [0, 2, 3], [0, 3, 1]],
+                regions: Vec::new(),
+                vertex_volume_node_indices,
+                triangle_volume_element_indices,
+            }],
+        }
+    }
+
+    fn first_mesh_plot(figure: &Figure) -> &MeshPlot {
+        figure
+            .plots()
+            .find_map(|plot| match plot {
+                PlotElement::Mesh(mesh) => Some(mesh),
+                _ => None,
+            })
+            .expect("figure should include a mesh plot")
+    }
+
+    fn analysis_mesh_plot(figure: &Figure) -> &MeshPlot {
+        figure
+            .plots()
+            .find_map(|plot| match plot {
+                PlotElement::Mesh(mesh) if mesh.mesh_id() == Some("analysis_mesh") => Some(mesh),
+                _ => None,
+            })
+            .expect("figure should include an analysis mesh plot")
+    }
+
+    fn analysis_mesh_plot_with_deformation(figure: &Figure) -> &MeshPlot {
+        figure
+            .plots()
+            .find_map(|plot| match plot {
+                PlotElement::Mesh(mesh)
+                    if mesh.mesh_id() == Some("analysis_mesh") && mesh.deformation().is_some() =>
+                {
+                    Some(mesh)
+                }
+                _ => None,
+            })
+            .expect("figure should include a deformed analysis mesh plot")
+    }
+
+    #[test]
+    fn render_topology_edges_are_disabled_by_default() {
+        let figure = render_topology_figure(
+            &simple_render_topology(),
+            "solver mesh",
+            AnalysisFigureGenerationOptions::default(),
+        )
+        .expect("solver topology should render");
+
+        let plot = first_mesh_plot(&figure);
+        assert_eq!(plot.edge_mode(), MeshEdgeMode::None);
+        assert_eq!(plot.edge_width(), 0.0);
+    }
+
+    #[test]
+    fn render_topology_figure_attaches_boundary_regions_to_solver_mesh() {
+        let mut topology = mapped_render_topology(
+            vec![Some(0), Some(1), Some(2), Some(3)],
+            vec![Some(0), Some(0), Some(0)],
+        );
+        topology.meshes[0].regions = vec![
+            crate::analysis::contracts::AnalysisRenderRegion {
+                region_id: "fixed".to_string(),
+                label: Some("Fixed".to_string()),
+                tag: Some("boundary".to_string()),
+                triangle_ranges: vec![
+                    crate::analysis::contracts::AnalysisRenderTriangleRange { start: 0, count: 1 },
+                    crate::analysis::contracts::AnalysisRenderTriangleRange { start: 2, count: 1 },
+                ],
+            },
+            crate::analysis::contracts::AnalysisRenderRegion {
+                region_id: "loaded".to_string(),
+                label: None,
+                tag: Some("boundary".to_string()),
+                triangle_ranges: vec![crate::analysis::contracts::AnalysisRenderTriangleRange {
+                    start: 1,
+                    count: 1,
+                }],
+            },
+        ];
+
+        let figure = render_topology_figure(
+            &topology,
+            "solver mesh",
+            AnalysisFigureGenerationOptions::default(),
+        )
+        .expect("solver topology should render");
+        let plot = analysis_mesh_plot(&figure);
+
+        let fixed = plot
+            .regions()
+            .iter()
+            .find(|region| region.region_id == "fixed")
+            .expect("fixed region should be attached to mesh plot");
+        assert_eq!(fixed.label.as_deref(), Some("Fixed"));
+        assert_eq!(fixed.tag.as_deref(), Some("boundary"));
+        assert!(fixed.contains_triangle(0));
+        assert!(!fixed.contains_triangle(1));
+        assert!(fixed.contains_triangle(2));
+        assert_eq!(
+            plot.region_for_triangle(1)
+                .map(|region| region.region_id.as_str()),
+            Some("loaded")
+        );
+    }
+
+    #[test]
+    fn render_topology_edges_can_be_enabled() {
+        let figure = render_topology_figure(
+            &simple_render_topology(),
+            "solver mesh",
+            AnalysisFigureGenerationOptions {
+                show_solver_mesh_edges: true,
+                ..AnalysisFigureGenerationOptions::default()
+            },
+        )
+        .expect("solver topology should render");
+
+        let plot = first_mesh_plot(&figure);
+        assert_eq!(plot.edge_mode(), MeshEdgeMode::All);
+        assert!(plot.edge_width() > 0.0);
+    }
+
+    #[test]
+    fn base_mesh_figure_can_force_solver_render_topology() {
+        let geometry = simple_geometry_asset();
+        let topology = simple_render_topology();
+        let figure = base_mesh_figure_for_run_source(
+            &geometry,
+            Some(&topology),
+            "solver source",
+            AnalysisFigureGenerationOptions {
+                mesh_source: AnalysisFigureMeshSource::Solver,
+                ..AnalysisFigureGenerationOptions::default()
+            },
+        )
+        .expect("solver source should render from topology");
+
+        let plot = first_mesh_plot(&figure);
+        assert_eq!(plot.mesh_id(), Some("analysis_mesh"));
+    }
+
+    #[test]
+    fn base_mesh_figure_can_force_cad_geometry_source() {
+        let geometry = simple_geometry_asset();
+        let topology = simple_render_topology();
+        let figure = base_mesh_figure_for_run_source(
+            &geometry,
+            Some(&topology),
+            "cad source",
+            AnalysisFigureGenerationOptions {
+                mesh_source: AnalysisFigureMeshSource::Cad,
+                ..AnalysisFigureGenerationOptions::default()
+            },
+        )
+        .expect("CAD source should render from geometry");
+
+        let plot = first_mesh_plot(&figure);
+        assert_eq!(plot.mesh_id(), Some("cad_surface"));
+    }
+
+    #[test]
+    fn base_mesh_figure_auto_layers_cad_context_and_solver_topology() {
+        let geometry = simple_geometry_asset();
+        let topology = simple_render_topology();
+        let figure = base_mesh_figure_for_run_source(
+            &geometry,
+            Some(&topology),
+            "layered result",
+            AnalysisFigureGenerationOptions::default(),
+        )
+        .expect("auto source should render layered CAD and solver topology");
+
+        let mesh_ids = figure
+            .plots()
+            .filter_map(|plot| match plot {
+                PlotElement::Mesh(mesh) => mesh.mesh_id(),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(mesh_ids, vec!["cad_surface", "analysis_mesh"]);
+    }
+
+    #[test]
+    fn base_mesh_figure_can_force_cad_reference_with_solver_topology() {
+        let geometry = simple_geometry_asset();
+        let topology = simple_render_topology();
+        let figure = base_mesh_figure_for_run_source(
+            &geometry,
+            Some(&topology),
+            "CAD reference result",
+            AnalysisFigureGenerationOptions {
+                mesh_source: AnalysisFigureMeshSource::CadReference,
+                ..AnalysisFigureGenerationOptions::default()
+            },
+        )
+        .expect("CAD reference source should layer CAD and solver topology");
+
+        let mesh_ids = figure
+            .plots()
+            .filter_map(|plot| match plot {
+                PlotElement::Mesh(mesh) => mesh.mesh_id(),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(mesh_ids, vec!["cad_surface", "analysis_mesh"]);
+    }
+
+    #[test]
+    fn auto_layered_result_scales_geometry_context_to_solver_meters() {
+        let mut geometry =
+            simple_geometry_asset_with_units(runmat_geometry_core::UnitSystem::Millimeter);
+        geometry.surface_meshes[0].vertices =
+            vec![[0.0, 0.0, 0.0], [1000.0, 0.0, 0.0], [0.0, 1000.0, 0.0]];
+        let topology = simple_render_topology();
+
+        let figure = base_mesh_figure_for_run_source(
+            &geometry,
+            Some(&topology),
+            "layered result",
+            AnalysisFigureGenerationOptions::default(),
+        )
+        .expect("auto source should render layered CAD and solver topology");
+
+        let cad = figure
+            .plots()
+            .find_map(|plot| match plot {
+                PlotElement::Mesh(mesh) if mesh.mesh_id() == Some("cad_surface") => Some(mesh),
+                _ => None,
+            })
+            .expect("CAD context mesh should be present");
+        assert_eq!(cad.vertices()[1], Vec3::new(1.0, 0.0, 0.0));
+        assert_eq!(cad.vertices()[2], Vec3::new(0.0, 1.0, 0.0));
+    }
+
+    #[test]
+    fn topology_mesh_counts_ignore_cad_context_meshes() {
+        let geometry = simple_geometry_asset();
+        let topology = simple_render_topology();
+        let figure = base_mesh_figure_for_run_source(
+            &geometry,
+            Some(&topology),
+            "layered result",
+            AnalysisFigureGenerationOptions::default(),
+        )
+        .expect("auto source should render layered CAD and solver topology");
+
+        let counts = collect_mesh_counts_with_topology(&figure, Some(&topology));
+
+        assert_eq!(counts.len(), 1);
+        assert_eq!(counts[0].vertices, topology.meshes[0].vertices.len());
+        assert_eq!(counts[0].triangles, topology.meshes[0].triangles.len());
+    }
+
+    #[test]
+    fn mesh_result_figures_apply_mapped_solver_element_scalar_fields() {
+        let run = simple_run_result(
+            vec![AnalysisField::host_f64(
+                "structural.von_mises",
+                vec![3],
+                vec![10.0, 20.0, 30.0],
+            )],
+            mapped_render_topology(
+                vec![Some(0), Some(1), Some(2), Some(3)],
+                vec![Some(2), Some(0), Some(1)],
+            ),
+        );
+        let options = AnalysisFigureGenerationOptions {
+            apply_deformation_overlay: false,
+            max_mesh_result_figures: 1,
+            ..AnalysisFigureGenerationOptions::default()
+        };
+
+        let figures = mesh_result_figures(&simple_geometry_asset(), None, &run, options);
+
+        assert_eq!(figures.len(), 1);
+        assert_eq!(figures[0].title, "FEA scalar field: structural.von_mises");
+        let scalar = analysis_mesh_plot(&figures[0].figure)
+            .scalar_field()
+            .expect("scalar field should be attached to solver mesh");
+        assert_eq!(scalar.location, MeshFieldLocation::Triangle);
+        assert_eq!(scalar.values, vec![30.0, 10.0, 20.0]);
+        assert!(scalar
+            .label
+            .as_deref()
+            .is_some_and(|label| label.contains("boundary projection")));
+        assert!(figures[0].warnings.is_empty());
+    }
+
+    #[test]
+    fn cad_reference_result_overlay_maps_fields_only_to_solver_mesh() {
+        let run = simple_run_result(
+            vec![AnalysisField::host_f64(
+                "structural.von_mises",
+                vec![3],
+                vec![10.0, 20.0, 30.0],
+            )],
+            mapped_render_topology(
+                vec![Some(0), Some(1), Some(2), Some(3)],
+                vec![Some(2), Some(0), Some(1)],
+            ),
+        );
+        let options = AnalysisFigureGenerationOptions {
+            apply_deformation_overlay: false,
+            max_mesh_result_figures: 1,
+            mesh_source: AnalysisFigureMeshSource::CadReference,
+            ..AnalysisFigureGenerationOptions::default()
+        };
+
+        let figures = mesh_result_figures(&simple_geometry_asset(), None, &run, options);
+
+        assert_eq!(figures.len(), 1);
+        let mesh_ids = figures[0]
+            .figure
+            .plots()
+            .filter_map(|plot| match plot {
+                PlotElement::Mesh(mesh) => mesh.mesh_id(),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(mesh_ids, vec!["cad_surface", "analysis_mesh"]);
+
+        let cad_plot = figures[0]
+            .figure
+            .plots()
+            .find_map(|plot| match plot {
+                PlotElement::Mesh(mesh) if mesh.mesh_id() == Some("cad_surface") => Some(mesh),
+                _ => None,
+            })
+            .expect("CAD context mesh should be present");
+        assert!(cad_plot.scalar_field().is_none());
+
+        let scalar = analysis_mesh_plot(&figures[0].figure)
+            .scalar_field()
+            .expect("scalar field should be attached to solver mesh");
+        assert_eq!(scalar.location, MeshFieldLocation::Triangle);
+        assert_eq!(scalar.values, vec![30.0, 10.0, 20.0]);
+    }
+
+    #[test]
+    fn mesh_result_figures_apply_mapped_solver_node_vector_and_deformation_fields() {
+        let run = simple_run_result(
+            vec![AnalysisField::host_f64(
+                "structural.displacement",
+                vec![4, 3],
+                vec![
+                    1.0, 0.0, 0.0, //
+                    0.0, 2.0, 0.0, //
+                    0.0, 0.0, 3.0, //
+                    4.0, 0.0, 0.0,
+                ],
+            )],
+            mapped_render_topology(
+                vec![Some(2), Some(0), Some(3), Some(1)],
+                vec![Some(0), Some(0), Some(0)],
+            ),
+        );
+        let options = AnalysisFigureGenerationOptions {
+            max_mesh_result_figures: 3,
+            ..AnalysisFigureGenerationOptions::default()
+        };
+
+        let figures = mesh_result_figures(&simple_geometry_asset(), None, &run, options);
+
+        let deformed = figures
+            .iter()
+            .find(|figure| figure.title == "FEA deformed shape: structural.displacement")
+            .expect("deformed shape figure should be generated");
+        let deformation = analysis_mesh_plot_with_deformation(&deformed.figure)
+            .deformation()
+            .expect("deformation should be attached to solver mesh");
+        assert_eq!(
+            deformation.displacements,
+            vec![
+                Vec3::new(0.0, 0.0, 3.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(4.0, 0.0, 0.0),
+                Vec3::new(0.0, 2.0, 0.0)
+            ]
+        );
+
+        let magnitude = figures
+            .iter()
+            .find(|figure| figure.title == "FEA scalar field: structural.displacement.magnitude")
+            .expect("mapped displacement magnitude figure should be generated");
+        let scalar = analysis_mesh_plot(&magnitude.figure)
+            .scalar_field()
+            .expect("magnitude field should be attached to solver mesh");
+        assert_eq!(scalar.location, MeshFieldLocation::Vertex);
+        assert_eq!(scalar.values, vec![3.0, 1.0, 4.0, 2.0]);
+
+        let vector = figures
+            .iter()
+            .find(|figure| figure.title == "FEA vector field: structural.displacement")
+            .expect("mapped displacement vector figure should be generated");
+        let vector_field = analysis_mesh_plot(&vector.figure)
+            .vector_field()
+            .expect("vector field should be attached to solver mesh");
+        assert_eq!(vector_field.location, MeshFieldLocation::Vertex);
+        assert_eq!(
+            vector_field.vectors,
+            vec![
+                Vec3::new(0.0, 0.0, 3.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(4.0, 0.0, 0.0),
+                Vec3::new(0.0, 2.0, 0.0)
+            ]
+        );
+    }
+
+    #[test]
+    fn mesh_result_figures_report_unmapped_solver_element_fields() {
+        let run = simple_run_result(
+            vec![AnalysisField::host_f64(
+                "structural.von_mises",
+                vec![3],
+                vec![10.0, 20.0, 30.0],
+            )],
+            mapped_render_topology(vec![Some(0), Some(1), Some(2), Some(3)], Vec::new()),
+        );
+        let options = AnalysisFigureGenerationOptions {
+            apply_deformation_overlay: false,
+            max_mesh_result_figures: 1,
+            ..AnalysisFigureGenerationOptions::default()
+        };
+
+        let figures = mesh_result_figures(&simple_geometry_asset(), None, &run, options);
+
+        assert_eq!(figures.len(), 1);
+        assert_eq!(figures[0].title, "FEA field topology mismatch");
+        assert!(figures[0]
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("structural.von_mises")));
+        assert!(figures[0]
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("render_triangle_count=3")));
+    }
+
+    #[test]
+    fn mesh_result_figures_include_authored_boundary_region_figure() {
+        let run = simple_run_result(Vec::new(), {
+            let mut topology = mapped_render_topology(
+                vec![Some(0), Some(1), Some(2), Some(3)],
+                vec![Some(0), Some(0), Some(0)],
+            );
+            topology.meshes[0].regions = vec![crate::analysis::contracts::AnalysisRenderRegion {
+                region_id: "loaded".to_string(),
+                label: None,
+                tag: Some("boundary".to_string()),
+                triangle_ranges: vec![crate::analysis::contracts::AnalysisRenderTriangleRange {
+                    start: 1,
+                    count: 1,
+                }],
+            }];
+            topology
+        });
+        let model = simple_boundary_region_model();
+        let options = AnalysisFigureGenerationOptions {
+            max_mesh_result_figures: 1,
+            ..AnalysisFigureGenerationOptions::default()
+        };
+
+        let figures = mesh_result_figures(&simple_geometry_asset(), Some(&model), &run, options);
+
+        assert_eq!(figures.len(), 1);
+        assert_eq!(figures[0].title, "FEA boundary regions");
+        assert!(figures[0]
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("authored constraint region 'fixed'")));
+        assert!(!figures[0]
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("volume_only")));
+        let plot = analysis_mesh_plot(&figures[0].figure);
+        assert_eq!(plot.highlighted_region_id(), Some("loaded"));
+        assert_eq!(
+            plot.region_for_triangle(1)
+                .map(|region| region.region_id.as_str()),
+            Some("loaded")
+        );
+        let vector_field = plot
+            .vector_field()
+            .expect("authored load direction should be attached");
+        assert_eq!(vector_field.location, MeshFieldLocation::Triangle);
+        assert_eq!(vector_field.field_id, "authored.boundary_load_direction");
+        assert_eq!(
+            vector_field.vectors,
+            vec![Vec3::ZERO, Vec3::new(0.0, 0.0, -1.0), Vec3::ZERO]
+        );
+    }
+
+    #[test]
+    fn mesh_result_figures_show_moment_load_axis() {
+        let run = simple_run_result(Vec::new(), {
+            let mut topology = mapped_render_topology(
+                vec![Some(0), Some(1), Some(2), Some(3)],
+                vec![Some(0), Some(0), Some(0)],
+            );
+            topology.meshes[0].regions = vec![crate::analysis::contracts::AnalysisRenderRegion {
+                region_id: "axis_region".to_string(),
+                label: None,
+                tag: Some("boundary".to_string()),
+                triangle_ranges: vec![crate::analysis::contracts::AnalysisRenderTriangleRange {
+                    start: 2,
+                    count: 1,
+                }],
+            }];
+            topology
+        });
+        let model = simple_moment_region_model();
+        let options = AnalysisFigureGenerationOptions {
+            max_mesh_result_figures: 1,
+            ..AnalysisFigureGenerationOptions::default()
+        };
+
+        let figures = mesh_result_figures(&simple_geometry_asset(), Some(&model), &run, options);
+
+        assert_eq!(figures.len(), 1);
+        assert_eq!(figures[0].title, "FEA boundary regions");
+        let plot = analysis_mesh_plot(&figures[0].figure);
+        let vector_field = plot
+            .vector_field()
+            .expect("moment load axis should be attached");
+        assert_eq!(vector_field.location, MeshFieldLocation::Triangle);
+        assert_eq!(
+            vector_field.vectors,
+            vec![Vec3::ZERO, Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0)]
+        );
+    }
+
+    #[test]
+    fn mesh_result_figures_show_wrench_moment_axis_when_force_is_zero() {
+        let run = simple_run_result(Vec::new(), {
+            let mut topology = mapped_render_topology(
+                vec![Some(0), Some(1), Some(2), Some(3)],
+                vec![Some(0), Some(0), Some(0)],
+            );
+            topology.meshes[0].regions = vec![crate::analysis::contracts::AnalysisRenderRegion {
+                region_id: "wrench_axis_region".to_string(),
+                label: None,
+                tag: Some("boundary".to_string()),
+                triangle_ranges: vec![crate::analysis::contracts::AnalysisRenderTriangleRange {
+                    start: 1,
+                    count: 1,
+                }],
+            }];
+            topology
+        });
+        let model = simple_wrench_moment_region_model();
+        let options = AnalysisFigureGenerationOptions {
+            max_mesh_result_figures: 1,
+            ..AnalysisFigureGenerationOptions::default()
+        };
+
+        let figures = mesh_result_figures(&simple_geometry_asset(), Some(&model), &run, options);
+
+        assert_eq!(figures.len(), 1);
+        assert_eq!(figures[0].title, "FEA boundary regions");
+        let plot = analysis_mesh_plot(&figures[0].figure);
+        let vector_field = plot
+            .vector_field()
+            .expect("wrench moment axis should be attached");
+        assert_eq!(vector_field.location, MeshFieldLocation::Triangle);
+        assert_eq!(
+            vector_field.vectors,
+            vec![Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0), Vec3::ZERO]
+        );
+    }
+
+    #[test]
+    fn mesh_result_figures_show_pressure_load_direction_from_triangle_normal() {
+        let run = simple_run_result(Vec::new(), {
+            let mut topology = mapped_render_topology(
+                vec![Some(0), Some(1), Some(2), Some(3)],
+                vec![Some(0), Some(0), Some(0)],
+            );
+            topology.meshes[0].regions = vec![crate::analysis::contracts::AnalysisRenderRegion {
+                region_id: "pressurized".to_string(),
+                label: None,
+                tag: Some("boundary".to_string()),
+                triangle_ranges: vec![crate::analysis::contracts::AnalysisRenderTriangleRange {
+                    start: 0,
+                    count: 1,
+                }],
+            }];
+            topology
+        });
+        let model = simple_pressure_region_model();
+        let options = AnalysisFigureGenerationOptions {
+            max_mesh_result_figures: 1,
+            ..AnalysisFigureGenerationOptions::default()
+        };
+
+        let figures = mesh_result_figures(&simple_geometry_asset(), Some(&model), &run, options);
+
+        assert_eq!(figures.len(), 1);
+        assert_eq!(figures[0].title, "FEA boundary regions");
+        let plot = analysis_mesh_plot(&figures[0].figure);
+        let vector_field = plot
+            .vector_field()
+            .expect("pressure load direction should be attached");
+        assert_eq!(vector_field.location, MeshFieldLocation::Triangle);
+        assert_eq!(
+            vector_field.vectors,
+            vec![Vec3::new(0.0, 0.0, -1.0), Vec3::ZERO, Vec3::ZERO]
+        );
+    }
+
+    #[test]
+    fn field_topology_warning_reports_solver_mesh_mismatch() {
+        let field = AnalysisField::host_f64("structural.von_mises", vec![1], vec![42.0]);
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 4,
+            triangles: 12,
+            vertex_volume_node_indices: Vec::new(),
+            triangle_volume_element_indices: Vec::new(),
+        }];
+
+        let warning = field_topology_mismatch_warning(&field, &meshes)
+            .expect("mismatched Tetrahedron4 element field should produce a warning");
+
+        assert!(warning.contains("structural.von_mises"));
+        assert!(warning.contains("topology_id=analysis_mesh"));
+        assert!(warning.contains("element_kind=tetrahedron4"));
+        assert!(warning.contains("value_count=1"));
+        assert!(warning.contains("render_triangle_count=12"));
+    }
+
+    #[test]
+    fn field_topology_warning_accepts_mapped_solver_element_fields() {
+        let field = AnalysisField::host_f64("structural.von_mises", vec![2], vec![10.0, 42.0]);
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 5,
+            triangles: 3,
+            vertex_volume_node_indices: Vec::new(),
+            triangle_volume_element_indices: vec![Some(0), Some(1), Some(1)],
+        }];
+
+        assert_eq!(field_topology_mismatch_warning(&field, &meshes), None);
+    }
+
+    #[test]
+    fn field_topology_warning_accepts_mapped_solver_node_fields() {
+        let field = AnalysisField::host_f64(
+            "structural.displacement",
+            vec![3, 3],
+            vec![
+                1.0, 0.0, 0.0, //
+                0.0, 2.0, 0.0, //
+                0.0, 0.0, 3.0,
+            ],
+        );
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 2,
+            triangles: 1,
+            vertex_volume_node_indices: vec![Some(0), Some(2)],
+            triangle_volume_element_indices: Vec::new(),
+        }];
+
+        assert_eq!(field_topology_mismatch_warning(&field, &meshes), None);
+    }
+
+    #[test]
+    fn field_topology_warning_rejects_unmapped_solver_vertices() {
+        let field = AnalysisField::host_f64(
+            "structural.displacement",
+            vec![3, 3],
+            vec![
+                1.0, 0.0, 0.0, //
+                0.0, 2.0, 0.0, //
+                0.0, 0.0, 3.0,
+            ],
+        );
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 3,
+            triangles: 1,
+            vertex_volume_node_indices: vec![Some(0), None, Some(2)],
+            triangle_volume_element_indices: Vec::new(),
+        }];
+
+        let warning = field_topology_mismatch_warning(&field, &meshes)
+            .expect("unmapped solver vertex should warn");
+
+        assert!(warning.contains("structural.displacement"));
+        assert!(warning.contains("render_vertex_count=3"));
+    }
+
+    #[test]
+    fn field_topology_warning_rejects_stale_solver_vertex_indices() {
+        let field = AnalysisField::host_f64(
+            "structural.displacement",
+            vec![3, 3],
+            vec![
+                1.0, 0.0, 0.0, //
+                0.0, 2.0, 0.0, //
+                0.0, 0.0, 3.0,
+            ],
+        );
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 3,
+            triangles: 1,
+            vertex_volume_node_indices: vec![Some(0), Some(3), Some(2)],
+            triangle_volume_element_indices: Vec::new(),
+        }];
+
+        let warning = field_topology_mismatch_warning(&field, &meshes)
+            .expect("stale solver vertex index should warn");
+
+        assert!(warning.contains("structural.displacement"));
+        assert!(warning.contains("render_vertex_count=3"));
+    }
+
+    #[test]
+    fn field_topology_warning_rejects_unmapped_solver_triangles() {
+        let field = AnalysisField::host_f64("structural.von_mises", vec![2], vec![10.0, 42.0]);
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 5,
+            triangles: 3,
+            vertex_volume_node_indices: Vec::new(),
+            triangle_volume_element_indices: vec![Some(0), None, Some(1)],
+        }];
+
+        let warning = field_topology_mismatch_warning(&field, &meshes)
+            .expect("unmapped solver triangle should warn");
+
+        assert!(warning.contains("structural.von_mises"));
+        assert!(warning.contains("render_triangle_count=3"));
+    }
+
+    #[test]
+    fn scalar_overlay_projects_element_values_to_boundary_triangles() {
+        let field = AnalysisField::host_f64("structural.von_mises", vec![2], vec![10.0, 42.0]);
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 5,
+            triangles: 3,
+            vertex_volume_node_indices: Vec::new(),
+            triangle_volume_element_indices: vec![Some(0), Some(1), Some(1)],
+        }];
+
+        let overlay = scalar_overlay(&field, &meshes, AnalysisFigureGenerationOptions::default())
+            .expect("element scalar field should project to boundary triangles");
+
+        assert_eq!(overlay.location, MeshFieldLocation::Triangle);
+        assert_eq!(overlay.chunks, vec![vec![10.0, 42.0, 42.0]]);
+    }
+
+    #[test]
+    fn scalar_overlay_prefers_solver_element_mapping_when_counts_match() {
+        let field =
+            AnalysisField::host_f64("structural.von_mises", vec![3], vec![10.0, 20.0, 30.0]);
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 5,
+            triangles: 3,
+            vertex_volume_node_indices: Vec::new(),
+            triangle_volume_element_indices: vec![Some(2), Some(0), Some(1)],
+        }];
+
+        let overlay = scalar_overlay(&field, &meshes, AnalysisFigureGenerationOptions::default())
+            .expect("element scalar field should use explicit solver mapping");
+
+        assert_eq!(overlay.location, MeshFieldLocation::Triangle);
+        assert_eq!(overlay.chunks, vec![vec![30.0, 10.0, 20.0]]);
+    }
+
+    #[test]
+    fn structural_summary_figure_reports_reactions_and_metrics() {
+        let fields = vec![
+            AnalysisField::host_f64(
+                FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+                vec![2, 3],
+                vec![3.0, 4.0, 0.0, 0.0, 0.0, 12.0],
+            ),
+            AnalysisField::host_f64(
+                FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
+                vec![1, 3],
+                vec![0.0, 0.0, 2.0],
+            ),
+            AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, vec![1], vec![7.5]),
+            AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, vec![1], vec![0.001]),
+        ];
+
+        assert_eq!(
+            vector_field_total_magnitude(&fields, FEA_FIELD_STRUCTURAL_REACTION_FORCE),
+            Some(13.0)
+        );
+        let figure = structural_result_summary_figure(&fields)
+            .expect("structural summary should be generated");
+
+        assert_eq!(figure.kind, AnalysisGeneratedFigureKind::Summary);
+        assert_eq!(figure.title, "FEA structural result summary");
+        assert!(figure
+            .field_ids
+            .iter()
+            .any(|field_id| field_id == FEA_FIELD_STRUCTURAL_REACTION_FORCE));
+        assert!(figure
+            .field_ids
+            .iter()
+            .any(|field_id| field_id == FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY));
+        assert!(figure
+            .figure
+            .plots()
+            .any(|plot| matches!(plot, PlotElement::Bar(_))));
+    }
+
+    #[test]
+    fn scalar_overlay_projects_node_values_to_render_vertices() {
+        let field = AnalysisField::host_f64(
+            "structural.nodal_von_mises",
+            vec![4],
+            vec![1.0, 2.0, 3.0, 4.0],
+        );
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 3,
+            triangles: 1,
+            vertex_volume_node_indices: vec![Some(0), Some(3), Some(1)],
+            triangle_volume_element_indices: Vec::new(),
+        }];
+
+        let overlay = scalar_overlay(&field, &meshes, AnalysisFigureGenerationOptions::default())
+            .expect("node scalar field should project to render vertices");
+
+        assert_eq!(overlay.location, MeshFieldLocation::Vertex);
+        assert_eq!(overlay.chunks, vec![vec![1.0, 4.0, 2.0]]);
+    }
+
+    #[test]
+    fn scalar_overlay_prefers_solver_node_mapping_when_counts_match() {
+        let field =
+            AnalysisField::host_f64("structural.nodal_von_mises", vec![3], vec![1.0, 2.0, 3.0]);
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 3,
+            triangles: 1,
+            vertex_volume_node_indices: vec![Some(2), Some(0), Some(1)],
+            triangle_volume_element_indices: Vec::new(),
+        }];
+
+        let overlay = scalar_overlay(&field, &meshes, AnalysisFigureGenerationOptions::default())
+            .expect("node scalar field should use explicit solver mapping");
+
+        assert_eq!(overlay.location, MeshFieldLocation::Vertex);
+        assert_eq!(overlay.chunks, vec![vec![3.0, 1.0, 2.0]]);
+    }
+
+    #[test]
+    fn scalar_overlay_prefers_solver_node_mapping_for_vector_magnitude_when_counts_match() {
+        let field = AnalysisField::host_f64(
+            "structural.displacement",
+            vec![3, 3],
+            vec![
+                1.0, 0.0, 0.0, //
+                0.0, 2.0, 0.0, //
+                0.0, 0.0, 3.0,
+            ],
+        );
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 3,
+            triangles: 1,
+            vertex_volume_node_indices: vec![Some(2), Some(0), Some(1)],
+            triangle_volume_element_indices: Vec::new(),
+        }];
+
+        let overlay = scalar_overlay(&field, &meshes, AnalysisFigureGenerationOptions::default())
+            .expect("node vector magnitude should use explicit solver mapping");
+
+        assert_eq!(overlay.location, MeshFieldLocation::Vertex);
+        assert_eq!(overlay.chunks, vec![vec![3.0, 1.0, 2.0]]);
+    }
+
+    #[test]
+    fn vector_overlay_projects_node_values_to_render_vertices() {
+        let field = AnalysisField::host_f64(
+            "structural.displacement",
+            vec![4, 3],
+            vec![
+                1.0, 0.0, 0.0, //
+                0.0, 2.0, 0.0, //
+                0.0, 0.0, 3.0, //
+                4.0, 0.0, 0.0,
+            ],
+        );
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 3,
+            triangles: 1,
+            vertex_volume_node_indices: vec![Some(0), Some(3), Some(1)],
+            triangle_volume_element_indices: Vec::new(),
+        }];
+
+        let overlay = vector_overlay(&field, &meshes, AnalysisFigureGenerationOptions::default())
+            .expect("node vector field should project to render vertices");
+
+        assert_eq!(overlay.location, MeshFieldLocation::Vertex);
+        assert_eq!(
+            overlay.chunks,
+            vec![vec![
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(4.0, 0.0, 0.0),
+                Vec3::new(0.0, 2.0, 0.0)
+            ]]
+        );
+    }
+
+    #[test]
+    fn vector_overlay_prefers_solver_node_mapping_when_counts_match() {
+        let field = AnalysisField::host_f64(
+            "structural.displacement",
+            vec![3, 3],
+            vec![
+                1.0, 0.0, 0.0, //
+                0.0, 2.0, 0.0, //
+                0.0, 0.0, 3.0,
+            ],
+        );
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 3,
+            triangles: 1,
+            vertex_volume_node_indices: vec![Some(2), Some(0), Some(1)],
+            triangle_volume_element_indices: Vec::new(),
+        }];
+
+        let overlay = vector_overlay(&field, &meshes, AnalysisFigureGenerationOptions::default())
+            .expect("node vector field should use explicit solver mapping");
+
+        assert_eq!(overlay.location, MeshFieldLocation::Vertex);
+        assert_eq!(
+            overlay.chunks,
+            vec![vec![
+                Vec3::new(0.0, 0.0, 3.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 2.0, 0.0)
+            ]]
+        );
+    }
+
+    #[test]
+    fn deformation_overlay_projects_node_values_to_render_vertices() {
+        let field = AnalysisField::host_f64(
+            "structural.displacement",
+            vec![4, 3],
+            vec![
+                1.0, 0.0, 0.0, //
+                0.0, 2.0, 0.0, //
+                0.0, 0.0, 3.0, //
+                4.0, 0.0, 0.0,
+            ],
+        );
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 3,
+            triangles: 1,
+            vertex_volume_node_indices: vec![Some(0), Some(3), Some(1)],
+            triangle_volume_element_indices: Vec::new(),
+        }];
+        let figure = render_topology_figure(
+            &simple_render_topology(),
+            "solver mesh",
+            AnalysisFigureGenerationOptions::default(),
+        )
+        .expect("solver topology should render");
+
+        let overlay = deformation_overlay(
+            &field,
+            &meshes,
+            &figure,
+            AnalysisFigureGenerationOptions::default(),
+        )
+        .expect("node vector field should project to render deformation");
+
+        assert_eq!(
+            overlay.chunks,
+            vec![vec![
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(4.0, 0.0, 0.0),
+                Vec3::new(0.0, 2.0, 0.0)
+            ]]
+        );
+    }
+
+    #[test]
+    fn deformation_overlay_prefers_solver_node_mapping_when_counts_match() {
+        let field = AnalysisField::host_f64(
+            "structural.displacement",
+            vec![3, 3],
+            vec![
+                1.0, 0.0, 0.0, //
+                0.0, 2.0, 0.0, //
+                0.0, 0.0, 3.0,
+            ],
+        );
+        let meshes = vec![MeshCounts {
+            plot_index: 0,
+            vertices: 3,
+            triangles: 1,
+            vertex_volume_node_indices: vec![Some(2), Some(0), Some(1)],
+            triangle_volume_element_indices: Vec::new(),
+        }];
+        let figure = render_topology_figure(
+            &simple_render_topology(),
+            "solver mesh",
+            AnalysisFigureGenerationOptions::default(),
+        )
+        .expect("solver topology should render");
+
+        let overlay = deformation_overlay(
+            &field,
+            &meshes,
+            &figure,
+            AnalysisFigureGenerationOptions::default(),
+        )
+        .expect("node vector field should use explicit solver deformation mapping");
+
+        assert_eq!(
+            overlay.chunks,
+            vec![vec![
+                Vec3::new(0.0, 0.0, 3.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 2.0, 0.0)
+            ]]
+        );
     }
 }

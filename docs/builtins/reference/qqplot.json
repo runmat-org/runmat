@@ -1,0 +1,52 @@
+{
+  "title": "qqplot",
+  "slug": "qqplot",
+  "keywords": [
+    "qqplot",
+    "quantile",
+    "normal",
+    "probability",
+    "statistics",
+    "plotting"
+  ],
+  "summary": "Create a quantile-quantile plot against a normal distribution or another sample.",
+  "description": "`qqplot(x)` plots sorted sample quantiles against standard-normal theoretical quantiles. `qqplot(x,y)` compares the quantiles of two samples. `qqplot(x,[],pvec)` and `qqplot(x,y,pvec)` evaluate quantiles at explicit percentage values in the interval [0,100]. Matrix inputs create one series per column, omitting NaN and Inf observations.",
+  "notes": [
+    "The returned handle vector contains the data line, solid quartile line, and dashed fitted reference line for each plotted series.",
+    "For one-sample plots, the reference line is fitted through the first and third quartiles of the theoretical normal quantiles and sample quantiles.",
+    "RunMat supports numeric vector and matrix data. Two-sample matrices are paired by column; a vector can be compared with each column of a matrix. Distribution-object inputs and table variable routing are not part of this compatibility surface yet."
+  ],
+  "examples": [
+    {
+      "description": "Normal quantile plot",
+      "input": "h = qqplot([1; 2; 4; 8])",
+      "output": "h is a 3-by-1 vector of line handles."
+    },
+    {
+      "description": "Use explicit probabilities",
+      "input": "h = qqplot([0; 10; 20], [], [25 50 75]);\ny = get(h(1), 'YData')",
+      "output": "y is [5 10 15]."
+    },
+    {
+      "description": "Compare two samples",
+      "input": "h = qqplot([1; 3; 5], [2; 4; 6], 50)",
+      "output": "The plotted point compares median quantiles 3 and 4."
+    }
+  ],
+  "errors": [
+    {
+      "identifier": "RunMat:qqplot:InvalidArgument",
+      "message": "qqplot: invalid argument"
+    },
+    {
+      "identifier": "RunMat:qqplot:Internal",
+      "message": "qqplot: internal error"
+    }
+  ],
+  "links": [
+    {
+      "label": "Source",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/qqplot.rs"
+    }
+  ]
+}

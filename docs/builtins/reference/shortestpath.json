@@ -1,0 +1,14 @@
+{
+  "title": "shortestpath",
+  "category": "graph",
+  "keywords": ["shortestpath", "graph", "path", "dijkstra"],
+  "summary": "Compute a shortest path between graph nodes.",
+  "status": "implemented",
+  "tested": {"unit": "builtins::graph::tests"},
+  "description": "`shortestpath(G,s,t)` uses Dijkstra search over nonnegative edge weights. Named graphs return node names; unnamed graphs return one-based node ids.",
+  "signatures": [
+    {"label": "path = shortestpath(G, s, t)", "description": "Return the shortest path nodes."},
+    {"label": "[path, d] = shortestpath(G, s, t)", "description": "Return the path and total distance."}
+  ],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/graph/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/graph/mod.rs"}
+}

@@ -7,6 +7,8 @@ pub(crate) mod mldivide;
 pub(crate) mod mpower;
 pub(crate) mod mrdivide;
 pub(crate) mod mtimes;
+pub(crate) mod pagemtimes;
+pub(crate) mod pagetranspose;
 pub(crate) mod trace;
 pub(crate) mod transpose;
 

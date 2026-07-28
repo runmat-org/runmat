@@ -233,7 +233,7 @@ pub async fn meshc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         ..Default::default()
     };
     let level_spec = ContourLevelSpec::Count(default_level_count());
-    let contour_map = style.colormap;
+    let contour_map = style.colormap.clone();
     let (mut surface, contour) = if let Some(z_gpu) = z_input.gpu_handle().cloned() {
         match super::gpu_helpers::axis_bounds_async(&z_gpu, BUILTIN_NAME).await {
             Ok((min_z, max_z)) => match build_surface_gpu_plot_with_bounds_async(
@@ -243,7 +243,7 @@ pub async fn meshc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                 &z_gpu,
                 min_z,
                 max_z,
-                style.colormap,
+                style.colormap.clone(),
                 style.alpha,
                 style.flatten_z,
             )
@@ -400,6 +400,7 @@ pub(crate) mod tests {
     fn tensor_from(data: &[f64]) -> Tensor {
         Tensor {
             data: data.to_vec(),
+            integer_data: None,
             shape: vec![data.len()],
             rows: data.len(),
             cols: 1,
@@ -416,6 +417,7 @@ pub(crate) mod tests {
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(Tensor {
                 data: vec![0.0],
+                integer_data: None,
                 shape: vec![1],
                 rows: 1,
                 cols: 1,
@@ -460,6 +462,7 @@ pub(crate) mod tests {
         setup_plot_tests();
         let handle = futures::executor::block_on(meshc_builtin(vec![Value::Tensor(Tensor {
             data: vec![0.0, 1.0, 1.0, 0.0],
+            integer_data: None,
             shape: vec![2, 2],
             rows: 2,
             cols: 2,

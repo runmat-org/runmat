@@ -199,7 +199,7 @@ async fn hydrate_plot_field_async(plot: &mut Value, field: &str) -> Result<(), R
     } else {
         data_ref.shape.as_slice()
     };
-    let hydrated = shape_values_to_json(&payload.values, target_shape)?;
+    let hydrated = shape_values_to_json(&payload.values.to_f64_vec(), target_shape)?;
     obj.insert(field.to_string(), hydrated);
     Ok(())
 }
@@ -266,12 +266,12 @@ async fn read_scene_array_payload_async(
                             ),
                         )
                     })?;
-                values.extend(payload.values);
+                values.extend(payload.values.to_f64_vec());
             }
             Ok(crate::data::DataArrayPayload {
                 dtype: data_ref.dtype.clone().unwrap_or_else(|| "f64".to_string()),
                 shape: vec![values.len()],
-                values,
+                values: crate::data::DataArrayValues::F64(values),
             })
         }
     }
@@ -595,7 +595,26 @@ fn parse_data_ref(value: &Value) -> Option<SceneDataRef> {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
     use std::time::Instant;
+
+    struct CurrentDirGuard {
+        previous: PathBuf,
+    }
+
+    impl CurrentDirGuard {
+        fn change_to(path: &Path) -> Self {
+            let previous = runmat_filesystem::current_dir().expect("current dir");
+            runmat_filesystem::set_current_dir(path).expect("set cwd");
+            Self { previous }
+        }
+    }
+
+    impl Drop for CurrentDirGuard {
+        fn drop(&mut self) {
+            runmat_filesystem::set_current_dir(&self.previous).expect("restore current directory");
+        }
+    }
 
     #[cfg(feature = "plot-core")]
     fn write_scene_dataset(
@@ -618,7 +637,7 @@ mod tests {
             let payload = crate::data::DataArrayPayload {
                 dtype: "f64".to_string(),
                 shape: vec![values.len()],
-                values: values.clone(),
+                values: crate::data::DataArrayValues::F64(values.clone()),
             };
             let chunk = vec![std::cmp::max(1usize, values.len())];
             let (payload_path, chunk_index_path) = futures::executor::block_on(
@@ -924,6 +943,9 @@ mod tests {
     #[cfg(feature = "plot-core")]
     #[test]
     fn scene_chunk_reader_resolves_provider_relative_paths() {
+        let _fs_lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let root = std::env::temp_dir().join(format!(
             "runmat_scene_relpath_{}",
             std::time::SystemTime::now()
@@ -943,8 +965,7 @@ mod tests {
         ))
         .expect("write chunk");
 
-        let previous = runmat_filesystem::current_dir().expect("current dir");
-        runmat_filesystem::set_current_dir(&root).expect("set cwd");
+        let _cwd = CurrentDirGuard::change_to(&root);
         let chunk = SceneDataChunkRef {
             src: Some(".artifacts/objects/ab/test_chunk.f64.chunk.json".to_string()),
             artifact_id: None,
@@ -958,8 +979,6 @@ mod tests {
         };
         let bytes =
             read_scene_chunk_bytes(&chunk, &data_ref).expect("read chunk via relative path");
-        runmat_filesystem::set_current_dir(previous).expect("restore cwd");
-
         assert_eq!(bytes, b"{\"values\":[1,2,3]}");
     }
 

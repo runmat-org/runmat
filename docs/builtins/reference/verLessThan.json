@@ -1,0 +1,52 @@
+{
+  "title": "verLessThan",
+  "category": "introspection",
+  "keywords": ["verLessThan", "version", "compatibility"],
+  "summary": "Compare RunMat's MATLAB compatibility version with a requested version.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host metadata query."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::runtime_compat::tests",
+    "integration": null
+  },
+  "description": "`verLessThan('matlab', version)` compares RunMat's MATLAB compatibility version against `version` and returns a logical scalar.",
+  "behaviors": [
+    "The product name `matlab` is recognized case-insensitively.",
+    "Unknown products return false, matching compatibility-branch use where non-MATLAB products are not installed.",
+    "Version components are compared numerically from left to right."
+  ],
+  "examples": [
+    {
+      "description": "Branching on MATLAB compatibility version",
+      "input": "tf = verLessThan('matlab', '99.0')",
+      "output": "tf = logical(1)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does this inspect installed toolbox versions?",
+      "answer": "No. This implementation supports the common MATLAB runtime compatibility branch and returns false for other products."
+    }
+  ],
+  "links": [
+    { "label": "version", "url": "./version" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/runtime_compat.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/runtime_compat.rs"
+  },
+  "gpu_residency": "The result is a host logical scalar.",
+  "gpu_behavior": ["No GPU kernels are launched."]
+}

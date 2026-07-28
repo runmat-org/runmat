@@ -90,6 +90,8 @@ pub enum Value {
     ComplexTensor(ComplexTensor),
     /// Scalar symbolic expression used by `sym`, `syms`, and symbolic math builtins.
     Symbolic(SymbolicExpr),
+    /// Dense symbolic array with column-major shape semantics.
+    SymbolicArray(SymbolicArray),
     Cell(CellArray),
     // Struct (scalar or nested). Struct arrays are represented in higher layers;
     // this variant holds a single struct's fields.
@@ -151,7 +153,13 @@ impl IntValue {
         }
     }
     pub fn to_f64(&self) -> f64 {
-        self.to_i64() as f64
+        match self {
+            // `uint64` has a wider positive range than `int64`. Converting it
+            // through `to_i64` incorrectly clamps every value above i64::MAX
+            // before normal IEEE-754 rounding can occur.
+            IntValue::U64(value) => *value as f64,
+            _ => self.to_i64() as f64,
+        }
     }
     pub fn is_zero(&self) -> bool {
         self.to_i64() == 0
@@ -167,6 +175,18 @@ impl IntValue {
             IntValue::U32(_) => "uint32",
             IntValue::U64(_) => "uint64",
         }
+    }
+}
+
+#[cfg(test)]
+mod int_value_tests {
+    use super::IntValue;
+
+    #[test]
+    fn uint64_to_f64_does_not_clamp_through_int64() {
+        let value = IntValue::U64(u64::MAX);
+        assert_eq!(value.to_f64(), u64::MAX as f64);
+        assert!(value.to_f64() > i64::MAX as f64);
     }
 }
 
@@ -210,6 +230,124 @@ pub enum NumericDType {
     F32,
     U8,
     U16,
+    U32,
+}
+
+/// Exact homogeneous backing storage for MATLAB integer arrays.
+///
+/// This deliberately stores each class in its native Rust representation so
+/// `int64` and `uint64` values never round through `f64` before an
+/// integer-aware runtime path consumes them.
+#[derive(Debug, Clone, PartialEq)]
+pub enum IntegerStorage {
+    I8(Vec<i8>),
+    I16(Vec<i16>),
+    I32(Vec<i32>),
+    I64(Vec<i64>),
+    U8(Vec<u8>),
+    U16(Vec<u16>),
+    U32(Vec<u32>),
+    U64(Vec<u64>),
+}
+
+impl IntegerStorage {
+    pub fn len(&self) -> usize {
+        match self {
+            Self::I8(values) => values.len(),
+            Self::I16(values) => values.len(),
+            Self::I32(values) => values.len(),
+            Self::I64(values) => values.len(),
+            Self::U8(values) => values.len(),
+            Self::U16(values) => values.len(),
+            Self::U32(values) => values.len(),
+            Self::U64(values) => values.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn class_name(&self) -> &'static str {
+        match self {
+            Self::I8(_) => "int8",
+            Self::I16(_) => "int16",
+            Self::I32(_) => "int32",
+            Self::I64(_) => "int64",
+            Self::U8(_) => "uint8",
+            Self::U16(_) => "uint16",
+            Self::U32(_) => "uint32",
+            Self::U64(_) => "uint64",
+        }
+    }
+
+    pub fn to_f64_vec(&self) -> Vec<f64> {
+        match self {
+            Self::I8(values) => values.iter().map(|&value| value as f64).collect(),
+            Self::I16(values) => values.iter().map(|&value| value as f64).collect(),
+            Self::I32(values) => values.iter().map(|&value| value as f64).collect(),
+            Self::I64(values) => values.iter().map(|&value| value as f64).collect(),
+            Self::U8(values) => values.iter().map(|&value| value as f64).collect(),
+            Self::U16(values) => values.iter().map(|&value| value as f64).collect(),
+            Self::U32(values) => values.iter().map(|&value| value as f64).collect(),
+            Self::U64(values) => values.iter().map(|&value| value as f64).collect(),
+        }
+    }
+
+    /// Returns an exact scalar from this homogeneous buffer.
+    pub fn value_at(&self, index: usize) -> Option<IntValue> {
+        match self {
+            Self::I8(values) => values.get(index).copied().map(IntValue::I8),
+            Self::I16(values) => values.get(index).copied().map(IntValue::I16),
+            Self::I32(values) => values.get(index).copied().map(IntValue::I32),
+            Self::I64(values) => values.get(index).copied().map(IntValue::I64),
+            Self::U8(values) => values.get(index).copied().map(IntValue::U8),
+            Self::U16(values) => values.get(index).copied().map(IntValue::U16),
+            Self::U32(values) => values.get(index).copied().map(IntValue::U32),
+            Self::U64(values) => values.get(index).copied().map(IntValue::U64),
+        }
+    }
+
+    /// Allocates zeros while preserving this integer class.
+    pub fn zeros_like(&self, len: usize) -> Self {
+        match self {
+            Self::I8(_) => Self::I8(vec![0; len]),
+            Self::I16(_) => Self::I16(vec![0; len]),
+            Self::I32(_) => Self::I32(vec![0; len]),
+            Self::I64(_) => Self::I64(vec![0; len]),
+            Self::U8(_) => Self::U8(vec![0; len]),
+            Self::U16(_) => Self::U16(vec![0; len]),
+            Self::U32(_) => Self::U32(vec![0; len]),
+            Self::U64(_) => Self::U64(vec![0; len]),
+        }
+    }
+
+    /// Stores a same-class exact scalar without floating-point conversion.
+    pub fn set_value(&mut self, index: usize, value: IntValue) -> Result<(), String> {
+        match (self, value) {
+            (Self::I8(values), IntValue::I8(value)) => set_integer_element(values, index, value),
+            (Self::I16(values), IntValue::I16(value)) => set_integer_element(values, index, value),
+            (Self::I32(values), IntValue::I32(value)) => set_integer_element(values, index, value),
+            (Self::I64(values), IntValue::I64(value)) => set_integer_element(values, index, value),
+            (Self::U8(values), IntValue::U8(value)) => set_integer_element(values, index, value),
+            (Self::U16(values), IntValue::U16(value)) => set_integer_element(values, index, value),
+            (Self::U32(values), IntValue::U32(value)) => set_integer_element(values, index, value),
+            (Self::U64(values), IntValue::U64(value)) => set_integer_element(values, index, value),
+            (storage, value) => Err(format!(
+                "cannot store {} in {} integer storage",
+                value.class_name(),
+                storage.class_name()
+            )),
+        }
+    }
+}
+
+fn set_integer_element<T>(values: &mut [T], index: usize, value: T) -> Result<(), String> {
+    let slot = values
+        .get_mut(index)
+        .ok_or_else(|| format!("integer storage index {index} is out of bounds"))?;
+    *slot = value;
+    Ok(())
 }
 
 impl NumericDType {
@@ -219,6 +357,7 @@ impl NumericDType {
             NumericDType::F32 => "single",
             NumericDType::U8 => "uint8",
             NumericDType::U16 => "uint16",
+            NumericDType::U32 => "uint32",
         }
     }
 
@@ -228,13 +367,67 @@ impl NumericDType {
             NumericDType::F32 => 4,
             NumericDType::U8 => 1,
             NumericDType::U16 => 2,
+            NumericDType::U32 => 4,
         }
+    }
+}
+
+#[cfg(test)]
+mod integer_storage_tests {
+    use super::{IntegerStorage, Tensor};
+
+    #[test]
+    fn uint64_tensor_keeps_exact_backing_values() {
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2])
+            .expect("integer tensor");
+
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::U64(vec![0, u64::MAX]))
+        );
+        assert_eq!(tensor.data[1], u64::MAX as f64);
+    }
+
+    #[test]
+    fn integer_tensor_supports_empty_typed_arrays() {
+        let tensor = Tensor::new_integer(IntegerStorage::I64(Vec::new()), vec![0, 1])
+            .expect("empty integer tensor");
+
+        assert_eq!(
+            tensor.integer_storage().map(IntegerStorage::class_name),
+            Some("int64")
+        );
+        assert!(tensor.data.is_empty());
+    }
+
+    #[test]
+    fn integer_tensor_rejects_shape_length_mismatches() {
+        let err = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![3, 1])
+            .expect_err("shape mismatch");
+        assert!(err.contains("doesn't match shape"));
+    }
+
+    #[test]
+    fn reshape_preserves_exact_integer_storage() {
+        let tensor = Tensor::new_integer(IntegerStorage::I64(vec![-1, i64::MAX]), vec![1, 2])
+            .expect("integer tensor")
+            .reshape(vec![2, 1])
+            .expect("reshape");
+
+        assert_eq!(tensor.shape, vec![2, 1]);
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::I64(vec![-1, i64::MAX]))
+        );
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tensor {
     pub data: Vec<f64>,
+    /// Exact homogeneous integer backing storage during the integer-dtype
+    /// migration. Floating tensors leave this unset.
+    pub integer_data: Option<IntegerStorage>,
     pub shape: Vec<usize>, // Column-major layout
     pub rows: usize,       // Compatibility for 2D usage
     pub cols: usize,       // Compatibility for 2D usage
@@ -250,12 +443,23 @@ pub struct SparseTensor {
     pub col_ptrs: Vec<usize>,
     /// Zero-based row indices, sorted within each column.
     pub row_indices: Vec<usize>,
+    /// Floating compatibility view for legacy sparse consumers.
     pub values: Vec<f64>,
+    /// Exact homogeneous backing storage for typed integer sparse values.
+    pub integer_data: Option<IntegerStorage>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComplexTensor {
     pub data: Vec<(f64, f64)>,
+    pub shape: Vec<usize>,
+    pub rows: usize,
+    pub cols: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SymbolicArray {
+    pub data: Vec<SymbolicExpr>,
     pub shape: Vec<usize>,
     pub rows: usize,
     pub cols: usize,
@@ -334,6 +538,14 @@ impl CharArray {
         }
         Ok(CharArray { data, rows, cols })
     }
+
+    /// Return the character contents when this value is a MATLAB character
+    /// row vector. `Display` intentionally renders arrays for the console and
+    /// therefore includes layout whitespace; semantic string conversions must
+    /// use this method instead.
+    pub fn row_string(&self) -> Option<String> {
+        (self.rows == 1).then(|| self.data.iter().collect())
+    }
 }
 
 impl StringArray {
@@ -372,6 +584,42 @@ impl StringArray {
     }
 }
 
+impl SymbolicArray {
+    pub fn new(data: Vec<SymbolicExpr>, shape: Vec<usize>) -> Result<Self, String> {
+        let expected: usize = shape.iter().product();
+        if data.len() != expected {
+            return Err(format!(
+                "SymbolicArray data length {} doesn't match shape {:?} ({} elements)",
+                data.len(),
+                shape,
+                expected
+            ));
+        }
+        // Keep the cached `rows`/`cols` fields in lockstep with the `rows()`/`cols()`
+        // accessors so the two never disagree for non-2D shapes.
+        let rows = shape.first().copied().unwrap_or(1);
+        let cols = shape.get(1).copied().unwrap_or(1);
+        Ok(SymbolicArray {
+            data,
+            shape,
+            rows,
+            cols,
+        })
+    }
+
+    pub fn new_2d(data: Vec<SymbolicExpr>, rows: usize, cols: usize) -> Result<Self, String> {
+        Self::new(data, vec![rows, cols])
+    }
+
+    pub fn rows(&self) -> usize {
+        self.rows
+    }
+
+    pub fn cols(&self) -> usize {
+        self.cols
+    }
+}
+
 // GpuTensorHandle now lives in runmat-accel-api
 
 impl Tensor {
@@ -394,6 +642,7 @@ impl Tensor {
         };
         Ok(Tensor {
             data,
+            integer_data: None,
             shape,
             rows,
             cols,
@@ -425,6 +674,78 @@ impl Tensor {
         Ok(t)
     }
 
+    /// Construct a tensor backed by an exact homogeneous integer buffer.
+    ///
+    /// The floating `data` member is retained only as a compatibility view for
+    /// legacy numeric consumers. Integer-aware code must use `integer_data`.
+    pub fn new_integer(storage: IntegerStorage, shape: Vec<usize>) -> Result<Self, String> {
+        let expected: usize = shape.iter().product();
+        if storage.len() != expected {
+            return Err(format!(
+                "integer tensor data length {} doesn't match shape {:?} ({} elements)",
+                storage.len(),
+                shape,
+                expected
+            ));
+        }
+
+        let (rows, cols) = if shape.len() >= 2 {
+            (shape[0], shape[1])
+        } else if shape.len() == 1 {
+            (1, shape[0])
+        } else {
+            (0, 0)
+        };
+        Ok(Tensor {
+            data: storage.to_f64_vec(),
+            integer_data: Some(storage),
+            shape,
+            rows,
+            cols,
+            // Legacy dtype consumers do not yet represent the complete
+            // integer class matrix. Integer-aware consumers inspect storage.
+            dtype: NumericDType::F64,
+        })
+    }
+
+    pub fn integer_storage(&self) -> Option<&IntegerStorage> {
+        self.integer_data.as_ref()
+    }
+
+    /// Change only shape metadata while retaining the underlying numeric storage.
+    pub fn reshape(mut self, shape: Vec<usize>) -> Result<Self, String> {
+        let expected: usize = shape.iter().product();
+        if self.data.len() != expected {
+            return Err(format!(
+                "Tensor data length {} doesn't match shape {:?} ({} elements)",
+                self.data.len(),
+                shape,
+                expected
+            ));
+        }
+        if let Some(storage) = &self.integer_data {
+            if storage.len() != expected {
+                return Err(format!(
+                    "integer tensor data length {} doesn't match shape {:?} ({} elements)",
+                    storage.len(),
+                    shape,
+                    expected
+                ));
+            }
+        }
+        let (rows, cols) = if shape.len() >= 2 {
+            (shape[0], shape[1])
+        } else if shape.len() == 1 {
+            (1, shape[0])
+        } else {
+            (0, 0)
+        };
+        self.shape = shape;
+        self.rows = rows;
+        self.cols = cols;
+        Ok(self)
+    }
+
     pub fn zeros(shape: Vec<usize>) -> Self {
         let size: usize = shape.iter().product();
         let (rows, cols) = if shape.len() >= 2 {
@@ -436,6 +757,7 @@ impl Tensor {
         };
         Tensor {
             data: vec![0.0; size],
+            integer_data: None,
             shape,
             rows,
             cols,
@@ -454,6 +776,7 @@ impl Tensor {
         };
         Tensor {
             data: vec![1.0; size],
+            integer_data: None,
             shape,
             rows,
             cols,
@@ -504,6 +827,7 @@ impl Tensor {
     pub fn scalar_to_tensor2(scalar: f64, rows: usize, cols: usize) -> Tensor {
         Tensor {
             data: vec![scalar; rows * cols],
+            integer_data: None,
             shape: vec![rows, cols],
             rows,
             cols,
@@ -521,6 +845,44 @@ impl SparseTensor {
         row_indices: Vec<usize>,
         values: Vec<f64>,
     ) -> Result<Self, String> {
+        Self::validate_structure(rows, cols, &col_ptrs, &row_indices, values.len())?;
+        Ok(Self {
+            rows,
+            cols,
+            col_ptrs,
+            row_indices,
+            values,
+            integer_data: None,
+        })
+    }
+
+    /// Constructs a sparse matrix backed by an exact integer value buffer.
+    pub fn new_integer(
+        rows: usize,
+        cols: usize,
+        col_ptrs: Vec<usize>,
+        row_indices: Vec<usize>,
+        integer_data: IntegerStorage,
+    ) -> Result<Self, String> {
+        Self::validate_structure(rows, cols, &col_ptrs, &row_indices, integer_data.len())?;
+        let values = integer_data.to_f64_vec();
+        Ok(Self {
+            rows,
+            cols,
+            col_ptrs,
+            row_indices,
+            values,
+            integer_data: Some(integer_data),
+        })
+    }
+
+    fn validate_structure(
+        rows: usize,
+        cols: usize,
+        col_ptrs: &[usize],
+        row_indices: &[usize],
+        values_len: usize,
+    ) -> Result<(), String> {
         if col_ptrs.len() != cols.saturating_add(1) {
             return Err(format!(
                 "SparseTensor col_ptrs length {} doesn't match cols {}",
@@ -528,17 +890,17 @@ impl SparseTensor {
                 cols
             ));
         }
-        if row_indices.len() != values.len() {
+        if row_indices.len() != values_len {
             return Err(format!(
                 "SparseTensor row index length {} doesn't match value length {}",
                 row_indices.len(),
-                values.len()
+                values_len
             ));
         }
         if col_ptrs.first().copied().unwrap_or(usize::MAX) != 0 {
             return Err("SparseTensor col_ptrs must start at 0".to_string());
         }
-        if col_ptrs.last().copied().unwrap_or(usize::MAX) != values.len() {
+        if col_ptrs.last().copied().unwrap_or(usize::MAX) != values_len {
             return Err("SparseTensor final col_ptr must equal nnz".to_string());
         }
         for window in col_ptrs.windows(2) {
@@ -560,13 +922,7 @@ impl SparseTensor {
                 prev = Some(row);
             }
         }
-        Ok(Self {
-            rows,
-            cols,
-            col_ptrs,
-            row_indices,
-            values,
-        })
+        Ok(())
     }
 
     pub fn zeros(rows: usize, cols: usize) -> Self {
@@ -576,11 +932,14 @@ impl SparseTensor {
             col_ptrs: vec![0; cols.saturating_add(1)],
             row_indices: Vec::new(),
             values: Vec::new(),
+            integer_data: None,
         }
     }
 
     pub fn nnz(&self) -> usize {
-        self.values.len()
+        self.integer_data
+            .as_ref()
+            .map_or_else(|| self.values.len(), IntegerStorage::len)
     }
 
     pub fn shape(&self) -> Vec<usize> {
@@ -592,6 +951,19 @@ impl SparseTensor {
             .rows
             .checked_mul(self.cols)
             .ok_or_else(|| "SparseTensor dense dimensions overflow usize".to_string())?;
+        if let Some(integer_data) = &self.integer_data {
+            let mut data = integer_data.zeros_like(len);
+            for col in 0..self.cols {
+                for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
+                    let row = self.row_indices[idx];
+                    let value = integer_data.value_at(idx).ok_or_else(|| {
+                        "SparseTensor integer storage is inconsistent".to_string()
+                    })?;
+                    data.set_value(row + col * self.rows, value)?;
+                }
+            }
+            return Tensor::new_integer(data, self.shape());
+        }
         let mut data = Vec::new();
         data.try_reserve_exact(len)
             .map_err(|err| format!("SparseTensor dense allocation failed: {err}"))?;
@@ -616,6 +988,30 @@ impl SparseTensor {
             .ok()
             .map(|offset| self.values[start + offset])
     }
+
+    /// Returns an exact stored integer value when this sparse matrix is typed.
+    pub fn integer_at(&self, row: usize, col: usize) -> Option<IntValue> {
+        let integer_data = self.integer_data.as_ref()?;
+        if row >= self.rows || col >= self.cols {
+            return None;
+        }
+        let start = self.col_ptrs[col];
+        let end = self.col_ptrs[col + 1];
+        self.row_indices[start..end]
+            .binary_search(&row)
+            .ok()
+            .and_then(|offset| integer_data.value_at(start + offset))
+    }
+
+    pub fn integer_storage(&self) -> Option<&IntegerStorage> {
+        self.integer_data.as_ref()
+    }
+
+    pub fn class_name(&self) -> &'static str {
+        self.integer_data
+            .as_ref()
+            .map_or("double", IntegerStorage::class_name)
+    }
 }
 
 #[cfg(test)]
@@ -630,6 +1026,7 @@ mod sparse_tensor_tests {
             col_ptrs: vec![0, 0, 0],
             row_indices: Vec::new(),
             values: Vec::new(),
+            integer_data: None,
         };
 
         let err = sparse.to_dense().unwrap_err();
@@ -804,6 +1201,45 @@ impl fmt::Display for Tensor {
                     })
                 } else {
                     write!(f, "Tensor(shape={:?})", self.shape)
+                }
+            }
+        }
+    }
+}
+
+impl fmt::Display for SymbolicArray {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.shape.len() {
+            0 | 1 => {
+                write!(f, "[")?;
+                for (i, expr) in self.data.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " ")?;
+                    }
+                    write!(f, "{expr}")?;
+                }
+                write!(f, "]")
+            }
+            2 => {
+                let rows = self.rows();
+                let cols = self.cols();
+                for r in 0..rows {
+                    writeln!(f)?;
+                    write!(f, "  ")?;
+                    for c in 0..cols {
+                        if c > 0 {
+                            write!(f, "  ")?;
+                        }
+                        write!(f, "{}", self.data[r + c * rows])?;
+                    }
+                }
+                Ok(())
+            }
+            _ => {
+                if should_expand_nd_display(&self.shape) {
+                    write_nd_pages(f, &self.shape, |f, idx| write!(f, "{}", self.data[idx]))
+                } else {
+                    write!(f, "SymbolicArray(shape={:?})", self.shape)
                 }
             }
         }
@@ -1134,6 +1570,11 @@ pub enum Type {
     },
     /// Scalar symbolic expression type.
     Symbolic,
+    /// Symbolic array type with optional shape information.
+    SymbolicArray {
+        /// Optional full shape; None means unknown/dynamic; individual dims can be omitted by using None
+        shape: Option<Vec<Option<usize>>>,
+    },
     /// Cell array type with optional element type information
     Cell {
         /// Optional element type (None means mixed/unknown)
@@ -1331,6 +1772,9 @@ impl Type {
                 shape: Some(t.shape.iter().map(|&d| Some(d)).collect()),
             },
             Value::Symbolic(_) => Type::Symbolic,
+            Value::SymbolicArray(array) => Type::SymbolicArray {
+                shape: Some(array.shape.iter().map(|&d| Some(d)).collect()),
+            },
             Value::Cell(cells) => {
                 if cells.data.is_empty() {
                     Type::cell()
@@ -2145,6 +2589,13 @@ impl Trace for ObjectInstance {
         for value in self.properties.values() {
             value.trace(tracer);
         }
+        if let Some(dynamic_properties) = &self.dynamic_properties {
+            for property in dynamic_properties.values() {
+                if let Some(metadata_handle) = property.metadata_handle {
+                    tracer.mark(metadata_handle);
+                }
+            }
+        }
     }
 }
 
@@ -2187,6 +2638,7 @@ impl Trace for Value {
             | Value::SparseTensor(_)
             | Value::ComplexTensor(_)
             | Value::Symbolic(_)
+            | Value::SymbolicArray(_)
             | Value::GpuTensor(_)
             | Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
@@ -2223,6 +2675,7 @@ impl fmt::Display for Value {
             Value::SparseTensor(m) => write!(f, "{m}"),
             Value::ComplexTensor(m) => write!(f, "{m}"),
             Value::Symbolic(expr) => write!(f, "{expr}"),
+            Value::SymbolicArray(array) => write!(f, "{array}"),
             Value::Cell(ca) => ca.fmt(f),
 
             Value::GpuTensor(h) => write!(
@@ -2513,6 +2966,7 @@ impl fmt::Display for CellArray {
 pub struct ObjectInstance {
     pub class_name: String,
     pub properties: HashMap<String, Value>,
+    pub dynamic_properties: Option<Box<HashMap<String, DynamicPropertyDef>>>,
 }
 
 impl ObjectInstance {
@@ -2520,11 +2974,54 @@ impl ObjectInstance {
         Self {
             class_name,
             properties: HashMap::new(),
+            dynamic_properties: None,
         }
     }
 
     pub fn is_class(&self, name: &str) -> bool {
         self.class_name == name
+    }
+
+    pub fn dynamic_property(&self, name: &str) -> Option<&DynamicPropertyDef> {
+        self.dynamic_properties
+            .as_ref()
+            .and_then(|properties| properties.get(name))
+    }
+
+    pub fn dynamic_property_mut(&mut self, name: &str) -> Option<&mut DynamicPropertyDef> {
+        self.dynamic_properties
+            .as_mut()
+            .and_then(|properties| properties.get_mut(name))
+    }
+
+    pub fn has_dynamic_property(&self, name: &str) -> bool {
+        self.dynamic_property(name).is_some()
+    }
+
+    pub fn insert_dynamic_property(
+        &mut self,
+        name: String,
+        property: DynamicPropertyDef,
+    ) -> Option<DynamicPropertyDef> {
+        self.dynamic_properties
+            .get_or_insert_with(|| Box::new(HashMap::new()))
+            .insert(name, property)
+    }
+
+    pub fn remove_dynamic_property(&mut self, name: &str) -> Option<DynamicPropertyDef> {
+        let properties = self.dynamic_properties.as_mut()?;
+        let removed = properties.remove(name);
+        if properties.is_empty() {
+            self.dynamic_properties = None;
+        }
+        removed
+    }
+
+    pub fn dynamic_property_names(&self) -> Vec<String> {
+        self.dynamic_properties
+            .as_ref()
+            .map(|properties| properties.keys().cloned().collect())
+            .unwrap_or_default()
     }
 }
 
@@ -2545,6 +3042,43 @@ pub struct PropertyDef {
     pub get_access: Access,
     pub set_access: Access,
     pub default_value: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DynamicPropertyDef {
+    pub name: String,
+    pub defining_class: String,
+    pub metadata_handle: Option<GcHandle>,
+    pub get_access: Access,
+    pub set_access: Access,
+    pub dependent: bool,
+    pub hidden: bool,
+    pub transient: bool,
+    pub non_copyable: bool,
+    pub abort_set: bool,
+    pub set_observable: bool,
+    pub get_observable: bool,
+    pub description: String,
+}
+
+impl DynamicPropertyDef {
+    pub fn new(name: String, defining_class: String) -> Self {
+        Self {
+            name,
+            defining_class,
+            metadata_handle: None,
+            get_access: Access::Public,
+            set_access: Access::Public,
+            dependent: false,
+            hidden: false,
+            transient: false,
+            non_copyable: false,
+            abort_set: false,
+            set_observable: false,
+            get_observable: false,
+            description: String::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -2628,7 +3162,7 @@ pub fn static_property_gc_roots() -> Vec<GcHandle> {
 }
 
 fn primitive_class_registry() -> HashMap<String, ClassDef> {
-    ["double", "single", "logical"]
+    let mut registry: HashMap<String, ClassDef> = ["double", "single", "logical"]
         .into_iter()
         .map(|class_name| {
             let mut methods = HashMap::new();
@@ -2654,7 +3188,59 @@ fn primitive_class_registry() -> HashMap<String, ClassDef> {
                 },
             )
         })
-        .collect()
+        .collect();
+
+    registry.insert(
+        "handle".to_string(),
+        ClassDef {
+            name: "handle".to_string(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        },
+    );
+    registry.insert(
+        "dynamicprops".to_string(),
+        ClassDef {
+            name: "dynamicprops".to_string(),
+            parent: Some("handle".to_string()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        },
+    );
+    registry.insert(
+        "matlab.metadata.Property".to_string(),
+        ClassDef {
+            name: "matlab.metadata.Property".to_string(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        },
+    );
+    let mut dynamic_property_methods = HashMap::new();
+    dynamic_property_methods.insert(
+        "delete".to_string(),
+        MethodDef {
+            name: "delete".to_string(),
+            is_static: false,
+            is_abstract: false,
+            is_sealed: false,
+            access: Access::Public,
+            function_name: "matlab.metadata.DynamicProperty.delete".to_string(),
+            implicit_class_argument: None,
+        },
+    );
+    registry.insert(
+        "matlab.metadata.DynamicProperty".to_string(),
+        ClassDef {
+            name: "matlab.metadata.DynamicProperty".to_string(),
+            parent: Some("handle".to_string()),
+            properties: HashMap::new(),
+            methods: dynamic_property_methods,
+        },
+    );
+
+    registry
 }
 
 pub fn register_class(def: ClassDef) {
@@ -2748,6 +3334,32 @@ pub fn is_class_or_subclass(class_name: &str, ancestor_name: &str) -> bool {
     })
 }
 
+pub fn superclass_chain(class_name: &str) -> Option<Vec<String>> {
+    CLASS_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let mut current = registry
+            .get(class_name)
+            .and_then(|class_def| class_def.parent.clone());
+        let mut visited = std::collections::HashSet::new();
+        visited.insert(class_name.to_string());
+        let mut supers = Vec::new();
+        while let Some(name) = current {
+            if !visited.insert(name.clone()) {
+                break;
+            }
+            supers.push(name.clone());
+            current = registry
+                .get(&name)
+                .and_then(|class_def| class_def.parent.clone());
+        }
+        if registry.contains_key(class_name) {
+            Some(supers)
+        } else {
+            None
+        }
+    })
+}
+
 /// Resolve a property through the inheritance chain, returning the property definition and
 /// the name of the class where it was defined.
 pub fn lookup_property(class_name: &str, prop: &str) -> Option<(PropertyDef, String)> {
@@ -2831,8 +3443,8 @@ pub fn set_static_property_value_in_owner(
 #[cfg(test)]
 mod class_registry_tests {
     use super::{
-        get_class, lookup_method, lookup_property, register_class, Access, ClassDef, MethodDef,
-        PropertyDef,
+        get_class, lookup_method, lookup_property, register_class, superclass_chain, Access,
+        ClassDef, MethodDef, PropertyDef,
     };
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -2865,6 +3477,75 @@ mod class_registry_tests {
                 Some(class_name)
             );
         }
+    }
+
+    #[test]
+    fn superclass_chain_reports_nearest_to_root_order() {
+        let grand = unique_class_name("super_chain_grand");
+        let parent = unique_class_name("super_chain_parent");
+        let child = unique_class_name("super_chain_child");
+
+        register_class(ClassDef {
+            name: grand.clone(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+        register_class(ClassDef {
+            name: parent.clone(),
+            parent: Some(grand.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+        register_class(ClassDef {
+            name: child.clone(),
+            parent: Some(parent.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        assert_eq!(
+            superclass_chain(&child),
+            Some(vec![parent.clone(), grand.clone()])
+        );
+        assert_eq!(superclass_chain(&grand), Some(Vec::new()));
+        assert_eq!(superclass_chain("MissingSuperclassChainClass"), None);
+    }
+
+    #[test]
+    fn superclass_chain_reports_recorded_parent_when_parent_metadata_is_missing() {
+        let child = unique_class_name("super_chain_missing_parent_child");
+        let parent = unique_class_name("super_chain_missing_parent_parent");
+
+        register_class(ClassDef {
+            name: child.clone(),
+            parent: Some(parent.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        assert_eq!(superclass_chain(&child), Some(vec![parent]));
+    }
+
+    #[test]
+    fn superclass_chain_stops_before_repeating_cycle_start() {
+        let first = unique_class_name("super_chain_cycle_first");
+        let second = unique_class_name("super_chain_cycle_second");
+
+        register_class(ClassDef {
+            name: first.clone(),
+            parent: Some(second.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+        register_class(ClassDef {
+            name: second.clone(),
+            parent: Some(first.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        assert_eq!(superclass_chain(&first), Some(vec![second]));
     }
 
     #[test]

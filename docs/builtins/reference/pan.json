@@ -1,0 +1,79 @@
+{
+  "title": "pan",
+  "category": "plotting",
+  "keywords": [
+    "pan",
+    "axes pan",
+    "figure pan",
+    "interactive plotting"
+  ],
+  "summary": "Control interactive axes panning for figures and axes.",
+  "status": "done",
+  "version_added": "0.5.3",
+  "tests": {
+    "unit": "builtins::plotting::pan::tests"
+  },
+  "description": "`pan` toggles or configures MATLAB-compatible figure panning state. It supports figure and axes targets, returns a live pan mode object, and integrates with `get` and `set` for common pan object properties.",
+  "syntax": [
+    "pan",
+    "pan(option)",
+    "pan(fig, option)",
+    "pan(ax, option)",
+    "p = pan",
+    "p = pan(fig)"
+  ],
+  "arguments": [
+    {
+      "name": "option",
+      "type": "'on' | 'off' | 'toggle' | 'xon' | 'yon'",
+      "description": "Pan mode command. `xon` and `yon` enable panning constrained to the horizontal or vertical axis."
+    },
+    {
+      "name": "fig",
+      "type": "figure handle",
+      "description": "Target figure handle."
+    },
+    {
+      "name": "ax",
+      "type": "axes handle",
+      "description": "Target axes handle."
+    }
+  ],
+  "examples": [
+    {
+      "description": "Enable horizontal panning",
+      "input": "plot(1:10);\npan xon;",
+      "output": "% Pan mode is enabled horizontally"
+    },
+    {
+      "description": "Use the pan object with get and set",
+      "input": "p = pan;\nset(p, 'Enable', 'on', 'Motion', 'vertical');\nget(p, 'Motion')",
+      "output": "ans = 'vertical'"
+    }
+  ],
+  "notes": [
+    "Statement-form `pan()` toggles pan mode. Output-form `p = pan()` returns a pan handle object.",
+    "The pan object supports `Enable`, `Motion`, `UIContextMenu`, `ButtonDownFilter`, `ActionPreCallback`, `ActionPostCallback`, and `FigureHandle` properties."
+  ],
+  "gpu_residency": "`pan` mutates plotting interaction metadata only. It does not gather or copy GPU-resident plot data.",
+  "related": [
+    {
+      "label": "zoom",
+      "url": "./zoom"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    }
+  ],
+  "implemented_in": [
+    {
+      "label": "crates/runmat-runtime/src/builtins/plotting/ops/pan.rs",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/pan.rs"
+    }
+  ]
+}

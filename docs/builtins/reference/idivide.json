@@ -1,0 +1,60 @@
+{
+  "title": "idivide",
+  "category": "math/elementwise",
+  "keywords": ["idivide", "integer", "division", "rounding"],
+  "summary": "Divide integer values with class-preserving rounded quotients.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "matlab",
+    "notes": "gpuArray integer tensors are gathered to the host integer division path."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::logical::bit::integer::tests",
+    "integration": null
+  },
+  "description": "`idivide(A,B)` divides integer `A` by integer `B` and returns a quotient in the class of `A`. `idivide(A,B,rounding)` selects the rounding rule.",
+  "behaviors": [
+    "Supports scalar signed and unsigned integer values, plus dense `uint8`, `uint16`, and `uint32` tensors.",
+    "A scalar double operand is accepted when the other operand has a non-64-bit integer class; the result keeps the integer class.",
+    "Dense tensor inputs use MATLAB-compatible scalar expansion when one input is scalar.",
+    "Rounding modes are `fix` (default), `floor`, `ceil`, and `round`.",
+    "The integer classes of `A` and `B` must match unless one operand is an allowed scalar double.",
+    "Division by zero, two-double calls, double operands with `int64` or `uint64`, unsupported classes, incompatible shapes, and quotient overflow raise errors.",
+    "Signed dense integer arrays are not representable in RunMat's current tensor value model; signed scalar integer values are supported."
+  ],
+  "examples": [
+    {
+      "description": "Default truncation toward zero",
+      "input": "q = idivide(int16(-7), int16(3))",
+      "output": "q = int16\n  -2"
+    },
+    {
+      "description": "Floor rounding for unsigned arrays",
+      "input": "q = idivide(uint16([9 10 11]), 3, 'floor')",
+      "output": "q = uint16([3 3 3])"
+    }
+  ],
+  "links": [
+    {
+      "label": "bitand",
+      "url": "./bitand"
+    },
+    {
+      "label": "swapbytes",
+      "url": "./swapbytes"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/logical/bit/integer.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/bit/integer.rs"
+  }
+}

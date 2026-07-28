@@ -1,0 +1,93 @@
+{
+  "title": "getAttribute",
+  "category": "strings/text_analytics",
+  "keywords": [
+    "getAttribute",
+    "htmlTree",
+    "HTML",
+    "DOM",
+    "attribute",
+    "text analytics"
+  ],
+  "summary": "Read an HTML attribute from htmlTree objects.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`getAttribute` reads host-resident HTML metadata and does not use provider kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::text_analytics::html::tests",
+    "integration": null
+  },
+  "description": "`getAttribute(tree, attr)` returns the value of an HTML attribute from a scalar RunMat `htmlTree` object or from each object in a cell array of `htmlTree` objects.",
+  "behaviors": [
+    "`tree` must be a scalar RunMat `htmlTree` object or a cell array of `htmlTree` objects, such as the output of `findElement`.",
+    "`attr` must be a nonempty string scalar or character vector.",
+    "Attribute names are normalized to lowercase and matched against the parser's lowercase attribute map.",
+    "A scalar `htmlTree` input returns a string scalar.",
+    "A cell array of `htmlTree` objects returns a string array with the same shape unless there is only one cell element.",
+    "If the requested attribute is absent, RunMat returns `<missing>` for that element.",
+    "Full MATLAB missing-string scalar representation for `htmlTree` attributes remains tied to broader missing/object-array compatibility work."
+  ],
+  "examples": [
+    {
+      "description": "Read Link Attributes",
+      "input": "tree = htmlTree(\"<a href='/home'>Home</a>\");\nhref = getAttribute(tree, \"href\")",
+      "output": "href = \"/home\""
+    },
+    {
+      "description": "Read Attributes From Matches",
+      "input": "tree = htmlTree(\"<div><a href='/home'>Home</a><a>Docs</a></div>\");\nlinks = findElement(tree, \"a\");\nhrefs = getAttribute(links, \"href\")",
+      "output": "hrefs = [\"/home\"; \"<missing>\"]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What does RunMat return for a missing attribute?",
+      "answer": "RunMat returns the string `<missing>` for that element. A first-class MATLAB missing-string scalar for this object path remains tracked with broader missing/object compatibility work."
+    },
+    {
+      "question": "Does `getAttribute` execute on the GPU?",
+      "answer": "No. Attribute lookup is host HTML metadata access and has no `runmat-accelerate` provider path."
+    }
+  ],
+  "links": [
+    {
+      "label": "htmlTree",
+      "url": "./htmlTree"
+    },
+    {
+      "label": "findElement",
+      "url": "./findElement"
+    },
+    {
+      "label": "extractHTMLText",
+      "url": "./extractHTMLText"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Supported form",
+      "input": "str = getAttribute(tree, attr)",
+      "output": "`str` is a string scalar or string array."
+    },
+    "points": [
+      "`tree` must be an `htmlTree` object or a cell array of `htmlTree` objects.",
+      "`attr` must name one HTML attribute."
+    ]
+  },
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/html.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/html.rs"
+  },
+  "gpu_residency": "`getAttribute` reads host-resident HTML metadata and has no provider kernel."
+}

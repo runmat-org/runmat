@@ -306,15 +306,6 @@ fn try_conv_gpu(a: &Value, b: &Value, mode: ConvMode) -> BuiltinResult<Option<Va
         _ => return Ok(None),
     };
 
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        if lhs_handle.device_id != 0 || rhs_handle.device_id != 0 {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
-
     let lhs_meta = conv_meta_from_shape(&lhs_handle.shape);
     let rhs_meta = conv_meta_from_shape(&rhs_handle.shape);
 

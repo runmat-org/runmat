@@ -1,0 +1,91 @@
+{
+  "title": "bin2dec",
+  "category": "comms/conversion",
+  "keywords": [
+    "bin2dec",
+    "binary",
+    "decimal",
+    "base conversion",
+    "twos complement"
+  ],
+  "summary": "Convert binary text to decimal numbers in MATLAB and RunMat.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Text inputs are converted on the host."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::comms::binary_conversion::tests",
+    "integration": null
+  },
+  "description": "`bin2dec(binStr)` converts binary character vectors, character matrices, string arrays, or cell arrays of text to decimal double values. Character matrix rows and cell text entries produce a column vector; string arrays preserve their shape.",
+  "behaviors": [
+    "Character vectors and string scalars produce a scalar double result.",
+    "Each row of a character matrix is converted independently.",
+    "String arrays preserve their input shape in the numeric output.",
+    "Cell arrays of character vectors or strings are converted element-by-element and returned as a column vector.",
+    "Optional `0b` or `0B` prefixes are accepted.",
+    "Unsigned suffixes `u8`, `u16`, `u32`, and `u64` are accepted when the digits fit in the requested width.",
+    "Signed suffixes `s8`, `s16`, `s32`, and `s64` interpret the digits as two's-complement signed values.",
+    "Results that exceed RunMat's exact integer range are rejected instead of silently losing precision."
+  ],
+  "examples": [
+    {
+      "description": "Convert a binary character vector",
+      "input": "d = bin2dec('10111')",
+      "output": "d = 23"
+    },
+    {
+      "description": "Convert rows of a character matrix",
+      "input": "d = bin2dec(['1111111111'; '0001111010'; '0000001110'])",
+      "output": "d = [1023; 122; 14]"
+    },
+    {
+      "description": "Convert a string array and preserve its shape",
+      "input": "d = bin2dec([\"1111111111\" \"1111010\" \"1110\"])",
+      "output": "d = [1023 122 14]"
+    },
+    {
+      "description": "Interpret a signed suffix",
+      "input": "d = bin2dec('0b11111111s8')",
+      "output": "d = -1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Can bin2dec parse prefixed binary literals?",
+      "answer": "Yes. RunMat accepts `0b` and `0B` prefixes."
+    },
+    {
+      "question": "What do signed suffixes mean?",
+      "answer": "A suffix such as `s8` treats the parsed bits as a signed two's-complement integer with that width."
+    },
+    {
+      "question": "How does RunMat handle very large binary values?",
+      "answer": "RunMat returns double values only when the result is exactly representable; larger results raise an error instead of returning rounded values."
+    }
+  ],
+  "links": [
+    {
+      "label": "dec2bin",
+      "url": "./dec2bin"
+    },
+    {
+      "label": "hex2dec",
+      "url": "./hex2dec"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/comms/binary_conversion.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/comms/binary_conversion.rs"
+  }
+}

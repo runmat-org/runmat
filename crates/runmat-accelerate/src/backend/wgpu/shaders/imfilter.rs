@@ -1,5 +1,5 @@
 pub const IMFILTER_SHADER_F64: &str = r#"
-const MAX_RANK: u32 = 512u;
+const MAX_RANK: u32 = 128u;
 
 struct Tensor {
     data: array<f64>,
@@ -177,7 +177,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 "#;
 
 pub const IMFILTER_SHADER_F32: &str = r#"
-const MAX_RANK: u32 = 512u;
+const MAX_RANK: u32 = 128u;
 
 struct Tensor {
     data: array<f32>,
@@ -355,3 +355,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     Output.data[global_idx] = acc;
 }
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::{IMFILTER_SHADER_F32, IMFILTER_SHADER_F64};
+
+    #[test]
+    fn shader_rank_contract_matches_host_parameter_layout() {
+        let declaration = format!(
+            "const MAX_RANK: u32 = {}u;",
+            crate::backend::wgpu::params::IMFILTER_MAX_RANK
+        );
+        assert!(IMFILTER_SHADER_F32.contains(&declaration));
+        assert!(IMFILTER_SHADER_F64.contains(&declaration));
+    }
+}

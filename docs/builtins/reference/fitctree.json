@@ -1,0 +1,77 @@
+{
+  "title": "fitctree",
+  "category": "stats/ml",
+  "keywords": [
+    "fitctree",
+    "classification tree",
+    "decision tree",
+    "machine learning",
+    "statistics"
+  ],
+  "summary": "Fit a binary decision tree for multiclass classification.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f64"],
+    "broadcasting": "none",
+    "notes": "GPU inputs are gathered to host. Classification tree fitting runs on CPU."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::ml::classification_tree::tests",
+    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+  },
+  "description": "`fitctree` fits a numeric-predictor classification tree from a predictor matrix or table and returns a `ClassificationTree` object usable with `predict`.",
+  "behaviors": [
+    "`fitctree(X,Y)` fits a classification tree with observations in rows of `X` and class labels in `Y`.",
+    "Table input supports `fitctree(Tbl,ResponseVarName)`, `fitctree(Tbl,formula)`, and `fitctree(Tbl,Y)`. Formula support covers additive predictor lists such as `Y ~ A + B`.",
+    "`Y` can contain numeric, logical, string, char, or cell-string labels. The predicted label output preserves the label family.",
+    "Name-value options `ClassNames`, `PredictorNames`, `ResponseName`, `MaxNumSplits`, `MinLeafSize`, `MinParentSize`, `SplitCriterion`, `Weights`, and `ScoreTransform` are accepted.",
+    "`SplitCriterion` supports `gdi` and `deviance`. `ScoreTransform` currently accepts `none`.",
+    "Rows containing `NaN` in predictors, response, or zero weights are omitted before fitting; `Inf` values and negative weights are rejected.",
+    "Categorical predictors, pruning, surrogate splits, cross-validation, prior/cost matrices, and hyperparameter optimization are not implemented yet and raise explicit errors instead of silently producing partial models.",
+    "The returned object exposes `ResponseName`, `PredictorNames`, `ClassNames`, `CategoricalPredictors`, `ScoreTransform`, `NumObservations`, `NumPredictors`, `NumNodes`, `NumSplits`, and `ModelParameters` properties."
+  ],
+  "examples": [
+    {
+      "description": "Fit and predict numeric classes",
+      "input": "X = [0; 1; 2; 3];\nY = [0; 0; 1; 1];\nmdl = fitctree(X, Y, 'MaxNumSplits', 1, 'MinParentSize', 2);\n[label,score] = predict(mdl, [0.5; 2.5])",
+      "output": "label is [0; 1], and score has one posterior-probability column per class."
+    },
+    {
+      "description": "Fit a table-input classification tree",
+      "input": "T = table(A, B, Y, 'VariableNames', {'A','B','Y'});\nmdl = fitctree(T, 'Y ~ A + B')",
+      "output": "mdl uses A and B as numeric predictors and Y as the response."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `fitctree` support categorical predictors?",
+      "answer": "No. RunMat currently supports numeric predictors only and raises an explicit error for categorical-predictor options."
+    },
+    {
+      "question": "What does `predict` return for a classification tree?",
+      "answer": "`predict(mdl,Xnew)` returns predicted class labels. With multiple outputs, `[label,score,node,cnum]` returns posterior probabilities, one-based leaf node ids, and one-based class-number predictions."
+    }
+  ],
+  "links": [
+    {
+      "label": "predict",
+      "url": "./predict"
+    },
+    {
+      "label": "fitlm",
+      "url": "./fitlm"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/ml/classification_tree.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/classification_tree.rs"
+  }
+}

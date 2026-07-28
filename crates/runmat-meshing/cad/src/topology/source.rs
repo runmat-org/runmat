@@ -1,0 +1,847 @@
+use std::collections::{BTreeMap, BTreeSet};
+
+use runmat_geometry_core::GeometryAsset;
+
+use super::SourceTopologyModel;
+
+mod generic;
+mod merge;
+mod semantics;
+mod types;
+
+use generic::generic_coplanar_face_ids;
+use merge::merge_stable_cad_faces;
+use semantics::{
+    cad_topology_source, edge_regions_by_source_edge, evaluator_curves_by_imported_id,
+    evaluator_faces_by_imported_id, face_regions_by_source_face, imported_curve_id_for_regions,
+    imported_curve_ids_by_region, imported_face_id_for_regions, imported_face_ids_by_region,
+    material_regions_by_source_face, semantic_face_regions,
+};
+pub use types::{
+    CadEdge, CadEntityId, CadEntityKind, CadFace, CadLoop, CadShell, CadTopologyError,
+    CadTopologyModel, CadTopologyReport, CadTopologySource, CadVertex, CadVolume,
+};
+
+pub fn build_cad_topology(
+    geometry: &GeometryAsset,
+    topology: &SourceTopologyModel,
+) -> Result<CadTopologyModel, CadTopologyError> {
+    if topology.vertices.is_empty() || topology.faces.is_empty() {
+        return Err(CadTopologyError::EmptyTopology);
+    }
+
+    let source = cad_topology_source(geometry);
+    let semantic_face_regions = semantic_face_regions(geometry);
+    let imported_face_ids_by_region = imported_face_ids_by_region(geometry);
+    let imported_curve_ids_by_region = imported_curve_ids_by_region(geometry);
+    let evaluator_faces = evaluator_faces_by_imported_id(geometry);
+    let evaluator_curves = evaluator_curves_by_imported_id(geometry);
+    let face_region_by_source_face = face_regions_by_source_face(geometry);
+    let material_region_by_source_face = material_regions_by_source_face(geometry);
+    let material_region_ids = geometry
+        .regions
+        .iter()
+        .filter(|region| region.has_material_role())
+        .map(|region| region.region_id.clone())
+        .collect::<BTreeSet<_>>();
+    let edge_region_by_source_edge = edge_regions_by_source_edge(geometry);
+    let generic_face_ids_by_source_face = if source == CadTopologySource::GenericCadMesh {
+        generic_coplanar_face_ids(topology, &face_region_by_source_face)
+    } else {
+        BTreeMap::new()
+    };
+
+    let vertices = topology
+        .vertices
+        .iter()
+        .map(|vertex| CadVertex {
+            entity_id: CadEntityId {
+                kind: CadEntityKind::Vertex,
+                id: format!("cad_vertex_{}", vertex.vertex_id),
+            },
+            source_vertex_id: vertex.vertex_id,
+            coordinates_m: vertex.coordinates_m,
+        })
+        .collect::<Vec<_>>();
+
+    let face_seeds = topology
+        .faces
+        .iter()
+        .map(|face| {
+            let mapped_region_ids = face_region_by_source_face
+                .get(&face.source_triangle_id)
+                .cloned();
+            let fallback_region_ids = face
+                .region_ids
+                .iter()
+                .filter(|region_id| !material_region_ids.contains(*region_id))
+                .cloned()
+                .collect::<Vec<_>>();
+            let material_region_ids = material_region_by_source_face
+                .get(&face.source_triangle_id)
+                .cloned()
+                .unwrap_or_else(|| face.material_region_ids.clone());
+            let identity_region_ids = mapped_region_ids.clone().unwrap_or_default();
+            let region_ids = mapped_region_ids.unwrap_or(fallback_region_ids);
+            let imported_face_id =
+                imported_face_id_for_regions(&imported_face_ids_by_region, &identity_region_ids);
+            let evaluator_face = imported_face_id.and_then(|face_id| evaluator_faces.get(&face_id));
+            let entity_id = identity_region_ids
+                .iter()
+                .find(|region_id| semantic_face_regions.contains(*region_id))
+                .cloned()
+                .or_else(|| generic_face_ids_by_source_face.get(&face.face_id).cloned())
+                .unwrap_or_else(|| format!("cad_face_{}", face.face_id));
+            CadFace {
+                entity_id: CadEntityId {
+                    kind: CadEntityKind::Face,
+                    id: entity_id,
+                },
+                imported_face_id,
+                evaluator_id: evaluator_face.map(|face| face.evaluator_id.clone()),
+                evaluator_supports_point_evaluation: evaluator_face
+                    .is_some_and(|face| face.supports_point_evaluation),
+                evaluator_supports_projection: evaluator_face
+                    .is_some_and(|face| face.supports_projection),
+                evaluator_supports_normal: evaluator_face.is_some_and(|face| face.supports_normal),
+                evaluator_supports_derivatives: evaluator_face
+                    .is_some_and(|face| face.supports_derivatives),
+                evaluator_supports_curvature: evaluator_face
+                    .is_some_and(|face| face.supports_curvature),
+                evaluator_reference_point_m: evaluator_face.and_then(|face| face.reference_point_m),
+                evaluator_unit_normal: evaluator_face.and_then(|face| face.reference_unit_normal),
+                evaluator_samples: evaluator_face
+                    .map(|face| face.evaluation_samples.clone())
+                    .unwrap_or_default(),
+                source_face_ids: vec![face.face_id],
+                source_edge_ids: face.edge_ids.to_vec(),
+                loop_ids: Vec::new(),
+                loop_edge_ids: face
+                    .edge_ids
+                    .iter()
+                    .map(|edge_id| format!("cad_edge_{edge_id}"))
+                    .collect(),
+                region_ids,
+                material_region_ids,
+                area_m2: face.area_m2,
+                unit_normal: face.unit_normal,
+            }
+        })
+        .collect::<Vec<_>>();
+    let edge_node_ids_by_cad_edge_id = topology
+        .edges
+        .iter()
+        .map(|edge| (format!("cad_edge_{}", edge.edge_id), edge.node_ids))
+        .collect::<BTreeMap<_, _>>();
+    let vertex_coordinates_by_node_id = topology
+        .vertices
+        .iter()
+        .map(|vertex| (vertex.vertex_id, vertex.coordinates_m))
+        .collect::<BTreeMap<_, _>>();
+    let mut faces = merge_stable_cad_faces(face_seeds);
+    let loops = attach_face_loops(
+        &mut faces,
+        &edge_node_ids_by_cad_edge_id,
+        &vertex_coordinates_by_node_id,
+    );
+
+    let face_ids_by_source_face = faces
+        .iter()
+        .flat_map(|face| {
+            face.source_face_ids
+                .iter()
+                .map(|source_face_id| (*source_face_id, face.entity_id.id.clone()))
+                .collect::<Vec<_>>()
+        })
+        .collect::<BTreeMap<_, _>>();
+    let edges = topology
+        .edges
+        .iter()
+        .map(|edge| {
+            let region_ids = edge_region_by_source_edge
+                .get(&edge.edge_id)
+                .cloned()
+                .unwrap_or_default();
+            let imported_curve_id =
+                imported_curve_id_for_regions(&imported_curve_ids_by_region, &region_ids);
+            let evaluator_curve =
+                imported_curve_id.and_then(|curve_id| evaluator_curves.get(&curve_id));
+            CadEdge {
+                entity_id: CadEntityId {
+                    kind: CadEntityKind::Edge,
+                    id: format!("cad_edge_{}", edge.edge_id),
+                },
+                source_edge_id: edge.edge_id,
+                imported_curve_id,
+                evaluator_id: evaluator_curve.map(|curve| curve.evaluator_id.clone()),
+                evaluator_supports_point_evaluation: evaluator_curve
+                    .is_some_and(|curve| curve.supports_point_evaluation),
+                evaluator_supports_projection: evaluator_curve
+                    .is_some_and(|curve| curve.supports_projection),
+                evaluator_supports_tangent: evaluator_curve
+                    .is_some_and(|curve| curve.supports_tangent),
+                evaluator_supports_curvature: evaluator_curve
+                    .is_some_and(|curve| curve.supports_curvature),
+                evaluator_samples: evaluator_curve
+                    .map(|curve| curve.evaluation_samples.clone())
+                    .unwrap_or_default(),
+                vertex_ids: [
+                    format!("cad_vertex_{}", edge.node_ids[0]),
+                    format!("cad_vertex_{}", edge.node_ids[1]),
+                ],
+                adjacent_face_ids: edge
+                    .adjacent_face_ids
+                    .iter()
+                    .filter_map(|face_id| face_ids_by_source_face.get(face_id).cloned())
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
+                    .collect(),
+                length_m: edge.length_m,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let closed = topology
+        .edges
+        .iter()
+        .all(|edge| edge.adjacent_face_ids.len() == 2);
+    let shell = CadShell {
+        entity_id: CadEntityId {
+            kind: CadEntityKind::Shell,
+            id: "cad_shell_0".to_string(),
+        },
+        face_ids: faces.iter().map(|face| face.entity_id.id.clone()).collect(),
+        closed,
+    };
+    let volume = CadVolume {
+        entity_id: CadEntityId {
+            kind: CadEntityKind::Volume,
+            id: "cad_volume_0".to_string(),
+        },
+        shell_ids: vec![shell.entity_id.id.clone()],
+        region_ids: topology.region_ids.clone(),
+    };
+
+    let semantic_face_count = faces
+        .iter()
+        .filter(|face| semantic_face_regions.contains(&face.entity_id.id))
+        .count();
+    let imported_face_count = faces
+        .iter()
+        .filter(|face| face.imported_face_id.is_some())
+        .count();
+    let evaluator_face_count = faces
+        .iter()
+        .filter(|face| {
+            face.imported_face_id
+                .is_some_and(|face_id| evaluator_faces.contains_key(&face_id))
+        })
+        .count();
+    let imported_curve_count = edges
+        .iter()
+        .filter(|edge| edge.imported_curve_id.is_some())
+        .count();
+    let evaluator_curve_count = edges
+        .iter()
+        .filter(|edge| {
+            edge.imported_curve_id
+                .is_some_and(|curve_id| evaluator_curves.contains_key(&curve_id))
+        })
+        .count();
+    let generic_face_count = faces.len().saturating_sub(semantic_face_count);
+    let report = CadTopologyReport {
+        source,
+        vertex_count: vertices.len(),
+        edge_count: edges.len(),
+        face_count: faces.len(),
+        shell_count: 1,
+        volume_count: usize::from(closed),
+        semantic_face_count,
+        imported_face_count,
+        evaluator_face_count,
+        imported_curve_count,
+        evaluator_curve_count,
+        generic_face_count,
+        loop_count: loops.len(),
+        hole_loop_count: loops.iter().filter(|cad_loop| !cad_loop.is_outer).count(),
+        closed_shell_count: usize::from(closed),
+    };
+
+    let model = CadTopologyModel {
+        source_geometry_id: topology.source_geometry_id.clone(),
+        source_geometry_revision: topology.source_geometry_revision,
+        source_geometry_sha256: topology.source_geometry_sha256.clone(),
+        source,
+        vertices,
+        edges,
+        loops,
+        faces,
+        shells: vec![shell],
+        volumes: closed.then_some(volume).into_iter().collect(),
+        report,
+    };
+    validate_cad_topology_model(&model)?;
+    Ok(model)
+}
+
+fn attach_face_loops(
+    faces: &mut [CadFace],
+    edge_node_ids_by_cad_edge_id: &BTreeMap<String, [u32; 2]>,
+    vertex_coordinates_by_node_id: &BTreeMap<u32, [f64; 3]>,
+) -> Vec<CadLoop> {
+    let mut loops = Vec::<CadLoop>::with_capacity(faces.len());
+    for face in faces {
+        let components = split_loop_edge_components(
+            &face.loop_edge_ids,
+            edge_node_ids_by_cad_edge_id,
+            vertex_coordinates_by_node_id,
+        );
+        let mut loop_ids = Vec::<String>::with_capacity(components.len());
+        for (component_index, edge_ids) in components.into_iter().enumerate() {
+            let loop_id = if component_index == 0 {
+                format!("cad_loop_{}_outer", face.entity_id.id)
+            } else {
+                format!("cad_loop_{}_hole_{component_index}", face.entity_id.id)
+            };
+            loop_ids.push(loop_id.clone());
+            loops.push(CadLoop {
+                entity_id: CadEntityId {
+                    kind: CadEntityKind::Loop,
+                    id: loop_id,
+                },
+                face_id: face.entity_id.id.clone(),
+                edge_ids,
+                is_outer: component_index == 0,
+            });
+        }
+        face.loop_ids = loop_ids;
+    }
+    loops
+}
+
+fn split_loop_edge_components(
+    loop_edge_ids: &[String],
+    edge_node_ids_by_cad_edge_id: &BTreeMap<String, [u32; 2]>,
+    vertex_coordinates_by_node_id: &BTreeMap<u32, [f64; 3]>,
+) -> Vec<Vec<String>> {
+    let mut remaining = loop_edge_ids.iter().cloned().collect::<BTreeSet<_>>();
+    let mut components = Vec::<Vec<String>>::new();
+    while let Some(start_edge_id) = remaining.iter().next().cloned() {
+        remaining.remove(&start_edge_id);
+        let mut component = vec![start_edge_id.clone()];
+        let mut component_node_ids = component_node_ids(
+            std::slice::from_ref(&start_edge_id),
+            edge_node_ids_by_cad_edge_id,
+        );
+
+        loop {
+            let adjacent_edge_ids = remaining
+                .iter()
+                .filter(|edge_id| {
+                    edge_node_ids_by_cad_edge_id
+                        .get(*edge_id)
+                        .is_some_and(|node_ids| {
+                            component_node_ids.contains(&node_ids[0])
+                                || component_node_ids.contains(&node_ids[1])
+                        })
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            if adjacent_edge_ids.is_empty() {
+                break;
+            }
+            for edge_id in adjacent_edge_ids {
+                remaining.remove(&edge_id);
+                if let Some(node_ids) = edge_node_ids_by_cad_edge_id.get(&edge_id) {
+                    component_node_ids.insert(node_ids[0]);
+                    component_node_ids.insert(node_ids[1]);
+                }
+                component.push(edge_id);
+            }
+        }
+
+        component.sort();
+        components.push(component);
+    }
+
+    components.sort_by(|left, right| {
+        component_span2(
+            right,
+            edge_node_ids_by_cad_edge_id,
+            vertex_coordinates_by_node_id,
+        )
+        .total_cmp(&component_span2(
+            left,
+            edge_node_ids_by_cad_edge_id,
+            vertex_coordinates_by_node_id,
+        ))
+        .then_with(|| right.len().cmp(&left.len()))
+        .then_with(|| left.first().cmp(&right.first()))
+    });
+    components
+}
+
+fn component_node_ids(
+    edge_ids: &[String],
+    edge_node_ids_by_cad_edge_id: &BTreeMap<String, [u32; 2]>,
+) -> BTreeSet<u32> {
+    edge_ids
+        .iter()
+        .filter_map(|edge_id| edge_node_ids_by_cad_edge_id.get(edge_id))
+        .flat_map(|node_ids| node_ids.iter().copied())
+        .collect()
+}
+
+fn component_span2(
+    edge_ids: &[String],
+    edge_node_ids_by_cad_edge_id: &BTreeMap<String, [u32; 2]>,
+    vertex_coordinates_by_node_id: &BTreeMap<u32, [f64; 3]>,
+) -> f64 {
+    let node_ids = component_node_ids(edge_ids, edge_node_ids_by_cad_edge_id);
+    let mut bounds_min = [f64::INFINITY; 3];
+    let mut bounds_max = [f64::NEG_INFINITY; 3];
+    let mut point_count = 0_usize;
+    for point in node_ids
+        .iter()
+        .filter_map(|node_id| vertex_coordinates_by_node_id.get(node_id))
+    {
+        point_count += 1;
+        for axis in 0..3 {
+            bounds_min[axis] = bounds_min[axis].min(point[axis]);
+            bounds_max[axis] = bounds_max[axis].max(point[axis]);
+        }
+    }
+    if point_count == 0 {
+        return 0.0;
+    }
+    let span = [
+        bounds_max[0] - bounds_min[0],
+        bounds_max[1] - bounds_min[1],
+        bounds_max[2] - bounds_min[2],
+    ];
+    span[0] * span[0] + span[1] * span[1] + span[2] * span[2]
+}
+
+pub fn validate_cad_topology_model(model: &CadTopologyModel) -> Result<(), CadTopologyError> {
+    let vertex_ids = collect_entity_ids(
+        CadEntityKind::Vertex,
+        model.vertices.iter().map(|vertex| &vertex.entity_id),
+    )?;
+    let edge_ids = collect_entity_ids(
+        CadEntityKind::Edge,
+        model.edges.iter().map(|edge| &edge.entity_id),
+    )?;
+    let loop_ids = collect_entity_ids(
+        CadEntityKind::Loop,
+        model.loops.iter().map(|cad_loop| &cad_loop.entity_id),
+    )?;
+    let face_ids = collect_entity_ids(
+        CadEntityKind::Face,
+        model.faces.iter().map(|face| &face.entity_id),
+    )?;
+    let shell_ids = collect_entity_ids(
+        CadEntityKind::Shell,
+        model.shells.iter().map(|shell| &shell.entity_id),
+    )?;
+    let _volume_ids = collect_entity_ids(
+        CadEntityKind::Volume,
+        model.volumes.iter().map(|volume| &volume.entity_id),
+    )?;
+    let loop_face_ids = model
+        .loops
+        .iter()
+        .map(|cad_loop| (cad_loop.entity_id.id.as_str(), cad_loop.face_id.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    let face_loop_ids = model
+        .faces
+        .iter()
+        .map(|face| {
+            (
+                face.entity_id.id.as_str(),
+                face.loop_ids
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<BTreeSet<_>>(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    for edge in &model.edges {
+        validate_edge_evaluator_metadata(edge)?;
+        for vertex_id in &edge.vertex_ids {
+            require_reference(
+                CadEntityKind::Edge,
+                &edge.entity_id.id,
+                CadEntityKind::Vertex,
+                vertex_id,
+                &vertex_ids,
+            )?;
+        }
+        for face_id in &edge.adjacent_face_ids {
+            require_reference(
+                CadEntityKind::Edge,
+                &edge.entity_id.id,
+                CadEntityKind::Face,
+                face_id,
+                &face_ids,
+            )?;
+        }
+    }
+    for cad_loop in &model.loops {
+        require_reference(
+            CadEntityKind::Loop,
+            &cad_loop.entity_id.id,
+            CadEntityKind::Face,
+            &cad_loop.face_id,
+            &face_ids,
+        )?;
+        require_face_lists_loop(&cad_loop.face_id, &cad_loop.entity_id.id, &face_loop_ids)?;
+        for edge_id in &cad_loop.edge_ids {
+            require_reference(
+                CadEntityKind::Loop,
+                &cad_loop.entity_id.id,
+                CadEntityKind::Edge,
+                edge_id,
+                &edge_ids,
+            )?;
+        }
+    }
+    for face in &model.faces {
+        validate_face_evaluator_metadata(face)?;
+        for loop_id in &face.loop_ids {
+            require_reference(
+                CadEntityKind::Face,
+                &face.entity_id.id,
+                CadEntityKind::Loop,
+                loop_id,
+                &loop_ids,
+            )?;
+            require_loop_belongs_to_face(&face.entity_id.id, loop_id, &loop_face_ids)?;
+        }
+        for edge_id in &face.loop_edge_ids {
+            require_reference(
+                CadEntityKind::Face,
+                &face.entity_id.id,
+                CadEntityKind::Edge,
+                edge_id,
+                &edge_ids,
+            )?;
+        }
+    }
+    for shell in &model.shells {
+        for face_id in &shell.face_ids {
+            require_reference(
+                CadEntityKind::Shell,
+                &shell.entity_id.id,
+                CadEntityKind::Face,
+                face_id,
+                &face_ids,
+            )?;
+        }
+    }
+    for volume in &model.volumes {
+        for shell_id in &volume.shell_ids {
+            require_reference(
+                CadEntityKind::Volume,
+                &volume.entity_id.id,
+                CadEntityKind::Shell,
+                shell_id,
+                &shell_ids,
+            )?;
+        }
+    }
+
+    validate_report_count(
+        "vertex_count",
+        model.vertices.len(),
+        model.report.vertex_count,
+    )?;
+    validate_report_count("edge_count", model.edges.len(), model.report.edge_count)?;
+    validate_report_count(
+        "imported_curve_count",
+        model
+            .edges
+            .iter()
+            .filter(|edge| edge.imported_curve_id.is_some())
+            .count(),
+        model.report.imported_curve_count,
+    )?;
+    validate_report_count(
+        "evaluator_curve_count",
+        model
+            .edges
+            .iter()
+            .filter(|edge| edge_has_evaluator_metadata(edge))
+            .count(),
+        model.report.evaluator_curve_count,
+    )?;
+    validate_report_count("loop_count", model.loops.len(), model.report.loop_count)?;
+    validate_report_count("face_count", model.faces.len(), model.report.face_count)?;
+    validate_report_count("shell_count", model.shells.len(), model.report.shell_count)?;
+    validate_report_count(
+        "volume_count",
+        model.volumes.len(),
+        model.report.volume_count,
+    )?;
+    validate_report_count(
+        "imported_face_count",
+        model
+            .faces
+            .iter()
+            .filter(|face| face.imported_face_id.is_some())
+            .count(),
+        model.report.imported_face_count,
+    )?;
+    validate_report_count(
+        "evaluator_face_count",
+        model
+            .faces
+            .iter()
+            .filter(|face| face_has_evaluator_metadata(face))
+            .count(),
+        model.report.evaluator_face_count,
+    )?;
+    validate_report_count(
+        "generic_face_count",
+        model
+            .faces
+            .len()
+            .saturating_sub(model.report.semantic_face_count),
+        model.report.generic_face_count,
+    )?;
+    validate_report_count(
+        "hole_loop_count",
+        model
+            .loops
+            .iter()
+            .filter(|cad_loop| !cad_loop.is_outer)
+            .count(),
+        model.report.hole_loop_count,
+    )?;
+    validate_report_count(
+        "closed_shell_count",
+        model.shells.iter().filter(|shell| shell.closed).count(),
+        model.report.closed_shell_count,
+    )?;
+    Ok(())
+}
+
+fn validate_edge_evaluator_metadata(edge: &CadEdge) -> Result<(), CadTopologyError> {
+    if edge_has_evaluator_metadata(edge) && edge.imported_curve_id.is_none() {
+        return Err(CadTopologyError::EvaluatorMetadataWithoutImportedCurve {
+            edge_id: edge.entity_id.id.clone(),
+        });
+    }
+    for (capability, supported) in [
+        ("point_evaluation", edge.evaluator_supports_point_evaluation),
+        ("projection", edge.evaluator_supports_projection),
+        ("tangent", edge.evaluator_supports_tangent),
+        ("curvature", edge.evaluator_supports_curvature),
+    ] {
+        if supported && edge.evaluator_id.is_none() {
+            return Err(CadTopologyError::CurveEvaluatorCapabilityWithoutEvaluator {
+                edge_id: edge.entity_id.id.clone(),
+                capability,
+            });
+        }
+    }
+    for (sample_index, sample) in edge.evaluator_samples.iter().enumerate() {
+        if !sample.parameter.is_finite() || !(0.0..=1.0).contains(&sample.parameter) {
+            return Err(CadTopologyError::InvalidCurveEvaluatorSample {
+                edge_id: edge.entity_id.id.clone(),
+                sample_index,
+                reason: "parameter must be finite and in [0, 1]",
+            });
+        }
+        if !sample.point_m.iter().all(|value| value.is_finite()) {
+            return Err(CadTopologyError::InvalidCurveEvaluatorSample {
+                edge_id: edge.entity_id.id.clone(),
+                sample_index,
+                reason: "point must be finite",
+            });
+        }
+        if sample
+            .projected_point_m
+            .is_some_and(|point| !point.iter().all(|value| value.is_finite()))
+        {
+            return Err(CadTopologyError::InvalidCurveEvaluatorSample {
+                edge_id: edge.entity_id.id.clone(),
+                sample_index,
+                reason: "projected point must be finite",
+            });
+        }
+        if sample
+            .tangent_m
+            .is_some_and(|tangent| !tangent.iter().all(|value| value.is_finite()))
+        {
+            return Err(CadTopologyError::InvalidCurveEvaluatorSample {
+                edge_id: edge.entity_id.id.clone(),
+                sample_index,
+                reason: "tangent must be finite",
+            });
+        }
+        if sample
+            .curvature_1_per_m
+            .is_some_and(|curvature| !curvature.is_finite())
+        {
+            return Err(CadTopologyError::InvalidCurveEvaluatorSample {
+                edge_id: edge.entity_id.id.clone(),
+                sample_index,
+                reason: "curvature must be finite",
+            });
+        }
+        if sample
+            .projection_error_m
+            .is_some_and(|error| !error.is_finite() || error < 0.0)
+        {
+            return Err(CadTopologyError::InvalidCurveEvaluatorSample {
+                edge_id: edge.entity_id.id.clone(),
+                sample_index,
+                reason: "projection error must be finite and non-negative",
+            });
+        }
+    }
+    Ok(())
+}
+
+fn edge_has_evaluator_metadata(edge: &CadEdge) -> bool {
+    edge.evaluator_id.is_some()
+        || edge.evaluator_supports_point_evaluation
+        || edge.evaluator_supports_projection
+        || edge.evaluator_supports_tangent
+        || edge.evaluator_supports_curvature
+        || !edge.evaluator_samples.is_empty()
+}
+
+fn validate_face_evaluator_metadata(face: &CadFace) -> Result<(), CadTopologyError> {
+    if face_has_evaluator_metadata(face) && face.imported_face_id.is_none() {
+        return Err(CadTopologyError::EvaluatorMetadataWithoutImportedFace {
+            face_id: face.entity_id.id.clone(),
+        });
+    }
+    for (capability, supported) in [
+        ("point_evaluation", face.evaluator_supports_point_evaluation),
+        ("projection", face.evaluator_supports_projection),
+        ("normal", face.evaluator_supports_normal),
+        ("derivatives", face.evaluator_supports_derivatives),
+        ("curvature", face.evaluator_supports_curvature),
+    ] {
+        if supported && face.evaluator_id.is_none() {
+            return Err(CadTopologyError::EvaluatorCapabilityWithoutEvaluator {
+                face_id: face.entity_id.id.clone(),
+                capability,
+            });
+        }
+    }
+    Ok(())
+}
+
+fn face_has_evaluator_metadata(face: &CadFace) -> bool {
+    face.evaluator_id.is_some()
+        || face.evaluator_supports_point_evaluation
+        || face.evaluator_supports_projection
+        || face.evaluator_supports_normal
+        || face.evaluator_supports_derivatives
+        || face.evaluator_supports_curvature
+        || !face.evaluator_samples.is_empty()
+}
+
+fn require_face_lists_loop(
+    face_id: &str,
+    loop_id: &str,
+    face_loop_ids: &BTreeMap<&str, BTreeSet<&str>>,
+) -> Result<(), CadTopologyError> {
+    if face_loop_ids
+        .get(face_id)
+        .is_some_and(|loop_ids| loop_ids.contains(loop_id))
+    {
+        Ok(())
+    } else {
+        Err(CadTopologyError::MissingFaceLoopReference {
+            face_id: face_id.to_string(),
+            loop_id: loop_id.to_string(),
+        })
+    }
+}
+
+fn require_loop_belongs_to_face(
+    face_id: &str,
+    loop_id: &str,
+    loop_face_ids: &BTreeMap<&str, &str>,
+) -> Result<(), CadTopologyError> {
+    match loop_face_ids.get(loop_id) {
+        Some(loop_face_id) if *loop_face_id == face_id => Ok(()),
+        Some(loop_face_id) => Err(CadTopologyError::LoopFaceMismatch {
+            loop_id: loop_id.to_string(),
+            expected_face_id: face_id.to_string(),
+            actual_face_id: (*loop_face_id).to_string(),
+        }),
+        None => Err(CadTopologyError::MissingEntityReference {
+            owner_kind: CadEntityKind::Face,
+            owner_id: face_id.to_string(),
+            reference_kind: CadEntityKind::Loop,
+            reference_id: loop_id.to_string(),
+        }),
+    }
+}
+
+fn collect_entity_ids<'a>(
+    expected_kind: CadEntityKind,
+    ids: impl Iterator<Item = &'a CadEntityId>,
+) -> Result<BTreeSet<String>, CadTopologyError> {
+    let mut seen = BTreeSet::<String>::new();
+    for entity_id in ids {
+        if entity_id.kind != expected_kind {
+            return Err(CadTopologyError::EntityKindMismatch {
+                expected: expected_kind,
+                actual: entity_id.kind,
+                id: entity_id.id.clone(),
+            });
+        }
+        if !seen.insert(entity_id.id.clone()) {
+            return Err(CadTopologyError::DuplicateEntityId {
+                kind: expected_kind,
+                id: entity_id.id.clone(),
+            });
+        }
+    }
+    Ok(seen)
+}
+
+fn require_reference(
+    owner_kind: CadEntityKind,
+    owner_id: &str,
+    reference_kind: CadEntityKind,
+    reference_id: &str,
+    valid_ids: &BTreeSet<String>,
+) -> Result<(), CadTopologyError> {
+    if valid_ids.contains(reference_id) {
+        Ok(())
+    } else {
+        Err(CadTopologyError::MissingEntityReference {
+            owner_kind,
+            owner_id: owner_id.to_string(),
+            reference_kind,
+            reference_id: reference_id.to_string(),
+        })
+    }
+}
+
+fn validate_report_count(
+    field: &'static str,
+    expected: usize,
+    actual: usize,
+) -> Result<(), CadTopologyError> {
+    if expected == actual {
+        Ok(())
+    } else {
+        Err(CadTopologyError::ReportCountMismatch {
+            field,
+            expected,
+            actual,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests;
