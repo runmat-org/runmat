@@ -477,7 +477,8 @@ fn format_stack_for_display(stack: &Value) -> String {
                 .fields
                 .get("line")
                 .and_then(|value| match value {
-                    Value::Num(n) => Some(*n as usize),
+                    Value::Num(n) => nonnegative_platform_usize(*n),
+                    Value::Int(int) => int.try_to_usize(),
                     _ => None,
                 })
                 .unwrap_or(0);
@@ -806,6 +807,9 @@ mod tests {
         assert_eq!(integer_value(&Value::Int(IntValue::I64(-1))), None);
         assert_eq!(integer_value(&Value::Num(1.5)), None);
         assert_eq!(integer_value(&Value::Num(usize::MAX as f64 + 1.0)), None);
+        if usize::BITS == 64 {
+            assert_eq!(integer_value(&Value::Num(usize::MAX as f64)), None);
+        }
     }
 
     #[test]

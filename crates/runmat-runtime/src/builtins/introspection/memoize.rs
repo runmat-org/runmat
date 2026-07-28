@@ -555,7 +555,7 @@ fn parse_cache_size(value: Option<&Value>) -> BuiltinResult<usize> {
             MEMOIZE_ERROR_INVALID_CACHE_SIZE.message,
         ));
     }
-    if numeric > usize::MAX as f64 {
+    if numeric > usize::MAX as f64 || (usize::BITS == 64 && numeric == usize::MAX as f64) {
         return Err(memoize_error(
             &MEMOIZE_ERROR_INVALID_CACHE_SIZE,
             MEMOIZE_ERROR_INVALID_CACHE_SIZE.message,
@@ -1600,6 +1600,19 @@ mod tests {
         ))
         .expect_err("expected cache size error");
 
+        assert_eq!(err.identifier(), Some("RunMat:memoize:InvalidCacheSize"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn cache_size_rejects_unrepresentable_double_boundary_before_cast() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+
+        let err = parse_cache_size(Some(&Value::Num(boundary))).expect_err("boundary rejected");
         assert_eq!(err.identifier(), Some("RunMat:memoize:InvalidCacheSize"));
     }
 

@@ -86,7 +86,12 @@ fn numeric_index(value: &Value) -> Option<usize> {
         }
         _ => return None,
     };
-    if !n.is_finite() || n < 1.0 || n.fract() != 0.0 || n > usize::MAX as f64 {
+    if !n.is_finite()
+        || n < 1.0
+        || n.fract() != 0.0
+        || n > usize::MAX as f64
+        || (usize::BITS == 64 && n == usize::MAX as f64)
+    {
         return None;
     }
     Some(n as usize)
@@ -207,5 +212,16 @@ mod tests {
 
         let name = dispatch_inputname(vec![Value::Tensor(tensor)]).expect("inputname succeeds");
         assert_eq!(name, Value::String("beta".to_string()));
+    }
+
+    #[test]
+    fn inputname_rejects_unrepresentable_double_index_before_cast() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+
+        assert_eq!(numeric_index(&Value::Num(boundary)), None);
     }
 }
