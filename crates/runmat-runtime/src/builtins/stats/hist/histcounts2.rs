@@ -1115,18 +1115,15 @@ fn parse_options(args: &[Value]) -> BuiltinResult<Histcounts2Options> {
             }
             index += 2;
         } else {
-            let bins = numeric_vector(&args[index], NAME, "NumBins")?;
-            match bins.len() {
-                1 => {
-                    let n = positive_usize_from_f64(bins[0], "NumBins")?;
-                    options.x.num_bins = Some(n);
-                    options.y.num_bins = Some(n);
+            let bins = num_bins_vector(&args[index])?;
+            match bins.as_slice() {
+                [n] => {
+                    options.x.num_bins = Some(*n);
+                    options.y.num_bins = Some(*n);
                 }
-                2 => {
-                    let nx = positive_usize_from_f64(bins[0], "NumBins")?;
-                    let ny = positive_usize_from_f64(bins[1], "NumBins")?;
-                    options.x.num_bins = Some(nx);
-                    options.y.num_bins = Some(ny);
+                [nx, ny] => {
+                    options.x.num_bins = Some(*nx);
+                    options.y.num_bins = Some(*ny);
                 }
                 _ => {
                     return Err(builtin_error(format!(
@@ -1153,18 +1150,15 @@ fn parse_options(args: &[Value]) -> BuiltinResult<Histcounts2Options> {
 
         match lowered.as_str() {
             "numbins" => {
-                let bins = numeric_vector(value, NAME, "NumBins")?;
-                match bins.len() {
-                    1 => {
-                        let n = positive_usize_from_f64(bins[0], "NumBins")?;
-                        options.x.num_bins = Some(n);
-                        options.y.num_bins = Some(n);
+                let bins = num_bins_vector(value)?;
+                match bins.as_slice() {
+                    [n] => {
+                        options.x.num_bins = Some(*n);
+                        options.y.num_bins = Some(*n);
                     }
-                    2 => {
-                        let nx = positive_usize_from_f64(bins[0], "NumBins")?;
-                        let ny = positive_usize_from_f64(bins[1], "NumBins")?;
-                        options.x.num_bins = Some(nx);
-                        options.y.num_bins = Some(ny);
+                    [nx, ny] => {
+                        options.x.num_bins = Some(*nx);
+                        options.y.num_bins = Some(*ny);
                     }
                     _ => {
                         return Err(builtin_error(format!(
@@ -1342,21 +1336,52 @@ fn numeric_vector(value: &Value, name: &str, option: &str) -> BuiltinResult<Vec<
     Ok(tensor::tensor_into_values_f64(tensor))
 }
 
-fn positive_usize(value: &Value, name: &str, option: &str) -> BuiltinResult<usize> {
-    if let Value::Int(value) = value {
-        return value
+fn num_bins_vector(value: &Value) -> BuiltinResult<Vec<usize>> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return Ok(vec![integer
             .try_to_usize()
-            .filter(|value| *value > 0)
+            .filter(valid_num_bins)
             .ok_or_else(|| {
-                if name == NAME && option == "NumBins" {
-                    descriptor_error(&HISTCOUNTS2_ERROR_NUMBINS_INVALID)
-                } else {
-                    builtin_error(format!("{name}: {option} must be a positive finite scalar"))
-                }
-            });
+                descriptor_error(&HISTCOUNTS2_ERROR_NUMBINS_INVALID)
+            })?]);
+    }
+    let tensor = tensor::value_to_tensor(value)
+        .map_err(|_| builtin_error(format!("{NAME}: NumBins must be numeric")))?;
+    if let Some(storage) = tensor.integer_storage() {
+        return storage
+            .exact_values()
+            .into_iter()
+            .map(|value| {
+                value
+                    .try_to_usize()
+                    .filter(valid_num_bins)
+                    .ok_or_else(|| descriptor_error(&HISTCOUNTS2_ERROR_NUMBINS_INVALID))
+            })
+            .collect();
+    }
+    tensor
+        .data
+        .iter()
+        .map(|value| positive_usize_from_f64(*value, "NumBins"))
+        .collect()
+}
+
+fn positive_usize(value: &Value, name: &str, option: &str) -> BuiltinResult<usize> {
+    if let Some(value) = tensor::scalar_integer_value(value) {
+        return value.try_to_usize().filter(valid_num_bins).ok_or_else(|| {
+            if name == NAME && option == "NumBins" {
+                descriptor_error(&HISTCOUNTS2_ERROR_NUMBINS_INVALID)
+            } else {
+                builtin_error(format!("{name}: {option} must be a positive finite scalar"))
+            }
+        });
     }
     let scalar = scalar_value(value, name, option)?;
     positive_usize_from_f64(scalar, option)
+}
+
+fn valid_num_bins(value: &usize) -> bool {
+    *value > 0 && *value < usize::MAX
 }
 
 fn positive_scalar(value: &Value, name: &str, option: &str) -> BuiltinResult<f64> {
@@ -1474,6 +1499,12 @@ pub(crate) mod tests {
         Value::Tensor(tensor)
     }
 
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, poison: f64) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.fill(poison);
+        Value::Tensor(tensor)
+    }
+
     #[test]
     fn histcounts2_type_defaults_to_unknown_matrix() {
         let ctx = ResolveContext::new(Vec::new());
@@ -1539,13 +1570,49 @@ pub(crate) mod tests {
             .unwrap(),
             4
         );
+        assert_eq!(
+            positive_usize(
+                &poisoned_int_tensor(IntegerStorage::U16(vec![9]), vec![1, 1], 0.0),
+                NAME,
+                "NumBins",
+            )
+            .unwrap(),
+            9
+        );
+        assert_eq!(
+            num_bins_vector(&poisoned_int_tensor(
+                IntegerStorage::U16(vec![7, 11]),
+                vec![1, 2],
+                0.0,
+            ))
+            .unwrap(),
+            vec![7, 11]
+        );
         for value in [
             Value::Int(IntValue::I8(-1)),
+            poisoned_int_tensor(IntegerStorage::I16(vec![-1]), vec![1, 1], 5.0),
+            poisoned_int_tensor(IntegerStorage::I16(vec![2, -1]), vec![1, 2], 5.0),
+            poisoned_int_tensor(
+                IntegerStorage::U64(vec![usize::MAX as u64]),
+                vec![1, 1],
+                5.0,
+            ),
+            poisoned_int_tensor(
+                IntegerStorage::U64(vec![2, usize::MAX as u64]),
+                vec![1, 2],
+                5.0,
+            ),
             Value::Num(1.5),
             Value::Num(usize::MAX as f64 + 1.0),
         ] {
             assert!(positive_usize(&value, NAME, "NumBins").is_err());
         }
+        assert!(num_bins_vector(&poisoned_int_tensor(
+            IntegerStorage::I16(vec![2, -1]),
+            vec![1, 2],
+            5.0
+        ))
+        .is_err());
     }
 
     #[test]

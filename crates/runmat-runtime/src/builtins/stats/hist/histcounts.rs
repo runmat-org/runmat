@@ -1010,8 +1010,8 @@ fn classify_bin_argument(value: &Value) -> BuiltinResult<BinArgument> {
         }
         Value::Tensor(tensor) => {
             if tensor::is_scalar_tensor(tensor) {
-                Ok(BinArgument::NumBins(positive_usize_from_f64(
-                    tensor::tensor_value_f64(tensor, 0),
+                Ok(BinArgument::NumBins(positive_usize(
+                    value,
                     "histcounts",
                     "NumBins",
                 )?))
@@ -1061,10 +1061,10 @@ fn numeric_vector(value: &Value, name: &str, option: &str) -> BuiltinResult<Vec<
 }
 
 fn positive_usize(value: &Value, name: &str, option: &str) -> BuiltinResult<usize> {
-    if let Value::Int(value) = value {
+    if let Some(value) = tensor::scalar_integer_value(value) {
         return value
             .try_to_usize()
-            .filter(|value| *value > 0)
+            .filter(|value| *value > 0 && *value < usize::MAX)
             .ok_or_else(|| {
                 builtin_error(format!("{name}: {option} must be a positive finite scalar"))
             });
@@ -1282,8 +1282,23 @@ pub(crate) mod tests {
             .unwrap(),
             4
         );
+        assert_eq!(
+            positive_usize(
+                &poisoned_int_tensor(IntegerStorage::U16(vec![9]), vec![1, 1], 0.0),
+                "histcounts",
+                "NumBins",
+            )
+            .unwrap(),
+            9
+        );
         for value in [
             Value::Int(IntValue::I8(-1)),
+            poisoned_int_tensor(IntegerStorage::I16(vec![-1]), vec![1, 1], 5.0),
+            poisoned_int_tensor(
+                IntegerStorage::U64(vec![usize::MAX as u64]),
+                vec![1, 1],
+                5.0,
+            ),
             Value::Num(1.5),
             Value::Num(usize::MAX as f64 + 1.0),
         ] {
