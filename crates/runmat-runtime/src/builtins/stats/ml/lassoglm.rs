@@ -713,7 +713,11 @@ fn scalar_bool(value: &Value, label: &str) -> BuiltinResult<bool> {
 
 fn positive_usize(value: &Value, label: &str) -> BuiltinResult<usize> {
     let raw = scalar_f64(value, label)?;
-    if raw < 1.0 || raw.fract() != 0.0 || raw > usize::MAX as f64 {
+    if raw < 1.0
+        || raw.fract() != 0.0
+        || raw > usize::MAX as f64
+        || (usize::BITS == 64 && raw == usize::MAX as f64)
+    {
         return Err(invalid(format!(
             "lassoglm: {label} must be a positive integer scalar"
         )));
@@ -1567,7 +1571,7 @@ fn predictor_names_value(options: &Options) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, StringArray};
+    use runmat_builtins::{IntValue, IntegerStorage, StringArray};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
@@ -1810,6 +1814,32 @@ mod tests {
             panic!("expected FitInfo");
         };
         assert!(info.fields.contains_key("Lambda"));
+    }
+
+    #[test]
+    fn lassoglm_positive_usize_parses_integer_bounds_exactly() {
+        assert_eq!(
+            positive_usize(&Value::Int(IntValue::U16(3)), "NumLambda").unwrap(),
+            3
+        );
+        assert_eq!(
+            positive_usize(
+                &cleared_int_tensor(IntegerStorage::U64(vec![3]), 1, 1),
+                "NumLambda"
+            )
+            .unwrap(),
+            3
+        );
+
+        for value in [
+            Value::Int(IntValue::I8(-1)),
+            Value::Num(1.5),
+            Value::Num(usize::MAX as f64),
+            Value::Num(usize::MAX as f64 + 1.0),
+            cleared_int_tensor(IntegerStorage::U64(vec![usize::MAX as u64]), 1, 1),
+        ] {
+            assert!(positive_usize(&value, "NumLambda").is_err());
+        }
     }
 
     #[test]

@@ -774,7 +774,11 @@ fn custom_numeric_partition(tensor: Tensor) -> BuiltinResult<PartitionSpec> {
     let mut ids = Vec::with_capacity(values.len());
     let mut max_id = 0usize;
     for value in values.iter() {
-        if !value.is_finite() || value.fract() != 0.0 || *value < 1.0 || *value > usize::MAX as f64
+        if !value.is_finite()
+            || value.fract() != 0.0
+            || *value < 1.0
+            || *value > usize::MAX as f64
+            || (usize::BITS == 64 && *value == usize::MAX as f64)
         {
             return Err(invalid_argument(
                 "cvpartition: custom partition ids must be positive integers",
@@ -1366,6 +1370,14 @@ mod tests {
         let mask = logical_output(block_on(test_builtin(partition, Vec::new())).expect("test"));
         assert_eq!(mask.shape, vec![4, 1]);
         assert_eq!(mask.data, vec![1, 0, 1, 0]);
+
+        let err = block_on(cvpartition_builtin(
+            Value::String("CustomPartition".into()),
+            tensor(vec![usize::MAX as f64], vec![1, 1]),
+            Vec::new(),
+        ))
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:cvpartition:InvalidArgument"));
     }
 
     #[test]
@@ -1519,6 +1531,7 @@ mod tests {
         for value in [
             Value::Int(runmat_builtins::IntValue::I8(-1)),
             Value::Num(1.5),
+            Value::Num(usize::MAX as f64),
             Value::Num(usize::MAX as f64 + 1.0),
         ] {
             assert!(positive_integer(&value, "KFold").is_err());

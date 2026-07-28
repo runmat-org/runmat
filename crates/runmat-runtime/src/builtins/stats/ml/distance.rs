@@ -644,7 +644,12 @@ fn parse_positive_integer(name: &'static str, value: &Value, label: &str) -> Bui
             ))
         }
     };
-    if !raw.is_finite() || raw < 1.0 || raw.fract().abs() > EPS || raw > usize::MAX as f64 {
+    if !raw.is_finite()
+        || raw < 1.0
+        || raw.fract().abs() > EPS
+        || raw > usize::MAX as f64
+        || (usize::BITS == 64 && raw == usize::MAX as f64)
+    {
         return Err(distance_error(
             name,
             format!("{name}: {label} must be a positive integer scalar"),
@@ -1763,6 +1768,19 @@ mod tests {
         let tensor = tensor_out(out);
         assert_eq!(tensor.shape, vec![1, 2]);
         assert_eq!(tensor.data, vec![1.0, 1.0]);
+
+        assert!(parse_positive_integer(
+            PDIST2_NAME,
+            &Value::Num(usize::MAX as f64),
+            "pdist2 selection count"
+        )
+        .is_err());
+        assert!(parse_positive_integer(
+            PDIST2_NAME,
+            &Value::Num(usize::MAX as f64 + 1.0),
+            "pdist2 selection count"
+        )
+        .is_err());
     }
 
     #[test]
