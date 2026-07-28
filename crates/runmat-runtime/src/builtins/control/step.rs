@@ -442,17 +442,18 @@ fn property_coefficients(object: &ObjectInstance, name: &str) -> BuiltinResult<V
 }
 
 fn real_complex_coefficients(tensor: &ComplexTensor, name: &str) -> BuiltinResult<Vec<f64>> {
-    let mut out = Vec::with_capacity(tensor.data.len());
-    for &(re, im) in &tensor.data {
-        if im.abs() > EPS {
-            return Err(step_error_with_detail(
-                &STEP_ERROR_UNSUPPORTED_MODEL,
-                format!("complex tf {name} coefficients are not supported yet"),
-            ));
-        }
-        out.push(re);
-    }
-    Ok(out)
+    tensor::complex_tensor_values_complex64(tensor)
+        .into_iter()
+        .map(|value| {
+            if value.im.abs() > EPS {
+                return Err(step_error_with_detail(
+                    &STEP_ERROR_UNSUPPORTED_MODEL,
+                    format!("complex tf {name} coefficients are not supported yet"),
+                ));
+            }
+            Ok(value.re)
+        })
+        .collect()
 }
 
 fn property_scalar(object: &ObjectInstance, name: &str) -> BuiltinResult<f64> {
@@ -896,7 +897,7 @@ fn column_tensor(data: Vec<f64>) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, IntegerStorage, ObjectInstance};
+    use runmat_builtins::{CharArray, IntegerComplexStorage, IntegerStorage, ObjectInstance};
 
     fn tf_object(num: Vec<f64>, den: Vec<f64>, sample_time: f64) -> Value {
         let mut object = ObjectInstance::new("tf".to_string());
@@ -935,6 +936,18 @@ mod tests {
 
     fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
+    }
+
+    fn poisoned_complex_integer_tensor(
+        real: IntegerStorage,
+        imag: IntegerStorage,
+        shape: Vec<usize>,
+    ) -> ComplexTensor {
+        let storage = IntegerComplexStorage::new(real, imag).expect("complex integer storage");
+        let mut tensor =
+            ComplexTensor::new_integer(storage, shape).expect("complex integer tensor");
+        tensor.data.fill((f64::NAN, f64::NAN));
+        tensor
     }
 
     #[test]
@@ -1050,6 +1063,33 @@ mod tests {
         let time = tensor_data(outputs[1].clone());
         assert_eq!(time.first().copied(), Some(0.0));
         assert_eq!(time.last().copied(), Some(2.0));
+    }
+
+    #[test]
+    fn step_tf_coefficients_read_complex_typed_integer_storage_exactly() {
+        let tensor = poisoned_complex_integer_tensor(
+            IntegerStorage::I16(vec![2, 4]),
+            IntegerStorage::I16(vec![0, 0]),
+            vec![1, 2],
+        );
+
+        assert_eq!(
+            real_complex_coefficients(&tensor, "Numerator").expect("coefficients"),
+            vec![2.0, 4.0]
+        );
+    }
+
+    #[test]
+    fn step_rejects_exact_nonreal_complex_typed_integer_coefficients() {
+        let tensor = poisoned_complex_integer_tensor(
+            IntegerStorage::I16(vec![2, 4]),
+            IntegerStorage::I16(vec![0, 1]),
+            vec![1, 2],
+        );
+
+        let err = real_complex_coefficients(&tensor, "Numerator").expect_err("nonreal coeff");
+        assert_eq!(err.identifier(), STEP_ERROR_UNSUPPORTED_MODEL.identifier);
+        assert!(err.message().contains("complex tf Numerator coefficients"));
     }
 
     #[test]
