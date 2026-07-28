@@ -481,15 +481,17 @@ pub fn ismember_numeric_from_tensors(
 }
 
 fn ismember_numeric_elements(a: Tensor, b: Tensor) -> crate::BuiltinResult<IsMemberEvaluation> {
+    let a_values = tensor::tensor_values_f64_cow(&a);
+    let b_values = tensor::tensor_values_f64_cow(&b);
     let mut map: HashMap<u64, usize> = HashMap::new();
-    for (idx, &value) in b.data.iter().enumerate() {
+    for (idx, &value) in b_values.iter().enumerate() {
         map.entry(canonicalize_f64(value)).or_insert(idx + 1);
     }
 
-    let mut mask_data = Vec::<u8>::with_capacity(a.data.len());
-    let mut loc_data = Vec::<f64>::with_capacity(a.data.len());
+    let mut mask_data = Vec::<u8>::with_capacity(a_values.len());
+    let mut loc_data = Vec::<f64>::with_capacity(a_values.len());
 
-    for &value in &a.data {
+    for &value in a_values.iter() {
         let key = canonicalize_f64(value);
         if let Some(&pos) = map.get(&key) {
             mask_data.push(1);
@@ -513,13 +515,15 @@ fn ismember_numeric_rows(a: Tensor, b: Tensor) -> crate::BuiltinResult<IsMemberE
     if cols_a != cols_b {
         return Err(ismember_error(&ISMEMBER_ERROR_ROWS_COLUMN_MISMATCH));
     }
+    let a_values = tensor::tensor_values_f64_cow(&a);
+    let b_values = tensor::tensor_values_f64_cow(&b);
 
     let mut map: HashMap<NumericRowKey, usize> = HashMap::new();
     for r in 0..rows_b {
         let mut row_values = Vec::with_capacity(cols_b);
         for c in 0..cols_b {
             let idx = r + c * rows_b;
-            row_values.push(b.data[idx]);
+            row_values.push(b_values[idx]);
         }
         let key = NumericRowKey::from_slice(&row_values);
         map.entry(key).or_insert(r + 1);
@@ -532,7 +536,7 @@ fn ismember_numeric_rows(a: Tensor, b: Tensor) -> crate::BuiltinResult<IsMemberE
         let mut row_values = Vec::with_capacity(cols_a);
         for c in 0..cols_a {
             let idx = r + c * rows_a;
-            row_values.push(a.data[idx]);
+            row_values.push(a_values[idx]);
         }
         let key = NumericRowKey::from_slice(&row_values);
         if let Some(&pos) = map.get(&key) {
@@ -1009,6 +1013,42 @@ pub(crate) mod tests {
         .expect("input");
         a.data.clear();
         b.data.clear();
+        let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
+            .expect("ismember rows");
+        assert_eq!(eval.mask.data, vec![0, 1]);
+        assert_eq!(eval.loc.data, vec![0.0, 1.0]);
+    }
+
+    #[test]
+    fn mixed_integer_membership_reads_exact_storage_without_mirror() {
+        let mut a = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U16(vec![7, 2, 9, 7]),
+            vec![4, 1],
+        )
+        .expect("input");
+        let mut b =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::I32(vec![2, 7]), vec![2, 1])
+                .expect("input");
+        a.data.clear();
+        b.data.clear();
+
+        let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("ismember");
+        assert_eq!(eval.mask.data, vec![1, 1, 0, 1]);
+        assert_eq!(eval.loc.data, vec![2.0, 1.0, 0.0, 2.0]);
+
+        let mut a = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U16(vec![1, 3, 2, 4]),
+            vec![2, 2],
+        )
+        .expect("input");
+        let mut b = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I32(vec![3, 5, 4, 6]),
+            vec![2, 2],
+        )
+        .expect("input");
+        a.data.clear();
+        b.data.clear();
+
         let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
             .expect("ismember rows");
         assert_eq!(eval.mask.data, vec![0, 1]);

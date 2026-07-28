@@ -911,7 +911,7 @@ impl SortArgs {
 
 fn is_dimension_placeholder(value: &Value) -> bool {
     match value {
-        Value::Tensor(t) => t.data.is_empty(),
+        Value::Tensor(t) => tensor::tensor_element_len(t) == 0,
         Value::LogicalArray(logical) => logical.data.is_empty(),
         _ => false,
     }
@@ -1204,6 +1204,28 @@ pub(crate) mod tests {
         match sorted {
             Value::Tensor(t) => assert_eq!(t.data, vec![4.0, 3.0, 1.0, 2.0]),
             other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sort_typed_integer_dimension_argument_is_not_empty_placeholder_without_mirror() {
+        let tensor = Tensor::new(vec![1.0, 3.0, 4.0, 2.0, 2.0, 5.0], vec![2, 3]).unwrap();
+        let mut dim =
+            Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("dimension");
+        dim.data.clear();
+
+        let eval = evaluate(Value::Tensor(tensor), &[Value::Tensor(dim)]).expect("evaluate");
+        let (sorted, indices) = eval.into_values();
+        match sorted {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 3]);
+                assert_eq!(t.data, vec![1.0, 2.0, 2.0, 3.0, 4.0, 5.0]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+        match indices {
+            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]),
+            other => panic!("expected tensor indices, got {other:?}"),
         }
     }
 

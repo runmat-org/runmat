@@ -601,8 +601,10 @@ fn intersect_numeric_elements(
     b: Tensor,
     opts: &IntersectOptions,
 ) -> crate::BuiltinResult<IntersectEvaluation> {
+    let a_values = tensor::tensor_values_f64_cow(&a);
+    let b_values = tensor::tensor_values_f64_cow(&b);
     let mut b_map: HashMap<u64, usize> = HashMap::new();
-    for (idx, &value) in b.data.iter().enumerate() {
+    for (idx, &value) in b_values.iter().enumerate() {
         let key = canonicalize_f64(value);
         b_map.entry(key).or_insert(idx);
     }
@@ -611,7 +613,7 @@ fn intersect_numeric_elements(
     let mut entries = Vec::<NumericIntersectEntry>::new();
     let mut order_counter = 0usize;
 
-    for (idx, &value) in a.data.iter().enumerate() {
+    for (idx, &value) in a_values.iter().enumerate() {
         let key = canonicalize_f64(value);
         if seen.contains(&key) {
             continue;
@@ -647,13 +649,15 @@ fn intersect_numeric_rows(
     let rows_a = a.shape[0];
     let cols = a.shape[1];
     let rows_b = b.shape[0];
+    let a_values = tensor::tensor_values_f64_cow(&a);
+    let b_values = tensor::tensor_values_f64_cow(&b);
 
     let mut b_map: HashMap<NumericRowKey, usize> = HashMap::new();
     for r in 0..rows_b {
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_b;
-            row_values.push(b.data[idx]);
+            row_values.push(b_values[idx]);
         }
         let key = NumericRowKey::from_slice(&row_values);
         b_map.entry(key).or_insert(r);
@@ -667,7 +671,7 @@ fn intersect_numeric_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_a;
-            row_values.push(a.data[idx]);
+            row_values.push(a_values[idx]);
         }
         let key = NumericRowKey::from_slice(&row_values);
         if seen.contains(&key) {
@@ -1785,6 +1789,37 @@ pub(crate) mod tests {
             panic!("indices");
         };
         assert_eq!(ib.data, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn intersect_mixed_integer_classes_read_exact_storage_without_mirror() {
+        let mut a = Tensor::new_integer(IntegerStorage::U16(vec![7, 2, 9, 7]), vec![4, 1]).unwrap();
+        let mut b = Tensor::new_integer(IntegerStorage::I32(vec![2, 7]), vec![2, 1]).unwrap();
+        a.data.clear();
+        b.data.clear();
+
+        let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("intersect");
+        let values = tensor::value_into_tensor_for("intersect", eval.values_value()).unwrap();
+        assert_eq!(values.data, vec![2.0, 7.0]);
+        let ia = tensor::value_into_tensor_for("intersect", eval.ia_value()).unwrap();
+        let ib = tensor::value_into_tensor_for("intersect", eval.ib_value()).unwrap();
+        assert_eq!(ia.data, vec![2.0, 1.0]);
+        assert_eq!(ib.data, vec![1.0, 2.0]);
+
+        let mut a = Tensor::new_integer(IntegerStorage::U16(vec![1, 3, 2, 4]), vec![2, 2]).unwrap();
+        let mut b = Tensor::new_integer(IntegerStorage::I32(vec![3, 5, 4, 6]), vec![2, 2]).unwrap();
+        a.data.clear();
+        b.data.clear();
+
+        let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
+            .expect("intersect rows");
+        let values = tensor::value_into_tensor_for("intersect", eval.values_value()).unwrap();
+        assert_eq!(values.shape, vec![1, 2]);
+        assert_eq!(values.data, vec![3.0, 4.0]);
+        let ia = tensor::value_into_tensor_for("intersect", eval.ia_value()).unwrap();
+        let ib = tensor::value_into_tensor_for("intersect", eval.ib_value()).unwrap();
+        assert_eq!(ia.data, vec![2.0]);
+        assert_eq!(ib.data, vec![1.0]);
     }
 
     #[test]
