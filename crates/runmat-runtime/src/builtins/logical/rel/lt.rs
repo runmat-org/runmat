@@ -485,6 +485,31 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn lt_dense_integer_arrays_read_exact_storage_without_mirror() {
+        let mut lhs = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![0, (1_u64 << 53) + 1]),
+            vec![2, 1],
+        )
+        .expect("lhs");
+        lhs.data.clear();
+        let mut rhs = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I64(vec![0, 1, i64::MAX]),
+            vec![1, 3],
+        )
+        .expect("rhs");
+        rhs.data.clear();
+
+        let result = run_lt(Value::Tensor(lhs), Value::Tensor(rhs)).expect("lt");
+        match result {
+            Value::LogicalArray(array) => {
+                assert_eq!(array.shape, vec![2, 3]);
+                assert_eq!(array.data, vec![0, 0, 1, 0, 1, 1]);
+            }
+            other => panic!("expected logical array, got {other:?}"),
+        }
+    }
+
     #[cfg(feature = "wgpu")]
     fn run_lt_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
         block_on(lt_host(lhs, rhs))
