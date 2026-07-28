@@ -507,7 +507,7 @@ fn positive_integer_from_f64(value: f64) -> BuiltinResult<u128> {
             "inputs must be finite positive integers",
         ));
     }
-    if value > u64::MAX as f64 {
+    if value >= u64::MAX as f64 {
         return Err(error_with_detail(
             &LCM_ERROR_INVALID_INPUT,
             "input is too large",
@@ -690,6 +690,20 @@ mod tests {
             let err = block_on(lcm_builtin(value, Value::Num(3.0))).expect_err("invalid input");
             assert_eq!(err.identifier(), LCM_ERROR_INVALID_INPUT.identifier);
         }
+    }
+
+    #[test]
+    fn lcm_rejects_unrepresentable_double_u64_boundary_before_casting() {
+        let err = block_on(lcm_builtin(Value::Num(u64::MAX as f64), Value::Num(3.0)))
+            .expect_err("unrepresentable u64 boundary should fail before cast");
+        assert_eq!(err.identifier(), LCM_ERROR_INVALID_INPUT.identifier);
+        assert!(err.to_string().contains("input is too large"));
+
+        let tensor = Tensor::new(vec![3.0, u64::MAX as f64], vec![1, 2]).unwrap();
+        let err = block_on(lcm_builtin(Value::Tensor(tensor), Value::Num(3.0)))
+            .expect_err("unrepresentable tensor entry should fail before cast");
+        assert_eq!(err.identifier(), LCM_ERROR_INVALID_INPUT.identifier);
+        assert!(err.to_string().contains("input is too large"));
     }
 
     #[test]

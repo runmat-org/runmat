@@ -217,7 +217,7 @@ fn scalar_from_f64(value: f64, output: OutputKind) -> BuiltinResult<PrimeRequest
     }
     let limit = if rounded < 2.0 {
         0
-    } else if rounded > u64::MAX as f64 {
+    } else if rounded >= u64::MAX as f64 {
         return Err(error_with_detail(&ERROR_INVALID_INPUT, "n is too large"));
     } else {
         rounded as u64
@@ -423,6 +423,14 @@ mod tests {
         assert!(block_on(primes_builtin(Value::Num(10.5), Vec::new())).is_err());
         assert!(block_on(primes_builtin(Value::Num(f64::INFINITY), Vec::new())).is_err());
         assert!(block_on(primes_builtin(Value::Bool(true), Vec::new())).is_err());
+    }
+
+    #[test]
+    fn primes_rejects_unrepresentable_double_u64_boundary_before_casting() {
+        let err = block_on(primes_builtin(Value::Num(u64::MAX as f64), Vec::new()))
+            .expect_err("unrepresentable u64 boundary should fail before cast");
+        assert_eq!(err.identifier(), ERROR_INVALID_INPUT.identifier);
+        assert!(err.to_string().contains("n is too large"));
     }
 
     #[test]
