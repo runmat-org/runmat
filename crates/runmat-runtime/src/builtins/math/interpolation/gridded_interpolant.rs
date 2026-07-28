@@ -931,19 +931,35 @@ fn evaluate_interpolant(spec: &InterpolantSpec, args: Vec<Value>) -> BuiltinResu
     if out_shape.is_empty() {
         out_shape.push(1);
     }
+    let values = tensor_utils::tensor_values_f64_cow(&spec.values);
     if is_piecewise_method(spec.method) {
-        return evaluate_piecewise_interpolant(spec, &plan, grid_size, extra_count, out_shape);
+        return evaluate_piecewise_interpolant(
+            spec,
+            values.as_ref(),
+            &plan,
+            grid_size,
+            extra_count,
+            out_shape,
+        );
     }
     let mut out = Vec::with_capacity(plan.len() * extra_count);
     for series in 0..extra_count {
         let series_offset = series * grid_size;
-        plan.for_each_point(|point| out.push(interpolate_point(spec, point, series_offset)));
+        plan.for_each_point(|point| {
+            out.push(interpolate_point(
+                spec,
+                values.as_ref(),
+                point,
+                series_offset,
+            ))
+        });
     }
     finish_interpolant_output(out, out_shape, spec.values.dtype)
 }
 
 fn evaluate_piecewise_interpolant(
     spec: &InterpolantSpec,
+    values: &[f64],
     plan: &QueryPlan,
     grid_size: usize,
     extra_count: usize,
@@ -953,7 +969,7 @@ fn evaluate_piecewise_interpolant(
     let mut out = Vec::with_capacity(plan.len() * extra_count);
     for series in 0..extra_count {
         let series_offset = series * grid_size;
-        let y = spec.values.data[series_offset..series_offset + grid_size].to_vec();
+        let y = values[series_offset..series_offset + grid_size].to_vec();
         let series_data = NumericSeries {
             x: x.clone(),
             y,
@@ -971,6 +987,7 @@ fn evaluate_piecewise_interpolant(
         plan.for_each_point(|point| {
             out.push(evaluate_piecewise_scalar(
                 spec,
+                values,
                 &pp,
                 point[0],
                 series_offset,
@@ -1103,18 +1120,23 @@ fn full_query_grid(query_vectors: Vec<Vec<f64>>) -> BuiltinResult<QueryPlan> {
     })
 }
 
-fn interpolate_point(spec: &InterpolantSpec, point: &[f64], series_offset: usize) -> f64 {
+fn interpolate_point(
+    spec: &InterpolantSpec,
+    values: &[f64],
+    point: &[f64],
+    series_offset: usize,
+) -> f64 {
     if point.iter().any(|value| value.is_nan()) {
         return f64::NAN;
     }
     if point_outside_grid(spec, point) {
-        return extrapolate_point(spec, point, series_offset);
+        return extrapolate_point(spec, values, point, series_offset);
     }
     match spec.method {
-        InterpMethod::Linear => interpolate_linear(spec, point, series_offset),
-        InterpMethod::Nearest => interpolate_nearest(spec, point, series_offset),
-        InterpMethod::Next => interpolate_step(spec, point[0], series_offset, true),
-        InterpMethod::Previous => interpolate_step(spec, point[0], series_offset, false),
+        InterpMethod::Linear => interpolate_linear(spec, values, point, series_offset),
+        InterpMethod::Nearest => interpolate_nearest(spec, values, point, series_offset),
+        InterpMethod::Next => interpolate_step(spec, values, point[0], series_offset, true),
+        InterpMethod::Previous => interpolate_step(spec, values, point[0], series_offset, false),
         InterpMethod::Pchip | InterpMethod::Spline => {
             unreachable!("higher-order methods use evaluate_piecewise_interpolant")
         }
@@ -1128,13 +1150,20 @@ fn point_outside_grid(spec: &InterpolantSpec, point: &[f64]) -> bool {
     })
 }
 
-fn extrapolate_point(spec: &InterpolantSpec, point: &[f64], series_offset: usize) -> f64 {
+fn extrapolate_point(
+    spec: &InterpolantSpec,
+    values: &[f64],
+    point: &[f64],
+    series_offset: usize,
+) -> f64 {
     match spec.extrapolation {
         ExtrapolationMethod::None => f64::NAN,
-        ExtrapolationMethod::Linear => interpolate_linear(spec, point, series_offset),
-        ExtrapolationMethod::Nearest => interpolate_nearest(spec, point, series_offset),
-        ExtrapolationMethod::Next => interpolate_step(spec, point[0], series_offset, true),
-        ExtrapolationMethod::Previous => interpolate_step(spec, point[0], series_offset, false),
+        ExtrapolationMethod::Linear => interpolate_linear(spec, values, point, series_offset),
+        ExtrapolationMethod::Nearest => interpolate_nearest(spec, values, point, series_offset),
+        ExtrapolationMethod::Next => interpolate_step(spec, values, point[0], series_offset, true),
+        ExtrapolationMethod::Previous => {
+            interpolate_step(spec, values, point[0], series_offset, false)
+        }
         ExtrapolationMethod::Pchip | ExtrapolationMethod::Spline => {
             unreachable!("piecewise extrapolation uses evaluate_piecewise_interpolant")
         }
@@ -1165,6 +1194,7 @@ fn is_piecewise_extrapolation(method: ExtrapolationMethod) -> bool {
 
 fn evaluate_piecewise_scalar(
     spec: &InterpolantSpec,
+    values: &[f64],
     pp: &PiecewisePolynomial,
     coord: f64,
     series_offset: usize,
@@ -1179,16 +1209,16 @@ fn evaluate_piecewise_scalar(
             ExtrapolationMethod::None => return f64::NAN,
             ExtrapolationMethod::Nearest => {
                 let idx = if coord < grid[0] { 0 } else { grid.len() - 1 };
-                return spec.values.data[series_offset + idx];
+                return values[series_offset + idx];
             }
             ExtrapolationMethod::Next => {
-                return interpolate_step(spec, coord, series_offset, true);
+                return interpolate_step(spec, values, coord, series_offset, true);
             }
             ExtrapolationMethod::Previous => {
-                return interpolate_step(spec, coord, series_offset, false);
+                return interpolate_step(spec, values, coord, series_offset, false);
             }
             ExtrapolationMethod::Linear => {
-                return interpolate_linear(spec, &[coord], series_offset);
+                return interpolate_linear(spec, values, &[coord], series_offset);
             }
             ExtrapolationMethod::Pchip | ExtrapolationMethod::Spline => {}
         }
@@ -1196,7 +1226,12 @@ fn evaluate_piecewise_scalar(
     eval_pp_scalar(pp, 0, coord, &Extrapolation::Extrapolate)
 }
 
-fn interpolate_linear(spec: &InterpolantSpec, point: &[f64], series_offset: usize) -> f64 {
+fn interpolate_linear(
+    spec: &InterpolantSpec,
+    values: &[f64],
+    point: &[f64],
+    series_offset: usize,
+) -> f64 {
     let mut brackets = Vec::with_capacity(point.len());
     for (dim, &coord) in point.iter().enumerate() {
         let Some(bracket) = bracket_for_linear(&spec.grid_vectors[dim], coord, spec.extrapolation)
@@ -1222,8 +1257,7 @@ fn interpolate_linear(spec: &InterpolantSpec, point: &[f64], series_offset: usiz
                 subs.push(bracket.hi);
             }
         }
-        acc += weight
-            * spec.values.data[series_offset + column_major_offset(&subs, &spec.values.shape)];
+        acc += weight * values[series_offset + column_major_offset(&subs, &spec.values.shape)];
     }
     acc
 }
@@ -1268,7 +1302,12 @@ fn bracket_for_linear(
     Some(Bracket { lo, hi, t })
 }
 
-fn interpolate_nearest(spec: &InterpolantSpec, point: &[f64], series_offset: usize) -> f64 {
+fn interpolate_nearest(
+    spec: &InterpolantSpec,
+    values: &[f64],
+    point: &[f64],
+    series_offset: usize,
+) -> f64 {
     let mut subs = Vec::with_capacity(point.len());
     for (dim, &coord) in point.iter().enumerate() {
         let Some(idx) = nearest_index(&spec.grid_vectors[dim], coord, spec.extrapolation) else {
@@ -1276,7 +1315,7 @@ fn interpolate_nearest(spec: &InterpolantSpec, point: &[f64], series_offset: usi
         };
         subs.push(idx);
     }
-    spec.values.data[series_offset + column_major_offset(&subs, &spec.values.shape)]
+    values[series_offset + column_major_offset(&subs, &spec.values.shape)]
 }
 
 fn nearest_index(grid: &[f64], coord: f64, extrapolation: ExtrapolationMethod) -> Option<usize> {
@@ -1300,21 +1339,27 @@ fn nearest_index(grid: &[f64], coord: f64, extrapolation: ExtrapolationMethod) -
     }
 }
 
-fn interpolate_step(spec: &InterpolantSpec, coord: f64, series_offset: usize, next: bool) -> f64 {
+fn interpolate_step(
+    spec: &InterpolantSpec,
+    values: &[f64],
+    coord: f64,
+    series_offset: usize,
+    next: bool,
+) -> f64 {
     let grid = &spec.grid_vectors[0];
     if coord < grid[0] || coord > grid[grid.len() - 1] {
         if spec.extrapolation == ExtrapolationMethod::None {
             return f64::NAN;
         }
         let idx = if coord < grid[0] { 0 } else { grid.len() - 1 };
-        return spec.values.data[series_offset + idx];
+        return values[series_offset + idx];
     }
     let idx = match grid.binary_search_by(|probe| probe.partial_cmp(&coord).unwrap()) {
         Ok(idx) => idx,
         Err(idx) if next => idx,
         Err(idx) => idx.saturating_sub(1),
     };
-    spec.values.data[series_offset + idx.min(grid.len() - 1)]
+    values[series_offset + idx.min(grid.len() - 1)]
 }
 
 fn column_major_offset(subs: &[usize], shape: &[usize]) -> usize {
@@ -1502,7 +1547,7 @@ mod tests {
     fn one_dimensional_spline_uses_piecewise_polynomial_path() {
         let obj = call(vec![
             col(&[1.0, 2.0, 3.0]),
-            col(&[1.0, 4.0, 9.0]),
+            int_col(IntegerStorage::I16(vec![1, 4, 9])),
             Value::String("spline".to_string()),
         ])
         .unwrap();
@@ -1516,7 +1561,7 @@ mod tests {
     fn one_dimensional_pchip_preserves_samples_and_nearest_extrapolates() {
         let obj = call(vec![
             col(&[1.0, 2.0, 3.0, 4.0]),
-            col(&[0.0, 1.0, 1.5, 1.75]),
+            int_col(IntegerStorage::I16(vec![0, 10, 15, 18])),
             Value::String("pchip".to_string()),
             Value::String("nearest".to_string()),
         ])
@@ -1524,8 +1569,8 @@ mod tests {
         match subsref(obj, vec![row(&[0.0, 3.0, 5.0])]).unwrap() {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.data[0], 0.0);
-                assert_eq!(tensor.data[1], 1.5);
-                assert_eq!(tensor.data[2], 1.75);
+                assert_eq!(tensor.data[1], 15.0);
+                assert_eq!(tensor.data[2], 18.0);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
