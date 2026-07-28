@@ -19,7 +19,8 @@ use std::sync::Mutex;
 use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, ClassDef, HandleRef, MethodDef, ObjectInstance, PropertyDef, StructValue, Value,
+    CellArray, ClassDef, HandleRef, IntValue, MethodDef, ObjectInstance, PropertyDef, StructValue,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -704,14 +705,12 @@ fn normalize_property_value(name: &str, value: Value) -> BuiltinResult<Value> {
             Ok(Value::Num(seconds))
         }
         "TasksToExecute" => {
-            let count = numeric_scalar(&value, name)?;
-            if !count.is_finite() || count < 1.0 || count.fract() != 0.0 {
-                return Err(timer_error(
-                    &TIMER_ERROR_INVALID_PROPERTY,
-                    "timer: TasksToExecute must be a positive integer scalar",
-                ));
+            parse_tasks_to_execute_value(&value)?;
+            if let Some(integer) = tensor::scalar_integer_value(&value) {
+                Ok(Value::Int(integer))
+            } else {
+                Ok(Value::Num(numeric_scalar(&value, name)?.round()))
             }
-            Ok(Value::Num(count))
         }
         "BusyMode" => match_string_choice(&value, name, &["drop", "error", "queue"]),
         "ExecutionMode" => match_string_choice(
@@ -788,6 +787,47 @@ fn numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
             format!("timer: {name} must be a numeric scalar, got {other:?}"),
         )),
     }
+}
+
+fn parse_tasks_to_execute_value(value: &Value) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return parse_tasks_to_execute_integer(&integer);
+    }
+
+    let count = numeric_scalar(value, "TasksToExecute")?;
+    if !count.is_finite() || count < 1.0 || count.fract() != 0.0 {
+        return Err(timer_error(
+            &TIMER_ERROR_INVALID_PROPERTY,
+            "timer: TasksToExecute must be a positive integer scalar",
+        ));
+    }
+    if !fits_platform_usize(count) {
+        return Err(timer_error(
+            &TIMER_ERROR_INVALID_PROPERTY,
+            "timer: TasksToExecute exceeds platform limits",
+        ));
+    }
+    Ok(count as usize)
+}
+
+fn parse_tasks_to_execute_integer(value: &IntValue) -> BuiltinResult<usize> {
+    let count = value.try_to_usize().ok_or_else(|| {
+        timer_error(
+            &TIMER_ERROR_INVALID_PROPERTY,
+            "timer: TasksToExecute must be a positive integer scalar",
+        )
+    })?;
+    if count == 0 {
+        return Err(timer_error(
+            &TIMER_ERROR_INVALID_PROPERTY,
+            "timer: TasksToExecute must be a positive integer scalar",
+        ));
+    }
+    Ok(count)
+}
+
+fn fits_platform_usize(value: f64) -> bool {
+    value < usize::MAX as f64 || (usize::BITS < 64 && value == usize::MAX as f64)
 }
 
 async fn start_timer_values(value: &Value, override_delay: Option<f64>) -> BuiltinResult<()> {
@@ -891,7 +931,7 @@ async fn start_one_timer(handle: HandleRef, override_delay: Option<f64>) -> Buil
     let tasks = if execution_mode.eq_ignore_ascii_case("singleShot") {
         1usize
     } else {
-        numeric_property(&handle, "TasksToExecute")?.max(1.0) as usize
+        parse_tasks_to_execute_value(&property(&handle, "TasksToExecute")?)?
     };
     let period = numeric_property(&handle, "Period")?;
     let mut last_fire: Option<runmat_time::Instant> = None;
@@ -1067,6 +1107,9 @@ fn parse_filters(args: &[Value]) -> BuiltinResult<Vec<(String, Value)>> {
 }
 
 fn normalize_find_value(value: Value) -> Value {
+    if let Some(integer) = tensor::scalar_integer_value(&value) {
+        return Value::Int(integer);
+    }
     match value {
         Value::CharArray(chars) if chars.rows == 1 => Value::String(chars.data.iter().collect()),
         other => other,
@@ -1088,6 +1131,14 @@ fn timer_values_equal(lhs: &Value, rhs: &Value) -> bool {
         (Value::String(a), Value::String(b)) => a == b,
         (Value::Num(a), Value::Num(b)) if a.is_nan() && b.is_nan() => true,
         (Value::Num(a), Value::Num(b)) => a == b,
+        (Value::Int(a), Value::Int(b)) => a == b,
+        (Value::Int(a), Value::Num(b)) | (Value::Num(b), Value::Int(a)) => {
+            b.is_finite()
+                && b.fract() == 0.0
+                && a.try_to_u64()
+                    .map(|value| value as f64 == *b)
+                    .unwrap_or(false)
+        }
         (Value::Bool(a), Value::Bool(b)) => a == b,
         _ => lhs == rhs,
     }
@@ -1363,6 +1414,79 @@ mod tests {
             numeric_scalar(&Value::Tensor(tensor), "StartDelay").expect("numeric scalar"),
             2026.0
         );
+    }
+
+    #[test]
+    fn timer_tasks_to_execute_preserves_typed_integer_storage_exactly() {
+        let _lock = TIMER_TEST_LOCK.lock().unwrap();
+        reset_timer_state_for_tests();
+        let calls = Arc::new(Mutex::new(0usize));
+        let invoker_calls = calls.clone();
+        let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            move |_function, _args, _requested_outputs| {
+                let invoker_calls = Arc::clone(&invoker_calls);
+                Box::pin(async move {
+                    *invoker_calls.lock().unwrap() += 1;
+                    Ok(Value::OutputList(Vec::new()))
+                })
+            },
+        )));
+
+        let mut tasks =
+            Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("typed tasks");
+        tasks.data.clear();
+        let timer = block_on(timer_builtin(vec![
+            Value::String("TimerFcn".into()),
+            Value::BoundFunctionHandle {
+                name: "tick".into(),
+                function: 1,
+            },
+            Value::String("ExecutionMode".into()),
+            Value::String("fixedSpacing".into()),
+            Value::String("TasksToExecute".into()),
+            Value::Tensor(tasks),
+            Value::String("Period".into()),
+            Value::Num(0.002),
+        ]))
+        .expect("timer");
+        let Value::HandleObject(handle) = timer.clone() else {
+            panic!("expected timer handle");
+        };
+        assert_eq!(
+            property(&handle, "TasksToExecute").unwrap(),
+            Value::Int(IntValue::U16(2))
+        );
+        assert_eq!(numeric_property(&handle, "TasksToExecute").unwrap(), 2.0);
+
+        let found = timerfind_builtin(vec![
+            Value::String("TasksToExecute".into()),
+            Value::Num(2.0),
+        ])
+        .expect("timerfind");
+        assert_eq!(found, timer);
+
+        block_on(timer_start_builtin(Value::HandleObject(handle))).expect("start");
+        assert_eq!(*calls.lock().unwrap(), 2);
+    }
+
+    #[test]
+    fn timer_tasks_to_execute_rejects_invalid_integer_bounds() {
+        let mut negative =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("negative tasks");
+        negative.data.clear();
+        assert!(parse_tasks_to_execute_value(&Value::Tensor(negative)).is_err());
+
+        let mut zero =
+            Tensor::new_integer(IntegerStorage::U16(vec![0]), vec![1, 1]).expect("zero tasks");
+        zero.data.clear();
+        assert!(parse_tasks_to_execute_value(&Value::Tensor(zero)).is_err());
+
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        assert!(parse_tasks_to_execute_value(&Value::Num(boundary)).is_err());
     }
 
     #[test]
