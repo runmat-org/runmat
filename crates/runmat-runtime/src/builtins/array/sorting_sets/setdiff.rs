@@ -542,8 +542,10 @@ fn setdiff_numeric_elements(
     b: Tensor,
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
+    let a_values = tensor::tensor_values_f64_cow(&a);
+    let b_values = tensor::tensor_values_f64_cow(&b);
     let mut b_keys: HashSet<u64> = HashSet::new();
-    for &value in &b.data {
+    for &value in b_values.iter() {
         b_keys.insert(canonicalize_f64(value));
     }
 
@@ -551,7 +553,7 @@ fn setdiff_numeric_elements(
     let mut entries = Vec::<NumericDiffEntry>::new();
     let mut order_counter = 0usize;
 
-    for (idx, &value) in a.data.iter().enumerate() {
+    for (idx, &value) in a_values.iter().enumerate() {
         let key = canonicalize_f64(value);
         if b_keys.contains(&key) {
             continue;
@@ -589,13 +591,15 @@ fn setdiff_numeric_rows(
     let rows_a = a.shape[0];
     let rows_b = b.shape[0];
     let cols = a.shape[1];
+    let a_values = tensor::tensor_values_f64_cow(&a);
+    let b_values = tensor::tensor_values_f64_cow(&b);
 
     let mut b_keys: HashSet<NumericRowKey> = HashSet::new();
     for r in 0..rows_b {
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_b;
-            row_values.push(b.data[idx]);
+            row_values.push(b_values[idx]);
         }
         b_keys.insert(NumericRowKey::from_slice(&row_values));
     }
@@ -608,7 +612,7 @@ fn setdiff_numeric_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_a;
-            row_values.push(a.data[idx]);
+            row_values.push(a_values[idx]);
         }
         let key = NumericRowKey::from_slice(&row_values);
         if b_keys.contains(&key) {
@@ -1640,6 +1644,47 @@ pub(crate) mod tests {
         );
         let ia = tensor::value_into_tensor_for("setdiff", ia).expect("row indices");
         assert_eq!(ia.data, vec![2.0]);
+    }
+
+    #[test]
+    fn setdiff_numeric_fallback_reads_mirrorless_integer_storage() {
+        let mut a = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U16(vec![7, 2, 9]),
+            vec![3, 1],
+        )
+        .expect("input");
+        let mut b = Tensor::new_integer(runmat_builtins::IntegerStorage::I32(vec![2]), vec![1, 1])
+            .expect("input");
+        a.data.clear();
+        b.data.clear();
+        let (values, ia) = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
+            .expect("setdiff")
+            .into_pair();
+        let values = tensor::value_into_tensor_for("setdiff", values).expect("values");
+        assert_eq!(values.data, vec![7.0, 9.0]);
+        assert_eq!(values.shape, vec![2, 1]);
+        let ia = tensor::value_into_tensor_for("setdiff", ia).expect("indices");
+        assert_eq!(ia.data, vec![1.0, 3.0]);
+
+        let mut a = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U16(vec![1, 3, 1, 2, 4, 2]),
+            vec![3, 2],
+        )
+        .expect("rows input");
+        let mut b =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::I32(vec![3, 4]), vec![1, 2])
+                .expect("rows input");
+        a.data.clear();
+        b.data.clear();
+        let (values, ia) =
+            evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
+                .expect("setdiff rows")
+                .into_pair();
+        let values = tensor::value_into_tensor_for("setdiff", values).expect("row values");
+        assert_eq!(values.shape, vec![1, 2]);
+        assert_eq!(values.data, vec![1.0, 2.0]);
+        let ia = tensor::value_into_tensor_for("setdiff", ia).expect("row indices");
+        assert_eq!(ia.data, vec![1.0]);
     }
 
     #[test]

@@ -660,7 +660,8 @@ fn unique_numeric_elements(
     tensor: Tensor,
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
-    let len = tensor.data.len();
+    let values = tensor::tensor_values_f64_cow(&tensor);
+    let len = values.len();
     if len == 0 {
         let values = Tensor::new(Vec::new(), vec![0, 1])
             .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
@@ -679,7 +680,7 @@ fn unique_numeric_elements(
     let mut map: HashMap<u64, usize> = HashMap::new();
     let mut element_entry_index = Vec::with_capacity(len);
 
-    for (idx, &value) in tensor.data.iter().enumerate() {
+    for (idx, &value) in values.iter().enumerate() {
         let key = canonicalize_f64(value);
         match map.get(&key) {
             Some(&entry_idx) => {
@@ -753,6 +754,7 @@ fn unique_numeric_rows(
     }
     let rows = tensor.shape[0];
     let cols = tensor.shape[1];
+    let tensor_values = tensor::tensor_values_f64_cow(&tensor);
 
     if rows == 0 || cols == 0 {
         let values = Tensor::new(Vec::new(), vec![0, cols])
@@ -776,7 +778,7 @@ fn unique_numeric_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows;
-            row_values.push(tensor.data[idx]);
+            row_values.push(tensor_values[idx]);
         }
         let key = NumericRowKey::from_slice(&row_values);
         match map.get(&key) {
@@ -2257,6 +2259,49 @@ pub(crate) mod tests {
         assert_eq!(ia.data, vec![3.0, 2.0]);
         let Value::Tensor(ic) = ic else {
             panic!("expected indices");
+        };
+        assert_eq!(ic.data, vec![1.0, 2.0, 1.0]);
+    }
+
+    #[test]
+    fn unique_numeric_fallback_reads_mirrorless_integer_storage() {
+        let opts = parse_options(&[]).expect("options");
+        let mut input =
+            Tensor::new_integer(IntegerStorage::U16(vec![7, 2, 7, 9]), vec![4, 1]).expect("input");
+        input.data.clear();
+        let (values, ia, ic) = unique_numeric_elements(input, &opts)
+            .expect("unique numeric elements")
+            .into_triple();
+        let Value::Tensor(values) = values else {
+            panic!("expected numeric values");
+        };
+        assert_eq!(values.data, vec![2.0, 7.0, 9.0]);
+        let Value::Tensor(ia) = ia else {
+            panic!("expected indices");
+        };
+        assert_eq!(ia.data, vec![2.0, 1.0, 4.0]);
+        let Value::Tensor(ic) = ic else {
+            panic!("expected inverse indices");
+        };
+        assert_eq!(ic.data, vec![2.0, 1.0, 2.0, 3.0]);
+
+        let mut rows = Tensor::new_integer(IntegerStorage::U16(vec![1, 3, 1, 2, 4, 2]), vec![3, 2])
+            .expect("rows");
+        rows.data.clear();
+        let (values, ia, ic) = unique_numeric_rows(rows, &opts)
+            .expect("unique numeric rows")
+            .into_triple();
+        let Value::Tensor(values) = values else {
+            panic!("expected numeric rows");
+        };
+        assert_eq!(values.shape, vec![2, 2]);
+        assert_eq!(values.data, vec![1.0, 3.0, 2.0, 4.0]);
+        let Value::Tensor(ia) = ia else {
+            panic!("expected row indices");
+        };
+        assert_eq!(ia.data, vec![1.0, 2.0]);
+        let Value::Tensor(ic) = ic else {
+            panic!("expected row inverse indices");
         };
         assert_eq!(ic.data, vec![1.0, 2.0, 1.0]);
     }

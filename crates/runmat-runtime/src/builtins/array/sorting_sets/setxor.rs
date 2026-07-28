@@ -682,10 +682,12 @@ fn setxor_numeric(
         setxor_numeric_rows(a, b, opts)
     } else {
         let meta = element_meta(&a.shape, a.dtype, &b.shape, b.dtype)?;
+        let a_values = tensor::tensor_values_f64_cow(&a);
+        let b_values = tensor::tensor_values_f64_cow(&b);
         let mut entries = Vec::<SymEntry<f64>>::new();
         let mut map: HashMap<NumericKey, usize> = HashMap::new();
         let mut order_counter = 0usize;
-        for (idx, &value) in a.data.iter().enumerate() {
+        for (idx, &value) in a_values.iter().enumerate() {
             add_sym_entry(
                 &mut entries,
                 &mut map,
@@ -696,7 +698,7 @@ fn setxor_numeric(
                 &mut order_counter,
             );
         }
-        for (idx, &value) in b.data.iter().enumerate() {
+        for (idx, &value) in b_values.iter().enumerate() {
             add_sym_entry(
                 &mut entries,
                 &mut map,
@@ -820,11 +822,13 @@ fn setxor_numeric_rows(
     let rows_b = b.shape[0];
     let cols = a.shape[1];
     let dtype = numeric_output_dtype(a.dtype, b.dtype)?;
+    let a_values = tensor::tensor_values_f64_cow(&a);
+    let b_values = tensor::tensor_values_f64_cow(&b);
     let mut entries = Vec::<SymEntry<Vec<f64>>>::new();
     let mut map: HashMap<NumericRowKey, usize> = HashMap::new();
     let mut order_counter = 0usize;
     for row in 0..rows_a {
-        let values = numeric_row(&a, row, cols);
+        let values = numeric_row_from_values(a_values.as_ref(), row, a.shape[0], cols);
         let key = numeric_row_key(&values, Origin::A, row);
         add_sym_entry(
             &mut entries,
@@ -837,7 +841,7 @@ fn setxor_numeric_rows(
         );
     }
     for row in 0..rows_b {
-        let values = numeric_row(&b, row, cols);
+        let values = numeric_row_from_values(b_values.as_ref(), row, b.shape[0], cols);
         let key = numeric_row_key(&values, Origin::B, row);
         add_sym_entry(
             &mut entries,
@@ -1570,10 +1574,8 @@ fn complex_row_key(values: &[(f64, f64)], origin: Origin, row: usize) -> Complex
     }
 }
 
-fn numeric_row(tensor: &Tensor, row: usize, cols: usize) -> Vec<f64> {
-    (0..cols)
-        .map(|col| tensor.data[row + col * tensor.shape[0]])
-        .collect()
+fn numeric_row_from_values(values: &[f64], row: usize, rows: usize, cols: usize) -> Vec<f64> {
+    (0..cols).map(|col| values[row + col * rows]).collect()
 }
 
 fn complex_row(tensor: &ComplexTensor, row: usize, cols: usize) -> Vec<(f64, f64)> {
@@ -1792,6 +1794,46 @@ mod tests {
                 0
             ]))
         );
+        let ia = tensor::value_into_tensor_for("setxor", ia).expect("row indices");
+        assert_eq!(ia.data, vec![1.0]);
+        let ib = tensor::value_into_tensor_for("setxor", ib).expect("row indices");
+        assert_eq!(ib.data, vec![2.0]);
+    }
+
+    #[test]
+    fn setxor_numeric_fallback_reads_mirrorless_integer_storage_with_double_peer() {
+        let mut a = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U16(vec![7, 2, 9]),
+            vec![3, 1],
+        )
+        .expect("input");
+        let b = Tensor::new(vec![2.0, 5.0], vec![2, 1]).expect("input");
+        a.data.clear();
+        let (values, ia, ib) = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
+            .expect("setxor")
+            .into_triple();
+        let values = tensor::value_into_tensor_for("setxor", values).expect("values");
+        assert_eq!(values.data, vec![5.0, 7.0, 9.0]);
+        assert_eq!(values.shape, vec![3, 1]);
+        let ia = tensor::value_into_tensor_for("setxor", ia).expect("indices");
+        assert_eq!(ia.data, vec![1.0, 3.0]);
+        let ib = tensor::value_into_tensor_for("setxor", ib).expect("indices");
+        assert_eq!(ib.data, vec![2.0]);
+
+        let mut a = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U16(vec![1, 3, 1, 2, 4, 2]),
+            vec![3, 2],
+        )
+        .expect("rows input");
+        let b = Tensor::new(vec![3.0, 5.0, 4.0, 6.0], vec![2, 2]).expect("rows input");
+        a.data.clear();
+        let (values, ia, ib) =
+            evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
+                .expect("setxor rows")
+                .into_triple();
+        let values = tensor::value_into_tensor_for("setxor", values).expect("row values");
+        assert_eq!(values.shape, vec![2, 2]);
+        assert_eq!(values.data, vec![1.0, 5.0, 2.0, 6.0]);
         let ia = tensor::value_into_tensor_for("setxor", ia).expect("row indices");
         assert_eq!(ia.data, vec![1.0]);
         let ib = tensor::value_into_tensor_for("setxor", ib).expect("row indices");

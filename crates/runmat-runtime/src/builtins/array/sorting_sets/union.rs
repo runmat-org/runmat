@@ -595,11 +595,13 @@ fn union_numeric_elements(
     b: Tensor,
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
+    let a_values = tensor::tensor_values_f64_cow(&a);
+    let b_values = tensor::tensor_values_f64_cow(&b);
     let mut entries = Vec::<NumericUnionEntry>::new();
     let mut map: HashMap<u64, usize> = HashMap::new();
     let mut order_counter = 0usize;
 
-    for (idx, &value) in a.data.iter().enumerate() {
+    for (idx, &value) in a_values.iter().enumerate() {
         let key = canonicalize_f64(value);
         match map.entry(key) {
             Entry::Occupied(_) => {
@@ -619,7 +621,7 @@ fn union_numeric_elements(
         }
     }
 
-    for (idx, &value) in b.data.iter().enumerate() {
+    for (idx, &value) in b_values.iter().enumerate() {
         let key = canonicalize_f64(value);
         match map.entry(key) {
             Entry::Occupied(occ) => {
@@ -664,6 +666,8 @@ fn union_numeric_rows(
     let rows_a = a.shape[0];
     let cols = a.shape[1];
     let rows_b = b.shape[0];
+    let a_values = tensor::tensor_values_f64_cow(&a);
+    let b_values = tensor::tensor_values_f64_cow(&b);
 
     let mut entries = Vec::<NumericRowUnionEntry>::new();
     let mut map: HashMap<NumericRowKey, usize> = HashMap::new();
@@ -673,7 +677,7 @@ fn union_numeric_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_a;
-            row_values.push(a.data[idx]);
+            row_values.push(a_values[idx]);
         }
         let key = NumericRowKey::from_slice(&row_values);
         match map.entry(key) {
@@ -696,7 +700,7 @@ fn union_numeric_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_b;
-            row_values.push(b.data[idx]);
+            row_values.push(b_values[idx]);
         }
         let key = NumericRowKey::from_slice(&row_values);
         match map.entry(key) {
@@ -2008,6 +2012,52 @@ pub(crate) mod tests {
         );
         let ia = tensor::value_into_tensor_for("union", ia).expect("row indices");
         assert_eq!(ia.data, vec![2.0, 1.0]);
+        let ib = tensor::value_into_tensor_for("union", ib).expect("row indices");
+        assert_eq!(ib.data, vec![2.0]);
+    }
+
+    #[test]
+    fn union_numeric_fallback_reads_mirrorless_integer_storage() {
+        let mut a =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![7, 2]), vec![2, 1])
+                .expect("input");
+        let mut b =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::I32(vec![2, 9]), vec![2, 1])
+                .expect("input");
+        a.data.clear();
+        b.data.clear();
+        let (values, ia, ib) = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
+            .expect("union")
+            .into_triple();
+        let values = tensor::value_into_tensor_for("union", values).expect("values");
+        assert_eq!(values.data, vec![2.0, 7.0, 9.0]);
+        assert_eq!(values.shape, vec![3, 1]);
+        let ia = tensor::value_into_tensor_for("union", ia).expect("indices");
+        assert_eq!(ia.data, vec![2.0, 1.0]);
+        let ib = tensor::value_into_tensor_for("union", ib).expect("indices");
+        assert_eq!(ib.data, vec![2.0]);
+
+        let mut a = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U16(vec![1, 3, 1, 2, 4, 2]),
+            vec![3, 2],
+        )
+        .expect("rows input");
+        let mut b = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I32(vec![3, 5, 4, 6]),
+            vec![2, 2],
+        )
+        .expect("rows input");
+        a.data.clear();
+        b.data.clear();
+        let (values, ia, ib) =
+            evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
+                .expect("union rows")
+                .into_triple();
+        let values = tensor::value_into_tensor_for("union", values).expect("row values");
+        assert_eq!(values.shape, vec![3, 2]);
+        assert_eq!(values.data, vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]);
+        let ia = tensor::value_into_tensor_for("union", ia).expect("row indices");
+        assert_eq!(ia.data, vec![1.0, 2.0]);
         let ib = tensor::value_into_tensor_for("union", ib).expect("row indices");
         assert_eq!(ib.data, vec![2.0]);
     }
