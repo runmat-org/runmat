@@ -3,8 +3,8 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, IntValue, LogicalArray, ObjectInstance, ResolveContext, StringArray,
-    StructValue, Tensor, Type, Value,
+    CellArray, CharArray, IntValue, LogicalArray, NumericDType, ObjectInstance, ResolveContext,
+    StringArray, StructValue, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -1856,12 +1856,19 @@ fn moving_mad(tensor: Tensor, window: usize, options: MovingOptions) -> BuiltinR
         .dim
         .unwrap_or_else(|| first_nonsingleton_dim(rows, cols));
     validate_matrix_dim(dim, "movmad")?;
-    let mut out = vec![f64::NAN; tensor.data.len()];
+    let shape = tensor.shape.clone();
+    let output_dtype = if tensor.integer_storage().is_some() {
+        NumericDType::F64
+    } else {
+        tensor.dtype
+    };
+    let values = tensor_utils::tensor_values_f64_cow(&tensor);
+    let mut out = vec![f64::NAN; values.len()];
     if dim == 1 {
         for col in 0..cols {
             for row in 0..rows {
                 out[row + col * rows] = moving_mad_at(
-                    &tensor.data,
+                    &values,
                     rows,
                     col * rows,
                     row,
@@ -1876,7 +1883,7 @@ fn moving_mad(tensor: Tensor, window: usize, options: MovingOptions) -> BuiltinR
         for row in 0..rows {
             for col in 0..cols {
                 out[row + col * rows] = moving_mad_at(
-                    &tensor.data,
+                    &values,
                     rows,
                     row,
                     col,
@@ -1888,7 +1895,7 @@ fn moving_mad(tensor: Tensor, window: usize, options: MovingOptions) -> BuiltinR
             }
         }
     }
-    Tensor::new_with_dtype(out, tensor.shape, tensor.dtype)
+    Tensor::new_with_dtype(out, shape, output_dtype)
         .map(Value::Tensor)
         .map_err(internal_error)
 }
@@ -2566,5 +2573,27 @@ mod tests {
         ))
         .unwrap();
         assert!(matches!(result, Value::Tensor(t) if t.data[2] == 2.0));
+    }
+
+    #[test]
+    fn movmad_reads_typed_integer_storage_and_returns_double_output() {
+        let mut input = Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 100, 4, 5]), vec![5, 1])
+            .expect("integer movmad input");
+        input.data.clear();
+
+        let result = block_on(movmad_builtin(
+            Value::Tensor(input),
+            Value::Num(3.0),
+            Vec::new(),
+        ))
+        .unwrap();
+
+        match result {
+            Value::Tensor(tensor) => {
+                assert!(tensor.integer_storage().is_none());
+                assert_eq!(tensor.data, vec![0.5, 1.0, 2.0, 1.0, 0.5]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
     }
 }
