@@ -458,6 +458,14 @@ fn numeric_option(name: &str, value: &Value) -> BuiltinResult<f64> {
 }
 
 fn integer_option(name: &str, value: &Value) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer.try_to_usize().ok_or_else(|| {
+            integral_error_with_detail(
+                &INTEGRAL_ERROR_INVALID_ARGUMENT,
+                format!("option {name} must be nonnegative"),
+            )
+        });
+    }
     let parsed = numeric_option(name, value)?;
     if parsed < 0.0 {
         return Err(integral_error_with_detail(
@@ -890,7 +898,7 @@ mod tests {
     fn max_fun_evals_option_reads_typed_integer_storage_exactly() {
         let mut max_fun_evals =
             Tensor::new_integer(IntegerStorage::U16(vec![50]), vec![1, 1]).expect("MaxFunEvals");
-        max_fun_evals.data.clear();
+        max_fun_evals.data = vec![5.0];
 
         let result = block_on(integral_builtin(
             Value::FunctionHandle("sin".into()),
@@ -900,6 +908,22 @@ mod tests {
         ))
         .expect("integral");
         assert!(matches!(result, Value::Num(_)));
+    }
+
+    #[test]
+    fn max_fun_evals_option_rejects_negative_typed_integer_storage_exactly() {
+        let mut max_fun_evals =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("MaxFunEvals");
+        max_fun_evals.data = vec![50.0];
+
+        let err = block_on(integral_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            vec![Value::from("MaxFunEvals"), Value::Tensor(max_fun_evals)],
+        ))
+        .unwrap_err();
+        assert!(err.message().contains("MaxFunEvals"));
     }
 
     #[test]

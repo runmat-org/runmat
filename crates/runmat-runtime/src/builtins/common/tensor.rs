@@ -125,6 +125,18 @@ pub fn tensor_value_f64(tensor: &Tensor, index: usize) -> f64 {
     }
 }
 
+/// Return an exact integer scalar from a scalar integer value or scalar typed
+/// integer tensor.
+pub fn scalar_integer_value(value: &Value) -> Option<IntValue> {
+    match value {
+        Value::Int(value) => Some(value.clone()),
+        Value::Tensor(tensor) if is_scalar_tensor(tensor) => tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0)),
+        _ => None,
+    }
+}
+
 /// Consume a tensor and return f64 values, preserving the fast path for
 /// ordinary double tensors while reading typed integer storage exactly.
 pub fn tensor_into_values_f64(tensor: Tensor) -> Vec<f64> {

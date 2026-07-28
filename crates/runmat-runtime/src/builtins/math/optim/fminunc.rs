@@ -440,6 +440,23 @@ fn bounded_option_usize(
     default: usize,
     maximum: usize,
 ) -> BuiltinResult<usize> {
+    if let Some(value) = options.and_then(|options| lookup_option(options, field)) {
+        if let Some(integer) = tensor::scalar_integer_value(value) {
+            let Some(value) = integer.try_to_usize() else {
+                return Err(fminunc_error_with_detail(
+                    &FMINUNC_ERROR_INVALID_ARGUMENT,
+                    format!("option {field} must be non-negative"),
+                ));
+            };
+            if value > maximum {
+                return Err(fminunc_error_with_detail(
+                    &FMINUNC_ERROR_INVALID_ARGUMENT,
+                    format!("option {field} must be no greater than {maximum}"),
+                ));
+            }
+            return Ok(value);
+        }
+    }
     let value = option_f64(NAME, options, field, default as f64)?;
     if value < 0.0 {
         return Err(fminunc_error_with_detail(
@@ -1399,7 +1416,7 @@ mod tests {
     fn options_read_typed_integer_tensor_storage_exactly() {
         let mut max_iter =
             Tensor::new_integer(IntegerStorage::U16(vec![5]), vec![1, 1]).expect("MaxIter");
-        max_iter.data.clear();
+        max_iter.data = vec![0.0];
         let mut gradient = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1])
             .expect("SpecifyObjectiveGradient");
         gradient.data.clear();
@@ -1410,6 +1427,26 @@ mod tests {
         let parsed = FminuncOptions::from_struct(Some(&opts), 1).expect("options");
         assert_eq!(parsed.max_iter, 5);
         assert!(parsed.specify_objective_gradient);
+    }
+
+    #[test]
+    fn options_reject_typed_integer_limits_exactly() {
+        let mut negative =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("MaxIter");
+        negative.data = vec![5.0];
+        let mut opts = StructValue::new();
+        opts.insert("MaxIter", Value::Tensor(negative));
+        assert!(FminuncOptions::from_struct(Some(&opts), 1).is_err());
+
+        let mut too_large = Tensor::new_integer(
+            IntegerStorage::U64(vec![(MAX_FUN_EVAL_LIMIT as u64) + 1]),
+            vec![1, 1],
+        )
+        .expect("MaxFunEvals");
+        too_large.data = vec![MAX_FUN_EVAL_LIMIT as f64];
+        let mut opts = StructValue::new();
+        opts.insert("MaxFunEvals", Value::Tensor(too_large));
+        assert!(FminuncOptions::from_struct(Some(&opts), 1).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

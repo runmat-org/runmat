@@ -481,6 +481,21 @@ fn option_f64(field: &str, value: &Value) -> BuiltinResult<f64> {
 }
 
 fn option_positive_usize(field: &str, value: &Value) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        let Some(parsed) = integer.try_to_usize() else {
+            return Err(fminbnd_error_with_detail(
+                &FMINBND_ERROR_INVALID_ARGUMENT,
+                format!("option {field} must be a positive integer"),
+            ));
+        };
+        if parsed >= 1 {
+            return Ok(parsed);
+        }
+        return Err(fminbnd_error_with_detail(
+            &FMINBND_ERROR_INVALID_ARGUMENT,
+            format!("option {field} must be a positive integer"),
+        ));
+    }
     let parsed = option_f64(field, value)?;
     if parsed < 1.0 {
         return Err(fminbnd_error_with_detail(
@@ -967,7 +982,7 @@ mod tests {
         upper.data.clear();
         let mut max_iter =
             Tensor::new_integer(IntegerStorage::U16(vec![1000]), vec![1, 1]).expect("MaxIter");
-        max_iter.data.clear();
+        max_iter.data = vec![0.0];
 
         let mut opts = StructValue::new();
         opts.insert("MaxIter", Value::Tensor(max_iter));
@@ -982,6 +997,17 @@ mod tests {
             V::Num(x) => assert!((x - 2.0).abs() < 1.0e-3, "x = {x}"),
             other => panic!("unexpected value {other:?}"),
         }
+    }
+
+    #[test]
+    fn options_reject_nonpositive_typed_integer_storage_exactly() {
+        let mut max_iter =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("MaxIter");
+        max_iter.data = vec![1000.0];
+        let mut opts = StructValue::new();
+        opts.insert("MaxIter", Value::Tensor(max_iter));
+
+        assert!(FminbndOptions::from_struct(Some(&opts)).is_err());
     }
 
     #[test]

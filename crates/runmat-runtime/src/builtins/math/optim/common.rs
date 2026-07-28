@@ -213,7 +213,21 @@ pub(crate) fn option_usize(
     field: &str,
     default: usize,
 ) -> BuiltinResult<usize> {
-    let value = option_f64(builtin, options, field, default as f64)?;
+    let Some(options) = options else {
+        return Ok(default);
+    };
+    let Some(raw) = lookup_option(options, field) else {
+        return Ok(default);
+    };
+    if let Some(integer) = tensor::scalar_integer_value(raw) {
+        return integer.try_to_usize().ok_or_else(|| {
+            optim_error(
+                builtin,
+                format!("{builtin}: option {field} must be non-negative"),
+            )
+        });
+    }
+    let value = option_f64(builtin, Some(options), field, default as f64)?;
     if value < 0.0 {
         return Err(optim_error(
             builtin,
@@ -278,10 +292,13 @@ pub(crate) struct InitialGuess {
 #[cfg(test)]
 mod tests {
     use super::{
-        canonicalize_callback_handle, initial_guess, value_to_real_vector, value_to_scalar,
+        canonicalize_callback_handle, initial_guess, option_usize, value_to_real_vector,
+        value_to_scalar,
     };
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, Closure, IntegerStorage, StringArray, Tensor, Value};
+    use runmat_builtins::{
+        CharArray, Closure, IntegerStorage, StringArray, StructValue, Tensor, Value,
+    };
     use std::sync::Arc;
 
     #[test]
@@ -316,6 +333,29 @@ mod tests {
         assert_eq!(guess.values, vec![11.0, -13.0]);
         assert_eq!(guess.shape, vec![2, 1]);
         assert!(!guess.scalar);
+    }
+
+    #[test]
+    fn option_usize_reads_typed_integer_storage_exactly() {
+        let mut max_iter = Tensor::new_integer(IntegerStorage::U16(vec![37]), vec![1, 1]).unwrap();
+        max_iter.data = vec![0.0];
+        let mut options = StructValue::new();
+        options.insert("MaxIter", Value::Tensor(max_iter));
+
+        assert_eq!(
+            option_usize("optim_test", Some(&options), "MaxIter", 400).unwrap(),
+            37
+        );
+    }
+
+    #[test]
+    fn option_usize_rejects_negative_typed_integer_storage_exactly() {
+        let mut max_iter = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).unwrap();
+        max_iter.data = vec![12.0];
+        let mut options = StructValue::new();
+        options.insert("MaxIter", Value::Tensor(max_iter));
+
+        assert!(option_usize("optim_test", Some(&options), "MaxIter", 400).is_err());
     }
 
     #[test]

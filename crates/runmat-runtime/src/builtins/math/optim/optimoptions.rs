@@ -633,6 +633,27 @@ fn positive_finite_scalar(field: &str, value: &Value) -> BuiltinResult<f64> {
 }
 
 fn positive_integer_scalar(field: &str, value: &Value) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        if let Some(parsed) = integer.try_to_usize() {
+            if parsed == 0 {
+                return Err(optimoptions_error_with(
+                    &OPTIMOPTIONS_ERROR_INVALID_OPTION_VALUE,
+                    format!("optimoptions: option {field} must be a finite positive scalar"),
+                ));
+            }
+            return Ok(parsed);
+        }
+        if integer.try_to_i64().is_some_and(|value| value < 0) {
+            return Err(optimoptions_error_with(
+                &OPTIMOPTIONS_ERROR_INVALID_OPTION_VALUE,
+                format!("optimoptions: option {field} must be a finite positive scalar"),
+            ));
+        }
+        return Err(optimoptions_error_with(
+            &OPTIMOPTIONS_ERROR_INVALID_OPTION_VALUE,
+            format!("optimoptions: option {field} is too large"),
+        ));
+    }
     let parsed = positive_finite_scalar(field, value)?;
     if parsed.fract() != 0.0 {
         return Err(optimoptions_error_with(
@@ -1247,7 +1268,7 @@ mod tests {
     fn optimoptions_numeric_options_read_typed_integer_storage_exactly() {
         let mut max_iter =
             Tensor::new_integer(IntegerStorage::U16(vec![5]), vec![1, 1]).expect("MaxIter");
-        max_iter.data.clear();
+        max_iter.data = vec![0.0];
 
         let options = struct_result(
             run_optimoptions(vec![
@@ -1258,6 +1279,24 @@ mod tests {
             .expect("optimoptions"),
         );
         assert_eq!(num_field(&options, "MaxIter"), 5.0);
+    }
+
+    #[test]
+    fn optimoptions_rejects_negative_typed_integer_options_exactly() {
+        let mut max_iter =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("MaxIter");
+        max_iter.data = vec![5.0];
+
+        let err = run_optimoptions(vec![
+            Value::from("fsolve"),
+            Value::from("MaxIter"),
+            Value::Tensor(max_iter),
+        ])
+        .expect_err("negative MaxIter should fail");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:optimoptions:InvalidOptionValue")
+        );
     }
 
     #[test]
