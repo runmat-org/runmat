@@ -11,6 +11,7 @@ use runmat_plot::plots::figure::PlotElement;
 use runmat_plot::plots::scatter::MarkerStyle;
 use runmat_plot::plots::{Figure, Scatter3Plot, ScatterPlot, TextStyle};
 
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::op_common::{apply_axes_target, split_leading_axes_handle};
 use crate::builtins::plotting::state::{
     register_textscatter_handle, update_textscatter_figure, update_textscatter_handle_state,
@@ -376,10 +377,13 @@ fn coordinates_from_matrix(
         None
     };
     for row in 0..matrix.rows {
-        x.push(matrix.data[row]);
-        y.push(matrix.data[row + matrix.rows]);
+        x.push(tensor_utils::tensor_value_f64(matrix, row));
+        y.push(tensor_utils::tensor_value_f64(matrix, row + matrix.rows));
         if let Some(z_values) = z.as_mut() {
-            z_values.push(matrix.data[row + 2 * matrix.rows]);
+            z_values.push(tensor_utils::tensor_value_f64(
+                matrix,
+                row + 2 * matrix.rows,
+            ));
         }
     }
     validate_finite(&x, "XData", builtin)?;
@@ -1241,14 +1245,16 @@ fn color_data(
 
 fn color_matrix(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<Vec4>> {
     let tensor = tensor_from_value_local(value, builtin)?;
-    if tensor.data.is_empty() {
+    let len = tensor_utils::tensor_element_len(&tensor);
+    if len == 0 {
         return Ok(Vec::new());
     }
-    if tensor.data.len() == 3 && (tensor.rows == 1 || tensor.cols == 1) {
-        let color = rgb_triplet(&tensor.data, builtin)?;
+    if len == 3 && (tensor.rows == 1 || tensor.cols == 1) {
+        let values = tensor_utils::tensor_values_f64(&tensor);
+        let color = rgb_triplet(&values, builtin)?;
         return Ok(vec![color]);
     }
-    if tensor.cols != 3 {
+    if tensor.cols != 3 || len != tensor.rows.saturating_mul(3) {
         return Err(textscatter_error(
             builtin,
             "RGB color matrices must have three columns",
@@ -1257,9 +1263,9 @@ fn color_matrix(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<Vec4>
     let mut colors = Vec::with_capacity(tensor.rows);
     for row in 0..tensor.rows {
         let rgb = [
-            tensor.data[row],
-            tensor.data[row + tensor.rows],
-            tensor.data[row + 2 * tensor.rows],
+            tensor_utils::tensor_value_f64(&tensor, row),
+            tensor_utils::tensor_value_f64(&tensor, row + tensor.rows),
+            tensor_utils::tensor_value_f64(&tensor, row + 2 * tensor.rows),
         ];
         colors.push(rgb_triplet(&rgb, builtin)?);
     }
@@ -1486,6 +1492,42 @@ mod tests {
 
     fn row(values: &[f64]) -> Value {
         Value::Tensor(Tensor::new_2d(values.to_vec(), 1, values.len()).unwrap())
+    }
+
+    fn int_tensor(values: Vec<i16>, rows: usize, cols: usize) -> Tensor {
+        let mut tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(values),
+            vec![rows, cols],
+        )
+        .expect("integer tensor");
+        tensor.data.clear();
+        tensor
+    }
+
+    #[test]
+    fn textscatter_coordinates_read_typed_integer_storage_exactly() {
+        let (x, y, z) = coordinates_from_matrix(
+            &int_tensor(vec![1, 2, 3, 4, 5, 6], 2, 3),
+            3,
+            TEXTSCATTER3_NAME,
+        )
+        .expect("coordinates");
+
+        assert_eq!(x, vec![1.0, 2.0]);
+        assert_eq!(y, vec![3.0, 4.0]);
+        assert_eq!(z.unwrap(), vec![5.0, 6.0]);
+    }
+
+    #[test]
+    fn textscatter_color_matrix_reads_typed_integer_storage_exactly() {
+        assert_eq!(
+            color_matrix(
+                &Value::Tensor(int_tensor(vec![1, 0, 0, 1, 0, 0], 2, 3)),
+                TEXTSCATTER_NAME
+            )
+            .expect("colors"),
+            vec![Vec4::new(1.0, 0.0, 0.0, 1.0), Vec4::new(0.0, 1.0, 0.0, 1.0)]
+        );
     }
 
     #[test]

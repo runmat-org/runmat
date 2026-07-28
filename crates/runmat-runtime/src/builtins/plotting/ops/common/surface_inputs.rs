@@ -1,6 +1,7 @@
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{Tensor, Value};
 
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::common::{gather_tensor_from_gpu_async, numeric_vector};
 use crate::builtins::plotting::plotting_error;
 use crate::BuiltinResult;
@@ -212,6 +213,27 @@ mod tests {
         assert!(err
             .to_string()
             .contains("X must have length 4 and Y must have length 3"));
+    }
+
+    fn int_matrix(values: Vec<i16>, rows: usize, cols: usize) -> Tensor {
+        let mut tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(values),
+            vec![rows, cols],
+        )
+        .expect("integer matrix");
+        tensor.data.clear();
+        tensor
+    }
+
+    #[test]
+    fn meshgrid_axes_read_typed_integer_storage_exactly() {
+        let x = int_matrix(vec![10, 10, 20, 20], 2, 2);
+        let y = int_matrix(vec![1, 2, 1, 2], 2, 2);
+
+        assert_eq!(
+            extract_meshgrid_axes_from_xy_matrices(&x, &y, 2, 2, "surf").unwrap(),
+            (vec![10.0, 20.0], vec![1.0, 2.0])
+        );
     }
 }
 
@@ -437,7 +459,9 @@ fn matrix_rows_are_identical(tensor: &Tensor) -> bool {
         for col in 0..cols {
             let idx0 = rows * col;
             let idx = row + rows * col;
-            if tensor.data[idx] != tensor.data[idx0] {
+            if tensor_utils::tensor_value_f64(tensor, idx)
+                != tensor_utils::tensor_value_f64(tensor, idx0)
+            {
                 return false;
             }
         }
@@ -455,7 +479,9 @@ fn matrix_cols_are_identical(tensor: &Tensor) -> bool {
         for row in 0..rows {
             let idx0 = row;
             let idx = row + rows * col;
-            if tensor.data[idx] != tensor.data[idx0] {
+            if tensor_utils::tensor_value_f64(tensor, idx)
+                != tensor_utils::tensor_value_f64(tensor, idx0)
+            {
                 return false;
             }
         }
@@ -484,11 +510,11 @@ pub fn extract_meshgrid_axes_from_xy_matrices(
     }
     let mut x_vec = Vec::with_capacity(cols);
     for col in 0..cols {
-        x_vec.push(x.data[rows * col]);
+        x_vec.push(tensor_utils::tensor_value_f64(x, rows * col));
     }
     let mut y_vec = Vec::with_capacity(rows);
     for row in 0..rows {
-        y_vec.push(y.data[row]);
+        y_vec.push(tensor_utils::tensor_value_f64(y, row));
     }
     Ok((x_vec, y_vec))
 }

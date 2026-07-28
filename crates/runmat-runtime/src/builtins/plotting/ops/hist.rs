@@ -389,10 +389,11 @@ impl HistWeightsInput {
             other => {
                 let tensor =
                     Tensor::try_from(&other).map_err(|e| hist_err(format!("hist: Weights {e}")))?;
-                if tensor.data.len() != expected_len {
+                let len = tensor_utils::tensor_element_len(&tensor);
+                if len != expected_len {
                     return Err(hist_err(format!(
                         "hist: Weights must contain {expected_len} elements (got {})",
-                        tensor.data.len()
+                        len
                     )));
                 }
                 Ok(HistWeightsInput::Host(tensor))
@@ -1035,7 +1036,7 @@ fn parse_center_vector(tensor: Tensor) -> BuiltinResult<HistBinSpec> {
         {
             return parse_integer_bin_count(&value);
         }
-        return parse_bin_count_value(tensor.data[0]);
+        return parse_bin_count_value(tensor_utils::tensor_value_f64(&tensor, 0));
     }
     let values = numeric_vector(tensor);
     validate_monotonic(&values)?;
@@ -1532,7 +1533,7 @@ impl HistInput {
 
     fn len(&self) -> usize {
         match self {
-            Self::Host(tensor) => tensor.data.len(),
+            Self::Host(tensor) => tensor_utils::tensor_element_len(tensor),
             Self::Gpu(handle) => handle.shape.iter().product(),
         }
     }
@@ -1560,6 +1561,16 @@ pub(crate) mod tests {
             cols: 1,
             dtype: runmat_builtins::NumericDType::F64,
         }
+    }
+
+    fn int_tensor(data: Vec<i16>) -> Tensor {
+        let mut tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(data.clone()),
+            vec![data.len()],
+        )
+        .expect("integer tensor");
+        tensor.data.clear();
+        tensor
     }
 
     fn assert_plotting_unavailable(err: &RuntimeError) {
@@ -1627,6 +1638,14 @@ pub(crate) mod tests {
         .expect("negative bin count");
         negative.data.clear();
         assert!(parse_hist_bins(Some(Value::Tensor(negative)), 10).is_err());
+    }
+
+    #[test]
+    fn hist_weights_read_typed_integer_storage_exactly() {
+        let weights = HistWeightsInput::from_value(Value::Tensor(int_tensor(vec![1, 2, 3])), 3)
+            .expect("weights");
+
+        assert_eq!(weights.total_weight_hint(3), Some(6.0));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, RuntimeError};
 
@@ -287,7 +288,7 @@ async fn parse_pie_args(
         return Err(pie_invalid("expected values input"));
     }
     let values = tensor_from_value(args[0].clone()).await?;
-    let values = values.data;
+    let values = tensor_utils::tensor_into_values_f64(values);
     if values.iter().any(|v| !v.is_finite() || *v < 0.0) {
         return Err(pie_invalid("values must be finite and nonnegative"));
     }
@@ -296,8 +297,11 @@ async fn parse_pie_args(
     for arg in args.into_iter().skip(1) {
         if explode.is_none() {
             if let Ok(t) = tensor_from_value(arg.clone()).await {
-                if t.data.len() == values.len() && t.data.iter().all(|v| v.is_finite()) {
-                    explode = Some(t.data.into_iter().map(|v| v != 0.0).collect());
+                let explode_values = tensor_utils::tensor_values_f64(&t);
+                if explode_values.len() == values.len()
+                    && explode_values.iter().all(|v| v.is_finite())
+                {
+                    explode = Some(explode_values.into_iter().map(|v| v != 0.0).collect());
                     continue;
                 }
             }
@@ -385,6 +389,16 @@ mod tests {
         }
     }
 
+    fn int_vec_tensor(data: Vec<i16>) -> Tensor {
+        let mut tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(data.clone()),
+            vec![data.len()],
+        )
+        .expect("integer tensor");
+        tensor.data.clear();
+        tensor
+    }
+
     #[test]
     fn pie_builds_chart_with_labels_and_explode() {
         let _guard = lock_plot_registry();
@@ -408,6 +422,27 @@ mod tests {
         };
         assert_eq!(pie.values, vec![1.0, 2.0, 3.0]);
         assert_eq!(pie.slice_labels, vec!["A", "B", "C"]);
+        assert_eq!(pie.explode, vec![false, true, false]);
+    }
+
+    #[test]
+    fn pie_values_and_explode_read_typed_integer_storage_exactly() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+
+        futures::executor::block_on(pie_builtin(vec![
+            Value::Tensor(int_vec_tensor(vec![1, 2, 3])),
+            Value::Tensor(int_vec_tensor(vec![0, 1, 0])),
+        ]))
+        .unwrap();
+
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        let PlotElement::Pie(pie) = fig.plots().next().unwrap() else {
+            panic!("expected pie");
+        };
+        assert_eq!(pie.values, vec![1.0, 2.0, 3.0]);
         assert_eq!(pie.explode, vec![false, true, false]);
     }
 

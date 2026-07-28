@@ -506,7 +506,7 @@ pub(crate) fn build_surface_from_values(
     }
     let x_bins = x_edges.len() - 1;
     let y_bins = y_edges.len() - 1;
-    if values.data.len() != x_bins * y_bins {
+    if tensor::tensor_element_len(values) != x_bins * y_bins {
         return Err(internal(
             "histogram2: Values shape does not match bin edges",
         ));
@@ -516,7 +516,7 @@ pub(crate) fn build_surface_from_values(
     let mut z_grid = vec![vec![0.0; y_bins]; x_bins];
     for (ix, row) in z_grid.iter_mut().enumerate().take(x_bins) {
         for (iy, cell) in row.iter_mut().enumerate().take(y_bins) {
-            let mut value = values.data[ix + iy * x_bins];
+            let mut value = tensor::tensor_value_f64(values, ix + iy * x_bins);
             if !show_empty_bins && value == 0.0 {
                 value = f64::NAN;
             }
@@ -773,6 +773,16 @@ mod tests {
         Value::Tensor(Tensor::new(values.to_vec(), vec![values.len(), 1]).unwrap())
     }
 
+    fn int_matrix(values: Vec<i16>, rows: usize, cols: usize) -> Tensor {
+        let mut tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(values),
+            vec![rows, cols],
+        )
+        .expect("integer matrix");
+        tensor.data.clear();
+        tensor
+    }
+
     #[test]
     fn histogram2_option_scalar_reads_typed_integer_storage_exactly() {
         let mut tensor =
@@ -782,6 +792,26 @@ mod tests {
         assert_eq!(
             option_scalar(&Value::Tensor(tensor), "FaceAlpha").unwrap(),
             1.0
+        );
+    }
+
+    #[test]
+    fn histogram2_surface_values_read_typed_integer_storage_exactly() {
+        let surface = build_surface_from_values(
+            &int_matrix(vec![1, 2, 3, 4], 2, 2),
+            &[0.0, 1.0, 2.0],
+            &[0.0, 1.0, 2.0],
+            Histogram2DisplayStyle::Bar3,
+            true,
+            1.0,
+            None,
+            None,
+        )
+        .expect("surface");
+
+        assert_eq!(
+            surface.z_data.as_ref().unwrap(),
+            &vec![vec![1.0, 3.0], vec![2.0, 4.0]]
         );
     }
 

@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -485,7 +486,11 @@ fn build_triangle_edges(
     if tri.cols != 3 {
         return Err(triplot_invalid("TRI must be an M-by-3 connectivity matrix"));
     }
-    if !is_vector_tensor(x) || !is_vector_tensor(y) || x.data.len() != y.data.len() {
+    let point_count = tensor_utils::tensor_element_len(x);
+    if !is_vector_tensor(x)
+        || !is_vector_tensor(y)
+        || point_count != tensor_utils::tensor_element_len(y)
+    {
         return Err(triplot_invalid(
             "X and Y must be coordinate vectors with the same length",
         ));
@@ -493,19 +498,27 @@ fn build_triangle_edges(
     if tri.rows == 0 {
         return Ok((Vec::new(), Vec::new()));
     }
-    if x.data.is_empty() {
+    if point_count == 0 {
         return Err(triplot_invalid("X and Y must contain at least one point"));
     }
 
+    let x_values = tensor_utils::tensor_values_f64(x);
+    let y_values = tensor_utils::tensor_values_f64(y);
     let mut x_edges = Vec::with_capacity(tri.rows * 5);
     let mut y_edges = Vec::with_capacity(tri.rows * 5);
     for row in 0..tri.rows {
-        let a = vertex_index(tri.data[row], x.data.len())?;
-        let b = vertex_index(tri.data[row + tri.rows], x.data.len())?;
-        let c = vertex_index(tri.data[row + 2 * tri.rows], x.data.len())?;
+        let a = vertex_index(tensor_utils::tensor_value_f64(tri, row), point_count)?;
+        let b = vertex_index(
+            tensor_utils::tensor_value_f64(tri, row + tri.rows),
+            point_count,
+        )?;
+        let c = vertex_index(
+            tensor_utils::tensor_value_f64(tri, row + 2 * tri.rows),
+            point_count,
+        )?;
         for idx in [a, b, c, a] {
-            x_edges.push(x.data[idx]);
-            y_edges.push(y.data[idx]);
+            x_edges.push(x_values[idx]);
+            y_edges.push(y_values[idx]);
         }
         x_edges.push(f64::NAN);
         y_edges.push(f64::NAN);
@@ -528,7 +541,7 @@ fn vertex_index(value: f64, point_count: usize) -> BuiltinResult<usize> {
 
 fn column_tensor(tensor: &Tensor, col: usize) -> Tensor {
     let data = (0..tensor.rows)
-        .map(|row| tensor.data[row + col * tensor.rows])
+        .map(|row| tensor_utils::tensor_value_f64(tensor, row + col * tensor.rows))
         .collect::<Vec<_>>();
     Tensor {
         rows: tensor.rows,
@@ -602,11 +615,41 @@ mod tests {
         })
     }
 
+    fn int_tensor(data: Vec<i16>, rows: usize, cols: usize) -> Tensor {
+        let mut tensor =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::I16(data), vec![rows, cols])
+                .expect("integer tensor");
+        tensor.data.clear();
+        tensor
+    }
+
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
         ensure_plot_test_env();
         reset_plot_state();
         guard
+    }
+
+    #[test]
+    fn triplot_edges_read_typed_integer_storage_exactly() {
+        let (x_edges, y_edges) = build_triangle_edges(
+            &int_tensor(vec![1, 2, 3], 1, 3),
+            &int_tensor(vec![10, 20, 30], 3, 1),
+            &int_tensor(vec![1, 2, 3], 3, 1),
+        )
+        .expect("edges");
+
+        assert_eq!(x_edges[..4], [10.0, 20.0, 30.0, 10.0]);
+        assert!(x_edges[4].is_nan());
+        assert_eq!(y_edges[..4], [1.0, 2.0, 3.0, 1.0]);
+        assert!(y_edges[4].is_nan());
+    }
+
+    #[test]
+    fn triplot_column_tensor_reads_typed_integer_storage_exactly() {
+        let column = column_tensor(&int_tensor(vec![1, 2, 3, 4], 2, 2), 1);
+
+        assert_eq!(column.data, vec![3.0, 4.0]);
     }
 
     #[test]

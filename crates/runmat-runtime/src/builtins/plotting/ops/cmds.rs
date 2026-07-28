@@ -18,6 +18,7 @@ use super::state::{
     set_hidden_line_removal_for_axes, set_surface_shading, set_z_limits, toggle_box,
     toggle_colorbar, toggle_grid, toggle_minor_grid,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::properties::{resolve_plot_handle, PlotHandle};
 use crate::builtins::plotting::type_resolvers::bool_type;
 use crate::{build_runtime_error, RuntimeError};
@@ -505,11 +506,13 @@ pub fn axis_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
 
     // Numeric form: axis([xmin xmax ymin ymax]) or axis([xmin xmax ymin ymax zmin zmax])
     if let Value::Tensor(t) = &args[0] {
-        if t.data.len() == 4 {
-            let xmin = t.data[0];
-            let xmax = t.data[1];
-            let ymin = t.data[2];
-            let ymax = t.data[3];
+        let len = tensor_utils::tensor_element_len(t);
+        if len == 4 {
+            let values = tensor_utils::tensor_values_f64(t);
+            let xmin = values[0];
+            let xmax = values[1];
+            let ymin = values[2];
+            let ymax = values[3];
             if !(xmin.is_finite() && xmax.is_finite() && ymin.is_finite() && ymax.is_finite()) {
                 return Err(cmd_error_with_message(
                     "axis",
@@ -520,13 +523,14 @@ pub fn axis_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
             set_axis_limits(Some((xmin, xmax)), Some((ymin, ymax)));
             return Ok(true);
         }
-        if t.data.len() == 6 {
-            let xmin = t.data[0];
-            let xmax = t.data[1];
-            let ymin = t.data[2];
-            let ymax = t.data[3];
-            let zmin = t.data[4];
-            let zmax = t.data[5];
+        if len == 6 {
+            let values = tensor_utils::tensor_values_f64(t);
+            let xmin = values[0];
+            let xmax = values[1];
+            let ymin = values[2];
+            let ymax = values[3];
+            let zmin = values[4];
+            let zmax = values[5];
             if !(xmin.is_finite()
                 && xmax.is_finite()
                 && ymin.is_finite()
@@ -843,6 +847,32 @@ mod tests {
         .unwrap();
         let zlim = get_builtin(vec![Value::Num(ax), Value::String("ZLim".into())]).unwrap();
         let zlim = Tensor::try_from(&zlim).unwrap();
+        assert_eq!(zlim.data, vec![4.0, 5.0]);
+    }
+
+    #[test]
+    fn axis_limits_read_typed_integer_storage_exactly() {
+        let _guard = setup();
+        let ax = crate::builtins::plotting::gca::gca_builtin(vec![]).unwrap();
+        let mut limits = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(vec![0, 10, -2, 2, 4, 5]),
+            vec![1, 6],
+        )
+        .expect("typed limits");
+        limits.data.clear();
+
+        axis_builtin(vec![Value::Tensor(limits)]).unwrap();
+
+        let xlim =
+            Tensor::try_from(&get_builtin(vec![ax.clone(), Value::String("XLim".into())]).unwrap())
+                .unwrap();
+        let ylim =
+            Tensor::try_from(&get_builtin(vec![ax.clone(), Value::String("YLim".into())]).unwrap())
+                .unwrap();
+        let zlim = Tensor::try_from(&get_builtin(vec![ax, Value::String("ZLim".into())]).unwrap())
+            .unwrap();
+        assert_eq!(xlim.data, vec![0.0, 10.0]);
+        assert_eq!(ylim.data, vec![-2.0, 2.0]);
         assert_eq!(zlim.data, vec![4.0, 5.0]);
     }
 

@@ -16,6 +16,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, RuntimeError};
 
@@ -387,12 +388,12 @@ fn default_axis(len: usize) -> Vec<f64> {
 }
 
 fn transpose_for_surface(tensor: &Tensor) -> Tensor {
-    let mut data = vec![0.0; tensor.data.len()];
+    let mut data = vec![0.0; tensor_utils::tensor_element_len(tensor)];
     for row in 0..tensor.rows {
         for col in 0..tensor.cols {
             let src = row + tensor.rows * col;
             let dst = col + tensor.cols * row;
-            data[dst] = tensor.data[src];
+            data[dst] = tensor_utils::tensor_value_f64(tensor, src);
         }
     }
     Tensor {
@@ -434,6 +435,23 @@ mod tests {
             cols,
             dtype: NumericDType::F64,
         }
+    }
+
+    fn int_tensor(data: Vec<i16>, rows: usize, cols: usize) -> Tensor {
+        let mut tensor =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::I16(data), vec![rows, cols])
+                .expect("integer tensor");
+        tensor.data.clear();
+        tensor
+    }
+
+    #[test]
+    fn heatmap_transpose_reads_typed_integer_storage_exactly() {
+        let transposed = transpose_for_surface(&int_tensor(vec![1, 2, 3, 4, 5, 6], 2, 3));
+
+        assert_eq!(transposed.rows, 3);
+        assert_eq!(transposed.cols, 2);
+        assert_eq!(transposed.data, vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]);
     }
 
     #[test]
