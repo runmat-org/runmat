@@ -4,7 +4,7 @@ use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, ResolveContext, Tensor, Type, Value,
+    ComplexTensor, NumericDType, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -564,7 +564,7 @@ fn value_shape(value: &Value) -> &[usize] {
 
 fn value_len(value: &Value) -> usize {
     match value {
-        Value::Tensor(tensor) => tensor.data.len(),
+        Value::Tensor(tensor) => tensor_len(tensor),
         Value::LogicalArray(logical) => logical.data.len(),
         Value::ComplexTensor(tensor) => tensor.data.len(),
         Value::GpuTensor(handle) => product(&handle.shape),
@@ -667,8 +667,26 @@ fn gradient_real_tensor_host_with_spacing(
     spacing: &GradientSpacing,
 ) -> BuiltinResult<Tensor> {
     let Tensor {
-        data, shape, dtype, ..
+        data,
+        integer_data,
+        shape,
+        dtype,
+        ..
     } = tensor;
+    let output_dtype = if integer_data.is_some() {
+        NumericDType::F64
+    } else {
+        dtype
+    };
+    let data = integer_data
+        .map(|storage| {
+            storage
+                .exact_values()
+                .into_iter()
+                .map(|value| value.to_f64())
+                .collect()
+        })
+        .unwrap_or(data);
     let dim_index = dim.saturating_sub(1);
     let mut shape = matlab_gradient_shape(&shape, data.len());
 
@@ -678,7 +696,7 @@ fn gradient_real_tensor_host_with_spacing(
         // invariant. Use the normalised shape directly, falling back to [0,0] if
         // matlab_gradient_shape returned an empty vec (untyped empty tensor).
         let empty_shape = if shape.is_empty() { vec![0, 0] } else { shape };
-        return Tensor::new_with_dtype(Vec::new(), empty_shape, dtype)
+        return Tensor::new_with_dtype(Vec::new(), empty_shape, output_dtype)
             .map_err(|e| gradient_internal_error(format!("gradient: {e}")));
     }
 
@@ -729,7 +747,7 @@ fn gradient_real_tensor_host_with_spacing(
         }
     }
 
-    Tensor::new_with_dtype(out, shape, dtype)
+    Tensor::new_with_dtype(out, shape, output_dtype)
         .map_err(|e| gradient_internal_error(format!("gradient: {e}")))
 }
 
@@ -966,6 +984,49 @@ mod tests {
         match result {
             Value::Tensor(out) => assert_eq!(out.data, vec![1.5, 2.0, 2.5]),
             other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gradient_input_reads_typed_integer_storage_without_mirror() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 4, 9]), vec![1, 3]).expect("input");
+        tensor.data.clear();
+
+        let result = gradient_builtin(Value::Tensor(tensor), Vec::new()).expect("gradient");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.dtype, NumericDType::F64);
+                assert!(out.integer_storage().is_none());
+                assert_eq!(out.data, vec![3.0, 4.0, 5.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gradient_multi_output_uses_typed_integer_storage_length_without_mirror() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2]).expect("input");
+        tensor.data.clear();
+        let _guard = crate::output_count::push_output_count(Some(2));
+
+        let result = gradient_builtin(Value::Tensor(tensor), Vec::new()).expect("gradient");
+        match result {
+            Value::OutputList(outputs) => {
+                let fx = test_support::gather(outputs[0].clone()).expect("fx");
+                let fy = test_support::gather(outputs[1].clone()).expect("fy");
+                assert_eq!(fx.shape, vec![2, 2]);
+                assert_eq!(fx.dtype, NumericDType::F64);
+                assert!(fx.integer_storage().is_none());
+                assert_eq!(fx.data, vec![1.0, 1.0, 1.0, 1.0]);
+                assert_eq!(fy.shape, vec![2, 2]);
+                assert_eq!(fy.dtype, NumericDType::F64);
+                assert!(fy.integer_storage().is_none());
+                assert_eq!(fy.data, vec![2.0, 2.0, 2.0, 2.0]);
+            }
+            other => panic!("expected output list, got {other:?}"),
         }
     }
 
