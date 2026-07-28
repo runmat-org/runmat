@@ -426,7 +426,10 @@ fn parse_speye_shape(args: &[Value]) -> BuiltinResult<(usize, usize)> {
     match args {
         [] => Ok((1, 1)),
         [n] => match n {
-            Value::Tensor(tensor) if is_vector_shape(&tensor.shape) && tensor.data.len() == 2 => {
+            Value::Tensor(tensor)
+                if is_vector_shape(&tensor.shape)
+                    && tensor_utils::tensor_element_len(tensor) == 2 =>
+            {
                 let dims = parse_speye_shape_tensor(tensor)?;
                 let rows = dims[0];
                 let cols = dims[1];
@@ -2263,8 +2266,9 @@ pub(crate) mod tests {
     #[test]
     fn speye_shape_parsing_accepts_typed_integer_tensors_exactly() {
         let large = 9_007_199_254_740_993_u64;
-        let shape =
+        let mut shape =
             Tensor::new_integer(IntegerStorage::U64(vec![large, 1]), vec![1, 2]).expect("shape");
+        shape.data.clear();
         let sparse =
             expect_sparse(super::speye_builtin(vec![Value::Tensor(shape)]).expect("speye"));
         assert_eq!(sparse.shape(), vec![large as usize, 1]);

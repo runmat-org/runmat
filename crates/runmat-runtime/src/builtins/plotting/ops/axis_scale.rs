@@ -99,7 +99,9 @@ fn numeric_scalar(value: &Value) -> Option<f64> {
     match value {
         Value::Num(v) => Some(*v),
         Value::Int(i) => Some(i.to_f64()),
-        Value::Tensor(t) if t.data.len() == 1 => Some(tensor_utils::tensor_value_f64(t, 0)),
+        Value::Tensor(t) if tensor_utils::is_scalar_tensor(t) => {
+            Some(tensor_utils::tensor_value_f64(t, 0))
+        }
         _ => None,
     }
 }
@@ -150,7 +152,7 @@ mod tests {
     #[test]
     fn axis_scale_numeric_scalar_reads_typed_integer_storage_exactly() {
         let mut tensor = Tensor::new_integer(IntegerStorage::I16(vec![12]), vec![1, 1]).unwrap();
-        tensor.data[0] = -3.0;
+        tensor.data.clear();
 
         assert_eq!(numeric_scalar(&Value::Tensor(tensor)), Some(12.0));
     }

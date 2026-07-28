@@ -946,7 +946,7 @@ fn value_as_scalar_f64(value: &Value) -> Option<f64> {
     match value {
         Value::Num(v) => Some(*v),
         Value::Int(i) => Some(i.to_f64()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             tensor::tensor_values_f64(tensor).first().copied()
         }
         _ => None,
@@ -1540,15 +1540,17 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn line_style_scalar_options_read_typed_integer_storage() {
+        let mut line_width =
+            Tensor::new_integer(IntegerStorage::U64(vec![3]), vec![1, 1]).expect("width");
+        line_width.data.clear();
+        let mut marker_size =
+            Tensor::new_integer(IntegerStorage::U16(vec![9]), vec![1, 1]).expect("size");
+        marker_size.data.clear();
         let rest = vec![
             Value::String("LineWidth".into()),
-            Value::Tensor(
-                Tensor::new_integer(IntegerStorage::U64(vec![3]), vec![1, 1]).expect("width"),
-            ),
+            Value::Tensor(line_width),
             Value::String("MarkerSize".into()),
-            Value::Tensor(
-                Tensor::new_integer(IntegerStorage::U16(vec![9]), vec![1, 1]).expect("size"),
-            ),
+            Value::Tensor(marker_size),
         ];
         let parsed =
             parse_line_style_args(&rest, &LineStyleParseOptions::plot()).expect("style parsed");

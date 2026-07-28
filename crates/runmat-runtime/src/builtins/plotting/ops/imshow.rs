@@ -237,8 +237,8 @@ async fn parse_display_range(value: Value) -> crate::BuiltinResult<DisplayRange>
             crate::builtins::common::map_control_flow_with_builtin(flow, BUILTIN_NAME)
         })?;
     match host {
-        Value::Tensor(tensor) if tensor.data.is_empty() => Ok(DisplayRange::Auto),
-        Value::Tensor(tensor) if tensor.data.len() == 2 => {
+        Value::Tensor(tensor) if tensor::tensor_element_len(&tensor) == 0 => Ok(DisplayRange::Auto),
+        Value::Tensor(tensor) if tensor::tensor_element_len(&tensor) == 2 => {
             let values = tensor::tensor_values_f64(&tensor);
             let lo = values[0];
             let hi = values[1];
@@ -843,7 +843,7 @@ mod tests {
         let mut range =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U8(vec![1, 7]), vec![1, 2])
                 .expect("typed range");
-        range.data.fill(0.0);
+        range.data.clear();
 
         let parsed =
             futures::executor::block_on(parse_display_range(Value::Tensor(range))).unwrap();

@@ -104,7 +104,7 @@ pub(crate) fn is_scalar_like(value: &Value) -> bool {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => true,
         Value::Tensor(t) => tensor::is_scalar_tensor(t),
         Value::LogicalArray(la) => la.data.len() == 1,
-        Value::ComplexTensor(t) => t.data.len() == 1,
+        Value::ComplexTensor(t) => tensor::is_scalar_complex_tensor(t),
         Value::GpuTensor(handle) => tensor::element_count(&handle.shape) == 1,
         _ => false,
     }
@@ -393,7 +393,7 @@ fn shapes_equal_with_trailing_ones(lhs: &[usize], rhs: &[usize]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntegerStorage, Tensor};
+    use runmat_builtins::{ComplexTensor, IntegerComplexStorage, IntegerStorage, Tensor};
 
     #[test]
     fn optional_dim_parses_typed_integer_tensor_exactly() {
@@ -440,6 +440,17 @@ mod tests {
             SpacingSpec::Scalar(value) => assert_eq!(value, 3.0),
             _ => panic!("expected scalar spacing"),
         }
+    }
+
+    #[test]
+    fn scalar_like_reads_typed_complex_integer_storage_without_mirror() {
+        let storage =
+            IntegerComplexStorage::new(IntegerStorage::I16(vec![3]), IntegerStorage::I16(vec![4]))
+                .expect("complex storage");
+        let mut scalar = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex scalar");
+        scalar.data.clear();
+
+        assert!(is_scalar_like(&Value::ComplexTensor(scalar)));
     }
 
     #[test]

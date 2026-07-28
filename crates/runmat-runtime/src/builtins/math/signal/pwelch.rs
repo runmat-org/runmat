@@ -778,7 +778,7 @@ fn is_scalar_numeric(value: &Value) -> bool {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
         Value::Tensor(tensor) => tensor_utils::is_scalar_tensor(tensor),
-        Value::ComplexTensor(tensor) => tensor.data.len() == 1,
+        Value::ComplexTensor(tensor) => tensor_utils::is_scalar_complex_tensor(tensor),
         Value::LogicalArray(logical) => logical.data.len() == 1,
         _ => false,
     }
@@ -1062,8 +1062,8 @@ fn hamming_window(len: usize) -> Vec<f64> {
 
 fn is_empty(value: &Value) -> bool {
     match value {
-        Value::Tensor(t) => t.data.is_empty(),
-        Value::ComplexTensor(t) => t.data.is_empty(),
+        Value::Tensor(t) => tensor_utils::tensor_element_len(t) == 0,
+        Value::ComplexTensor(t) => tensor_utils::complex_tensor_element_len(t) == 0,
         _ => false,
     }
 }
@@ -1238,6 +1238,20 @@ mod tests {
         let (pxx, f) = output_pair(out);
         assert_eq!(pxx.len(), 5);
         assert_eq!(f.len(), 5);
+    }
+
+    #[test]
+    fn pwelch_scalar_detector_reads_typed_complex_integer_storage_without_mirror() {
+        let storage = runmat_builtins::IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![8]),
+            IntegerStorage::I16(vec![0]),
+        )
+        .expect("complex integer storage");
+        let mut scalar =
+            runmat_builtins::ComplexTensor::new_integer(storage, vec![1, 1]).expect("scalar");
+        scalar.data.clear();
+
+        assert!(is_scalar_numeric(&Value::ComplexTensor(scalar)));
     }
 
     #[test]

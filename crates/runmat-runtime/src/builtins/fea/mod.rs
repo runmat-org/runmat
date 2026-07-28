@@ -2860,12 +2860,14 @@ fn value_to_json(builtin: &'static str, value: &Value) -> BuiltinResult<serde_js
                 .map(serde_json::Value::String)
                 .collect(),
         )),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => match tensor.integer_storage() {
-            Some(storage) => Ok(int_value_to_json(
-                &storage.value_at(0).expect("integer storage index is valid"),
-            )),
-            None => json_number(builtin, tensor.data[0]),
-        },
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            match tensor.integer_storage() {
+                Some(storage) => Ok(int_value_to_json(
+                    &storage.value_at(0).expect("integer storage index is valid"),
+                )),
+                None => json_number(builtin, tensor.data[0]),
+            }
+        }
         Value::Tensor(tensor) => Ok(serde_json::Value::Array(match tensor.integer_storage() {
             Some(storage) => storage
                 .exact_values()
@@ -3652,11 +3654,25 @@ mod tests {
             maximum.decimal_string()
         );
 
-        let tensor = Tensor::new_integer(
+        let mut scalar = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![u64::MAX]),
+            vec![1, 1],
+        )
+        .expect("scalar tensor");
+        scalar.data.clear();
+        assert_eq!(
+            value_to_json(INTERFACE_NAME, &Value::Tensor(scalar))
+                .expect("scalar tensor json")
+                .to_string(),
+            u64::MAX.to_string()
+        );
+
+        let mut tensor = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![42, u64::MAX]),
             vec![1, 2],
         )
         .expect("tensor");
+        tensor.data.clear();
         assert_eq!(
             value_to_json(INTERFACE_NAME, &Value::Tensor(tensor))
                 .expect("tensor json")

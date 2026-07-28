@@ -413,7 +413,7 @@ fn parse_n_number(raw: f64) -> BuiltinResult<usize> {
 fn exact_integer_scalar(value: &Value) -> Option<IntValue> {
     match value {
         Value::Int(value) => Some(value.clone()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => tensor
             .integer_storage()
             .and_then(|storage| storage.value_at(0)),
         _ => None,
@@ -558,25 +558,28 @@ mod tests {
 
     #[test]
     fn sphere_n_reads_typed_integer_tensor_exactly() {
-        let n = runmat_builtins::Tensor::new_integer(
+        let mut n = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![42]),
             vec![1, 1],
         )
         .expect("typed n");
+        n.data.clear();
         assert_eq!(block_on(parse_n_value(&Value::Tensor(n))).unwrap(), 42);
 
-        let negative = runmat_builtins::Tensor::new_integer(
+        let mut negative = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::I64(vec![-1]),
             vec![1, 1],
         )
         .expect("negative n");
+        negative.data.clear();
         assert!(block_on(parse_n_value(&Value::Tensor(negative))).is_err());
 
-        let too_large = runmat_builtins::Tensor::new_integer(
+        let mut too_large = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![u64::MAX]),
             vec![1, 1],
         )
         .expect("large n");
+        too_large.data.clear();
         assert!(block_on(parse_n_value(&Value::Tensor(too_large))).is_err());
     }
 

@@ -1279,7 +1279,10 @@ fn classify_value(value: &Value) -> BuiltinResult<ClassifiedValue> {
             Ok(ClassifiedValue::Double(tensor::tensor_value_f64(t, 0)))
         }
         Value::Complex(re, im) => Ok(ClassifiedValue::Complex((*re, *im))),
-        Value::ComplexTensor(t) if t.data.len() == 1 => Ok(ClassifiedValue::Complex(t.data[0])),
+        Value::ComplexTensor(t) if tensor::is_scalar_complex_tensor(t) => {
+            let value = tensor::complex_tensor_value_complex64(t, 0);
+            Ok(ClassifiedValue::Complex((value.re, value.im)))
+        }
         Value::CharArray(ca) if ca.rows * ca.cols == 1 => {
             let ch = ca.data.first().copied().unwrap_or('\0');
             Ok(ClassifiedValue::Char(ch))
@@ -1371,7 +1374,9 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntegerStorage, ResolveContext, Tensor, Type, Value};
+    use runmat_builtins::{
+        ComplexTensor, IntegerComplexStorage, IntegerStorage, ResolveContext, Tensor, Type, Value,
+    };
     use std::sync::Arc;
 
     fn call(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -1407,6 +1412,25 @@ pub(crate) mod tests {
                 assert_eq!(value, 9_007_199_254_740_993_u64 as f64);
             }
             _ => panic!("expected double classification"),
+        }
+    }
+
+    #[test]
+    fn uniform_classifier_reads_typed_complex_integer_tensor_storage_exactly() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I64(vec![9_007_199_254_740_993]),
+            IntegerStorage::I64(vec![-9_007_199_254_740_993]),
+        )
+        .expect("complex integer storage");
+        let mut tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
+        tensor.data.clear();
+
+        match classify_value(&Value::ComplexTensor(tensor)).expect("classify") {
+            ClassifiedValue::Complex((re, im)) => {
+                assert_eq!(re, 9_007_199_254_740_993_i64 as f64);
+                assert_eq!(im, -9_007_199_254_740_993_i64 as f64);
+            }
+            _ => panic!("expected complex classification"),
         }
     }
 
