@@ -758,8 +758,8 @@ fn char_array_to_string_array(
 
 fn tensor_to_string_array(tensor: Tensor) -> BuiltinResult<StringArray> {
     let strings = if let Some(storage) = tensor.integer_storage() {
-        let mut strings = Vec::with_capacity(tensor.data.len());
-        for idx in 0..tensor.data.len() {
+        let mut strings = Vec::with_capacity(storage.len());
+        for idx in 0..storage.len() {
             let value = storage
                 .value_at(idx)
                 .ok_or_else(|| string_flow("string: integer tensor storage is inconsistent"))?;
@@ -777,8 +777,9 @@ fn tensor_to_string_array(tensor: Tensor) -> BuiltinResult<StringArray> {
 }
 
 fn complex_tensor_to_string_array(tensor: ComplexTensor) -> BuiltinResult<StringArray> {
-    let mut strings = Vec::with_capacity(tensor.data.len());
-    for idx in 0..tensor.data.len() {
+    let len = tensor::complex_tensor_element_len(&tensor);
+    let mut strings = Vec::with_capacity(len);
+    for idx in 0..len {
         strings.push(tensor.format_element(idx));
     }
     StringArray::new(strings, tensor.shape).map_err(|e| string_flow(format!("string: {e}")))
@@ -979,6 +980,8 @@ pub(crate) mod tests {
             vec![1, 2],
         )
         .expect("integer tensor");
+        let mut tensor = tensor;
+        tensor.data.clear();
         let out = string_builtin(Value::Tensor(tensor), Vec::new()).expect("string");
         match out {
             Value::StringArray(sa) => {
@@ -997,6 +1000,8 @@ pub(crate) mod tests {
             vec![1, 2],
         )
         .expect("integer tensor");
+        let mut tensor = tensor;
+        tensor.data.clear();
         let out = string_builtin(Value::Tensor(tensor), Vec::new()).expect("string");
         match out {
             Value::StringArray(sa) => {
@@ -1016,6 +1021,8 @@ pub(crate) mod tests {
         )
         .expect("matching integer complex storage");
         let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).expect("complex integer");
+        let mut tensor = tensor;
+        tensor.data.clear();
         let out = string_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("string");
         match out {
             Value::StringArray(sa) => {
@@ -1099,6 +1106,8 @@ pub(crate) mod tests {
         let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
                 .expect("integer tensor");
+        let mut tensor = tensor;
+        tensor.data.clear();
         let cell = CellArray::new(vec![Value::Tensor(tensor)], 1, 1)
             .expect("cell with scalar integer tensor");
         let out = string_builtin(Value::Cell(cell), Vec::new()).expect("string");
@@ -1120,6 +1129,8 @@ pub(crate) mod tests {
         )
         .expect("matching integer complex storage");
         let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex integer");
+        let mut tensor = tensor;
+        tensor.data.clear();
         let cell = CellArray::new(vec![Value::ComplexTensor(tensor)], 1, 1)
             .expect("cell with scalar complex integer tensor");
         let out = string_builtin(Value::Cell(cell), Vec::new()).expect("string");
