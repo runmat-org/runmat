@@ -764,6 +764,34 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn mod_dense_integer_arrays_preserve_exact_storage_without_mirror() {
+        let mut lhs =
+            Tensor::new_integer(IntegerStorage::I64(vec![-7, 7]), vec![2, 1]).expect("lhs");
+        lhs.data.clear();
+        let mut rhs =
+            Tensor::new_integer(IntegerStorage::I64(vec![4, -4, 0]), vec![1, 3]).expect("rhs");
+        rhs.data.clear();
+
+        let result = mod_builtin(Value::Tensor(lhs), Value::Tensor(rhs)).expect("mod");
+        let Value::Tensor(result) = result else {
+            panic!("expected integer tensor");
+        };
+        assert_eq!(result.shape, vec![2, 3]);
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::I64(vec![1, 3, -3, -1, -7, 7]))
+        );
+
+        let mut lhs =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("lhs");
+        lhs.data.clear();
+        assert_eq!(
+            mod_builtin(Value::Tensor(lhs), Value::Num(3.0)).expect("mod"),
+            Value::Int(IntValue::U64(0))
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
