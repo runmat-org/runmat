@@ -436,7 +436,7 @@ async fn parse_flagged_options(
 }
 
 fn normalize_shape(input: &Tensor) -> Vec<usize> {
-    tensor::default_shape_for(&input.shape, input.data.len())
+    tensor::default_shape_for(&input.shape, tensor::tensor_element_len(input))
 }
 
 fn resolved_axes(shape: &[usize], axes: Axes) -> Vec<usize> {
@@ -624,7 +624,7 @@ fn weight_spec_for(
     input_shape: &[usize],
     axes: &[usize],
 ) -> BuiltinResult<WeightSpec> {
-    let weight_len = weights.data.len();
+    let weight_len = tensor::tensor_element_len(&weights);
     let weight_values = tensor::tensor_into_values_f64(weights);
     if weight_values.iter().any(|value| *value < 0.0) {
         return Err(descriptive_error(
@@ -1249,6 +1249,12 @@ mod tests {
         Value::Tensor(tensor)
     }
 
+    fn mirrorless_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
+        tensor.data.clear();
+        Value::Tensor(tensor)
+    }
+
     fn complex_int_tensor(real: IntegerStorage, imag: IntegerStorage, shape: Vec<usize>) -> Value {
         let mut tensor = runmat_builtins::ComplexTensor::new_integer(
             IntegerComplexStorage::new(real, imag).unwrap(),
@@ -1318,6 +1324,17 @@ mod tests {
 
         let kurt = block_on(kurtosis::kurtosis_builtin(x, all)).unwrap();
         assert_close(tensor_values(kurt).0[0], 1.5);
+    }
+
+    #[test]
+    fn descriptive_reduction_shape_uses_typed_integer_storage_not_mirror() {
+        let x = mirrorless_int_tensor(IntegerStorage::U16(vec![9]), Vec::new());
+
+        let out = block_on(geomean::geomean_builtin(x, Vec::new())).unwrap();
+
+        let (data, shape) = tensor_values(out);
+        assert_eq!(shape, vec![1, 1]);
+        assert_close(data[0], 9.0);
     }
 
     #[test]
@@ -1437,6 +1454,29 @@ mod tests {
             ],
         ))
         .unwrap();
+        assert_close(
+            tensor_values(out).0[0],
+            ((1.0 + 18.0 + 75.0) / 6.0_f64).sqrt(),
+        );
+    }
+
+    #[test]
+    fn weighted_rmse_weight_length_uses_typed_integer_storage_not_mirror() {
+        let x = Value::Tensor(Tensor::new(vec![2.0, 4.0, 6.0], vec![3, 1]).unwrap());
+        let y = Value::Num(1.0);
+        let weights = mirrorless_int_tensor(IntegerStorage::U16(vec![1, 2, 3]), vec![3, 1]);
+
+        let out = block_on(rmse::rmse_builtin(
+            x,
+            y,
+            vec![
+                Value::Num(1.0),
+                Value::CharArray(runmat_builtins::CharArray::new_row("Weights")),
+                weights,
+            ],
+        ))
+        .unwrap();
+
         assert_close(
             tensor_values(out).0[0],
             ((1.0 + 18.0 + 75.0) / 6.0_f64).sqrt(),
