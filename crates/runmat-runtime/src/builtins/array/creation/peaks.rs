@@ -316,6 +316,9 @@ fn peaks_literal_n(ctx: &ResolveContext) -> Option<usize> {
             if rounded < 0.0 || (rounded - value).abs() > 1e-9 {
                 return None;
             }
+            if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+                return None;
+            }
             Some(rounded as usize)
         }
         Some(LiteralValue::Bool(value)) => Some(usize::from(*value)),
@@ -623,7 +626,7 @@ async fn parse_scalar_n(value: &Value) -> crate::BuiltinResult<usize> {
     if rounded < 0.0 {
         return Err(builtin_error("peaks: n must be non-negative"));
     }
-    if rounded > usize::MAX as f64 {
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
         return Err(builtin_error("peaks: n is too large for this platform"));
     }
     Ok(rounded as usize)
@@ -799,6 +802,11 @@ mod tests {
     fn peaks_n_too_large_errors() {
         // 2e19 exceeds usize::MAX on all common platforms; must error cleanly.
         let err = peaks_builtin(vec![Value::Num(2e19)]).unwrap_err();
+        assert!(
+            err.to_string().contains("too large"),
+            "unexpected error: {err}"
+        );
+        let err = peaks_builtin(vec![Value::Num(usize::MAX as f64)]).unwrap_err();
         assert!(
             err.to_string().contains("too large"),
             "unexpected error: {err}"

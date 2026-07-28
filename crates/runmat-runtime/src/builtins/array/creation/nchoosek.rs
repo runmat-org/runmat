@@ -549,7 +549,10 @@ fn parse_nonnegative_integer_f64(value: f64) -> Option<usize> {
         return None;
     }
     let rounded = value.round();
-    if (value - rounded).abs() > 0.0 || rounded > usize::MAX as f64 {
+    if (value - rounded).abs() > 0.0
+        || rounded > usize::MAX as f64
+        || (usize::BITS == 64 && rounded == usize::MAX as f64)
+    {
         return None;
     }
     Some(rounded as usize)
@@ -698,6 +701,11 @@ mod tests {
 
         let err = call(Value::Int(IntValue::U8(20)), Value::Num(10.0)).unwrap_err();
         assert_eq!(err.identifier.as_deref(), Some("RunMat:nchoosek:TooLarge"));
+
+        assert!(!matches!(
+            call(Value::Num(5.0), Value::Num(usize::MAX as f64)),
+            Ok(_)
+        ));
     }
 
     #[test]

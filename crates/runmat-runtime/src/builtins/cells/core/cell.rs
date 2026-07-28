@@ -582,7 +582,7 @@ fn parse_numeric(value: f64, context: &str) -> BuiltinResult<usize> {
             &CELL_ERROR_INVALID_SIZE,
         ));
     }
-    if rounded > usize::MAX as f64 {
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
         return Err(cell_error_with_message(
             "cell: requested size exceeds platform limits",
             &CELL_ERROR_INVALID_SIZE,
@@ -686,6 +686,9 @@ pub(crate) mod tests {
                 .expect("negative");
         negative.data.clear();
         assert!(parse_size_tensor(&negative).is_err());
+
+        assert!(parse_size_scalar(&Value::Num(usize::MAX as f64), "cell").is_err());
+        assert!(parse_size_scalar(&Value::Num((usize::MAX as f64) + 1.0), "cell").is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

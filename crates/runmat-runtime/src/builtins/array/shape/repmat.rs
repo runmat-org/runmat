@@ -538,7 +538,7 @@ fn coerce_rep_factor(value: f64, position: usize) -> crate::BuiltinResult<usize>
             "repmat: replication factors must be non-negative integers",
         ));
     }
-    if rounded > (usize::MAX as f64) {
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
         return Err(repmat_invalid_factors(format!(
             "repmat: replication factor {position} exceeds the maximum supported size"
         )));
@@ -912,6 +912,11 @@ pub(crate) mod tests {
             block_on(parse_replication_vector(&Value::Tensor(vector))).unwrap(),
             vec![large as usize, 0]
         );
+        assert!(block_on(parse_replication_scalar(&Value::Num(usize::MAX as f64))).is_err());
+        assert!(block_on(parse_replication_scalar(&Value::Num(
+            (usize::MAX as f64) + 1.0
+        )))
+        .is_err());
     }
 
     #[test]

@@ -313,7 +313,7 @@ fn parse_numeric_count(raw: f64) -> crate::BuiltinResult<usize> {
     if rounded < 0.0 {
         return Err(builtin_error("logspace: number of points must be >= 0"));
     }
-    if rounded > usize::MAX as f64 {
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
         return Err(builtin_error(
             "logspace: number of points is too large for this platform",
         ));
@@ -494,6 +494,11 @@ pub(crate) mod tests {
             usize::try_from(u64::MAX).ok()
         );
         assert!(futures::executor::block_on(parse_count(&Value::Int(IntValue::I64(-1)))).is_err());
+        assert!(futures::executor::block_on(parse_count(&Value::Num(usize::MAX as f64))).is_err());
+        assert!(
+            futures::executor::block_on(parse_count(&Value::Num((usize::MAX as f64) + 1.0)))
+                .is_err()
+        );
     }
     use crate::builtins::common::test_support;
     use futures::executor::block_on;

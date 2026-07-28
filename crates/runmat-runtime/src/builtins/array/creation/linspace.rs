@@ -373,7 +373,7 @@ fn parse_numeric_count(raw: f64) -> crate::BuiltinResult<usize> {
     if rounded < 0.0 {
         return Err(linspace_error(&LINSPACE_ERROR_COUNT_NEGATIVE));
     }
-    if rounded > usize::MAX as f64 {
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
         return Err(linspace_error(&LINSPACE_ERROR_COUNT_TOO_LARGE));
     }
     Ok(rounded as usize)
@@ -511,6 +511,8 @@ pub(crate) mod tests {
             usize::try_from(u64::MAX).ok()
         );
         assert!(parse_count_host(&Value::Int(IntValue::I64(-1))).is_err());
+        assert!(parse_count_host(&Value::Num(usize::MAX as f64)).is_err());
+        assert!(parse_count_host(&Value::Num((usize::MAX as f64) + 1.0)).is_err());
     }
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
