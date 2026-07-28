@@ -253,8 +253,9 @@ fn scalar_hypot_value(value: &Value) -> Option<f64> {
             Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
         }
         Value::Complex(re, im) => Some(complex_magnitude(*re, *im)),
-        Value::ComplexTensor(ct) if ct.data.len() == 1 => {
-            ct.data.first().map(|(re, im)| complex_magnitude(*re, *im))
+        Value::ComplexTensor(ct) if tensor::is_scalar_complex_tensor(ct) => {
+            let value = tensor::complex_tensor_value_complex64(ct, 0);
+            Some(complex_magnitude(value.re, value.im))
         }
         _ => None,
     }
@@ -285,6 +286,17 @@ pub(crate) mod tests {
             scalar_hypot_value(&Value::Tensor(tensor)),
             Some(9_007_199_254_740_993_u64 as f64)
         );
+    }
+
+    #[test]
+    fn scalar_hypot_value_reads_typed_integer_complex_storage_without_mirror() {
+        let storage =
+            IntegerComplexStorage::new(IntegerStorage::I16(vec![3]), IntegerStorage::I16(vec![4]))
+                .expect("complex integer storage");
+        let mut tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
+        tensor.data.clear();
+
+        assert_eq!(scalar_hypot_value(&Value::ComplexTensor(tensor)), Some(5.0));
     }
 
     #[test]

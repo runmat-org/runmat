@@ -527,9 +527,9 @@ fn parse_sigma(value: &Value) -> BuiltinResult<Option<Sigma>> {
         Value::Tensor(tensor) if tensor_element_len(tensor) == 1 => Ok(Some(Sigma::Near(
             Complex64::new(scalar_tensor_f64(tensor), 0.0),
         ))),
-        Value::ComplexTensor(tensor) if tensor.data.len() == 1 => {
-            let (re, im) = tensor.data[0];
-            Ok(Some(Sigma::Near(Complex64::new(re, im))))
+        Value::ComplexTensor(tensor) if tensor::is_scalar_complex_tensor(tensor) => {
+            let value = tensor::complex_tensor_value_complex64(tensor, 0);
+            Ok(Some(Sigma::Near(value)))
         }
         Value::LogicalArray(logical) if logical.len() == 1 => Ok(Some(Sigma::Near(
             Complex64::new(if logical.data[0] != 0 { 1.0 } else { 0.0 }, 0.0),
@@ -1259,6 +1259,20 @@ mod tests {
         let err = block_on(eigs_builtin(Value::ComplexTensor(tensor), Vec::new()))
             .expect_err("typed complex integer input must reject");
         assert!(err.message().contains("complex numbers with integer types"));
+    }
+
+    #[test]
+    fn eigs_sigma_parser_reads_typed_integer_complex_scalar_without_mirror() {
+        let storage =
+            IntegerComplexStorage::new(IntegerStorage::I16(vec![3]), IntegerStorage::I16(vec![-2]))
+                .expect("storage");
+        let mut tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("tensor");
+        tensor.data.clear();
+
+        match parse_sigma(&Value::ComplexTensor(tensor)).expect("sigma") {
+            Some(Sigma::Near(value)) => assert_eq!(value, Complex64::new(3.0, -2.0)),
+            _ => panic!("expected near sigma"),
+        }
     }
 
     fn tensor(value: Value) -> Tensor {

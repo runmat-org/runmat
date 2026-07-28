@@ -684,8 +684,8 @@ pub fn scalar_complex(value: &Value, builtin: &'static str) -> BuiltinResult<Com
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             Ok(Complex64::new(tensor::tensor_value_f64(tensor, 0), 0.0))
         }
-        Value::ComplexTensor(tensor) if tensor.data.len() == 1 => {
-            Ok(tensor::complex_tensor_values_complex64(tensor)[0])
+        Value::ComplexTensor(tensor) if tensor::is_scalar_complex_tensor(tensor) => {
+            Ok(tensor::complex_tensor_value_complex64(tensor, 0))
         }
         Value::LogicalArray(logical) if logical.data.len() == 1 => Ok(Complex64::new(
             if logical.data[0] == 0 { 0.0 } else { 1.0 },
@@ -1249,10 +1249,15 @@ mod tests {
         imag: IntegerStorage,
         shape: Vec<usize>,
     ) -> Value {
+        let is_scalar = shape.iter().product::<usize>() == 1;
         let storage = IntegerComplexStorage::new(real, imag).expect("complex integer storage");
         let mut tensor =
             ComplexTensor::new_integer(storage, shape).expect("complex integer tensor");
-        tensor.data.fill((f64::NAN, f64::NAN));
+        if is_scalar {
+            tensor.data.clear();
+        } else {
+            tensor.data.fill((f64::NAN, f64::NAN));
+        }
         Value::ComplexTensor(tensor)
     }
 

@@ -2226,7 +2226,10 @@ fn scalar_real_value(value: &Value) -> Option<f64> {
 fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
     match value {
         Value::Complex(re, im) => Some((*re, *im)),
-        Value::ComplexTensor(ct) if ct.data.len() == 1 => ct.data.first().copied(),
+        Value::ComplexTensor(ct) if tensor::is_scalar_complex_tensor(ct) => {
+            let value = tensor::complex_tensor_value_complex64(ct, 0);
+            Some((value.re, value.im))
+        }
         _ => None,
     }
 }
@@ -2393,7 +2396,9 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, Tensor, Value};
+    use runmat_builtins::{
+        ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, Tensor, Value,
+    };
 
     fn max_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::max_builtin(value, rest))
@@ -3018,6 +3023,20 @@ pub(crate) mod tests {
         let args = vec![Value::Num(2.0)];
         let result = max_builtin(Value::Num(3.0), args).expect("max");
         assert_eq!(result, Value::Num(3.0));
+    }
+
+    #[test]
+    fn max_scalar_complex_value_reads_typed_integer_complex_storage_without_mirror() {
+        let storage =
+            IntegerComplexStorage::new(IntegerStorage::I16(vec![-7]), IntegerStorage::I16(vec![2]))
+                .expect("complex integer storage");
+        let mut tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
+        tensor.data.clear();
+
+        assert_eq!(
+            scalar_complex_value(&Value::ComplexTensor(tensor)),
+            Some((-7.0, 2.0))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

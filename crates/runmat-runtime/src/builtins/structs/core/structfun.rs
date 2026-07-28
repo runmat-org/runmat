@@ -658,8 +658,9 @@ fn classify_uniform_value(value: &Value) -> BuiltinResult<ClassifiedValue> {
         Value::LogicalArray(array) if array.data.len() == 1 => {
             Ok(ClassifiedValue::Logical(array.data[0] != 0))
         }
-        Value::ComplexTensor(tensor) if tensor.data.len() == 1 => {
-            Ok(ClassifiedValue::Complex(tensor.data[0]))
+        Value::ComplexTensor(tensor) if tensor::is_scalar_complex_tensor(tensor) => {
+            let value = tensor::complex_tensor_value_complex64(tensor, 0);
+            Ok(ClassifiedValue::Complex((value.re, value.im)))
         }
         _ => Err(structfun_error(
             "structfun: callback must return scalar values when 'UniformOutput' is true",
@@ -690,7 +691,9 @@ fn structfun_error(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, IntegerStorage, Tensor};
+    use runmat_builtins::{
+        CellArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, Tensor,
+    };
     use std::sync::Arc;
 
     fn call(func: Value, st: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -709,6 +712,20 @@ mod tests {
                 assert_eq!(value, 9_007_199_254_740_993_u64 as f64);
             }
             _ => panic!("expected double classification"),
+        }
+    }
+
+    #[test]
+    fn uniform_classifier_reads_typed_integer_complex_storage_without_mirror() {
+        let storage =
+            IntegerComplexStorage::new(IntegerStorage::I16(vec![-4]), IntegerStorage::I16(vec![9]))
+                .expect("complex integer storage");
+        let mut tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
+        tensor.data.clear();
+
+        match classify_uniform_value(&Value::ComplexTensor(tensor)).expect("classify") {
+            ClassifiedValue::Complex(value) => assert_eq!(value, (-4.0, 9.0)),
+            _ => panic!("expected complex classification"),
         }
     }
 

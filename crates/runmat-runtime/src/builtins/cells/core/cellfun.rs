@@ -1019,7 +1019,10 @@ fn classify_value(value: &Value) -> BuiltinResult<ClassifiedValue> {
         Value::LogicalArray(la) if la.data.len() == 1 => {
             Ok(ClassifiedValue::Logical(la.data[0] != 0))
         }
-        Value::ComplexTensor(ct) if ct.data.len() == 1 => Ok(ClassifiedValue::Complex(ct.data[0])),
+        Value::ComplexTensor(ct) if tensor::is_scalar_complex_tensor(ct) => {
+            let value = tensor::complex_tensor_value_complex64(ct, 0);
+            Ok(ClassifiedValue::Complex((value.re, value.im)))
+        }
         _ => Err(cellfun_error_with_message(
             "cellfun: callback must return scalar values when 'UniformOutput' is true",
             &CELLFUN_ERROR_UNIFORM_OUTPUT,
@@ -1033,7 +1036,9 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, IntegerStorage, StringArray};
+    use runmat_builtins::{
+        ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, StringArray,
+    };
     use std::convert::TryInto;
     use std::sync::Arc;
 
@@ -1053,6 +1058,20 @@ pub(crate) mod tests {
                 assert_eq!(value, 9_007_199_254_740_993_u64 as f64);
             }
             _ => panic!("expected double classification"),
+        }
+    }
+
+    #[test]
+    fn uniform_classifier_reads_typed_integer_complex_storage_without_mirror() {
+        let storage =
+            IntegerComplexStorage::new(IntegerStorage::I16(vec![8]), IntegerStorage::I16(vec![-3]))
+                .expect("complex integer storage");
+        let mut tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
+        tensor.data.clear();
+
+        match classify_value(&Value::ComplexTensor(tensor)).expect("classify") {
+            ClassifiedValue::Complex(value) => assert_eq!(value, (8.0, -3.0)),
+            _ => panic!("expected complex classification"),
         }
     }
 
