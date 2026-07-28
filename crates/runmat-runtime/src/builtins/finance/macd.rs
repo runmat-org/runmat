@@ -228,8 +228,9 @@ fn compute_macd(close: &Tensor, include_signal: bool) -> BuiltinResult<(Tensor, 
         .copied()
         .unwrap_or_else(|| tensor::tensor_element_len(close));
     let cols = if shape.len() >= 2 { shape[1] } else { 1 };
-    let fast = exponential_moving_average(&close.data, rows, cols, FAST_ALPHA);
-    let slow = exponential_moving_average(&close.data, rows, cols, SLOW_ALPHA);
+    let close_values = tensor::tensor_values_f64_cow(close);
+    let fast = exponential_moving_average(&close_values, rows, cols, FAST_ALPHA);
+    let slow = exponential_moving_average(&close_values, rows, cols, SLOW_ALPHA);
     let macd = fast
         .iter()
         .zip(slow.iter())

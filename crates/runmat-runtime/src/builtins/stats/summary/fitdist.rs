@@ -460,13 +460,13 @@ async fn evaluate_distribution(
         input,
     )
     .await?;
-    let data = x
-        .data
-        .iter()
+    let shape = x.shape.clone();
+    let data = tensor::tensor_into_values_f64(x)
+        .into_iter()
         .map(|value| match mode {
-            DistributionEvaluation::Pdf => pdf_scalar(&fit, *value),
-            DistributionEvaluation::Cdf => cdf_scalar(&fit, *value),
-            DistributionEvaluation::Icdf => icdf_scalar(&fit, *value),
+            DistributionEvaluation::Pdf => pdf_scalar(&fit, value),
+            DistributionEvaluation::Cdf => cdf_scalar(&fit, value),
+            DistributionEvaluation::Icdf => icdf_scalar(&fit, value),
         })
         .collect::<Vec<_>>();
     finish_for(
@@ -475,7 +475,7 @@ async fn evaluate_distribution(
             DistributionEvaluation::Cdf => CDF_NAME,
             DistributionEvaluation::Icdf => "icdf",
         },
-        x.shape,
+        shape,
         data,
     )
 }
@@ -506,16 +506,16 @@ async fn evaluate_distribution_or_name(
         observations: f64::NAN,
     };
     let x = value_to_tensor(builtin, input).await?;
-    let data = x
-        .data
-        .iter()
+    let shape = x.shape.clone();
+    let data = tensor::tensor_into_values_f64(x)
+        .into_iter()
         .map(|value| match mode {
-            DistributionEvaluation::Pdf => pdf_scalar(&fit, *value),
-            DistributionEvaluation::Cdf => cdf_scalar(&fit, *value),
-            DistributionEvaluation::Icdf => icdf_scalar(&fit, *value),
+            DistributionEvaluation::Pdf => pdf_scalar(&fit, value),
+            DistributionEvaluation::Cdf => cdf_scalar(&fit, value),
+            DistributionEvaluation::Icdf => icdf_scalar(&fit, value),
         })
         .collect::<Vec<_>>();
-    finish_for(builtin, x.shape, data)
+    finish_for(builtin, shape, data)
 }
 
 async fn parse_named_eval_parameters(
@@ -629,7 +629,7 @@ async fn parse_fit_options(rest: Vec<Value>) -> BuiltinResult<FitOptions> {
         match name.as_str() {
             "frequency" | "freq" => {
                 let tensor = value_to_tensor(FITDIST_NAME, pair[1].clone()).await?;
-                options.frequency = Some(tensor.data);
+                options.frequency = Some(tensor::tensor_into_values_f64(tensor));
             }
             "censoring" | "censor" => {
                 return Err(invalid(
@@ -691,15 +691,16 @@ fn broadcast_tensor_to(
     let in_shape = align_shape(&tensor.shape, out_shape.len());
     let strides = broadcast::compute_strides(&in_shape);
     let mut out = Vec::with_capacity(len);
+    let input_len = tensor::tensor_element_len(tensor);
     for idx in 0..len {
         let source_idx = broadcast::broadcast_index(idx, out_shape, &in_shape, &strides);
-        let Some(value) = tensor.data.get(source_idx) else {
+        if source_idx >= input_len {
             return Err(invalid_for(
                 builtin,
                 format!("{builtin}: tensor data does not match tensor shape"),
             ));
-        };
-        out.push(*value);
+        }
+        out.push(tensor::tensor_value_f64(tensor, source_idx));
     }
     Ok(out)
 }
@@ -1501,7 +1502,7 @@ mod tests {
 
         let density = block_on(pdf_builtin(
             pd,
-            int_vec_tensor(IntegerStorage::U16(vec![2, 3]), 2),
+            mirrorless_int_tensor(IntegerStorage::U16(vec![2, 3]), vec![2, 1]),
             Vec::new(),
         ))
         .unwrap();
@@ -1521,7 +1522,7 @@ mod tests {
             Value::String("Exponential".into()),
             vec![
                 Value::String("Frequency".into()),
-                poisoned_int_tensor(IntegerStorage::U8(vec![1, 3, 2]), vec![3, 1]),
+                mirrorless_int_tensor(IntegerStorage::U8(vec![1, 3, 2]), vec![3, 1]),
             ],
         ))
         .unwrap();
@@ -1619,14 +1620,18 @@ mod tests {
     fn generic_pdf_cdf_random_name_overloads_execute() {
         let density = block_on(pdf_builtin(
             Value::String("Normal".into()),
-            Value::Num(0.0),
-            vec![Value::Num(0.0), Value::Num(1.0)],
+            mirrorless_int_tensor(IntegerStorage::I16(vec![0, 1]), vec![2, 1]),
+            vec![
+                mirrorless_int_tensor(IntegerStorage::I16(vec![0]), vec![1, 1]),
+                mirrorless_int_tensor(IntegerStorage::I16(vec![1]), vec![1, 1]),
+            ],
         ))
         .unwrap();
-        let Value::Num(density) = density else {
-            panic!("expected scalar density");
+        let Value::Tensor(density) = density else {
+            panic!("expected vector density");
         };
-        assert!((density - distribution_math::standard_normal_pdf(0.0)).abs() < 1.0e-12);
+        assert_eq!(density.shape, vec![2, 1]);
+        assert!((density.data[0] - distribution_math::standard_normal_pdf(0.0)).abs() < 1.0e-12);
 
         let probability = block_on(cdf_builtin(
             Value::String("Poisson".into()),
