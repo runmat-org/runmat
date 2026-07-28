@@ -21,6 +21,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, RuntimeError};
 
@@ -477,7 +478,7 @@ fn truecolor_shape(tensor: &Tensor, builtin: &'static str) -> crate::BuiltinResu
         ));
     }
     let expected_len = rows * cols * channels;
-    if tensor.data.len() != expected_len {
+    if tensor_utils::tensor_element_len(tensor) != expected_len {
         return Err(crate::builtins::plotting::plotting_error(
             builtin,
             format!("{builtin}: truecolor image data length mismatch"),
@@ -563,15 +564,16 @@ fn build_truecolor_image_surface(
             ));
         }
     };
+    let values = tensor_utils::tensor_values_f64_cow(&tensor);
     let mut grid = vec![vec![glam::Vec4::ZERO; cols]; rows];
     for row in 0..rows {
         for col in 0..cols {
             let base = row + rows * col;
-            let r = tensor.data[base] as f32 * scale;
-            let g = tensor.data[base + rows * cols] as f32 * scale;
-            let b = tensor.data[base + 2 * rows * cols] as f32 * scale;
+            let r = values[base] as f32 * scale;
+            let g = values[base + rows * cols] as f32 * scale;
+            let b = values[base + 2 * rows * cols] as f32 * scale;
             let a = if channels == 4 {
-                tensor.data[base + 3 * rows * cols] as f32 * scale
+                values[base + 3 * rows * cols] as f32 * scale
             } else {
                 1.0
             };
@@ -597,7 +599,7 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
-    use runmat_builtins::NumericDType;
+    use runmat_builtins::{IntegerStorage, NumericDType};
     use runmat_plot::plots::PlotElement;
 
     fn truecolor_tensor() -> Tensor {
@@ -609,6 +611,16 @@ mod tests {
             cols: 2,
             dtype: NumericDType::F64,
         }
+    }
+
+    fn typed_truecolor_tensor() -> Tensor {
+        let mut tensor = Tensor::new_integer(
+            IntegerStorage::U8(vec![255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255]),
+            vec![2, 2, 3],
+        )
+        .expect("typed truecolor");
+        tensor.data.clear();
+        tensor
     }
 
     #[test]
@@ -630,6 +642,27 @@ mod tests {
             get_builtin(vec![Value::Num(handle), Value::String("Type".into())]).unwrap(),
             Value::String("image".into())
         );
+    }
+
+    #[test]
+    fn image_truecolor_reads_typed_integer_storage_without_mirror() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+
+        futures::executor::block_on(image_builtin(vec![Value::Tensor(typed_truecolor_tensor())]))
+            .unwrap();
+
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        let PlotElement::Surface(surface) = fig.plots().next().unwrap() else {
+            panic!("expected surface");
+        };
+        let grid = surface.color_grid.as_ref().expect("color grid");
+        assert_eq!(grid[0][0], glam::Vec4::new(1.0, 0.0, 0.0, 1.0));
+        assert_eq!(grid[0][1], glam::Vec4::new(0.0, 0.0, 1.0, 1.0));
+        assert_eq!(grid[1][0], glam::Vec4::new(0.0, 1.0, 0.0, 1.0));
+        assert_eq!(grid[1][1], glam::Vec4::new(1.0, 1.0, 1.0, 1.0));
     }
 
     #[test]

@@ -458,7 +458,7 @@ fn truecolor_shape(tensor: &Tensor) -> crate::BuiltinResult<(usize, usize)> {
         ));
     }
     let expected_len = rows * cols * channels;
-    if tensor.data.len() != expected_len {
+    if tensor::tensor_element_len(tensor) != expected_len {
         return Err(imshow_error("imshow: truecolor image data length mismatch"));
     }
     Ok((rows, cols))
@@ -547,7 +547,7 @@ fn tensor_to_image_grid(
     cols: usize,
     rows: usize,
 ) -> crate::BuiltinResult<Vec<Vec<f64>>> {
-    if tensor.data.len() != rows * cols {
+    if tensor::tensor_element_len(&tensor) != rows * cols {
         return Err(imshow_error(format!(
             "imshow: image data must contain exactly {} values ({}x{})",
             rows * cols,
@@ -946,7 +946,7 @@ mod tests {
         let mut tensor =
             Tensor::new_integer(IntegerStorage::U16(vec![0, 1000, 40000, 65535]), vec![2, 2])
                 .expect("typed grayscale image");
-        tensor.data.fill(f64::NAN);
+        tensor.data.clear();
 
         futures::executor::block_on(imshow_builtin(vec![Value::Tensor(tensor)])).unwrap();
         let fig = clone_figure(current_figure_handle()).unwrap();
@@ -1011,7 +1011,7 @@ mod tests {
             vec![2, 2, 3],
         )
         .expect("typed truecolor image");
-        tensor.data.fill(f64::NAN);
+        tensor.data.clear();
 
         futures::executor::block_on(imshow_builtin(vec![Value::Tensor(tensor)])).unwrap();
         let fig = clone_figure(current_figure_handle()).unwrap();

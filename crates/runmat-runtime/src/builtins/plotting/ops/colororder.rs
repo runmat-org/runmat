@@ -204,12 +204,13 @@ fn parse_color_order(value: &Value) -> BuiltinResult<Vec<Vec4>> {
 }
 
 fn colors_from_tensor(tensor: &Tensor) -> BuiltinResult<Vec<Vec4>> {
-    if tensor.data.is_empty() {
+    let len = tensor_utils::tensor_element_len(tensor);
+    if len == 0 {
         return Err(colororder_err(
             "color array must contain at least one color",
         ));
     }
-    if tensor.data.len() == 3 && (tensor.rows == 1 || tensor.cols == 1) {
+    if len == 3 && (tensor.rows == 1 || tensor.cols == 1) {
         return Ok(vec![rgb_triplet(
             tensor_utils::tensor_value_f64(tensor, 0),
             tensor_utils::tensor_value_f64(tensor, 1),
@@ -424,7 +425,7 @@ mod tests {
     fn integer_rgb_matrix(data: Vec<u8>, rows: usize) -> Value {
         let mut tensor =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U8(data), vec![rows, 3]).unwrap();
-        tensor.data.fill(f64::NAN);
+        tensor.data.clear();
         Value::Tensor(tensor)
     }
 

@@ -315,7 +315,8 @@ pub(crate) fn parse_rgb_colormap_tensor(
     tensor: &Tensor,
     builtin: &'static str,
 ) -> BuiltinResult<(ColorMap, usize)> {
-    if tensor.cols != 3 || tensor.data.len() != tensor.rows.saturating_mul(3) {
+    if tensor.cols != 3 || tensor_utils::tensor_element_len(tensor) != tensor.rows.saturating_mul(3)
+    {
         return Err(invalid(
             builtin,
             "RGB colormap arrays must be m-by-3 numeric matrices",
@@ -618,7 +619,7 @@ mod tests {
             vec![2, 3],
         )
         .expect("typed RGB colormap");
-        typed.data.fill(f64::NAN);
+        typed.data.clear();
         let (map, len) = parse_rgb_colormap_tensor(&typed, "colormap").expect("parse typed");
         assert_eq!(len, 2);
         assert!(matches!(map, ColorMap::Listed(_)));
