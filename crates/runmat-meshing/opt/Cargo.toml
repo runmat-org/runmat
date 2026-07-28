@@ -1,6 +1,6 @@
 [package]
 name = "runmat-meshing-opt"
-version = "0.5.6"
+version = "0.6.0"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../../LICENSE.md"
