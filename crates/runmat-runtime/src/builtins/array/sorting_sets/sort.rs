@@ -427,6 +427,10 @@ fn sort_real_tensor(tensor: Tensor, args: &SortArgs) -> crate::BuiltinResult<Sor
         ));
     }
 
+    if let Some(storage) = tensor.integer_storage() {
+        return sort_integer_tensor(storage, tensor.shape.clone(), dim, args);
+    }
+
     let dim_len = dimension_length(&tensor.shape, dim);
     if tensor.data.is_empty() || dim_len <= 1 {
         let indices = vec![1.0; tensor.data.len()];
@@ -437,10 +441,6 @@ fn sort_real_tensor(tensor: Tensor, args: &SortArgs) -> crate::BuiltinResult<Sor
             sorted: sorted_value,
             indices: index_tensor,
         });
-    }
-
-    if let Some(storage) = tensor.integer_storage() {
-        return sort_integer_tensor(storage, tensor.shape.clone(), dim, args);
     }
 
     let stride_before = stride_before(&tensor.shape, dim);
@@ -1027,6 +1027,36 @@ pub(crate) mod tests {
             };
             assert_eq!(indices.data, vec![2.0, 3.0, 4.0, 1.0]);
         }
+    }
+
+    #[test]
+    fn sort_reads_exact_integer_values_without_mirror() {
+        let mut tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993, 7]),
+            vec![4, 1],
+        )
+        .expect("input");
+        tensor.data.clear();
+
+        let (sorted, indices) = evaluate(Value::Tensor(tensor), &[])
+            .expect("sort")
+            .into_values();
+        let Value::Tensor(sorted) = sorted else {
+            panic!("expected exact integer sorted values");
+        };
+        assert_eq!(
+            sorted.integer_storage(),
+            Some(&IntegerStorage::U64(vec![
+                0,
+                7,
+                9_007_199_254_740_993,
+                u64::MAX,
+            ]))
+        );
+        let Value::Tensor(indices) = indices else {
+            panic!("expected index tensor");
+        };
+        assert_eq!(indices.data, vec![2.0, 4.0, 3.0, 1.0]);
     }
 
     #[test]

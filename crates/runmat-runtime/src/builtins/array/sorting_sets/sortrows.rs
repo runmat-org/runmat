@@ -1154,6 +1154,19 @@ fn parse_column_vector(
                     "sortrows: column specification must be a vector",
                 ));
             }
+            if let Some(storage) = tensor.integer_storage() {
+                let mut specs = Vec::with_capacity(storage.len());
+                for entry in storage.exact_values() {
+                    let Some(column) = entry.try_to_i64() else {
+                        return Err(sortrows_error_with(
+                            &SORTROWS_ERROR_INVALID_COLUMN_INDEX,
+                            "sortrows: column indices must fit signed integer range",
+                        ));
+                    };
+                    specs.push(parse_single_column_i64(column, num_cols)?);
+                }
+                return Ok(Some(specs));
+            }
             let mut specs = Vec::with_capacity(tensor.data.len());
             for &entry in &tensor.data {
                 if !entry.is_finite() {
@@ -1370,6 +1383,39 @@ pub(crate) mod tests {
             sorted.integer_storage(),
             Some(&IntegerStorage::I64(vec![-1, 2, i64::MAX, i64::MIN]))
         );
+    }
+
+    #[test]
+    fn sortrows_reads_exact_integer_values_and_column_specs_without_mirrors() {
+        let mut tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 0, 1, 9_007_199_254_740_993]),
+            vec![2, 2],
+        )
+        .expect("input");
+        tensor.data.clear();
+        let mut columns =
+            Tensor::new_integer(IntegerStorage::I16(vec![-2]), vec![1, 1]).expect("columns");
+        columns.data.clear();
+
+        let (sorted, indices) = evaluate(Value::Tensor(tensor), &[Value::Tensor(columns)])
+            .expect("sortrows")
+            .into_values();
+        let Value::Tensor(sorted) = sorted else {
+            panic!("expected exact integer output");
+        };
+        assert_eq!(
+            sorted.integer_storage(),
+            Some(&IntegerStorage::U64(vec![
+                0,
+                u64::MAX,
+                9_007_199_254_740_993,
+                1,
+            ]))
+        );
+        let Value::Tensor(indices) = indices else {
+            panic!("expected index tensor");
+        };
+        assert_eq!(indices.data, vec![2.0, 1.0]);
     }
 
     #[test]
