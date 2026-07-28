@@ -615,15 +615,16 @@ fn broadcast_tensor_to(
     let in_shape = align_shape(&tensor.shape, out_shape.len());
     let strides = broadcast::compute_strides(&in_shape);
     let mut out = Vec::with_capacity(len);
+    let input_len = tensor::tensor_element_len(tensor);
     for idx in 0..len {
         let source_idx = broadcast::broadcast_index(idx, out_shape, &in_shape, &strides);
-        let Some(value) = tensor.data.get(source_idx) else {
+        if source_idx >= input_len {
             return Err(normal_error(
                 name,
                 format!("{name}: tensor data does not match tensor shape"),
             ));
-        };
-        out.push(*value);
+        }
+        out.push(tensor::tensor_value_f64(tensor, source_idx));
     }
     Ok(out)
 }
@@ -1594,8 +1595,10 @@ mod tests {
         }
     }
 
-    fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        Value::Tensor(Tensor::new_integer(storage, shape).unwrap())
+    fn mirrorless_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
+        tensor.data.clear();
+        Value::Tensor(tensor)
     }
 
     #[test]
@@ -2125,10 +2128,10 @@ mod tests {
     #[test]
     fn distribution_helpers_accept_typed_integer_tensors_at_f64_boundary() {
         let out = block_on(normcdf::normcdf_builtin(
-            int_tensor(IntegerStorage::I16(vec![0, 1]), vec![1, 2]),
+            mirrorless_int_tensor(IntegerStorage::I16(vec![0, 1]), vec![1, 2]),
             vec![
-                int_tensor(IntegerStorage::I16(vec![0]), vec![1, 1]),
-                int_tensor(IntegerStorage::U16(vec![1]), vec![1, 1]),
+                mirrorless_int_tensor(IntegerStorage::I16(vec![0]), vec![1, 1]),
+                mirrorless_int_tensor(IntegerStorage::U16(vec![1]), vec![1, 1]),
             ],
         ))
         .unwrap();
@@ -2142,8 +2145,11 @@ mod tests {
         }
 
         let chi2 = block_on(chi2cdf::chi2cdf_builtin(
-            int_tensor(IntegerStorage::U16(vec![3]), vec![1, 1]),
-            vec![int_tensor(IntegerStorage::U16(vec![5]), vec![1, 1])],
+            mirrorless_int_tensor(IntegerStorage::U16(vec![3]), vec![1, 1]),
+            vec![mirrorless_int_tensor(
+                IntegerStorage::U16(vec![5]),
+                vec![1, 1],
+            )],
         ))
         .unwrap();
         match chi2 {
