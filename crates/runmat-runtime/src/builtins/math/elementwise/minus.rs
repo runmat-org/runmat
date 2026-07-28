@@ -1020,6 +1020,44 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn minus_dense_integer_arrays_preserve_exact_storage_without_mirror() {
+        let mut lhs =
+            Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![2, 1])
+                .expect("lhs");
+        lhs.data.clear();
+        let mut rhs = Tensor::new_integer(IntegerStorage::I64(vec![1, -7, i64::MIN]), vec![1, 3])
+            .expect("rhs");
+        rhs.data.clear();
+
+        let result = minus_builtin(Value::Tensor(lhs), Value::Tensor(rhs), Vec::new())
+            .expect("integer minus");
+        let Value::Tensor(result) = result else {
+            panic!("expected integer tensor");
+        };
+        assert_eq!(result.shape, vec![2, 3]);
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::I64(vec![
+                i64::MIN,
+                i64::MAX - 1,
+                i64::MIN + 7,
+                i64::MAX,
+                0,
+                i64::MAX
+            ]))
+        );
+
+        let mut scalar_tensor =
+            Tensor::new_integer(IntegerStorage::U16(vec![0]), vec![1, 1]).expect("scalar");
+        scalar_tensor.data.clear();
+        assert_eq!(
+            minus_builtin(Value::Tensor(scalar_tensor), Value::Num(1.0), Vec::new())
+                .expect("scalar minus"),
+            Value::Int(runmat_builtins::IntValue::U16(0))
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn minus_row_column_broadcast() {

@@ -1040,6 +1040,46 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn times_dense_integer_arrays_preserve_exact_storage_without_mirror() {
+        let mut lhs = Tensor::new_integer(
+            IntegerStorage::U64(vec![(1_u64 << 63) + 1, u64::MAX]),
+            vec![2, 1],
+        )
+        .expect("lhs");
+        lhs.data.clear();
+        let mut rhs =
+            Tensor::new_integer(IntegerStorage::U64(vec![1, 2, 0]), vec![1, 3]).expect("rhs");
+        rhs.data.clear();
+
+        let result = times_builtin(Value::Tensor(lhs), Value::Tensor(rhs), Vec::new())
+            .expect("integer times");
+        let Value::Tensor(result) = result else {
+            panic!("expected integer tensor");
+        };
+        assert_eq!(result.shape, vec![2, 3]);
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::U64(vec![
+                (1_u64 << 63) + 1,
+                u64::MAX,
+                u64::MAX,
+                u64::MAX,
+                0,
+                0
+            ]))
+        );
+
+        let mut scalar_tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![i16::MAX]), vec![1, 1]).expect("scalar");
+        scalar_tensor.data.clear();
+        assert_eq!(
+            times_builtin(Value::Tensor(scalar_tensor), Value::Num(2.0), Vec::new())
+                .expect("scalar times"),
+            Value::Int(IntValue::I16(i16::MAX))
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn times_row_column_broadcast() {

@@ -1019,6 +1019,46 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn plus_dense_integer_arrays_preserve_exact_storage_without_mirror() {
+        let mut lhs = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, (1_u64 << 63) + 1]),
+            vec![2, 1],
+        )
+        .expect("lhs");
+        lhs.data.clear();
+        let mut rhs =
+            Tensor::new_integer(IntegerStorage::U64(vec![1, 7, 2]), vec![1, 3]).expect("rhs");
+        rhs.data.clear();
+
+        let result =
+            plus_builtin(Value::Tensor(lhs), Value::Tensor(rhs), Vec::new()).expect("integer plus");
+        let Value::Tensor(result) = result else {
+            panic!("expected integer tensor");
+        };
+        assert_eq!(result.shape, vec![2, 3]);
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::U64(vec![
+                u64::MAX,
+                (1_u64 << 63) + 2,
+                u64::MAX,
+                (1_u64 << 63) + 8,
+                u64::MAX,
+                (1_u64 << 63) + 3
+            ]))
+        );
+
+        let mut scalar_tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![i16::MAX]), vec![1, 1]).expect("scalar");
+        scalar_tensor.data.clear();
+        assert_eq!(
+            plus_builtin(Value::Tensor(scalar_tensor), Value::Num(1.0), Vec::new())
+                .expect("scalar plus"),
+            Value::Int(IntValue::I16(i16::MAX))
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn plus_row_column_broadcast() {
