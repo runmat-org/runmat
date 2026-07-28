@@ -77,6 +77,14 @@ fn dlarray_node_ids_preserve_typed_integer_bounds() {
     );
     assert_eq!(node_id(Value::Num(7.5)), None);
     assert_eq!(node_id(Value::Num(f64::INFINITY)), None);
+
+    let boundary = node_id(Value::Num(usize::MAX as f64));
+    if usize::BITS == 64 {
+        assert_eq!(boundary, None);
+    } else {
+        assert_eq!(boundary, Some(usize::MAX));
+    }
+    assert_eq!(node_id(Value::Num((usize::MAX as f64) + 1.0)), None);
 }
 
 fn layer_name(value: &Value) -> String {
@@ -146,6 +154,61 @@ fn layer_constructors_read_typed_integer_size_storage_exactly() {
             Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap()
         ))
     );
+
+    let exact = (1_u64 << 53) + 1;
+    let large_input = poisoned_int_tensor(IntegerStorage::U64(vec![exact]), vec![1, 1], f64::NAN);
+    let large = block_on(feature_input_layer_builtin(large_input, vec![]));
+    if usize::BITS == 64 {
+        assert!(large.is_ok());
+    } else {
+        assert!(large.is_err());
+    }
+}
+
+#[test]
+fn deep_learning_integer_parsers_reject_unrepresentable_double_bounds() {
+    let fc_boundary = block_on(fully_connected_layer_builtin(
+        Value::Num(usize::MAX as f64),
+        vec![],
+    ));
+    if usize::BITS == 64 {
+        assert!(fc_boundary.is_err());
+    } else {
+        assert!(fc_boundary.is_ok());
+    }
+    assert!(block_on(fully_connected_layer_builtin(
+        Value::Num((usize::MAX as f64) + 1.0),
+        vec![],
+    ))
+    .is_err());
+    assert!(block_on(fully_connected_layer_builtin(
+        Value::Tensor(Tensor::new(vec![f64::NAN], vec![1, 1]).expect("nan scalar")),
+        vec![],
+    ))
+    .is_err());
+
+    let vector_boundary = Tensor::new(vec![usize::MAX as f64], vec![1, 1]).expect("input size");
+    let feature_boundary = block_on(feature_input_layer_builtin(
+        Value::Tensor(vector_boundary),
+        vec![],
+    ));
+    if usize::BITS == 64 {
+        assert!(feature_boundary.is_err());
+    } else {
+        assert!(feature_boundary.is_ok());
+    }
+
+    let mut layer = ObjectInstance::new("nnet.cnn.layer.FullyConnectedLayer".to_string());
+    let exact = (1_u64 << 53) + 1;
+    layer
+        .properties
+        .insert("OutputSize".to_string(), Value::Int(IntValue::U64(exact)));
+    let parsed = positive_property_usize(&layer, "OutputSize", "forward");
+    if usize::BITS == 64 {
+        assert_eq!(parsed.unwrap(), exact as usize);
+    } else {
+        assert!(parsed.is_err());
+    }
 }
 
 #[test]

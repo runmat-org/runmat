@@ -6,7 +6,8 @@ use runmat_macros::runtime_builtin;
 use crate::{builtins::common::tensor, BuiltinResult};
 
 use super::{
-    any_type, deep_learning_error, gather_args, model, numeric_values, scalar_text, string_array,
+    any_type, deep_learning_error, gather_args, model, numeric_values, positive_usize, scalar_text,
+    string_array,
 };
 
 #[runtime_builtin(
@@ -687,20 +688,12 @@ fn positive_option_usize(
     function: &'static str,
 ) -> BuiltinResult<usize> {
     match object.properties.get(name) {
-        Some(value) => {
-            let values = numeric_values(value, function, name)?;
-            if values.len() != 1
-                || !values[0].is_finite()
-                || values[0] < 1.0
-                || values[0].fract().abs() > f64::EPSILON
-            {
-                return Err(deep_learning_error(
-                    function,
-                    format!("{function}: {name} must be a positive integer scalar"),
-                ));
-            }
-            Ok(values[0] as usize)
-        }
+        Some(value) => positive_usize(value, function, name).map_err(|_| {
+            deep_learning_error(
+                function,
+                format!("{function}: {name} must be a positive integer scalar"),
+            )
+        }),
         None => Ok(default),
     }
 }

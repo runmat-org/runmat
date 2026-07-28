@@ -6,8 +6,8 @@ use crate::{builtins::common::tensor, BuiltinResult};
 
 use super::{
     any_type, autodiff, deep_learning_error, gather_args, layer_names, layers_from_value,
-    numeric_values, object, parse_name_values, scalar_text, string_array, tensor_value,
-    unsupported_error,
+    numeric_values, numeric_vector, object, parse_name_values, positive_usize, scalar_text,
+    string_array, tensor_value, unsupported_error,
 };
 
 pub(crate) const DLNETWORK_CLASS: &str = "dlnetwork";
@@ -974,20 +974,14 @@ pub(super) fn feature_input_width(
         .properties
         .get("InputSize")
         .ok_or_else(|| deep_learning_error(function, "featureInputLayer is missing InputSize"))
-        .and_then(|value| numeric_values(value, function, "InputSize"))?;
+        .and_then(|value| numeric_vector(value, function, "InputSize"))?;
     let Some(width) = values.first() else {
         return Err(deep_learning_error(
             function,
             "featureInputLayer InputSize must not be empty",
         ));
     };
-    if !width.is_finite() || *width < 1.0 || width.fract().abs() > f64::EPSILON {
-        return Err(deep_learning_error(
-            function,
-            "featureInputLayer InputSize must contain positive integers",
-        ));
-    }
-    Ok(*width as usize)
+    Ok(*width)
 }
 
 pub(super) fn positive_property_usize(
@@ -995,24 +989,16 @@ pub(super) fn positive_property_usize(
     name: &str,
     function: &'static str,
 ) -> BuiltinResult<usize> {
-    let values = object
-        .properties
-        .get(name)
-        .ok_or_else(|| {
-            deep_learning_error(function, format!("{function}: layer is missing {name}"))
-        })
-        .and_then(|value| numeric_values(value, function, name))?;
-    if values.len() != 1
-        || !values[0].is_finite()
-        || values[0] < 1.0
-        || values[0].fract().abs() > f64::EPSILON
-    {
-        return Err(deep_learning_error(
+    let values = object.properties.get(name).ok_or_else(|| {
+        deep_learning_error(function, format!("{function}: layer is missing {name}"))
+    })?;
+    match positive_usize(values, function, name) {
+        Ok(value) => Ok(value),
+        Err(_) => Err(deep_learning_error(
             function,
             format!("{function}: {name} must be a positive integer scalar"),
-        ));
+        )),
     }
-    Ok(values[0] as usize)
 }
 
 pub(super) fn tensor_property(

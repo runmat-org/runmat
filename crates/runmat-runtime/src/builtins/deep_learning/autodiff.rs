@@ -249,15 +249,7 @@ pub(super) fn dlarray_node_id(value: &Value) -> Option<usize> {
     object
         .properties
         .get(AD_NODE_PROPERTY)
-        .and_then(|value| match value {
-            Value::Num(n)
-                if n.is_finite() && *n >= 0.0 && n.fract() == 0.0 && *n < usize::MAX as f64 =>
-            {
-                Some(*n as usize)
-            }
-            Value::Int(i) => i.try_to_usize(),
-            _ => None,
-        })
+        .and_then(|value| super::nonnegative_usize(value, "dlarray", AD_NODE_PROPERTY))
 }
 
 pub(super) fn dlarray_format_and_labels(value: &Value) -> (Value, Value) {

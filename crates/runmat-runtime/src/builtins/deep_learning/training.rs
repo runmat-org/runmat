@@ -9,7 +9,7 @@ use crate::BuiltinResult;
 
 use super::{
     any_type, autodiff, deep_learning_error, ensure_dlarray_class_registered, gather_args, model,
-    object, parse_name_values, scalar_text, text_or_missing, unsupported_error,
+    object, parse_name_values, positive_usize, scalar_text, text_or_missing, unsupported_error,
 };
 use crate::builtins::common::gpu_helpers;
 
@@ -1225,14 +1225,12 @@ fn require_same_shape(
 }
 
 fn positive_iteration(value: &Value) -> BuiltinResult<usize> {
-    let iteration = optional_positive_scalar(std::slice::from_ref(value), 0, 0.0, "iteration")?;
-    if iteration.fract().abs() > f64::EPSILON || iteration > usize::MAX as f64 {
-        return Err(deep_learning_error(
+    positive_usize(value, "adamupdate", "iteration").map_err(|_| {
+        deep_learning_error(
             "adamupdate",
             "adamupdate: iteration must be a positive integer",
-        ));
-    }
-    Ok(iteration as usize)
+        )
+    })
 }
 
 fn optional_finite_scalar(
@@ -1303,12 +1301,41 @@ mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
+    use runmat_builtins::{IntValue, IntegerStorage};
 
     fn assert_close(actual: f64, expected: f64) {
         assert!(
             (actual - expected).abs() < 1.0e-10,
             "got {actual}, expected {expected}"
         );
+    }
+
+    #[test]
+    fn adamupdate_iteration_parser_preserves_typed_integer_bounds() {
+        assert_eq!(
+            positive_iteration(&Value::Int(IntValue::U16(7))).unwrap(),
+            7
+        );
+        assert!(positive_iteration(&Value::Int(IntValue::I8(-1))).is_err());
+
+        let exact = (1_u64 << 53) + 1;
+        let mut typed =
+            Tensor::new_integer(IntegerStorage::U64(vec![exact]), vec![1, 1]).expect("iteration");
+        typed.data.fill(f64::NAN);
+        let parsed = positive_iteration(&Value::Tensor(typed));
+        if usize::BITS == 64 {
+            assert_eq!(parsed.unwrap(), exact as usize);
+        } else {
+            assert!(parsed.is_err());
+        }
+
+        let boundary = positive_iteration(&Value::Num(usize::MAX as f64));
+        if usize::BITS == 64 {
+            assert!(boundary.is_err());
+        } else {
+            assert_eq!(boundary.unwrap(), usize::MAX);
+        }
+        assert!(positive_iteration(&Value::Num((usize::MAX as f64) + 1.0)).is_err());
     }
 
     #[test]
