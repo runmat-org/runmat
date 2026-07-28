@@ -762,6 +762,20 @@ mod tests {
     }
 
     #[test]
+    fn qammod_reads_typed_integer_symbol_storage_exactly() {
+        let out = qammod(
+            integer_tensor(IntegerStorage::U64(vec![0, 1, 2, 3]), vec![1, 4]),
+            4,
+            vec![],
+        );
+        assert_eq!(out.shape, vec![1, 4]);
+        assert_complex_close(
+            &out.data,
+            &[(-1.0, 1.0), (-1.0, -1.0), (1.0, 1.0), (1.0, -1.0)],
+        );
+    }
+
+    #[test]
     fn qammod_16_gray_mapping() {
         let input: Vec<f64> = (0..16).map(|v| v as f64).collect();
         let out = qammod(tensor(input, vec![1, 16]), 16, vec![]);
@@ -834,6 +848,23 @@ mod tests {
                     0.0, 0.0, 0.0, 0.0, // channel 1 -> symbol 0
                     1.0, 1.0, 1.0, 1.0, // channel 2 -> symbol 15
                 ],
+                vec![4, 2],
+            ),
+            16,
+            vec![Value::from("InputType"), Value::from("bit")],
+        );
+        assert_eq!(out.shape, vec![1, 2]);
+        assert_complex_close(&out.data, &[(-3.0, 3.0), (1.0, -1.0)]);
+    }
+
+    #[test]
+    fn qammod_reads_typed_integer_bit_storage_exactly() {
+        let out = qammod(
+            integer_tensor(
+                IntegerStorage::U8(vec![
+                    0, 0, 0, 0, // channel 1 -> symbol 0
+                    1, 1, 1, 1, // channel 2 -> symbol 15
+                ]),
                 vec![4, 2],
             ),
             16,
@@ -941,6 +972,20 @@ mod tests {
         let mapping = tensor(vec![0.0, 3.0, 1.0, 2.0], vec![1, 4]);
         let out = qammod(
             tensor(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]),
+            4,
+            vec![mapping],
+        );
+        assert_complex_close(
+            &out.data,
+            &[(-1.0, 1.0), (1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)],
+        );
+    }
+
+    #[test]
+    fn qammod_reads_typed_integer_custom_mapping_exactly() {
+        let mapping = integer_tensor(IntegerStorage::U16(vec![0, 3, 1, 2]), vec![1, 4]);
+        let out = qammod(
+            integer_tensor(IntegerStorage::U8(vec![0, 1, 2, 3]), vec![1, 4]),
             4,
             vec![mapping],
         );

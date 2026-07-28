@@ -752,6 +752,20 @@ mod tests {
     }
 
     #[test]
+    fn pskmod_reads_typed_integer_symbol_storage_exactly() {
+        let out = pskmod(
+            integer_tensor(IntegerStorage::U64(vec![0, 1, 2, 3]), vec![1, 4]),
+            4,
+            vec![],
+        );
+        assert_eq!(out.shape, vec![1, 4]);
+        assert_complex_close(
+            &out.data,
+            &[(1.0, 0.0), (0.0, 1.0), (0.0, -1.0), (-1.0, 0.0)],
+        );
+    }
+
+    #[test]
     fn pskmod_8psk_gray_mapping() {
         let out = pskmod(
             tensor((0..8).map(|v| v as f64).collect(), vec![1, 8]),
@@ -807,8 +821,33 @@ mod tests {
     }
 
     #[test]
+    fn pskmod_reads_typed_integer_custom_mapping_exactly() {
+        let mapping = integer_tensor(IntegerStorage::U16(vec![0, 3, 1, 2]), vec![1, 4]);
+        let out = pskmod(
+            integer_tensor(IntegerStorage::U8(vec![0, 1, 2, 3]), vec![1, 4]),
+            4,
+            vec![Value::Num(0.0), mapping],
+        );
+        assert_complex_close(
+            &out.data,
+            &[(1.0, 0.0), (-1.0, 0.0), (0.0, -1.0), (0.0, 1.0)],
+        );
+    }
+
+    #[test]
     fn pskmod_bit_input_groups_rows_by_channel() {
         let bits = tensor(vec![0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0], vec![4, 2]);
+        let out = pskmod(bits, 4, vec![Value::from("InputType"), Value::from("bit")]);
+        assert_eq!(out.shape, vec![2, 2]);
+        assert_complex_close(
+            &out.data,
+            &[(1.0, 0.0), (0.0, 1.0), (0.0, -1.0), (-1.0, 0.0)],
+        );
+    }
+
+    #[test]
+    fn pskmod_reads_typed_integer_bit_storage_exactly() {
+        let bits = integer_tensor(IntegerStorage::U8(vec![0, 0, 0, 1, 1, 0, 1, 1]), vec![4, 2]);
         let out = pskmod(bits, 4, vec![Value::from("InputType"), Value::from("bit")]);
         assert_eq!(out.shape, vec![2, 2]);
         assert_complex_close(
