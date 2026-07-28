@@ -51,6 +51,8 @@ fn cat_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("cat").build()
 }
 
+const MAX_CAT_DIMENSION: usize = 1024;
+
 const CAT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "B",
     ty: BuiltinParamType::Any,
@@ -483,7 +485,7 @@ async fn cat_builtin(dim: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
         return Err(cat_err(CAT_ERROR_TOO_FEW_INPUTS.message));
     }
     let dim_index = match dim {
-        Value::Int(_) | Value::Num(_) | Value::GpuTensor(_) => {
+        Value::Int(_) | Value::Num(_) | Value::Tensor(_) | Value::GpuTensor(_) => {
             match tensor::dimension_from_value_async(&dim, "cat", false)
                 .await
                 .map_err(cat_err)?
@@ -504,6 +506,11 @@ async fn cat_builtin(dim: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
             )))
         }
     };
+    if dim_index > MAX_CAT_DIMENSION {
+        return Err(cat_err(format!(
+            "cat: dimension must be <= {MAX_CAT_DIMENSION}"
+        )));
+    }
     let dim_zero = dim_index - 1;
 
     let (inputs, like) = extract_like(rest)?;
@@ -1473,6 +1480,78 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn cat_dimension_scalar_tensor_reads_typed_integer_storage_exactly() {
+        let mut dim = Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("dim");
+        dim.data.clear();
+        let a = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
+        let b = Tensor::new(vec![3.0], vec![1, 1]).unwrap();
+        let result =
+            cat_builtin(Value::Tensor(dim), vec![Value::Tensor(a), Value::Tensor(b)]).expect("cat");
+
+        let Value::Tensor(output) = result else {
+            panic!("expected tensor");
+        };
+        assert_eq!(output.shape, vec![1, 3]);
+        assert_eq!(output.data, vec![1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn cat_dimension_scalar_double_tensor_is_accepted() {
+        let dim = Tensor::new(vec![2.0], vec![1, 1]).expect("dim");
+        let a = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
+        let b = Tensor::new(vec![3.0], vec![1, 1]).unwrap();
+        let result =
+            cat_builtin(Value::Tensor(dim), vec![Value::Tensor(a), Value::Tensor(b)]).expect("cat");
+
+        let Value::Tensor(output) = result else {
+            panic!("expected tensor");
+        };
+        assert_eq!(output.shape, vec![1, 3]);
+        assert_eq!(output.data, vec![1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn cat_dimension_scalar_tensor_rejects_negative_typed_integer_storage() {
+        let mut dim = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("dim");
+        dim.data = vec![2.0];
+        let a = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let b = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
+        let err =
+            cat_builtin(Value::Tensor(dim), vec![Value::Tensor(a), Value::Tensor(b)]).unwrap_err();
+        assert!(err.message().contains("dimension"));
+    }
+
+    #[test]
+    fn cat_dimension_tensor_rejects_non_scalar_and_oversized_typed_integer_storage() {
+        let vector_dim = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("dim");
+        let a = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let b = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
+        let err = cat_builtin(
+            Value::Tensor(vector_dim),
+            vec![Value::Tensor(a.clone()), Value::Tensor(b.clone())],
+        )
+        .unwrap_err();
+        assert!(!err.message().is_empty());
+
+        let too_large =
+            Tensor::new_integer(IntegerStorage::U64(vec![usize::MAX as u64]), vec![1, 1])
+                .expect("dim");
+        let err = cat_builtin(
+            Value::Tensor(too_large),
+            vec![Value::Tensor(a.clone()), Value::Tensor(b.clone())],
+        )
+        .unwrap_err();
+        assert!(err.message().contains("dimension"));
+
+        let err = cat_builtin(
+            Value::Int(IntValue::U64(usize::MAX as u64)),
+            vec![Value::Tensor(a), Value::Tensor(b)],
+        )
+        .unwrap_err();
+        assert!(err.message().contains("dimension"));
     }
 
     #[test]
