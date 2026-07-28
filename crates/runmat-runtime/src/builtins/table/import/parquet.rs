@@ -747,12 +747,39 @@ fn selected_row_groups(
 
 fn one_based_indices(value: &Value, context: &str) -> BuiltinResult<Vec<usize>> {
     match value {
+        Value::Int(integer) => integer
+            .try_to_usize()
+            .and_then(|index| index.checked_sub(1))
+            .map(|idx| vec![idx])
+            .ok_or_else(|| {
+                invalid_argument(format!(
+                    "parquetread: {context} entries must be positive integers"
+                ))
+            }),
         Value::Num(number) => one_based_index_from_number(*number, context).map(|idx| vec![idx]),
-        Value::Tensor(tensor) => tensor
-            .data
-            .iter()
-            .map(|value| one_based_index_from_number(*value, context))
-            .collect(),
+        Value::Tensor(tensor) => {
+            let len = crate::builtins::common::tensor::tensor_element_len(tensor);
+            let mut out = Vec::with_capacity(len);
+            if let Some(storage) = tensor.integer_storage() {
+                for idx in 0..len {
+                    let Some(parsed) = storage
+                        .value_at(idx)
+                        .and_then(|value| value.try_to_usize())
+                        .and_then(|index| index.checked_sub(1))
+                    else {
+                        return Err(invalid_argument(format!(
+                            "parquetread: {context} entries must be positive integers"
+                        )));
+                    };
+                    out.push(parsed);
+                }
+            } else {
+                for value in &tensor.data {
+                    out.push(one_based_index_from_number(*value, context)?);
+                }
+            }
+            Ok(out)
+        }
         other => Err(invalid_argument(format!(
             "parquetread: {context} must be a positive integer scalar or numeric vector, got {other:?}"
         ))),
@@ -763,6 +790,11 @@ fn one_based_index_from_number(value: f64, context: &str) -> BuiltinResult<usize
     if !value.is_finite() || value.fract() != 0.0 || value < 1.0 {
         return Err(invalid_argument(format!(
             "parquetread: {context} entries must be positive integers"
+        )));
+    }
+    if value > usize::MAX as f64 || (usize::BITS == 64 && value == usize::MAX as f64) {
+        return Err(invalid_argument(format!(
+            "parquetread: {context} entries exceed platform limits"
         )));
     }
     Ok(value as usize - 1)
@@ -778,4 +810,48 @@ fn millis_since_unix_to_datenum(millis: f64) -> f64 {
 
 fn seconds_since_unix_to_datenum(seconds: f64) -> f64 {
     719_529.0 + seconds / 86_400.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parquet_one_based_indices_read_typed_integer_storage_exactly() {
+        let exact = (1_u64 << 53) + 1;
+        let mut row_groups =
+            Tensor::new_integer(IntegerStorage::U64(vec![exact]), vec![1, 1]).expect("groups");
+        row_groups.data.fill(f64::NAN);
+
+        let parsed = one_based_indices(&Value::Tensor(row_groups), "RowGroups");
+        if usize::BITS == 64 {
+            assert_eq!(parsed.unwrap(), vec![exact as usize - 1]);
+        } else {
+            assert!(parsed.is_err());
+        }
+
+        let mut invalid =
+            Tensor::new_integer(IntegerStorage::I16(vec![0]), vec![1, 1]).expect("groups");
+        invalid.data.clear();
+        assert!(one_based_indices(&Value::Tensor(invalid), "RowGroups").is_err());
+    }
+
+    #[test]
+    fn parquet_one_based_indices_reject_unrepresentable_double_bounds() {
+        let boundary = one_based_indices(&Value::Num(usize::MAX as f64), "RowGroups");
+        if usize::BITS == 64 {
+            assert!(boundary.is_err());
+        } else {
+            assert_eq!(boundary.unwrap(), vec![usize::MAX - 1]);
+        }
+        assert!(one_based_indices(&Value::Num((usize::MAX as f64) + 1.0), "RowGroups").is_err());
+
+        let vector = Tensor::new(vec![1.0, usize::MAX as f64], vec![1, 2]).expect("groups");
+        let parsed = one_based_indices(&Value::Tensor(vector), "RowGroups");
+        if usize::BITS == 64 {
+            assert!(parsed.is_err());
+        } else {
+            assert_eq!(parsed.unwrap(), vec![0, usize::MAX - 1]);
+        }
+    }
 }

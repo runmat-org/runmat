@@ -37,17 +37,45 @@ pub(super) fn nonnegative_usize(value: &Value, context: &str) -> BuiltinResult<u
         Value::Int(value) => value.try_to_usize().ok_or_else(|| {
             invalid_argument(format!("table: {context} must be a non-negative integer"))
         }),
+        Value::Tensor(tensor) if crate::builtins::common::tensor::is_scalar_tensor(tensor) => {
+            if let Some(value) = tensor
+                .integer_storage()
+                .and_then(|storage| storage.value_at(0))
+            {
+                return value.try_to_usize().ok_or_else(|| {
+                    invalid_argument(format!("table: {context} must be a non-negative integer"))
+                });
+            }
+            nonnegative_usize_from_f64(
+                crate::builtins::common::tensor::tensor_value_f64(tensor, 0),
+                context,
+            )
+        }
         Value::Num(value)
             if value.is_finite()
                 && *value >= 0.0
                 && (value.round() - value).abs() <= f64::EPSILON =>
         {
-            Ok(value.round() as usize)
+            nonnegative_usize_from_f64(value.round(), context)
         }
         _ => Err(invalid_argument(format!(
             "table: {context} must be a non-negative integer"
         ))),
     }
+}
+
+fn nonnegative_usize_from_f64(value: f64, context: &str) -> BuiltinResult<usize> {
+    if !value.is_finite()
+        || value < 0.0
+        || value.fract() != 0.0
+        || value > usize::MAX as f64
+        || (usize::BITS == 64 && value == usize::MAX as f64)
+    {
+        return Err(invalid_argument(format!(
+            "table: {context} must be a non-negative integer"
+        )));
+    }
+    Ok(value as usize)
 }
 
 pub(super) fn positive_usize(value: &Value, context: &str) -> BuiltinResult<usize> {
@@ -157,5 +185,46 @@ pub(super) fn optional_sheet_selector(value: &Value) -> BuiltinResult<Option<She
         Ok(None)
     } else {
         SheetSelector::parse(value).map(Some)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::{IntegerStorage, Tensor};
+
+    #[test]
+    fn table_usize_parsers_read_typed_integer_storage_exactly() {
+        let exact = (1_u64 << 53) + 1;
+        let mut count =
+            Tensor::new_integer(IntegerStorage::U64(vec![exact]), vec![1, 1]).expect("count");
+        count.data.fill(f64::NAN);
+
+        let parsed = nonnegative_usize(&Value::Tensor(count), "head row count");
+        if usize::BITS == 64 {
+            assert_eq!(parsed.unwrap(), exact as usize);
+        } else {
+            assert!(parsed.is_err());
+        }
+
+        let mut negative =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("count");
+        negative.data.clear();
+        assert!(nonnegative_usize(&Value::Tensor(negative), "head row count").is_err());
+    }
+
+    #[test]
+    fn table_usize_parsers_reject_unrepresentable_double_bounds() {
+        let boundary = nonnegative_usize(&Value::Num(usize::MAX as f64), "head row count");
+        if usize::BITS == 64 {
+            assert!(boundary.is_err());
+        } else {
+            assert_eq!(boundary.unwrap(), usize::MAX);
+        }
+        assert!(
+            nonnegative_usize(&Value::Num((usize::MAX as f64) + 1.0), "head row count").is_err()
+        );
+        assert!(nonnegative_usize(&Value::Num(1.5), "head row count").is_err());
+        assert!(positive_usize(&Value::Num(0.0), "head row count").is_err());
     }
 }
