@@ -285,6 +285,104 @@ fn integer_data_len(data: &HostIntegerDataOwned) -> usize {
     }
 }
 
+fn gather_integer_data(
+    data: &HostIntegerDataOwned,
+    indices: &[u32],
+) -> Result<HostIntegerDataOwned> {
+    macro_rules! gather {
+        ($values:expr, $owned:ident) => {{
+            let mut out = Vec::with_capacity(indices.len());
+            for (pos, &idx) in indices.iter().enumerate() {
+                let lin = idx as usize;
+                let value = $values.get(lin).copied().ok_or_else(|| {
+                    anyhow!(
+                        "gather_linear: integer index {} (position {}) out of bounds (logical_len={})",
+                        lin,
+                        pos,
+                        $values.len()
+                    )
+                })?;
+                out.push(value);
+            }
+            Ok(HostIntegerDataOwned::$owned(out))
+        }};
+    }
+
+    match data {
+        HostIntegerDataOwned::I8(values) => gather!(values, I8),
+        HostIntegerDataOwned::I16(values) => gather!(values, I16),
+        HostIntegerDataOwned::I32(values) => gather!(values, I32),
+        HostIntegerDataOwned::I64(values) => gather!(values, I64),
+        HostIntegerDataOwned::U8(values) => gather!(values, U8),
+        HostIntegerDataOwned::U16(values) => gather!(values, U16),
+        HostIntegerDataOwned::U32(values) => gather!(values, U32),
+        HostIntegerDataOwned::U64(values) => gather!(values, U64),
+    }
+}
+
+fn scatter_integer_data(
+    target: &mut HostIntegerDataOwned,
+    indices: &[u32],
+    values: &HostIntegerDataOwned,
+) -> Result<()> {
+    macro_rules! scatter {
+        ($target:expr, $values:expr) => {{
+            ensure!(
+                $values.len() == indices.len(),
+                "scatter_linear: integer values length {} does not match index count {}",
+                $values.len(),
+                indices.len()
+            );
+            let target_len = $target.len();
+            for (pos, &idx) in indices.iter().enumerate() {
+                let lin = idx as usize;
+                let target = $target.get_mut(lin).ok_or_else(|| {
+                    anyhow!(
+                        "scatter_linear: integer index {} (position {}) out of bounds for target logical len {}",
+                        lin,
+                        pos,
+                        target_len
+                    )
+                })?;
+                *target = $values[pos];
+            }
+            Ok(())
+        }};
+    }
+
+    match (target, values) {
+        (HostIntegerDataOwned::I8(target), HostIntegerDataOwned::I8(values)) => {
+            scatter!(target, values)
+        }
+        (HostIntegerDataOwned::I16(target), HostIntegerDataOwned::I16(values)) => {
+            scatter!(target, values)
+        }
+        (HostIntegerDataOwned::I32(target), HostIntegerDataOwned::I32(values)) => {
+            scatter!(target, values)
+        }
+        (HostIntegerDataOwned::I64(target), HostIntegerDataOwned::I64(values)) => {
+            scatter!(target, values)
+        }
+        (HostIntegerDataOwned::U8(target), HostIntegerDataOwned::U8(values)) => {
+            scatter!(target, values)
+        }
+        (HostIntegerDataOwned::U16(target), HostIntegerDataOwned::U16(values)) => {
+            scatter!(target, values)
+        }
+        (HostIntegerDataOwned::U32(target), HostIntegerDataOwned::U32(values)) => {
+            scatter!(target, values)
+        }
+        (HostIntegerDataOwned::U64(target), HostIntegerDataOwned::U64(values)) => {
+            scatter!(target, values)
+        }
+        (target, values) => Err(anyhow!(
+            "scatter_linear: integer storage mismatch target={:?} values={:?}",
+            target.element_type(),
+            values.element_type()
+        )),
+    }
+}
+
 fn reduce_integer_data_dim(
     data: &HostIntegerDataOwned,
     shape: &[usize],
@@ -3424,6 +3522,47 @@ impl AccelProvider for InProcessProvider {
         indices: &[u32],
         output_shape: &[usize],
     ) -> Result<GpuTensorHandle> {
+        if let Some(integer_type) = runmat_accelerate_api::handle_integer_type(source) {
+            let output_len = output_shape
+                .iter()
+                .try_fold(1usize, |acc, &extent| acc.checked_mul(extent))
+                .ok_or_else(|| anyhow!("gather_linear: integer output shape product overflow"))?;
+            ensure!(
+                output_len == indices.len(),
+                "gather_linear: integer index count {} does not match output size {}",
+                indices.len(),
+                output_len
+            );
+            let data = {
+                let guard = integer_registry().lock().unwrap_or_else(|e| e.into_inner());
+                guard.get(&source.buffer_id).cloned().ok_or_else(|| {
+                    anyhow!("gather_linear: unknown integer buffer {}", source.buffer_id)
+                })?
+            };
+            ensure!(
+                data.element_type() == integer_type,
+                "gather_linear: integer metadata {:?} does not match buffer {:?}",
+                integer_type,
+                data.element_type()
+            );
+            let out = gather_integer_data(&data, indices)?;
+            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+            self.telemetry.record_upload_bytes(integer_data_bytes(&out));
+            integer_registry()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(id, out);
+            let handle = GpuTensorHandle {
+                shape: output_shape.to_vec(),
+                device_id: self.device_id,
+                buffer_id: id,
+            };
+            runmat_accelerate_api::set_handle_integer_type(&handle, integer_type);
+            runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::Real);
+            runmat_accelerate_api::set_handle_logical(&handle, false);
+            return Ok(handle);
+        }
+
         let storage = runmat_accelerate_api::handle_storage(source);
         let lane_factor = match storage {
             GpuTensorStorage::Real => 1usize,
@@ -3471,6 +3610,56 @@ impl AccelProvider for InProcessProvider {
         indices: &[u32],
         values: &GpuTensorHandle,
     ) -> Result<()> {
+        match (
+            runmat_accelerate_api::handle_integer_type(target),
+            runmat_accelerate_api::handle_integer_type(values),
+        ) {
+            (Some(target_type), Some(values_type)) => {
+                ensure!(
+                    target_type == values_type,
+                    "scatter_linear: integer type mismatch target={:?} values={:?}",
+                    target_type,
+                    values_type
+                );
+                let values_data = {
+                    let guard = integer_registry().lock().unwrap_or_else(|e| e.into_inner());
+                    guard.get(&values.buffer_id).cloned().ok_or_else(|| {
+                        anyhow!(
+                            "scatter_linear: unknown integer values buffer {}",
+                            values.buffer_id
+                        )
+                    })?
+                };
+                ensure!(
+                    values_data.element_type() == values_type,
+                    "scatter_linear: integer values metadata {:?} does not match buffer {:?}",
+                    values_type,
+                    values_data.element_type()
+                );
+                let mut guard = integer_registry().lock().unwrap_or_else(|e| e.into_inner());
+                let target_data = guard.get_mut(&target.buffer_id).ok_or_else(|| {
+                    anyhow!(
+                        "scatter_linear: unknown integer target buffer {}",
+                        target.buffer_id
+                    )
+                })?;
+                ensure!(
+                    target_data.element_type() == target_type,
+                    "scatter_linear: integer target metadata {:?} does not match buffer {:?}",
+                    target_type,
+                    target_data.element_type()
+                );
+                scatter_integer_data(target_data, indices, &values_data)?;
+                return Ok(());
+            }
+            (Some(_), None) | (None, Some(_)) => {
+                return Err(anyhow!(
+                    "scatter_linear: cannot mix exact integer and floating buffers"
+                ));
+            }
+            (None, None) => {}
+        }
+
         let target_storage = runmat_accelerate_api::handle_storage(target);
         let values_storage = runmat_accelerate_api::handle_storage(values);
         ensure!(
@@ -10518,6 +10707,60 @@ mod tests {
             &[(2.0, 20.0), (0.0, 0.0), (4.0, 40.0), (0.0, 0.0)],
             &[1, 4],
         );
+    }
+
+    #[test]
+    fn linear_gather_and_scatter_preserve_all_native_integer_classes() {
+        let provider = InProcessProvider::new();
+        provider.next_id.store(9_000_175, Ordering::Relaxed);
+        macro_rules! check {
+            ($view:ident, $owned:ident, $values:expr, $expected:expr) => {{
+                let source = provider
+                    .upload_integer(&HostIntegerTensorView {
+                        data: HostIntegerDataView::$view(&$values),
+                        shape: &[1, 3],
+                    })
+                    .expect("upload integer source");
+                let gathered = provider
+                    .gather_linear(&source, &[2, 0], &[1, 2])
+                    .expect("gather integer values");
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(&gathered),
+                    runmat_accelerate_api::handle_integer_type(&source)
+                );
+                assert_eq!(
+                    block_on(provider.download_integer(&gathered))
+                        .expect("download gathered")
+                        .data,
+                    HostIntegerDataOwned::$owned(vec![($expected)[0], ($expected)[1]])
+                );
+
+                let target = provider
+                    .upload_integer(&HostIntegerTensorView {
+                        data: HostIntegerDataView::$view(&[0 as _, 0 as _, 0 as _]),
+                        shape: &[1, 3],
+                    })
+                    .expect("upload integer target");
+                provider
+                    .scatter_linear(&target, &[0, 2], &gathered)
+                    .expect("scatter integer values");
+                assert_eq!(
+                    block_on(provider.download_integer(&target))
+                        .expect("download target")
+                        .data,
+                    HostIntegerDataOwned::$owned(vec![($expected)[0], 0, ($expected)[1]])
+                );
+            }};
+        }
+
+        check!(I8, I8, [i8::MIN, -1, i8::MAX], [i8::MAX, i8::MIN]);
+        check!(I16, I16, [i16::MIN, -1, i16::MAX], [i16::MAX, i16::MIN]);
+        check!(I32, I32, [i32::MIN, -1, i32::MAX], [i32::MAX, i32::MIN]);
+        check!(I64, I64, [i64::MIN, -1, i64::MAX], [i64::MAX, i64::MIN]);
+        check!(U8, U8, [0, 1, u8::MAX], [u8::MAX, 0]);
+        check!(U16, U16, [0, 1, u16::MAX], [u16::MAX, 0]);
+        check!(U32, U32, [0, 1, u32::MAX], [u32::MAX, 0]);
+        check!(U64, U64, [0, 1, u64::MAX], [u64::MAX, 0]);
     }
 
     #[test]

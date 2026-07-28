@@ -828,6 +828,9 @@ pub fn read_gpu_slice_from_plan(
         )
     })?;
     if plan.indices.is_empty() {
+        if let Some(integer_type) = runmat_accelerate_api::handle_integer_type(handle) {
+            return upload_empty_integer_gpu_slice(provider, integer_type, &plan.output_shape);
+        }
         let zeros = provider
             .zeros(&plan.output_shape)
             .map_err(map_slice_acceleration_error)?;
@@ -838,6 +841,32 @@ pub fn read_gpu_slice_from_plan(
             .map_err(map_slice_acceleration_error)?;
         Ok(Value::GpuTensor(result))
     }
+}
+
+fn upload_empty_integer_gpu_slice(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    integer_type: runmat_accelerate_api::IntegerElementType,
+    output_shape: &[usize],
+) -> Result<Value, RuntimeError> {
+    use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView, IntegerElementType};
+
+    let data = match integer_type {
+        IntegerElementType::I8 => HostIntegerDataView::I8(&[]),
+        IntegerElementType::I16 => HostIntegerDataView::I16(&[]),
+        IntegerElementType::I32 => HostIntegerDataView::I32(&[]),
+        IntegerElementType::I64 => HostIntegerDataView::I64(&[]),
+        IntegerElementType::U8 => HostIntegerDataView::U8(&[]),
+        IntegerElementType::U16 => HostIntegerDataView::U16(&[]),
+        IntegerElementType::U32 => HostIntegerDataView::U32(&[]),
+        IntegerElementType::U64 => HostIntegerDataView::U64(&[]),
+    };
+    provider
+        .upload_integer(&HostIntegerTensorView {
+            data,
+            shape: output_shape,
+        })
+        .map(Value::GpuTensor)
+        .map_err(map_slice_acceleration_error)
 }
 
 pub async fn read_string_slice(
@@ -887,8 +916,8 @@ pub fn gather_string_slice(sa: &StringArray, plan: &IndexPlan) -> Result<Value, 
 mod tests {
     use super::{
         gather_string_slice, map_slice_acceleration_error, read_complex_slice_from_plan,
-        read_sparse_slice_from_plan, read_string_slice, read_tensor_slice_from_plan,
-        try_tensor_slice_2d_fast_path,
+        read_gpu_slice_from_plan, read_sparse_slice_from_plan, read_string_slice,
+        read_tensor_slice_from_plan, try_tensor_slice_2d_fast_path,
     };
     use crate::indexing::plan::IndexPlan;
     use crate::indexing::selectors::SliceSelector;
@@ -958,6 +987,62 @@ mod tests {
         .expect("fast path")
         .expect("fast path result");
         assert_eq!(result, Value::Int(IntValue::I64(i64::MAX)));
+    }
+
+    #[test]
+    fn gpu_integer_slice_preserves_class_for_empty_and_nonempty_plans() {
+        runmat_accelerate_api::set_thread_provider(None);
+        runmat_accelerate_api::clear_provider();
+        runmat_accelerate::simple_provider::register_inprocess_provider();
+        let provider = runmat_accelerate_api::provider().expect("test provider");
+        let _thread_provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+
+        {
+            let source = provider
+                .upload_integer(&runmat_accelerate_api::HostIntegerTensorView {
+                    data: runmat_accelerate_api::HostIntegerDataView::U64(&[
+                        0,
+                        1_u64 << 63,
+                        u64::MAX,
+                    ]),
+                    shape: &[1, 3],
+                })
+                .expect("upload integer gpu source");
+
+            let nonempty = IndexPlan::new(vec![2, 1], vec![1, 2], vec![2], 1, vec![1, 3]);
+            let Value::GpuTensor(gathered) =
+                read_gpu_slice_from_plan(&source, &nonempty).expect("gpu integer gather")
+            else {
+                panic!("expected gpu tensor");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&gathered),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            let host = block_on(provider.download_integer(&gathered)).expect("download gathered");
+            assert_eq!(host.shape, vec![1, 2]);
+            assert_eq!(
+                host.data,
+                runmat_accelerate_api::HostIntegerDataOwned::U64(vec![u64::MAX, 1_u64 << 63])
+            );
+
+            let empty = IndexPlan::new(Vec::new(), vec![1, 0], vec![0], 1, vec![1, 3]);
+            let Value::GpuTensor(empty_handle) =
+                read_gpu_slice_from_plan(&source, &empty).expect("empty gpu integer slice")
+            else {
+                panic!("expected gpu tensor");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&empty_handle),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            let host = block_on(provider.download_integer(&empty_handle)).expect("download empty");
+            assert_eq!(host.shape, vec![1, 0]);
+            assert_eq!(
+                host.data,
+                runmat_accelerate_api::HostIntegerDataOwned::U64(Vec::new())
+            );
+        }
     }
 
     #[test]
