@@ -272,8 +272,9 @@ impl FrequencySpec {
         let gathered = crate::dispatcher::gather_if_needed_async(value).await?;
         let tensor = frequency_tensor_from_value(gathered)?;
         ensure_vector("frequency", &tensor.shape)?;
-        validate_frequency_vector(&tensor.data)?;
-        Ok(Self::Values(tensor.data))
+        let values = tensor::tensor_into_values_f64(tensor);
+        validate_frequency_vector(&values)?;
+        Ok(Self::Values(values))
     }
 }
 
@@ -559,7 +560,7 @@ mod tests {
 
     fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
+        tensor.data.clear();
         Value::Tensor(tensor)
     }
 

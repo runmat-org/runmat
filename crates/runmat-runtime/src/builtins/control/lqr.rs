@@ -354,14 +354,15 @@ impl RealMatrix {
                 format!("{label} must be a 2-D matrix, got shape {:?}", tensor.shape),
             ));
         }
-        if tensor.data.iter().any(|value| !value.is_finite()) {
+        let values = tensor::tensor_values_f64_cow(&tensor);
+        if values.iter().any(|value| !value.is_finite()) {
             return Err(lqr_error(
                 &LQR_ERROR_UNSUPPORTED_INPUT,
                 format!("{label} must contain finite real values"),
             ));
         }
         Ok(Self {
-            matrix: DMatrix::from_column_slice(tensor.rows, tensor.cols, &tensor.data),
+            matrix: DMatrix::from_column_slice(tensor.rows, tensor.cols, &values),
         })
     }
 
@@ -923,7 +924,9 @@ mod tests {
     }
 
     fn integer_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        Value::Tensor(Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor"))
+        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
+        tensor.data.clear();
+        Value::Tensor(tensor)
     }
 
     fn output_list(value: Value) -> Vec<Value> {

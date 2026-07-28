@@ -861,7 +861,8 @@ fn ss_state_matrix_property(
             ),
         ));
     }
-    if tensor.data.iter().any(|value| !value.is_finite()) {
+    let values = tensor::tensor_values_f64_cow(&tensor);
+    if values.iter().any(|value| !value.is_finite()) {
         return Err(control_error(
             builtin,
             unsupported_model_identifier(builtin),
@@ -871,7 +872,7 @@ fn ss_state_matrix_property(
     let mut matrix = DMatrix::<Complex64>::zeros(tensor.rows, tensor.cols);
     for col in 0..tensor.cols {
         for row in 0..tensor.rows {
-            matrix[(row, col)] = Complex64::new(tensor.data[row + col * tensor.rows], 0.0);
+            matrix[(row, col)] = Complex64::new(values[row + col * tensor.rows], 0.0);
         }
     }
     Ok(matrix)
@@ -1314,5 +1315,21 @@ mod tests {
             coefficients_from_property(&object, "Numerator", "tf").expect("coefficients"),
             vec![Complex64::new(5.0, -6.0), Complex64::new(7.0, 8.0)]
         );
+    }
+
+    #[test]
+    fn ss_state_matrix_property_reads_typed_integer_storage_exactly() {
+        let mut object = ObjectInstance::new(SS_CLASS.to_string());
+        object.properties.insert(
+            "A".to_string(),
+            poisoned_integer_tensor(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2]),
+        );
+
+        let matrix = ss_state_matrix_property(&object, "A", "pole").expect("state matrix");
+        assert_eq!(matrix.shape(), (2, 2));
+        assert_eq!(matrix[(0, 0)], Complex64::new(1.0, 0.0));
+        assert_eq!(matrix[(1, 0)], Complex64::new(3.0, 0.0));
+        assert_eq!(matrix[(0, 1)], Complex64::new(2.0, 0.0));
+        assert_eq!(matrix[(1, 1)], Complex64::new(4.0, 0.0));
     }
 }

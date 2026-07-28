@@ -441,7 +441,8 @@ impl RealMatrix {
                 format!("{label} must be a 2-D matrix, got shape {:?}", tensor.shape),
             ));
         }
-        if tensor.data.iter().any(|value| !value.is_finite()) {
+        let values = tensor::tensor_values_f64_cow(&tensor);
+        if values.iter().any(|value| !value.is_finite()) {
             return Err(ss_error_with_detail(
                 &SS_ERROR_UNSUPPORTED_INPUT,
                 format!("{label} must contain only finite real values"),
@@ -632,15 +633,17 @@ mod tests {
 
     #[test]
     fn ss_typed_integer_matrices_and_sample_time_cross_double_boundary_exactly() {
+        fn mirrorless_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+            let mut tensor = Tensor::new_integer(storage, shape).unwrap();
+            tensor.data.clear();
+            Value::Tensor(tensor)
+        }
+
         let sys = run_ss(
-            Value::Tensor(
-                Tensor::new_integer(IntegerStorage::I16(vec![0, -2, 1, -3]), vec![2, 2]).unwrap(),
-            ),
-            Value::Tensor(
-                Tensor::new_integer(IntegerStorage::U16(vec![0, 1]), vec![2, 1]).unwrap(),
-            ),
-            Value::Tensor(Tensor::new_integer(IntegerStorage::I8(vec![1, 0]), vec![1, 2]).unwrap()),
-            Value::Tensor(Tensor::new_integer(IntegerStorage::U8(vec![0]), vec![1, 1]).unwrap()),
+            mirrorless_integer_tensor(IntegerStorage::I16(vec![0, -2, 1, -3]), vec![2, 2]),
+            mirrorless_integer_tensor(IntegerStorage::U16(vec![0, 1]), vec![2, 1]),
+            mirrorless_integer_tensor(IntegerStorage::I8(vec![1, 0]), vec![1, 2]),
+            mirrorless_integer_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
             vec![Value::from("Ts"), {
                 let mut ts = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).unwrap();
                 ts.data.clear();
