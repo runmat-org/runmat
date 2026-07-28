@@ -280,12 +280,13 @@ async fn value_to_magnitude_tensor(name: &str, value: Value) -> BuiltinResult<Te
         Value::Complex(re, im) => Tensor::new(vec![re.hypot(im)], vec![1, 1])
             .map_err(|err| descriptive_error(name, format!("{name}: {err}"))),
         Value::ComplexTensor(tensor) => {
-            let data = tensor
-                .data
+            let shape = tensor.shape.clone();
+            let data = tensor::complex_tensor_into_values_complex64(tensor)
                 .into_iter()
-                .map(|(re, im)| re.hypot(im))
+                .map(|value| value.norm())
                 .collect::<Vec<_>>();
-            Tensor::new(data, tensor.shape)
+            let shape = tensor::default_shape_for(&shape, data.len());
+            Tensor::new(data, shape)
                 .map_err(|err| descriptive_error(name, format!("{name}: {err}")))
         }
         other => tensor::value_into_tensor_for(name, other)
@@ -568,16 +569,23 @@ async fn value_to_complex_buffer(name: &str, value: Value) -> BuiltinResult<Comp
             shape: vec![1, 1],
         }),
         Value::ComplexTensor(tensor) => {
-            let shape = tensor::default_shape_for(&tensor.shape, tensor.data.len());
+            let shape = tensor::default_shape_for(
+                &tensor.shape,
+                tensor::complex_tensor_element_len(&tensor),
+            );
             Ok(ComplexBuffer {
-                data: tensor.data,
+                data: tensor::complex_tensor_into_values_complex64(tensor)
+                    .into_iter()
+                    .map(|value| (value.re, value.im))
+                    .collect(),
                 shape,
             })
         }
         other => {
             let tensor = tensor::value_into_tensor_for(name, other)
                 .map_err(|err| descriptive_error(name, format!("{name}: {err}")))?;
-            let shape = tensor::default_shape_for(&tensor.shape, tensor.data.len());
+            let shape =
+                tensor::default_shape_for(&tensor.shape, tensor::tensor_element_len(&tensor));
             let data = tensor::tensor_into_values_f64(tensor)
                 .into_iter()
                 .map(|value| (value, 0.0))
@@ -1195,7 +1203,7 @@ pub mod tabulate {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_builtins::{IntegerComplexStorage, IntegerStorage};
 
     #[test]
     fn tabulate_labels_preserve_exact_uint64_text() {
@@ -1239,6 +1247,16 @@ mod tests {
         let mut tensor = Tensor::new_integer(storage, shape).unwrap();
         tensor.data.fill(f64::NAN);
         Value::Tensor(tensor)
+    }
+
+    fn complex_int_tensor(real: IntegerStorage, imag: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = runmat_builtins::ComplexTensor::new_integer(
+            IntegerComplexStorage::new(real, imag).unwrap(),
+            shape,
+        )
+        .unwrap();
+        tensor.data.clear();
+        Value::ComplexTensor(tensor)
     }
 
     #[test]
@@ -1469,6 +1487,42 @@ mod tests {
         ))
         .unwrap();
         assert_close(tensor_values(out).0[0], 5.0);
+    }
+
+    #[test]
+    fn rms_reads_typed_complex_integer_storage_exactly() {
+        let x = complex_int_tensor(
+            IntegerStorage::I16(vec![3, 0]),
+            IntegerStorage::I16(vec![4, 12]),
+            vec![2, 1],
+        );
+        let out = block_on(rms::rms_builtin(
+            x,
+            vec![Value::CharArray(runmat_builtins::CharArray::new_row("all"))],
+        ))
+        .unwrap();
+        assert_close(tensor_values(out).0[0], ((25.0 + 144.0) / 2.0_f64).sqrt());
+    }
+
+    #[test]
+    fn rmse_reads_typed_complex_integer_residual_storage_exactly() {
+        let x = complex_int_tensor(
+            IntegerStorage::I16(vec![3, 0]),
+            IntegerStorage::I16(vec![4, 12]),
+            vec![2, 1],
+        );
+        let y = complex_int_tensor(
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I16(vec![2]),
+            vec![1, 1],
+        );
+        let out = block_on(rmse::rmse_builtin(
+            x,
+            y,
+            vec![Value::CharArray(runmat_builtins::CharArray::new_row("all"))],
+        ))
+        .unwrap();
+        assert_close(tensor_values(out).0[0], ((8.0 + 101.0) / 2.0_f64).sqrt());
     }
 
     #[test]
