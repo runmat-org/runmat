@@ -1679,6 +1679,30 @@ mod tests {
     }
 
     #[test]
+    fn dec_text_min_digits_rejects_exact_integer_resource_overflow() {
+        let too_wide = IntValue::U64(MAX_DECIMAL_TEXT_OUTPUT_CHARS as u64 + 1);
+        let err = block_on(super::dec2bin_builtin(
+            Value::Num(1.0),
+            vec![Value::Int(too_wide)],
+        ))
+        .expect_err("wide typed minDigits should reject before allocation");
+        assert!(err.to_string().contains("requested output"));
+
+        let mut width = Tensor::new_integer(
+            IntegerStorage::U64(vec![MAX_DECIMAL_TEXT_OUTPUT_CHARS as u64 + 1]),
+            vec![1, 1],
+        )
+        .unwrap();
+        width.data.clear();
+        let err = block_on(super::dec2hex_builtin(
+            Value::Num(1.0),
+            vec![Value::Tensor(width)],
+        ))
+        .expect_err("wide typed tensor minDigits should reject before allocation");
+        assert!(err.to_string().contains("requested output"));
+    }
+
+    #[test]
     fn bi2de_and_de2bi_typed_integer_tensors_remain_exact() {
         let digits = integer_tensor(IntegerStorage::U64(vec![1, 0, 1]), vec![1, 3]);
         assert_eq!(value_data(bi2de(digits, vec![])), vec![5.0]);

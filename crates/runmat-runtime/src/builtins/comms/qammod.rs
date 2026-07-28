@@ -634,12 +634,18 @@ fn number_to_symbol_with_name(value: f64, name: &str) -> BuiltinResult<usize> {
             "qammod: {name} values must be nonnegative integers"
         )));
     }
-    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+    if rounded > usize::MAX.saturating_sub(1) as f64 {
         return Err(qammod_error(format!(
             "qammod: {name} value is too large for this platform"
         )));
     }
-    Ok(rounded as usize)
+    let parsed = rounded as usize;
+    if parsed as f64 != rounded || parsed == usize::MAX {
+        return Err(qammod_error(format!(
+            "qammod: {name} value is too large for this platform"
+        )));
+    }
+    Ok(parsed)
 }
 
 fn integer_storage_to_symbols(storage: &IntegerStorage, name: &str) -> BuiltinResult<Vec<usize>> {
@@ -1165,6 +1171,8 @@ mod tests {
         ] {
             assert!(parse_modulation_order(&value).is_err());
         }
+        assert!(number_to_symbol_with_name(usize::MAX as f64, "M").is_err());
+        assert!(number_to_symbol_with_name(1.0e300, "M").is_err());
     }
 
     #[test]
