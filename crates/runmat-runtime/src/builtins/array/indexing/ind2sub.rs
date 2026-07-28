@@ -4,7 +4,7 @@ use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Tensor, Type, Value,
+    IntValue, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -306,12 +306,11 @@ fn compute_subscripts(
         return Err(ind2sub_error("Size vector must have at least one element."));
     }
 
-    let values = tensor::tensor_values_f64_cow(indices);
-    let len = values.len();
+    let len = tensor::tensor_element_len(indices);
     let mut outputs: Vec<Vec<f64>> = dims.iter().map(|_| Vec::with_capacity(len)).collect();
 
-    for &value in values.iter() {
-        let idx = coerce_linear_index(value, total)?;
+    for value_index in 0..len {
+        let idx = coerce_linear_index_value(linear_index_value(indices, value_index), total)?;
         let zero_based = idx - 1;
         for (dim_index, (&dim, &stride)) in dims.iter().zip(strides.iter()).enumerate() {
             let coord = ((zero_based / stride) % dim) + 1;
@@ -332,6 +331,51 @@ fn compute_subscripts(
         tensors.push(tensor);
     }
     Ok(tensors)
+}
+
+enum LinearIndexValue {
+    Float(f64),
+    Integer(IntValue),
+}
+
+fn linear_index_value(indices: &Tensor, value_index: usize) -> LinearIndexValue {
+    if let Some(storage) = indices.integer_storage() {
+        return LinearIndexValue::Integer(
+            storage
+                .value_at(value_index)
+                .expect("linear index is within integer storage bounds"),
+        );
+    }
+    LinearIndexValue::Float(tensor::tensor_value_f64(indices, value_index))
+}
+
+fn coerce_linear_index_value(
+    value: LinearIndexValue,
+    max_index: usize,
+) -> crate::BuiltinResult<usize> {
+    match value {
+        LinearIndexValue::Float(value) => coerce_linear_index(value, max_index),
+        LinearIndexValue::Integer(value) => coerce_integer_linear_index(&value, max_index),
+    }
+}
+
+fn coerce_integer_linear_index(value: &IntValue, max_index: usize) -> crate::BuiltinResult<usize> {
+    let Some(coerced) = value.try_to_usize() else {
+        return Err(ind2sub_error("Linear indices must be positive integers."));
+    };
+    if coerced < 1 {
+        return Err(ind2sub_error("Linear indices must be positive integers."));
+    }
+    if coerced > max_index {
+        return Err(ind2sub_error_with_message(
+            format!(
+                "Index exceeds number of array elements. Index must not exceed {}.",
+                max_index
+            ),
+            &IND2SUB_ERROR_INDEX_BOUNDS,
+        ));
+    }
+    Ok(coerced)
 }
 
 fn coerce_linear_index(value: f64, max_index: usize) -> crate::BuiltinResult<usize> {
@@ -499,7 +543,7 @@ pub(crate) mod tests {
         let dims = Tensor::new(vec![2.0, 3.0, 4.0], vec![1, 3]).unwrap();
         let mut idx =
             Tensor::new_integer(IntegerStorage::U16(vec![3, 11]), vec![1, 2]).expect("indices");
-        idx.data.clear();
+        idx.data = vec![0.0, 0.0];
 
         let result =
             ind2sub_builtin(Value::Tensor(dims), Value::Tensor(idx)).expect("ind2sub result");
@@ -519,6 +563,27 @@ pub(crate) mod tests {
         assert_eq!(
             values[2],
             Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap())
+        );
+    }
+
+    #[test]
+    fn ind2sub_rejects_wide_typed_integer_index_without_f64_rounding() {
+        let max = 9_007_199_254_740_992_u64;
+        let out_of_range = max + 1;
+        assert_eq!(max as f64, out_of_range as f64);
+
+        let mut dims =
+            Tensor::new_integer(IntegerStorage::U64(vec![max]), vec![1, 1]).expect("typed dims");
+        dims.data = vec![max as f64];
+        let mut index = Tensor::new_integer(IntegerStorage::U64(vec![out_of_range]), vec![1, 1])
+            .expect("typed index");
+        index.data = vec![max as f64];
+
+        let err = ind2sub_builtin(Value::Tensor(dims), Value::Tensor(index))
+            .expect_err("wide index should remain out of range");
+        assert_eq!(
+            err.identifier(),
+            super::IND2SUB_ERROR_INDEX_BOUNDS.identifier
         );
     }
 
