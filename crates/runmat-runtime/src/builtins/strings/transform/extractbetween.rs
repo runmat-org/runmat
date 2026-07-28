@@ -890,10 +890,14 @@ fn parse_position(value: f64) -> BuiltinResult<usize> {
     if (value.fract()).abs() > f64::EPSILON {
         return Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_POSITION_TYPE));
     }
-    if value > (usize::MAX as f64) {
+    if value > usize::MAX.saturating_sub(1) as f64 {
         return Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_POSITION_TYPE));
     }
-    Ok(value as usize)
+    let parsed = value as usize;
+    if parsed as f64 != value || parsed == usize::MAX {
+        return Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_POSITION_TYPE));
+    }
+    Ok(parsed)
 }
 
 fn parse_position_int(value: IntValue) -> BuiltinResult<usize> {
@@ -936,6 +940,11 @@ pub(crate) mod tests {
             Tensor::new_integer(IntegerStorage::I16(vec![1, 0]), vec![1, 2]).expect("positions");
 
         assert!(BoundaryPositions::from_value(Value::Tensor(positions)).is_err());
+    }
+
+    #[test]
+    fn extractBetween_position_vectors_reject_oversized_double_positions() {
+        assert!(BoundaryPositions::from_value(Value::Num(1.0e300)).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

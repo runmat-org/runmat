@@ -1,4 +1,5 @@
 use super::*;
+use crate::builtins::common::tensor;
 #[derive(Clone)]
 pub(in crate::builtins::table) struct ReadTableOptions {
     pub(super) file_type: ImportFileType,
@@ -1013,16 +1014,30 @@ pub(in crate::builtins::table) enum SheetSelector {
 
 impl SheetSelector {
     pub(in crate::builtins::table) fn parse(value: &Value) -> BuiltinResult<Self> {
-        match value {
-            Value::Int(i) => i
+        if let Some(integer) = tensor::scalar_integer_value(value) {
+            return integer
                 .try_to_usize()
                 .and_then(|index| index.checked_sub(1))
                 .map(Self::Index)
-                .ok_or_else(|| invalid_argument("readtable: Sheet must be one-based")),
+                .ok_or_else(|| invalid_argument("readtable: Sheet must be one-based"));
+        }
+
+        match value {
             Value::Num(n)
                 if n.is_finite() && *n >= 1.0 && (n.round() - n).abs() <= f64::EPSILON =>
             {
-                Ok(Self::Index(n.round() as usize - 1))
+                let rounded = n.round();
+                if rounded > usize::MAX.saturating_sub(1) as f64 {
+                    return Err(invalid_argument("readtable: Sheet index is too large"));
+                }
+                let parsed = rounded as usize;
+                if parsed as f64 != rounded || parsed == usize::MAX {
+                    return Err(invalid_argument("readtable: Sheet index is too large"));
+                }
+                parsed
+                    .checked_sub(1)
+                    .map(Self::Index)
+                    .ok_or_else(|| invalid_argument("readtable: Sheet must be one-based"))
             }
             _ => {
                 let text = scalar_text(value, "Sheet")?;
@@ -1220,5 +1235,24 @@ mod tests {
         range.data.clear();
 
         assert!(RangeSpec::parse(&Value::Tensor(range)).is_err());
+    }
+
+    #[test]
+    fn sheet_selector_reads_typed_integer_storage_exactly() {
+        let mut sheet = Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).unwrap();
+        sheet.data.clear();
+
+        match SheetSelector::parse(&Value::Tensor(sheet)).unwrap() {
+            SheetSelector::Index(index) => assert_eq!(index, 2),
+            SheetSelector::Name(name) => panic!("expected sheet index, got {name}"),
+        }
+    }
+
+    #[test]
+    fn sheet_selector_rejects_invalid_integer_and_double_values() {
+        let mut zero = Tensor::new_integer(IntegerStorage::U16(vec![0]), vec![1, 1]).unwrap();
+        zero.data.clear();
+        assert!(SheetSelector::parse(&Value::Tensor(zero)).is_err());
+        assert!(SheetSelector::parse(&Value::Num(1.0e300)).is_err());
     }
 }

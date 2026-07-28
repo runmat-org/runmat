@@ -352,7 +352,7 @@ fn value_to_dimension(value: &Value) -> BuiltinResult<Option<usize>> {
             if (rounded - n).abs() > f64::EPSILON {
                 return Err(join_error(&JOIN_ERROR_DIMENSION_TYPE));
             }
-            Ok(Some(rounded as usize))
+            parse_dimension_float(rounded)
         }
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
             if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
@@ -370,10 +370,21 @@ fn value_to_dimension(value: &Value) -> BuiltinResult<Option<usize>> {
             if (rounded - val).abs() > f64::EPSILON {
                 return Err(join_error(&JOIN_ERROR_DIMENSION_TYPE));
             }
-            Ok(Some(rounded as usize))
+            parse_dimension_float(rounded)
         }
         _ => Ok(None),
     }
+}
+
+fn parse_dimension_float(rounded: f64) -> BuiltinResult<Option<usize>> {
+    if rounded > usize::MAX.saturating_sub(1) as f64 {
+        return Err(join_error(&JOIN_ERROR_DIMENSION_TYPE));
+    }
+    let parsed = rounded as usize;
+    if parsed as f64 != rounded || parsed == usize::MAX {
+        return Err(join_error(&JOIN_ERROR_DIMENSION_TYPE));
+    }
+    Ok(Some(parsed))
 }
 
 struct JoinInput {
@@ -895,6 +906,7 @@ pub(crate) mod tests {
         let negative =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("negative dim");
         assert!(value_to_dimension(&Value::Tensor(negative)).is_err());
+        assert!(value_to_dimension(&Value::Num(1.0e300)).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

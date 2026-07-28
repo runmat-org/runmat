@@ -1130,7 +1130,15 @@ fn parse_column_vector(
     num_cols: usize,
 ) -> crate::BuiltinResult<Option<Vec<ColumnSpec>>> {
     match value {
-        Value::Int(i) => parse_single_column(i.to_i64(), num_cols).map(Some),
+        Value::Int(i) => {
+            let Some(column) = i.try_to_i64() else {
+                return Err(sortrows_error_with(
+                    &SORTROWS_ERROR_INVALID_COLUMN_INDEX,
+                    "sortrows: column indices must fit signed integer range",
+                ));
+            };
+            parse_single_column(column, num_cols).map(Some)
+        }
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(sortrows_error_with(
@@ -1145,7 +1153,13 @@ fn parse_column_vector(
                     "sortrows: column indices must be integers",
                 ));
             }
-            parse_single_column(rounded as i64, num_cols).map(Some)
+            let Some(column) = float_to_i64_column(rounded) else {
+                return Err(sortrows_error_with(
+                    &SORTROWS_ERROR_INVALID_COLUMN_INDEX,
+                    "sortrows: column indices must fit signed integer range",
+                ));
+            };
+            parse_single_column(column, num_cols).map(Some)
         }
         Value::Tensor(tensor) => {
             if !is_vector(&tensor.shape) {
@@ -1182,13 +1196,27 @@ fn parse_column_vector(
                         "sortrows: column indices must be integers",
                     ));
                 }
-                let column = parse_single_column_i64(rounded as i64, num_cols)?;
+                let Some(column) = float_to_i64_column(rounded) else {
+                    return Err(sortrows_error_with(
+                        &SORTROWS_ERROR_INVALID_COLUMN_INDEX,
+                        "sortrows: column indices must fit signed integer range",
+                    ));
+                };
+                let column = parse_single_column_i64(column, num_cols)?;
                 specs.push(column);
             }
             Ok(Some(specs))
         }
         _ => Ok(None),
     }
+}
+
+fn float_to_i64_column(rounded: f64) -> Option<i64> {
+    if rounded < i64::MIN as f64 || rounded >= i64::MAX as f64 {
+        return None;
+    }
+    let parsed = rounded as i64;
+    (parsed as f64 == rounded).then_some(parsed)
 }
 
 fn parse_single_column(value: i64, num_cols: usize) -> crate::BuiltinResult<Vec<ColumnSpec>> {
@@ -1202,7 +1230,12 @@ fn parse_single_column_i64(value: i64, num_cols: usize) -> crate::BuiltinResult<
             "sortrows: column indices must be non-zero",
         ));
     }
-    let abs = value.unsigned_abs() as usize;
+    let Some(abs) = usize::try_from(value.unsigned_abs()).ok() else {
+        return Err(sortrows_error_with(
+            &SORTROWS_ERROR_INVALID_COLUMN_INDEX,
+            "sortrows: column index exceeds platform index range",
+        ));
+    };
     if abs == 0 {
         return Err(sortrows_error_with(
             &SORTROWS_ERROR_INVALID_COLUMN_INDEX,
@@ -1416,6 +1449,20 @@ pub(crate) mod tests {
             panic!("expected index tensor");
         };
         assert_eq!(indices.data, vec![2.0, 1.0]);
+    }
+
+    #[test]
+    fn sortrows_column_specs_reject_unrepresentable_integer_and_double_values() {
+        assert!(parse_column_vector(&Value::Int(IntValue::U64(u64::MAX)), 3).is_err());
+        assert!(parse_column_vector(&Value::Num(1.0e300), 3).is_err());
+
+        let mut columns =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("columns");
+        columns.data.clear();
+        assert!(parse_column_vector(&Value::Tensor(columns), 3).is_err());
+
+        #[cfg(target_pointer_width = "32")]
+        assert!(parse_single_column_i64(i64::from(u32::MAX) + 1, usize::MAX).is_err());
     }
 
     #[test]

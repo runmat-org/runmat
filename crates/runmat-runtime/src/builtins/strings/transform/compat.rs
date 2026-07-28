@@ -4,11 +4,12 @@ use regex::Regex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ResolveContext, StringArray, Type, Value,
+    CharArray, IntValue, ResolveContext, StringArray, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::map_control_flow_with_builtin;
+use crate::builtins::common::tensor;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::builtins::strings::core::compat::{
     broadcast_flat_index, broadcast_shape, logical_value, pattern_regex, scalar_text, text_items,
@@ -551,9 +552,12 @@ enum Boundary {
 
 impl Boundary {
     fn from_value(value: &Value, fn_name: &str) -> BuiltinResult<Self> {
+        if let Some(integer) = tensor::scalar_integer_value(value) {
+            return parse_boundary_integer(integer, fn_name).map(Self::Position);
+        }
         match value {
             Value::Num(n) if n.is_finite() && *n > 0.0 && n.fract() == 0.0 => {
-                Ok(Self::Position(*n as usize))
+                parse_boundary_float(*n, fn_name).map(Self::Position)
             }
             Value::Num(_) => Err(transform_error(
                 fn_name,
@@ -563,6 +567,35 @@ impl Boundary {
             _ => Ok(Self::Text(scalar_text(value, fn_name)?)),
         }
     }
+}
+
+fn parse_boundary_integer(value: IntValue, fn_name: &str) -> BuiltinResult<usize> {
+    value
+        .try_to_usize()
+        .filter(|position| *position > 0)
+        .ok_or_else(|| {
+            transform_error(
+                fn_name,
+                format!("{fn_name}: numeric boundaries must be positive integer scalars"),
+            )
+        })
+}
+
+fn parse_boundary_float(value: f64, fn_name: &str) -> BuiltinResult<usize> {
+    if value > usize::MAX.saturating_sub(1) as f64 {
+        return Err(transform_error(
+            fn_name,
+            format!("{fn_name}: numeric boundaries must be positive integer scalars"),
+        ));
+    }
+    let parsed = value as usize;
+    if parsed as f64 != value || parsed == usize::MAX {
+        return Err(transform_error(
+            fn_name,
+            format!("{fn_name}: numeric boundaries must be positive integer scalars"),
+        ));
+    }
+    Ok(parsed)
 }
 
 fn locate_boundary(text: &str, boundary: &Boundary) -> BuiltinResult<(usize, usize)> {
@@ -811,7 +844,7 @@ fn justify(text: &str, side: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::CellArray;
+    use runmat_builtins::{CellArray, IntegerStorage, Tensor};
 
     fn block(
         value: impl std::future::Future<Output = BuiltinResult<Value>>,
@@ -873,6 +906,59 @@ mod tests {
             .unwrap(),
             Value::String("a[new]b".into())
         );
+    }
+
+    #[test]
+    fn text_boundary_positions_read_typed_integer_storage_exactly() {
+        let mut boundary =
+            Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).expect("boundary");
+        boundary.data.clear();
+
+        assert_eq!(
+            block(insert_after_builtin(
+                Value::String("run".into()),
+                vec![Value::Tensor(boundary), Value::String("mat".into())],
+            ))
+            .unwrap(),
+            Value::String("runmat".into())
+        );
+
+        let mut start =
+            Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("start");
+        start.data.clear();
+        let mut stop = Tensor::new_integer(IntegerStorage::U16(vec![4]), vec![1, 1]).expect("stop");
+        stop.data.clear();
+
+        assert_eq!(
+            block(replace_between_builtin(
+                Value::String("abcde".into()),
+                vec![
+                    Value::Tensor(start),
+                    Value::Tensor(stop),
+                    Value::String("X".into()),
+                ],
+            ))
+            .unwrap(),
+            Value::String("aXe".into())
+        );
+    }
+
+    #[test]
+    fn text_boundary_positions_reject_invalid_integer_and_double_values() {
+        let mut zero =
+            Tensor::new_integer(IntegerStorage::U16(vec![0]), vec![1, 1]).expect("boundary");
+        zero.data.clear();
+        assert!(block(insert_after_builtin(
+            Value::String("run".into()),
+            vec![Value::Tensor(zero), Value::String("mat".into())],
+        ))
+        .is_err());
+
+        assert!(block(insert_after_builtin(
+            Value::String("run".into()),
+            vec![Value::Num(1.0e300), Value::String("mat".into())],
+        ))
+        .is_err());
     }
 
     #[test]
