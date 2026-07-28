@@ -358,7 +358,7 @@ async fn value_to_input(value: Value) -> BuiltinResult<NumericInput> {
         .map_err(|err| normalize_internal(format!("normalize: {err}")))?;
     match value {
         Value::Tensor(tensor) => {
-            let shape = normalize_shape_for(&tensor.shape, tensor.data.len());
+            let shape = normalize_shape_for(&tensor.shape, tensor::tensor_element_len(&tensor));
             Ok(NumericInput::Real {
                 shape,
                 data: tensor::tensor_into_values_f64(tensor),
@@ -389,8 +389,11 @@ async fn value_to_input(value: Value) -> BuiltinResult<NumericInput> {
             shape: vec![1, 1],
         }),
         Value::ComplexTensor(tensor) => Ok(NumericInput::Complex {
-            shape: normalize_shape_for(&tensor.shape, tensor.data.len()),
-            data: tensor.data,
+            shape: normalize_shape_for(&tensor.shape, tensor::complex_tensor_element_len(&tensor)),
+            data: tensor::complex_tensor_into_values_complex64(tensor)
+                .into_iter()
+                .map(|value| (value.re, value.im))
+                .collect(),
         }),
         other => Err(normalize_error(format!(
             "normalize: unsupported input type {other:?}"
@@ -1271,7 +1274,9 @@ fn real_param_values(param: &ParamReal) -> Vec<f64> {
 fn real_param_shape(param: &ParamReal, len: usize) -> Vec<usize> {
     match param {
         ParamReal::Computed { shape, .. } => shape.clone(),
-        ParamReal::Explicit(tensor) => normalize_shape_for(&tensor.shape, tensor.data.len()),
+        ParamReal::Explicit(tensor) => {
+            normalize_shape_for(&tensor.shape, tensor::tensor_element_len(tensor))
+        }
     }
     .shape_fallback(len)
 }
@@ -1283,16 +1288,21 @@ fn complex_param_values(param: &ParamComplex) -> Vec<(f64, f64)> {
             .into_iter()
             .map(|value| (value, 0.0))
             .collect(),
-        ParamComplex::ExplicitComplex(tensor) => tensor.data.clone(),
+        ParamComplex::ExplicitComplex(tensor) => tensor::complex_tensor_values_complex64(tensor)
+            .into_iter()
+            .map(|value| (value.re, value.im))
+            .collect(),
     }
 }
 
 fn complex_param_shape(param: &ParamComplex, len: usize) -> Vec<usize> {
     match param {
         ParamComplex::Computed { shape, .. } => shape.clone(),
-        ParamComplex::ExplicitReal(tensor) => normalize_shape_for(&tensor.shape, tensor.data.len()),
+        ParamComplex::ExplicitReal(tensor) => {
+            normalize_shape_for(&tensor.shape, tensor::tensor_element_len(tensor))
+        }
         ParamComplex::ExplicitComplex(tensor) => {
-            normalize_shape_for(&tensor.shape, tensor.data.len())
+            normalize_shape_for(&tensor.shape, tensor::complex_tensor_element_len(tensor))
         }
     }
     .shape_fallback(len)
@@ -1350,7 +1360,10 @@ fn normalize_shape_for(shape: &[usize], len: usize) -> Vec<usize> {
 
 fn real_part_tensor(tensor: &ComplexTensor) -> BuiltinResult<Tensor> {
     Tensor::new(
-        tensor.data.iter().map(|value| value.0).collect(),
+        tensor::complex_tensor_values_complex64(tensor)
+            .into_iter()
+            .map(|value| value.re)
+            .collect(),
         tensor.shape.clone(),
     )
     .map_err(|err| normalize_internal(format!("normalize: {err}")))
@@ -1360,7 +1373,7 @@ fn real_part_tensor(tensor: &ComplexTensor) -> BuiltinResult<Tensor> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_builtins::{IntegerComplexStorage, IntegerStorage};
 
     fn call(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(normalize_builtin(value, rest))
@@ -1374,6 +1387,20 @@ mod tests {
         let mut tensor = Tensor::new_integer(storage, shape).unwrap();
         tensor.data.fill(f64::NAN);
         Value::Tensor(tensor)
+    }
+
+    fn mirrorless_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
+        tensor.data.clear();
+        Value::Tensor(tensor)
+    }
+
+    fn complex_int_tensor(real: IntegerStorage, imag: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor =
+            ComplexTensor::new_integer(IntegerComplexStorage::new(real, imag).unwrap(), shape)
+                .unwrap();
+        tensor.data.clear();
+        Value::ComplexTensor(tensor)
     }
 
     fn expect_tensor(value: Value) -> Tensor {
@@ -1408,6 +1435,21 @@ mod tests {
             )
             .unwrap(),
         );
+        assert_close(out.data[0], -1.0);
+        assert_close(out.data[1], 0.0);
+        assert_close(out.data[2], 1.0);
+    }
+
+    #[test]
+    fn normalize_real_input_shape_uses_typed_integer_storage_not_mirror() {
+        let out = expect_tensor(
+            call(
+                mirrorless_int_tensor(IntegerStorage::I16(vec![1, 2, 3]), vec![3, 1]),
+                vec![],
+            )
+            .unwrap(),
+        );
+        assert_eq!(out.shape, vec![3, 1]);
         assert_close(out.data[0], -1.0);
         assert_close(out.data[1], 0.0);
         assert_close(out.data[2], 1.0);
@@ -1530,6 +1572,23 @@ mod tests {
     }
 
     #[test]
+    fn normalize_explicit_param_shape_uses_typed_integer_storage_not_mirror() {
+        let out = expect_tensor(
+            call(
+                mirrorless_int_tensor(IntegerStorage::I16(vec![2, 4, 6]), vec![3, 1]),
+                vec![
+                    Value::from("center"),
+                    mirrorless_int_tensor(IntegerStorage::I16(vec![2, 2, 2]), vec![3, 1]),
+                    Value::from("scale"),
+                    mirrorless_int_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]),
+                ],
+            )
+            .unwrap(),
+        );
+        assert_eq!(out.data, vec![0.0, 1.0, 2.0]);
+    }
+
+    #[test]
     fn zero_scale_output_can_be_reused() {
         let values = {
             let _guard = crate::output_count::push_output_count(Some(3));
@@ -1617,6 +1676,50 @@ mod tests {
         assert_close(out.data[0].0, 3.0 / 13.0);
         assert_close(out.data[0].1, 4.0 / 13.0);
         assert_close(out.data[1].1, 12.0 / 13.0);
+    }
+
+    #[test]
+    fn normalize_reads_typed_complex_integer_storage_exactly() {
+        let input = complex_int_tensor(
+            IntegerStorage::I16(vec![3, 0]),
+            IntegerStorage::I16(vec![4, 12]),
+            vec![2, 1],
+        );
+        let Value::ComplexTensor(out) =
+            call(input, vec![Value::from("norm"), Value::Num(2.0)]).unwrap()
+        else {
+            panic!("expected complex output");
+        };
+        assert_close(out.data[0].0, 3.0 / 13.0);
+        assert_close(out.data[0].1, 4.0 / 13.0);
+        assert_close(out.data[1].0, 0.0);
+        assert_close(out.data[1].1, 12.0 / 13.0);
+    }
+
+    #[test]
+    fn normalize_reuses_typed_complex_integer_center_from_storage() {
+        let input = Value::ComplexTensor(
+            ComplexTensor::new(vec![(3.0, 4.0), (5.0, 8.0)], vec![2, 1]).unwrap(),
+        );
+        let center = complex_int_tensor(
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I16(vec![2]),
+            vec![1, 1],
+        );
+        let Value::ComplexTensor(out) = call(
+            input,
+            vec![
+                Value::from("center"),
+                center,
+                Value::from("scale"),
+                Value::Num(2.0),
+            ],
+        )
+        .unwrap() else {
+            panic!("expected complex output");
+        };
+        assert_eq!(out.shape, vec![2, 1]);
+        assert_eq!(out.data, vec![(1.0, 1.0), (2.0, 3.0)]);
     }
 
     #[test]
