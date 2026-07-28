@@ -5784,3 +5784,43 @@ fn eye_integer_class_strings_preserve_integer_storage_on_script_surface() {
         );
     }
 }
+
+#[test]
+fn diag_integer_class_strings_preserve_integer_storage_on_script_surface() {
+    let program = r#"
+        a = diag([1.5 -2.5 300], 'int16');
+        b = diag(uint64([18446744073709551615 9223372036854775808]), 'int64');
+        ca = class(a);
+        cb = class(b);
+    "#;
+    let vars = execute_source(program);
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_builtins::Value::Tensor(tensor)
+            if tensor.shape == vec![3, 3]
+                && tensor.integer_storage()
+                    == Some(&runmat_builtins::IntegerStorage::I16(vec![
+                        2, 0, 0, 0, -3, 0, 0, 0, 300
+                    ]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_builtins::Value::Tensor(tensor)
+            if tensor.shape == vec![2, 2]
+                && tensor.integer_storage()
+                    == Some(&runmat_builtins::IntegerStorage::I64(vec![
+                        i64::MAX,
+                        0,
+                        0,
+                        i64::MAX
+                    ]))
+    )));
+    for expected in ["int16", "int64"] {
+        assert!(
+            vars.iter().any(
+                |value| matches!(value, runmat_builtins::Value::String(class) if class == expected)
+            ),
+            "expected class {expected:?}; vars={vars:?}"
+        );
+    }
+}

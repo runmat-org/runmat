@@ -7,6 +7,9 @@ use crate::builtins::common::{
     },
     tensor,
 };
+use crate::builtins::math::elementwise::integer_cast::{
+    cast_complex_value, CastError, IntegerTarget,
+};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, HostTensorView, ProviderPrecision};
 use runmat_builtins::{
@@ -298,7 +301,7 @@ const DIAG_INPUTS_A_CLASS: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Output class override ('logical' or 'double').",
+        description: "Output class override ('logical', 'double', or integer class).",
     },
 ];
 
@@ -426,6 +429,7 @@ enum OutputTemplate {
     Native,
     Logical,
     Double,
+    Integer(IntegerTarget),
     Like(Value),
 }
 
@@ -433,6 +437,7 @@ enum OutputTemplate {
 enum ClassOverride {
     Logical,
     Double,
+    Integer(IntegerTarget),
 }
 
 struct ParsedDiagArgs {
@@ -485,6 +490,20 @@ impl ParsedDiagArgs {
                             ));
                         }
                         class_override = Some(ClassOverride::Double);
+                        idx += 1;
+                        continue;
+                    }
+                    "int8" | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32"
+                    | "uint64" => {
+                        if like_proto.is_some() {
+                            return Err(diag_error(
+                                MESSAGE_ID_INVALID_INPUT,
+                                format!("diag: cannot combine 'like' with '{keyword}'"),
+                            ));
+                        }
+                        let target = integer_target_from_keyword(&keyword)
+                            .expect("integer class keyword must map to target");
+                        class_override = Some(ClassOverride::Integer(target));
                         idx += 1;
                         continue;
                     }
@@ -548,6 +567,7 @@ impl ParsedDiagArgs {
             match class_override {
                 Some(ClassOverride::Logical) => OutputTemplate::Logical,
                 Some(ClassOverride::Double) => OutputTemplate::Double,
+                Some(ClassOverride::Integer(target)) => OutputTemplate::Integer(target),
                 None => OutputTemplate::Native,
             }
         };
@@ -569,6 +589,20 @@ fn keyword_of(value: &Value) -> Option<String> {
             let text: String = ca.data.iter().collect();
             Some(text.to_ascii_lowercase())
         }
+        _ => None,
+    }
+}
+
+fn integer_target_from_keyword(keyword: &str) -> Option<IntegerTarget> {
+    match keyword {
+        "int8" => Some(IntegerTarget::I8),
+        "int16" => Some(IntegerTarget::I16),
+        "int32" => Some(IntegerTarget::I32),
+        "int64" => Some(IntegerTarget::I64),
+        "uint8" => Some(IntegerTarget::U8),
+        "uint16" => Some(IntegerTarget::U16),
+        "uint32" => Some(IntegerTarget::U32),
+        "uint64" => Some(IntegerTarget::U64),
         _ => None,
     }
 }
@@ -753,6 +787,7 @@ fn gpu_diag_template(
             })
         }
         OutputTemplate::Like(_) => None,
+        OutputTemplate::Integer(_) => None,
     }
 }
 
@@ -1161,6 +1196,7 @@ async fn apply_output_template(value: Value, template: &OutputTemplate) -> Built
         OutputTemplate::Native => Ok(value),
         OutputTemplate::Logical => logical_array_from_value(value).map(Value::LogicalArray),
         OutputTemplate::Double => tensor_from_value(value).map(Value::Tensor),
+        OutputTemplate::Integer(target) => integer_value_from_value(value, *target),
         OutputTemplate::Like(proto) => apply_like_template(value, proto).await,
     }
 }
@@ -1255,6 +1291,66 @@ fn cast_tensor_dtype(tensor: Tensor, dtype: NumericDType) -> BuiltinResult<Tenso
         return Ok(tensor);
     }
     Ok(tensor::coerce_tensor_dtype(tensor, dtype))
+}
+
+fn integer_value_from_value(value: Value, target: IntegerTarget) -> BuiltinResult<Value> {
+    match value {
+        Value::Tensor(tensor) => target
+            .cast_tensor(tensor)
+            .map(Value::Tensor)
+            .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}"))),
+        Value::LogicalArray(array) => {
+            let tensor = tensor::logical_to_tensor(&array)
+                .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))?;
+            target
+                .cast_tensor(tensor)
+                .map(Value::Tensor)
+                .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
+        }
+        Value::CharArray(chars) => {
+            let tensor = char_array_to_tensor(&chars)?;
+            target
+                .cast_tensor(tensor)
+                .map(Value::Tensor)
+                .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
+        }
+        Value::Complex(_, _) | Value::ComplexTensor(_) => {
+            cast_complex_value(value, target).map_err(|err| diag_cast_error("diag", err))
+        }
+        Value::Num(n) => {
+            Tensor::new_integer(target.storage(vec![target.cast_scalar(n)]), vec![1, 1])
+                .map(Value::Tensor)
+                .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
+        }
+        Value::Int(i) => Tensor::new_integer(target.storage(vec![target.cast_int(&i)]), vec![1, 1])
+            .map(Value::Tensor)
+            .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}"))),
+        Value::Bool(flag) => Tensor::new_integer(
+            target.storage(vec![target.cast_scalar(if flag { 1.0 } else { 0.0 })]),
+            vec![1, 1],
+        )
+        .map(Value::Tensor)
+        .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}"))),
+        other => Err(diag_error(
+            MESSAGE_ID_INVALID_INPUT,
+            format!(
+                "diag: cannot convert {other:?} to {} output",
+                target.class_name()
+            ),
+        )),
+    }
+}
+
+fn diag_cast_error(context: &str, err: CastError) -> RuntimeError {
+    match err {
+        CastError::Unsupported(kind) => diag_error(
+            MESSAGE_ID_INVALID_INPUT,
+            format!("{context}: cannot convert {kind} to integer output"),
+        ),
+        CastError::Internal(message) => {
+            diag_error(MESSAGE_ID_INVALID_INPUT, format!("{context}: {message}"))
+        }
+    }
 }
 
 fn logical_array_from_value(value: Value) -> BuiltinResult<LogicalArray> {
@@ -1671,6 +1767,69 @@ mod tests {
         };
         assert_eq!(array.shape, vec![2, 1]);
         assert_eq!(array.data, vec![0, 1]);
+    }
+
+    #[test]
+    fn diag_integer_class_overrides_cover_all_classes() {
+        let cases = [
+            ("int8", IntegerStorage::I8(vec![2, 0, 0, -3])),
+            ("int16", IntegerStorage::I16(vec![2, 0, 0, -3])),
+            ("int32", IntegerStorage::I32(vec![2, 0, 0, -3])),
+            ("int64", IntegerStorage::I64(vec![2, 0, 0, -3])),
+            ("uint8", IntegerStorage::U8(vec![2, 0, 0, 0])),
+            ("uint16", IntegerStorage::U16(vec![2, 0, 0, 0])),
+            ("uint32", IntegerStorage::U32(vec![2, 0, 0, 0])),
+            ("uint64", IntegerStorage::U64(vec![2, 0, 0, 0])),
+        ];
+
+        for (class_name, expected) in cases {
+            let value = Value::Tensor(Tensor::new(vec![1.5, -2.5], vec![1, 2]).unwrap());
+            let out = run_diag(value, vec![Value::from(class_name)]).expect("diag");
+            let Value::Tensor(tensor) = out else {
+                panic!("expected tensor output for {class_name}");
+            };
+            assert_eq!(tensor.shape, vec![2, 2]);
+            assert_eq!(tensor.integer_storage(), Some(&expected), "{class_name}");
+        }
+    }
+
+    #[test]
+    fn diag_integer_class_override_reads_typed_storage_exactly() {
+        let mut value = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 9_223_372_036_854_775_808]),
+            vec![1, 2],
+        )
+        .expect("tensor");
+        value.data.fill(f64::NAN);
+
+        let out = run_diag(Value::Tensor(value), vec![Value::from("int64")]).expect("diag");
+        let Value::Tensor(tensor) = out else {
+            panic!("expected tensor output");
+        };
+        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::I64(vec![i64::MAX, 0, 0, i64::MAX]))
+        );
+    }
+
+    #[test]
+    fn diag_integer_class_override_casts_complex_storage() {
+        let value = Value::ComplexTensor(
+            ComplexTensor::new(vec![(1.5, -2.5), (300.0, 4.5)], vec![1, 2]).unwrap(),
+        );
+
+        let out = run_diag(value, vec![Value::from("uint8")]).expect("diag");
+        let Value::ComplexTensor(tensor) = out else {
+            panic!("expected complex tensor output");
+        };
+        assert_eq!(tensor.shape, vec![2, 2]);
+        let storage = tensor
+            .integer_data
+            .as_ref()
+            .expect("complex integer storage");
+        assert_eq!(storage.real, IntegerStorage::U8(vec![2, 0, 0, u8::MAX]));
+        assert_eq!(storage.imag, IntegerStorage::U8(vec![0, 0, 0, 5]));
     }
 
     #[test]
