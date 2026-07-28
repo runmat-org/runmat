@@ -9,7 +9,8 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 
 use super::common::{
-    build_strides, dims_from_tokens, materialize_value, parse_dims, total_elements,
+    build_strides, dims_from_tokens, fits_positive_platform_index, materialize_value, parse_dims,
+    total_elements,
 };
 use crate::builtins::array::type_resolvers::size_vector_len;
 use crate::builtins::common::arg_tokens::tokens_from_context;
@@ -389,7 +390,7 @@ fn coerce_linear_index(value: f64, max_index: usize) -> crate::BuiltinResult<usi
     if rounded < 1.0 {
         return Err(ind2sub_error("Linear indices must be positive integers."));
     }
-    if rounded > usize::MAX as f64 {
+    if !fits_positive_platform_index(rounded) {
         return Err(ind2sub_error(
             "Index exceeds maximum supported size for this platform.",
         ));
@@ -621,6 +622,29 @@ pub(crate) mod tests {
         assert!(
             err.contains("Linear indices must be positive integers"),
             "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_oversized_float_linear_indices_before_casting() {
+        let dims = Tensor::new_integer(
+            IntegerStorage::U64(vec![usize::MAX.saturating_sub(1) as u64]),
+            vec![1, 1],
+        )
+        .unwrap();
+
+        let err = ind2sub_builtin(Value::Tensor(dims.clone()), Value::Num(1.0e300))
+            .expect_err("huge float index must reject");
+        assert_eq!(
+            err.identifier(),
+            super::IND2SUB_ERROR_INVALID_INPUT.identifier
+        );
+
+        let err = ind2sub_builtin(Value::Tensor(dims), Value::Num(usize::MAX as f64))
+            .expect_err("platform boundary float index must reject");
+        assert_eq!(
+            err.identifier(),
+            super::IND2SUB_ERROR_INVALID_INPUT.identifier
         );
     }
 

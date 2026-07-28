@@ -114,7 +114,7 @@ pub(crate) fn coerce_positive_int(value: f64, builtin: &str) -> BuiltinResult<us
             "Size arguments must be positive integers.",
         ));
     }
-    if !fits_platform_usize(rounded) {
+    if !fits_positive_platform_index(rounded) {
         return Err(indexing_error(
             builtin,
             "Size arguments exceed the maximum supported size.",
@@ -171,14 +171,18 @@ fn coerce_positive_literal(value: f64) -> Option<usize> {
     if rounded < 1.0 {
         return None;
     }
-    if !fits_platform_usize(rounded) {
+    if !fits_positive_platform_index(rounded) {
         return None;
     }
     Some(rounded as usize)
 }
 
-fn fits_platform_usize(value: f64) -> bool {
-    value < usize::MAX as f64 || (usize::BITS < 64 && value == usize::MAX as f64)
+pub(crate) fn fits_positive_platform_index(value: f64) -> bool {
+    if value > usize::MAX.saturating_sub(1) as f64 {
+        return false;
+    }
+    let parsed = value as usize;
+    parsed as f64 == value && parsed != usize::MAX
 }
 
 /// Build column-major strides for the supplied dimensions, checking overflow.

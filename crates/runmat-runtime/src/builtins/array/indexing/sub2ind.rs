@@ -10,7 +10,9 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
-use super::common::{build_strides, dims_from_tokens, materialize_value, parse_dims};
+use super::common::{
+    build_strides, dims_from_tokens, fits_positive_platform_index, materialize_value, parse_dims,
+};
 use crate::builtins::array::type_resolvers::is_scalar_type;
 use crate::builtins::common::arg_tokens::tokens_from_context;
 use crate::builtins::common::spec::{
@@ -476,6 +478,11 @@ fn coerce_subscript(value: f64, dim_number: usize, dim_size: usize) -> crate::Bu
             "Subscript indices must either be real positive integers or logicals.",
         ));
     }
+    if !fits_positive_platform_index(rounded) {
+        return Err(sub2ind_error(
+            "Subscript indices exceed the maximum supported index range.",
+        ));
+    }
     if rounded > dim_size as f64 {
         return Err(dimension_bounds_error(dim_number));
     }
@@ -665,6 +672,25 @@ pub(crate) mod tests {
             err.to_string().contains("real positive integers"),
             "expected integer coercion error, got {err}"
         );
+        assert_eq!(
+            err.identifier(),
+            super::SUB2IND_ERROR_INVALID_INPUT.identifier
+        );
+    }
+
+    #[test]
+    fn rejects_oversized_float_subscripts_before_casting() {
+        let dims = Value::Int(IntValue::U64(usize::MAX.saturating_sub(1) as u64));
+
+        let err = sub2ind_builtin(dims.clone(), vec![Value::Num(1.0e300)])
+            .expect_err("huge float subscript must reject");
+        assert_eq!(
+            err.identifier(),
+            super::SUB2IND_ERROR_INVALID_INPUT.identifier
+        );
+
+        let err = sub2ind_builtin(dims, vec![Value::Num(usize::MAX as f64)])
+            .expect_err("platform boundary float subscript must reject");
         assert_eq!(
             err.identifier(),
             super::SUB2IND_ERROR_INVALID_INPUT.identifier

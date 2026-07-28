@@ -9,6 +9,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use super::common::fits_positive_platform_index;
 use crate::builtins::array::type_resolvers::column_vector_type;
 use crate::builtins::common::arg_tokens::ArgToken;
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -546,6 +547,15 @@ fn parse_limit_scalar(value: f64) -> crate::BuiltinResult<usize> {
             &FIND_ERROR_INVALID_INPUT,
         ));
     }
+    if rounded == 0.0 {
+        return Ok(0);
+    }
+    if !fits_positive_platform_index(rounded) {
+        return Err(find_error_with_message(
+            "find: K exceeds the maximum supported index range",
+            &FIND_ERROR_INVALID_INPUT,
+        ));
+    }
     Ok(rounded as usize)
 }
 
@@ -1062,6 +1072,15 @@ pub(crate) mod tests {
         let err = parse_find_tokens(&[ArgToken::Integer(IntValue::I64(-1))])
             .expect_err("negative integer limit must reject");
         assert_eq!(err.identifier(), FIND_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn find_float_limits_reject_oversized_values_before_casting() {
+        assert!(parse_find_tokens(&[ArgToken::Number(1.0e300)]).is_err());
+        assert!(parse_find_tokens(&[ArgToken::Number(usize::MAX as f64)]).is_err());
+
+        let options = parse_find_tokens(&[ArgToken::Number(0.0)]).expect("zero limit");
+        assert_eq!(options.limit, Some(0));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
