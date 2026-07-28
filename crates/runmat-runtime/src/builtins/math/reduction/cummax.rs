@@ -1230,11 +1230,12 @@ pub(crate) mod tests {
 
     #[test]
     fn cummax_integer_storage_and_reverse_indices_remain_exact() {
-        let input = Tensor::new_integer(
+        let mut input = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I64(vec![i64::MIN, -4, -5, -3]),
             vec![2, 2],
         )
         .unwrap();
+        input.data.clear();
         let (values, indices) = evaluate(Value::Tensor(input), &[Value::from("reverse")])
             .unwrap()
             .into_pair();

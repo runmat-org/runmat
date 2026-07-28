@@ -2151,11 +2151,12 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_native_integer_reduction_preserves_uint64_values_and_indices() {
-        let input = Tensor::new_integer(
+        let mut input = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![u64::MAX - 1, u64::MAX, 3, 2]),
             vec![2, 2],
         )
         .expect("input");
+        input.data.clear();
         let (values, indices) = evaluate(Value::Tensor(input), &[])
             .expect("min")
             .into_pair();
@@ -2178,11 +2179,12 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_native_integer_abs_all_uses_exact_int64_minimum() {
-        let input = Tensor::new_integer(
+        let mut input = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I64(vec![i64::MIN, -3, 3]),
             vec![3, 1],
         )
         .expect("input");
+        input.data.clear();
         let args = vec![
             placeholder(),
             Value::from("all"),
