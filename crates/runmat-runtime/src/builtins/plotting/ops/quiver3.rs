@@ -749,7 +749,11 @@ fn tensor_shape_from_value(value: &Value) -> crate::BuiltinResult<(usize, usize,
         _ => {
             let tensor = Tensor::try_from(value)
                 .map_err(|err| plotting_error(BUILTIN_NAME, format!("quiver3: {err}")))?;
-            Ok((tensor.rows.max(1), tensor.cols.max(1), tensor.data.len()))
+            Ok((
+                tensor.rows.max(1),
+                tensor.cols.max(1),
+                tensor_helpers::tensor_element_len(&tensor),
+            ))
         }
     }
 }
@@ -762,12 +766,12 @@ fn materialize_quiver3_components(
     v: Tensor,
     w: Tensor,
 ) -> crate::BuiltinResult<Quiver3Components> {
-    let x_len = x.data.len();
-    let y_len = y.data.len();
-    let z_len = z.data.len();
-    let u_len = u.data.len();
-    let v_len = v.data.len();
-    let w_len = w.data.len();
+    let x_len = tensor_helpers::tensor_element_len(&x);
+    let y_len = tensor_helpers::tensor_element_len(&y);
+    let z_len = tensor_helpers::tensor_element_len(&z);
+    let u_len = tensor_helpers::tensor_element_len(&u);
+    let v_len = tensor_helpers::tensor_element_len(&v);
+    let w_len = tensor_helpers::tensor_element_len(&w);
     let z_rows = z.rows;
     let z_cols = z.cols;
     let z_shape = z.shape.clone();
@@ -1038,6 +1042,21 @@ mod tests {
         assert_eq!(quiver.u, vec![6.0, 7.0]);
         assert_eq!(quiver.v, vec![8.0, 9.0]);
         assert_eq!(quiver.w.as_ref().unwrap(), &vec![10.0, 11.0]);
+    }
+
+    #[test]
+    fn quiver3_rejects_mismatched_typed_integer_vector_lengths() {
+        let err = materialize_quiver3_components(
+            int_vec_tensor(vec![0, 1]),
+            int_vec_tensor(vec![2]),
+            int_vec_tensor(vec![4, 5]),
+            int_vec_tensor(vec![6, 7]),
+            int_vec_tensor(vec![8, 9]),
+            int_vec_tensor(vec![10, 11]),
+        )
+        .expect_err("mismatched typed vectors should reject");
+
+        assert!(format!("{err:?}").contains("same length"));
     }
 
     #[test]
