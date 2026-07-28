@@ -452,7 +452,7 @@ fn option_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
     }
     let tensor = tensor::value_to_tensor(value)
         .map_err(|_| invalid(format!("scatterhist: {name} must be logical")))?;
-    if tensor.data.len() != 1 {
+    if tensor::tensor_element_len(&tensor) != 1 {
         return Err(invalid(format!(
             "scatterhist: {name} must be a logical scalar"
         )));
@@ -467,7 +467,7 @@ fn option_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
             _ => Err(invalid(format!("scatterhist: {name} must be 0 or 1"))),
         };
     }
-    match tensor.data[0] {
+    match tensor::tensor_value_f64(&tensor, 0) {
         0.0 => Ok(false),
         1.0 => Ok(true),
         _ => Err(invalid(format!("scatterhist: {name} must be 0 or 1"))),
@@ -750,7 +750,7 @@ fn parse_parent(value: &Value) -> BuiltinResult<FigureHandle> {
 
 fn group_labels(value: &Value, expected_len: usize) -> BuiltinResult<Vec<Option<String>>> {
     match value {
-        Value::Tensor(tensor) if tensor.data.len() == expected_len => {
+        Value::Tensor(tensor) if tensor::tensor_element_len(tensor) == expected_len => {
             if let Some(storage) = tensor.integer_storage() {
                 return Ok(storage
                     .exact_values()
@@ -1415,7 +1415,9 @@ mod tests {
     }
 
     fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        Value::Tensor(Tensor::new_integer(storage, shape).unwrap())
+        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
+        tensor.data.clear();
+        Value::Tensor(tensor)
     }
 
     #[test]
@@ -1494,10 +1496,7 @@ mod tests {
             Value::String("LineWidth".into()),
             int_tensor(IntegerStorage::U16(vec![2, 3]), vec![1, 2]),
             Value::String("Color".into()),
-            Value::Tensor(
-                Tensor::new_integer(IntegerStorage::U8(vec![1, 0, 0, 0, 1, 0]), vec![2, 3])
-                    .unwrap(),
-            ),
+            int_tensor(IntegerStorage::U8(vec![1, 0, 0, 0, 1, 0]), vec![2, 3]),
             Value::String("Legend".into()),
             int_tensor(IntegerStorage::U8(vec![1]), vec![1, 1]),
         ]))

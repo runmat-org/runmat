@@ -776,7 +776,7 @@ impl InitialState {
     ) -> BuiltinResult<Self> {
         if state_len == 0 {
             match value {
-                Value::Tensor(tensor) if tensor.data.is_empty() => {
+                Value::Tensor(tensor) if tensor::tensor_element_len(&tensor) == 0 => {
                     return Ok(Self::empty(expected_shape.to_vec()))
                 }
                 Value::GpuTensor(handle) => {
@@ -809,7 +809,9 @@ impl InitialState {
                 Value::LogicalArray(logical) if logical.data.is_empty() => {
                     return Ok(Self::empty(expected_shape.to_vec()))
                 }
-                Value::ComplexTensor(tensor) if tensor.data.is_empty() => {
+                Value::ComplexTensor(tensor)
+                    if tensor::complex_tensor_element_len(&tensor) == 0 =>
+                {
                     return Ok(Self {
                         provided: true,
                         column_major: Vec::new(),
@@ -966,8 +968,8 @@ fn parse_optional_arguments(rest: &[Value]) -> BuiltinResult<(Option<Value>, Opt
 
 fn is_empty_placeholder(value: &Value) -> bool {
     match value {
-        Value::Tensor(t) => t.data.is_empty(),
-        Value::ComplexTensor(t) => t.data.is_empty(),
+        Value::Tensor(t) => tensor::tensor_element_len(t) == 0,
+        Value::ComplexTensor(t) => tensor::complex_tensor_element_len(t) == 0,
         Value::LogicalArray(l) => l.data.is_empty(),
         Value::StringArray(sa) => sa.data.is_empty(),
         Value::CharArray(ca) => ca.data.is_empty(),
@@ -1491,7 +1493,7 @@ pub(crate) mod tests {
 
     fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
         let mut tensor = Tensor::new_integer(storage, shape).expect("typed integer tensor");
-        tensor.data.fill(f64::NAN);
+        tensor.data.clear();
         tensor
     }
 
@@ -1647,6 +1649,36 @@ pub(crate) mod tests {
             other => panic!("expected tensor output, got {other:?}"),
         };
         approx_eq_slice(&data, &[0.2, 0.16, 0.128, 0.1024, 0.08192]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn filter_accepts_empty_typed_integer_initial_state_without_mirror_for_zero_order() {
+        let b = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let a = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let x = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
+        let zi = integer_tensor(IntegerStorage::I16(Vec::new()), vec![0, 0]);
+
+        let eval = evaluate(
+            Value::Tensor(b),
+            Value::Tensor(a),
+            Value::Tensor(x),
+            &[Value::Tensor(zi)],
+        )
+        .expect("filter");
+        let (y, zf) = eval.into_pair();
+
+        let Tensor { data, .. } = match y {
+            Value::Tensor(t) => t,
+            other => panic!("expected tensor output, got {other:?}"),
+        };
+        approx_eq_slice(&data, &[2.0, 3.0]);
+
+        let Tensor { data, .. } = match zf {
+            Value::Tensor(t) => t,
+            other => panic!("expected empty tensor final state, got {other:?}"),
+        };
+        assert!(data.is_empty());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

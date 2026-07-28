@@ -307,7 +307,7 @@ fn parse_refline_coefficients(args: &[Value]) -> BuiltinResult<(ReflinePlan, &[V
 fn coefficient_pair(value: &Value) -> BuiltinResult<Option<(f64, f64)>> {
     match value {
         Value::Tensor(tensor) => {
-            if tensor.data.len() != 2 {
+            if tensor_utils::tensor_element_len(tensor) != 2 {
                 return Ok(None);
             }
             let slope = tensor_utils::tensor_value_f64(tensor, 0);
@@ -523,7 +523,7 @@ mod tests {
 
     fn int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
         let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
-        tensor.data.fill(f64::NAN);
+        tensor.data.clear();
         Value::Tensor(tensor)
     }
 

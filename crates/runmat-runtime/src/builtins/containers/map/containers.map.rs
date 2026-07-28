@@ -1477,7 +1477,10 @@ async fn flatten_keys(
             Ok(arr.data.iter().map(|&b| Value::Bool(b != 0)).collect())
         }
         Value::Tensor(t) => {
-            if !t.shape.is_empty() && t.data.len() != 1 && !is_vector_shape(&t.shape) {
+            if !t.shape.is_empty()
+                && tensor::tensor_element_len(t) != 1
+                && !is_vector_shape(&t.shape)
+            {
                 return Err(map_error(
                     "containers.Map: numeric keys must be scalar or vector shaped",
                     builtin,
@@ -1520,7 +1523,10 @@ async fn flatten_values(value: &Value, builtin: &'static str) -> BuiltinResult<V
         Value::CharArray(ca) => Ok(char_array_rows(ca, builtin)?),
         Value::LogicalArray(arr) => Ok(arr.data.iter().map(|&b| Value::Bool(b != 0)).collect()),
         Value::Tensor(t) => {
-            if !t.shape.is_empty() && !is_vector_shape(&t.shape) && t.data.len() != 1 {
+            if !t.shape.is_empty()
+                && !is_vector_shape(&t.shape)
+                && tensor::tensor_element_len(t) != 1
+            {
                 return Err(map_error(
                     "containers.Map: numeric values must be scalar or vector shaped",
                     builtin,
@@ -2622,10 +2628,10 @@ pub(crate) mod tests {
             vec![1, 2],
         )
         .expect("uint64 keys");
-        keys.data = vec![42.0, 42.0];
+        keys.data.clear();
         let mut values =
             Tensor::new_integer(IntegerStorage::I32(vec![11, 22]), vec![1, 2]).expect("values");
-        values.data = vec![0.0, 0.0];
+        values.data.clear();
 
         let map = containers_map_builtin(vec![
             Value::Tensor(keys),
@@ -2640,7 +2646,7 @@ pub(crate) mod tests {
             vec![1, 2],
         )
         .expect("payload");
-        payload.data = vec![42.0, 42.0];
+        payload.data.clear();
         let key_payload = crate::make_cell(vec![Value::Tensor(payload)], 1, 1).unwrap();
         let result = containers_map_subsref(map, "()".to_string(), key_payload).expect("lookup");
         match result {
@@ -2658,7 +2664,7 @@ pub(crate) mod tests {
         let keys = crate::make_cell(vec![Value::from("mask")], 1, 1).unwrap();
         let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2])
             .expect("integer logical source");
-        tensor.data = vec![7.0, 0.0];
+        tensor.data.clear();
         let values = crate::make_cell(vec![Value::Tensor(tensor)], 1, 1).unwrap();
         let map = containers_map_builtin(vec![
             keys,

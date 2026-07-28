@@ -297,7 +297,7 @@ fn parse_ribbon_args(args: Vec<Value>) -> BuiltinResult<ParsedRibbon> {
 fn ribbon_data_from_value(value: &Value) -> BuiltinResult<RibbonData> {
     let tensor = Tensor::try_from(value)
         .map_err(|err| invalid_argument(format!("Y must be numeric: {err}")))?;
-    if tensor.data.is_empty() {
+    if tensor_utils::tensor_element_len(&tensor) == 0 {
         return Err(invalid_argument("Y must be non-empty"));
     }
     if tensor.shape.len() > 2 {
@@ -334,7 +334,7 @@ fn scalar_f64(value: &Value) -> Option<f64> {
         Value::Num(value) => Some(*value),
         Value::Int(value) => Some(value.to_f64()),
         Value::Bool(value) => Some(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
             Some(tensor_utils::tensor_value_f64(tensor, 0))
         }
         _ => None,
@@ -486,7 +486,7 @@ mod tests {
 
     fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
         let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
+        tensor.data.clear();
         Value::Tensor(tensor)
     }
 
