@@ -520,9 +520,6 @@ fn parse_size_args(args: &[Value]) -> BuiltinResult<Vec<usize>> {
 }
 
 fn tensor_shape_as_size(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
-    if tensor.data.is_empty() {
-        return Ok(vec![0, 0]);
-    }
     if let Some(storage) = tensor.integer_storage() {
         return (0..storage.len())
             .map(|index| {
@@ -532,6 +529,9 @@ fn tensor_shape_as_size(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
                 integer_size_to_usize(&value, "missing size")
             })
             .collect();
+    }
+    if tensor.data.is_empty() {
+        return Ok(vec![0, 0]);
     }
     tensor
         .data
@@ -586,9 +586,10 @@ fn ismissing_value(value: &Value) -> BuiltinResult<Value> {
             array.data.iter().map(|text| is_missing_text(text)),
             array.shape.clone(),
         ),
-        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
-            logical_from_iter(vec![false; tensor.data.len()], tensor.shape.clone())
-        }
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => logical_from_iter(
+            vec![false; tensor_utils::tensor_element_len(tensor)],
+            tensor.shape.clone(),
+        ),
         Value::Tensor(tensor) => logical_from_iter(
             tensor.data.iter().map(|value| value.is_nan()),
             tensor.shape.clone(),
@@ -905,7 +906,8 @@ fn remove_missing_tensor(
         let rows = tensor.rows();
         let cols = tensor.cols();
         let mask = if rows == 1 || cols == 1 {
-            LogicalArray::new(vec![0; tensor.data.len()], vec![1, tensor.data.len()])
+            let len = tensor_utils::tensor_element_len(&tensor);
+            LogicalArray::new(vec![0; len], vec![1, len])
         } else if matches!(options.dim, RemoveDim::Columns) {
             LogicalArray::new(vec![0; cols], vec![1, cols])
         } else {
@@ -2238,7 +2240,9 @@ mod tests {
     #[test]
     fn missing_preserves_typed_integer_size_vectors_exactly() {
         let large = 9_007_199_254_740_993_u64;
-        let dims = Tensor::new_integer(IntegerStorage::U64(vec![large, 0]), vec![1, 2]).unwrap();
+        let mut dims =
+            Tensor::new_integer(IntegerStorage::U64(vec![large, 0]), vec![1, 2]).unwrap();
+        dims.data.clear();
 
         let result = block_on(missing_builtin(vec![Value::Tensor(dims)])).unwrap();
 
@@ -2278,13 +2282,12 @@ mod tests {
 
     #[test]
     fn missing_rejects_negative_typed_integer_sizes() {
-        assert!(scalar_usize(
-            &Value::Tensor(Tensor::new_integer(IntegerStorage::I8(vec![-1]), vec![1, 1]).unwrap()),
-            "missing size",
-        )
-        .is_err());
+        let mut scalar = Tensor::new_integer(IntegerStorage::I8(vec![-1]), vec![1, 1]).unwrap();
+        scalar.data.clear();
+        assert!(scalar_usize(&Value::Tensor(scalar), "missing size").is_err());
 
-        let dims = Tensor::new_integer(IntegerStorage::I64(vec![2, -1]), vec![1, 2]).unwrap();
+        let mut dims = Tensor::new_integer(IntegerStorage::I64(vec![2, -1]), vec![1, 2]).unwrap();
+        dims.data.clear();
         assert!(tensor_shape_as_size(&dims).is_err());
     }
 
@@ -2306,7 +2309,7 @@ mod tests {
     fn ismissing_typed_integer_tensor_ignores_f64_mirror() {
         let mut input = Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3]), vec![1, 3])
             .expect("integer tensor");
-        input.data.fill(f64::NAN);
+        input.data.clear();
 
         let result = block_on(ismissing_builtin(Value::Tensor(input))).unwrap();
 
@@ -2335,7 +2338,7 @@ mod tests {
     fn rmmissing_typed_integer_tensor_preserves_storage_and_reports_no_missing() {
         let expected = IntegerStorage::U64(vec![1, u64::MAX, 3, 4]);
         let mut input = Tensor::new_integer(expected.clone(), vec![2, 2]).expect("integer tensor");
-        input.data.fill(f64::NAN);
+        input.data.clear();
 
         let result = remove_missing_tensor(
             input,
@@ -2350,6 +2353,30 @@ mod tests {
                 assert_eq!(tensor.integer_storage(), Some(&expected));
                 assert_eq!(mask.data, vec![0, 0]);
                 assert_eq!(mask.shape, vec![2, 1]);
+            }
+            other => panic!("expected tensor and mask, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rmmissing_typed_integer_vector_mask_uses_storage_len_not_mirror() {
+        let expected = IntegerStorage::I16(vec![1, 2, 3]);
+        let mut input = Tensor::new_integer(expected.clone(), vec![1, 3]).expect("integer tensor");
+        input.data.clear();
+
+        let result = remove_missing_tensor(
+            input,
+            RemoveOptions {
+                dim: RemoveDim::Rows,
+            },
+        )
+        .unwrap();
+
+        match result {
+            (Value::Tensor(tensor), mask) => {
+                assert_eq!(tensor.integer_storage(), Some(&expected));
+                assert_eq!(mask.data, vec![0, 0, 0]);
+                assert_eq!(mask.shape, vec![1, 3]);
             }
             other => panic!("expected tensor and mask, got {other:?}"),
         }
@@ -2416,7 +2443,7 @@ mod tests {
     fn fillmissing_typed_integer_tensor_preserves_storage_and_reports_no_missing() {
         let expected = IntegerStorage::I32(vec![10, 20, 30]);
         let mut input = Tensor::new_integer(expected.clone(), vec![3, 1]).expect("integer tensor");
-        input.data.fill(f64::NAN);
+        input.data.clear();
 
         let result = fill_missing_tensor(
             input,
