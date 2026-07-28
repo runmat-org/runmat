@@ -6,6 +6,7 @@ use std::str::Chars;
 
 use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, StringArray, Value};
 
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const FORMAT_UNSUPPORTED_SPECIFIER_IDENTIFIER: &str = "RunMat:format:UnsupportedSpecifier";
@@ -1086,7 +1087,7 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
         }
         Value::ComplexTensor(tensor) => {
             if tensor.integer_data.is_some() {
-                for index in 0..tensor.data.len() {
+                for index in 0..tensor::complex_tensor_element_len(&tensor) {
                     output.push(Value::String(tensor.format_element(index)));
                 }
             } else {
@@ -1256,6 +1257,8 @@ mod tests {
         .expect("matching complex integer storage");
         let tensor = runmat_builtins::ComplexTensor::new_integer(storage, vec![1, 2])
             .expect("complex integer tensor");
+        let mut tensor = tensor;
+        tensor.data.clear();
         let flattened = futures::executor::block_on(flatten_arguments(
             &[Value::ComplexTensor(tensor)],
             "sprintf",
