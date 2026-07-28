@@ -7,6 +7,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "cell2struct";
@@ -223,19 +224,19 @@ fn field_name_scalar(value: &Value) -> BuiltinResult<String> {
 }
 
 fn parse_dim(value: &Value) -> BuiltinResult<usize> {
+    if let Some(value) = tensor::scalar_integer_value(value) {
+        return value
+            .try_to_usize()
+            .filter(|value| *value >= 1)
+            .ok_or_else(|| {
+                error(
+                    &ERROR_INVALID_INPUT,
+                    "cell2struct: dim must be a positive integer",
+                )
+            });
+    }
     let raw = match value {
-        Value::Num(value) if value.is_finite() && *value < (usize::MAX as f64) + 1.0 => *value,
-        Value::Int(value) => {
-            return value
-                .try_to_usize()
-                .filter(|value| *value >= 1)
-                .ok_or_else(|| {
-                    error(
-                        &ERROR_INVALID_INPUT,
-                        "cell2struct: dim must be a positive integer",
-                    )
-                });
-        }
+        Value::Num(value) if value.is_finite() => *value,
         _ => {
             return Err(error(
                 &ERROR_INVALID_INPUT,
@@ -247,6 +248,12 @@ fn parse_dim(value: &Value) -> BuiltinResult<usize> {
         return Err(error(
             &ERROR_INVALID_INPUT,
             "cell2struct: dim must be a positive integer",
+        ));
+    }
+    if raw > usize::MAX as f64 || (usize::BITS == 64 && raw == usize::MAX as f64) {
+        return Err(error(
+            &ERROR_INVALID_INPUT,
+            "cell2struct: dim exceeds platform limits",
         ));
     }
     Ok(raw as usize)
@@ -342,6 +349,43 @@ mod tests {
             Value::Cell(cells),
             Value::Cell(fields),
             Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("platform limits"),
+            "unexpected error message: {err}"
+        );
+    }
+
+    #[test]
+    fn typed_tensor_dimensions_are_exactly_validated() {
+        let cells = CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap();
+        let fields = CellArray::new(vec![Value::from("id")], 1, 1).unwrap();
+        let mut dim = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U16(vec![1]),
+            vec![1, 1],
+        )
+        .expect("typed dim");
+        dim.data.clear();
+
+        let out = cell2struct_builtin(
+            Value::Cell(cells.clone()),
+            Value::Cell(fields.clone()),
+            Value::Tensor(dim),
+        )
+        .unwrap();
+        assert!(matches!(out, Value::Struct(_)));
+
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        let err = cell2struct_builtin(
+            Value::Cell(cells),
+            Value::Cell(fields),
+            Value::Num(boundary),
         )
         .unwrap_err()
         .to_string();

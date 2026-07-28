@@ -626,7 +626,7 @@ fn partition_entry_to_usize(
             if *value < 0.0 {
                 return Err(invalid("non-negative"));
             }
-            if *value >= (usize::MAX as f64) + 1.0 {
+            if *value > usize::MAX as f64 || (usize::BITS == 64 && *value == usize::MAX as f64) {
                 return Err(invalid("within platform limits"));
             }
             Ok(*value as usize)
@@ -1120,6 +1120,20 @@ pub(crate) mod tests {
             .to_string();
         assert!(
             err.contains("non-negative"),
+            "unexpected error message: {err}"
+        );
+
+        let input = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        let err = mat2cell_builtin(Value::Tensor(input), vec![row_vector(&[boundary])])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("platform limits"),
             "unexpected error message: {err}"
         );
     }

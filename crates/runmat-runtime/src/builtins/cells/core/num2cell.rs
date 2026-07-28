@@ -427,7 +427,8 @@ fn parse_dim(value: f64) -> BuiltinResult<usize> {
     if !value.is_finite()
         || value < 1.0
         || value.fract() != 0.0
-        || value >= (usize::MAX as f64) + 1.0
+        || value > usize::MAX as f64
+        || (usize::BITS == 64 && value == usize::MAX as f64)
     {
         return Err(error(
             &ERROR_INVALID_INPUT,
@@ -608,9 +609,14 @@ mod tests {
         );
 
         let input = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
         let err = block_on(num2cell_builtin(
             Value::Tensor(input),
-            vec![Value::Num((usize::MAX as f64) + 1.0)],
+            vec![Value::Num(boundary)],
         ))
         .unwrap_err()
         .to_string();
