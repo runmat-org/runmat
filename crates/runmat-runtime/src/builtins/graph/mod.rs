@@ -1151,7 +1151,12 @@ fn numeric_vector(value: &Value, name: &'static str) -> BuiltinResult<Vec<usize>
     values
         .into_iter()
         .map(|value| {
-            if !value.is_finite() || value < 0.0 || value.fract().abs() > 1e-9 {
+            if !value.is_finite()
+                || value < 0.0
+                || value.fract().abs() > 1e-9
+                || value > usize::MAX as f64
+                || (usize::BITS == 64 && value == usize::MAX as f64)
+            {
                 Err(graph_error(
                     name,
                     format!("{name}: node indices must be nonnegative integers"),
@@ -1365,7 +1370,12 @@ fn node_index_from_integer(
 }
 
 fn node_index_from_f64(value: f64, node_count: usize, name: &'static str) -> BuiltinResult<usize> {
-    if !value.is_finite() || value < 1.0 || value.fract().abs() > 1e-9 {
+    if !value.is_finite()
+        || value < 1.0
+        || value.fract().abs() > 1e-9
+        || value > usize::MAX as f64
+        || (usize::BITS == 64 && value == usize::MAX as f64)
+    {
         return Err(graph_error(
             name,
             format!("{name}: edge endpoints must be positive integer node ids"),
@@ -1942,5 +1952,29 @@ mod tests {
                 assert!(numeric_vector(&value, "graph").is_err());
             }
         }
+    }
+
+    #[test]
+    fn graph_numeric_vector_rejects_unrepresentable_double_boundary_before_cast() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+
+        assert!(numeric_vector(&Value::Num(boundary), "graph").is_err());
+        assert!(numeric_vector(&Value::Num(1.5), "graph").is_err());
+    }
+
+    #[test]
+    fn graph_node_index_rejects_unrepresentable_double_boundary_before_cast() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+
+        assert!(node_index_from_f64(boundary, usize::MAX, "graph").is_err());
+        assert!(node_index_from_f64(1.5, 3, "graph").is_err());
     }
 }
