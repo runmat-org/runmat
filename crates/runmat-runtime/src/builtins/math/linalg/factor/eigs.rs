@@ -1079,9 +1079,11 @@ fn parse_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
 
 fn numeric_vector_len(value: &Value, name: &str) -> BuiltinResult<usize> {
     match value {
-        Value::Tensor(tensor) if tensor.rows() == 1 || tensor.cols() == 1 => Ok(tensor.data.len()),
+        Value::Tensor(tensor) if tensor.rows() == 1 || tensor.cols() == 1 => {
+            Ok(tensor_element_len(tensor))
+        }
         Value::ComplexTensor(tensor) if tensor.rows == 1 || tensor.cols == 1 => {
-            Ok(tensor.data.len())
+            Ok(complex_tensor_element_len(tensor))
         }
         Value::LogicalArray(logical) => {
             let (rows, cols) = matrix_shape_from_slice(&logical.shape);
@@ -1515,6 +1517,20 @@ mod tests {
         );
 
         assert_eq!(out.data, vec![2.0]);
+    }
+
+    #[test]
+    fn eigs_start_vector_length_reads_typed_integer_storage_exactly() {
+        let a = real_matrix(vec![1.0, 0.0, 0.0, 3.0], 2, 2);
+        let mut start = Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![2, 1]).unwrap();
+        start.data.clear();
+        let mut opts = StructValue::new();
+        opts.insert("StartVector", Value::Tensor(start));
+
+        let out = tensor(call(a, vec![Value::Num(1.0), Value::Struct(opts)]).unwrap());
+
+        assert_eq!(out.shape, vec![1, 1]);
+        assert_eq!(out.data, vec![3.0]);
     }
 
     #[test]
