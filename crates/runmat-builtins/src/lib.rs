@@ -4235,33 +4235,36 @@ pub fn static_property_gc_roots() -> Vec<GcHandle> {
 }
 
 fn primitive_class_registry() -> HashMap<String, ClassDef> {
-    let mut registry: HashMap<String, ClassDef> = ["double", "single", "logical"]
-        .into_iter()
-        .map(|class_name| {
-            let mut methods = HashMap::new();
-            methods.insert(
-                "zeros".to_string(),
-                MethodDef {
-                    name: "zeros".to_string(),
-                    is_static: true,
-                    is_abstract: false,
-                    is_sealed: false,
-                    access: Access::Public,
-                    function_name: "zeros".to_string(),
-                    implicit_class_argument: Some(class_name.to_string()),
-                },
-            );
-            (
-                class_name.to_string(),
-                ClassDef {
-                    name: class_name.to_string(),
-                    parent: None,
-                    properties: HashMap::new(),
-                    methods,
-                },
-            )
-        })
-        .collect();
+    let mut registry: HashMap<String, ClassDef> = [
+        "double", "single", "logical", "int8", "int16", "int32", "int64", "uint8", "uint16",
+        "uint32", "uint64",
+    ]
+    .into_iter()
+    .map(|class_name| {
+        let mut methods = HashMap::new();
+        methods.insert(
+            "zeros".to_string(),
+            MethodDef {
+                name: "zeros".to_string(),
+                is_static: true,
+                is_abstract: false,
+                is_sealed: false,
+                access: Access::Public,
+                function_name: "zeros".to_string(),
+                implicit_class_argument: Some(class_name.to_string()),
+            },
+        );
+        (
+            class_name.to_string(),
+            ClassDef {
+                name: class_name.to_string(),
+                parent: None,
+                properties: HashMap::new(),
+                methods,
+            },
+        )
+    })
+    .collect();
 
     registry.insert(
         "handle".to_string(),
@@ -4531,7 +4534,10 @@ mod class_registry_tests {
 
     #[test]
     fn primitive_classes_expose_static_zeros_method_metadata() {
-        for class_name in ["double", "single", "logical"] {
+        for class_name in [
+            "double", "single", "logical", "int8", "int16", "int32", "int64", "uint8", "uint16",
+            "uint32", "uint64",
+        ] {
             let class_def = get_class(class_name).expect("primitive class should be registered");
             let method = class_def
                 .methods

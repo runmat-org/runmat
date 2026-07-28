@@ -5691,3 +5691,54 @@ fn type_class_static_method_logical_zeros() {
         }
     }));
 }
+
+#[test]
+fn integer_type_class_static_method_zeros_preserves_integer_classes() {
+    let program = r#"
+        a = int8.zeros(2, 3);
+        b = int32.zeros([1 4]);
+        c = uint16.zeros(3, 1);
+        d = uint64.zeros(1, 2);
+        ca = class(a);
+        cb = class(b);
+        cc = class(c);
+        cd = class(d);
+    "#;
+    let vars = execute_source(program);
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_builtins::Value::Tensor(tensor)
+            if tensor.shape == vec![2, 3]
+                && tensor.integer_storage()
+                    == Some(&runmat_builtins::IntegerStorage::I8(vec![0; 6]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_builtins::Value::Tensor(tensor)
+            if tensor.shape == vec![1, 4]
+                && tensor.integer_storage()
+                    == Some(&runmat_builtins::IntegerStorage::I32(vec![0; 4]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_builtins::Value::Tensor(tensor)
+            if tensor.shape == vec![3, 1]
+                && tensor.integer_storage()
+                    == Some(&runmat_builtins::IntegerStorage::U16(vec![0; 3]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_builtins::Value::Tensor(tensor)
+            if tensor.shape == vec![1, 2]
+                && tensor.integer_storage()
+                    == Some(&runmat_builtins::IntegerStorage::U64(vec![0; 2]))
+    )));
+    for expected in ["int8", "int32", "uint16", "uint64"] {
+        assert!(
+            vars.iter().any(
+                |value| matches!(value, runmat_builtins::Value::String(class) if class == expected)
+            ),
+            "expected class {expected:?}; vars={vars:?}"
+        );
+    }
+}
