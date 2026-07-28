@@ -373,7 +373,7 @@ fn evaluate_condition(value: Value) -> crate::BuiltinResult<ConditionOutcome> {
 
 fn evaluate_tensor_condition(tensor: &Tensor) -> crate::BuiltinResult<ConditionOutcome> {
     if let Some(storage) = tensor.integer_storage() {
-        if storage.len() == 0 {
+        if storage.is_empty() {
             return Ok(ConditionOutcome::Pass);
         }
         for idx in 0..storage.len() {
@@ -397,7 +397,7 @@ fn evaluate_tensor_condition(tensor: &Tensor) -> crate::BuiltinResult<ConditionO
 
 fn evaluate_complex_tensor(tensor: &ComplexTensor) -> crate::BuiltinResult<ConditionOutcome> {
     if let Some(storage) = tensor.integer_data.as_ref() {
-        if storage.len() == 0 {
+        if storage.is_empty() {
             return Ok(ConditionOutcome::Pass);
         }
         for idx in 0..storage.len() {
