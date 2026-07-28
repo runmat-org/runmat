@@ -16,6 +16,7 @@ use super::state::{
     select_axes_for_figure, FigureHandle,
 };
 use super::style::value_as_string;
+use crate::builtins::common::tensor as tensor_utils;
 use crate::BuiltinResult;
 
 const BUILTIN_NAME: &str = "plotmatrix";
@@ -291,13 +292,13 @@ async fn matrix_columns(value: Value) -> BuiltinResult<MatrixColumns> {
     let tensor = NumericInput::from_value(value, BUILTIN_NAME)?
         .into_tensor_async(BUILTIN_NAME)
         .await?;
-    if tensor.data.is_empty() {
+    if tensor_utils::tensor_element_len(&tensor) == 0 {
         return Err(invalid("input matrices must be nonempty"));
     }
     let rows = tensor.rows();
     let cols = tensor.cols();
     let (observations, variables) = if rows == 1 || cols == 1 {
-        (tensor.data.len(), 1)
+        (tensor_utils::tensor_element_len(&tensor), 1)
     } else {
         (rows, cols)
     };
@@ -306,12 +307,12 @@ async fn matrix_columns(value: Value) -> BuiltinResult<MatrixColumns> {
     }
 
     let columns = if variables == 1 {
-        vec![tensor.data]
+        vec![tensor_utils::tensor_into_values_f64(tensor)]
     } else {
         (0..variables)
             .map(|col| {
                 (0..observations)
-                    .map(|row| tensor.data[col * rows + row])
+                    .map(|row| tensor_utils::tensor_value_f64(&tensor, col * rows + row))
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>()
@@ -440,6 +441,7 @@ mod tests {
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, clone_figure, reset_hold_state_for_run};
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -447,6 +449,26 @@ mod tests {
         reset_hold_state_for_run();
         let _ = clear_figure(None);
         guard
+    }
+
+    fn cleared_int_value(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
+        tensor.data.clear();
+        Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn matrix_columns_reads_typed_integer_storage_without_mirror() {
+        let columns = block_on(matrix_columns(cleared_int_value(
+            IntegerStorage::I16(vec![1, 2, 10, 20]),
+            2,
+            2,
+        )))
+        .expect("columns");
+
+        assert_eq!(columns.observations, 2);
+        assert_eq!(columns.columns.len(), 2);
+        assert_eq!(columns.columns, vec![vec![1.0, 2.0], vec![10.0, 20.0]]);
     }
 
     #[test]

@@ -907,7 +907,7 @@ impl BarMatrixShape {
 }
 
 fn numeric_tensor_len(tensor: &Tensor) -> usize {
-    tensor.data.len()
+    tensor_utils::tensor_element_len(tensor)
 }
 
 fn category_labels_from_x(
@@ -967,7 +967,7 @@ fn build_stacked_bar_gpu_bounds(
         } else {
             shape.cols
         };
-    if tensor.data.len() != expected_len {
+    if tensor_utils::tensor_element_len(&tensor) != expected_len {
         return Err(config.invalid("gpuArray shape mismatch"));
     }
     let tensor_values = tensor_utils::tensor_values_f64_cow(&tensor);
@@ -1175,7 +1175,7 @@ fn tensor_to_bar_input(tensor: Tensor, config: BarRenderConfig) -> BuiltinResult
     if rows == 0 || cols == 0 {
         return Err(config.invalid("input cannot be empty"));
     }
-    if rows * cols != tensor.data.len() {
+    if rows * cols != tensor_utils::tensor_element_len(&tensor) {
         return Err(config.invalid("matrix inputs must be dense numeric arrays"));
     }
     let data = tensor_utils::tensor_values_f64(&tensor);
@@ -1327,7 +1327,7 @@ pub(crate) mod tests {
 
     fn poisoned_integer_matrix(storage: IntegerStorage, rows: usize, cols: usize) -> Tensor {
         let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer matrix");
-        tensor.data.fill(f64::NAN);
+        tensor.data.clear();
         tensor
     }
 

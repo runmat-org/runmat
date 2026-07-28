@@ -15,6 +15,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 
 use super::common::numeric_pair;
 use super::op_common::line_inputs::NumericInput;
@@ -709,7 +710,7 @@ fn infer_plot_x_from_y(y: &Value) -> BuiltinResult<Value> {
         other => {
             let tensor = Tensor::try_from(other)
                 .map_err(|e| plotting_error(BUILTIN_NAME, format!("plot: {e}")))?;
-            tensor.data.len().max(1)
+            tensor_utils::tensor_element_len(&tensor).max(1)
         }
     };
     let data = (1..=len).map(|i| i as f64).collect::<Vec<_>>();
@@ -973,7 +974,7 @@ pub(crate) mod tests {
     use crate::builtins::plotting::{clone_figure, configure_subplot, current_figure_handle};
     use crate::RuntimeError;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{IntegerStorage, ResolveContext, Type};
     use runmat_plot::plots::PlotElement;
 
     fn setup_plot_tests() -> PlotTestLockGuard {
@@ -997,6 +998,26 @@ pub(crate) mod tests {
 
     fn tensor_with_shape(data: &[f64], shape: Vec<usize>) -> Tensor {
         Tensor::new(data.to_vec(), shape).unwrap()
+    }
+
+    fn cleared_int_value(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.clear();
+        Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn infer_plot_x_reads_typed_integer_length_without_mirror() {
+        let x = infer_plot_x_from_y(&cleared_int_value(
+            IntegerStorage::U16(vec![7, 8, 9]),
+            vec![3, 1],
+        ))
+        .expect("x");
+
+        let Value::Tensor(x) = x else {
+            panic!("expected tensor");
+        };
+        assert_eq!(x.data, vec![1.0, 2.0, 3.0]);
     }
 
     fn assert_plotting_unavailable(err: &RuntimeError) {

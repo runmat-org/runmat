@@ -17,6 +17,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, RuntimeError};
 
@@ -774,7 +775,7 @@ fn parse_stem_args(
         let y = first;
         let y_tensor =
             Tensor::try_from(&y).map_err(|e| plotting_error(BUILTIN_NAME, format!("stem: {e}")))?;
-        let len = y_tensor.data.len();
+        let len = tensor_utils::tensor_element_len(&y_tensor);
         let x = Value::Tensor(Tensor {
             data: (1..=len).map(|i| i as f64).collect(),
             integer_data: None,
@@ -789,7 +790,7 @@ fn parse_stem_args(
         let y = first;
         let y_tensor =
             Tensor::try_from(&y).map_err(|e| plotting_error(BUILTIN_NAME, format!("stem: {e}")))?;
-        let len = y_tensor.data.len();
+        let len = tensor_utils::tensor_element_len(&y_tensor);
         let x = Value::Tensor(Tensor {
             data: (1..=len).map(|i| i as f64).collect(),
             integer_data: None,

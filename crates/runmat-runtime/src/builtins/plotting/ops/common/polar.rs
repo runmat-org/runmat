@@ -137,12 +137,20 @@ pub(crate) fn tensor_columns(tensor: &Tensor) -> Vec<Vec<f64>> {
 
 pub(crate) fn complex_tensor_columns(tensor: &ComplexTensor) -> Vec<Vec<(f64, f64)>> {
     if tensor.rows <= 1 || tensor.cols <= 1 || tensor.shape.len() <= 1 {
-        return vec![tensor.data.clone()];
+        return vec![tensor_utils::complex_tensor_values_complex64(tensor)
+            .into_iter()
+            .map(|value| (value.re, value.im))
+            .collect()];
     }
     (0..tensor.cols)
         .map(|col| {
             let start = col * tensor.rows;
-            tensor.data[start..start + tensor.rows].to_vec()
+            (start..start + tensor.rows)
+                .map(|idx| {
+                    let value = tensor_utils::complex_tensor_value_complex64(tensor, idx);
+                    (value.re, value.im)
+                })
+                .collect()
         })
         .collect()
 }
@@ -153,7 +161,7 @@ pub(crate) fn tensor_is_vector(tensor: &Tensor) -> bool {
 
 pub(crate) fn tensor_rows(tensor: &Tensor) -> usize {
     if tensor_is_vector(tensor) {
-        tensor.data.len()
+        tensor_utils::tensor_element_len(tensor)
     } else {
         tensor.rows
     }
@@ -192,6 +200,7 @@ fn polar_data_err(builtin: &'static str, msg: impl Into<String>) -> RuntimeError
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::{IntegerComplexStorage, IntegerStorage};
 
     #[test]
     fn tensor_columns_read_typed_integer_storage_exactly() {
@@ -200,7 +209,7 @@ mod tests {
             vec![2, 2],
         )
         .unwrap();
-        tensor.data.fill(f64::NAN);
+        tensor.data.clear();
 
         assert_eq!(
             tensor_columns(&tensor),
@@ -208,6 +217,37 @@ mod tests {
         );
         assert_eq!(tensor_rows(&tensor), 2);
         assert_eq!(tensor_cols(&tensor), 2);
+    }
+
+    #[test]
+    fn vector_tensor_rows_reads_typed_integer_storage_without_mirror() {
+        let mut tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U8(vec![1, 2, 3]),
+            vec![1, 3],
+        )
+        .unwrap();
+        tensor.data.clear();
+
+        assert_eq!(tensor_rows(&tensor), 3);
+    }
+
+    #[test]
+    fn complex_tensor_columns_read_typed_integer_storage_without_mirror() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![1, 2, 3, 4]),
+            IntegerStorage::I16(vec![-1, -2, -3, -4]),
+        )
+        .expect("complex integer storage");
+        let mut tensor = ComplexTensor::new_integer(storage, vec![2, 2]).expect("complex tensor");
+        tensor.data.clear();
+
+        assert_eq!(
+            complex_tensor_columns(&tensor),
+            vec![
+                vec![(1.0, -1.0), (2.0, -2.0)],
+                vec![(3.0, -3.0), (4.0, -4.0)]
+            ]
+        );
     }
 
     #[test]
@@ -220,8 +260,8 @@ mod tests {
             vec![2, 2],
         )
         .unwrap();
-        theta.data.fill(f64::NAN);
-        rho.data.fill(f64::NAN);
+        theta.data.clear();
+        rho.data.clear();
 
         let evaluated = evaluate_theta_rho_tensors(theta, rho, "polarplot").unwrap();
         assert_eq!(evaluated.len(), 2);

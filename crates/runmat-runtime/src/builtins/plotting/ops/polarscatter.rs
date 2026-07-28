@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use super::line::handles_value;
@@ -346,7 +347,7 @@ fn series_style_value(
     let Value::Tensor(tensor) = value else {
         return value.clone();
     };
-    if tensor.data.len() <= 1 || tensor_is_vector(tensor) {
+    if tensor_utils::tensor_element_len(tensor) <= 1 || tensor_is_vector(tensor) {
         return value.clone();
     }
     if tensor.rows == point_count && tensor.cols == series_count {
@@ -416,7 +417,7 @@ mod tests {
     use crate::builtins::plotting::{
         clone_figure, current_figure_handle, reset_hold_state_for_run, reset_plot_state,
     };
-    use runmat_builtins::{NumericDType, Tensor};
+    use runmat_builtins::{IntegerStorage, NumericDType, Tensor};
 
     fn tensor(data: &[f64], rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor {
@@ -427,6 +428,23 @@ mod tests {
             cols,
             dtype: NumericDType::F64,
         })
+    }
+
+    fn cleared_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
+        tensor.data.clear();
+        Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn series_style_value_reads_typed_integer_matrix_length_without_mirror() {
+        let value = cleared_int_tensor(IntegerStorage::U8(vec![10, 20, 30, 40]), 2, 2);
+        let series = series_style_value(&value, 1, 2, 2, false);
+
+        let Value::Tensor(tensor) = series else {
+            panic!("expected tensor");
+        };
+        assert_eq!(tensor.data, vec![30.0, 40.0]);
     }
 
     #[test]

@@ -731,7 +731,7 @@ fn vector_from_tensor(tensor: &Tensor) -> crate::BuiltinResult<Vec<f64>> {
 
 fn area_shape_from_tensor(tensor: &Tensor) -> (usize, usize) {
     if tensor.shape.len() <= 1 || tensor.rows == 1 || tensor.cols == 1 {
-        (tensor.data.len().max(1), 1)
+        (tensor_utils::tensor_element_len(tensor).max(1), 1)
     } else {
         (tensor.rows.max(1), tensor.cols.max(1))
     }
@@ -802,12 +802,13 @@ mod tests {
             vec![1, 3],
         )
         .expect("typed area x vector");
-        x.data = vec![f64::NAN, f64::NAN, f64::NAN];
+        x.data.clear();
 
         assert_eq!(
             vector_from_tensor(&x).expect("area vector"),
             vec![-1.0, 0.0, 1.0]
         );
+        assert_eq!(area_shape_from_tensor(&x), (3, 1));
     }
 
     #[test]

@@ -19,6 +19,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 
 use super::common::numeric_pair;
 use super::gpu_helpers::gpu_xy_bounds;
@@ -489,7 +490,7 @@ fn infer_stairs_x_from_y(y: &Value) -> BuiltinResult<Value> {
         other => {
             let tensor = Tensor::try_from(other)
                 .map_err(|e| plotting_error(BUILTIN_NAME, format!("stairs: {e}")))?;
-            tensor.data.len().max(1)
+            tensor_utils::tensor_element_len(&tensor).max(1)
         }
     };
     let data = (1..=len).map(|i| i as f64).collect::<Vec<_>>();
@@ -626,6 +627,7 @@ pub(crate) mod tests {
         clear_figure, clone_figure, configure_subplot, current_figure_handle,
         reset_hold_state_for_run,
     };
+    use runmat_builtins::IntegerStorage;
     use runmat_builtins::{ResolveContext, Type};
 
     fn setup_plot_tests() {
@@ -643,6 +645,26 @@ pub(crate) mod tests {
             cols: 1,
             dtype: runmat_builtins::NumericDType::F64,
         }
+    }
+
+    fn cleared_int_value(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.clear();
+        Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn infer_stairs_x_reads_typed_integer_length_without_mirror() {
+        let x = infer_stairs_x_from_y(&cleared_int_value(
+            IntegerStorage::I16(vec![4, 5, 6]),
+            vec![1, 3],
+        ))
+        .expect("x");
+
+        let Value::Tensor(x) = x else {
+            panic!("expected tensor");
+        };
+        assert_eq!(x.data, vec![1.0, 2.0, 3.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
