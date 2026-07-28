@@ -170,8 +170,11 @@ fn imag_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
         return Tensor::new_integer(storage.zeros_like(storage.len()), tensor.shape.clone())
             .map_err(|e| builtin_error_with_detail(&IMAG_ERROR_INTERNAL, e));
     }
-    Tensor::new(vec![0.0; tensor.data.len()], tensor.shape.clone())
-        .map_err(|e| builtin_error_with_detail(&IMAG_ERROR_INTERNAL, e))
+    Tensor::new(
+        vec![0.0; tensor::tensor_element_len(&tensor)],
+        tensor.shape.clone(),
+    )
+    .map_err(|e| builtin_error_with_detail(&IMAG_ERROR_INTERNAL, e))
 }
 
 fn imag_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
@@ -291,6 +294,26 @@ pub(crate) mod tests {
     fn imag_int_scalar_zero() {
         let result = imag_builtin(Value::Int(IntValue::I32(-42))).expect("imag");
         assert_eq!(result, Value::Int(IntValue::I32(0)));
+    }
+
+    #[test]
+    fn imag_typed_real_integer_tensor_zeros_from_storage_without_mirror() {
+        let mut tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![1, 9_223_372_036_854_775_809, u64::MAX]),
+            vec![1, 3],
+        )
+        .expect("typed integer tensor");
+        tensor.data.clear();
+
+        let result = imag_builtin(Value::Tensor(tensor)).expect("imag");
+        let Value::Tensor(output) = result else {
+            panic!("expected typed integer zero tensor");
+        };
+        assert_eq!(output.shape, vec![1, 3]);
+        assert_eq!(
+            output.integer_storage(),
+            Some(&runmat_builtins::IntegerStorage::U64(vec![0, 0, 0]))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

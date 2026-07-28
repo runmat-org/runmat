@@ -409,6 +409,36 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn conj_complex_integer_tensor_reads_storage_without_mirror() {
+        let mut complex = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::I16(vec![-10, 20]),
+                IntegerStorage::I16(vec![3, i16::MIN]),
+            )
+            .unwrap(),
+            vec![1, 2],
+        )
+        .unwrap();
+        complex.data.clear();
+
+        let result = conj_builtin(Value::ComplexTensor(complex)).expect("conj");
+        let Value::ComplexTensor(output) = result else {
+            panic!("expected typed complex integer tensor");
+        };
+        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(
+            output.integer_data,
+            Some(
+                IntegerComplexStorage::new(
+                    IntegerStorage::I16(vec![-10, 20]),
+                    IntegerStorage::I16(vec![-3, i16::MAX]),
+                )
+                .unwrap()
+            )
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conj_char_array_returns_double_codes() {

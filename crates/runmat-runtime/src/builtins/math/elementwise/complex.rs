@@ -709,6 +709,33 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn complex_integer_components_broadcast_from_storage_without_mirrors() {
+        let mut real =
+            Tensor::new_integer(IntegerStorage::I32(vec![-3]), vec![1, 1]).expect("real scalar");
+        real.data.clear();
+        let mut imag = Tensor::new_integer(IntegerStorage::I32(vec![7, -8, i32::MAX]), vec![3, 1])
+            .expect("imag vector");
+        imag.data.clear();
+
+        let result = complex_call(Value::Tensor(real), vec![Value::Tensor(imag)])
+            .expect("complex integer broadcast");
+        let Value::ComplexTensor(output) = result else {
+            panic!("expected typed complex integer tensor");
+        };
+        assert_eq!(output.shape, vec![3, 1]);
+        assert_eq!(
+            output.integer_data,
+            Some(
+                IntegerComplexStorage::new(
+                    IntegerStorage::I32(vec![-3, -3, -3]),
+                    IntegerStorage::I32(vec![7, -8, i32::MAX]),
+                )
+                .unwrap()
+            )
+        );
+    }
+
+    #[test]
     fn complex_integer_scalar_keeps_exact_complex_storage() {
         let result = complex_call(
             Value::Int(IntValue::I64(i64::MIN)),

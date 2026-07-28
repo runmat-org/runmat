@@ -306,6 +306,33 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn real_integer_complex_tensor_reads_storage_without_mirror() {
+        let mut complex = ComplexTensor::new_integer(
+            runmat_builtins::IntegerComplexStorage::new(
+                runmat_builtins::IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+                runmat_builtins::IntegerStorage::I64(vec![7, -8]),
+            )
+            .unwrap(),
+            vec![2, 1],
+        )
+        .unwrap();
+        complex.data.clear();
+
+        let result = real_builtin(Value::ComplexTensor(complex)).expect("real");
+        let Value::Tensor(tensor) = result else {
+            panic!("expected typed real tensor");
+        };
+        assert_eq!(tensor.shape, vec![2, 1]);
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&runmat_builtins::IntegerStorage::I64(vec![
+                i64::MIN,
+                i64::MAX,
+            ]))
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn real_logical_array_to_numeric() {
