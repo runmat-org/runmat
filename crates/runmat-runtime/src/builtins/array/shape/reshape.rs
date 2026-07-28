@@ -591,7 +591,7 @@ pub(crate) mod tests {
         block_on(super::reshape_builtin(value, rest))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{IntValue, IntegerStorage, LogicalArray};
+    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray};
 
     #[test]
     fn reshape_type_infers_rank_from_size_vector() {
@@ -696,6 +696,63 @@ pub(crate) mod tests {
                 assert_eq!(out.data, vec![1, 0, 1, 0, 1, 0]);
             }
             other => panic!("expected logical array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn reshape_preserves_all_exact_integer_classes() {
+        for storage in [
+            IntegerStorage::I8(vec![i8::MIN, -1, 0, i8::MAX]),
+            IntegerStorage::I16(vec![i16::MIN, -1, 0, i16::MAX]),
+            IntegerStorage::I32(vec![i32::MIN, -1, 0, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, -1, 0, i64::MAX]),
+            IntegerStorage::U8(vec![0, 1, 7, u8::MAX]),
+            IntegerStorage::U16(vec![0, 1, 700, u16::MAX]),
+            IntegerStorage::U32(vec![0, 1, 9_007_199, u32::MAX]),
+            IntegerStorage::U64(vec![0, 1, 9_007_199_254_740_993, u64::MAX]),
+        ] {
+            let expected = storage.clone();
+            let tensor = Tensor::new_integer(storage, vec![4, 1]).expect("integer tensor");
+            let result = reshape_builtin(
+                Value::Tensor(tensor),
+                vec![Value::from(2.0), Value::from(2.0)],
+            )
+            .expect("reshape");
+
+            match result {
+                Value::Tensor(out) => {
+                    assert_eq!(out.shape, vec![2, 2]);
+                    assert_eq!(out.integer_data, Some(expected));
+                }
+                other => panic!("expected typed integer tensor, got {other:?}"),
+            }
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn reshape_preserves_typed_complex_integer_storage() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![0, 1, 9_007_199_254_740_993, u64::MAX]),
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993, 1, 0]),
+        )
+        .expect("complex integer storage");
+        let tensor =
+            ComplexTensor::new_integer(storage.clone(), vec![4, 1]).expect("complex integer");
+
+        let result = reshape_builtin(
+            Value::ComplexTensor(tensor),
+            vec![Value::from(2.0), Value::from(2.0)],
+        )
+        .expect("reshape");
+
+        match result {
+            Value::ComplexTensor(out) => {
+                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.integer_data, Some(storage));
+            }
+            other => panic!("expected typed complex integer tensor, got {other:?}"),
         }
     }
 
@@ -950,6 +1007,27 @@ pub(crate) mod tests {
         let ok = reshape_builtin(value, vec![Value::from(1.0), Value::from(1.0)])
             .expect("reshape scalar");
         assert!(matches!(ok, Value::Int(_)));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn reshape_int_scalar_high_rank_preserves_exact_integer_storage() {
+        let result = reshape_builtin(
+            Value::Int(IntValue::U64(9_007_199_254_740_993)),
+            vec![Value::from(1.0), Value::from(1.0), Value::from(1.0)],
+        )
+        .expect("reshape scalar");
+
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 1, 1]);
+                assert_eq!(
+                    out.integer_data,
+                    Some(IntegerStorage::U64(vec![9_007_199_254_740_993]))
+                );
+            }
+            other => panic!("expected typed integer tensor, got {other:?}"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -269,7 +269,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
-        CellArray, CharArray, LogicalArray, StringArray, StructValue, Tensor, Type, Value,
+        CellArray, CharArray, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray,
+        StructValue, Tensor, Type, Value,
     };
 
     #[test]
@@ -405,6 +406,57 @@ pub(crate) mod tests {
         match result {
             Value::LogicalArray(out) => assert_eq!(out.data, expected.data),
             other => panic!("expected logical array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn flipud_preserves_exact_integer_storage_without_f64_mirror() {
+        let exact = IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993, 7]);
+        let mut tensor = Tensor::new_integer(exact, vec![2, 2]).expect("integer tensor");
+        tensor.data.clear();
+
+        let result = flipud_builtin(Value::Tensor(tensor)).expect("flipud");
+
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(
+                    out.integer_data,
+                    Some(IntegerStorage::U64(vec![
+                        0,
+                        u64::MAX,
+                        7,
+                        9_007_199_254_740_993,
+                    ]))
+                );
+            }
+            other => panic!("expected typed integer tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn flipud_preserves_typed_complex_integer_storage_without_f64_mirror() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![1, 2, 3, 4]),
+            IntegerStorage::I16(vec![5, 6, 7, 8]),
+        )
+        .expect("complex integer storage");
+        let mut tensor =
+            ComplexTensor::new_integer(storage, vec![2, 2]).expect("complex integer tensor");
+        tensor.data.clear();
+
+        let result = flipud_builtin(Value::ComplexTensor(tensor)).expect("flipud");
+
+        match result {
+            Value::ComplexTensor(out) => {
+                assert_eq!(out.shape, vec![2, 2]);
+                let storage = out.integer_data.expect("typed complex integer output");
+                assert_eq!(storage.real, IntegerStorage::I16(vec![2, 1, 4, 3]));
+                assert_eq!(storage.imag, IntegerStorage::I16(vec![6, 5, 8, 7]));
+            }
+            other => panic!("expected typed complex integer tensor, got {other:?}"),
         }
     }
 

@@ -250,7 +250,10 @@ pub(crate) mod tests {
     use crate::builtins::array::shape::flip::{flip_logical_array, flip_tensor};
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CharArray, LogicalArray, StringArray, StructValue, Tensor, Type, Value};
+    use runmat_builtins::{
+        CharArray, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray, StructValue,
+        Tensor, Type, Value,
+    };
 
     #[test]
     fn fliplr_type_keeps_matrix_shape() {
@@ -357,6 +360,57 @@ pub(crate) mod tests {
         match result {
             Value::LogicalArray(out) => assert_eq!(out.data, expected.data),
             other => panic!("expected logical array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn fliplr_preserves_exact_integer_storage_without_f64_mirror() {
+        let exact = IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993, 7]);
+        let mut tensor = Tensor::new_integer(exact, vec![2, 2]).expect("integer tensor");
+        tensor.data.clear();
+
+        let result = fliplr_builtin(Value::Tensor(tensor)).expect("fliplr");
+
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(
+                    out.integer_data,
+                    Some(IntegerStorage::U64(vec![
+                        9_007_199_254_740_993,
+                        7,
+                        u64::MAX,
+                        0,
+                    ]))
+                );
+            }
+            other => panic!("expected typed integer tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn fliplr_preserves_typed_complex_integer_storage_without_f64_mirror() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![1, 2, 3, 4]),
+            IntegerStorage::I16(vec![5, 6, 7, 8]),
+        )
+        .expect("complex integer storage");
+        let mut tensor =
+            ComplexTensor::new_integer(storage, vec![2, 2]).expect("complex integer tensor");
+        tensor.data.clear();
+
+        let result = fliplr_builtin(Value::ComplexTensor(tensor)).expect("fliplr");
+
+        match result {
+            Value::ComplexTensor(out) => {
+                assert_eq!(out.shape, vec![2, 2]);
+                let storage = out.integer_data.expect("typed complex integer output");
+                assert_eq!(storage.real, IntegerStorage::I16(vec![3, 4, 1, 2]));
+                assert_eq!(storage.imag, IntegerStorage::I16(vec![7, 8, 5, 6]));
+            }
+            other => panic!("expected typed complex integer tensor, got {other:?}"),
         }
     }
 
