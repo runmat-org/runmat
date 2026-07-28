@@ -589,11 +589,11 @@ async fn normalize_input(value: Value) -> crate::BuiltinResult<InputArray> {
 }
 
 fn issorted_real(tensor: &Tensor, args: &IssortedArgs) -> crate::BuiltinResult<bool> {
-    if tensor.data.is_empty() {
-        return Ok(true);
-    }
     if let Some(storage) = tensor.integer_storage() {
         return issorted_integer(&storage.exact_values(), &tensor.shape, args);
+    }
+    if tensor.data.is_empty() {
+        return Ok(true);
     }
     match args.mode {
         CheckMode::Dimension(dim) => Ok(check_real_dimension(tensor, dim, args)),
@@ -1501,6 +1501,33 @@ pub(crate) mod tests {
                 Value::Bool(true)
             );
         }
+    }
+
+    #[test]
+    fn issorted_reads_mirrorless_integer_storage_before_empty_data_fast_path() {
+        let mut unsorted = Tensor::new_integer(
+            IntegerStorage::U64(vec![0, u64::MAX, 9_007_199_254_740_993]),
+            vec![3, 1],
+        )
+        .expect("input");
+        unsorted.data.clear();
+        assert_eq!(
+            issorted_builtin(Value::Tensor(unsorted), Vec::new()).expect("issorted"),
+            Value::Bool(false)
+        );
+
+        let mut descending_rows =
+            Tensor::new_integer(IntegerStorage::I64(vec![10, 3, 2, 9, 4, 1]), vec![3, 2])
+                .expect("input");
+        descending_rows.data.clear();
+        assert_eq!(
+            issorted_builtin(
+                Value::Tensor(descending_rows),
+                vec![Value::from("rows"), Value::from("descend")],
+            )
+            .expect("issorted"),
+            Value::Bool(true)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

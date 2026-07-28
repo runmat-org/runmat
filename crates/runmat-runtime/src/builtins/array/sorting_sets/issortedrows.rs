@@ -132,4 +132,27 @@ mod tests {
             Value::Bool(false)
         );
     }
+
+    #[test]
+    fn issortedrows_reads_mirrorless_integer_storage_through_sortrows() {
+        let mut sorted = Tensor::new_integer(
+            IntegerStorage::U64(vec![0, 9_007_199_254_740_993, u64::MAX, 0, 1, 2]),
+            vec![3, 2],
+        )
+        .expect("input");
+        sorted.data.clear();
+        assert_eq!(
+            block_on(issortedrows_builtin(Value::Tensor(sorted), Vec::new())).unwrap(),
+            Value::Bool(true)
+        );
+
+        let mut unsorted =
+            Tensor::new_integer(IntegerStorage::I64(vec![10, 3, 2, 9, 4, 1]), vec![3, 2])
+                .expect("input");
+        unsorted.data.clear();
+        assert_eq!(
+            block_on(issortedrows_builtin(Value::Tensor(unsorted), Vec::new())).unwrap(),
+            Value::Bool(false)
+        );
+    }
 }
