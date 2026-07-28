@@ -625,12 +625,12 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
 
             let len = typed_storage
                 .map(|storage| storage.len())
-                .unwrap_or(tensor.data.len());
+                .unwrap_or_else(|| tensor::tensor_element_len(tensor));
             match options.direction {
                 FindDirection::First => {
                     for idx in 0..len {
                         let nonzero = typed_storage.map_or_else(
-                            || tensor.data[idx] != 0.0,
+                            || tensor::tensor_value_f64(tensor, idx) != 0.0,
                             |storage| {
                                 storage
                                     .value_at(idx)
@@ -649,7 +649,7 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
                 FindDirection::Last => {
                     for idx in (0..len).rev() {
                         let nonzero = typed_storage.map_or_else(
-                            || tensor.data[idx] != 0.0,
+                            || tensor::tensor_value_f64(tensor, idx) != 0.0,
                             |storage| {
                                 storage
                                     .value_at(idx)
@@ -906,7 +906,12 @@ impl FindResult {
 
 fn find_values_for_tensor(tensor: &Tensor, indices: &[usize]) -> FindValues {
     let Some(storage) = tensor.integer_storage() else {
-        return FindValues::Real(indices.iter().map(|index| tensor.data[index - 1]).collect());
+        return FindValues::Real(
+            indices
+                .iter()
+                .map(|index| tensor::tensor_value_f64(tensor, index - 1))
+                .collect(),
+        );
     };
     let selected: Vec<usize> = indices.iter().map(|index| index - 1).collect();
     FindValues::Integer(select_integer_values(storage, &selected))
