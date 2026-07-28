@@ -50,6 +50,38 @@ fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
     }
 }
 
+enum ComplexTensorValues<'a> {
+    Raw(&'a [(f64, f64)]),
+    Exact(Vec<num_complex::Complex64>),
+}
+
+impl ComplexTensorValues<'_> {
+    fn len(&self) -> usize {
+        match self {
+            Self::Raw(values) => values.len(),
+            Self::Exact(values) => values.len(),
+        }
+    }
+
+    fn value_at(&self, index: usize) -> (f64, f64) {
+        match self {
+            Self::Raw(values) => values[index],
+            Self::Exact(values) => {
+                let value = values[index];
+                (value.re, value.im)
+            }
+        }
+    }
+}
+
+fn complex_tensor_values(tensor: &runmat_builtins::ComplexTensor) -> ComplexTensorValues<'_> {
+    if tensor.integer_data.is_some() {
+        ComplexTensorValues::Exact(tensor_utils::complex_tensor_values_complex64(tensor))
+    } else {
+        ComplexTensorValues::Raw(&tensor.data)
+    }
+}
+
 fn scalar_power_value(base: &Value, exponent: &Value) -> Option<Value> {
     let base_is_complex = matches!(base, Value::Complex(_, _) | Value::ComplexTensor(_));
     let exp_is_complex = matches!(exponent, Value::Complex(_, _) | Value::ComplexTensor(_));
@@ -253,10 +285,12 @@ pub async fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
                     m1.rows, m1.cols, m2.rows, m2.cols
                 ));
             }
-            let mut out: Vec<(f64, f64)> = Vec::with_capacity(m1.data.len());
-            for i in 0..m1.data.len() {
-                let (ar, ai) = m1.data[i];
-                let (br, bi) = m2.data[i];
+            let lhs = complex_tensor_values(m1);
+            let rhs = complex_tensor_values(m2);
+            let mut out: Vec<(f64, f64)> = Vec::with_capacity(lhs.len());
+            for i in 0..lhs.len() {
+                let (ar, ai) = lhs.value_at(i);
+                let (br, bi) = rhs.value_at(i);
                 out.push((ar * br - ai * bi, ar * bi + ai * br));
             }
             Ok(Value::ComplexTensor(
@@ -265,13 +299,25 @@ pub async fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
             ))
         }
         (Value::ComplexTensor(m), Value::Num(s)) => {
-            let data: Vec<(f64, f64)> = m.data.iter().map(|(re, im)| (re * s, im * s)).collect();
+            let values = complex_tensor_values(m);
+            let data: Vec<(f64, f64)> = (0..values.len())
+                .map(|index| {
+                    let (re, im) = values.value_at(index);
+                    (re * s, im * s)
+                })
+                .collect();
             Ok(Value::ComplexTensor(
                 runmat_builtins::ComplexTensor::new_2d(data, m.rows, m.cols)?,
             ))
         }
         (Value::Num(s), Value::ComplexTensor(m)) => {
-            let data: Vec<(f64, f64)> = m.data.iter().map(|(re, im)| (s * re, s * im)).collect();
+            let values = complex_tensor_values(m);
+            let data: Vec<(f64, f64)> = (0..values.len())
+                .map(|index| {
+                    let (re, im) = values.value_at(index);
+                    (s * re, s * im)
+                })
+                .collect();
             Ok(Value::ComplexTensor(
                 runmat_builtins::ComplexTensor::new_2d(data, m.rows, m.cols)?,
             ))
@@ -466,11 +512,12 @@ pub async fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
                     m1.rows, m1.cols, m2.rows, m2.cols
                 ));
             }
-            let data: Vec<(f64, f64)> = m1
-                .data
-                .iter()
-                .zip(m2.data.iter())
-                .map(|((ar, ai), (br, bi))| {
+            let lhs = complex_tensor_values(m1);
+            let rhs = complex_tensor_values(m2);
+            let data: Vec<(f64, f64)> = (0..lhs.len())
+                .map(|index| {
+                    let (ar, ai) = lhs.value_at(index);
+                    let (br, bi) = rhs.value_at(index);
                     let denom = br * br + bi * bi;
                     if denom == 0.0 {
                         (f64::NAN, f64::NAN)
@@ -484,16 +531,22 @@ pub async fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
             ))
         }
         (Value::ComplexTensor(m), Value::Num(s)) => {
-            let data: Vec<(f64, f64)> = m.data.iter().map(|(re, im)| (re / s, im / s)).collect();
+            let values = complex_tensor_values(m);
+            let data: Vec<(f64, f64)> = (0..values.len())
+                .map(|index| {
+                    let (re, im) = values.value_at(index);
+                    (re / s, im / s)
+                })
+                .collect();
             Ok(Value::ComplexTensor(
                 runmat_builtins::ComplexTensor::new_2d(data, m.rows, m.cols)?,
             ))
         }
         (Value::Num(s), Value::ComplexTensor(m)) => {
-            let data: Vec<(f64, f64)> = m
-                .data
-                .iter()
-                .map(|(br, bi)| {
+            let values = complex_tensor_values(m);
+            let data: Vec<(f64, f64)> = (0..values.len())
+                .map(|index| {
+                    let (br, bi) = values.value_at(index);
                     let denom = br * br + bi * bi;
                     if denom == 0.0 {
                         (f64::NAN, f64::NAN)
@@ -698,10 +751,12 @@ pub fn elementwise_pow(a: &Value, b: &Value) -> Result<Value, String> {
                     m1.rows, m1.cols, m2.rows, m2.cols
                 ));
             }
-            let mut out: Vec<(f64, f64)> = Vec::with_capacity(m1.data.len());
-            for i in 0..m1.data.len() {
-                let (ar, ai) = m1.data[i];
-                let (br, bi) = m2.data[i];
+            let lhs = complex_tensor_values(m1);
+            let rhs = complex_tensor_values(m2);
+            let mut out: Vec<(f64, f64)> = Vec::with_capacity(lhs.len());
+            for i in 0..lhs.len() {
+                let (ar, ai) = lhs.value_at(i);
+                let (br, bi) = rhs.value_at(i);
                 out.push(complex_pow_scalar(ar, ai, br, bi));
             }
             Ok(Value::ComplexTensor(
@@ -709,10 +764,12 @@ pub fn elementwise_pow(a: &Value, b: &Value) -> Result<Value, String> {
             ))
         }
         (Value::ComplexTensor(m), Value::Num(s)) => {
-            let out: Vec<(f64, f64)> = m
-                .data
-                .iter()
-                .map(|(ar, ai)| complex_pow_scalar(*ar, *ai, *s, 0.0))
+            let values = complex_tensor_values(m);
+            let out: Vec<(f64, f64)> = (0..values.len())
+                .map(|index| {
+                    let (ar, ai) = values.value_at(index);
+                    complex_pow_scalar(ar, ai, *s, 0.0)
+                })
                 .collect();
             Ok(Value::ComplexTensor(
                 runmat_builtins::ComplexTensor::new_2d(out, m.rows, m.cols)?,
@@ -720,30 +777,36 @@ pub fn elementwise_pow(a: &Value, b: &Value) -> Result<Value, String> {
         }
         (Value::ComplexTensor(m), Value::Int(s)) => {
             let sv = s.to_f64();
-            let out: Vec<(f64, f64)> = m
-                .data
-                .iter()
-                .map(|(ar, ai)| complex_pow_scalar(*ar, *ai, sv, 0.0))
+            let values = complex_tensor_values(m);
+            let out: Vec<(f64, f64)> = (0..values.len())
+                .map(|index| {
+                    let (ar, ai) = values.value_at(index);
+                    complex_pow_scalar(ar, ai, sv, 0.0)
+                })
                 .collect();
             Ok(Value::ComplexTensor(
                 runmat_builtins::ComplexTensor::new_2d(out, m.rows, m.cols)?,
             ))
         }
         (Value::ComplexTensor(m), Value::Complex(br, bi)) => {
-            let out: Vec<(f64, f64)> = m
-                .data
-                .iter()
-                .map(|(ar, ai)| complex_pow_scalar(*ar, *ai, *br, *bi))
+            let values = complex_tensor_values(m);
+            let out: Vec<(f64, f64)> = (0..values.len())
+                .map(|index| {
+                    let (ar, ai) = values.value_at(index);
+                    complex_pow_scalar(ar, ai, *br, *bi)
+                })
                 .collect();
             Ok(Value::ComplexTensor(
                 runmat_builtins::ComplexTensor::new_2d(out, m.rows, m.cols)?,
             ))
         }
         (Value::Num(s), Value::ComplexTensor(m)) => {
-            let out: Vec<(f64, f64)> = m
-                .data
-                .iter()
-                .map(|(br, bi)| complex_pow_scalar(*s, 0.0, *br, *bi))
+            let values = complex_tensor_values(m);
+            let out: Vec<(f64, f64)> = (0..values.len())
+                .map(|index| {
+                    let (br, bi) = values.value_at(index);
+                    complex_pow_scalar(*s, 0.0, br, bi)
+                })
                 .collect();
             Ok(Value::ComplexTensor(
                 runmat_builtins::ComplexTensor::new_2d(out, m.rows, m.cols)?,
@@ -751,20 +814,24 @@ pub fn elementwise_pow(a: &Value, b: &Value) -> Result<Value, String> {
         }
         (Value::Int(s), Value::ComplexTensor(m)) => {
             let sv = s.to_f64();
-            let out: Vec<(f64, f64)> = m
-                .data
-                .iter()
-                .map(|(br, bi)| complex_pow_scalar(sv, 0.0, *br, *bi))
+            let values = complex_tensor_values(m);
+            let out: Vec<(f64, f64)> = (0..values.len())
+                .map(|index| {
+                    let (br, bi) = values.value_at(index);
+                    complex_pow_scalar(sv, 0.0, br, bi)
+                })
                 .collect();
             Ok(Value::ComplexTensor(
                 runmat_builtins::ComplexTensor::new_2d(out, m.rows, m.cols)?,
             ))
         }
         (Value::Complex(br, bi), Value::ComplexTensor(m)) => {
-            let out: Vec<(f64, f64)> = m
-                .data
-                .iter()
-                .map(|(er, ei)| complex_pow_scalar(*br, *bi, *er, *ei))
+            let values = complex_tensor_values(m);
+            let out: Vec<(f64, f64)> = (0..values.len())
+                .map(|index| {
+                    let (er, ei) = values.value_at(index);
+                    complex_pow_scalar(*br, *bi, er, ei)
+                })
                 .collect();
             Ok(Value::ComplexTensor(
                 runmat_builtins::ComplexTensor::new_2d(out, m.rows, m.cols)?,
@@ -817,6 +884,69 @@ mod tests {
             }
             other => panic!("expected complex scalar, got {other:?}"),
         }
+    }
+
+    fn mirrorless_complex_integer_tensor(
+        real: Vec<i16>,
+        imag: Vec<i16>,
+        shape: Vec<usize>,
+    ) -> runmat_builtins::ComplexTensor {
+        let storage = runmat_builtins::IntegerComplexStorage::new(
+            IntegerStorage::I16(real),
+            IntegerStorage::I16(imag),
+        )
+        .expect("complex integer storage");
+        let mut tensor =
+            runmat_builtins::ComplexTensor::new_integer(storage, shape).expect("complex tensor");
+        tensor.data.clear();
+        tensor
+    }
+
+    #[test]
+    fn elementwise_mul_reads_typed_complex_integer_storage_exactly() {
+        let lhs = mirrorless_complex_integer_tensor(vec![3, -2], vec![4, 5], vec![1, 2]);
+        let rhs = mirrorless_complex_integer_tensor(vec![1, 6], vec![-2, 1], vec![1, 2]);
+
+        let Value::ComplexTensor(result) = block_on(elementwise_mul(
+            &Value::ComplexTensor(lhs),
+            &Value::ComplexTensor(rhs),
+        ))
+        .expect("mul") else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(result.shape, vec![1, 2]);
+        assert_eq!(result.data, vec![(11.0, -2.0), (-17.0, 28.0)]);
+    }
+
+    #[test]
+    fn elementwise_div_reads_typed_complex_integer_storage_exactly() {
+        let lhs = mirrorless_complex_integer_tensor(vec![3, -2], vec![4, 5], vec![1, 2]);
+
+        let Value::ComplexTensor(result) = block_on(elementwise_div(
+            &Value::ComplexTensor(lhs),
+            &Value::Num(2.0),
+        ))
+        .expect("div") else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(result.shape, vec![1, 2]);
+        assert_eq!(result.data, vec![(1.5, 2.0), (-1.0, 2.5)]);
+    }
+
+    #[test]
+    fn elementwise_pow_reads_typed_complex_integer_storage_exactly() {
+        let base = mirrorless_complex_integer_tensor(vec![3, 1], vec![4, -2], vec![1, 2]);
+
+        let Value::ComplexTensor(result) =
+            elementwise_pow(&Value::ComplexTensor(base), &Value::Num(2.0)).expect("pow")
+        else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(result.shape, vec![1, 2]);
+        assert!((result.data[0].0 + 7.0).abs() < 1e-12);
+        assert!((result.data[0].1 - 24.0).abs() < 1e-12);
+        assert!((result.data[1].0 + 3.0).abs() < 1e-12);
+        assert!((result.data[1].1 + 4.0).abs() < 1e-12);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
