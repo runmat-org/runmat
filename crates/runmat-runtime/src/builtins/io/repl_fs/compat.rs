@@ -1250,18 +1250,20 @@ fn shape_from_value(value: &Value) -> BuiltinResult<Vec<usize>> {
         Value::Num(v) => Ok(vec![positive_platform_usize(*v, "Format shape")?, 1]),
         Value::Int(v) => Ok(vec![positive_integer_shape_dim(v)?, 1]),
         Value::Tensor(tensor) => {
-            let mut shape = Vec::with_capacity(tensor.data.len());
             if let Some(storage) = tensor.integer_storage() {
-                for index in 0..tensor.data.len() {
+                let mut shape = Vec::with_capacity(storage.len());
+                for index in 0..storage.len() {
                     let value = storage.value_at(index).expect("integer storage length");
                     shape.push(positive_integer_shape_dim(&value)?);
                 }
+                Ok(shape)
             } else {
+                let mut shape = Vec::with_capacity(tensor.data.len());
                 for value in &tensor.data {
                     shape.push(positive_platform_usize(*value, "Format shape")?);
                 }
+                Ok(shape)
             }
-            Ok(shape)
         }
         _ => Err(compat_error(
             "memmapfile",
@@ -1615,8 +1617,9 @@ mod tests {
             shape_from_value(&Value::Int(IntValue::U16(7))).unwrap(),
             vec![7, 1]
         );
-        let shape = Tensor::new_integer(IntegerStorage::U64(vec![2, 3]), vec![1, 2])
+        let mut shape = Tensor::new_integer(IntegerStorage::U64(vec![2, 3]), vec![1, 2])
             .expect("typed shape vector");
+        shape.data.clear();
         assert_eq!(shape_from_value(&Value::Tensor(shape)).unwrap(), vec![2, 3]);
         assert!(shape_from_value(&Value::Int(IntValue::I8(-1))).is_err());
         assert!(shape_from_value(&Value::Int(IntValue::U8(0))).is_err());

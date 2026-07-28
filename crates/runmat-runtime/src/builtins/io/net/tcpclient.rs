@@ -625,13 +625,15 @@ pub(crate) mod tests {
             i32::MAX
         );
 
-        let typed_too_large =
+        let mut typed_too_large =
             Tensor::new_integer(IntegerStorage::U64(vec![i32::MAX as u64 + 1]), vec![1, 1])
                 .expect("typed buffer size");
+        typed_too_large.data.clear();
         assert!(parse_buffer_size(&Value::Tensor(typed_too_large), "InputBufferSize").is_err());
 
-        let typed_negative = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
+        let mut typed_negative = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
             .expect("typed buffer size");
+        typed_negative.data.clear();
         assert!(parse_buffer_size(&Value::Tensor(typed_negative), "InputBufferSize").is_err());
     }
 

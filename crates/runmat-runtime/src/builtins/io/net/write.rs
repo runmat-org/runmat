@@ -1089,8 +1089,7 @@ pub(crate) mod tests {
         let wide = (1_u64 << 53) + 1;
         let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![wide, u64::MAX]), vec![1, 2])
             .expect("typed integer tensor");
-        tensor.data[0] = wide as f64 - 1.0;
-        tensor.data[1] = 0.0;
+        tensor.data.clear();
 
         let payload =
             prepare_payload(&Value::Tensor(tensor), DataType::UInt64, ByteOrder::Little).unwrap();
@@ -1118,8 +1117,7 @@ pub(crate) mod tests {
     fn write_char_payload_reads_typed_integer_storage_exactly() {
         let mut tensor =
             Tensor::new_integer(IntegerStorage::U16(vec![82, 77]), vec![1, 2]).expect("chars");
-        tensor.data[0] = 0.0;
-        tensor.data[1] = 0.0;
+        tensor.data.clear();
 
         let payload = prepare_payload(&Value::Tensor(tensor), DataType::Char, ByteOrder::Little)
             .expect("char payload");

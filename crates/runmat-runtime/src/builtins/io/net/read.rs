@@ -910,12 +910,14 @@ pub(crate) mod tests {
         typed_count.data.clear();
         assert_eq!(parse_count(&Value::Tensor(typed_count)).unwrap(), 42);
 
-        let typed_negative =
+        let mut typed_negative =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("count");
+        typed_negative.data.clear();
         assert!(parse_count(&Value::Tensor(typed_negative)).is_err());
 
-        let typed_max =
+        let mut typed_max =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("count");
+        typed_max.data.clear();
         let maximum = parse_count(&Value::Tensor(typed_max));
         if usize::BITS == 64 {
             assert_eq!(maximum.unwrap(), usize::MAX);

@@ -705,13 +705,15 @@ pub(crate) mod tests {
         typed_max.data.clear();
         assert_eq!(parse_port(&Value::Tensor(typed_max)).unwrap(), u16::MAX);
 
-        let typed_too_large =
+        let mut typed_too_large =
             Tensor::new_integer(IntegerStorage::U64(vec![u16::MAX as u64 + 1]), vec![1, 1])
                 .expect("typed port");
+        typed_too_large.data.clear();
         assert!(parse_port(&Value::Tensor(typed_too_large)).is_err());
 
-        let typed_negative =
+        let mut typed_negative =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("typed port");
+        typed_negative.data.clear();
         assert!(parse_port(&Value::Tensor(typed_negative)).is_err());
     }
 

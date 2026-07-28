@@ -501,7 +501,7 @@ fn logical_array_to_json(
 }
 
 fn tensor_to_json(tensor: &Tensor, options: &JsonEncodeOptions) -> BuiltinResult<JsonValue> {
-    if tensor.data.is_empty() {
+    if tensor::tensor_element_len(tensor) == 0 {
         return Ok(JsonValue::Array(Vec::new()));
     }
     let keep_dims = compute_keep_dims(&tensor.shape, true);
@@ -554,7 +554,7 @@ fn complex_tensor_to_json(
     ct: &ComplexTensor,
     options: &JsonEncodeOptions,
 ) -> BuiltinResult<JsonValue> {
-    if ct.data.is_empty() {
+    if tensor::complex_tensor_element_len(ct) == 0 {
         return Ok(JsonValue::Array(Vec::new()));
     }
     let keep_dims = compute_keep_dims(&ct.shape, true);
@@ -1071,9 +1071,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_integer_tensor_preserves_exact_uint64_values() {
-        let tensor =
+        let mut tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]), vec![1, 2])
                 .expect("integer tensor");
+        tensor.data.clear();
 
         let encoded =
             block_on(jsonencode_builtin(Value::Tensor(tensor), Vec::new())).expect("jsonencode");
@@ -1295,7 +1296,9 @@ pub(crate) mod tests {
         for (class, real, imag, expected) in cases {
             let storage = runmat_builtins::IntegerComplexStorage::new(real, imag)
                 .expect("matching integer components");
-            let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("typed complex");
+            let mut tensor =
+                ComplexTensor::new_integer(storage, vec![1, 1]).expect("typed complex");
+            tensor.data.clear();
             let encoded = block_on(jsonencode_builtin(Value::ComplexTensor(tensor), Vec::new()))
                 .expect("jsonencode typed complex integer");
             assert_eq!(as_string(encoded), expected, "{class}");

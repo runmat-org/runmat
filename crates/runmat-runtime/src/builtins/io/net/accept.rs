@@ -740,8 +740,9 @@ pub(crate) mod tests {
         typed.data.clear();
         assert_eq!(parse_timeout_value(&Value::Tensor(typed)).unwrap(), 30.0);
 
-        let negative =
+        let mut negative =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("timeout");
+        negative.data.clear();
         assert!(parse_timeout_value(&Value::Tensor(negative)).is_err());
     }
 

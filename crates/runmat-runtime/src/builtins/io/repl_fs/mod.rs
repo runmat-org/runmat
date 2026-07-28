@@ -72,17 +72,17 @@ mod tests {
     fn tensor_char_codes_to_string_reads_typed_integer_storage_exactly() {
         let mut tensor =
             Tensor::new_integer(IntegerStorage::U16(vec![82, 77]), vec![1, 2]).expect("tensor");
-        tensor.data = vec![65.0, 66.0];
+        tensor.data.clear();
         assert_eq!(tensor_char_codes_to_string(&tensor).as_deref(), Some("RM"));
 
         let mut negative =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("tensor");
-        negative.data = vec![65.0];
+        negative.data.clear();
         assert!(tensor_char_codes_to_string(&negative).is_none());
 
         let mut invalid =
             Tensor::new_integer(IntegerStorage::U32(vec![0x11_0000]), vec![1, 1]).expect("tensor");
-        invalid.data = vec![65.0];
+        invalid.data.clear();
         assert!(tensor_char_codes_to_string(&invalid).is_none());
     }
 }
