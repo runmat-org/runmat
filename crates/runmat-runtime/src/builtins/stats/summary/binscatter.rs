@@ -365,6 +365,11 @@ fn numeric_selector_index(selector: &Value) -> BuiltinResult<Option<usize>> {
             "binscatter: table variable index must be a positive integer",
         ));
     }
+    if value > usize::MAX as f64 || (usize::BITS == 64 && value == usize::MAX as f64) {
+        return Err(invalid(
+            "binscatter: table variable index exceeds platform limits",
+        ));
+    }
     Ok(Some(value as usize - 1))
 }
 
@@ -511,6 +516,11 @@ fn positive_bin_count(value: f64, name: &str) -> BuiltinResult<usize> {
     if !value.is_finite() || value < 1.0 || value.fract() != 0.0 {
         return Err(invalid(format!(
             "binscatter: {name} entries must be positive integers"
+        )));
+    }
+    if value > MAX_NUM_BINS as f64 {
+        return Err(invalid(format!(
+            "binscatter: {name} entries must be no greater than {MAX_NUM_BINS}"
         )));
     }
     let count = value as usize;
@@ -931,6 +941,14 @@ mod tests {
         Value::Tensor(tensor)
     }
 
+    fn first_unrepresentable_usize_double() -> f64 {
+        if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        }
+    }
+
     #[test]
     fn binscatter_parses_typed_integer_options_exactly() {
         assert_eq!(
@@ -984,6 +1002,24 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.message().contains("0 or 1"), "{}", err.message());
+    }
+
+    #[test]
+    fn binscatter_rejects_unrepresentable_double_indices_before_casting() {
+        let err =
+            numeric_selector_index(&Value::Num(first_unrepresentable_usize_double())).unwrap_err();
+        assert!(
+            err.message().contains("platform limits"),
+            "{}",
+            err.message()
+        );
+
+        let err = parse_num_bins(&vec_tensor(&[first_unrepresentable_usize_double()])).unwrap_err();
+        assert!(
+            err.message().contains("no greater than 250"),
+            "{}",
+            err.message()
+        );
     }
 
     #[test]

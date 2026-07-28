@@ -545,6 +545,9 @@ fn tensor_shape_as_size(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
             if *value > usize::MAX as f64 {
                 return Err(invalid_argument("missing: size exceeds platform limits"));
             }
+            if usize::BITS == 64 && *value == usize::MAX as f64 {
+                return Err(invalid_argument("missing: size exceeds platform limits"));
+            }
             Ok(*value as usize)
         })
         .collect()
@@ -2199,6 +2202,9 @@ fn numeric_size_to_usize(n: f64, context: &str) -> BuiltinResult<usize> {
     if n > usize::MAX as f64 {
         return Err(invalid_argument(format!("{context}: integer too large")));
     }
+    if usize::BITS == 64 && n == usize::MAX as f64 {
+        return Err(invalid_argument(format!("{context}: integer too large")));
+    }
     Ok(n as usize)
 }
 
@@ -2232,6 +2238,14 @@ mod tests {
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
+    }
+
+    fn first_unrepresentable_usize_double() -> f64 {
+        if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        }
     }
 
     #[test]
@@ -2296,6 +2310,21 @@ mod tests {
         let mut dims = Tensor::new_integer(IntegerStorage::I64(vec![2, -1]), vec![1, 2]).unwrap();
         dims.data.clear();
         assert!(tensor_shape_as_size(&dims).is_err());
+    }
+
+    #[test]
+    fn missing_rejects_unrepresentable_double_sizes_before_casting() {
+        let err = scalar_usize(
+            &Value::Num(first_unrepresentable_usize_double()),
+            "missing size",
+        )
+        .unwrap_err();
+        assert!(err.message.contains("integer too large"), "{}", err.message);
+
+        let dims =
+            Tensor::new(vec![first_unrepresentable_usize_double(), 0.0], vec![1, 2]).unwrap();
+        let err = tensor_shape_as_size(&dims).unwrap_err();
+        assert!(err.message.contains("platform limits"), "{}", err.message);
     }
 
     #[test]

@@ -1067,6 +1067,12 @@ fn scalar_usize(builtin: &'static str, value: &Value, label: &str) -> BuiltinRes
             format!("{label} must be a nonnegative integer"),
         ));
     }
+    if number > usize::MAX as f64 || (usize::BITS == 64 && number == usize::MAX as f64) {
+        return Err(invalid_argument(
+            builtin,
+            format!("{label} exceeds platform integer limits"),
+        ));
+    }
     Ok(number as usize)
 }
 
@@ -1119,6 +1125,14 @@ mod tests {
         Value::Tensor(tensor)
     }
 
+    fn first_unrepresentable_usize_double() -> f64 {
+        if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        }
+    }
+
     #[test]
     fn outlier_numeric_parsers_read_typed_integer_storage_exactly() {
         let wide = u64::MAX - 1;
@@ -1166,6 +1180,21 @@ mod tests {
         .unwrap_err();
         assert!(
             err.message().contains("nonnegative integer"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn outlier_scalar_usize_rejects_unrepresentable_double_boundary() {
+        let err = scalar_usize(
+            ISOUTLIER_NAME,
+            &Value::Num(first_unrepresentable_usize_double()),
+            "window",
+        )
+        .unwrap_err();
+        assert!(
+            err.message().contains("platform integer limits"),
             "{}",
             err.message()
         );

@@ -363,6 +363,11 @@ fn bin_count(value: f64) -> BuiltinResult<usize> {
             "scatterhist: NBins entries must be integers greater than or equal to 2",
         ));
     }
+    if value > MAX_BINS as f64 {
+        return Err(invalid(format!(
+            "scatterhist: NBins entries must be no greater than {MAX_BINS}"
+        )));
+    }
     let value = value as usize;
     if value > MAX_BINS {
         return Err(invalid(format!(
@@ -1411,6 +1416,14 @@ mod tests {
         Value::Tensor(tensor)
     }
 
+    fn first_unrepresentable_usize_double() -> f64 {
+        if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        }
+    }
+
     #[test]
     fn scatterhist_numeric_parsers_read_typed_integer_storage_exactly() {
         let wide = u64::MAX - 1;
@@ -1467,6 +1480,16 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.message.contains("0 or 1"), "{}", err.message);
+    }
+
+    #[test]
+    fn scatterhist_rejects_unrepresentable_double_bin_counts_before_casting() {
+        let err = parse_bins(&vec_tensor(&[first_unrepresentable_usize_double()])).unwrap_err();
+        assert!(
+            err.message.contains("no greater than 250"),
+            "{}",
+            err.message
+        );
     }
 
     #[test]
