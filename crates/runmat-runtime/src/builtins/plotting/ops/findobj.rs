@@ -643,7 +643,7 @@ mod tests {
     #[test]
     fn findobj_root_handles_reads_typed_integer_storage_exactly() {
         let mut roots = Tensor::new_integer(IntegerStorage::U16(vec![11, 13]), vec![1, 2]).unwrap();
-        roots.data = vec![f64::NAN, f64::NAN];
+        roots.data.clear();
         let args = vec![Value::Tensor(roots), Value::String("Type".into())];
         let (handles, rest) = split_root_handles(&args)
             .expect("split roots")

@@ -1009,7 +1009,8 @@ fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
 
 fn numeric_vector_from_value(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     let tensor = numeric_tensor_from_value(value, name)?;
-    if tensor.rows() != tensor.data.len() && tensor.cols() != tensor.data.len() {
+    let len = tensor_utils::tensor_element_len(&tensor);
+    if tensor.rows() != len && tensor.cols() != len {
         return Err(stacked_err(format!("{name} must be a vector")));
     }
     Ok(tensor_utils::tensor_into_values_f64(tensor))
@@ -1017,7 +1018,7 @@ fn numeric_vector_from_value(value: &Value, name: &str) -> BuiltinResult<Vec<f64
 
 fn plotted_row_count(tensor: &Tensor) -> usize {
     if tensor.rows() == 1 || tensor.cols() == 1 {
-        tensor.data.len()
+        tensor_utils::tensor_element_len(tensor)
     } else {
         tensor.rows()
     }
@@ -1313,7 +1314,7 @@ mod tests {
             vec![1, 3],
         )
         .expect("typed x vector");
-        x.data = vec![f64::NAN, f64::NAN, f64::NAN];
+        x.data.clear();
 
         assert_eq!(
             numeric_vector(&Value::Tensor(x), "X").expect("numeric vector"),
@@ -1328,7 +1329,7 @@ mod tests {
             vec![2, 2],
         )
         .expect("typed y matrix");
-        y.data = vec![f64::NAN, f64::NAN, f64::NAN, f64::NAN];
+        y.data.clear();
 
         assert_eq!(
             tensor_plot_columns(&y).expect("plot columns"),

@@ -747,9 +747,8 @@ mod tests {
     }
 
     fn int_tensor(rows: usize, cols: usize, storage: IntegerStorage) -> Value {
-        let len = storage.len();
         let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
-        tensor.data = vec![-999.0; len];
+        tensor.data.clear();
         Value::Tensor(tensor)
     }
 

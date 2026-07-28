@@ -684,7 +684,7 @@ mod tests {
             vec![1, 3],
         )
         .expect("typed edge vector");
-        edges.data = vec![f64::NAN, f64::NAN, f64::NAN];
+        edges.data.clear();
 
         assert_eq!(
             numeric_vector(&Value::Tensor(edges), "BinEdges").expect("numeric vector"),

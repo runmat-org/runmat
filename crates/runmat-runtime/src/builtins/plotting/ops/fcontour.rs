@@ -674,7 +674,7 @@ mod tests {
             vec![1, 2],
         )
         .expect("typed domain vector");
-        domain.data = vec![f64::NAN, f64::NAN];
+        domain.data.clear();
 
         assert_eq!(
             numeric_vector(&Value::Tensor(domain)).expect("numeric vector"),

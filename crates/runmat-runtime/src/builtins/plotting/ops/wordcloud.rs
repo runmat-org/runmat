@@ -1351,13 +1351,15 @@ fn color_list(value: &Value, name: &str, expected_rows: Option<usize>) -> Builti
         return Ok(vec![parse_color(value)?]);
     }
     let tensor = Tensor::try_from(value).map_err(wordcloud_error)?;
-    if tensor.data.is_empty() {
+    let len = tensor_utils::tensor_element_len(&tensor);
+    if len == 0 {
         return Ok(Vec::new());
     }
-    if tensor.data.len() == 3 && (tensor.rows == 1 || tensor.cols == 1) {
-        return Ok(vec![rgb_triplet(&tensor.data, name)?]);
+    if len == 3 && (tensor.rows == 1 || tensor.cols == 1) {
+        let values = tensor_utils::tensor_values_f64(&tensor);
+        return Ok(vec![rgb_triplet(&values, name)?]);
     }
-    if tensor.cols != 3 {
+    if tensor.cols != 3 || len != tensor.rows.saturating_mul(3) {
         return Err(wordcloud_error(format!(
             "{name} matrix must have three columns"
         )));
@@ -1373,9 +1375,9 @@ fn color_list(value: &Value, name: &str, expected_rows: Option<usize>) -> Builti
     for row in 0..tensor.rows {
         colors.push(rgb_triplet(
             &[
-                tensor.data[row],
-                tensor.data[row + tensor.rows],
-                tensor.data[row + 2 * tensor.rows],
+                tensor_utils::tensor_value_f64(&tensor, row),
+                tensor_utils::tensor_value_f64(&tensor, row + tensor.rows),
+                tensor_utils::tensor_value_f64(&tensor, row + 2 * tensor.rows),
             ],
             name,
         )?);
@@ -1513,11 +1515,41 @@ mod tests {
             vec![1, 3],
         )
         .expect("typed size vector");
-        sizes.data = vec![f64::NAN, f64::NAN, f64::NAN];
+        sizes.data.clear();
 
         assert_eq!(
             numeric_vector(&Value::Tensor(sizes), "SizeData").expect("numeric vector"),
             vec![2.0, 4.0, 8.0]
+        );
+    }
+
+    #[test]
+    fn wordcloud_color_reads_typed_integer_storage_exactly() {
+        let mut color = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U16(vec![1, 0, 0]),
+            vec![1, 3],
+        )
+        .expect("typed color vector");
+        color.data.clear();
+
+        assert_eq!(
+            color_list(&Value::Tensor(color), "Color", None).expect("color list"),
+            vec![Vec4::new(1.0, 0.0, 0.0, 1.0)]
+        );
+    }
+
+    #[test]
+    fn wordcloud_color_matrix_reads_typed_integer_storage_exactly() {
+        let mut color = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U16(vec![1, 0, 0, 1, 0, 0]),
+            vec![2, 3],
+        )
+        .expect("typed color matrix");
+        color.data.clear();
+
+        assert_eq!(
+            color_list(&Value::Tensor(color), "Color", Some(2)).expect("color list"),
+            vec![Vec4::new(1.0, 0.0, 0.0, 1.0), Vec4::new(0.0, 1.0, 0.0, 1.0)]
         );
     }
 
