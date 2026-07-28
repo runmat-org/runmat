@@ -1511,7 +1511,11 @@ mod tests {
             panic!("expected output list");
         };
         assert_eq!(values[0], Value::Num(0.0));
-        assert_eq!(values[1], char_value("hello"));
+        #[cfg(windows)]
+        let expected_output = "hello\r\n";
+        #[cfg(not(windows))]
+        let expected_output = "hello";
+        assert_eq!(values[1], char_value(expected_output));
     }
 
     #[test]

@@ -1,5 +1,13 @@
 use std::{fs, path::Path};
 
+fn read_source(path: &Path) -> String {
+    fs::read_to_string(path)
+        .unwrap_or_else(|error| {
+            panic!("source file {} should be readable: {error}", path.display())
+        })
+        .replace("\r\n", "\n")
+}
+
 #[test]
 fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
     let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -33,10 +41,8 @@ fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
         );
     }
 
-    let core_manifest = fs::read_to_string(crate_root.join("core").join("Cargo.toml"))
-        .expect("core manifest should be readable");
-    let core_lib = fs::read_to_string(crate_root.join("core").join("src").join("lib.rs"))
-        .expect("core lib should be readable");
+    let core_manifest = read_source(&crate_root.join("core").join("Cargo.toml"));
+    let core_lib = read_source(&crate_root.join("core").join("src").join("lib.rs"));
     for implementation_crate in [
         "runmat-meshing-cad",
         "runmat-meshing-curve",
@@ -51,8 +57,7 @@ fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
             "core depends on implementation crate: {implementation_crate}"
         );
     }
-    let evidence_manifest = fs::read_to_string(crate_root.join("evidence").join("Cargo.toml"))
-        .expect("evidence manifest should be readable");
+    let evidence_manifest = read_source(&crate_root.join("evidence").join("Cargo.toml"));
     let implementation_crate = "runmat-meshing-size";
     assert!(
         !evidence_manifest.contains(implementation_crate),
@@ -101,15 +106,13 @@ fn meshing_crate_layout_keeps_stage_implementations_out_of_core() {
 fn meshing_development_observability_stays_feature_gated() {
     let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
 
-    let evidence_manifest = fs::read_to_string(crate_root.join("evidence").join("Cargo.toml"))
-        .expect("evidence manifest should be readable");
+    let evidence_manifest = read_source(&crate_root.join("evidence").join("Cargo.toml"));
     assert!(
         evidence_manifest.contains("dev-evidence = []"),
         "mesh debug evidence must remain behind the evidence crate dev-evidence feature"
     );
 
-    let evidence_lib = fs::read_to_string(crate_root.join("evidence").join("src").join("lib.rs"))
-        .expect("evidence lib should be readable");
+    let evidence_lib = read_source(&crate_root.join("evidence").join("src").join("lib.rs"));
     assert!(
         evidence_lib.contains("#[cfg(feature = \"dev-evidence\")]\npub mod dev_traces;"),
         "dev_traces module must not be exported without the dev-evidence feature"
@@ -120,8 +123,7 @@ fn meshing_development_observability_stays_feature_gated() {
     );
 
     let evidence_artifact =
-        fs::read_to_string(crate_root.join("evidence").join("src").join("artifact.rs"))
-            .expect("evidence artifact module should be readable");
+        read_source(&crate_root.join("evidence").join("src").join("artifact.rs"));
     assert!(
         evidence_artifact
             .contains("#[cfg(feature = \"dev-evidence\")]\nuse crate::MeshDebugEvidence;"),
@@ -132,15 +134,14 @@ fn meshing_development_observability_stays_feature_gated() {
         "debug evidence field must remain feature-gated and omitted from default artifacts"
     );
 
-    let constrained_cavity_mod = fs::read_to_string(
-        crate_root
+    let constrained_cavity_mod = read_source(
+        &crate_root
             .join("tetrahedron")
             .join("src")
             .join("cavity")
             .join("constrained")
             .join("mod.rs"),
-    )
-    .expect("constrained cavity module should be readable");
+    );
     assert!(
         constrained_cavity_mod.contains("#[cfg(test)]\nmod diagnostic_metrics;"),
         "constrained-cavity diagnostic metrics should stay out of release builds"
@@ -150,16 +151,15 @@ fn meshing_development_observability_stays_feature_gated() {
         "constrained-cavity diagnostics should stay out of release builds"
     );
 
-    let constrained_cavity_exact_cover_mod = fs::read_to_string(
-        crate_root
+    let constrained_cavity_exact_cover_mod = read_source(
+        &crate_root
             .join("tetrahedron")
             .join("src")
             .join("cavity")
             .join("constrained")
             .join("exact_cover")
             .join("mod.rs"),
-    )
-    .expect("constrained exact-cover module should be readable");
+    );
     assert!(
         constrained_cavity_exact_cover_mod.contains("#[cfg(test)]\nmod diagnostics;"),
         "exact-cover diagnostics should stay out of release builds"

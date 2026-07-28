@@ -634,12 +634,15 @@ mod tests {
     use crate::builtins::io::mat::save::encode_workspace_to_mat_bytes;
     use futures::executor::block_on;
     use runmat_builtins::{CharArray, IntegerStorage, NumericDType, Tensor};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_TEMP_FILE_ID: AtomicU64 = AtomicU64::new(0);
 
     fn unique_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
             "runmat_matfile_{name}_{}_{}.mat",
             std::process::id(),
-            std::thread::current().name().unwrap_or("test")
+            NEXT_TEMP_FILE_ID.fetch_add(1, Ordering::Relaxed)
         ))
     }
 
