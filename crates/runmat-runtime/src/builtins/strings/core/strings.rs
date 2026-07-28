@@ -469,7 +469,7 @@ fn parse_numeric_dimension(value: f64) -> BuiltinResult<usize> {
     if rounded < 0.0 {
         return Err(err_nonnegative());
     }
-    if rounded > usize::MAX as f64 {
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
         return Err(strings_error_with_message(
             format!("{FN_NAME}: requested dimension exceeds platform limits"),
             &STRINGS_ERROR_SIZE_OVERFLOW,
@@ -621,6 +621,17 @@ pub(crate) mod tests {
         let vector =
             Tensor::new_integer(IntegerStorage::I16(vec![2, -1]), vec![1, 2]).expect("vector");
         assert!(parse_size_tensor(&vector).is_err());
+    }
+
+    #[test]
+    fn strings_numeric_dimensions_reject_unrepresentable_double_boundary() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+
+        assert!(parse_numeric_dimension(boundary).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

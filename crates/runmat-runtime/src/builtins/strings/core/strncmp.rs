@@ -280,7 +280,7 @@ fn parse_prefix_length_from_float(value: f64) -> BuiltinResult<usize> {
     if (rounded - value).abs() > f64::EPSILON {
         return Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
     }
-    if rounded > (usize::MAX as f64) {
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
         return Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
     }
     Ok(rounded as usize)
@@ -575,6 +575,24 @@ pub(crate) mod tests {
             .expect_err("negative length"),
         );
         assert!(err.to_ascii_lowercase().contains("nonnegative"));
+    }
+
+    #[test]
+    fn strncmp_prefix_length_rejects_unrepresentable_double_boundary() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        let err = error_message(
+            strncmp_builtin(
+                Value::String("abc".into()),
+                Value::String("abc".into()),
+                Value::Num(boundary),
+            )
+            .expect_err("unrepresentable prefix length"),
+        );
+        assert!(err.to_ascii_lowercase().contains("prefix length"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

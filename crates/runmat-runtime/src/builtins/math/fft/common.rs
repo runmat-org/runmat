@@ -567,7 +567,7 @@ fn parse_nd_sizes_data(data: &[f64], builtin: &str) -> BuiltinResult<Vec<usize>>
                 format!("{builtin}: SIZE values must be integers"),
             ));
         }
-        if rounded >= (usize::MAX as f64) + 1.0 {
+        if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
             return Err(builtin_error(
                 builtin,
                 format!("{builtin}: SIZE values exceed the maximum supported size"),
@@ -971,7 +971,12 @@ mod tests {
             .to_string();
         assert!(err.contains("non-negative"), "unexpected error: {err}");
 
-        let err = parse_nd_sizes_value(&Value::Num((usize::MAX as f64) + 1.0), "fftn")
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        let err = parse_nd_sizes_value(&Value::Num(boundary), "fftn")
             .unwrap_err()
             .to_string();
         assert!(

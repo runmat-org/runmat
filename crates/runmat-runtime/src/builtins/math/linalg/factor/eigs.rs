@@ -507,7 +507,7 @@ fn parse_integer_scalar(value: &Value) -> BuiltinResult<Option<i64>> {
             &ERROR_INVALID_ARGUMENT,
         ));
     }
-    if raw > (usize::MAX as f64) {
+    if raw >= i64::MAX as f64 {
         return Err(error_with_detail(
             "eigs: k is too large for this platform",
             &ERROR_INVALID_ARGUMENT,
@@ -1037,10 +1037,27 @@ fn numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
 }
 
 fn positive_integer_option(value: &Value, name: &str) -> BuiltinResult<usize> {
+    if let Some(value) = exact_integer_scalar(value) {
+        return value
+            .try_to_usize()
+            .filter(|value| *value > 0)
+            .ok_or_else(|| {
+                error_with_detail(
+                    format!("eigs: {name} must be a positive integer"),
+                    &ERROR_INVALID_ARGUMENT,
+                )
+            });
+    }
     let parsed = numeric_scalar(value, name)?;
     if !parsed.is_finite() || parsed <= 0.0 || parsed.fract() != 0.0 {
         return Err(error_with_detail(
             format!("eigs: {name} must be a positive integer"),
+            &ERROR_INVALID_ARGUMENT,
+        ));
+    }
+    if parsed > usize::MAX as f64 || (usize::BITS == 64 && parsed == usize::MAX as f64) {
+        return Err(error_with_detail(
+            format!("eigs: {name} is too large for this platform"),
             &ERROR_INVALID_ARGUMENT,
         ));
     }
@@ -1472,6 +1489,31 @@ mod tests {
             ]
         )
         .is_err());
+    }
+
+    #[test]
+    fn eigs_positive_integer_options_read_typed_storage_and_reject_float_boundary() {
+        let wide = if usize::BITS == 64 {
+            9_007_199_254_740_993
+        } else {
+            u32::MAX as u64
+        };
+        let mut typed =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("typed option");
+        typed.data.clear();
+
+        assert_eq!(
+            positive_integer_option(&Value::Tensor(typed), "MaxIterations").expect("typed option"),
+            wide as usize
+        );
+
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        assert!(positive_integer_option(&Value::Num(boundary), "MaxIterations").is_err());
+        assert!(parse_k(&Value::Num(i64::MAX as f64)).is_err());
     }
 
     #[test]

@@ -1928,7 +1928,7 @@ fn nonnegative_integer(name: &'static str, raw: f64, what: &str) -> BuiltinResul
             format!("{name}: {what} must be nonnegative"),
         ));
     }
-    if rounded > usize::MAX as f64 {
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
         return Err(invalid_argument(
             name,
             format!("{name}: {what} is too large"),
@@ -2570,12 +2570,17 @@ mod tests {
 
     #[test]
     fn rejects_oversized_window_without_overflowing() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
         let err = call(
             "movsum",
             MovingOp::Sum,
             vec![
                 tensor(vec![1., 2.], vec![1, 2]),
-                Value::Tensor(Tensor::new(vec![usize::MAX as f64, 1.0], vec![1, 2]).unwrap()),
+                Value::Tensor(Tensor::new(vec![boundary, 1.0], vec![1, 2]).unwrap()),
             ],
         )
         .unwrap_err();
