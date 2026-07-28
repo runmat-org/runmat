@@ -3088,16 +3088,18 @@ fn bool_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<bool> 
 }
 
 fn usize_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<usize> {
-    match value {
-        Value::Int(int) => int.try_to_usize().ok_or_else(|| {
+    if let Some(int) = tensor_utils::scalar_integer_value(value) {
+        return int.try_to_usize().ok_or_else(|| {
             builtin_error(
                 builtin,
                 &ERROR_INPUT,
                 "expected non-negative integer value outside the platform range",
             )
-        }),
+        });
+    }
+    match value {
         Value::Num(n) if n.is_finite() && *n >= 0.0 && n.fract() == 0.0 => {
-            if *n > usize::MAX as f64 {
+            if *n > usize::MAX as f64 || (usize::BITS == 64 && *n == usize::MAX as f64) {
                 return Err(builtin_error(
                     builtin,
                     &ERROR_INPUT,
@@ -4023,6 +4025,31 @@ run:
         let field_handle =
             block_on(fea_plot_builtin(vec![field])).expect("field plot should create a figure");
         assert!(matches!(field_handle, Value::Num(handle) if handle >= 1.0));
+    }
+
+    #[test]
+    fn fea_usize_parser_reads_typed_integer_storage_exactly_and_rejects_float_boundary() {
+        let wide = if usize::BITS == 64 {
+            9_007_199_254_740_993
+        } else {
+            u32::MAX as u64
+        };
+        let mut typed =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![wide]), vec![1, 1])
+                .expect("typed integer");
+        typed.data.clear();
+
+        assert_eq!(
+            usize_from_value(STUDY_NAME, &Value::Tensor(typed)).expect("typed integer"),
+            wide as usize
+        );
+
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        assert!(usize_from_value(STUDY_NAME, &Value::Num(boundary)).is_err());
     }
 
     fn synthetic_plot_run_value() -> (Value, Value) {

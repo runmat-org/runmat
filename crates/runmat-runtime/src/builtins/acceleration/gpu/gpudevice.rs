@@ -244,17 +244,10 @@ fn handle_single_argument(arg: &Value) -> BuiltinResult<Value> {
 
 fn struct_device_index(info: &StructValue) -> Option<u32> {
     info.fields.get("index").and_then(|value| match value {
-        Value::Int(intv) => {
-            let idx = intv.to_i64();
-            if idx >= 0 && idx <= u32::MAX as i64 {
-                Some(idx as u32)
-            } else {
-                None
-            }
-        }
+        Value::Int(intv) => intv.try_to_u64().and_then(|idx| u32::try_from(idx).ok()),
         Value::Num(n) if n.is_finite() && *n >= 0.0 => {
             let rounded = n.round();
-            if (rounded - n).abs() <= 1e-9 {
+            if (rounded - n).abs() <= 1e-9 && rounded <= u32::MAX as f64 {
                 Some(rounded as u32)
             } else {
                 None
@@ -336,6 +329,9 @@ fn num_to_index(raw: f64) -> BuiltinResult<Option<u32>> {
     if (rounded - raw).abs() > 1e-9 {
         return Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into());
     }
+    if rounded > u32::MAX as f64 {
+        return Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into());
+    }
     let idx = rounded as i64;
     int_to_index(idx)
 }
@@ -406,6 +402,15 @@ pub(crate) mod tests {
                 .expect("integer tensor");
             let err = call(vec![Value::Tensor(negative)]).unwrap_err().to_string();
             assert_eq!(err, GPU_DEVICE_ERROR_INVALID_INDEX.message);
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn gpu_device_index_parser_rejects_out_of_range_double_before_casting() {
+        test_support::with_test_provider(|_| {
+            let err = call(vec![Value::Num((u32::MAX as f64) + 1.0)]).unwrap_err();
+            assert_eq!(err.to_string(), GPU_DEVICE_ERROR_INVALID_INDEX.message);
         });
     }
 

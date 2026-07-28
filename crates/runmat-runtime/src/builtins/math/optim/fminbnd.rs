@@ -509,6 +509,12 @@ fn option_positive_usize(field: &str, value: &Value) -> BuiltinResult<usize> {
             format!("option {field} must be an integer scalar"),
         ));
     }
+    if parsed > usize::MAX as f64 || (usize::BITS == 64 && parsed == usize::MAX as f64) {
+        return Err(fminbnd_error_with_detail(
+            &FMINBND_ERROR_INVALID_ARGUMENT,
+            format!("option {field} exceeds maximum supported size"),
+        ));
+    }
     Ok(parsed as usize)
 }
 
@@ -1006,6 +1012,19 @@ mod tests {
         max_iter.data = vec![1000.0];
         let mut opts = StructValue::new();
         opts.insert("MaxIter", Value::Tensor(max_iter));
+
+        assert!(FminbndOptions::from_struct(Some(&opts)).is_err());
+    }
+
+    #[test]
+    fn options_reject_unrepresentable_double_integer_boundary() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        let mut opts = StructValue::new();
+        opts.insert("MaxIter", Value::Num(boundary));
 
         assert!(FminbndOptions::from_struct(Some(&opts)).is_err());
     }

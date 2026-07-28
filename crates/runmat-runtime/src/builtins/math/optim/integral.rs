@@ -479,6 +479,12 @@ fn integer_option(name: &str, value: &Value) -> BuiltinResult<usize> {
             format!("option {name} must be an integer scalar"),
         ));
     }
+    if parsed > usize::MAX as f64 || (usize::BITS == 64 && parsed == usize::MAX as f64) {
+        return Err(integral_error_with_detail(
+            &INTEGRAL_ERROR_INVALID_ARGUMENT,
+            format!("option {name} exceeds maximum supported size"),
+        ));
+    }
     Ok(parsed as usize)
 }
 
@@ -921,6 +927,23 @@ mod tests {
             Value::Num(0.0),
             Value::Num(1.0),
             vec![Value::from("MaxFunEvals"), Value::Tensor(max_fun_evals)],
+        ))
+        .unwrap_err();
+        assert!(err.message().contains("MaxFunEvals"));
+    }
+
+    #[test]
+    fn max_fun_evals_option_rejects_unrepresentable_double_boundary() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        let err = block_on(integral_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            vec![Value::from("MaxFunEvals"), Value::Num(boundary)],
         ))
         .unwrap_err();
         assert!(err.message().contains("MaxFunEvals"));

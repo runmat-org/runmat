@@ -234,7 +234,19 @@ pub(crate) fn option_usize(
             format!("{builtin}: option {field} must be non-negative"),
         ));
     }
-    Ok(value.floor() as usize)
+    if value.fract() != 0.0 {
+        return Err(optim_error(
+            builtin,
+            format!("{builtin}: option {field} must be an integer"),
+        ));
+    }
+    if value > usize::MAX as f64 || (usize::BITS == 64 && value == usize::MAX as f64) {
+        return Err(optim_error(
+            builtin,
+            format!("{builtin}: option {field} exceeds maximum supported size"),
+        ));
+    }
+    Ok(value as usize)
 }
 
 pub(crate) fn option_string(
@@ -355,6 +367,21 @@ mod tests {
         let mut options = StructValue::new();
         options.insert("MaxIter", Value::Tensor(max_iter));
 
+        assert!(option_usize("optim_test", Some(&options), "MaxIter", 400).is_err());
+    }
+
+    #[test]
+    fn option_usize_rejects_fractional_and_unrepresentable_double_values() {
+        let mut options = StructValue::new();
+        options.insert("MaxIter", Value::Num(3.5));
+        assert!(option_usize("optim_test", Some(&options), "MaxIter", 400).is_err());
+
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        options.insert("MaxIter", Value::Num(boundary));
         assert!(option_usize("optim_test", Some(&options), "MaxIter", 400).is_err());
     }
 

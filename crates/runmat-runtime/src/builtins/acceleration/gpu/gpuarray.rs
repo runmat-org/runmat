@@ -607,6 +607,12 @@ fn float_to_dim(value: f64) -> BuiltinResult<usize> {
             &GPUARRAY_ERROR_SIZE_ARGUMENT,
         ));
     }
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+        return Err(gpu_array_error_with_message(
+            "gpuArray: size arguments exceed maximum supported size",
+            &GPUARRAY_ERROR_SIZE_ARGUMENT,
+        ));
+    }
     Ok(rounded as usize)
 }
 
@@ -1384,6 +1390,17 @@ pub(crate) mod tests {
         let negative = Tensor::new_integer(IntegerStorage::I8(vec![-1]), vec![1, 1])
             .expect("integer size vector");
         assert!(tensor_to_dims(&negative).is_err());
+    }
+
+    #[test]
+    fn gpu_array_float_dimensions_reject_unrepresentable_usize_boundary() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+
+        assert!(float_to_dim(boundary).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
