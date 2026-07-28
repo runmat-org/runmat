@@ -1,5 +1,6 @@
 //! MATLAB-compatible `decomposition` objects for reusable linear solves.
 
+use std::borrow::Cow;
 use std::cell::Cell;
 use std::collections::HashMap;
 
@@ -718,7 +719,7 @@ fn keep_triangle(matrix: Value, flag: TriangularFlag) -> BuiltinResult<Value> {
             }
             Ok(Value::Tensor(tensor))
         }
-        Value::ComplexTensor(mut tensor) => {
+        Value::ComplexTensor(mut tensor) if tensor.integer_data.is_none() => {
             for col in 0..tensor.cols {
                 for row in 0..tensor.rows {
                     let zero = match flag {
@@ -731,6 +732,24 @@ fn keep_triangle(matrix: Value, flag: TriangularFlag) -> BuiltinResult<Value> {
                 }
             }
             Ok(Value::ComplexTensor(tensor))
+        }
+        Value::ComplexTensor(tensor) => {
+            let mut values = complex_tensor_values_pair_cow(&tensor).into_owned();
+            for col in 0..tensor.cols {
+                for row in 0..tensor.rows {
+                    let zero = match flag {
+                        TriangularFlag::Upper => row > col,
+                        TriangularFlag::Lower => row < col,
+                    };
+                    if zero {
+                        values[row + col * tensor.rows] = (0.0, 0.0);
+                    }
+                }
+            }
+            Ok(Value::ComplexTensor(
+                ComplexTensor::new(values, tensor.shape)
+                    .map_err(|e| internal(format!("decomposition: {e}")))?,
+            ))
         }
         other => Err(invalid(format!(
             "decomposition: unsupported coefficient matrix {other:?}"
@@ -757,7 +776,7 @@ fn symmetrize_from_triangle(matrix: Value, flag: TriangularFlag) -> BuiltinResul
             }
             Ok(Value::Tensor(tensor))
         }
-        Value::ComplexTensor(mut tensor) => {
+        Value::ComplexTensor(mut tensor) if tensor.integer_data.is_none() => {
             for col in 0..tensor.cols {
                 for row in 0..tensor.rows {
                     if row == col {
@@ -780,6 +799,34 @@ fn symmetrize_from_triangle(matrix: Value, flag: TriangularFlag) -> BuiltinResul
                 }
             }
             Ok(Value::ComplexTensor(tensor))
+        }
+        Value::ComplexTensor(tensor) => {
+            let mut values = complex_tensor_values_pair_cow(&tensor).into_owned();
+            for col in 0..tensor.cols {
+                for row in 0..tensor.rows {
+                    if row == col {
+                        continue;
+                    }
+                    let maybe_value = match flag {
+                        TriangularFlag::Upper if row > col => {
+                            let (re, im) = values[col + row * tensor.rows];
+                            Some((re, -im))
+                        }
+                        TriangularFlag::Lower if row < col => {
+                            let (re, im) = values[col + row * tensor.rows];
+                            Some((re, -im))
+                        }
+                        _ => None,
+                    };
+                    if let Some(value) = maybe_value {
+                        values[row + col * tensor.rows] = value;
+                    }
+                }
+            }
+            Ok(Value::ComplexTensor(
+                ComplexTensor::new(values, tensor.shape)
+                    .map_err(|e| internal(format!("decomposition: {e}")))?,
+            ))
         }
         other => Err(invalid(format!(
             "decomposition: unsupported coefficient matrix {other:?}"
@@ -857,9 +904,10 @@ fn matrix_shape_value(matrix: &Value) -> BuiltinResult<Value> {
 fn is_diagonal_matrix(matrix: &Value) -> bool {
     match matrix {
         Value::Tensor(tensor) => {
+            let values = tensor::tensor_values_f64_cow(tensor);
             for col in 0..tensor.cols() {
                 for row in 0..tensor.rows() {
-                    if row != col && tensor.data[row + col * tensor.rows()] != 0.0 {
+                    if row != col && values[row + col * tensor.rows()] != 0.0 {
                         return false;
                     }
                 }
@@ -867,9 +915,10 @@ fn is_diagonal_matrix(matrix: &Value) -> bool {
             true
         }
         Value::ComplexTensor(tensor) => {
+            let values = complex_tensor_values_pair_cow(tensor);
             for col in 0..tensor.cols {
                 for row in 0..tensor.rows {
-                    if row != col && tensor.data[row + col * tensor.rows] != (0.0, 0.0) {
+                    if row != col && values[row + col * tensor.rows] != (0.0, 0.0) {
                         return false;
                     }
                 }
@@ -887,9 +936,10 @@ fn is_triangular_matrix(matrix: &Value) -> bool {
 fn is_upper_triangular(matrix: &Value) -> bool {
     match matrix {
         Value::Tensor(tensor) => {
+            let values = tensor::tensor_values_f64_cow(tensor);
             for col in 0..tensor.cols() {
                 for row in (col + 1)..tensor.rows() {
-                    if tensor.data[row + col * tensor.rows()] != 0.0 {
+                    if values[row + col * tensor.rows()] != 0.0 {
                         return false;
                     }
                 }
@@ -897,9 +947,10 @@ fn is_upper_triangular(matrix: &Value) -> bool {
             true
         }
         Value::ComplexTensor(tensor) => {
+            let values = complex_tensor_values_pair_cow(tensor);
             for col in 0..tensor.cols {
                 for row in (col + 1)..tensor.rows {
-                    if tensor.data[row + col * tensor.rows] != (0.0, 0.0) {
+                    if values[row + col * tensor.rows] != (0.0, 0.0) {
                         return false;
                     }
                 }
@@ -913,9 +964,10 @@ fn is_upper_triangular(matrix: &Value) -> bool {
 fn is_lower_triangular(matrix: &Value) -> bool {
     match matrix {
         Value::Tensor(tensor) => {
+            let values = tensor::tensor_values_f64_cow(tensor);
             for col in 0..tensor.cols() {
                 for row in 0..col.min(tensor.rows()) {
-                    if tensor.data[row + col * tensor.rows()] != 0.0 {
+                    if values[row + col * tensor.rows()] != 0.0 {
                         return false;
                     }
                 }
@@ -923,9 +975,10 @@ fn is_lower_triangular(matrix: &Value) -> bool {
             true
         }
         Value::ComplexTensor(tensor) => {
+            let values = complex_tensor_values_pair_cow(tensor);
             for col in 0..tensor.cols {
                 for row in 0..col.min(tensor.rows) {
-                    if tensor.data[row + col * tensor.rows] != (0.0, 0.0) {
+                    if values[row + col * tensor.rows] != (0.0, 0.0) {
                         return false;
                     }
                 }
@@ -943,9 +996,10 @@ fn is_hermitian_matrix(matrix: &Value) -> bool {
     }
     match matrix {
         Value::Tensor(tensor) => {
+            let values = tensor::tensor_values_f64_cow(tensor);
             for col in 0..cols {
                 for row in 0..rows {
-                    if tensor.data[row + col * rows] != tensor.data[col + row * rows] {
+                    if values[row + col * rows] != values[col + row * rows] {
                         return false;
                     }
                 }
@@ -953,10 +1007,11 @@ fn is_hermitian_matrix(matrix: &Value) -> bool {
             true
         }
         Value::ComplexTensor(tensor) => {
+            let values = complex_tensor_values_pair_cow(tensor);
             for col in 0..cols {
                 for row in 0..rows {
-                    let lhs = tensor.data[row + col * rows];
-                    let rhs = tensor.data[col + row * rows];
+                    let lhs = values[row + col * rows];
+                    let rhs = values[col + row * rows];
                     if lhs != (rhs.0, -rhs.1) {
                         return false;
                     }
@@ -1254,8 +1309,23 @@ fn matrix_datatype(matrix: &Value) -> &'static str {
 
 fn matrix_is_real(matrix: &Value) -> bool {
     match matrix {
-        Value::ComplexTensor(tensor) => tensor.data.iter().all(|(_, im)| *im == 0.0),
+        Value::ComplexTensor(tensor) => complex_tensor_values_pair_cow(tensor)
+            .iter()
+            .all(|(_, im)| *im == 0.0),
         _ => true,
+    }
+}
+
+fn complex_tensor_values_pair_cow(tensor: &ComplexTensor) -> Cow<'_, [(f64, f64)]> {
+    if tensor.integer_data.is_some() {
+        Cow::Owned(
+            tensor::complex_tensor_values_complex64(tensor)
+                .into_iter()
+                .map(|value| (value.re, value.im))
+                .collect(),
+        )
+    } else {
+        Cow::Borrowed(&tensor.data)
     }
 }
 
@@ -1564,6 +1634,77 @@ mod tests {
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn constructor_structure_helpers_read_typed_integer_storage_exactly() {
+        let upper_kept = keep_triangle(
+            mirrorless_complex_int_tensor(
+                IntegerStorage::I16(vec![1, 99, 0, 4]),
+                IntegerStorage::I16(vec![2, 99, 0, 5]),
+                vec![2, 2],
+            ),
+            TriangularFlag::Upper,
+        )
+        .expect("keep upper");
+        match upper_kept {
+            Value::ComplexTensor(tensor) => {
+                assert_eq!(
+                    tensor.data,
+                    vec![(1.0, 2.0), (0.0, 0.0), (0.0, 0.0), (4.0, 5.0)]
+                );
+            }
+            other => panic!("expected complex tensor, got {other:?}"),
+        }
+
+        let symmetrized = symmetrize_from_triangle(
+            mirrorless_complex_int_tensor(
+                IntegerStorage::I16(vec![1, 2, 0, 4]),
+                IntegerStorage::I16(vec![0, 3, 0, 0]),
+                vec![2, 2],
+            ),
+            TriangularFlag::Lower,
+        )
+        .expect("symmetrize lower");
+        match symmetrized {
+            Value::ComplexTensor(tensor) => {
+                assert_eq!(
+                    tensor.data,
+                    vec![(1.0, 0.0), (2.0, 3.0), (2.0, -3.0), (4.0, 0.0)]
+                );
+            }
+            other => panic!("expected complex tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn structure_predicates_read_typed_integer_storage_exactly() {
+        let diagonal = mirrorless_int_tensor(IntegerStorage::I16(vec![1, 0, 0, 4]), vec![2, 2]);
+        assert!(is_diagonal_matrix(&diagonal));
+        assert!(is_triangular_matrix(&diagonal));
+        assert!(is_hermitian_matrix(&diagonal));
+
+        let not_diagonal = mirrorless_int_tensor(IntegerStorage::I16(vec![1, 2, 0, 4]), vec![2, 2]);
+        assert!(!is_diagonal_matrix(&not_diagonal));
+        assert!(is_lower_triangular(&not_diagonal));
+        assert!(!is_upper_triangular(&not_diagonal));
+        assert!(!is_hermitian_matrix(&not_diagonal));
+
+        let hermitian = mirrorless_complex_int_tensor(
+            IntegerStorage::I16(vec![1, 2, 2, 4]),
+            IntegerStorage::I16(vec![0, 3, -3, 0]),
+            vec![2, 2],
+        );
+        assert!(is_hermitian_matrix(&hermitian));
+        assert!(!matrix_is_real(&hermitian));
+
+        let real_complex = mirrorless_complex_int_tensor(
+            IntegerStorage::I16(vec![1, 0, 0, 4]),
+            IntegerStorage::I16(vec![0, 0, 0, 0]),
+            vec![2, 2],
+        );
+        assert!(is_diagonal_matrix(&real_complex));
+        assert!(matrix_is_real(&real_complex));
     }
 
     #[test]
