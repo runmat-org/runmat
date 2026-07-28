@@ -933,7 +933,10 @@ fn positive_scalar(value: &Value, label: &str) -> BuiltinResult<f64> {
 
 fn positive_integer(value: &Value, label: &str) -> BuiltinResult<usize> {
     let scalar = positive_scalar(value, label)?;
-    if scalar.fract() != 0.0 || scalar > usize::MAX as f64 {
+    if scalar.fract() != 0.0
+        || scalar > usize::MAX as f64
+        || (usize::BITS == 64 && scalar == usize::MAX as f64)
+    {
         return Err(invalid(format!(
             "mnrfit: {label} must be a positive integer"
         )));
@@ -1121,6 +1124,18 @@ mod tests {
         };
         assert!(stats.fields.contains_key("se"));
         assert!(stats.fields.contains_key("covb"));
+    }
+
+    #[test]
+    fn mnrfit_positive_integer_rejects_unrepresentable_double_bounds() {
+        assert_eq!(positive_integer(&Value::Num(5.0), "MaxIter").unwrap(), 5);
+        let boundary = positive_integer(&Value::Num(usize::MAX as f64), "MaxIter");
+        if usize::BITS == 64 {
+            assert!(boundary.is_err());
+        } else {
+            assert_eq!(boundary.unwrap(), usize::MAX);
+        }
+        assert!(positive_integer(&Value::Num((usize::MAX as f64) + 1.0), "MaxIter").is_err());
     }
 
     #[test]

@@ -820,7 +820,12 @@ fn int_usize_entry(value: &IntValue, builtin: &'static str, label: &str) -> Buil
 }
 
 fn numeric_usize_entry(value: f64, builtin: &'static str, label: &str) -> BuiltinResult<usize> {
-    if !value.is_finite() || value < 1.0 || value > usize::MAX as f64 || value.fract() != 0.0 {
+    if !value.is_finite()
+        || value < 1.0
+        || value > usize::MAX as f64
+        || (usize::BITS == 64 && value == usize::MAX as f64)
+        || value.fract() != 0.0
+    {
         Err(hdf5_error(
             builtin,
             &ERR_ARGUMENT,
@@ -2272,6 +2277,20 @@ mod tests {
 
         assert!(numeric_vector_usize(&Value::Int(IntValue::U8(0)), H5READ_NAME, "start").is_err());
         assert!(numeric_vector_usize(&Value::Int(IntValue::I8(-1)), H5READ_NAME, "start").is_err());
+    }
+
+    #[test]
+    fn hdf5_selection_vectors_reject_unrepresentable_double_bounds() {
+        let boundary = numeric_vector_usize(&Value::Num(usize::MAX as f64), H5READ_NAME, "start");
+        if usize::BITS == 64 {
+            assert!(boundary.is_err());
+        } else {
+            assert_eq!(boundary.unwrap(), vec![usize::MAX]);
+        }
+        assert!(
+            numeric_vector_usize(&Value::Num((usize::MAX as f64) + 1.0), H5READ_NAME, "start")
+                .is_err()
+        );
     }
 
     #[test]

@@ -754,7 +754,7 @@ fn parse_count(value: &Value) -> BuiltinResult<usize> {
             "read: count must be finite",
         ));
     }
-    if numeric > usize::MAX as f64 {
+    if numeric > usize::MAX as f64 || (usize::BITS == 64 && numeric == usize::MAX as f64) {
         return Err(read_flow(
             &READ_ERROR_INVALID_COUNT,
             "read: count exceeds the maximum supported size",
@@ -909,6 +909,14 @@ pub(crate) mod tests {
             Tensor::new_integer(IntegerStorage::U64(vec![42]), vec![1, 1]).expect("count");
         typed_count.data.clear();
         assert_eq!(parse_count(&Value::Tensor(typed_count)).unwrap(), 42);
+
+        let boundary = parse_count(&Value::Num(usize::MAX as f64));
+        if usize::BITS == 64 {
+            assert!(boundary.is_err());
+        } else {
+            assert_eq!(boundary.unwrap(), usize::MAX);
+        }
+        assert!(parse_count(&Value::Num((usize::MAX as f64) + 1.0)).is_err());
 
         let mut typed_negative =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("count");

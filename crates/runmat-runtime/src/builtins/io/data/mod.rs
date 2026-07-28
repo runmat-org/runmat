@@ -2424,9 +2424,14 @@ fn parse_shape_from_value(value: &Value) -> BuiltinResult<Vec<usize>> {
                 }
             } else {
                 for v in &t.data {
-                    if !v.is_finite() || *v < 0.0 {
+                    if !v.is_finite()
+                        || *v < 0.0
+                        || v.fract() != 0.0
+                        || *v > usize::MAX as f64
+                        || (usize::BITS == 64 && *v == usize::MAX as f64)
+                    {
                         return Err(data_error(
-                            "shape dimensions must be non-negative finite numbers",
+                            "shape dimensions must be non-negative finite integers within platform limits",
                         ));
                     }
                     out.push(*v as usize);
@@ -2435,9 +2440,14 @@ fn parse_shape_from_value(value: &Value) -> BuiltinResult<Vec<usize>> {
             Ok(out)
         }
         Value::Num(v) => {
-            if !v.is_finite() || *v < 0.0 {
+            if !v.is_finite()
+                || *v < 0.0
+                || v.fract() != 0.0
+                || *v > usize::MAX as f64
+                || (usize::BITS == 64 && *v == usize::MAX as f64)
+            {
                 return Err(data_error(
-                    "shape dimensions must be non-negative finite numbers",
+                    "shape dimensions must be non-negative finite integers within platform limits",
                 ));
             }
             Ok(vec![*v as usize])
@@ -2789,13 +2799,21 @@ fn parse_dim_range(value: &Value, extent: usize) -> BuiltinResult<DimRange> {
             end: extent,
         }),
         Value::Num(n) => {
-            let idx = (*n as isize) - 1;
-            if idx < 0 || idx as usize >= extent {
+            if !n.is_finite()
+                || *n < 1.0
+                || n.fract() != 0.0
+                || *n > usize::MAX as f64
+                || (usize::BITS == 64 && *n == usize::MAX as f64)
+            {
+                return Err(data_error("INVALID_SLICE: index out of bounds"));
+            }
+            let idx = (*n as usize) - 1;
+            if idx >= extent {
                 return Err(data_error("INVALID_SLICE: index out of bounds"));
             }
             Ok(DimRange {
-                start: idx as usize,
-                end: idx as usize + 1,
+                start: idx,
+                end: idx + 1,
             })
         }
         Value::Int(i) => {
@@ -2834,14 +2852,29 @@ fn parse_dim_range(value: &Value, extent: usize) -> BuiltinResult<DimRange> {
                     end: end_inclusive + 1,
                 })
             } else {
-                let start = (t.data[0] as isize) - 1;
-                let end_inclusive = (t.data[1] as isize) - 1;
-                if start < 0 || end_inclusive < start || end_inclusive as usize >= extent {
+                let start_raw = t.data[0];
+                let end_raw = t.data[1];
+                if !start_raw.is_finite()
+                    || !end_raw.is_finite()
+                    || start_raw < 1.0
+                    || end_raw < 1.0
+                    || start_raw.fract() != 0.0
+                    || end_raw.fract() != 0.0
+                    || start_raw > usize::MAX as f64
+                    || end_raw > usize::MAX as f64
+                    || (usize::BITS == 64
+                        && (start_raw == usize::MAX as f64 || end_raw == usize::MAX as f64))
+                {
+                    return Err(data_error("INVALID_SLICE: range out of bounds"));
+                }
+                let start = start_raw as usize - 1;
+                let end_inclusive = end_raw as usize - 1;
+                if end_inclusive < start || end_inclusive >= extent {
                     return Err(data_error("INVALID_SLICE: range out of bounds"));
                 }
                 Ok(DimRange {
-                    start: start as usize,
-                    end: end_inclusive as usize + 1,
+                    start,
+                    end: end_inclusive + 1,
                 })
             }
         }
@@ -3163,6 +3196,44 @@ mod tests {
         .expect("range");
         invalid.data.clear();
         assert!(parse_dim_range(&Value::Tensor(invalid), 5).is_err());
+    }
+
+    #[test]
+    fn data_shape_and_slice_double_parsers_reject_fractional_and_unrepresentable_bounds() {
+        assert!(parse_shape_from_value(&Value::Num(1.5)).is_err());
+        let boundary_shape = parse_shape_from_value(&Value::Num(usize::MAX as f64));
+        if usize::BITS == 64 {
+            assert!(boundary_shape.is_err());
+        } else {
+            assert_eq!(boundary_shape.unwrap(), vec![usize::MAX]);
+        }
+        assert!(parse_shape_from_value(&Value::Num((usize::MAX as f64) + 1.0)).is_err());
+
+        let fractional_shape = Tensor::new(vec![2.0, 3.25], vec![1, 2]).expect("shape");
+        assert!(parse_shape_from_value(&Value::Tensor(fractional_shape)).is_err());
+
+        assert!(parse_dim_range(&Value::Num(1.5), 5).is_err());
+        let boundary_range = parse_dim_range(&Value::Num(usize::MAX as f64), usize::MAX);
+        if usize::BITS == 64 {
+            assert!(boundary_range.is_err());
+        } else {
+            let parsed = boundary_range.expect("32-bit boundary");
+            assert_eq!(parsed.start, usize::MAX - 1);
+            assert_eq!(parsed.end, usize::MAX);
+        }
+
+        let fractional_range = Tensor::new(vec![1.0, 3.5], vec![1, 2]).expect("range");
+        assert!(parse_dim_range(&Value::Tensor(fractional_range), 5).is_err());
+
+        let too_large_range = Tensor::new(vec![1.0, usize::MAX as f64], vec![1, 2]).expect("range");
+        let tensor_boundary = parse_dim_range(&Value::Tensor(too_large_range), usize::MAX);
+        if usize::BITS == 64 {
+            assert!(tensor_boundary.is_err());
+        } else {
+            let parsed = tensor_boundary.expect("32-bit tensor boundary");
+            assert_eq!(parsed.start, 0);
+            assert_eq!(parsed.end, usize::MAX);
+        }
     }
     use crate::dispatcher::call_builtin;
     use async_trait::async_trait;

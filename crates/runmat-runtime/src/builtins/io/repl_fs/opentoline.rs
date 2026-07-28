@@ -316,7 +316,7 @@ fn position_value_to_usize(value: f64) -> Option<usize> {
     if !value.is_finite() || value < 1.0 || value.fract().abs() > f64::EPSILON {
         return None;
     }
-    if value > usize::MAX as f64 {
+    if value > usize::MAX as f64 || (usize::BITS == 64 && value == usize::MAX as f64) {
         return None;
     }
     Some(value as usize)
@@ -422,6 +422,21 @@ mod tests {
         } else {
             assert!(parsed.is_err());
         }
+    }
+
+    #[test]
+    fn opentoline_double_positions_reject_unrepresentable_platform_bounds() {
+        let boundary = block_on(positive_integer_arg(&Value::Num(usize::MAX as f64), "line"));
+        if usize::BITS == 64 {
+            assert!(boundary.is_err());
+        } else {
+            assert_eq!(boundary.unwrap(), usize::MAX);
+        }
+        assert!(block_on(positive_integer_arg(
+            &Value::Num((usize::MAX as f64) + 1.0),
+            "line"
+        ))
+        .is_err());
     }
 
     #[test]
