@@ -1628,7 +1628,9 @@ pub(crate) mod tests {
                 )
                 .expect("expected storage");
             let data = Value::Tensor(Tensor::new(vec![1.0, 2.5, -3.0], vec![3, 1]).unwrap());
-            let prototype = Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).unwrap());
+            let mut prototype_tensor = Tensor::new_integer(storage, vec![1, 1]).unwrap();
+            prototype_tensor.data.clear();
+            let prototype = Value::Tensor(prototype_tensor);
             let output = adjust_output_for_like(data, &prototype, PrecisionSpec::default())
                 .expect("integer like output");
             let Value::Tensor(output) = output else {
@@ -1665,15 +1667,17 @@ pub(crate) mod tests {
     #[cfg(target_pointer_width = "64")]
     fn fread_size_tensor_parser_preserves_exact_integer_storage() {
         let count = (1_u64 << 53) + 1;
-        let count_tensor =
+        let mut count_tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![count]), vec![1, 1]).expect("count");
+        count_tensor.data.clear();
         match parse_size(Some(&Value::Tensor(count_tensor))).expect("size") {
             SizeSpec::Count(value) => assert_eq!(value, usize::try_from(count).unwrap()),
             other => panic!("expected count size, got {other:?}"),
         }
 
-        let matrix_tensor =
+        let mut matrix_tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![count, 3]), vec![1, 2]).expect("matrix");
+        matrix_tensor.data.clear();
         match parse_size(Some(&Value::Tensor(matrix_tensor))).expect("size") {
             SizeSpec::Matrix {
                 rows,
@@ -1688,12 +1692,14 @@ pub(crate) mod tests {
 
     #[test]
     fn fread_size_tensor_parser_rejects_negative_integer_storage() {
-        let count_tensor =
+        let mut count_tensor =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("count");
+        count_tensor.data.clear();
         assert!(parse_size(Some(&Value::Tensor(count_tensor))).is_err());
 
-        let matrix_tensor =
+        let mut matrix_tensor =
             Tensor::new_integer(IntegerStorage::I16(vec![2, -1]), vec![1, 2]).expect("matrix");
+        matrix_tensor.data.clear();
         assert!(parse_size(Some(&Value::Tensor(matrix_tensor))).is_err());
     }
 
@@ -1739,8 +1745,9 @@ pub(crate) mod tests {
         skip.data.clear();
         assert_eq!(parse_skip(Some(&Value::Tensor(skip))).unwrap(), 9);
 
-        let too_large =
+        let mut too_large =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("skip");
+        too_large.data.clear();
         assert!(parse_skip(Some(&Value::Tensor(too_large))).is_err());
     }
 

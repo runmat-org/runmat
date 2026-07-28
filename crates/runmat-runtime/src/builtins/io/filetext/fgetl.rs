@@ -447,11 +447,12 @@ pub(crate) mod tests {
 
         let mut typed_tensor =
             Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("typed fid");
-        typed_tensor.data[0] = 0.0;
+        typed_tensor.data.clear();
         assert_eq!(parse_fid(&Value::Tensor(typed_tensor)).unwrap(), 7);
-        let typed_tensor_too_large =
+        let mut typed_tensor_too_large =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
                 .expect("typed fid");
+        typed_tensor_too_large.data.clear();
         let typed_tensor_too_large =
             unwrap_error_message(parse_fid(&Value::Tensor(typed_tensor_too_large)).unwrap_err());
         assert_eq!(

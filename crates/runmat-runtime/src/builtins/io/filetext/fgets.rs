@@ -502,10 +502,12 @@ pub(crate) mod tests {
 
         let mut fid_tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1])
             .expect("typed fid tensor");
-        fid_tensor.data[0] = 0.0;
+        fid_tensor.data.clear();
         assert_eq!(parse_fid(&Value::Tensor(fid_tensor)).unwrap(), 7);
-        let fid_too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
-            .expect("typed fid tensor");
+        let mut fid_too_large =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+                .expect("typed fid tensor");
+        fid_too_large.data.clear();
         assert!(parse_fid(&Value::Tensor(fid_too_large)).is_err());
 
         let nchar =
@@ -513,12 +515,14 @@ pub(crate) mod tests {
         assert_eq!(nchar, Some(64));
         let mut nchar_tensor = Tensor::new_integer(IntegerStorage::U16(vec![64]), vec![1, 1])
             .expect("typed nchar tensor");
-        nchar_tensor.data[0] = 0.0;
+        nchar_tensor.data.clear();
         let nchar_from_tensor =
             futures::executor::block_on(parse_nchar(&[Value::Tensor(nchar_tensor)])).unwrap();
         assert_eq!(nchar_from_tensor, Some(64));
-        let negative_nchar_tensor = Tensor::new_integer(IntegerStorage::I8(vec![-1]), vec![1, 1])
-            .expect("typed nchar tensor");
+        let mut negative_nchar_tensor =
+            Tensor::new_integer(IntegerStorage::I8(vec![-1]), vec![1, 1])
+                .expect("typed nchar tensor");
+        negative_nchar_tensor.data.clear();
         assert!(
             futures::executor::block_on(parse_nchar(&[Value::Tensor(negative_nchar_tensor)]))
                 .is_err()
