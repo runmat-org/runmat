@@ -277,10 +277,7 @@ fn kron_host(left: Value, right: Value) -> crate::BuiltinResult<Value> {
 }
 
 fn contains_complex(value: &Value) -> bool {
-    match value {
-        Value::Complex(_, _) | Value::ComplexTensor(_) => true,
-        _ => false,
-    }
+    matches!(value, Value::Complex(_, _) | Value::ComplexTensor(_))
 }
 
 enum KronIntegerOperand<'a> {

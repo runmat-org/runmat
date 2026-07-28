@@ -511,7 +511,7 @@ fn parse_state_scalar(value: &Value) -> BuiltinResult<u64> {
                         parse_state_word(tensor::tensor_value_f64(t, 1), "rng: State[2]")?,
                     )
                 };
-                Ok(lo | ((hi as u64) << 32))
+                Ok(lo | (hi << 32))
             }
             _ => Err(rng_error_with(
                 &RNG_ERROR_INVALID_ARGUMENT,

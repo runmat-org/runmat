@@ -2536,7 +2536,7 @@ fn bag_from_unique_words_and_counts(words: &Value, counts: &Value) -> BuiltinRes
         keep_cols.len(),
         "bagOfWords",
     )?);
-    let values = tensor_utils::tensor_values_f64_cow(&tensor);
+    let values = tensor_utils::tensor_values_f64_cow(tensor);
     for col in keep_cols {
         for row in 0..tensor.rows {
             filtered_counts.push(values[row + col * tensor.rows]);

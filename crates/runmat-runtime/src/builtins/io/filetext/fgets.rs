@@ -339,7 +339,7 @@ fn parse_fid(value: &Value) -> BuiltinResult<i32> {
                 "file identifier is out of range",
             )
         }),
-        Value::Tensor(t) if tensor::is_scalar_tensor(&t) => {
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
             if let Some(storage) = t.integer_storage() {
                 let value = storage.value_at(0).expect("one-element integer storage");
                 return value.try_to_i32().ok_or_else(|| {
@@ -349,7 +349,7 @@ fn parse_fid(value: &Value) -> BuiltinResult<i32> {
                     )
                 });
             }
-            let n = tensor::tensor_value_f64(&t, 0);
+            let n = tensor::tensor_value_f64(t, 0);
             if !n.is_finite() {
                 return Err(fgets_error_with_detail(
                     &FGETS_ERROR_INVALID_INPUT,

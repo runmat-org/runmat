@@ -249,7 +249,11 @@ pub async fn fsurf_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
 #[derive(Clone)]
 enum SurfaceFunction {
     Explicit(Value),
-    Parametric { x: Value, y: Value, z: Value },
+    Parametric {
+        x: Box<Value>,
+        y: Box<Value>,
+        z: Box<Value>,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -325,9 +329,9 @@ fn parse_fsurf_args(args: Vec<Value>) -> BuiltinResult<ParsedFsurf> {
     let function = match function_values.len() {
         1 => SurfaceFunction::Explicit(function_values.remove(0)),
         3 => SurfaceFunction::Parametric {
-            x: function_values.remove(0),
-            y: function_values.remove(0),
-            z: function_values.remove(0),
+            x: Box::new(function_values.remove(0)),
+            y: Box::new(function_values.remove(0)),
+            z: Box::new(function_values.remove(0)),
         },
         0 => return Err(fsurf_invalid("expected a function handle")),
         _ => {

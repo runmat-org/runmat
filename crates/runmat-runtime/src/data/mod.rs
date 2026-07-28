@@ -177,6 +177,10 @@ impl DataArrayValues {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn into_tensor(self, shape: Vec<usize>) -> Result<Tensor, String> {
         match self {
             Self::F64(values) => Tensor::new(values, shape),

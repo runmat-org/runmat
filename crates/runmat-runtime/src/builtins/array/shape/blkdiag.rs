@@ -382,9 +382,7 @@ fn assemble_typed_integer_blocks(args: &[Value]) -> Option<BuiltinResult<Value>>
     for value in args {
         let (storage, shape) = match value {
             Value::Tensor(tensor) => {
-                let Some(storage) = tensor.integer_storage() else {
-                    return None;
-                };
+                let storage = tensor.integer_storage()?;
                 (storage.clone(), tensor.shape.clone())
             }
             Value::Int(value) => (IntegerStorage::from_scalar(value.clone()), vec![1, 1]),
@@ -407,9 +405,7 @@ fn assemble_typed_integer_blocks(args: &[Value]) -> Option<BuiltinResult<Value>>
     let (rows, cols) = match blocks
         .iter()
         .try_fold((0usize, 0usize), |(rows, cols), (_, shape)| {
-            let Some((block_rows, block_cols)) = matrix_dims_from_shape(shape) else {
-                return None;
-            };
+            let (block_rows, block_cols) = matrix_dims_from_shape(shape)?;
             Some((rows.checked_add(block_rows)?, cols.checked_add(block_cols)?))
         }) {
         Some(dims) => dims,

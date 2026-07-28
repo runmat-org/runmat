@@ -819,7 +819,7 @@ fn integer_median_from_sorted(values: &[IntValue]) -> IntValue {
             let IntValue::$variant(upper) = &values[middle] else {
                 unreachable!()
             };
-            IntValue::$variant(((*lower as u128 + *upper as u128 + 1) / 2) as $ty)
+            IntValue::$variant((*lower as u128 + *upper as u128).div_ceil(2) as $ty)
         }};
     }
     match values.first().expect("nonempty median slice") {

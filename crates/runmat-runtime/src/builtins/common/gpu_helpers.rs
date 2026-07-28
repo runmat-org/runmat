@@ -128,7 +128,7 @@ pub fn upload_exact_integer_scalar_like(
         IntegerElementType::U32 if scalar >= 0.0 && scalar <= u32::MAX as f64 => {
             upload!(scalar as u32, U32)
         }
-        IntegerElementType::U64 if scalar >= 0.0 && scalar < 18_446_744_073_709_551_616.0 => {
+        IntegerElementType::U64 if (0.0..18_446_744_073_709_551_616.0).contains(&scalar) => {
             upload!(scalar as u64, U64)
         }
         _ => None,
