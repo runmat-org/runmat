@@ -71,10 +71,13 @@ mod tests {
     #[test]
     fn numeric_triplet_reads_typed_integer_storage_at_plot_boundary() {
         let large = 9_007_199_254_740_993_u64;
-        let x = Tensor::new_integer(IntegerStorage::U64(vec![large, large + 1]), vec![1, 2])
+        let mut x = Tensor::new_integer(IntegerStorage::U64(vec![large, large + 1]), vec![1, 2])
             .expect("x");
-        let y = Tensor::new_integer(IntegerStorage::I64(vec![-3, 4]), vec![1, 2]).expect("y");
-        let z = Tensor::new_integer(IntegerStorage::U16(vec![5, 6]), vec![1, 2]).expect("z");
+        x.data.clear();
+        let mut y = Tensor::new_integer(IntegerStorage::I64(vec![-3, 4]), vec![1, 2]).expect("y");
+        y.data.clear();
+        let mut z = Tensor::new_integer(IntegerStorage::U16(vec![5, 6]), vec![1, 2]).expect("z");
+        z.data.clear();
 
         let (x, y, z) = numeric_triplet(x, y, z, "plot3").expect("triplet");
 

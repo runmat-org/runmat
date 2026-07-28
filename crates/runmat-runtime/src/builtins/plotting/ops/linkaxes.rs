@@ -228,7 +228,7 @@ mod tests {
             vec![1, 2],
         )
         .expect("typed axes handles");
-        handles.data = vec![f64::NAN, f64::NAN];
+        handles.data.clear();
         let first_target = decode_axes_handle(first).expect("first axes handle");
         let second_target = decode_axes_handle(second).expect("second axes handle");
 

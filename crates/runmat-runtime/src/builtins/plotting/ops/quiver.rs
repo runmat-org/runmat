@@ -1081,7 +1081,7 @@ mod tests {
             vec![3],
         )
         .expect("typed quiver axis");
-        tensor.data = vec![f64::NAN, f64::NAN, f64::NAN];
+        tensor.data.clear();
         let host = QuiverCoordinateInput::Explicit(NumericInput::Host(tensor));
 
         let f64_axis =

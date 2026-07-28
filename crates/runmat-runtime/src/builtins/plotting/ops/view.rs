@@ -405,9 +405,10 @@ mod tests {
         reset_hold_state_for_run();
         let _ = clear_figure(None);
 
-        let angles = Value::Tensor(
-            Tensor::new_integer(IntegerStorage::I16(vec![45, 20]), vec![1, 2]).expect("angles"),
-        );
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![45, 20]), vec![1, 2]).expect("angles");
+        tensor.data.clear();
+        let angles = Value::Tensor(tensor);
         let value = view_builtin(vec![angles]).unwrap();
         let t = Tensor::try_from(&value).unwrap();
 
