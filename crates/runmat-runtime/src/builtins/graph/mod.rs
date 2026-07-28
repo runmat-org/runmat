@@ -687,33 +687,33 @@ fn graph_from_adjacency(
     for col in 0..node_count {
         for row in 0..node_count {
             let weight = if directed {
-                matrix.data[row + col * matrix.rows]
+                tensor::tensor_value_f64(matrix, row + col * matrix.rows)
             } else {
                 match mode {
                     TriangleMode::Full => {
                         if row > col {
                             continue;
                         }
-                        let upper = matrix.data[row + col * matrix.rows];
+                        let upper = tensor::tensor_value_f64(matrix, row + col * matrix.rows);
                         if upper != 0.0 {
                             upper
                         } else if row == col {
                             0.0
                         } else {
-                            matrix.data[col + row * matrix.rows]
+                            tensor::tensor_value_f64(matrix, col + row * matrix.rows)
                         }
                     }
                     TriangleMode::Upper => {
                         if row > col {
                             continue;
                         }
-                        matrix.data[row + col * matrix.rows]
+                        tensor::tensor_value_f64(matrix, row + col * matrix.rows)
                     }
                     TriangleMode::Lower => {
                         if row < col {
                             continue;
                         }
-                        matrix.data[row + col * matrix.rows]
+                        tensor::tensor_value_f64(matrix, row + col * matrix.rows)
                     }
                 }
             };
@@ -1347,7 +1347,7 @@ fn node_index_from_tensor(
             .ok_or_else(|| graph_error(name, format!("{name}: endpoint index is out of bounds")))?;
         return node_index_from_integer(&value, node_count, name);
     }
-    node_index_from_f64(tensor.data[index], node_count, name)
+    node_index_from_f64(tensor::tensor_value_f64(tensor, index), node_count, name)
 }
 
 fn node_index_from_integer(
@@ -1741,6 +1741,59 @@ mod tests {
         assert_eq!(
             tensor_data(block_on(adjacency_builtin(graph)).unwrap()),
             vec![0.0, 1.0, 3.0, 1.0, 0.0, 2.0, 3.0, 2.0, 0.0]
+        );
+    }
+
+    #[test]
+    fn graph_adjacency_reads_typed_integer_storage_exactly() {
+        let graph = block_on(graph_builtin(vec![int_numeric(
+            IntegerStorage::I16(vec![0, 2, 0, 0, 0, 3, 4, 0, 0]),
+            3,
+            3,
+        )]))
+        .expect("graph from adjacency");
+
+        assert_eq!(
+            tensor_data(block_on(adjacency_builtin(graph)).unwrap()),
+            vec![0.0, 2.0, 4.0, 2.0, 0.0, 3.0, 4.0, 3.0, 0.0]
+        );
+    }
+
+    #[test]
+    fn digraph_adjacency_reads_typed_integer_storage_exactly() {
+        let graph = block_on(digraph_builtin(vec![int_numeric(
+            IntegerStorage::I16(vec![0, 2, 0, 0, 0, 3, 4, 0, 0]),
+            3,
+            3,
+        )]))
+        .expect("digraph from adjacency");
+
+        assert_eq!(
+            tensor_data(block_on(adjacency_builtin(graph)).unwrap()),
+            vec![0.0, 2.0, 0.0, 0.0, 0.0, 3.0, 4.0, 0.0, 0.0]
+        );
+    }
+
+    #[test]
+    fn graph_adjacency_triangle_modes_read_typed_integer_storage_exactly() {
+        let upper = block_on(graph_builtin(vec![
+            int_numeric(IntegerStorage::I16(vec![0, 9, 0, 2, 0, 8, 4, 3, 0]), 3, 3),
+            Value::String("upper".into()),
+        ]))
+        .expect("upper graph");
+        assert_eq!(
+            tensor_data(block_on(adjacency_builtin(upper)).unwrap()),
+            vec![0.0, 2.0, 4.0, 2.0, 0.0, 3.0, 4.0, 3.0, 0.0]
+        );
+
+        let lower = block_on(graph_builtin(vec![
+            int_numeric(IntegerStorage::I16(vec![0, 2, 4, 9, 0, 3, 0, 8, 0]), 3, 3),
+            Value::String("lower".into()),
+        ]))
+        .expect("lower graph");
+        assert_eq!(
+            tensor_data(block_on(adjacency_builtin(lower)).unwrap()),
+            vec![0.0, 2.0, 4.0, 2.0, 0.0, 3.0, 4.0, 3.0, 0.0]
         );
     }
 
