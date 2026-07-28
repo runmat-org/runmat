@@ -2181,7 +2181,7 @@ pub(crate) mod tests {
 
     fn poisoned_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
         let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
+        tensor.data.clear();
         tensor
     }
 
@@ -2227,12 +2227,18 @@ pub(crate) mod tests {
     #[test]
     fn sparse_triplet_integer_subscripts_do_not_round_through_double() {
         let large = 9_007_199_254_740_993_u64;
-        let row =
+        let mut row =
             Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).expect("row index");
-        let col = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("col index");
+        row.data.clear();
+        let mut col =
+            Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("col index");
+        col.data.clear();
         let value = Tensor::new(vec![0.0], vec![1, 1]).expect("zero value");
-        let rows = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).expect("rows");
-        let cols = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("cols");
+        let mut rows =
+            Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).expect("rows");
+        rows.data.clear();
+        let mut cols = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("cols");
+        cols.data.clear();
 
         let sparse = expect_sparse(
             sparse_builtin(vec![
@@ -2247,8 +2253,9 @@ pub(crate) mod tests {
         assert_eq!(sparse.shape(), vec![large as usize, 1]);
         assert_eq!(sparse.nnz(), 0);
 
-        let smaller_rows =
+        let mut smaller_rows =
             Tensor::new_integer(IntegerStorage::U64(vec![large - 1]), vec![1, 1]).expect("rows");
+        smaller_rows.data.clear();
         let err = sparse_builtin(vec![
             Value::Tensor(row),
             Value::Tensor(col),
@@ -2298,7 +2305,9 @@ pub(crate) mod tests {
 
         for storage in cases {
             let expected_class = storage.class_name();
-            let tensor = Tensor::new_integer(storage.clone(), vec![2, 2]).expect("integer tensor");
+            let mut tensor =
+                Tensor::new_integer(storage.clone(), vec![2, 2]).expect("integer tensor");
+            tensor.data.clear();
             let sparse = expect_sparse(
                 sparse_builtin(vec![Value::Tensor(tensor)]).expect("sparse integer tensor"),
             );
@@ -2324,8 +2333,10 @@ pub(crate) mod tests {
 
     #[test]
     fn nonzeros_of_uint64_sparse_preserves_exact_values() {
-        let source = Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX, 7, 0]), vec![2, 2])
-            .expect("uint64 tensor");
+        let mut source =
+            Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX, 7, 0]), vec![2, 2])
+                .expect("uint64 tensor");
+        source.data.clear();
         let sparse = expect_sparse(
             sparse_builtin(vec![Value::Tensor(source)]).expect("sparse uint64 tensor"),
         );
