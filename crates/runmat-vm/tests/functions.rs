@@ -4209,6 +4209,49 @@ fn randi_script_surface_preserves_explicit_and_like_integer_classes() {
 }
 
 #[test]
+fn missing_integer_cast_names_are_registered_on_script_surface() {
+    let vars = execute_source(
+        "a = int32([2147483648 -2147483649 3.5]); b = uint8([-1 260 4.5]); c = uint16([-1 70000 5.5]); d = uint32([-1 4294967296 6.5]); ca = class(a); cb = class(b); cc = class(c); cd = class(d);",
+    );
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_builtins::Value::Tensor(tensor)
+            if tensor.integer_storage()
+                == Some(&runmat_builtins::IntegerStorage::I32(vec![
+                    i32::MAX,
+                    i32::MIN,
+                    4,
+                ]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_builtins::Value::Tensor(tensor)
+            if tensor.integer_storage()
+                == Some(&runmat_builtins::IntegerStorage::U8(vec![0, u8::MAX, 5]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_builtins::Value::Tensor(tensor)
+            if tensor.integer_storage()
+                == Some(&runmat_builtins::IntegerStorage::U16(vec![0, u16::MAX, 6]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_builtins::Value::Tensor(tensor)
+            if tensor.integer_storage()
+                == Some(&runmat_builtins::IntegerStorage::U32(vec![0, u32::MAX, 7]))
+    )));
+    for expected in ["int32", "uint8", "uint16", "uint32"] {
+        assert!(
+            vars.iter().any(
+                |value| matches!(value, runmat_builtins::Value::String(class) if class == expected)
+            ),
+            "expected class {expected:?}; vars={vars:?}"
+        );
+    }
+}
+
+#[test]
 fn num_arguments_from_subscript_script_surface() {
     let program = r#"
         C = {"one", 2, "three"};
