@@ -126,38 +126,35 @@ pub fn try_tensor_slice_2d_fast_path(
                         Tensor::new(Vec::new(), vec![rows, 0]).map_err(map_slice_shape_error)?;
                     Ok(Some(Value::Tensor(tens)))
                 }
-            } else {
-                if tensor.integer_storage().is_some() {
-                    let mut indices = Vec::with_capacity(rows * js.len());
-                    for &j in js {
-                        let j0 = j - 1;
-                        if j0 >= cols {
-                            return Err(crate::interpreter::errors::mex(
-                                "IndexOutOfBounds",
-                                "Index out of bounds",
-                            ));
-                        }
-                        let start = j0 * rows;
-                        indices.extend(start..start + rows);
+            } else if tensor.integer_storage().is_some() {
+                let mut indices = Vec::with_capacity(rows * js.len());
+                for &j in js {
+                    let j0 = j - 1;
+                    if j0 >= cols {
+                        return Err(crate::interpreter::errors::mex(
+                            "IndexOutOfBounds",
+                            "Index out of bounds",
+                        ));
                     }
-                    integer_selection_value(tensor, &indices, vec![rows, js.len()]).map(Some)
-                } else {
-                    let mut out: Vec<f64> = Vec::with_capacity(rows * js.len());
-                    for &j in js {
-                        let j0 = j - 1;
-                        if j0 >= cols {
-                            return Err(crate::interpreter::errors::mex(
-                                "IndexOutOfBounds",
-                                "Index out of bounds",
-                            ));
-                        }
-                        let start = j0 * rows;
-                        out.extend_from_slice(&tensor.data[start..start + rows]);
-                    }
-                    let tens =
-                        Tensor::new(out, vec![rows, js.len()]).map_err(map_slice_shape_error)?;
-                    Ok(Some(Value::Tensor(tens)))
+                    let start = j0 * rows;
+                    indices.extend(start..start + rows);
                 }
+                integer_selection_value(tensor, &indices, vec![rows, js.len()]).map(Some)
+            } else {
+                let mut out: Vec<f64> = Vec::with_capacity(rows * js.len());
+                for &j in js {
+                    let j0 = j - 1;
+                    if j0 >= cols {
+                        return Err(crate::interpreter::errors::mex(
+                            "IndexOutOfBounds",
+                            "Index out of bounds",
+                        ));
+                    }
+                    let start = j0 * rows;
+                    out.extend_from_slice(&tensor.data[start..start + rows]);
+                }
+                let tens = Tensor::new(out, vec![rows, js.len()]).map_err(map_slice_shape_error)?;
+                Ok(Some(Value::Tensor(tens)))
             }
         }
         (SliceSelector::Indices(is), SliceSelector::Colon) => {
@@ -169,40 +166,37 @@ pub fn try_tensor_slice_2d_fast_path(
                         Tensor::new(Vec::new(), vec![0, cols]).map_err(map_slice_shape_error)?;
                     Ok(Some(Value::Tensor(tens)))
                 }
-            } else {
-                if tensor.integer_storage().is_some() {
-                    let mut indices = Vec::with_capacity(is.len() * cols);
-                    for col in 0..cols {
-                        for &i in is {
-                            let i0 = i - 1;
-                            if i0 >= rows {
-                                return Err(crate::interpreter::errors::mex(
-                                    "IndexOutOfBounds",
-                                    "Index out of bounds",
-                                ));
-                            }
-                            indices.push(i0 + col * rows);
+            } else if tensor.integer_storage().is_some() {
+                let mut indices = Vec::with_capacity(is.len() * cols);
+                for col in 0..cols {
+                    for &i in is {
+                        let i0 = i - 1;
+                        if i0 >= rows {
+                            return Err(crate::interpreter::errors::mex(
+                                "IndexOutOfBounds",
+                                "Index out of bounds",
+                            ));
                         }
+                        indices.push(i0 + col * rows);
                     }
-                    integer_selection_value(tensor, &indices, vec![is.len(), cols]).map(Some)
-                } else {
-                    let mut out: Vec<f64> = Vec::with_capacity(is.len() * cols);
-                    for col in 0..cols {
-                        for &i in is {
-                            let i0 = i - 1;
-                            if i0 >= rows {
-                                return Err(crate::interpreter::errors::mex(
-                                    "IndexOutOfBounds",
-                                    "Index out of bounds",
-                                ));
-                            }
-                            out.push(tensor.data[i0 + col * rows]);
-                        }
-                    }
-                    let tens =
-                        Tensor::new(out, vec![is.len(), cols]).map_err(map_slice_shape_error)?;
-                    Ok(Some(Value::Tensor(tens)))
                 }
+                integer_selection_value(tensor, &indices, vec![is.len(), cols]).map(Some)
+            } else {
+                let mut out: Vec<f64> = Vec::with_capacity(is.len() * cols);
+                for col in 0..cols {
+                    for &i in is {
+                        let i0 = i - 1;
+                        if i0 >= rows {
+                            return Err(crate::interpreter::errors::mex(
+                                "IndexOutOfBounds",
+                                "Index out of bounds",
+                            ));
+                        }
+                        out.push(tensor.data[i0 + col * rows]);
+                    }
+                }
+                let tens = Tensor::new(out, vec![is.len(), cols]).map_err(map_slice_shape_error)?;
+                Ok(Some(Value::Tensor(tens)))
             }
         }
         _ => Ok(None),

@@ -59,10 +59,13 @@ fn direct_relational_builtins_keep_uint64_comparisons_exact() {
     .expect("direct relational builtins should execute");
 
     assert!(
-        vars.contains(&Value::Num(0.0)),
+        vars.contains(&Value::Bool(false)),
         "eq must be false: {vars:?}"
     );
-    assert!(vars.contains(&Value::Num(1.0)), "gt must be true: {vars:?}");
+    assert!(
+        vars.contains(&Value::Bool(true)),
+        "gt must be true: {vars:?}"
+    );
 }
 
 #[test]

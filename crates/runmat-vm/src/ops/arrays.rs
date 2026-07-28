@@ -232,6 +232,36 @@ where
     Ok(())
 }
 
+pub fn unpack(stack: &mut Vec<Value>, out_count: usize) -> Result<(), RuntimeError> {
+    let value = stack
+        .pop()
+        .ok_or(mex("StackUnderflow", "stack underflow"))?;
+    match value {
+        Value::OutputList(values) => {
+            if values.len() < out_count {
+                let message = format!(
+                    "Requested {out_count} outputs but call produced {} output value(s)",
+                    values.len()
+                );
+                return Err(mex("TooManyOutputs", &message));
+            }
+            for v in values.into_iter().take(out_count) {
+                stack.push(v);
+            }
+        }
+        other => {
+            if out_count > 1 {
+                let message = format!(
+                    "Requested {out_count} outputs but call produced a single output value"
+                );
+                return Err(mex("TooManyOutputs", &message));
+            }
+            stack.push(other);
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,34 +328,4 @@ mod tests {
             Some(&IntegerStorage::U64(vec![1_u64 << 63, 7, u64::MAX, 11]))
         );
     }
-}
-
-pub fn unpack(stack: &mut Vec<Value>, out_count: usize) -> Result<(), RuntimeError> {
-    let value = stack
-        .pop()
-        .ok_or(mex("StackUnderflow", "stack underflow"))?;
-    match value {
-        Value::OutputList(values) => {
-            if values.len() < out_count {
-                let message = format!(
-                    "Requested {out_count} outputs but call produced {} output value(s)",
-                    values.len()
-                );
-                return Err(mex("TooManyOutputs", &message));
-            }
-            for v in values.into_iter().take(out_count) {
-                stack.push(v);
-            }
-        }
-        other => {
-            if out_count > 1 {
-                let message = format!(
-                    "Requested {out_count} outputs but call produced a single output value"
-                );
-                return Err(mex("TooManyOutputs", &message));
-            }
-            stack.push(other);
-        }
-    }
-    Ok(())
 }

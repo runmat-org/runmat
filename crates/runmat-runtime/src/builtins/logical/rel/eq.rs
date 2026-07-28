@@ -16,7 +16,8 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::logical::rel::integer_comparison::{
-    try_integer_comparison, IntegerComparisonError, IntegerComparisonOp,
+    try_complex_integer_equality_comparison, try_integer_comparison, IntegerComparisonError,
+    IntegerComparisonOp,
 };
 use crate::builtins::logical::type_resolvers::logical_binary_type;
 use crate::builtins::math::symbolic::{symbolic_expr_to_value, value_to_symbolic_scalar};
@@ -140,15 +141,6 @@ fn eq_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     builtin_path = "crate::builtins::logical::rel::eq"
 )]
 async fn eq_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    if crate::builtins::common::validation::is_typed_complex_integer(&lhs)
-        || crate::builtins::common::validation::is_typed_complex_integer(&rhs)
-    {
-        return Err(build_runtime_error(
-            "eq: operations involving complex numbers with integer types are not supported",
-        )
-        .with_builtin(BUILTIN_NAME)
-        .build());
-    }
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {
         if let Some(result) = try_eq_gpu(a, b).await {
             return result;
@@ -198,6 +190,17 @@ async fn eq_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     }
 
     let (lhs, rhs) = normalize_char_string(lhs, rhs);
+
+    if let Some(result) =
+        try_complex_integer_equality_comparison(&lhs, &rhs, IntegerComparisonOp::Eq).map_err(
+            |error| match error {
+                IntegerComparisonError::SizeMismatch => eq_error(&EQ_ERROR_SIZE_MISMATCH),
+                IntegerComparisonError::Internal => eq_error(&EQ_ERROR_INVALID_INPUT),
+            },
+        )?
+    {
+        return Ok(result);
+    }
 
     if let Some(result) = try_integer_comparison(&lhs, &rhs, IntegerComparisonOp::Eq).map_err(
         |error| match error {
@@ -815,20 +818,62 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn eq_rejects_typed_complex_integer_before_floating_comparison() {
+    fn eq_typed_complex_integer_compares_exact_storage() {
         let tensor = ComplexTensor::new_integer(
             IntegerComplexStorage::new(
-                IntegerStorage::U64(vec![u64::MAX]),
-                IntegerStorage::U64(vec![1_u64 << 63]),
+                IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
+                IntegerStorage::U64(vec![0, 7]),
             )
             .expect("matching components"),
-            vec![1, 1],
+            vec![2, 1],
+        )
+        .expect("typed complex");
+        let rhs = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![1_u64 << 63, u64::MAX, u64::MAX]),
+                IntegerStorage::U64(vec![0, 0, 7]),
+            )
+            .expect("matching components"),
+            vec![1, 3],
+        )
+        .expect("typed complex rhs");
+
+        assert_eq!(
+            run_eq(Value::ComplexTensor(tensor), Value::ComplexTensor(rhs)).unwrap(),
+            Value::LogicalArray(
+                LogicalArray::new(vec![1, 0, 0, 0, 0, 1], vec![2, 3]).expect("logical result")
+            )
+        );
+    }
+
+    #[test]
+    fn eq_typed_complex_integer_real_comparison_requires_zero_imaginary_part() {
+        let tensor = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![1_u64 << 63, (1_u64 << 63) + 1]),
+                IntegerStorage::U64(vec![0, 1]),
+            )
+            .expect("matching components"),
+            vec![2, 1],
         )
         .expect("typed complex");
 
-        let err = run_eq(Value::ComplexTensor(tensor), Value::Num(0.0))
-            .expect_err("typed complex integer equality must reject");
-        assert!(err.message().contains("complex numbers with integer types"));
+        assert_eq!(
+            run_eq(
+                Value::ComplexTensor(tensor),
+                Value::Tensor(
+                    Tensor::new_integer(
+                        IntegerStorage::U64(vec![1_u64 << 63, (1_u64 << 63) + 1]),
+                        vec![1, 2],
+                    )
+                    .expect("integer tensor")
+                ),
+            )
+            .unwrap(),
+            Value::LogicalArray(
+                LogicalArray::new(vec![1, 0, 0, 0], vec![2, 2]).expect("logical result")
+            )
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

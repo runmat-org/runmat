@@ -2,7 +2,9 @@
 
 use std::cmp::Ordering;
 
-use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, Value};
+use runmat_builtins::{
+    ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, Value,
+};
 
 use crate::builtins::common::broadcast::BroadcastPlan;
 
@@ -47,6 +49,40 @@ pub(crate) fn try_integer_comparison(
             };
             compare_integer_numeric(&rhs, &lhs, false, operation)?
         }
+    };
+    Ok(Some(result))
+}
+
+/// Performs exact equality/inequality when at least one complex operand carries
+/// native integer component storage.
+pub(crate) fn try_complex_integer_equality_comparison(
+    lhs: &Value,
+    rhs: &Value,
+    operation: IntegerComparisonOp,
+) -> Result<Option<Value>, IntegerComparisonError> {
+    debug_assert!(matches!(
+        operation,
+        IntegerComparisonOp::Eq | IntegerComparisonOp::Ne
+    ));
+    let lhs_complex = complex_operand(lhs);
+    let rhs_complex = complex_operand(rhs);
+    let result = match (lhs_complex, rhs_complex) {
+        (Some(lhs), Some(rhs)) if lhs.has_integer_storage() || rhs.has_integer_storage() => {
+            compare_complex_operands(&lhs, &rhs, operation)?
+        }
+        (Some(lhs), None) if lhs.has_integer_storage() => {
+            let Some(rhs) = real_operand(rhs) else {
+                return Ok(None);
+            };
+            compare_complex_real(&lhs, &rhs, operation)?
+        }
+        (None, Some(rhs)) if rhs.has_integer_storage() => {
+            let Some(lhs) = real_operand(lhs) else {
+                return Ok(None);
+            };
+            compare_complex_real(&rhs, &lhs, operation)?
+        }
+        _ => return Ok(None),
     };
     Ok(Some(result))
 }
@@ -99,6 +135,203 @@ fn logical_result(data: Vec<u8>, shape: Vec<usize>) -> Result<Value, IntegerComp
     ))
 }
 
+struct ComplexOperand<'a> {
+    source: ComplexSource<'a>,
+    shape: Vec<usize>,
+}
+
+impl ComplexOperand<'_> {
+    fn has_integer_storage(&self) -> bool {
+        matches!(
+            self.source,
+            ComplexSource::Tensor {
+                integer_storage: Some(_),
+                ..
+            }
+        )
+    }
+
+    fn real_imag_at(&self, index: usize) -> ComplexValue {
+        match self.source {
+            ComplexSource::Scalar(real, imag) => ComplexValue::Float(real, imag),
+            ComplexSource::Tensor {
+                data: _,
+                integer_storage: Some(storage),
+            } => ComplexValue::Integer(
+                storage_value(&storage.real, index),
+                storage_value(&storage.imag, index),
+            ),
+            ComplexSource::Tensor {
+                data,
+                integer_storage: None,
+            } => {
+                let (real, imag) = data[index];
+                ComplexValue::Float(real, imag)
+            }
+        }
+    }
+}
+
+enum ComplexSource<'a> {
+    Scalar(f64, f64),
+    Tensor {
+        data: &'a [(f64, f64)],
+        integer_storage: Option<&'a IntegerComplexStorage>,
+    },
+}
+
+enum ComplexValue {
+    Integer(IntValue, IntValue),
+    Float(f64, f64),
+}
+
+enum RealValue {
+    Integer(IntValue),
+    Float(f64),
+}
+
+struct RealOperand<'a> {
+    source: RealSource<'a>,
+    shape: Vec<usize>,
+}
+
+impl RealOperand<'_> {
+    fn value_at(&self, index: usize) -> RealValue {
+        match self.source {
+            RealSource::ScalarInteger(ref value) => RealValue::Integer(value.clone()),
+            RealSource::ScalarFloat(value) => RealValue::Float(value),
+            RealSource::Tensor {
+                data: _,
+                integer_storage: Some(storage),
+            } => RealValue::Integer(storage_value(storage, index)),
+            RealSource::Tensor {
+                data,
+                integer_storage: None,
+            } => RealValue::Float(data[index]),
+            RealSource::Logical { data } => RealValue::Float(f64::from(data[index] != 0)),
+        }
+    }
+}
+
+enum RealSource<'a> {
+    ScalarInteger(IntValue),
+    ScalarFloat(f64),
+    Tensor {
+        data: &'a [f64],
+        integer_storage: Option<&'a IntegerStorage>,
+    },
+    Logical {
+        data: &'a [u8],
+    },
+}
+
+fn compare_complex_operands(
+    lhs: &ComplexOperand<'_>,
+    rhs: &ComplexOperand<'_>,
+    operation: IntegerComparisonOp,
+) -> Result<Value, IntegerComparisonError> {
+    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+        .map_err(|_| IntegerComparisonError::SizeMismatch)?;
+    let mut data = Vec::with_capacity(plan.len());
+    for (_, lhs_index, rhs_index) in plan.iter() {
+        let matches =
+            complex_values_equal(lhs.real_imag_at(lhs_index), rhs.real_imag_at(rhs_index));
+        data.push(matches_relation_bool(matches, operation) as u8);
+    }
+    logical_result(data, plan.output_shape().to_vec())
+}
+
+fn compare_complex_real(
+    complex: &ComplexOperand<'_>,
+    real: &RealOperand<'_>,
+    operation: IntegerComparisonOp,
+) -> Result<Value, IntegerComparisonError> {
+    let plan = BroadcastPlan::new(&complex.shape, &real.shape)
+        .map_err(|_| IntegerComparisonError::SizeMismatch)?;
+    let mut data = Vec::with_capacity(plan.len());
+    for (_, complex_index, real_index) in plan.iter() {
+        let matches = complex_value_equals_real(
+            complex.real_imag_at(complex_index),
+            real.value_at(real_index),
+        );
+        data.push(matches_relation_bool(matches, operation) as u8);
+    }
+    logical_result(data, plan.output_shape().to_vec())
+}
+
+fn complex_values_equal(lhs: ComplexValue, rhs: ComplexValue) -> bool {
+    match (lhs, rhs) {
+        (ComplexValue::Integer(lhs_real, lhs_imag), ComplexValue::Integer(rhs_real, rhs_imag)) => {
+            compare_integer_values(lhs_real, rhs_real) == Ordering::Equal
+                && compare_integer_values(lhs_imag, rhs_imag) == Ordering::Equal
+        }
+        (ComplexValue::Integer(real, imag), ComplexValue::Float(rhs_real, rhs_imag)) => {
+            integer_value_equals_f64(real, rhs_real) && integer_value_equals_f64(imag, rhs_imag)
+        }
+        (ComplexValue::Float(lhs_real, lhs_imag), ComplexValue::Integer(real, imag)) => {
+            integer_value_equals_f64(real, lhs_real) && integer_value_equals_f64(imag, lhs_imag)
+        }
+        (ComplexValue::Float(lhs_real, lhs_imag), ComplexValue::Float(rhs_real, rhs_imag)) => {
+            lhs_real == rhs_real && lhs_imag == rhs_imag
+        }
+    }
+}
+
+fn complex_value_equals_real(complex: ComplexValue, real: RealValue) -> bool {
+    match (complex, real) {
+        (ComplexValue::Integer(complex_real, complex_imag), RealValue::Integer(real)) => {
+            complex_imag.is_zero() && compare_integer_values(complex_real, real) == Ordering::Equal
+        }
+        (ComplexValue::Integer(complex_real, complex_imag), RealValue::Float(real)) => {
+            complex_imag.is_zero() && integer_value_equals_f64(complex_real, real)
+        }
+        (ComplexValue::Float(complex_real, complex_imag), RealValue::Integer(real)) => {
+            complex_imag == 0.0 && integer_value_equals_f64(real, complex_real)
+        }
+        (ComplexValue::Float(complex_real, complex_imag), RealValue::Float(real)) => {
+            complex_imag == 0.0 && complex_real == real
+        }
+    }
+}
+
+fn integer_value_equals_f64(integer: IntValue, float: f64) -> bool {
+    integer_f64_order(integer, float) == Some(Ordering::Equal)
+}
+
+fn matches_relation_bool(matches: bool, operation: IntegerComparisonOp) -> bool {
+    match operation {
+        IntegerComparisonOp::Eq => matches,
+        IntegerComparisonOp::Ne => !matches,
+        IntegerComparisonOp::Lt
+        | IntegerComparisonOp::Le
+        | IntegerComparisonOp::Gt
+        | IntegerComparisonOp::Ge => {
+            unreachable!("complex integer equality helper only supports eq/ne")
+        }
+    }
+}
+
+fn complex_operand(value: &Value) -> Option<ComplexOperand<'_>> {
+    match value {
+        Value::Complex(real, imag) => Some(ComplexOperand {
+            source: ComplexSource::Scalar(*real, *imag),
+            shape: vec![1, 1],
+        }),
+        Value::ComplexTensor(tensor) => Some(complex_tensor_operand(tensor)),
+        _ => None,
+    }
+}
+
+fn complex_tensor_operand(tensor: &ComplexTensor) -> ComplexOperand<'_> {
+    ComplexOperand {
+        source: ComplexSource::Tensor {
+            data: &tensor.data,
+            integer_storage: tensor.integer_data.as_ref(),
+        },
+        shape: tensor.shape.clone(),
+    }
+}
+
 struct IntegerOperand<'a> {
     storage: IntegerStorageRef<'a>,
     shape: Vec<usize>,
@@ -133,6 +366,35 @@ fn integer_operand(value: &Value) -> Option<IntegerOperand<'_>> {
         Value::Tensor(tensor) => tensor.integer_storage().map(|storage| IntegerOperand {
             storage: IntegerStorageRef::Array(storage),
             shape: tensor.shape.clone(),
+        }),
+        _ => None,
+    }
+}
+
+fn real_operand(value: &Value) -> Option<RealOperand<'_>> {
+    match value {
+        Value::Int(value) => Some(RealOperand {
+            source: RealSource::ScalarInteger(value.clone()),
+            shape: vec![1, 1],
+        }),
+        Value::Num(value) => Some(RealOperand {
+            source: RealSource::ScalarFloat(*value),
+            shape: vec![1, 1],
+        }),
+        Value::Bool(value) => Some(RealOperand {
+            source: RealSource::ScalarFloat(if *value { 1.0 } else { 0.0 }),
+            shape: vec![1, 1],
+        }),
+        Value::Tensor(tensor) => Some(RealOperand {
+            source: RealSource::Tensor {
+                data: &tensor.data,
+                integer_storage: tensor.integer_storage(),
+            },
+            shape: tensor.shape.clone(),
+        }),
+        Value::LogicalArray(array) => Some(RealOperand {
+            source: RealSource::Logical { data: &array.data },
+            shape: array.shape.clone(),
         }),
         _ => None,
     }

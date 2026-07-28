@@ -1164,12 +1164,12 @@ fn integer_gpu_rhs_indices_for_plan(
                 "GPU rhs exceeds indexing limits",
             )
         })?);
-        for dimension in 0..dims {
-            coordinates[dimension] += 1;
-            if coordinates[dimension] < plan.selection_lengths[dimension].max(1) {
+        for (dimension, coordinate) in coordinates.iter_mut().enumerate().take(dims) {
+            *coordinate += 1;
+            if *coordinate < plan.selection_lengths[dimension].max(1) {
                 break;
             }
-            coordinates[dimension] = 0;
+            *coordinate = 0;
         }
     }
     Ok(output)

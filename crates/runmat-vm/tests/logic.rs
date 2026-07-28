@@ -47,7 +47,7 @@ fn short_circuit_or_accepts_boolean_lhs_without_numeric_coercion() {
 #[test]
 fn integer_scalar_arithmetic_keeps_int64_and_uint64_exact_through_vm_dispatch() {
     let vars = execute_source(
-        "u = uint64(9223372036854775808); up = u + 1; down = uint64(18446744073709551615) - 1; lo = int64(-9223372036854775808) + 1; reverse = 1 - int64(-9223372036854775808); same = up .* 1; row = uint64([9223372036854775808 18446744073709551615]); rowdown = row - 1;",
+        "u = uint64(9223372036854775808); up = u + 1; down = uint64(18446744073709551615) - 1; lo = int64(-9223372036854775808) + 1; reverse = 1 - int64(-9223372036854775808); same = up .* 1; row = uint64([9223372036854775808 18446744073709551615]); rowdown = row - 1; col = uint64([9223372036854775808; 18446744073709551615]); row2 = uint64([1 2 0]); plusgrid = col + row2; timesgrid = col .* row2; signedcol = int64([-9223372036854775808; 9223372036854775807]); signedrow = int64([1 -7 -9223372036854775808]); minusgrid = signedcol - signedrow; remgrid = rem(int64([-7; 7]), int64([4 -4 0])); modgrid = mod(int64([-7; 7]), int64([4 -4 0]));",
     )
     .expect("integer arithmetic should execute");
 
@@ -63,6 +63,62 @@ fn integer_scalar_arithmetic_keeps_int64_and_uint64_exact_through_vm_dispatch() 
             if tensor.shape == vec![1, 2]
                 && tensor.integer_storage()
                     == Some(&IntegerStorage::U64(vec![(1_u64 << 63) - 1, u64::MAX - 1]))
+    ));
+    assert!(matches!(
+        &vars[10],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![2, 3]
+                && tensor.integer_storage()
+                    == Some(&IntegerStorage::U64(vec![
+                        (1_u64 << 63) + 1,
+                        u64::MAX,
+                        (1_u64 << 63) + 2,
+                        u64::MAX,
+                        1_u64 << 63,
+                        u64::MAX
+                    ]))
+    ));
+    assert!(matches!(
+        &vars[11],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![2, 3]
+                && tensor.integer_storage()
+                    == Some(&IntegerStorage::U64(vec![
+                        1_u64 << 63,
+                        u64::MAX,
+                        u64::MAX,
+                        u64::MAX,
+                        0,
+                        0
+                    ]))
+    ));
+    assert!(matches!(
+        &vars[14],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![2, 3]
+                && tensor.integer_storage()
+                    == Some(&IntegerStorage::I64(vec![
+                        i64::MIN,
+                        i64::MAX - 1,
+                        i64::MIN + 7,
+                        i64::MAX,
+                        0,
+                        i64::MAX
+                    ]))
+    ));
+    assert!(matches!(
+        &vars[15],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![2, 3]
+                && tensor.integer_storage()
+                    == Some(&IntegerStorage::I64(vec![-3, 3, -3, 3, 0, 0]))
+    ));
+    assert!(matches!(
+        &vars[16],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![2, 3]
+                && tensor.integer_storage()
+                    == Some(&IntegerStorage::I64(vec![1, 3, -3, -1, -7, 7]))
     ));
 }
 
@@ -486,18 +542,27 @@ fn isequal_preserves_typed_complex_integer_precision_through_vm_dispatch() {
 }
 
 #[test]
-fn typed_complex_integer_relational_equality_is_rejected_before_f64_coercion() {
-    for operation in ["z == z", "z ~= z", "eq(z, z)", "ne(z, z)"] {
-        let source =
-            format!("z = complex(uint64(9223372036854775808), uint64(1)); out = {operation};");
-        let err = execute_source(&source).expect_err(operation);
-        assert!(
-            err.to_string().contains(
-                "operations involving complex numbers with integer types are not supported"
-            ),
-            "{operation} returned an unexpected error: {err}"
-        );
-    }
+fn typed_complex_integer_relational_equality_preserves_exact_storage() {
+    let vars = execute_source(
+        "base = uint64(9223372036854775808); next = base + 1; z = complex(base, uint64(1)); w = complex(next, uint64(1)); same = z == z; different = z == w; builtin_same = eq(z, z); builtin_different = eq(z, w); ne_same = z ~= z; ne_different = ne(z, w);",
+    )
+    .expect("typed complex integer equality should execute exactly");
+
+    assert!(matches!(
+        &vars[4],
+        Value::Tensor(tensor) if tensor.data == vec![1.0] && tensor.shape == vec![1, 1]
+    ));
+    assert!(matches!(
+        &vars[5],
+        Value::Tensor(tensor) if tensor.data == vec![0.0] && tensor.shape == vec![1, 1]
+    ));
+    assert_eq!(vars[6], Value::Bool(true));
+    assert_eq!(vars[7], Value::Bool(false));
+    assert!(matches!(
+        &vars[8],
+        Value::Tensor(tensor) if tensor.data == vec![0.0] && tensor.shape == vec![1, 1]
+    ));
+    assert_eq!(vars[9], Value::Bool(true));
 }
 
 #[test]
