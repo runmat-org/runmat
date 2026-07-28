@@ -981,30 +981,34 @@ pub(crate) mod tests {
 
     #[test]
     fn integer_membership_uses_exact_values_for_elements_and_rows() {
-        let a = Tensor::new_integer(
+        let mut a = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993]),
             vec![3, 1],
         )
         .expect("input");
-        let b = Tensor::new_integer(
+        let mut b = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![0, u64::MAX]),
             vec![2, 1],
         )
         .expect("input");
+        a.data.clear();
+        b.data.clear();
         let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("ismember");
         assert_eq!(eval.mask.data, vec![1, 1, 0]);
         assert_eq!(eval.loc.data, vec![2.0, 1.0, 0.0]);
 
-        let a = Tensor::new_integer(
+        let mut a = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I64(vec![i64::MAX, i64::MIN, 1, 2]),
             vec![2, 2],
         )
         .expect("input");
-        let b = Tensor::new_integer(
+        let mut b = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I64(vec![i64::MIN, 7, 2, 8]),
             vec![2, 2],
         )
         .expect("input");
+        a.data.clear();
+        b.data.clear();
         let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
             .expect("ismember rows");
         assert_eq!(eval.mask.data, vec![0, 1]);

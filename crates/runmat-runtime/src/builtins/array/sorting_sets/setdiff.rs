@@ -1590,13 +1590,15 @@ pub(crate) mod tests {
 
     #[test]
     fn setdiff_preserves_exact_integer_elements_and_rows() {
-        let a = Tensor::new_integer(
+        let mut a = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993]),
             vec![3, 1],
         )
         .expect("input");
-        let b = Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![0]), vec![1, 1])
+        let mut b = Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![0]), vec![1, 1])
             .expect("input");
+        a.data.clear();
+        b.data.clear();
         let (values, ia) = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
             .expect("setdiff")
             .into_pair();
@@ -1613,16 +1615,18 @@ pub(crate) mod tests {
         let ia = tensor::value_into_tensor_for("setdiff", ia).expect("indices");
         assert_eq!(ia.data, vec![3.0, 1.0]);
 
-        let a = Tensor::new_integer(
+        let mut a = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I64(vec![i64::MAX, 4, 0, 2]),
             vec![2, 2],
         )
         .expect("rows input");
-        let b = Tensor::new_integer(
+        let mut b = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I64(vec![i64::MAX, 0]),
             vec![1, 2],
         )
         .expect("rows input");
+        a.data.clear();
+        b.data.clear();
         let (values, ia) =
             evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
                 .expect("setdiff rows")

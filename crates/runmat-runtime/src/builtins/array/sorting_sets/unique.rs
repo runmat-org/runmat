@@ -2199,11 +2199,12 @@ pub(crate) mod tests {
 
     #[test]
     fn unique_preserves_exact_integer_elements_rows_and_indices() {
-        let input = Tensor::new_integer(
+        let mut input = Tensor::new_integer(
             IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993, u64::MAX]),
             vec![4, 1],
         )
         .expect("input");
+        input.data.clear();
         let (values, ia, ic) = evaluate_sync(Value::Tensor(input), &[])
             .expect("unique")
             .into_triple();
@@ -2227,11 +2228,12 @@ pub(crate) mod tests {
         };
         assert_eq!(ic.data, vec![3.0, 1.0, 2.0, 3.0]);
 
-        let rows = Tensor::new_integer(
+        let mut rows = Tensor::new_integer(
             IntegerStorage::I64(vec![i64::MAX, i64::MIN, i64::MAX, 1, 2, 1]),
             vec![3, 2],
         )
         .expect("input");
+        rows.data.clear();
         let (values, ia, ic) = evaluate_sync(
             Value::Tensor(rows),
             &[

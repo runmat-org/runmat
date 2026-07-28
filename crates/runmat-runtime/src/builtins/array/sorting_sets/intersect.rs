@@ -1755,16 +1755,18 @@ pub(crate) mod tests {
 
     #[test]
     fn intersect_preserves_exact_integer_elements_and_rows() {
-        let a = Tensor::new_integer(
+        let mut a = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993]),
             vec![3, 1],
         )
         .expect("input");
-        let b = Tensor::new_integer(
+        let mut b = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![0, u64::MAX]),
             vec![2, 1],
         )
         .expect("input");
+        a.data.clear();
+        b.data.clear();
         let (values, ia, ib) = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
             .expect("intersect")
             .into_triple();
