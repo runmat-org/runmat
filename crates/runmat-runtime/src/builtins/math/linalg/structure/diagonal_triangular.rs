@@ -14,6 +14,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::math::linalg::type_resolvers::logical_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -434,7 +435,7 @@ fn matrix_from_real_tensor(tensor: Tensor, ctx: BuiltinContext) -> BuiltinResult
     };
     if rows
         .checked_mul(cols)
-        .is_none_or(|len| len > tensor.data.len())
+        .is_none_or(|len| len > tensor_utils::tensor_element_len(&tensor))
     {
         return Err(runtime_error_with_detail(
             ctx,
@@ -445,7 +446,7 @@ fn matrix_from_real_tensor(tensor: Tensor, ctx: BuiltinContext) -> BuiltinResult
     Ok(MatrixInput::DenseReal {
         rows,
         cols,
-        data: tensor.data,
+        data: tensor_utils::tensor_into_values_f64(tensor),
     })
 }
 
@@ -458,7 +459,7 @@ fn matrix_from_complex_tensor(
     };
     if rows
         .checked_mul(cols)
-        .is_none_or(|len| len > tensor.data.len())
+        .is_none_or(|len| len > tensor_utils::complex_tensor_element_len(&tensor))
     {
         return Err(runtime_error_with_detail(
             ctx,
@@ -469,7 +470,10 @@ fn matrix_from_complex_tensor(
     Ok(MatrixInput::DenseComplex {
         rows,
         cols,
-        data: tensor.data,
+        data: tensor_utils::complex_tensor_into_values_complex64(tensor)
+            .into_iter()
+            .map(|value| (value.re, value.im))
+            .collect(),
     })
 }
 
@@ -598,7 +602,7 @@ mod tests {
     use runmat_accelerate_api::{
         AccelDownloadFuture, AccelProvider, HostTensorOwned, HostTensorView,
     };
-    use runmat_builtins::{IntValue, ResolveContext, Type};
+    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage, ResolveContext, Type};
 
     use crate::builtins::common::test_support;
 
@@ -695,6 +699,24 @@ mod tests {
     }
 
     #[test]
+    fn dense_structure_predicates_read_typed_integer_storage_exactly() {
+        let mut lower = Tensor::new_integer(
+            IntegerStorage::I16(vec![1, 2, 3, 0, 4, 5, 0, 0, 6]),
+            vec![3, 3],
+        )
+        .unwrap();
+        lower.data.clear();
+
+        assert!(!expect_bool(
+            call_isdiag(Value::Tensor(lower.clone())).unwrap()
+        ));
+        assert!(expect_bool(
+            call_istril(Value::Tensor(lower.clone())).unwrap()
+        ));
+        assert!(!expect_bool(call_istriu(Value::Tensor(lower)).unwrap()));
+    }
+
+    #[test]
     fn rectangular_diagonal_matrix_can_be_true() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 0.0, 2.0, 0.0], vec![3, 2]).unwrap();
         assert!(expect_bool(
@@ -778,6 +800,27 @@ mod tests {
             vec![2, 2],
         )
         .unwrap();
+        assert!(!expect_bool(
+            call_isdiag(Value::ComplexTensor(tensor.clone())).unwrap()
+        ));
+        assert!(expect_bool(
+            call_istril(Value::ComplexTensor(tensor.clone())).unwrap()
+        ));
+        assert!(!expect_bool(
+            call_istriu(Value::ComplexTensor(tensor)).unwrap()
+        ));
+    }
+
+    #[test]
+    fn dense_structure_predicates_read_typed_complex_integer_storage_exactly() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![1, 0, 0, 0]),
+            IntegerStorage::I16(vec![0, 2, 0, 0]),
+        )
+        .unwrap();
+        let mut tensor = ComplexTensor::new_integer(storage, vec![2, 2]).unwrap();
+        tensor.data.clear();
+
         assert!(!expect_bool(
             call_isdiag(Value::ComplexTensor(tensor.clone())).unwrap()
         ));
