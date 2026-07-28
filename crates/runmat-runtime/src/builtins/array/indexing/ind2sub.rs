@@ -499,7 +499,7 @@ pub(crate) mod tests {
         let dims = Tensor::new(vec![2.0, 3.0, 4.0], vec![1, 3]).unwrap();
         let mut idx =
             Tensor::new_integer(IntegerStorage::U16(vec![3, 11]), vec![1, 2]).expect("indices");
-        idx.data.fill(f64::NAN);
+        idx.data.clear();
 
         let result =
             ind2sub_builtin(Value::Tensor(dims), Value::Tensor(idx)).expect("ind2sub result");
