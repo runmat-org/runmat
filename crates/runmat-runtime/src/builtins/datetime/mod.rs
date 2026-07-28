@@ -3519,7 +3519,9 @@ mod tests {
     }
 
     fn integer_tensor(storage: runmat_builtins::IntegerStorage, shape: Vec<usize>) -> Value {
-        Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.clear();
+        Value::Tensor(tensor)
     }
 
     #[test]
