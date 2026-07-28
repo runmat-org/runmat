@@ -249,6 +249,14 @@ fn parse_prefix_length(value: Value) -> BuiltinResult<usize> {
             if tensor::tensor_element_len(&tensor) != 1 {
                 return Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
             }
+            if let Some(value) = tensor
+                .integer_storage()
+                .and_then(|storage| storage.value_at(0))
+            {
+                return value
+                    .try_to_usize()
+                    .ok_or_else(|| strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
+            }
             parse_prefix_length_from_float(tensor::tensor_value_f64(&tensor, 0))
         }
         Value::LogicalArray(array) => {
@@ -547,6 +555,22 @@ pub(crate) mod tests {
                 Value::String("abc".into()),
                 Value::String("abc".into()),
                 Value::Num(-1.0),
+            )
+            .expect_err("negative length"),
+        );
+        assert!(err.to_ascii_lowercase().contains("nonnegative"));
+    }
+
+    #[test]
+    fn strncmp_prefix_length_rejects_negative_typed_integer_tensor() {
+        let mut limit =
+            Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("integer tensor");
+        limit.data[0] = 3.0;
+        let err = error_message(
+            strncmp_builtin(
+                Value::String("abc".into()),
+                Value::String("abc".into()),
+                Value::Tensor(limit),
             )
             .expect_err("negative length"),
         );
