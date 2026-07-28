@@ -4,7 +4,7 @@ use regex::Regex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, IntegerStorage, Tensor, Value,
+    CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -275,6 +275,11 @@ enum NumericData {
     },
     Complex {
         data: Vec<(f64, f64)>,
+        rows: usize,
+        cols: usize,
+    },
+    IntegerComplex {
+        storage: IntegerComplexStorage,
         rows: usize,
         cols: usize,
     },
@@ -665,6 +670,13 @@ fn complex_tensor_to_data(tensor: ComplexTensor) -> BuiltinResult<NumericData> {
     }
     let rows = tensor.rows;
     let cols = tensor.cols;
+    if let Some(storage) = tensor.integer_data {
+        return Ok(NumericData::IntegerComplex {
+            storage,
+            rows,
+            cols,
+        });
+    }
     Ok(NumericData::Complex {
         data: tensor.data,
         rows,
@@ -684,6 +696,11 @@ fn format_numeric_data(data: NumericData, options: &FormatOptions) -> BuiltinRes
         NumericData::Complex { data, rows, cols } => {
             format_complex_matrix(&data, rows, cols, options)
         }
+        NumericData::IntegerComplex {
+            storage,
+            rows,
+            cols,
+        } => format_integer_complex_matrix(&storage, rows, cols, options),
         NumericData::Integer {
             storage,
             rows,
@@ -824,6 +841,89 @@ fn integer_storage_decimal(storage: &IntegerStorage, index: usize) -> String {
         IntegerStorage::U16(values) => values[index].to_string(),
         IntegerStorage::U32(values) => values[index].to_string(),
         IntegerStorage::U64(values) => values[index].to_string(),
+    }
+}
+
+fn format_integer_complex_matrix(
+    storage: &IntegerComplexStorage,
+    rows: usize,
+    cols: usize,
+    options: &FormatOptions,
+) -> BuiltinResult<CharArray> {
+    if rows == 0 {
+        return CharArray::new(Vec::new(), 0, 0)
+            .map_err(|_| num2str_error(&NUM2STR_ERROR_INTERNAL));
+    }
+    if cols == 0 {
+        return CharArray::new(Vec::new(), rows, 0)
+            .map_err(|_| num2str_error(&NUM2STR_ERROR_INTERNAL));
+    }
+
+    let mut entries = vec![
+        vec![
+            CellEntry {
+                text: String::new(),
+                width: 0
+            };
+            cols
+        ];
+        rows
+    ];
+    let mut col_widths = vec![0usize; cols];
+
+    for (col, width) in col_widths.iter_mut().enumerate() {
+        for (row, row_entries) in entries.iter_mut().enumerate() {
+            let text = format_integer_complex(storage, row + col * rows, options);
+            let entry_width = text.chars().count();
+            row_entries[col] = CellEntry {
+                text,
+                width: entry_width,
+            };
+            *width = (*width).max(entry_width);
+        }
+    }
+
+    if cols > 1 {
+        for (idx, width) in col_widths.iter_mut().enumerate() {
+            if idx > 0 {
+                *width += 1;
+            }
+        }
+    }
+
+    rows_to_char_array(assemble_rows(entries, col_widths))
+}
+
+fn format_integer_complex(
+    storage: &IntegerComplexStorage,
+    index: usize,
+    options: &FormatOptions,
+) -> String {
+    let real_raw = integer_storage_decimal(&storage.real, index);
+    let imag_raw = integer_storage_decimal(&storage.imag, index);
+    let real_is_zero = real_raw == "0";
+    let real_str = format_integer(real_raw, &options.spec, options.decimal);
+    let Some(imag_abs_raw) = integer_abs_decimal(&imag_raw) else {
+        return real_str;
+    };
+    let imag_str = format_integer(imag_abs_raw, &options.spec, options.decimal);
+    let imag_sign = if imag_raw.starts_with('-') { '-' } else { '+' };
+
+    if real_is_zero {
+        if imag_sign == '-' {
+            return format!("-{imag_str}i");
+        }
+        return format!("{imag_str}i");
+    }
+
+    format!("{real_str} {imag_sign} {imag_str}i")
+}
+
+fn integer_abs_decimal(value: &str) -> Option<String> {
+    if value == "0" {
+        None
+    } else {
+        Some(value.strip_prefix('-').unwrap_or(value).to_string())
     }
 }
 
@@ -1250,7 +1350,7 @@ pub(crate) mod tests {
     fn num2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::num2str_builtin(value, rest))
     }
-    use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, Tensor};
+    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, Tensor};
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
@@ -1392,6 +1492,54 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 let text: String = ca.data.iter().collect();
                 assert_eq!(text, "3 + 4i  5 - 6i");
+            }
+            other => panic!("expected char array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn num2str_complex_integer_tensor_reads_exact_storage_without_mirror() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+            IntegerStorage::U64(vec![7, 0]),
+        )
+        .expect("complex integer storage");
+        let mut tensor =
+            ComplexTensor::new_integer(storage, vec![1, 2]).expect("complex integer tensor");
+        tensor.data.clear();
+
+        let out = num2str_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("num2str");
+        match out {
+            Value::CharArray(ca) => {
+                let text: String = ca.data.iter().collect();
+                assert_eq!(text, "1.84467440737096e+19 + 7i  9.00719925474099e+15");
+            }
+            other => panic!("expected char array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn num2str_complex_integer_tensor_fixed_format_keeps_exact_digits() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+            IntegerStorage::U64(vec![7, 0]),
+        )
+        .expect("complex integer storage");
+        let mut tensor =
+            ComplexTensor::new_integer(storage, vec![1, 2]).expect("complex integer tensor");
+        tensor.data.clear();
+
+        let out = num2str_builtin(
+            Value::ComplexTensor(tensor),
+            vec![Value::String("%.0f".to_string())],
+        )
+        .expect("num2str");
+        match out {
+            Value::CharArray(ca) => {
+                let text: String = ca.data.iter().collect();
+                assert_eq!(text, format!("{} + 7i  9007199254740993", u64::MAX));
             }
             other => panic!("expected char array, got {other:?}"),
         }
