@@ -581,7 +581,7 @@ fn parse_skip_scalar(scalar: f64) -> Result<usize, String> {
     if (rounded - scalar).abs() > f64::EPSILON {
         return Err("fwrite: skip value must be an integer".to_string());
     }
-    if rounded > i64::MAX as f64 {
+    if rounded >= i64::MAX as f64 {
         return Err("fwrite: skip value is too large".to_string());
     }
     Ok(rounded as usize)
@@ -1177,6 +1177,8 @@ pub(crate) mod tests {
         );
         assert!(parse_skip(Some(&Value::Int(IntValue::U64(u64::MAX)))).is_err());
         assert!(parse_skip(Some(&Value::Int(IntValue::I8(-1)))).is_err());
+        assert!(parse_skip(Some(&Value::Num(i64::MAX as f64))).is_err());
+        assert!(parse_skip(Some(&Value::Num((i64::MAX as f64) + 1.0))).is_err());
     }
 
     #[test]

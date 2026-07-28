@@ -552,7 +552,9 @@ fn parse_file_type(value: &Value) -> BuiltinResult<OutputFileType> {
 
 fn parse_sheet(value: &Value) -> BuiltinResult<SheetSelector> {
     match value {
-        Value::Num(n) if n.is_finite() && *n >= 1.0 && n.fract() == 0.0 => {
+        Value::Num(n)
+            if n.is_finite() && *n >= 1.0 && n.fract() == 0.0 && *n < usize::MAX as f64 =>
+        {
             Ok(SheetSelector::Index(*n as usize))
         }
         Value::Int(i) => i
@@ -565,6 +567,23 @@ fn parse_sheet(value: &Value) -> BuiltinResult<SheetSelector> {
                     "writecell: Sheet must be a name or one-based numeric index",
                 )
             }),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                let value = storage.value_at(0).expect("one-element integer storage");
+                value
+                    .try_to_usize()
+                    .filter(|index| *index >= 1)
+                    .map(SheetSelector::Index)
+                    .ok_or_else(|| {
+                        writecell_error_with(
+                            &WRITECELL_ERROR_OPTION,
+                            "writecell: Sheet must be a name or one-based numeric index",
+                        )
+                    })
+            } else {
+                parse_sheet(&Value::Num(tensor::tensor_value_f64(tensor, 0)))
+            }
+        }
         _ => {
             let text = string_scalar_from_value(value, "Sheet")
                 .map_err(|message| writecell_error_with(&WRITECELL_ERROR_OPTION, message))?;
@@ -1682,6 +1701,24 @@ mod tests {
         let contents = fs::read_to_string(&path).expect("read contents");
         assert_eq!(contents, "18446744073709551615,9007199254740993\n");
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn writecell_sheet_parser_rejects_unrepresentable_double_boundary() {
+        assert!(parse_sheet(&Value::Num(usize::MAX as f64)).is_err());
+        assert!(parse_sheet(&Value::Num((usize::MAX as f64) + 1.0)).is_err());
+
+        let mut typed =
+            Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1])
+                .expect("typed sheet");
+        typed.data.clear();
+        let parsed = parse_sheet(&Value::Tensor(typed));
+        match usize::try_from((1_u64 << 53) + 1) {
+            Ok(expected) => {
+                assert!(matches!(parsed, Ok(SheetSelector::Index(actual)) if actual == expected))
+            }
+            Err(_) => assert!(parsed.is_err()),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

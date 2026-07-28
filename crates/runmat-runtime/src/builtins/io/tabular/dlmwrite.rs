@@ -583,6 +583,12 @@ fn parse_offset_value(value: &Value, context: &str) -> BuiltinResult<usize> {
             format!("dlmwrite: {context} must be >= 0"),
         ));
     }
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+        return Err(dlmwrite_error_with(
+            &DLMWRITE_ERROR_OPTION,
+            format!("dlmwrite: {context} is too large"),
+        ));
+    }
     Ok(rounded as usize)
 }
 
@@ -613,6 +619,12 @@ fn parse_precision_value(value: &Value) -> BuiltinResult<PrecisionSpec> {
                 ));
             }
             if rounded <= 0.0 {
+                return Err(dlmwrite_error_with(
+                    &DLMWRITE_ERROR_OPTION,
+                    "dlmwrite: precision must be a positive integer",
+                ));
+            }
+            if rounded > u32::MAX as f64 {
                 return Err(dlmwrite_error_with(
                     &DLMWRITE_ERROR_OPTION,
                     "dlmwrite: precision must be a positive integer",
@@ -1838,6 +1850,10 @@ pub(crate) mod tests {
             Tensor::new_integer(IntegerStorage::U64(vec![u32::MAX as u64 + 1]), vec![1, 1])
                 .expect("precision");
         assert!(parse_precision_value(&Value::Tensor(too_large)).is_err());
+
+        assert!(parse_offset_value(&Value::Num(usize::MAX as f64), "row offset").is_err());
+        assert!(parse_offset_value(&Value::Num((usize::MAX as f64) + 1.0), "row offset").is_err());
+        assert!(parse_precision_value(&Value::Num((u32::MAX as f64) + 1.0)).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

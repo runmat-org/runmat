@@ -499,16 +499,21 @@ fn numeric_sheet_index(value: f64) -> BuiltinResult<SheetSelector> {
             "xlswrite: sheet index must be a positive integer",
         ));
     }
-    let index = value.round() as u128;
+    let rounded = value.round();
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+        return Err(xlswrite_error_with(
+            &XLSWRITE_ERROR_SHEET,
+            "xlswrite: sheet index is too large",
+        ));
+    }
+    let index = rounded as usize;
     let zero_based = index.checked_sub(1).ok_or_else(|| {
         xlswrite_error_with(
             &XLSWRITE_ERROR_SHEET,
             "xlswrite: sheet index must be one-based",
         )
     })?;
-    let index = usize::try_from(zero_based).map_err(|_| {
-        xlswrite_error_with(&XLSWRITE_ERROR_SHEET, "xlswrite: sheet index is too large")
-    })?;
+    let index = zero_based;
     if index >= MAX_XLSWRITE_SHEETS {
         return Err(xlswrite_error_with(
             &XLSWRITE_ERROR_SHEET,
@@ -581,8 +586,15 @@ fn one_based_index(value: f64, label: &str) -> BuiltinResult<usize> {
             format!("xlswrite: range {label} must be a positive integer"),
         ));
     }
-    let one_based = value.round() as u128;
-    usize::try_from(one_based - 1).map_err(|_| {
+    let rounded = value.round();
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+        return Err(xlswrite_error_with(
+            &XLSWRITE_ERROR_RANGE,
+            format!("xlswrite: range {label} is too large"),
+        ));
+    }
+    let one_based = rounded as usize;
+    one_based.checked_sub(1).ok_or_else(|| {
         xlswrite_error_with(
             &XLSWRITE_ERROR_RANGE,
             format!("xlswrite: range {label} is too large"),
@@ -1648,6 +1660,11 @@ mod tests {
 
         assert_eq!(parsed.row, 1);
         assert_eq!(parsed.col, 2);
+
+        let boundary = Value::Tensor(
+            Tensor::new(vec![usize::MAX as f64, 1.0], vec![1, 2]).expect("boundary range"),
+        );
+        assert!(parse_range_start(&boundary).is_err());
     }
 
     #[test]
@@ -1984,6 +2001,9 @@ mod tests {
             Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("negative");
         negative.data.clear();
         assert!(parse_sheet_selector(&Value::Tensor(negative)).is_err());
+
+        assert!(parse_sheet_selector(&Value::Num(usize::MAX as f64)).is_err());
+        assert!(parse_sheet_selector(&Value::Num((usize::MAX as f64) + 1.0)).is_err());
     }
 
     #[test]

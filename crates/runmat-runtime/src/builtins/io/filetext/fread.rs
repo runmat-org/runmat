@@ -878,7 +878,7 @@ fn scalar_to_size_component(value: f64, err: &str) -> Result<usize, String> {
     if (rounded - value).abs() > f64::EPSILON {
         return Err(err.to_string());
     }
-    if rounded > usize::MAX as f64 {
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
         return Err("size argument is too large".to_string());
     }
     Ok(rounded as usize)
@@ -1049,7 +1049,7 @@ fn parse_skip_scalar(scalar: f64) -> Result<usize, String> {
     if (rounded - scalar).abs() > f64::EPSILON {
         return Err("skip value must be an integer".to_string());
     }
-    if rounded > i64::MAX as f64 {
+    if rounded >= i64::MAX as f64 {
         return Err("skip value is too large".to_string());
     }
     Ok(rounded as usize)
@@ -1729,6 +1729,11 @@ pub(crate) mod tests {
         );
         assert!(parse_skip(Some(&Value::Int(IntValue::U64(u64::MAX)))).is_err());
         assert!(parse_size(Some(&Value::Int(IntValue::I8(-1)))).is_err());
+
+        assert!(parse_size(Some(&Value::Num(usize::MAX as f64))).is_err());
+        assert!(parse_size(Some(&Value::Num((usize::MAX as f64) + 1.0))).is_err());
+        assert!(parse_skip(Some(&Value::Num(i64::MAX as f64))).is_err());
+        assert!(parse_skip(Some(&Value::Num((i64::MAX as f64) + 1.0))).is_err());
     }
 
     #[test]

@@ -439,16 +439,21 @@ fn numeric_sheet_index(value: f64) -> BuiltinResult<SheetSelector> {
             "xlsread: sheet index must be a positive integer",
         ));
     }
-    let index = value.round() as u128;
+    let rounded = value.round();
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+        return Err(xlsread_error_with(
+            &XLSREAD_ERROR_SHEET,
+            "xlsread: sheet index is too large",
+        ));
+    }
+    let index = rounded as usize;
     let zero_based = index.checked_sub(1).ok_or_else(|| {
         xlsread_error_with(
             &XLSREAD_ERROR_SHEET,
             "xlsread: sheet index must be one-based",
         )
     })?;
-    usize::try_from(zero_based)
-        .map(SheetSelector::Index)
-        .map_err(|_| xlsread_error_with(&XLSREAD_ERROR_SHEET, "xlsread: sheet index is too large"))
+    Ok(SheetSelector::Index(zero_based))
 }
 
 fn value_to_string_scalar(value: &Value) -> BuiltinResult<String> {
@@ -956,13 +961,14 @@ fn positive_index(value: f64, position: usize) -> BuiltinResult<usize> {
             "xlsread: range indices must be positive integers",
         ));
     }
-    if value > usize::MAX as f64 {
+    let rounded = value.round();
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
         return Err(xlsread_error_with(
             &XLSREAD_ERROR_RANGE,
             format!("xlsread: range index {} is too large", position + 1),
         ));
     }
-    let one_based = value.round() as usize;
+    let one_based = rounded as usize;
     one_based.checked_sub(1).ok_or_else(|| {
         xlsread_error_with(
             &XLSREAD_ERROR_RANGE,
@@ -1524,6 +1530,9 @@ mod tests {
         let negative =
             Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("negative");
         assert!(parse_sheet_selector(&Value::Tensor(negative)).is_err());
+
+        assert!(parse_sheet_selector(&Value::Num(usize::MAX as f64)).is_err());
+        assert!(parse_sheet_selector(&Value::Num((usize::MAX as f64) + 1.0)).is_err());
     }
 
     #[test]
@@ -1550,6 +1559,11 @@ mod tests {
         .expect("typed excessive range");
         too_large.data.clear();
         assert!(parse_range(&Value::Tensor(too_large)).is_err());
+
+        let boundary = Value::Tensor(
+            Tensor::new(vec![usize::MAX as f64, 1.0], vec![1, 2]).expect("boundary range"),
+        );
+        assert!(parse_range(&boundary).is_err());
     }
     use futures::executor::block_on;
     use std::fs;

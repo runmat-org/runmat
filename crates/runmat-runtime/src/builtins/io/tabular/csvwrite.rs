@@ -365,6 +365,12 @@ fn coerce_offset_from_float(value: f64, context: &str) -> BuiltinResult<usize> {
             format!("csvwrite: {context} must be >= 0"),
         ));
     }
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+        return Err(csvwrite_error_with(
+            &CSVWRITE_ERROR_OFFSETS,
+            format!("csvwrite: {context} is too large"),
+        ));
+    }
     Ok(rounded as usize)
 }
 
@@ -760,6 +766,9 @@ pub(crate) mod tests {
         } else {
             assert!(parsed.is_err());
         }
+
+        assert!(parse_offset(&Value::Num(usize::MAX as f64), "row offset").is_err());
+        assert!(parse_offset(&Value::Num((usize::MAX as f64) + 1.0), "row offset").is_err());
     }
 
     #[cfg(feature = "wgpu")]
