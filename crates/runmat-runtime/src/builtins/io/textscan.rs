@@ -912,6 +912,9 @@ impl<'a> TextScanner<'a> {
 
     fn skip_header_lines(&mut self) {
         for _ in 0..self.options.header_lines {
+            if self.current_char().is_none() {
+                break;
+            }
             while let Some(ch) = self.current_char() {
                 self.pos += ch.len_utf8();
                 if ch == '\n' {
@@ -1463,9 +1466,17 @@ fn bool_like(value: &Value, context: &str) -> BuiltinResult<bool> {
 }
 
 fn nonnegative_usize(value: &Value, context: &str) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer.try_to_usize().ok_or_else(|| {
+            textscan_error_with(
+                &TEXTSCAN_ERROR_ARGUMENT,
+                format!("textscan: {context} must be a nonnegative integer scalar"),
+            )
+        });
+    }
+
     let raw = match value {
         Value::Num(value) => *value,
-        Value::Int(value) => value.to_i64() as f64,
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             tensor::tensor_value_f64(tensor, 0)
         }
@@ -1482,13 +1493,29 @@ fn nonnegative_usize(value: &Value, context: &str) -> BuiltinResult<usize> {
             format!("textscan: {context} must be a nonnegative integer scalar"),
         ));
     }
-    Ok(raw as usize)
+    if raw > usize::MAX.saturating_sub(1) as f64 {
+        return Err(textscan_error_with(
+            &TEXTSCAN_ERROR_ARGUMENT,
+            format!("textscan: {context} is too large"),
+        ));
+    }
+    let parsed = raw.round() as usize;
+    if parsed as f64 != raw || parsed == usize::MAX {
+        return Err(textscan_error_with(
+            &TEXTSCAN_ERROR_ARGUMENT,
+            format!("textscan: {context} is too large"),
+        ));
+    }
+    Ok(parsed)
 }
 
 fn numeric_fid(value: &Value) -> Option<i32> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer.try_to_i32();
+    }
+
     let raw = match value {
         Value::Num(value) => *value,
-        Value::Int(value) => value.to_i64() as f64,
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             tensor::tensor_value_f64(tensor, 0)
         }
@@ -1509,7 +1536,7 @@ fn is_numeric_scalar(value: &Value) -> bool {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, Tensor};
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
     use runmat_filesystem::OpenOptions;
     use std::sync::{Arc, Mutex as StdMutex};
 
@@ -1573,17 +1600,38 @@ mod tests {
             .expect("typed invalid count");
         invalid.data.clear();
         assert!(nonnegative_usize(&Value::Tensor(invalid), "HeaderLines").is_err());
+        assert_eq!(
+            nonnegative_usize(&Value::Int(IntValue::U64(u64::MAX)), "HeaderLines").ok(),
+            usize::try_from(u64::MAX).ok()
+        );
+        assert!(nonnegative_usize(&Value::Num(1.0e300), "HeaderLines").is_err());
 
         let mut fid =
             Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("typed fid");
         fid.data.clear();
         assert_eq!(numeric_fid(&Value::Tensor(fid)), Some(7));
+        assert_eq!(numeric_fid(&Value::Int(IntValue::U32(7))), Some(7));
+        assert_eq!(numeric_fid(&Value::Int(IntValue::U64(u64::MAX))), None);
 
         let mut fid_too_large =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
                 .expect("typed fid");
         fid_too_large.data.clear();
         assert_eq!(numeric_fid(&Value::Tensor(fid_too_large)), None);
+    }
+
+    #[test]
+    fn textscan_huge_header_lines_stop_at_eof() {
+        let out = block_on(textscan_builtin(
+            Value::from("x"),
+            Value::from("%s"),
+            vec![
+                Value::from("HeaderLines"),
+                Value::Int(IntValue::U64(usize::MAX as u64)),
+            ],
+        ))
+        .expect("textscan");
+        assert!(text_column(&out, 0).is_empty());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

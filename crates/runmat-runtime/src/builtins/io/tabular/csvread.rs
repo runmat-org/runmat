@@ -325,22 +325,16 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<CsvReadOptions> {
 }
 
 fn value_to_start_index(value: &Value, name: &str) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer.try_to_usize().ok_or_else(|| {
+            csvread_error_with(
+                &CSVREAD_ERROR_INDEX,
+                format!("csvread: {name} must be a non-negative integer"),
+            )
+        });
+    }
+
     match value {
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 0 {
-                return Err(csvread_error_with(
-                    &CSVREAD_ERROR_INDEX,
-                    format!("csvread: {name} must be a non-negative integer"),
-                ));
-            }
-            usize::try_from(raw).map_err(|_| {
-                csvread_error_with(
-                    &CSVREAD_ERROR_INDEX,
-                    format!("csvread: {name} is too large"),
-                )
-            })
-        }
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(csvread_error_with(
@@ -361,12 +355,23 @@ fn value_to_start_index(value: &Value, name: &str) -> BuiltinResult<usize> {
                     format!("csvread: {name} must be an integer"),
                 ));
             }
-            usize::try_from(rounded as i64).map_err(|_| {
-                csvread_error_with(
+            if rounded > usize::MAX.saturating_sub(1) as f64 {
+                return Err(csvread_error_with(
                     &CSVREAD_ERROR_INDEX,
                     format!("csvread: {name} is too large"),
-                )
-            })
+                ));
+            }
+            let parsed = rounded as usize;
+            if parsed as f64 != rounded || parsed == usize::MAX {
+                return Err(csvread_error_with(
+                    &CSVREAD_ERROR_INDEX,
+                    format!("csvread: {name} is too large"),
+                ));
+            }
+            Ok(parsed)
+        }
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+            value_to_start_index(&Value::Num(tensor::tensor_value_f64(t, 0)), name)
         }
         _ => Err(csvread_error_with(
             &CSVREAD_ERROR_INDEX,
@@ -1085,6 +1090,25 @@ pub(crate) mod tests {
         assert_eq!(parsed.start_col, 2);
         assert_eq!(parsed.end_row, Some(3));
         assert_eq!(parsed.end_col, Some(4));
+    }
+
+    #[test]
+    fn csvread_start_offsets_read_typed_integer_storage_exactly() {
+        let mut row = BuiltinTensor::new_integer(IntegerStorage::U64(vec![7]), vec![1, 1])
+            .expect("row offset");
+        row.data.clear();
+        assert_eq!(value_to_start_index(&Value::Tensor(row), "row").unwrap(), 7);
+
+        let mut negative = BuiltinTensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
+            .expect("negative row offset");
+        negative.data.clear();
+        assert!(value_to_start_index(&Value::Tensor(negative), "row").is_err());
+
+        assert_eq!(
+            value_to_start_index(&Value::Int(IntValue::U64(u64::MAX)), "row").ok(),
+            usize::try_from(u64::MAX).ok()
+        );
+        assert!(value_to_start_index(&Value::Num(1.0e300), "row").is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

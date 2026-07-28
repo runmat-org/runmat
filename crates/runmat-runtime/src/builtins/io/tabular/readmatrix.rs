@@ -516,13 +516,16 @@ fn value_to_string_scalar(value: &Value, context: &str) -> BuiltinResult<String>
 }
 
 fn value_to_usize(value: &Value, context: &str) -> BuiltinResult<usize> {
-    match value {
-        Value::Int(i) => i.try_to_usize().ok_or_else(|| {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer.try_to_usize().ok_or_else(|| {
             readmatrix_error_with(
                 &READMATRIX_ERROR_OPTION_VALUE,
                 format!("readmatrix: {context} must be a non-negative integer"),
             )
-        }),
+        });
+    }
+
+    match value {
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(readmatrix_error_with(
@@ -536,13 +539,30 @@ fn value_to_usize(value: &Value, context: &str) -> BuiltinResult<usize> {
                     format!("readmatrix: {context} must be a non-negative integer"),
                 ));
             }
-            if (n.round() - n).abs() > f64::EPSILON {
+            let rounded = n.round();
+            if (rounded - n).abs() > f64::EPSILON {
                 return Err(readmatrix_error_with(
                     &READMATRIX_ERROR_OPTION_VALUE,
                     format!("readmatrix: {context} must be an integer value"),
                 ));
             }
-            Ok(n.round() as usize)
+            if rounded > usize::MAX.saturating_sub(1) as f64 {
+                return Err(readmatrix_error_with(
+                    &READMATRIX_ERROR_OPTION_VALUE,
+                    format!("readmatrix: {context} is too large"),
+                ));
+            }
+            let parsed = rounded as usize;
+            if parsed as f64 != rounded || parsed == usize::MAX {
+                return Err(readmatrix_error_with(
+                    &READMATRIX_ERROR_OPTION_VALUE,
+                    format!("readmatrix: {context} is too large"),
+                ));
+            }
+            Ok(parsed)
+        }
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+            value_to_usize(&Value::Num(tensor::tensor_value_f64(t, 0)), context)
         }
         _ => Err(readmatrix_error_with(
             &READMATRIX_ERROR_OPTION_VALUE,
@@ -1671,6 +1691,17 @@ pub(crate) mod tests {
             usize::try_from(u64::MAX).ok()
         );
         assert!(value_to_usize(&Value::Int(IntValue::I64(-1)), "option").is_err());
+
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![9]), vec![1, 1]).expect("option");
+        tensor.data.clear();
+        assert_eq!(value_to_usize(&Value::Tensor(tensor), "option").unwrap(), 9);
+
+        let mut negative =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("option");
+        negative.data.clear();
+        assert!(value_to_usize(&Value::Tensor(negative), "option").is_err());
+        assert!(value_to_usize(&Value::Num(1.0e300), "option").is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

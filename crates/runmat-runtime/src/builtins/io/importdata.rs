@@ -559,9 +559,17 @@ fn parse_delimiter_arg(value: &Value) -> BuiltinResult<String> {
 }
 
 fn parse_header_lines(value: &Value) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer.try_to_usize().ok_or_else(|| {
+            importdata_error_with(
+                &IMPORTDATA_ERROR_ARGUMENT,
+                "importdata: headerlinesIn must be a nonnegative integer scalar",
+            )
+        });
+    }
+
     let raw = match value {
         Value::Num(n) => *n,
-        Value::Int(i) => i.to_i64() as f64,
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => tensor::tensor_value_f64(t, 0),
         _ => {
             return Err(importdata_error_with(
@@ -576,7 +584,20 @@ fn parse_header_lines(value: &Value) -> BuiltinResult<usize> {
             "importdata: headerlinesIn must be a nonnegative integer scalar",
         ));
     }
-    Ok(raw as usize)
+    if raw > usize::MAX.saturating_sub(1) as f64 {
+        return Err(importdata_error_with(
+            &IMPORTDATA_ERROR_ARGUMENT,
+            "importdata: headerlinesIn is too large",
+        ));
+    }
+    let parsed = raw.round() as usize;
+    if parsed as f64 != raw || parsed == usize::MAX {
+        return Err(importdata_error_with(
+            &IMPORTDATA_ERROR_ARGUMENT,
+            "importdata: headerlinesIn is too large",
+        ));
+    }
+    Ok(parsed)
 }
 
 fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
@@ -758,6 +779,18 @@ mod tests {
             parse_header_lines(&Value::Tensor(header_lines)).expect("header lines"),
             2
         );
+
+        let mut negative =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![-1]), vec![1, 1])
+                .expect("negative header lines");
+        negative.data.clear();
+        assert!(parse_header_lines(&Value::Tensor(negative)).is_err());
+
+        assert_eq!(
+            parse_header_lines(&Value::Int(runmat_builtins::IntValue::U64(u64::MAX))).ok(),
+            usize::try_from(u64::MAX).ok()
+        );
+        assert!(parse_header_lines(&Value::Num(1.0e300)).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
