@@ -84,7 +84,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "rustc -V failed (exit $LASTEXITCODE) — toolchain may be broken." }
 
 
-      - name: Validate Windows runner dependencies
+      - name: Ensure and validate Windows runner dependencies
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -101,6 +101,7 @@ jobs:
           }
           $prefix = Join-Path $vcpkgRoot "installed\$triplet"
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $overlayPorts = Join-Path $pwd "infra\vcpkg-ports"
 
           if (-not (Test-Path $vswhere)) {
             throw "vswhere.exe was not found. Provision the runner with infra/scripts/bootstrap-windows-runner.ps1."
@@ -119,6 +120,10 @@ jobs:
           if (-not (Get-Command perl -ErrorAction SilentlyContinue)) {
             throw "Perl was not found on PATH. Provision the runner with infra/scripts/bootstrap-windows-runner.ps1."
           }
+          & ./infra/scripts/ensure-windows-vcpkg-dependencies.ps1 `
+            -VcpkgRoot $vcpkgRoot `
+            -Triplet $triplet `
+            -OverlayPorts $overlayPorts
 
           $required = @(
             (Join-Path $vcpkgRoot 'vcpkg.exe'),
@@ -126,6 +131,7 @@ jobs:
             (Join-Path $prefix 'include\H5pubconf.h'),
             (Join-Path $prefix 'include\opencascade'),
             (Join-Path $prefix 'lib\openblas.lib'),
+            (Join-Path $prefix 'lib\lapack.lib'),
             (Join-Path $prefix 'lib\hdf5.lib'),
             (Join-Path $prefix 'bin\hdf5.dll'),
             (Join-Path $prefix 'lib\TKBRep.lib'),
@@ -144,10 +150,6 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_ROOT=$vcpkgRoot"
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_DEFAULT_TRIPLET=$triplet"
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_TRIPLET=$triplet"
-          $overlayPorts = Join-Path $pwd "infra\vcpkg-ports"
-          if (-not (Test-Path (Join-Path $overlayPorts "libaec\vcpkg.json"))) {
-            throw "RunMat vcpkg overlay ports were not found at $overlayPorts"
-          }
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_DYNAMIC=1"
           Add-Content -Path $env:GITHUB_ENV -Value "INCLUDE=$prefix\include;$env:INCLUDE"
           Add-Content -Path $env:GITHUB_ENV -Value "LIB=$prefix\lib;$env:LIB"
@@ -357,6 +359,10 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_ROOT=$vcpkgRoot"
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_DEFAULT_TRIPLET=$triplet"
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_TRIPLET=$triplet"
+          $overlayPorts = Join-Path $pwd "infra\vcpkg-ports"
+          if (-not (Test-Path (Join-Path $overlayPorts "libaec\vcpkg.json"))) {
+            throw "RunMat vcpkg overlay ports were not found at $overlayPorts"
+          }
 
           function Install-VcpkgPackage {
             param(

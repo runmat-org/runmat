@@ -237,22 +237,9 @@ Remove-Item Env:F90 -ErrorAction SilentlyContinue
 $env:Path = [string]::Join(';', $keptPath)
 
 Write-Host 'Installing vcpkg packages used by Windows CI'
-& (Join-Path $VcpkgRoot 'vcpkg.exe') install "openblas:$Triplet"
-if ($LASTEXITCODE -ne 0) {
-    throw "vcpkg install openblas failed with exit code $LASTEXITCODE"
-}
-& (Join-Path $VcpkgRoot 'vcpkg.exe') install "zeromq:$Triplet"
-if ($LASTEXITCODE -ne 0) {
-    throw "vcpkg install zeromq failed with exit code $LASTEXITCODE"
-}
-& (Join-Path $VcpkgRoot 'vcpkg.exe') install "hdf5:$Triplet"
-if ($LASTEXITCODE -ne 0) {
-    throw "vcpkg install hdf5 failed with exit code $LASTEXITCODE"
-}
-& (Join-Path $VcpkgRoot 'vcpkg.exe') install "opencascade:$Triplet"
-if ($LASTEXITCODE -ne 0) {
-    throw "vcpkg install opencascade failed with exit code $LASTEXITCODE"
-}
+& (Join-Path $PSScriptRoot 'ensure-windows-vcpkg-dependencies.ps1') `
+    -VcpkgRoot $VcpkgRoot `
+    -Triplet $Triplet
 
 Write-Host 'Writing machine-wide environment variables'
 [Environment]::SetEnvironmentVariable('VCPKG_ROOT', $VcpkgRoot, 'Machine')
