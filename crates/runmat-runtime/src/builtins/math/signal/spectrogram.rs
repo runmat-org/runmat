@@ -16,6 +16,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::math::signal::common::{
     centered_frequency_offset, centered_shift, gpu_vector_len, parse_nonnegative_integer,
     parse_scalar_f64, selected_frequency_len, value_to_complex_vector,
@@ -684,8 +685,8 @@ async fn parse_frequency_grid(value: Value) -> BuiltinResult<FrequencyGrid> {
 fn is_scalar_numeric(value: &Value) -> bool {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
-        Value::Tensor(tensor) => tensor.data.len() == 1,
-        Value::ComplexTensor(tensor) => tensor.data.len() == 1,
+        Value::Tensor(value) => tensor::is_scalar_tensor(value),
+        Value::ComplexTensor(value) => tensor::is_scalar_complex_tensor(value),
         Value::LogicalArray(logical) => logical.data.len() == 1,
         _ => false,
     }
@@ -1046,7 +1047,7 @@ mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_builtins::builtin_function_by_name;
+    use runmat_builtins::{builtin_function_by_name, IntegerStorage};
 
     fn empty() -> Value {
         Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap())
@@ -1062,6 +1063,19 @@ mod tests {
             panic!("expected output list");
         };
         values
+    }
+
+    #[test]
+    fn spectrogram_scalar_detector_reads_typed_integer_storage_without_mirror() {
+        let mut scalar =
+            Tensor::new_integer(IntegerStorage::I16(vec![16]), vec![1, 1]).expect("scalar");
+        scalar.data.clear();
+        let mut vector =
+            Tensor::new_integer(IntegerStorage::I16(vec![16, 32]), vec![1, 2]).expect("vector");
+        vector.data.clear();
+
+        assert!(is_scalar_numeric(&Value::Tensor(scalar)));
+        assert!(!is_scalar_numeric(&Value::Tensor(vector)));
     }
 
     #[test]

@@ -917,7 +917,7 @@ async fn parse_resample_filter_spec(
 
 async fn scalar_integer_option(value: &Value) -> BuiltinResult<Option<usize>> {
     match value {
-        Value::Tensor(tensor) if tensor.data.len() != 1 => return Ok(None),
+        Value::Tensor(tensor) if !tensor::is_scalar_tensor(tensor) => return Ok(None),
         Value::GpuTensor(handle) if checked_product(&handle.shape) != Some(1) => return Ok(None),
         Value::ComplexTensor(_) => return Ok(None),
         _ => {}
@@ -2018,6 +2018,25 @@ mod tests {
         };
         assert_eq!(upsampled.shape, vec![1, 6]);
         assert_eq!(upsampled.data, vec![1.0, 0.0, 2.0, 0.0, 3.0, 0.0]);
+    }
+
+    #[test]
+    fn resample_scalar_integer_option_reads_typed_integer_storage_without_mirror() {
+        let mut scalar =
+            Tensor::new_integer(IntegerStorage::U16(vec![12]), vec![1, 1]).expect("scalar");
+        scalar.data.clear();
+        let mut vector =
+            Tensor::new_integer(IntegerStorage::U16(vec![12, 14]), vec![1, 2]).expect("vector");
+        vector.data.clear();
+
+        assert_eq!(
+            block_on(scalar_integer_option(&Value::Tensor(scalar))).expect("scalar"),
+            Some(12)
+        );
+        assert_eq!(
+            block_on(scalar_integer_option(&Value::Tensor(vector))).expect("vector"),
+            None
+        );
     }
 
     #[test]

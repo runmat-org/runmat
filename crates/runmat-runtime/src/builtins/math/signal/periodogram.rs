@@ -691,8 +691,8 @@ async fn parse_frequency_grid(value: Value) -> BuiltinResult<FrequencyGrid> {
 fn is_scalar_numeric(value: &Value) -> bool {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
-        Value::Tensor(tensor) => tensor.data.len() == 1,
-        Value::ComplexTensor(tensor) => tensor.data.len() == 1,
+        Value::Tensor(tensor) => tensor_utils::is_scalar_tensor(tensor),
+        Value::ComplexTensor(tensor) => tensor_utils::is_scalar_complex_tensor(tensor),
         Value::LogicalArray(logical) => logical.data.len() == 1,
         _ => false,
     }
@@ -989,6 +989,17 @@ mod tests {
             Tensor::new_integer(IntegerStorage::I16(values), shape).expect("typed integer tensor");
         tensor.data.fill(f64::NAN);
         tensor
+    }
+
+    #[test]
+    fn periodogram_scalar_detector_reads_typed_integer_storage_without_mirror() {
+        let mut scalar =
+            Tensor::new_integer(IntegerStorage::I16(vec![8]), vec![1, 1]).expect("scalar");
+        scalar.data.clear();
+        let vector = integer_tensor(vec![8, 16], vec![1, 2]);
+
+        assert!(is_scalar_numeric(&Value::Tensor(scalar)));
+        assert!(!is_scalar_numeric(&Value::Tensor(vector)));
     }
 
     #[test]
