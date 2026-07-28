@@ -1905,11 +1905,14 @@ pub(crate) mod tests {
         ];
         let mut entries = Vec::new();
         for (name, storage) in &cases {
-            let tensor = Tensor::new_integer(storage.clone(), vec![2, 1]).expect("integer tensor");
+            let mut tensor =
+                Tensor::new_integer(storage.clone(), vec![2, 1]).expect("integer tensor");
+            tensor.data.clear();
             entries.push(((*name).to_string(), Value::Tensor(tensor)));
         }
-        let empty = Tensor::new_integer(IntegerStorage::U64(Vec::new()), vec![0, 2])
+        let mut empty = Tensor::new_integer(IntegerStorage::U64(Vec::new()), vec![0, 2])
             .expect("empty integer tensor");
+        empty.data.clear();
         entries.push(("empty_u64".to_string(), Value::Tensor(empty)));
         entries.push((
             "scalar_u64".to_string(),
@@ -1990,7 +1993,9 @@ pub(crate) mod tests {
         for (name, real, imag) in &cases {
             let storage =
                 IntegerComplexStorage::new(real.clone(), imag.clone()).expect("components");
-            let tensor = ComplexTensor::new_integer(storage, vec![2, 1]).expect("typed complex");
+            let mut tensor =
+                ComplexTensor::new_integer(storage, vec![2, 1]).expect("typed complex");
+            tensor.data.clear();
             entries.push(((*name).to_string(), Value::ComplexTensor(tensor)));
         }
 
@@ -2011,11 +2016,14 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_save_roundtrip_preserves_nested_integer_tensors() {
-        let unsigned =
+        let mut unsigned =
             Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]), vec![1, 2])
                 .expect("unsigned tensor");
-        let signed = Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![2, 1])
-            .expect("signed tensor");
+        unsigned.data.clear();
+        let mut signed =
+            Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![2, 1])
+                .expect("signed tensor");
+        signed.data.clear();
         let cell = make_cell(
             vec![
                 Value::Tensor(unsigned.clone()),

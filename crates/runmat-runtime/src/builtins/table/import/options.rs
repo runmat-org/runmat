@@ -1216,7 +1216,8 @@ mod tests {
 
     #[test]
     fn range_spec_rejects_nonpositive_typed_integer_indices() {
-        let range = Tensor::new_integer(IntegerStorage::I16(vec![1, 0]), vec![1, 2]).unwrap();
+        let mut range = Tensor::new_integer(IntegerStorage::I16(vec![1, 0]), vec![1, 2]).unwrap();
+        range.data.clear();
 
         assert!(RangeSpec::parse(&Value::Tensor(range)).is_err());
     }

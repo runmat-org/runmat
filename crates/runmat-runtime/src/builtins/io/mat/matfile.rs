@@ -774,10 +774,11 @@ mod tests {
             vec![Value::String("Writable".into()), Value::Bool(true)],
         ))
         .expect("matfile writable");
-        let input = Value::Tensor(
+        let mut tensor =
             Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![1, 2])
-                .expect("integer tensor"),
-        );
+                .expect("integer tensor");
+        tensor.data.clear();
+        let input = Value::Tensor(tensor);
 
         let object = block_on(matfile_subsasgn(
             object,
