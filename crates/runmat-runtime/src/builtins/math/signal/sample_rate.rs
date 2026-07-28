@@ -922,6 +922,14 @@ async fn scalar_integer_option(value: &Value) -> BuiltinResult<Option<usize>> {
         Value::ComplexTensor(_) => return Ok(None),
         _ => {}
     }
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return parse_nonnegative_integer_value(
+            integer,
+            RESAMPLE_NAME,
+            &SAMPLE_ERROR_INVALID_OPTION,
+        )
+        .map(Some);
+    }
     let Some(raw) = tensor::scalar_f64_from_value_async(value)
         .await
         .map_err(|err| {
@@ -1037,6 +1045,9 @@ fn apply_resample(
 }
 
 async fn parse_factor(value: &Value, builtin: &'static str) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return parse_positive_integer_value(integer, builtin, &SAMPLE_ERROR_INVALID_FACTOR);
+    }
     let Some(raw) = tensor::scalar_f64_from_value_async(value)
         .await
         .map_err(|detail| {
@@ -1053,17 +1064,23 @@ async fn parse_factor(value: &Value, builtin: &'static str) -> BuiltinResult<usi
 }
 
 async fn parse_phase(value: &Value, factor: usize, builtin: &'static str) -> BuiltinResult<usize> {
-    let Some(raw) = tensor::scalar_f64_from_value_async(value)
-        .await
-        .map_err(|detail| sample_error_with_detail(builtin, &SAMPLE_ERROR_INVALID_PHASE, detail))?
-    else {
-        return Err(sample_error_with_detail(
-            builtin,
-            &SAMPLE_ERROR_INVALID_PHASE,
-            format!("received {value:?}"),
-        ));
+    let phase = if let Some(integer) = tensor::scalar_integer_value(value) {
+        parse_nonnegative_integer_value(integer, builtin, &SAMPLE_ERROR_INVALID_PHASE)?
+    } else {
+        let Some(raw) = tensor::scalar_f64_from_value_async(value)
+            .await
+            .map_err(|detail| {
+                sample_error_with_detail(builtin, &SAMPLE_ERROR_INVALID_PHASE, detail)
+            })?
+        else {
+            return Err(sample_error_with_detail(
+                builtin,
+                &SAMPLE_ERROR_INVALID_PHASE,
+                format!("received {value:?}"),
+            ));
+        };
+        parse_nonnegative_integer(raw, builtin, &SAMPLE_ERROR_INVALID_PHASE)?
     };
-    let phase = parse_nonnegative_integer(raw, builtin, &SAMPLE_ERROR_INVALID_PHASE)?;
     if phase >= factor {
         return Err(sample_error_with_detail(
             builtin,
@@ -1086,6 +1103,28 @@ fn parse_positive_integer(
     Ok(value)
 }
 
+fn parse_positive_integer_value(
+    value: runmat_builtins::IntValue,
+    builtin: &'static str,
+    error: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<usize> {
+    let value = parse_nonnegative_integer_value(value, builtin, error)?;
+    if value == 0 {
+        return Err(sample_error(builtin, error));
+    }
+    Ok(value)
+}
+
+fn parse_nonnegative_integer_value(
+    value: runmat_builtins::IntValue,
+    builtin: &'static str,
+    error: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<usize> {
+    value
+        .try_to_usize()
+        .ok_or_else(|| sample_error(builtin, error))
+}
+
 fn parse_nonnegative_integer(
     raw: f64,
     builtin: &'static str,
@@ -1094,7 +1133,10 @@ fn parse_nonnegative_integer(
     if !raw.is_finite() || raw < 0.0 {
         return Err(sample_error(builtin, error));
     }
-    if raw.trunc() != raw || raw > usize::MAX as f64 {
+    if raw.trunc() != raw
+        || raw > usize::MAX as f64
+        || (usize::BITS == 64 && raw == usize::MAX as f64)
+    {
         return Err(sample_error(builtin, error));
     }
     Ok(raw as usize)
@@ -1650,6 +1692,22 @@ mod tests {
     use runmat_accelerate_api::{GpuTensorStorage, HostTensorView};
     use runmat_builtins::IntegerStorage;
 
+    fn first_unrepresentable_usize_double() -> f64 {
+        if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        }
+    }
+
+    fn exact_platform_wide_integer() -> u64 {
+        if usize::BITS == 64 {
+            9_007_199_254_740_993
+        } else {
+            u32::MAX as u64
+        }
+    }
+
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
     }
@@ -2037,6 +2095,43 @@ mod tests {
             block_on(scalar_integer_option(&Value::Tensor(vector))).expect("vector"),
             None
         );
+    }
+
+    #[test]
+    fn sample_rate_integer_parsers_read_typed_integer_storage_exactly() {
+        let wide = exact_platform_wide_integer();
+        let mut factor =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("factor");
+        factor.data.clear();
+        let mut phase =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide - 1]), vec![1, 1]).expect("phase");
+        phase.data.clear();
+
+        assert_eq!(
+            block_on(parse_factor(&Value::Tensor(factor), UPSAMPLE_NAME)).expect("factor"),
+            wide as usize
+        );
+        assert_eq!(
+            block_on(parse_phase(
+                &Value::Tensor(phase),
+                wide as usize,
+                UPSAMPLE_NAME
+            ))
+            .expect("phase"),
+            (wide - 1) as usize
+        );
+    }
+
+    #[test]
+    fn sample_rate_integer_parsers_reject_unrepresentable_double_boundary() {
+        let err = parse_nonnegative_integer(
+            first_unrepresentable_usize_double(),
+            UPSAMPLE_NAME,
+            &SAMPLE_ERROR_INVALID_FACTOR,
+        )
+        .expect_err("unrepresentable integer should fail");
+
+        assert_eq!(err.identifier(), SAMPLE_ERROR_INVALID_FACTOR.identifier);
     }
 
     #[test]

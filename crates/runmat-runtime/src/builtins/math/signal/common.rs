@@ -288,6 +288,15 @@ pub(crate) fn parse_nonnegative_integer(
     label: &str,
     value: &Value,
 ) -> BuiltinResult<usize> {
+    if let Some(value) = tensor::scalar_integer_value(value) {
+        return value.try_to_usize().ok_or_else(|| {
+            signal_error(
+                builtin,
+                None,
+                format!("{builtin}: {label} exceeds maximum supported size"),
+            )
+        });
+    }
     let scalar = parse_scalar_f64(builtin, label, value)?;
     let rounded = scalar.round();
     if rounded < 0.0 || (rounded - scalar).abs() > 1e-9 {
@@ -297,7 +306,7 @@ pub(crate) fn parse_nonnegative_integer(
             format!("{builtin}: {label} must be a nonnegative integer"),
         ));
     }
-    if rounded > usize::MAX as f64 {
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
         return Err(signal_error(
             builtin,
             None,
@@ -312,6 +321,9 @@ pub(crate) fn keyword(value: &Value) -> Option<String> {
 }
 
 pub(crate) fn scalar_length_arg(value: Value) -> Result<usize, WindowArgError> {
+    if let Some(value) = tensor::scalar_integer_value(&value) {
+        return value.try_to_usize().ok_or(WindowArgError::InvalidLength);
+    }
     let scalar = match value {
         Value::Num(n) => n,
         Value::Int(i) => i.to_f64(),
@@ -323,7 +335,10 @@ pub(crate) fn scalar_length_arg(value: Value) -> Result<usize, WindowArgError> {
         return Err(WindowArgError::InvalidLength);
     }
     let rounded = scalar.round();
-    if rounded > usize::MAX as f64 {
+    if (rounded - scalar).abs() > 1e-9
+        || rounded > usize::MAX as f64
+        || (usize::BITS == 64 && rounded == usize::MAX as f64)
+    {
         return Err(WindowArgError::InvalidLength);
     }
     Ok(rounded as usize)
@@ -422,6 +437,14 @@ mod tests {
     use super::*;
     use runmat_builtins::{ComplexTensor, IntegerComplexStorage, IntegerStorage};
 
+    fn first_unrepresentable_usize_double() -> f64 {
+        if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        }
+    }
+
     #[test]
     fn complex_vector_to_value_treats_near_zero_imaginary_as_real() {
         let value = complex_vector_to_value(
@@ -493,9 +516,36 @@ mod tests {
     }
 
     #[test]
+    fn parse_nonnegative_integer_rejects_unrepresentable_double_boundary() {
+        let err = parse_nonnegative_integer(
+            "test",
+            "n",
+            &Value::Num(first_unrepresentable_usize_double()),
+        )
+        .expect_err("unrepresentable integer should fail");
+
+        assert!(err.message().contains("exceeds maximum supported size"));
+    }
+
+    #[test]
     fn scalar_length_arg_rejects_values_outside_usize_range() {
         let err = scalar_length_arg(Value::Num((usize::MAX as f64) * 2.0))
             .expect_err("out-of-range length should fail");
+
+        assert_eq!(err, WindowArgError::InvalidLength);
+    }
+
+    #[test]
+    fn scalar_length_arg_rejects_unrepresentable_double_boundary() {
+        let err = scalar_length_arg(Value::Num(first_unrepresentable_usize_double()))
+            .expect_err("unrepresentable length should fail");
+
+        assert_eq!(err, WindowArgError::InvalidLength);
+    }
+
+    #[test]
+    fn scalar_length_arg_rejects_fractional_double_lengths() {
+        let err = scalar_length_arg(Value::Num(4.25)).expect_err("fractional length should fail");
 
         assert_eq!(err, WindowArgError::InvalidLength);
     }
