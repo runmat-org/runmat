@@ -4213,7 +4213,9 @@ mod tests {
             .expect("create dataset");
             let arr = call_builtin("Dataset.array", &[ds, Value::String("samples".to_string())])
                 .expect("array");
-            let input = Tensor::new_integer(storage.clone(), vec![2, 1]).expect("integer tensor");
+            let mut input =
+                Tensor::new_integer(storage.clone(), vec![2, 1]).expect("integer tensor");
+            input.data.clear();
             call_builtin("DataArray.write", &[arr.clone(), Value::Tensor(input)])
                 .expect("write integer array");
 
@@ -4285,11 +4287,12 @@ mod tests {
             )
             .expect("slice"),
         );
-        let replacement = Tensor::new_integer(
+        let mut replacement = Tensor::new_integer(
             IntegerStorage::U64(vec![1_u64 << 63, u64::MAX - 1]),
             vec![1, 2],
         )
         .expect("replacement");
+        replacement.data.clear();
         call_builtin(
             "DataArray.write",
             &[arr.clone(), slice, Value::Tensor(replacement)],
