@@ -512,9 +512,18 @@ fn parse_numeric_order(raw: f64) -> BuiltinResult<NormOrder> {
 }
 
 fn parse_dim(value: &Value) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer
+            .try_to_usize()
+            .filter(|dim| *dim >= 1)
+            .ok_or_else(|| {
+                argument_error(format!(
+                    "{NAME}: dim must be a positive integer numeric scalar."
+                ))
+            });
+    }
     let raw = match value {
         Value::Num(value) => *value,
-        Value::Int(value) => value.to_f64(),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             tensor::tensor_value_f64(tensor, 0)
         }
@@ -545,6 +554,11 @@ fn parse_dim(value: &Value) -> BuiltinResult<usize> {
     }
     let rounded = raw.round();
     if (rounded - raw).abs() > f64::EPSILON {
+        return Err(argument_error(format!(
+            "{NAME}: dim must be a positive integer numeric scalar."
+        )));
+    }
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
         return Err(argument_error(format!(
             "{NAME}: dim must be a positive integer numeric scalar."
         )));
@@ -876,6 +890,15 @@ mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+
+        let wide = 9_007_199_254_740_993_u64;
+        let mut large_dim =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("large dim");
+        large_dim.data.clear();
+        match usize::try_from(wide) {
+            Ok(expected) => assert_eq!(parse_dim(&Value::Tensor(large_dim)).unwrap(), expected),
+            Err(_) => assert!(parse_dim(&Value::Tensor(large_dim)).is_err()),
+        }
     }
 
     #[test]
@@ -898,6 +921,18 @@ mod tests {
         .unwrap_err();
         assert_eq!(err.identifier(), VECNORM_ERROR_INVALID_ARGUMENT.identifier);
         assert!(err.message().contains("positive integer numeric scalar"));
+    }
+
+    #[test]
+    fn vecnorm_dim_rejects_unrepresentable_double_boundary_before_cast() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+
+        assert!(parse_dim(&Value::Num(boundary)).is_err());
+        assert!(parse_dim(&Value::Num(1.5)).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
