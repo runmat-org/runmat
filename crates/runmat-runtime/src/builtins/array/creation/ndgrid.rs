@@ -523,13 +523,18 @@ fn axis_from_tensor(tensor: Tensor, index: usize) -> BuiltinResult<AxisData> {
         ));
     }
     let integer_storage = tensor.integer_storage().cloned();
-    let values = tensor
-        .data
-        .into_iter()
-        .map(|value| (value, 0.0))
-        .collect::<Vec<_>>();
+    let len = tensor::tensor_element_len(&tensor);
+    let values = if integer_storage.is_some() {
+        Vec::new()
+    } else {
+        tensor
+            .data
+            .into_iter()
+            .map(|value| (value, 0.0))
+            .collect::<Vec<_>>()
+    };
     Ok(AxisData {
-        len: values.len(),
+        len,
         values,
         class: integer_storage
             .as_ref()
@@ -577,15 +582,18 @@ fn axis_from_complex_tensor(tensor: ComplexTensor, index: usize) -> BuiltinResul
             ),
         ));
     }
-    let ComplexTensor {
-        data, integer_data, ..
-    } = tensor;
+    let len = tensor::complex_tensor_element_len(&tensor);
+    let values = if tensor.integer_data.is_some() {
+        Vec::new()
+    } else {
+        tensor.data
+    };
     Ok(AxisData {
-        len: data.len(),
-        values: data,
+        len,
+        values,
         class: OutputClass::Complex,
         integer_storage: None,
-        integer_data,
+        integer_data: tensor.integer_data,
         gpu_real: None,
     })
 }
@@ -1211,6 +1219,72 @@ mod tests {
             };
             assert_eq!(second_output.integer_storage(), Some(&expected_second));
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn ndgrid_reads_typed_integer_axis_length_from_storage_without_mirror() {
+        let mut axis = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("axis");
+        axis.data.clear();
+
+        let eval = eval(&[Value::Tensor(axis)], Some(2)).expect("ndgrid");
+        let Value::Tensor(first) = output(&eval, 0).expect("first grid") else {
+            panic!("expected typed integer first grid");
+        };
+        let Value::Tensor(second) = output(&eval, 1).expect("second grid") else {
+            panic!("expected typed integer second grid");
+        };
+        assert_eq!(first.shape, vec![2, 2]);
+        assert_eq!(
+            first.integer_storage(),
+            Some(&IntegerStorage::U64(vec![
+                9_007_199_254_740_993,
+                u64::MAX,
+                9_007_199_254_740_993,
+                u64::MAX,
+            ]))
+        );
+        assert_eq!(
+            second.integer_storage(),
+            Some(&IntegerStorage::U64(vec![
+                9_007_199_254_740_993,
+                9_007_199_254_740_993,
+                u64::MAX,
+                u64::MAX,
+            ]))
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn ndgrid_reads_typed_complex_integer_axis_length_from_storage_without_mirror() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![-3, 5]),
+            IntegerStorage::I16(vec![7, -11]),
+        )
+        .unwrap();
+        let mut axis = ComplexTensor::new_integer(storage, vec![1, 2]).expect("axis");
+        axis.data.clear();
+
+        let eval = eval(&[Value::ComplexTensor(axis)], Some(2)).expect("ndgrid");
+        let Value::ComplexTensor(first) = output(&eval, 0).expect("first grid") else {
+            panic!("expected typed complex integer first grid");
+        };
+        assert_eq!(first.shape, vec![2, 2]);
+        assert_eq!(
+            first.integer_data,
+            Some(
+                IntegerComplexStorage::new(
+                    IntegerStorage::I16(vec![-3, 5, -3, 5]),
+                    IntegerStorage::I16(vec![7, -11, 7, -11]),
+                )
+                .unwrap()
+            )
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

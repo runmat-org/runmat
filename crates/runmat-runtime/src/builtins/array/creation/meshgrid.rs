@@ -761,6 +761,7 @@ async fn axis_from_value(
 
 fn axis_from_tensor(tensor: Tensor, index: usize) -> crate::BuiltinResult<AxisData> {
     if is_vector_shape(&tensor.shape) {
+        let len = tensor::tensor_element_len(&tensor);
         let values = if tensor.integer_data.is_some() {
             Vec::new()
         } else {
@@ -768,7 +769,7 @@ fn axis_from_tensor(tensor: Tensor, index: usize) -> crate::BuiltinResult<AxisDa
             values.iter().map(|&value| (value, 0.0)).collect()
         };
         return Ok(AxisData {
-            len: tensor.data.len(),
+            len,
             values,
             is_complex: false,
             real_integer_data: tensor.integer_data,
@@ -795,19 +796,29 @@ fn axis_from_tensor(tensor: Tensor, index: usize) -> crate::BuiltinResult<AxisDa
 
 fn axis_from_complex_tensor(tensor: ComplexTensor, index: usize) -> crate::BuiltinResult<AxisData> {
     if is_vector_shape(&tensor.shape) {
-        let is_complex = tensor
-            .data
-            .iter()
-            .any(|&(_, imag)| !imag.is_nan() && imag != 0.0);
-        let ComplexTensor {
-            data, integer_data, ..
-        } = tensor;
+        let len = tensor::complex_tensor_element_len(&tensor);
+        let is_complex = match tensor.integer_data.as_ref() {
+            Some(storage) => storage
+                .imag
+                .exact_values()
+                .into_iter()
+                .any(|value| value.to_f64() != 0.0),
+            None => tensor
+                .data
+                .iter()
+                .any(|&(_, imag)| !imag.is_nan() && imag != 0.0),
+        };
+        let values = if tensor.integer_data.is_some() {
+            Vec::new()
+        } else {
+            tensor.data
+        };
         return Ok(AxisData {
-            len: data.len(),
-            values: data,
+            len,
+            values,
             is_complex,
             real_integer_data: None,
-            integer_data,
+            integer_data: tensor.integer_data,
             gpu_real: None,
         });
     }
@@ -1657,6 +1668,70 @@ pub(crate) mod tests {
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::U64(vec![u64::MAX]))
+        );
+    }
+
+    #[test]
+    fn meshgrid_reads_typed_integer_axis_length_from_storage_without_mirror() {
+        let mut axis = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("axis");
+        axis.data.clear();
+
+        let eval = evaluate(&[Value::Tensor(axis)]).expect("meshgrid");
+        let Value::Tensor(x) = eval_first(&eval).expect("X") else {
+            panic!("expected real integer X output");
+        };
+        let Value::Tensor(y) = eval_second(&eval).expect("Y") else {
+            panic!("expected real integer Y output");
+        };
+        assert_eq!(x.shape, vec![2, 2]);
+        assert_eq!(
+            x.integer_storage(),
+            Some(&IntegerStorage::U64(vec![
+                9_007_199_254_740_993,
+                9_007_199_254_740_993,
+                u64::MAX,
+                u64::MAX,
+            ]))
+        );
+        assert_eq!(
+            y.integer_storage(),
+            Some(&IntegerStorage::U64(vec![
+                9_007_199_254_740_993,
+                u64::MAX,
+                9_007_199_254_740_993,
+                u64::MAX,
+            ]))
+        );
+    }
+
+    #[test]
+    fn meshgrid_reads_typed_complex_integer_axis_length_from_storage_without_mirror() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![-3, 5]),
+            IntegerStorage::I16(vec![7, -11]),
+        )
+        .unwrap();
+        let mut axis = ComplexTensor::new_integer(storage, vec![1, 2]).expect("axis");
+        axis.data.clear();
+
+        let eval = evaluate(&[Value::ComplexTensor(axis)]).expect("meshgrid");
+        let Value::ComplexTensor(x) = eval_first(&eval).expect("X") else {
+            panic!("expected typed complex integer X output");
+        };
+        assert_eq!(x.shape, vec![2, 2]);
+        assert_eq!(
+            x.integer_data,
+            Some(
+                IntegerComplexStorage::new(
+                    IntegerStorage::I16(vec![-3, -3, 5, 5]),
+                    IntegerStorage::I16(vec![7, 7, -11, -11]),
+                )
+                .unwrap()
+            )
         );
     }
 
