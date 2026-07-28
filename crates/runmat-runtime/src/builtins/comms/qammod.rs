@@ -736,7 +736,9 @@ mod tests {
     }
 
     fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.clear();
+        Value::Tensor(tensor)
     }
 
     fn assert_complex_close(actual: &[(f64, f64)], expected: &[(f64, f64)]) {
