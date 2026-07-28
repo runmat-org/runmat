@@ -1155,13 +1155,16 @@ fn label_kinds_compatible(left: LabelKind, right: LabelKind) -> bool {
 
 fn is_grouping_container(value: &Value) -> bool {
     match value {
-        Value::Tensor(tensor) => tensor.data.len() > 1,
+        Value::Tensor(tensor) => tensor::tensor_element_len(tensor) > 1,
         Value::LogicalArray(array) => array.data.len() > 1,
         Value::StringArray(array) => array.data.len() > 1,
         Value::CharArray(array) => array.rows > 1,
         Value::Cell(cell) => cell.data.len() > 1,
         Value::Object(object) if object.is_class("categorical") => {
-            matches!(object.properties.get("Codes"), Some(Value::Tensor(tensor)) if tensor.data.len() > 1)
+            matches!(
+                object.properties.get("Codes"),
+                Some(Value::Tensor(tensor)) if tensor::tensor_element_len(tensor) > 1
+            )
         }
         _ => false,
     }
@@ -1276,6 +1279,12 @@ mod tests {
         Value::Tensor(tensor)
     }
 
+    fn mirrorless_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
+        tensor.data.clear();
+        Value::Tensor(tensor)
+    }
+
     fn assert_f64_slice_eq_nan(left: &[f64], right: &[f64]) {
         assert_eq!(left.len(), right.len());
         for (idx, (a, b)) in left.iter().zip(right).enumerate() {
@@ -1380,6 +1389,25 @@ mod tests {
         .unwrap() else {
             panic!("tensor");
         };
+        assert_eq!(out.shape, vec![3, 4]);
+        assert_eq!(
+            out.data,
+            vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0]
+        );
+    }
+
+    #[test]
+    fn dummyvar_grouping_detection_uses_typed_integer_storage_len() {
+        let first = mirrorless_int_tensor(IntegerStorage::I16(vec![1, 2, 1]), vec![3, 1]);
+        let second = mirrorless_int_tensor(IntegerStorage::I16(vec![2, 2, 1]), vec![3, 1]);
+
+        let Value::Tensor(out) = block_on(dummyvar_builtin(Value::Cell(
+            CellArray::new(vec![first, second], 1, 2).unwrap(),
+        )))
+        .unwrap() else {
+            panic!("tensor");
+        };
+
         assert_eq!(out.shape, vec![3, 4]);
         assert_eq!(
             out.data,
