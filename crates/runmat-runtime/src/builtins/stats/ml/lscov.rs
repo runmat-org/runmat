@@ -378,7 +378,7 @@ async fn parse_weighting(
         .map_err(|err| invalid(format!("lscov: {err}")))?;
     let tensor = tensor::value_into_tensor_for(NAME, gathered)
         .map_err(|err| invalid(format!("lscov: {err}")))?;
-    if tensor.data.is_empty() {
+    if tensor::tensor_element_len(&tensor) == 0 {
         return Ok(Weighting::Identity);
     }
     let values = tensor::tensor_values_f64(&tensor);
@@ -890,7 +890,7 @@ fn scaled_covariance_real(covariance_base: &DMatrix<f64>, mse: f64) -> Vec<f64> 
 
 fn real_rhs_matrix(tensor: &Tensor, rows: usize, rhs_cols: usize) -> BuiltinResult<DMatrix<f64>> {
     let values = tensor::tensor_values_f64_cow(tensor);
-    if is_vector(tensor) && tensor.data.len() == rows {
+    if is_vector(tensor) && tensor::tensor_element_len(tensor) == rows {
         Ok(DMatrix::from_column_slice(rows, 1, values.as_ref()))
     } else if tensor.rows == rows && tensor.cols == rhs_cols {
         Ok(DMatrix::from_column_slice(rows, rhs_cols, values.as_ref()))
@@ -917,12 +917,7 @@ fn complex_matrix(value: &NumericMatrix) -> BuiltinResult<DMatrix<Complex64>> {
         NumericMatrix::Complex(tensor) => Ok(DMatrix::from_column_slice(
             tensor.rows,
             tensor.cols,
-            &tensor
-                .data
-                .iter()
-                .copied()
-                .map(|(re, im)| Complex64::new(re, im))
-                .collect::<Vec<_>>(),
+            &tensor::complex_tensor_values_complex64(tensor),
         )),
     }
 }
@@ -951,7 +946,7 @@ fn rhs_columns(value: &NumericMatrix, rows: usize) -> BuiltinResult<usize> {
             rhs_columns_from_shape(tensor.rows, tensor.cols, tensor, rows)
         }
         NumericMatrix::Complex(tensor) => {
-            if is_complex_vector(tensor) && tensor.data.len() == rows {
+            if is_complex_vector(tensor) && tensor::complex_tensor_element_len(tensor) == rows {
                 Ok(1)
             } else if tensor.rows == rows {
                 Ok(tensor.cols)
@@ -970,7 +965,7 @@ fn rhs_columns_from_shape(
     tensor: &Tensor,
     rows: usize,
 ) -> BuiltinResult<usize> {
-    if is_vector(tensor) && tensor.data.len() == rows {
+    if is_vector(tensor) && tensor::tensor_element_len(tensor) == rows {
         Ok(1)
     } else if tensor_rows == rows {
         Ok(tensor_cols)
@@ -997,8 +992,8 @@ fn matrix_cols(value: &NumericMatrix) -> usize {
 
 fn numeric_len(value: &NumericMatrix) -> usize {
     match value {
-        NumericMatrix::Real(tensor) => tensor.data.len(),
-        NumericMatrix::Complex(tensor) => tensor.data.len(),
+        NumericMatrix::Real(tensor) => tensor::tensor_element_len(tensor),
+        NumericMatrix::Complex(tensor) => tensor::complex_tensor_element_len(tensor),
     }
 }
 
@@ -1154,6 +1149,12 @@ mod tests {
         Value::Tensor(tensor)
     }
 
+    fn mirrorless_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
+        tensor.data.clear();
+        Value::Tensor(tensor)
+    }
+
     fn complex_tensor(data: Vec<(f64, f64)>, rows: usize, cols: usize) -> Value {
         Value::ComplexTensor(ComplexTensor::new(data, vec![rows, cols]).unwrap())
     }
@@ -1242,6 +1243,20 @@ mod tests {
         let x = tensor_ref(&out[0]);
         assert_eq!(x.shape, vec![2, 1]);
         assert!(x.data.iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn lscov_weighting_length_uses_typed_integer_storage_not_mirror() {
+        let weighting = block_on(parse_weighting(
+            mirrorless_int_tensor(IntegerStorage::U16(vec![1, 2, 3]), 3, 1),
+            3,
+            Algorithm::Orth,
+        ))
+        .unwrap();
+        match weighting {
+            Weighting::Weights(values) => assert_eq!(values, vec![1.0, 2.0, 3.0]),
+            other => panic!("expected vector weighting, got {other:?}"),
+        }
     }
 
     #[test]

@@ -553,13 +553,13 @@ fn evaluate_ecdf(value: Value, options: Options) -> BuiltinResult<EcdfEvaluation
             ),
         ));
     }
-    if tensor.data.is_empty() {
+    let data = tensor::tensor_values_f64(&tensor);
+    if data.is_empty() {
         return Err(invalid_argument(
             ECDF_NAME,
             "ecdf: sample data must be nonempty",
         ));
     }
-    let data = tensor.data;
     let n = data.len();
     let censoring = options.censoring.unwrap_or_else(|| vec![0.0; n]);
     let frequency = options.frequency.unwrap_or_else(|| vec![1.0; n]);
@@ -1124,16 +1124,7 @@ fn integer_scalar(value: &Value) -> Option<IntValue> {
 }
 
 fn tensor_values_f64(tensor: &Tensor) -> Vec<f64> {
-    tensor
-        .integer_storage()
-        .map(|storage| {
-            storage
-                .exact_values()
-                .into_iter()
-                .map(|value| value.to_f64())
-                .collect()
-        })
-        .unwrap_or_else(|| tensor.data.clone())
+    tensor::tensor_values_f64(tensor)
 }
 
 fn column_tensor(data: Vec<f64>) -> BuiltinResult<Tensor> {

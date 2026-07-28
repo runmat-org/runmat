@@ -415,16 +415,7 @@ fn probabilities_from_tensor(tensor: Tensor) -> BuiltinResult<Vec<f64>> {
 }
 
 fn tensor_values_f64(tensor: &Tensor) -> Vec<f64> {
-    tensor
-        .integer_storage()
-        .map(|storage| {
-            storage
-                .exact_values()
-                .into_iter()
-                .map(|value| value.to_f64())
-                .collect()
-        })
-        .unwrap_or_else(|| tensor.data.clone())
+    tensor::tensor_values_f64(tensor)
 }
 
 fn default_probabilities(n: usize) -> Vec<f64> {

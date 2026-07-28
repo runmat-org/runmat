@@ -715,10 +715,9 @@ fn parse_sample(tensor: Tensor, options: FitOptions) -> BuiltinResult<WeightedSa
     if tensor.shape.iter().copied().filter(|dim| *dim > 1).count() > 1 {
         return Err(invalid("fitdist: data must be a vector"));
     }
-    let frequency = options
-        .frequency
-        .unwrap_or_else(|| vec![1.0; tensor.data.len()]);
-    if frequency.len() != tensor.data.len() {
+    let sample_len = tensor::tensor_element_len(&tensor);
+    let frequency = options.frequency.unwrap_or_else(|| vec![1.0; sample_len]);
+    if frequency.len() != sample_len {
         return Err(invalid(
             "fitdist: Frequency must contain one value per observation",
         ));
@@ -1445,6 +1444,12 @@ mod tests {
         Value::Tensor(tensor)
     }
 
+    fn mirrorless_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        tensor.data.clear();
+        Value::Tensor(tensor)
+    }
+
     fn object(value: Value) -> ObjectInstance {
         match value {
             Value::Object(object) => object,
@@ -1533,6 +1538,19 @@ mod tests {
             numeric_vector_property(&typed_object, "ParameterValues").unwrap(),
             vec![7.0]
         );
+    }
+
+    #[test]
+    fn fitdist_sample_length_uses_typed_integer_storage_not_mirror() {
+        let pd = block_on(fitdist_builtin(
+            mirrorless_int_tensor(IntegerStorage::I16(vec![1, 2, 3]), vec![3, 1]),
+            Value::String("Normal".into()),
+            Vec::new(),
+        ))
+        .unwrap();
+        let object = object(pd);
+        let values = numeric_vector_property(&object, "ParameterValues").unwrap();
+        assert!((values[0] - 2.0).abs() < 1.0e-12);
     }
 
     #[test]
