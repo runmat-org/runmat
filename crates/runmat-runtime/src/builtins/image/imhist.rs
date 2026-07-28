@@ -355,13 +355,27 @@ fn parse_call(image: Value, rest: &[Value]) -> BuiltinResult<ParsedCall> {
 }
 
 fn parse_optional_bin_count(value: &Value) -> BuiltinResult<Option<usize>> {
+    if let Some(bins) = integer_scalar_bin_count(value)? {
+        validate_bin_count(bins)?;
+        return Ok(Some(bins));
+    }
     let Some(raw) = scalar_number(value) else {
         return Ok(None);
     };
     if !raw.is_finite() || raw < 1.0 || (raw.round() - raw).abs() > INTEGER_TOL {
         return Err(invalid("bin count must be a positive integer scalar"));
     }
-    let bins = raw.round() as usize;
+    let rounded = raw.round();
+    if !fits_platform_usize(rounded) {
+        return Err(invalid("bin count is outside the supported platform range"));
+    }
+    if rounded > MAX_BINS as f64 {
+        return Err(invalid(format!(
+            "bin count {:.0} exceeds maximum supported bin count {MAX_BINS}",
+            rounded
+        )));
+    }
+    let bins = rounded as usize;
     validate_bin_count(bins)?;
     Ok(Some(bins))
 }
@@ -732,6 +746,27 @@ fn scalar_number(value: &Value) -> Option<f64> {
     }
 }
 
+fn integer_scalar_bin_count(value: &Value) -> BuiltinResult<Option<usize>> {
+    let integer = match value {
+        Value::Int(value) => Some(value.clone()),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0)),
+        _ => None,
+    };
+    let Some(integer) = integer else {
+        return Ok(None);
+    };
+    integer
+        .try_to_usize()
+        .ok_or_else(|| invalid("bin count is outside the supported platform range"))
+        .map(Some)
+}
+
+fn fits_platform_usize(value: f64) -> bool {
+    value < usize::MAX as f64 || (usize::BITS < 64 && value == usize::MAX as f64)
+}
+
 fn linspace(start: f64, stop: f64, count: usize) -> Vec<f64> {
     if count == 0 {
         return Vec::new();
@@ -957,6 +992,36 @@ mod tests {
         bins.data.clear();
 
         assert_eq!(scalar_number(&Value::Tensor(bins)), Some(2026.0));
+    }
+
+    #[test]
+    fn bin_count_parser_preserves_typed_integer_scalar_bounds() {
+        assert_eq!(
+            parse_optional_bin_count(&Value::Int(IntValue::U32(1024))).unwrap(),
+            Some(1024)
+        );
+
+        let bins = Tensor::new_integer(IntegerStorage::U64(vec![2048]), vec![1, 1])
+            .expect("typed bin count");
+        assert_eq!(
+            parse_optional_bin_count(&Value::Tensor(bins)).unwrap(),
+            Some(2048)
+        );
+
+        let negative = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
+            .expect("negative bin count");
+        assert!(parse_optional_bin_count(&Value::Tensor(negative)).is_err());
+        assert!(parse_optional_bin_count(&Value::Int(IntValue::U64(MAX_BINS as u64 + 1))).is_err());
+    }
+
+    #[test]
+    fn bin_count_parser_rejects_unrepresentable_double_before_casting() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        assert!(parse_optional_bin_count(&Value::Num(boundary)).is_err());
     }
 
     #[test]

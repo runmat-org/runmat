@@ -540,8 +540,16 @@ fn parse_disk_params(arg: Option<&Value>) -> BuiltinResult<(f64, usize)> {
     if radius < 0.0 {
         return Err(fspecial_error("fspecial: RADIUS must be non-negative"));
     }
-    let extent = radius.ceil() as isize;
-    let size = (2 * extent + 1) as usize;
+    let extent_raw = radius.ceil();
+    if extent_raw > isize::MAX as f64 {
+        return Err(fspecial_error("fspecial: RADIUS is too large"));
+    }
+    let extent = extent_raw as isize;
+    let size = extent
+        .checked_mul(2)
+        .and_then(|value| value.checked_add(1))
+        .and_then(|value| usize::try_from(value).ok())
+        .ok_or_else(|| fspecial_error("fspecial: RADIUS is too large"))?;
     Ok((radius, size))
 }
 
@@ -627,26 +635,45 @@ fn parse_motion_params(
     length_value: Option<&Value>,
     angle_value: Option<&Value>,
 ) -> BuiltinResult<(usize, usize, f64, usize)> {
-    let length_raw = match length_value {
-        None => 9.0,
-        Some(value) => {
-            let len = to_positive_scalar(value, "fspecial: LENGTH must be a positive scalar")?;
-            if len <= 0.0 {
-                return Err(fspecial_error("fspecial: LENGTH must be positive"));
-            }
-            len
-        }
+    let length = parse_motion_length(length_value)?;
+    let kernel_size = if length % 2 == 1 {
+        length
+    } else {
+        length
+            .checked_add(1)
+            .ok_or_else(|| fspecial_error("fspecial: LENGTH is too large"))?
     };
-    let length = length_raw.round() as usize;
-    if length == 0 {
-        return Err(fspecial_error("fspecial: LENGTH must be at least 1"));
-    }
-    let kernel_size = if length % 2 == 1 { length } else { length + 1 };
     let angle_deg = match angle_value {
         None => 0.0,
         Some(value) => to_scalar(value, "fspecial: ANGLE must be a scalar")?,
     };
     Ok((length, kernel_size, angle_deg, 8))
+}
+
+fn parse_motion_length(value: Option<&Value>) -> BuiltinResult<usize> {
+    let Some(value) = value else {
+        return Ok(9);
+    };
+    if let Some(length) = integer_scalar_dimension(value)? {
+        if length == 0 {
+            return Err(fspecial_error("fspecial: LENGTH must be positive"));
+        }
+        return Ok(length);
+    }
+
+    let len = to_positive_scalar(value, "fspecial: LENGTH must be a positive scalar")?;
+    if len <= 0.0 {
+        return Err(fspecial_error("fspecial: LENGTH must be positive"));
+    }
+    let rounded = len.round();
+    if !fits_platform_usize(rounded) {
+        return Err(fspecial_error("fspecial: LENGTH is too large"));
+    }
+    let length = rounded as usize;
+    if length == 0 {
+        return Err(fspecial_error("fspecial: LENGTH must be at least 1"));
+    }
+    Ok(length)
 }
 
 fn parse_unsharp_alpha(arg: Option<&Value>) -> BuiltinResult<f64> {
@@ -683,7 +710,10 @@ fn generate_disk(radius: f64, size: usize) -> BuiltinResult<Tensor> {
             .map_err(|e| fspecial_internal_error(format!("fspecial: {e}")));
     }
 
-    let mut data = vec![0.0f64; size * size];
+    let total = size
+        .checked_mul(size)
+        .ok_or_else(|| fspecial_error("fspecial: RADIUS is too large"))?;
+    let mut data = vec![0.0f64; total];
     let center = (size as isize / 2) as f64;
 
     for row in 0..size {
@@ -718,10 +748,13 @@ fn generate_disk(radius: f64, size: usize) -> BuiltinResult<Tensor> {
 }
 
 fn generate_gaussian(rows: usize, cols: usize, sigma: f64) -> BuiltinResult<Tensor> {
+    let total = rows
+        .checked_mul(cols)
+        .ok_or_else(|| fspecial_error("fspecial: LENGTHS are too large"))?;
     let row_center = (rows as f64 - 1.0) / 2.0;
     let col_center = (cols as f64 - 1.0) / 2.0;
     let denom = 2.0 * sigma * sigma;
-    let mut data = Vec::with_capacity(rows * cols);
+    let mut data = Vec::with_capacity(total);
     let mut sum = 0.0;
     for col in 0..cols {
         let x = col as f64 - col_center;
@@ -761,9 +794,12 @@ fn generate_laplacian(alpha: f64) -> BuiltinResult<Tensor> {
 }
 
 fn generate_log(rows: usize, cols: usize, sigma: f64) -> BuiltinResult<Tensor> {
+    let total = rows
+        .checked_mul(cols)
+        .ok_or_else(|| fspecial_error("fspecial: LENGTHS are too large"))?;
     let row_center = (rows as f64 - 1.0) / 2.0;
     let col_center = (cols as f64 - 1.0) / 2.0;
-    let mut gauss = Vec::with_capacity(rows * cols);
+    let mut gauss = Vec::with_capacity(total);
     let mut gauss_sum = 0.0;
     for col in 0..cols {
         let x = col as f64 - col_center;
@@ -809,12 +845,17 @@ fn generate_motion(
     angle_degrees: f64,
     oversample: usize,
 ) -> BuiltinResult<Tensor> {
-    let mut data = vec![0.0f64; kernel_size * kernel_size];
+    let total = kernel_size
+        .checked_mul(kernel_size)
+        .ok_or_else(|| fspecial_error("fspecial: LENGTH is too large"))?;
+    let total_samples = length
+        .checked_mul(oversample)
+        .ok_or_else(|| fspecial_error("fspecial: LENGTH is too large"))?;
+    let mut data = vec![0.0f64; total];
     let center = (kernel_size as f64 - 1.0) / 2.0;
     let theta = angle_degrees.to_radians();
     let dir_x = theta.cos();
     let dir_y = theta.sin();
-    let total_samples = length * oversample;
     let step = 1.0 / oversample as f64;
     let half = (length as f64 - 1.0) / 2.0;
 
@@ -998,7 +1039,35 @@ fn parse_numeric_dimension(n: f64) -> BuiltinResult<usize> {
     if (rounded - n).abs() > f64::EPSILON {
         return Err(fspecial_error("fspecial: dimensions must be integers"));
     }
+    if !fits_platform_usize(rounded) {
+        return Err(fspecial_error(
+            "fspecial: dimensions are outside the supported platform range",
+        ));
+    }
     Ok(rounded as usize)
+}
+
+fn integer_scalar_dimension(value: &Value) -> BuiltinResult<Option<usize>> {
+    match value {
+        Value::Int(value) => parse_integer_dimension(value).map(Some),
+        Value::Tensor(tensor) => {
+            let Some(storage) = tensor.integer_storage() else {
+                return Ok(None);
+            };
+            if storage.len() != 1 {
+                return Ok(None);
+            }
+            let value = storage
+                .value_at(0)
+                .ok_or_else(|| fspecial_error("fspecial: dimensions must be scalar"))?;
+            parse_integer_dimension(&value).map(Some)
+        }
+        _ => Ok(None),
+    }
+}
+
+fn fits_platform_usize(value: f64) -> bool {
+    value < usize::MAX as f64 || (usize::BITS < 64 && value == usize::MAX as f64)
 }
 
 fn to_scalar(value: &Value, err: &str) -> BuiltinResult<f64> {
@@ -1237,6 +1306,65 @@ pub(crate) mod tests {
             "fspecial: LENGTHS must be positive integers",
         )
         .is_err());
+    }
+
+    #[test]
+    fn fspecial_dimension_parsers_reject_unrepresentable_double_bounds() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+
+        assert!(parse_numeric_dimension(boundary).is_err());
+
+        let dims = Tensor::new(vec![boundary], vec![1, 1]).expect("dims");
+        assert!(parse_lengths_strict(
+            &Value::Tensor(dims),
+            "fspecial: LENGTHS must be positive integers",
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn fspecial_motion_length_preserves_typed_integer_scalar_bounds() {
+        assert_eq!(
+            parse_motion_length(Some(&Value::Int(IntValue::U64(17)))).unwrap(),
+            17
+        );
+
+        let tensor =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![21]), vec![1, 1])
+                .expect("typed scalar length");
+        assert_eq!(
+            parse_motion_length(Some(&Value::Tensor(tensor))).unwrap(),
+            21
+        );
+
+        let negative =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![-1]), vec![1, 1])
+                .expect("negative");
+        assert!(parse_motion_length(Some(&Value::Tensor(negative))).is_err());
+
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        assert!(parse_motion_length(Some(&Value::Num(boundary))).is_err());
+    }
+
+    #[test]
+    fn fspecial_generators_reject_overflowing_dimensions_before_allocation() {
+        assert!(generate_gaussian(usize::MAX, 2, 0.5).is_err());
+        assert!(generate_log(usize::MAX, 2, 0.5).is_err());
+        assert!(generate_motion(usize::MAX, usize::MAX, 0.0, 8).is_err());
+    }
+
+    #[test]
+    fn fspecial_disk_rejects_unrepresentable_radius_before_size_cast() {
+        let huge_radius = (isize::MAX as f64) / 2.0 + 1.0;
+        assert!(parse_disk_params(Some(&Value::Num(huge_radius))).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
