@@ -399,7 +399,11 @@ fn parse_n_number(raw: f64) -> BuiltinResult<usize> {
         return Err(sphere_error(&SPHERE_ERROR_INVALID_N, "n must be finite"));
     }
     let rounded = raw.round();
-    if (rounded - raw).abs() > 1e-6 || rounded < 0.0 || rounded > usize::MAX as f64 {
+    if (rounded - raw).abs() > 1e-6
+        || rounded < 0.0
+        || rounded > usize::MAX as f64
+        || (usize::BITS == 64 && rounded == usize::MAX as f64)
+    {
         return Err(sphere_error(
             &SPHERE_ERROR_INVALID_N,
             "n must be a non-negative integer representable on this platform",
@@ -656,6 +660,14 @@ mod tests {
         assert_eq!(err.identifier(), Some("RunMat:sphere:InvalidArgument"));
 
         let err = call(vec![Value::Num(f64::INFINITY)]).unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:sphere:InvalidArgument"));
+
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        let err = call(vec![Value::Num(boundary)]).unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:sphere:InvalidArgument"));
     }
 

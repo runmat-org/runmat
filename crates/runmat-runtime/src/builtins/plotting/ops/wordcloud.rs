@@ -1285,7 +1285,11 @@ fn numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
 
 fn nonnegative_integer(value: &Value, name: &str) -> BuiltinResult<usize> {
     let scalar = numeric_scalar(value, name)?;
-    if scalar.fract() != 0.0 || scalar < 0.0 || scalar > usize::MAX as f64 {
+    if scalar.fract() != 0.0
+        || scalar < 0.0
+        || scalar > usize::MAX as f64
+        || (usize::BITS == 64 && scalar == usize::MAX as f64)
+    {
         return Err(wordcloud_error(format!(
             "{name} must be a nonnegative integer"
         )));
@@ -1765,6 +1769,16 @@ mod tests {
         let err = wordcloud_builtin(vec![lda, Value::Num(1.0)])
             .expect_err("LDA model should be explicit unsupported");
         assert!(err.to_string().contains("ldaModel"));
+    }
+
+    #[test]
+    fn wordcloud_rejects_unrepresentable_integer_options_before_cast() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        assert!(max_display_words_value(&Value::Num(boundary)).is_err());
     }
 
     fn tokenized_document_object(documents: Vec<Vec<String>>) -> Value {

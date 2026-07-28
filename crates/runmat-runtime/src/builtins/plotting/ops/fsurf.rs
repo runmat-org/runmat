@@ -452,7 +452,11 @@ fn parse_mesh_density(value: &Value) -> BuiltinResult<usize> {
         return Err(fsurf_invalid("MeshDensity must be finite"));
     }
     let rounded = raw.round();
-    if (rounded - raw).abs() > 1.0e-9 || rounded < 2.0 {
+    if (rounded - raw).abs() > 1.0e-9
+        || rounded < 2.0
+        || rounded > usize::MAX as f64
+        || (usize::BITS == 64 && rounded == usize::MAX as f64)
+    {
         return Err(fsurf_invalid(
             "MeshDensity must be an integer greater than or equal to 2",
         ));
@@ -904,6 +908,13 @@ mod tests {
         .expect("negative density");
         negative.data.clear();
         assert!(parse_mesh_density(&Value::Tensor(negative)).is_err());
+
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        assert!(parse_mesh_density(&Value::Num(boundary)).is_err());
     }
 
     #[test]

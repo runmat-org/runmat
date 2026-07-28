@@ -806,6 +806,18 @@ fn parse_scalar_level_count(value: f64, context: &str) -> BuiltinResult<ContourL
             format!("{context}: level count must be positive"),
         ));
     }
+    if (rounded - value).abs() > f64::EPSILON {
+        return Err(plotting_error(
+            context,
+            format!("{context}: level count must be an integer"),
+        ));
+    }
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+        return Err(plotting_error(
+            context,
+            format!("{context}: level count is too large"),
+        ));
+    }
     Ok(ContourLevelSpec::Count(rounded as usize))
 }
 
@@ -2341,6 +2353,14 @@ pub(crate) mod tests {
         .expect("negative level count");
         negative.data.clear();
         assert!(parse_level_spec(Value::Tensor(negative), "contour").is_err());
+
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        assert!(parse_level_spec(Value::Num(boundary), "contour").is_err());
+        assert!(parse_level_spec(Value::Num(2.5), "contour").is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

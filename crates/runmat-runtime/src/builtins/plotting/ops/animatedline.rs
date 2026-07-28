@@ -362,10 +362,16 @@ fn maximum_from_value(value: &Value) -> BuiltinResult<Option<usize>> {
     if !maximum.is_finite() || maximum <= 0.0 {
         return Err(animatedline_err("MaximumNumPoints must be positive or Inf"));
     }
-    if maximum > usize::MAX as f64 {
+    let rounded = maximum.round();
+    if (rounded - maximum).abs() > f64::EPSILON {
+        return Err(animatedline_err(
+            "MaximumNumPoints must be a positive integer or Inf",
+        ));
+    }
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
         return Err(animatedline_err("MaximumNumPoints is too large"));
     }
-    Ok(Some(maximum.floor() as usize))
+    Ok(Some(rounded as usize))
 }
 
 fn trim_initial_points(
@@ -456,6 +462,17 @@ mod tests {
         .unwrap();
         let x = get_builtin(vec![handle, Value::String("XData".into())]).unwrap();
         assert_eq!(tensor_data(x), vec![2.0, 3.0]);
+    }
+
+    #[test]
+    fn animatedline_rejects_unrepresentable_maximum_before_cast() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        assert!(maximum_from_value(&Value::Num(boundary)).is_err());
+        assert!(maximum_from_value(&Value::Num(2.5)).is_err());
     }
 
     #[test]

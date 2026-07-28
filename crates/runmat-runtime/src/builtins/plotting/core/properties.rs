@@ -5116,13 +5116,20 @@ fn animated_line_maximum_from_value(
             format!("{builtin}: MaximumNumPoints must be positive or Inf"),
         ));
     }
-    if maximum > usize::MAX as f64 {
+    let rounded = maximum.round();
+    if (rounded - maximum).abs() > f64::EPSILON {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: MaximumNumPoints must be a positive integer or Inf"),
+        ));
+    }
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: MaximumNumPoints is too large"),
         ));
     }
-    Ok(Some(maximum.floor() as usize))
+    Ok(Some(rounded as usize))
 }
 
 fn apply_reference_line_property(

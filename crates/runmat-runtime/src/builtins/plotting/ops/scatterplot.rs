@@ -515,7 +515,7 @@ fn parse_nonnegative_integer(value: &Value, name: &str) -> BuiltinResult<usize> 
             &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
         ));
     }
-    if scalar > (usize::MAX as f64) {
+    if scalar > usize::MAX as f64 || (usize::BITS == 64 && scalar == usize::MAX as f64) {
         return Err(scatterplot_error(
             format!("scatterplot: {name} is too large"),
             &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
@@ -686,6 +686,16 @@ mod tests {
         .unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:scatterplot:InvalidArgument"));
         assert!(!err.to_string().contains("PlotFailed"));
+    }
+
+    #[test]
+    fn scatterplot_rejects_unrepresentable_integer_options_before_cast() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        assert!(parse_nonnegative_integer(&Value::Num(boundary), "n").is_err());
     }
 
     #[test]

@@ -976,6 +976,9 @@ fn parse_num_bins_value(value: &Value) -> BuiltinResult<usize> {
     if (scalar - rounded).abs() > 1e-9 {
         return Err(hist_err("hist: NumBins must be an integer"));
     }
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+        return Err(hist_err("hist: NumBins is too large"));
+    }
     Ok(rounded as usize)
 }
 
@@ -1045,11 +1048,17 @@ fn parse_center_vector(tensor: Tensor) -> BuiltinResult<HistBinSpec> {
 }
 
 fn parse_bin_count_value(value: f64) -> BuiltinResult<HistBinSpec> {
-    if value.is_finite() && value > 0.0 {
-        Ok(HistBinSpec::Count(value.round() as usize))
-    } else {
-        Err(hist_err("hist: bin count must be positive"))
+    if !value.is_finite() || value <= 0.0 {
+        return Err(hist_err("hist: bin count must be positive"));
     }
+    let rounded = value.round();
+    if (value - rounded).abs() > 1e-9 {
+        return Err(hist_err("hist: bin count must be an integer"));
+    }
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+        return Err(hist_err("hist: bin count is too large"));
+    }
+    Ok(HistBinSpec::Count(rounded as usize))
 }
 
 fn exact_integer_scalar(value: &Value) -> Option<IntValue> {
@@ -1638,6 +1647,15 @@ pub(crate) mod tests {
         .expect("negative bin count");
         negative.data.clear();
         assert!(parse_hist_bins(Some(Value::Tensor(negative)), 10).is_err());
+
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        assert!(parse_num_bins_value(&Value::Num(boundary)).is_err());
+        assert!(parse_hist_bins(Some(Value::Num(boundary)), 10).is_err());
+        assert!(parse_hist_bins(Some(Value::Num(2.5)), 10).is_err());
     }
 
     #[test]

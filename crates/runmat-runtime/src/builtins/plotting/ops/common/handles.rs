@@ -73,14 +73,14 @@ pub fn handle_from_scalar(value: f64, ctx: &str) -> BuiltinResult<FigureHandle> 
             format!("{ctx}: figure handle must be finite"),
         ));
     }
-    let rounded = value.round() as i64;
-    if rounded <= 0 {
+    let rounded = value.round();
+    if rounded <= 0.0 {
         return Err(plotting_error(
             ctx,
             format!("{ctx}: figure handle must be positive"),
         ));
     }
-    if rounded > u32::MAX as i64 {
+    if (rounded - value).abs() > f64::EPSILON || rounded > u32::MAX as f64 {
         return Err(plotting_error(
             ctx,
             format!("{ctx}: figure handle is too large"),
@@ -133,5 +133,11 @@ mod tests {
         let handles = handles_from_value(&value, "figure").expect("handles");
 
         assert_eq!(handles, vec![FigureHandle::from(1), FigureHandle::from(2)]);
+    }
+
+    #[test]
+    fn handle_parser_rejects_unrepresentable_float_before_cast() {
+        assert!(handle_from_scalar((u32::MAX as f64) + 1.0, "figure").is_err());
+        assert!(handle_from_scalar(1.5, "figure").is_err());
     }
 }
