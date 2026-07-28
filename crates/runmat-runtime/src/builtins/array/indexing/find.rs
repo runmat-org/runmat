@@ -623,7 +623,9 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
                 return FindResult::new(shape, indices, find_values_for_tensor(tensor, &[]));
             }
 
-            let len = tensor.data.len();
+            let len = typed_storage
+                .map(|storage| storage.len())
+                .unwrap_or(tensor.data.len());
             match options.direction {
                 FindDirection::First => {
                     for idx in 0..len {
@@ -678,7 +680,9 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
                 return FindResult::new(shape, indices, values);
             }
 
-            let len = tensor.data.len();
+            let len = typed_storage
+                .map(|storage| storage.len())
+                .unwrap_or(tensor.data.len());
             match options.direction {
                 FindDirection::First => {
                     for idx in 0..len {
@@ -1155,11 +1159,12 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn find_values_preserve_exact_uint64_storage() {
-        let input = Tensor::new_integer(
+        let mut input = Tensor::new_integer(
             IntegerStorage::U64(vec![0, u64::MAX, 1_u64 << 63, 0]),
             vec![2, 2],
         )
         .expect("integer tensor");
+        input.data.clear();
         let eval = evaluate(Value::Tensor(input), &[]).expect("evaluate");
         let values = eval.values_value().expect("values");
         let Value::Tensor(values) = values else {
@@ -1176,7 +1181,7 @@ pub(crate) mod tests {
     fn find_indices_read_typed_integer_storage_exactly() {
         let mut input = Tensor::new_integer(IntegerStorage::I16(vec![0, -7, 0, 9]), vec![2, 2])
             .expect("integer tensor");
-        input.data = vec![0.0, 0.0, 0.0, 0.0];
+        input.data.clear();
 
         let value = find_builtin(Value::Tensor(input), Vec::new()).expect("find");
 
@@ -1193,7 +1198,7 @@ pub(crate) mod tests {
     fn find_last_indices_read_typed_integer_storage_exactly() {
         let mut input = Tensor::new_integer(IntegerStorage::U16(vec![5, 0, 3, 0]), vec![2, 2])
             .expect("integer tensor");
-        input.data = vec![0.0, 0.0, 0.0, 0.0];
+        input.data.clear();
 
         let value = find_builtin(
             Value::Tensor(input),
@@ -1202,6 +1207,29 @@ pub(crate) mod tests {
         .expect("find");
 
         assert_eq!(value, Value::Num(3.0));
+    }
+
+    #[test]
+    fn find_reads_mirrorless_typed_complex_integer_storage() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![0, -7, 0, 9]),
+            IntegerStorage::I16(vec![0, 0, 5, 0]),
+        )
+        .expect("complex integer storage");
+        let mut input = ComplexTensor::new_integer(storage, vec![2, 2]).expect("complex tensor");
+        input.data.clear();
+
+        let eval = evaluate(Value::ComplexTensor(input), &[]).expect("find");
+        let linear = tensor::value_into_tensor_for("find", eval.linear_value().expect("linear"))
+            .expect("linear tensor");
+        assert_eq!(linear.data, vec![2.0, 3.0, 4.0]);
+        let values = eval.values_value().expect("values");
+        let Value::ComplexTensor(values) = values else {
+            panic!("expected typed complex tensor values");
+        };
+        let storage = values.integer_data.as_ref().expect("typed complex values");
+        assert_eq!(storage.real, IntegerStorage::I16(vec![-7, 0, 9]));
+        assert_eq!(storage.imag, IntegerStorage::I16(vec![0, 5, 0]));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
