@@ -1775,7 +1775,9 @@ fn parse_positive_scalar(value: &Value, fn_name: &str, option: &str) -> BuiltinR
 
 fn parse_ngram_range(value: &Value) -> BuiltinResult<(usize, usize)> {
     let values = match value {
-        Value::Tensor(tensor) if tensor.data.len() == 2 => tensor_utils::tensor_values_f64(tensor),
+        Value::Tensor(tensor) if tensor_utils::tensor_element_len(tensor) == 2 => {
+            tensor_utils::tensor_values_f64(tensor)
+        }
         other => {
             return Err(embedding_error(
                 "trainWordEmbedding",
@@ -2585,7 +2587,7 @@ mod tests {
 
     fn poisoned_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
         let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
+        tensor.data.clear();
         tensor
     }
 

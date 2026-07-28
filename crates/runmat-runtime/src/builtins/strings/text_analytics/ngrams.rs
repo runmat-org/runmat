@@ -324,7 +324,9 @@ fn parse_options(args: &[Value], start: usize) -> BuiltinResult<Option<Vec<usize
 fn parse_lengths(value: &Value) -> BuiltinResult<Vec<usize>> {
     let raw = match value {
         Value::Num(n) => vec![*n],
-        Value::Tensor(tensor) if !tensor.data.is_empty() => tensor_utils::tensor_values_f64(tensor),
+        Value::Tensor(tensor) if tensor_utils::tensor_element_len(tensor) != 0 => {
+            tensor_utils::tensor_values_f64(tensor)
+        }
         other => {
             return Err(ngrams_error(format!(
             "bagOfNgrams: NgramLengths must be a positive integer scalar or vector, got {other:?}"
@@ -732,11 +734,26 @@ mod tests {
     fn parse_lengths_reads_typed_integer_storage_exactly() {
         let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![1, 3]), vec![1, 2])
             .expect("integer tensor");
-        tensor.data.fill(f64::NAN);
+        tensor.data.clear();
 
         assert_eq!(
             parse_lengths(&Value::Tensor(tensor)).expect("lengths"),
             vec![1, 3]
+        );
+    }
+
+    #[test]
+    fn parse_lengths_rejects_empty_typed_integer_storage_without_mirror() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 0]).expect("empty");
+        tensor.data.clear();
+
+        let err = parse_lengths(&Value::Tensor(tensor)).expect_err("empty should reject");
+        assert!(
+            err.message()
+                .contains("NgramLengths must be a positive integer scalar or vector"),
+            "{}",
+            err.message()
         );
     }
 
