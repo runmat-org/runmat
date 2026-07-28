@@ -396,13 +396,13 @@ fn coordinates_from_matrix(
 
 fn tensor_vector(value: &Value, name: &str, builtin: &'static str) -> BuiltinResult<Vec<f64>> {
     let tensor = tensor_from_value_local(value, builtin)?;
-    if tensor.data.is_empty() {
+    if tensor_utils::tensor_element_len(&tensor) == 0 {
         return Err(textscatter_error(
             builtin,
             format!("{name} must be a nonempty numeric vector"),
         ));
     }
-    let values = tensor.data;
+    let values = tensor_utils::tensor_into_values_f64(tensor);
     validate_finite(&values, name, builtin)?;
     Ok(values)
 }
@@ -1516,6 +1516,22 @@ mod tests {
         assert_eq!(x, vec![1.0, 2.0]);
         assert_eq!(y, vec![3.0, 4.0]);
         assert_eq!(z.unwrap(), vec![5.0, 6.0]);
+    }
+
+    #[test]
+    fn textscatter_vector_coordinates_read_typed_integer_storage_exactly() {
+        let _guard = setup();
+        let labels =
+            runmat_builtins::StringArray::new(vec!["a".to_string(), "b".to_string()], vec![1, 2])
+                .expect("labels");
+        let handle = textscatter3_builtin(vec![
+            Value::Tensor(int_tensor(vec![1, 2], 1, 2)),
+            Value::Tensor(int_tensor(vec![3, 4], 1, 2)),
+            Value::Tensor(int_tensor(vec![5, 6], 1, 2)),
+            Value::StringArray(labels),
+        ])
+        .expect("textscatter3");
+        assert!(handle.is_finite());
     }
 
     #[test]
