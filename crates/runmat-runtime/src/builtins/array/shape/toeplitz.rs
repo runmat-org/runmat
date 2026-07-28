@@ -8,6 +8,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::math::elementwise::conj::conjugate_integer_imaginary_storage;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -133,7 +134,7 @@ impl InputVector {
             }),
             Value::Int(value) => Ok(Self::TypedInteger(IntegerStorage::from_scalar(value))),
             Value::Tensor(tensor) => {
-                validate_vector_shape(&tensor.shape, tensor.data.len())?;
+                validate_vector_shape(&tensor.shape, tensor_utils::tensor_element_len(&tensor))?;
                 Ok(match tensor.integer_data {
                     Some(storage) => Self::TypedInteger(storage),
                     None => Self::Real {
@@ -144,7 +145,10 @@ impl InputVector {
             }
             Value::Complex(re, im) => Ok(Self::Complex(vec![(re, im)])),
             Value::ComplexTensor(tensor) => {
-                validate_vector_shape(&tensor.shape, tensor.data.len())?;
+                validate_vector_shape(
+                    &tensor.shape,
+                    tensor_utils::complex_tensor_element_len(&tensor),
+                )?;
                 Ok(match tensor.integer_data {
                     Some(storage) => Self::TypedComplex(storage),
                     None => Self::Complex(tensor.data),
@@ -470,7 +474,7 @@ fn error_with_detail(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage};
+    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage};
 
     fn row(values: &[f64]) -> Value {
         Value::Tensor(Tensor::new(values.to_vec(), vec![1, values.len()]).expect("tensor"))
@@ -561,7 +565,8 @@ mod tests {
                     values[0].clone(),
                 ])
                 .expect("expected toeplitz storage");
-            let input = Tensor::new_integer(storage, vec![1, 3]).expect("integer vector");
+            let mut input = Tensor::new_integer(storage, vec![1, 3]).expect("integer vector");
+            input.data.clear();
             let Value::Tensor(output) =
                 block_on(toeplitz_builtin(vec![Value::Tensor(input)])).expect("toeplitz")
             else {
@@ -571,13 +576,15 @@ mod tests {
             assert_eq!(output.integer_storage(), Some(&expected));
         }
 
-        let column = Tensor::new_integer(IntegerStorage::U64(vec![7, u64::MAX]), vec![2, 1])
+        let mut column = Tensor::new_integer(IntegerStorage::U64(vec![7, u64::MAX]), vec![2, 1])
             .expect("column");
-        let row = Tensor::new_integer(
+        column.data.clear();
+        let mut row = Tensor::new_integer(
             IntegerStorage::U64(vec![7, 9_007_199_254_740_993]),
             vec![1, 2],
         )
         .expect("row");
+        row.data.clear();
         let Value::Tensor(output) = block_on(toeplitz_builtin(vec![
             Value::Tensor(column),
             Value::Tensor(row),
@@ -604,6 +611,34 @@ mod tests {
         assert_eq!(
             scalar.integer_storage(),
             Some(&IntegerStorage::U64(vec![u64::MAX]))
+        );
+    }
+
+    #[test]
+    fn toeplitz_typed_complex_integer_vector_shape_uses_storage_len_not_mirror() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![1, 2, 3]),
+            IntegerStorage::I16(vec![4, 5, 6]),
+        )
+        .expect("complex integer storage");
+        let mut input = ComplexTensor::new_integer(storage, vec![1, 3]).expect("complex vector");
+        input.data.clear();
+
+        let Value::ComplexTensor(output) =
+            block_on(toeplitz_builtin(vec![Value::ComplexTensor(input)])).expect("toeplitz")
+        else {
+            panic!("expected exact complex integer tensor");
+        };
+
+        assert_eq!(output.shape, vec![3, 3]);
+        let storage = output.integer_data.expect("typed complex storage");
+        assert_eq!(
+            storage.real,
+            IntegerStorage::I16(vec![1, 2, 3, 2, 1, 2, 3, 2, 1])
+        );
+        assert_eq!(
+            storage.imag,
+            IntegerStorage::I16(vec![4, -5, -6, 5, 4, -5, 6, 5, 4])
         );
     }
 
