@@ -953,11 +953,7 @@ fn coefficients_from_property(
         }
         Value::ComplexTensor(tensor) => {
             ensure_vector_shape(name, &tensor.shape, builtin)?;
-            Ok(tensor
-                .data
-                .iter()
-                .map(|(re, im)| Complex64::new(*re, *im))
-                .collect())
+            Ok(tensor::complex_tensor_values_complex64(tensor))
         }
         Value::Num(n) => Ok(vec![Complex64::new(*n, 0.0)]),
         Value::Int(i) => Ok(vec![Complex64::new(i.to_f64(), 0.0)]),
@@ -1299,6 +1295,24 @@ mod tests {
         assert_eq!(
             block_on(parse_coefficients("numerator", value, "tf")).expect("coefficients"),
             vec![Complex64::new(1.0, 2.0), Complex64::new(3.0, -4.0)]
+        );
+    }
+
+    #[test]
+    fn coefficients_from_property_reads_complex_typed_integer_storage_exactly() {
+        let mut object = ObjectInstance::new(TF_CLASS.to_string());
+        object.properties.insert(
+            "Numerator".to_string(),
+            poisoned_complex_integer_tensor(
+                IntegerStorage::I16(vec![5, 7]),
+                IntegerStorage::I16(vec![-6, 8]),
+                vec![1, 2],
+            ),
+        );
+
+        assert_eq!(
+            coefficients_from_property(&object, "Numerator", "tf").expect("coefficients"),
+            vec![Complex64::new(5.0, -6.0), Complex64::new(7.0, 8.0)]
         );
     }
 }
