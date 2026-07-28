@@ -1160,25 +1160,28 @@ fn conjugate_transpose(value: Value) -> BuiltinResult<Value> {
         Value::Tensor(tensor) => {
             let rows = tensor.rows();
             let cols = tensor.cols();
-            let mut data = vec![0.0; tensor.data.len()];
+            let dtype = tensor.dtype;
+            let values = tensor::tensor_into_values_f64(tensor);
+            let mut data = vec![0.0; values.len()];
             for row in 0..rows {
                 for col in 0..cols {
-                    data[col + row * cols] = tensor.data[row + col * rows];
+                    data[col + row * cols] = values[row + col * rows];
                 }
             }
             Ok(Value::Tensor(
-                Tensor::new_with_dtype(data, vec![cols, rows], tensor.dtype)
+                Tensor::new_with_dtype(data, vec![cols, rows], dtype)
                     .map_err(|e| internal(format!("decomposition: {e}")))?,
             ))
         }
         Value::ComplexTensor(tensor) => {
             let rows = tensor.rows;
             let cols = tensor.cols;
-            let mut data = vec![(0.0, 0.0); tensor.data.len()];
+            let values = tensor::complex_tensor_into_values_complex64(tensor);
+            let mut data = vec![(0.0, 0.0); values.len()];
             for row in 0..rows {
                 for col in 0..cols {
-                    let (re, im) = tensor.data[row + col * rows];
-                    data[col + row * cols] = (re, -im);
+                    let value = values[row + col * rows];
+                    data[col + row * cols] = (value.re, -value.im);
                 }
             }
             Ok(Value::ComplexTensor(
@@ -1197,35 +1200,39 @@ fn scale_matrix(value: Value, scale: (f64, f64)) -> BuiltinResult<Value> {
         return Ok(value);
     }
     match value {
-        Value::Tensor(tensor) if scale.1 == 0.0 => Ok(Value::Tensor(
-            Tensor::new_with_dtype(
-                tensor
-                    .data
-                    .into_iter()
-                    .map(|value| value * scale.0)
-                    .collect(),
-                tensor.shape,
-                tensor.dtype,
-            )
-            .map_err(|e| internal(format!("decomposition: {e}")))?,
-        )),
-        Value::Tensor(tensor) => Ok(Value::ComplexTensor(
-            ComplexTensor::new(
-                tensor
-                    .data
-                    .into_iter()
-                    .map(|value| complex_mul((value, 0.0), scale))
-                    .collect(),
-                tensor.shape,
-            )
-            .map_err(|e| internal(format!("decomposition: {e}")))?,
-        )),
+        Value::Tensor(tensor) if scale.1 == 0.0 => {
+            let shape = tensor.shape.clone();
+            let dtype = tensor.dtype;
+            Ok(Value::Tensor(
+                Tensor::new_with_dtype(
+                    tensor::tensor_into_values_f64(tensor)
+                        .into_iter()
+                        .map(|value| value * scale.0)
+                        .collect(),
+                    shape,
+                    dtype,
+                )
+                .map_err(|e| internal(format!("decomposition: {e}")))?,
+            ))
+        }
+        Value::Tensor(tensor) => {
+            let shape = tensor.shape.clone();
+            Ok(Value::ComplexTensor(
+                ComplexTensor::new(
+                    tensor::tensor_into_values_f64(tensor)
+                        .into_iter()
+                        .map(|value| complex_mul((value, 0.0), scale))
+                        .collect(),
+                    shape,
+                )
+                .map_err(|e| internal(format!("decomposition: {e}")))?,
+            ))
+        }
         Value::ComplexTensor(tensor) => {
-            let shape = tensor.shape;
-            let data = tensor
-                .data
+            let shape = tensor.shape.clone();
+            let data = tensor::complex_tensor_into_values_complex64(tensor)
                 .into_iter()
-                .map(|value| complex_mul(value, scale))
+                .map(|value| complex_mul((value.re, value.im), scale))
                 .collect();
             Ok(complex_tensor_into_value(
                 ComplexTensor::new(data, shape)
@@ -1372,7 +1379,7 @@ fn complex_div(lhs: (f64, f64), rhs: (f64, f64)) -> BuiltinResult<(f64, f64)> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_builtins::{IntegerComplexStorage, IntegerStorage};
 
     fn tensor(data: &[f64], rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data.to_vec(), vec![rows, cols]).unwrap())
@@ -1380,6 +1387,24 @@ mod tests {
 
     fn complex_tensor(data: &[(f64, f64)], rows: usize, cols: usize) -> Value {
         Value::ComplexTensor(ComplexTensor::new(data.to_vec(), vec![rows, cols]).unwrap())
+    }
+
+    fn mirrorless_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
+        tensor.data.clear();
+        Value::Tensor(tensor)
+    }
+
+    fn mirrorless_complex_int_tensor(
+        real: IntegerStorage,
+        imag: IntegerStorage,
+        shape: Vec<usize>,
+    ) -> Value {
+        let mut tensor =
+            ComplexTensor::new_integer(IntegerComplexStorage::new(real, imag).unwrap(), shape)
+                .unwrap();
+        tensor.data.clear();
+        Value::ComplexTensor(tensor)
     }
 
     fn call_constructor(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -1475,6 +1500,70 @@ mod tests {
         let values = approx_vec(result);
         assert!((values[0] - 3.0).abs() < 1e-12);
         assert!((values[1] + 5.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn stored_matrix_helpers_read_typed_integer_storage_exactly() {
+        let matrix = mirrorless_int_tensor(IntegerStorage::I16(vec![1, 2, 3, 4, 5, 6]), vec![2, 3]);
+
+        match conjugate_transpose(matrix).expect("ctranspose") {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![3, 2]);
+                assert_eq!(
+                    tensor::tensor_values_f64(&tensor),
+                    vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]
+                );
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+
+        let scaled = scale_matrix(
+            mirrorless_int_tensor(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2]),
+            (2.0, 0.0),
+        )
+        .expect("scale");
+        match scaled {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor::tensor_values_f64(&tensor), vec![2.0, 4.0, 6.0, 8.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stored_matrix_helpers_read_typed_complex_integer_storage_exactly() {
+        let matrix = mirrorless_complex_int_tensor(
+            IntegerStorage::I16(vec![1, 2, 3, 4]),
+            IntegerStorage::I16(vec![5, 6, 7, 8]),
+            vec![2, 2],
+        );
+
+        match conjugate_transpose(matrix).expect("ctranspose") {
+            Value::ComplexTensor(tensor) => {
+                assert_eq!(tensor.shape, vec![2, 2]);
+                assert_eq!(
+                    tensor.data,
+                    vec![(1.0, -5.0), (3.0, -7.0), (2.0, -6.0), (4.0, -8.0)]
+                );
+            }
+            other => panic!("expected complex tensor, got {other:?}"),
+        }
+
+        let scaled = scale_matrix(
+            mirrorless_complex_int_tensor(
+                IntegerStorage::I16(vec![1, 2]),
+                IntegerStorage::I16(vec![3, 4]),
+                vec![2, 1],
+            ),
+            (2.0, 0.0),
+        )
+        .expect("scale");
+        match scaled {
+            Value::ComplexTensor(tensor) => {
+                assert_eq!(tensor.data, vec![(2.0, 6.0), (4.0, 8.0)]);
+            }
+            other => panic!("expected complex tensor, got {other:?}"),
+        }
     }
 
     #[test]
