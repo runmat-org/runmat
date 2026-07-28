@@ -562,7 +562,7 @@ async fn vector_parameter(
     label: &str,
 ) -> BuiltinResult<Vec<f64>> {
     let tensor = value_to_matrix(name, value).await?;
-    if tensor.data.len() != expected_len {
+    if tensor::tensor_element_len(&tensor) != expected_len {
         return Err(distance_error(
             name,
             format!("{name}: {label} length must match the number of columns"),
@@ -1512,7 +1512,7 @@ fn vector_to_square(tensor: Tensor) -> BuiltinResult<Tensor> {
             "squareform: vector input is required for 'tomatrix'",
         ));
     }
-    let len = tensor.data.len();
+    let len = tensor::tensor_element_len(&tensor);
     let size = condensed_matrix_size(len).ok_or_else(|| {
         distance_error(
             SQUAREFORM_NAME,
@@ -1964,7 +1964,7 @@ mod tests {
 
     #[test]
     fn squareform_reads_typed_integer_storage_exactly() {
-        let vector = poisoned_int_tensor(IntegerStorage::U8(vec![5, 4, 2]), 1, 3);
+        let vector = cleared_int_tensor(IntegerStorage::U8(vec![5, 4, 2]), 1, 3);
         let matrix = tensor_out(block_on(squareform_builtin(vector, Vec::new())).unwrap());
         assert_eq!(matrix.shape, vec![3, 3]);
         assert_eq!(
@@ -1976,5 +1976,18 @@ mod tests {
         let vector = tensor_out(block_on(squareform_builtin(matrix, Vec::new())).unwrap());
         assert_eq!(vector.shape, vec![1, 3]);
         assert_eq!(vector.data, vec![5.0, 4.0, 2.0]);
+    }
+
+    #[test]
+    fn seuclidean_scale_reads_typed_integer_storage_length_without_mirror() {
+        let out = block_on(pdist_builtin(
+            int_tensor(IntegerStorage::I16(vec![0, 3, 4, 0, 4, 0]), 3, 2),
+            vec![
+                Value::from("seuclidean"),
+                cleared_int_tensor(IntegerStorage::U16(vec![1, 4]), 1, 2),
+            ],
+        ))
+        .unwrap();
+        assert!((tensor_out(out).data[0] - 10.0_f64.sqrt()).abs() < 1.0e-10);
     }
 }

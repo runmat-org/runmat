@@ -506,7 +506,8 @@ fn build_box_stats(
     if tensor.shape.len() > 2 {
         return Err(invalid("boxplot: X must be a vector or matrix"));
     }
-    if tensor.data.is_empty() {
+    let tensor_len = tensor::tensor_element_len(&tensor);
+    if tensor_len == 0 {
         return Err(invalid("boxplot: X must not be empty"));
     }
     let mut groups = match group {
@@ -569,11 +570,12 @@ fn grouped_series(
     options: &BoxplotOptions,
 ) -> BuiltinResult<Vec<(String, Vec<f64>)>> {
     let values = tensor::tensor_values_f64_cow(tensor);
-    let labels = match group_labels(&group, tensor.data.len()) {
+    let tensor_len = values.len();
+    let labels = match group_labels(&group, tensor_len) {
         Ok(labels) => labels,
         Err(err) if tensor.rows > 1 && tensor.cols > 1 => {
             let row_labels = group_labels(&group, tensor.rows).map_err(|_| err)?;
-            let mut labels = Vec::with_capacity(tensor.data.len());
+            let mut labels = Vec::with_capacity(tensor_len);
             for _col in 0..tensor.cols {
                 labels.extend(row_labels.iter().cloned());
             }
@@ -581,7 +583,7 @@ fn grouped_series(
         }
         Err(err) => return Err(err),
     };
-    if labels.len() != tensor.data.len() {
+    if labels.len() != tensor_len {
         return Err(invalid(
             "boxplot: grouping variables must have the same number of elements as X",
         ));
@@ -1247,7 +1249,7 @@ fn group_labels(value: &Value, expected_len: usize) -> BuiltinResult<Vec<Option<
                     "boxplot: grouping variable must be numeric, text, cell, or categorical ({err})"
                 ))
             })?;
-            if tensor.data.len() != expected_len {
+            if tensor::tensor_element_len(&tensor) != expected_len {
                 return Err(invalid(
                     "boxplot: grouping variable length must match the number of X elements",
                 ));
@@ -1261,7 +1263,7 @@ fn group_labels(value: &Value, expected_len: usize) -> BuiltinResult<Vec<Option<
 }
 
 fn validate_group_like(tensor: &Tensor, value: &Value) -> BuiltinResult<()> {
-    match group_labels(value, tensor.data.len()) {
+    match group_labels(value, tensor::tensor_element_len(tensor)) {
         Ok(_) => Ok(()),
         Err(err) if tensor.rows > 1 && tensor.cols > 1 => group_labels(value, tensor.rows)
             .map(|_| ())
@@ -1395,7 +1397,7 @@ mod tests {
 
     fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
+        tensor.data.clear();
         Value::Tensor(tensor)
     }
 

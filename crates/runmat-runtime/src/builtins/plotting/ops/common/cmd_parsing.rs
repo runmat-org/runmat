@@ -38,7 +38,7 @@ pub fn scalar_from_value(value: &Value, name: &str) -> BuiltinResult<usize> {
         Value::Bool(flag) => to_positive_index(if *flag { 1.0 } else { 0.0 }, name),
         Value::Int(i) => to_positive_index(i.to_f64(), name),
         Value::Tensor(tensor) => {
-            if tensor.data.len() != 1 {
+            if !tensor::is_scalar_tensor(tensor) {
                 return Err(plotting_error(
                     name,
                     format!("{name}: expected scalar input"),
@@ -85,7 +85,7 @@ pub fn parse_hold_mode(value: &Value) -> BuiltinResult<crate::builtins::plotting
         }),
         Value::Bool(b) => Ok(if *b { HoldMode::On } else { HoldMode::Off }),
         Value::Tensor(tensor) => {
-            if tensor.data.len() != 1 {
+            if !tensor::is_scalar_tensor(tensor) {
                 return Err(plotting_error("hold", "hold: logical scalar expected"));
             }
             Ok(if tensor::tensor_values_f64(tensor)[0] == 0.0 {
@@ -117,12 +117,14 @@ mod tests {
 
     #[test]
     fn scalar_and_hold_parsers_read_typed_integer_storage() {
-        let scalar = Value::Tensor(
-            Tensor::new_integer(IntegerStorage::U64(vec![4]), vec![1, 1]).expect("scalar"),
-        );
-        let hold = Value::Tensor(
-            Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("hold"),
-        );
+        let mut scalar_tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![4]), vec![1, 1]).expect("scalar");
+        scalar_tensor.data.clear();
+        let scalar = Value::Tensor(scalar_tensor);
+        let mut hold_tensor =
+            Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("hold");
+        hold_tensor.data.clear();
+        let hold = Value::Tensor(hold_tensor);
 
         assert_eq!(scalar_from_value(&scalar, "subplot").expect("scalar"), 4);
         assert!(matches!(

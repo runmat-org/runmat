@@ -261,7 +261,7 @@ fn handle_list(value: &Value, role: &'static str) -> BuiltinResult<HandleList> {
         Value::Tensor(tensor) => Ok(HandleList {
             handles: tensor_utils::tensor_values_f64(tensor),
             shape: tensor.shape.clone(),
-            is_scalar: tensor.data.len() == 1,
+            is_scalar: tensor_utils::tensor_element_len(tensor) == 1,
         }),
         value => Ok(HandleList {
             handles: vec![handle_scalar(value, role)?],
@@ -379,7 +379,7 @@ mod tests {
         let mut tensor =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U32(vec![3, 5]), vec![1, 2])
                 .unwrap();
-        tensor.data = vec![f64::NAN, f64::NAN];
+        tensor.data.clear();
 
         let list = handle_list(&Value::Tensor(tensor), "source").expect("handle list");
 

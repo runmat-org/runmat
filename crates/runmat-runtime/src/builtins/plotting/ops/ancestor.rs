@@ -143,7 +143,7 @@ fn ancestor_array(
     toplevel: bool,
 ) -> crate::BuiltinResult<Value> {
     let values = tensor_utils::tensor_values_f64_cow(tensor);
-    if tensor.data.len() == 1 {
+    if values.len() == 1 {
         return Ok(match ancestor_scalar(values[0], types, toplevel) {
             Some(handle) => Value::Num(handle),
             None => empty_handle_array(),
@@ -611,7 +611,7 @@ mod tests {
         let mut handle =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U8(vec![0]), vec![1, 1])
                 .expect("typed handle");
-        handle.data[0] = f64::NAN;
+        handle.data.clear();
 
         assert_eq!(
             ancestor_builtin(vec![Value::Tensor(handle), Value::String("root".into())]).unwrap(),

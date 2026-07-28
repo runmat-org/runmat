@@ -426,7 +426,8 @@ impl PartitionInput {
 }
 
 fn numeric_labels(tensor: Tensor) -> BuiltinResult<PartitionInput> {
-    if tensor.data.is_empty() {
+    let values = tensor::tensor_values_f64_cow(&tensor);
+    if values.is_empty() {
         return Err(invalid_argument(
             "cvpartition: stratification variable must be nonempty",
         ));
@@ -437,16 +438,15 @@ fn numeric_labels(tensor: Tensor) -> BuiltinResult<PartitionInput> {
         ));
     }
     Ok(PartitionInput {
-        n: tensor.data.len(),
+        n: values.len(),
         labels: Some(
-            tensor
-                .data
-                .into_iter()
+            values
+                .iter()
                 .map(|value| {
                     if value.is_nan() {
                         None
                     } else {
-                        Some(label_number(value))
+                        Some(label_number(*value))
                     }
                 })
                 .collect(),
@@ -724,15 +724,15 @@ fn custom_partition(value: Value) -> BuiltinResult<PartitionSpec> {
 }
 
 fn custom_numeric_partition(tensor: Tensor) -> BuiltinResult<PartitionSpec> {
-    if tensor.data.is_empty() {
+    let values = tensor::tensor_values_f64_cow(&tensor);
+    if values.is_empty() {
         return Err(invalid_argument(
             "cvpartition: CustomPartition test sets must be nonempty",
         ));
     }
     let is_vector = tensor.shape.iter().filter(|dim| **dim > 1).count() <= 1;
     if !is_vector {
-        let data = tensor
-            .data
+        let data = values
             .iter()
             .map(|value| {
                 if (*value - 0.0).abs() <= EPS {
@@ -751,7 +751,6 @@ fn custom_numeric_partition(tensor: Tensor) -> BuiltinResult<PartitionSpec> {
         return custom_partition(Value::LogicalArray(array));
     }
 
-    let values = tensor::tensor_values_f64_cow(&tensor);
     if values.iter().any(|value| (*value - 0.0).abs() <= EPS) {
         let data = values
             .iter()
@@ -1204,12 +1203,6 @@ mod tests {
         Value::LogicalArray(LogicalArray::new(data, shape).unwrap())
     }
 
-    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-        tensor.data.fill(f64::NAN);
-        Value::Tensor(tensor)
-    }
-
     fn cleared_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         let mut tensor = Tensor::new_integer(storage, shape).unwrap();
         tensor.data.clear();
@@ -1355,7 +1348,7 @@ mod tests {
     fn custom_integer_vector_reads_typed_integer_storage_exactly() {
         let partition = cv(
             Value::String("CustomPartition".into()),
-            poisoned_int_tensor(IntegerStorage::U8(vec![1, 2, 2, 1]), vec![1, 4]),
+            cleared_int_tensor(IntegerStorage::U8(vec![1, 2, 2, 1]), vec![1, 4]),
             Vec::new(),
         );
         let all = logical_output(
@@ -1367,7 +1360,7 @@ mod tests {
 
         let partition = cv(
             Value::String("CustomPartition".into()),
-            poisoned_int_tensor(IntegerStorage::U8(vec![1, 0, 1, 0]), vec![1, 4]),
+            cleared_int_tensor(IntegerStorage::U8(vec![1, 0, 1, 0]), vec![1, 4]),
             Vec::new(),
         );
         let mask = logical_output(block_on(test_builtin(partition, Vec::new())).expect("test"));

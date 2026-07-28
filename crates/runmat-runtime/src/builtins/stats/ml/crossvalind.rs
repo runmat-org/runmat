@@ -524,9 +524,9 @@ fn classes_from_value(value: &Value, n: usize) -> BuiltinResult<Vec<Option<Strin
 }
 
 fn numeric_labels(tensor: &Tensor) -> BuiltinResult<Vec<Option<String>>> {
-    ensure_vector(&tensor.shape, tensor.data.len(), "Classes")?;
-    Ok(tensor
-        .data
+    let values = tensor::tensor_values_f64_cow(tensor);
+    ensure_vector(&tensor.shape, values.len(), "Classes")?;
+    Ok(values
         .iter()
         .map(|value| {
             if value.is_nan() {
@@ -761,8 +761,7 @@ mod tests {
     #[test]
     fn classes_option_stratifies_holdout() {
         random::set_seed(13).expect("seed");
-        let classes =
-            Tensor::new(vec![1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0], vec![8, 1]).expect("classes");
+        let classes = cleared_int_tensor(IntegerStorage::U8(vec![1, 1, 1, 1, 2, 2, 2, 2]), 8, 1);
         let outputs = output_list(
             call(
                 vec![
@@ -770,7 +769,7 @@ mod tests {
                     Value::Num(8.0),
                     Value::Num(0.5),
                     Value::from("Classes"),
-                    Value::Tensor(classes),
+                    classes,
                 ],
                 Some(2),
             )
