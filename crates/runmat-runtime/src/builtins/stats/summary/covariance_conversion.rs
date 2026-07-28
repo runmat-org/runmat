@@ -192,9 +192,10 @@ fn covariance_to_correlation(
 ) -> BuiltinResult<(Value, Value)> {
     validate_covariance_matrix(name, &covariance)?;
     let n = covariance.rows;
+    let covariance_values = tensor::tensor_values_f64_cow(&covariance);
     let mut sigma = Vec::with_capacity(n);
     for idx in 0..n {
-        sigma.push(covariance.data[idx + idx * n].sqrt());
+        sigma.push(covariance_values[idx + idx * n].sqrt());
     }
 
     let mut r = vec![0.0; n * n];
@@ -205,7 +206,7 @@ fn covariance_to_correlation(
             r[idx] = if denom == 0.0 {
                 f64::NAN
             } else {
-                covariance.data[idx] / denom
+                covariance_values[idx] / denom
             };
         }
     }
@@ -232,7 +233,8 @@ fn validate_covariance_matrix(name: &'static str, tensor: &Tensor) -> BuiltinRes
             format!("{name}: covariance matrix must be square"),
         ));
     }
-    for value in &tensor.data {
+    let values = tensor::tensor_values_f64_cow(tensor);
+    for &value in values.iter() {
         if value.is_nan() {
             continue;
         }
@@ -244,7 +246,7 @@ fn validate_covariance_matrix(name: &'static str, tensor: &Tensor) -> BuiltinRes
         }
     }
     for idx in 0..tensor.rows {
-        let variance = tensor.data[idx + idx * tensor.rows];
+        let variance = values[idx + idx * tensor.rows];
         if variance < 0.0 {
             return Err(conversion_error(
                 name,
@@ -254,8 +256,8 @@ fn validate_covariance_matrix(name: &'static str, tensor: &Tensor) -> BuiltinRes
     }
     for col in 0..tensor.cols {
         for row in 0..col {
-            let a = tensor.data[row + col * tensor.rows];
-            let b = tensor.data[col + row * tensor.rows];
+            let a = values[row + col * tensor.rows];
+            let b = values[col + row * tensor.rows];
             if a.is_nan() && b.is_nan() {
                 continue;
             }
@@ -272,8 +274,8 @@ fn validate_covariance_matrix(name: &'static str, tensor: &Tensor) -> BuiltinRes
                     format!("{name}: covariance matrix must be symmetric"),
                 ));
             }
-            let variance_row = tensor.data[row + row * tensor.rows];
-            let variance_col = tensor.data[col + col * tensor.rows];
+            let variance_row = values[row + row * tensor.rows];
+            let variance_col = values[col + col * tensor.rows];
             if variance_row.is_nan() || variance_col.is_nan() {
                 continue;
             }
@@ -520,9 +522,9 @@ mod tests {
         );
     }
 
-    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+    fn mirrorless_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
+        tensor.data.clear();
         Value::Tensor(tensor)
     }
 
@@ -682,7 +684,7 @@ mod tests {
     #[test]
     fn corrcov_accepts_typed_integer_tensors_and_scalar_logical_extensions() {
         {
-            let integer = poisoned_int_tensor(IntegerStorage::U16(vec![4, 2, 2, 9]), vec![2, 2]);
+            let integer = mirrorless_int_tensor(IntegerStorage::U16(vec![4, 2, 2, 9]), vec![2, 2]);
             let _guard = crate::output_count::push_output_count(Some(2));
             let out = block_on(corrcov::corrcov_builtin(integer, Vec::new())).unwrap();
             match out {
