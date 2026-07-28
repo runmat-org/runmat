@@ -5742,3 +5742,45 @@ fn integer_type_class_static_method_zeros_preserves_integer_classes() {
         );
     }
 }
+
+#[test]
+fn eye_integer_class_strings_preserve_integer_storage_on_script_surface() {
+    let program = r#"
+        a = eye(2, 3, 'int16');
+        b = eye([2 2], 'uint32');
+        c = eye(1, 4, 'uint64');
+        ca = class(a);
+        cb = class(b);
+        cc = class(c);
+    "#;
+    let vars = execute_source(program);
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_builtins::Value::Tensor(tensor)
+            if tensor.shape == vec![2, 3]
+                && tensor.integer_storage()
+                    == Some(&runmat_builtins::IntegerStorage::I16(vec![1, 0, 0, 1, 0, 0]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_builtins::Value::Tensor(tensor)
+            if tensor.shape == vec![2, 2]
+                && tensor.integer_storage()
+                    == Some(&runmat_builtins::IntegerStorage::U32(vec![1, 0, 0, 1]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_builtins::Value::Tensor(tensor)
+            if tensor.shape == vec![1, 4]
+                && tensor.integer_storage()
+                    == Some(&runmat_builtins::IntegerStorage::U64(vec![1, 0, 0, 0]))
+    )));
+    for expected in ["int16", "uint32", "uint64"] {
+        assert!(
+            vars.iter().any(
+                |value| matches!(value, runmat_builtins::Value::String(class) if class == expected)
+            ),
+            "expected class {expected:?}; vars={vars:?}"
+        );
+    }
+}

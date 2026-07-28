@@ -111,7 +111,7 @@ const EYE_SIG_CLASS_INPUTS: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
         default: Some("\"double\""),
-        description: "Class name override (double|logical).",
+        description: "Class name override (double|logical|int8|int16|int32|int64|uint8|uint16|uint32|uint64).",
     },
 ];
 
@@ -241,6 +241,7 @@ struct ParsedEye {
 enum EyeTemplate {
     Double,
     Logical,
+    Integer(IntegerStorage),
     Like(Value),
 }
 
@@ -298,6 +299,18 @@ impl ParsedEye {
                         return Err(
                             "eye: single precision output is not implemented yet".to_string()
                         );
+                    }
+                    "int8" | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32"
+                    | "uint64" => {
+                        if like_proto.is_some() {
+                            return Err(format!("eye: cannot combine 'like' with '{keyword}'"));
+                        }
+                        class_override = Some(EyeTemplate::Integer(
+                            integer_storage_prototype_from_keyword(&keyword)
+                                .expect("matched integer class keyword"),
+                        ));
+                        idx += 1;
+                        continue;
                     }
                     other => {
                         return Err(format!("eye: unrecognised option '{other}'"));
@@ -358,6 +371,7 @@ async fn build_output(parsed: ParsedEye) -> Result<Value, String> {
     match parsed.template {
         EyeTemplate::Double => eye_double(&shape),
         EyeTemplate::Logical => eye_logical(&shape),
+        EyeTemplate::Integer(storage) => eye_integer_like(&storage, &shape),
         EyeTemplate::Like(proto) => eye_like(&proto, &shape).await,
     }
 }
@@ -379,6 +393,20 @@ fn eye_complex(shape: &[usize]) -> Result<Value, String> {
     let mut tensor = ComplexTensor::zeros(shape.clone());
     visit_identity_positions(&shape, |idx| tensor.data[idx] = (1.0, 0.0));
     Ok(Value::ComplexTensor(tensor))
+}
+
+fn integer_storage_prototype_from_keyword(keyword: &str) -> Option<IntegerStorage> {
+    match keyword {
+        "int8" => Some(IntegerStorage::I8(Vec::new())),
+        "int16" => Some(IntegerStorage::I16(Vec::new())),
+        "int32" => Some(IntegerStorage::I32(Vec::new())),
+        "int64" => Some(IntegerStorage::I64(Vec::new())),
+        "uint8" => Some(IntegerStorage::U8(Vec::new())),
+        "uint16" => Some(IntegerStorage::U16(Vec::new())),
+        "uint32" => Some(IntegerStorage::U32(Vec::new())),
+        "uint64" => Some(IntegerStorage::U64(Vec::new())),
+        _ => None,
+    }
 }
 
 #[async_recursion::async_recursion(?Send)]
@@ -783,6 +811,34 @@ pub(crate) mod tests {
             output.integer_storage(),
             Some(&IntegerStorage::I64(vec![1, 0, 0, 1]))
         );
+    }
+
+    #[test]
+    fn eye_class_strings_create_exact_integer_identity_storage() {
+        let cases = [
+            ("int8", IntegerStorage::I8(vec![1, 0, 0, 1, 0, 0])),
+            ("int16", IntegerStorage::I16(vec![1, 0, 0, 1, 0, 0])),
+            ("int32", IntegerStorage::I32(vec![1, 0, 0, 1, 0, 0])),
+            ("int64", IntegerStorage::I64(vec![1, 0, 0, 1, 0, 0])),
+            ("uint8", IntegerStorage::U8(vec![1, 0, 0, 1, 0, 0])),
+            ("uint16", IntegerStorage::U16(vec![1, 0, 0, 1, 0, 0])),
+            ("uint32", IntegerStorage::U32(vec![1, 0, 0, 1, 0, 0])),
+            ("uint64", IntegerStorage::U64(vec![1, 0, 0, 1, 0, 0])),
+        ];
+
+        for (class_name, expected) in cases {
+            let result = block_on(eye_builtin(vec![
+                Value::Num(2.0),
+                Value::Num(3.0),
+                Value::from(class_name),
+            ]))
+            .expect("eye integer class");
+            let Value::Tensor(output) = result else {
+                panic!("expected integer tensor for {class_name}");
+            };
+            assert_eq!(output.shape, vec![2, 3]);
+            assert_eq!(output.integer_storage(), Some(&expected));
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
