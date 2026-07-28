@@ -286,7 +286,7 @@ async fn parse_quantile_args(
         .await
         .map_err(|err| order_error(name, format!("{name}: {err}")))?;
     let probabilities = parse_probabilities(name, p_value, scale)?;
-    let shape = tensor::default_shape_for(&input.shape, input.data.len());
+    let shape = tensor::default_shape_for(&input.shape, tensor::tensor_element_len(&input));
     let mut dim = first_non_singleton(&shape);
     let mut nanflag = NanFlag::Omit;
     let mut idx = 1usize;
@@ -704,8 +704,8 @@ mod tests {
         let mut x =
             Tensor::new_integer(IntegerStorage::I16(vec![1, 3, 9, 27]), vec![4, 1]).unwrap();
         let mut p = Tensor::new_integer(IntegerStorage::U8(vec![0, 1]), vec![1, 2]).unwrap();
-        x.data.fill(0.0);
-        p.data.fill(0.5);
+        x.data.clear();
+        p.data.clear();
 
         let out = block_on(quantile::quantile_builtin(
             Value::Tensor(x),

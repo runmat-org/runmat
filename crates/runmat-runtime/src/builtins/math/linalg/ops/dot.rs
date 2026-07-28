@@ -449,7 +449,7 @@ fn elementwise_complex_product(
 }
 
 fn ensure_same_size(a: &Tensor, b: &Tensor) -> BuiltinResult<()> {
-    if a.data.len() != b.data.len() {
+    if tensor::tensor_element_len(a) != tensor::tensor_element_len(b) {
         return Err(dot_error(&DOT_ERROR_INVALID_INPUT));
     }
     if canonical_shape_tensor(a) != canonical_shape_tensor(b) {
@@ -663,12 +663,12 @@ pub(crate) mod tests {
     fn dot_reads_typed_integer_tensors_and_dimension_exactly() {
         let mut lhs = Tensor::new_integer(IntegerStorage::I16(vec![1, 4, 2, 5, 3, 6]), vec![2, 3])
             .expect("lhs");
-        lhs.data.fill(f64::NAN);
+        lhs.data.clear();
         let mut rhs = Tensor::new_integer(IntegerStorage::U16(vec![6, 3, 5, 2, 4, 1]), vec![2, 3])
             .expect("rhs");
-        rhs.data.fill(f64::NAN);
+        rhs.data.clear();
         let mut dim = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("dim");
-        dim.data.fill(f64::NAN);
+        dim.data.clear();
 
         let value = dot_builtin(
             Value::Tensor(lhs),
