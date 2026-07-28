@@ -1409,6 +1409,63 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn prod_native_integer_tensor_forms_read_typed_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 4, 2, 5, 3, 6]), vec![2, 3])
+                .expect("tensor");
+        tensor.data.clear();
+
+        let result =
+            prod_builtin(Value::Tensor(tensor), vec![Value::from("native")]).expect("prod");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(
+                    out.integer_storage(),
+                    Some(&IntegerStorage::I16(vec![4, 10, 18]))
+                );
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![2, 3, 4]), vec![3, 1]).expect("tensor");
+        tensor.data.clear();
+        let result = prod_builtin(
+            Value::Tensor(tensor),
+            vec![Value::from("all"), Value::from("native")],
+        )
+        .expect("prod all");
+        assert_eq!(result, Value::Int(IntValue::I16(24)));
+
+        let mut tensor = Tensor::new_integer(
+            IntegerStorage::I32((1..=12).collect::<Vec<i32>>()),
+            vec![2, 3, 2],
+        )
+        .expect("tensor");
+        tensor.data.clear();
+        let mut dims =
+            Tensor::new_integer(IntegerStorage::U8(vec![1, 3]), vec![1, 2]).expect("dims");
+        dims.data.clear();
+
+        let result = prod_builtin(
+            Value::Tensor(tensor),
+            vec![Value::Tensor(dims), Value::from("native")],
+        )
+        .expect("prod vecdim");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 3, 1]);
+                assert_eq!(
+                    out.integer_storage(),
+                    Some(&IntegerStorage::I32(vec![112, 1080, 3960]))
+                );
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn prod_native_template_reads_typed_integer_scalar_storage_exactly() {
         let mut tensor =
             Tensor::new_integer(IntegerStorage::U32(vec![77]), vec![1, 1]).expect("tensor");

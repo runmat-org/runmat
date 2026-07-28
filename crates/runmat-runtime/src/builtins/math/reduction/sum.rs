@@ -1616,6 +1616,62 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sum_native_integer_tensor_forms_read_typed_storage_exactly() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 4, 2, 5, 3, 6]), vec![2, 3])
+                .expect("tensor");
+        tensor.data.clear();
+
+        let result = sum_builtin(Value::Tensor(tensor), vec![Value::from("native")]).expect("sum");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(
+                    out.integer_storage(),
+                    Some(&IntegerStorage::I16(vec![5, 7, 9]))
+                );
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+
+        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![10, 20, 30, 40]), vec![2, 2])
+            .expect("tensor");
+        tensor.data.clear();
+        let result = sum_builtin(
+            Value::Tensor(tensor),
+            vec![Value::from("all"), Value::from("native")],
+        )
+        .expect("sum all");
+        assert_eq!(result, Value::Int(IntValue::U16(100)));
+
+        let mut tensor = Tensor::new_integer(
+            IntegerStorage::I16((1..=12).map(|value| value as i16).collect()),
+            vec![2, 3, 2],
+        )
+        .expect("tensor");
+        tensor.data.clear();
+        let mut dims =
+            Tensor::new_integer(IntegerStorage::U8(vec![1, 3]), vec![1, 2]).expect("dims");
+        dims.data.clear();
+
+        let result = sum_builtin(
+            Value::Tensor(tensor),
+            vec![Value::Tensor(dims), Value::from("native")],
+        )
+        .expect("sum vecdim");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 3, 1]);
+                assert_eq!(
+                    out.integer_storage(),
+                    Some(&IntegerStorage::I16(vec![18, 26, 34]))
+                );
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn sum_native_template_reads_typed_integer_scalar_storage_exactly() {
         let mut tensor =
             Tensor::new_integer(IntegerStorage::I32(vec![-9]), vec![1, 1]).expect("tensor");
