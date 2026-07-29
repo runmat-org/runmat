@@ -1623,6 +1623,12 @@ impl WgpuProvider {
         }
 
         let entry = self.get_entry(handle)?;
+        let integer_type = entry.integer_type;
+        let word_factor = integer_type.map_or(1usize, |element_type| match element_type {
+            runmat_accelerate_api::IntegerElementType::I64
+            | runmat_accelerate_api::IntegerElementType::U64 => 2,
+            _ => 1,
+        });
         if entry.len == 0 {
             return Ok(handle.clone());
         }
@@ -1640,28 +1646,32 @@ impl WgpuProvider {
             }
         }
 
-        let rank = ext_shape.len();
-        if rank == 0 {
+        let logical_rank = ext_shape.len();
+        if logical_rank == 0 {
             return Ok(handle.clone());
         }
+        let rank = logical_rank + usize::from(word_factor > 1);
         if rank > crate::backend::wgpu::params::FLIP_MAX_RANK {
             return Err(anyhow!(
                 "flip: rank {} exceeds GPU support (max {})",
-                rank,
+                logical_rank,
                 crate::backend::wgpu::params::FLIP_MAX_RANK
             ));
         }
 
-        let total = product_checked(&ext_shape)
+        let logical_total = product_checked(&ext_shape)
             .ok_or_else(|| anyhow!("flip: dimension product exceeds GPU limits"))?;
         ensure!(
-            total == entry.len || (total == 0 && entry.len == 0),
+            logical_total == entry.len || (logical_total == 0 && entry.len == 0),
             "flip: shape/product mismatch ({} vs {})",
-            total,
+            logical_total,
             entry.len
         );
+        let storage_total = logical_total
+            .checked_mul(word_factor)
+            .ok_or_else(|| anyhow!("flip: tensor storage length exceeds GPU limits"))?;
         ensure!(
-            entry.len <= u32::MAX as usize,
+            storage_total <= u32::MAX as usize,
             "flip: tensor too large for GPU kernel"
         );
         ensure!(
@@ -1669,9 +1679,9 @@ impl WgpuProvider {
             "flip: dimensions exceed GPU kernel limits"
         );
 
-        let mut flags = vec![false; rank];
+        let mut flags = vec![false; logical_rank];
         for &axis in axes {
-            if axis < rank {
+            if axis < logical_rank {
                 flags[axis] = !flags[axis];
             }
         }
@@ -1683,9 +1693,18 @@ impl WgpuProvider {
             return Ok(handle.clone());
         }
 
+        let mut kernel_shape = Vec::with_capacity(rank);
+        let mut kernel_flags = Vec::with_capacity(rank);
+        if word_factor > 1 {
+            kernel_shape.push(word_factor);
+            kernel_flags.push(false);
+        }
+        kernel_shape.extend(ext_shape.iter().copied());
+        kernel_flags.extend(flags.iter().copied());
+
         let mut strides = vec![0usize; rank];
         let mut stride = 1usize;
-        for (idx, &dim) in ext_shape.iter().enumerate() {
+        for (idx, &dim) in kernel_shape.iter().enumerate() {
             strides[idx] = stride;
             stride = stride
                 .checked_mul(dim.max(1))
@@ -1703,16 +1722,24 @@ impl WgpuProvider {
         let mut flags_arr = [crate::backend::wgpu::params::AlignedU32::new(0);
             crate::backend::wgpu::params::FLIP_MAX_RANK];
         for i in 0..rank {
-            shape_arr[i] = crate::backend::wgpu::params::AlignedU32::new(ext_shape[i] as u32);
+            shape_arr[i] = crate::backend::wgpu::params::AlignedU32::new(kernel_shape[i] as u32);
             strides_arr[i] = crate::backend::wgpu::params::AlignedU32::new(strides[i] as u32);
             flags_arr[i] =
-                crate::backend::wgpu::params::AlignedU32::new(if flags[i] { 1 } else { 0 });
+                crate::backend::wgpu::params::AlignedU32::new(if kernel_flags[i] { 1 } else { 0 });
         }
 
-        let out_buffer = self.create_storage_buffer(entry.len, "runmat-flip-out");
+        let out_buffer = if integer_type.is_some() {
+            self.create_integer_word_buffer(storage_total, "runmat-integer-flip-out")?
+        } else {
+            self.create_storage_buffer(entry.len, "runmat-flip-out")
+        };
         let out_shape = entry.shape.clone();
-        if entry.len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, out_shape, 0));
+        if storage_total == 0 {
+            return if let Some(element_type) = integer_type {
+                Ok(self.register_integer_buffer(out_buffer, out_shape, 0, element_type, 0))
+            } else {
+                Ok(self.register_existing_buffer(out_buffer, out_shape, 0))
+            };
         }
 
         {
@@ -1725,7 +1752,11 @@ impl WgpuProvider {
                 label: Some("runmat-flip-noop-pass"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&self.pipelines.flip.pipeline);
+            pass.set_pipeline(if integer_type.is_some() {
+                &self.pipelines.integer_flip.pipeline
+            } else {
+                &self.pipelines.flip.pipeline
+            });
             drop(pass);
             self.submit(enc);
         }
@@ -1742,8 +1773,8 @@ impl WgpuProvider {
         let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
             * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
         let mut offset = 0usize;
-        while offset < entry.len {
-            let remaining = entry.len - offset;
+        while offset < storage_total {
+            let remaining = storage_total - offset;
             let chunk_len = remaining.min(chunk_capacity);
             let params = crate::backend::wgpu::params::FlipParams {
                 len: chunk_len as u32,
@@ -1759,7 +1790,11 @@ impl WgpuProvider {
                 .device_ref()
                 .create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("runmat-flip-bind"),
-                    layout: &self.pipelines.flip.layout,
+                    layout: if integer_type.is_some() {
+                        &self.pipelines.integer_flip.layout
+                    } else {
+                        &self.pipelines.flip.layout
+                    },
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
@@ -1782,14 +1817,28 @@ impl WgpuProvider {
             crate::backend::wgpu::dispatch::flip::run(
                 self.device_ref(),
                 self.queue_ref(),
-                &self.pipelines.flip.pipeline,
+                if integer_type.is_some() {
+                    &self.pipelines.integer_flip.pipeline
+                } else {
+                    &self.pipelines.flip.pipeline
+                },
                 &bind_group,
                 workgroups,
             );
             offset += chunk_len;
         }
 
-        let handle = self.register_existing_buffer(out_buffer, out_shape, entry.len);
+        let handle = if let Some(element_type) = integer_type {
+            self.register_integer_buffer(
+                out_buffer,
+                out_shape,
+                logical_total,
+                element_type,
+                (storage_total as u64) * std::mem::size_of::<u32>() as u64,
+            )
+        } else {
+            self.register_existing_buffer(out_buffer, out_shape, entry.len)
+        };
 
         Ok(handle)
     }
@@ -1986,6 +2035,48 @@ mod tests {
                 19,
                 29,
             ])
+        );
+    }
+
+    #[test]
+    fn flip_wide_int64_uses_exact_integer_words_without_float_mirror() {
+        use runmat_accelerate_api::{
+            HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView, IntegerElementType,
+        };
+
+        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+            return;
+        };
+        let values = [i64::MIN, -1, 0, i64::MAX, -2, 17];
+        let input = provider
+            .upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::I64(&values),
+                shape: &[2, 3],
+            })
+            .expect("exact integer upload");
+        let flipped = provider.flip_exec(&input, &[0]).expect("integer flip");
+
+        assert_ne!(
+            input.buffer_id, flipped.buffer_id,
+            "flip must materialize on device"
+        );
+        assert_eq!(flipped.shape, vec![2, 3]);
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&flipped),
+            Some(IntegerElementType::I64)
+        );
+        let raw = provider
+            .get_entry_raw(&flipped)
+            .expect("resident integer output");
+        assert_eq!(
+            raw.allocated_bytes,
+            6 * 2 * std::mem::size_of::<u32>() as u64
+        );
+        let gathered =
+            block_on(provider.download_integer_exec(&flipped)).expect("exact integer download");
+        assert_eq!(
+            gathered.data,
+            HostIntegerDataOwned::I64(vec![-1, i64::MIN, i64::MAX, 0, 17, -2])
         );
     }
 
