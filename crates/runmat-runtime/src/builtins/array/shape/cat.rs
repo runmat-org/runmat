@@ -11,12 +11,14 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::builtins::math::elementwise::integer_cast::{integer_values, IntegerTarget};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use runmat_accelerate_api::HostTensorView;
+use runmat_accelerate_api::{
+    AccelProvider, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
+};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, LogicalArray,
-    ResolveContext, StringArray, Tensor, Type, Value,
+    CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
+    LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -400,6 +402,7 @@ enum LikeDevice {
 struct LikeSpec {
     device: LikeDevice,
     category_hint: Option<CatCategory>,
+    explicit: bool,
 }
 
 impl Default for LikeSpec {
@@ -407,6 +410,7 @@ impl Default for LikeSpec {
         Self {
             device: LikeDevice::Host,
             category_hint: None,
+            explicit: false,
         }
     }
 }
@@ -417,18 +421,22 @@ impl LikeSpec {
             Value::GpuTensor(_) => Ok(Self {
                 device: LikeDevice::Gpu,
                 category_hint: Some(CatCategory::Numeric),
+                explicit: true,
             }),
             Value::Tensor(_) | Value::Num(_) | Value::Int(_) => Ok(Self {
                 device: LikeDevice::Host,
                 category_hint: Some(CatCategory::Numeric),
+                explicit: true,
             }),
             Value::LogicalArray(_) | Value::Bool(_) => Ok(Self {
                 device: LikeDevice::Host,
                 category_hint: Some(CatCategory::Logical),
+                explicit: true,
             }),
             Value::ComplexTensor(_) | Value::Complex(_, _) => Ok(Self {
                 device: LikeDevice::Host,
                 category_hint: Some(CatCategory::Complex),
+                explicit: true,
             }),
             other => Err(cat_err(format!(
                 "cat: unsupported prototype for 'like' ({other:?}); provide a numeric or gpuArray prototype"
@@ -665,30 +673,68 @@ fn infer_category(inputs: &[Value]) -> BuiltinResult<CatCategory> {
 }
 
 fn finalize_numeric_output(tensor: Tensor, like: &LikeSpec) -> BuiltinResult<Value> {
+    finalize_numeric_output_with_provider(tensor, like, None)
+}
+
+fn finalize_numeric_output_with_provider(
+    tensor: Tensor,
+    like: &LikeSpec,
+    provider_override: Option<&'static dyn AccelProvider>,
+) -> BuiltinResult<Value> {
     like.ensure_device(CatCategory::Numeric)?;
     match like.device {
         LikeDevice::Host => Ok(tensor::tensor_into_value(tensor)),
         LikeDevice::Gpu => {
-            if tensor.integer_storage().is_some() {
-                return Err(cat_err(
-                    "cat: GPU integer-array output is not supported until the acceleration provider supports typed integer buffers",
-                ));
-            }
-            let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-                cat_err(
-                    "cat: GPU output requested via 'like' but no acceleration provider is active",
-                )
-            })?;
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).map_err(|err| {
-                cat_err(format!("cat: failed to upload concatenated tensor: {err}"))
-            })?;
+            let provider = provider_override
+                .or_else(runmat_accelerate_api::provider)
+                .ok_or_else(|| {
+                    cat_err(
+                        "cat: GPU output requested via 'like' but no acceleration provider is active",
+                    )
+                })?;
+            let handle = upload_numeric_tensor(provider, &tensor)?;
             Ok(Value::GpuTensor(handle))
         }
     }
+}
+
+fn upload_numeric_tensor(
+    provider: &dyn AccelProvider,
+    tensor: &Tensor,
+) -> BuiltinResult<runmat_accelerate_api::GpuTensorHandle> {
+    if let Some(storage) = tensor.integer_storage() {
+        let view = integer_storage_view(storage, &tensor.shape);
+        provider.upload_integer(&view).map_err(|err| {
+            cat_err(format!(
+                "cat: failed to upload concatenated integer tensor: {err}"
+            ))
+        })
+    } else {
+        let view = HostTensorView {
+            data: &tensor.data,
+            shape: &tensor.shape,
+        };
+        provider
+            .upload(&view)
+            .map_err(|err| cat_err(format!("cat: failed to upload concatenated tensor: {err}")))
+    }
+}
+
+fn integer_storage_view<'a>(
+    storage: &'a IntegerStorage,
+    shape: &'a [usize],
+) -> HostIntegerTensorView<'a> {
+    let data = match storage {
+        IntegerStorage::I8(values) => HostIntegerDataView::I8(values),
+        IntegerStorage::I16(values) => HostIntegerDataView::I16(values),
+        IntegerStorage::I32(values) => HostIntegerDataView::I32(values),
+        IntegerStorage::I64(values) => HostIntegerDataView::I64(values),
+        IntegerStorage::U8(values) => HostIntegerDataView::U8(values),
+        IntegerStorage::U16(values) => HostIntegerDataView::U16(values),
+        IntegerStorage::U32(values) => HostIntegerDataView::U32(values),
+        IntegerStorage::U64(values) => HostIntegerDataView::U64(values),
+    };
+    HostIntegerTensorView { data, shape }
 }
 
 fn cat_numeric_tensors(
@@ -741,6 +787,15 @@ fn cat_integer_tensors(
     values: Vec<Value>,
     like: &LikeSpec,
 ) -> BuiltinResult<Value> {
+    let tensor = build_integer_cat_tensor(target, dim_zero, values)?;
+    finalize_numeric_output(tensor, like)
+}
+
+fn build_integer_cat_tensor(
+    target: IntegerTarget,
+    dim_zero: usize,
+    values: Vec<Value>,
+) -> BuiltinResult<Tensor> {
     let mut shapes = Vec::with_capacity(values.len());
     let mut value_buffers = Vec::with_capacity(values.len());
 
@@ -753,9 +808,8 @@ fn cat_integer_tensors(
     let data_refs: Vec<&[runmat_builtins::IntValue]> =
         value_buffers.iter().map(Vec::as_slice).collect();
     let (values, shape) = concat_column_major(dim_zero, &shapes, &data_refs, "cat")?;
-    let tensor = Tensor::new_integer(target.storage(values), shape)
-        .map_err(|error| cat_err(format!("cat: {error}")))?;
-    finalize_numeric_output(tensor, like)
+    Tensor::new_integer(target.storage(values), shape)
+        .map_err(|error| cat_err(format!("cat: {error}")))
 }
 
 fn integer_concat_input(
@@ -1169,6 +1223,15 @@ async fn cat_gpu_tensors(
     values: Vec<Value>,
     like: &LikeSpec,
 ) -> BuiltinResult<Value> {
+    let output_like = if like.explicit {
+        like.clone()
+    } else {
+        LikeSpec {
+            device: LikeDevice::Gpu,
+            category_hint: Some(CatCategory::Numeric),
+            explicit: false,
+        }
+    };
     if let Some(hint) = like.category_hint {
         if !matches!(hint, CatCategory::Numeric) {
             return Err(cat_err(
@@ -1176,10 +1239,7 @@ async fn cat_gpu_tensors(
             ));
         }
     }
-    like.ensure_device(CatCategory::Numeric)?;
-
-    let provider = runmat_accelerate_api::provider()
-        .ok_or_else(|| cat_err("cat: no acceleration provider is registered"))?;
+    output_like.ensure_device(CatCategory::Numeric)?;
 
     let mut handles = Vec::with_capacity(values.len());
     for value in values {
@@ -1188,9 +1248,30 @@ async fn cat_gpu_tensors(
         }
     }
 
+    let first_handle = handles
+        .first()
+        .ok_or_else(|| cat_err("cat: no gpuArray inputs to concatenate"))?;
+    let provider = runmat_accelerate_api::provider_for_handle(first_handle)
+        .ok_or_else(|| cat_err("cat: no acceleration provider is registered"))?;
+    for handle in &handles {
+        let Some(owner) = runmat_accelerate_api::provider_for_handle(handle) else {
+            return Err(cat_err("cat: no acceleration provider is registered"));
+        };
+        if owner.device_id() != provider.device_id() {
+            return Err(cat_err(
+                "cat: all gpuArray inputs must belong to the same acceleration provider",
+            ));
+        }
+    }
+    let has_integer_handle = handles
+        .iter()
+        .any(|handle| runmat_accelerate_api::handle_integer_type(handle).is_some());
+
     // Native provider hook
-    if let Ok(result) = provider.cat(dim_zero + 1, &handles) {
-        return finalize_gpu_value(result, like).await;
+    if !has_integer_handle {
+        if let Ok(result) = provider.cat(dim_zero + 1, &handles) {
+            return finalize_gpu_value(result, &output_like).await;
+        }
     }
 
     let mut tensors = Vec::with_capacity(handles.len());
@@ -1199,19 +1280,21 @@ async fn cat_gpu_tensors(
         tensors.push(tensor);
     }
 
+    let gathered_values: Vec<Value> = tensors.iter().cloned().map(Value::Tensor).collect();
+    if let Some(target) = leftmost_integer_target(&gathered_values) {
+        let tensor = build_integer_cat_tensor(target, dim_zero, gathered_values)?;
+        return finalize_numeric_output_with_provider(tensor, &output_like, Some(provider));
+    }
+
     let shapes: Vec<Vec<usize>> = tensors.iter().map(|t| t.shape.clone()).collect();
     let data_refs: Vec<&[f64]> = tensors.iter().map(|t| t.data.as_slice()).collect();
     let (data, shape) = concat_column_major(dim_zero, &shapes, &data_refs, "cat")?;
     let tensor = Tensor::new(data, shape.clone()).map_err(|e| cat_err(format!("cat: {e}")))?;
-    if matches!(like.device, LikeDevice::Host) {
+    if matches!(output_like.device, LikeDevice::Host) {
         return Ok(tensor::tensor_into_value(tensor));
     }
 
-    let view = HostTensorView {
-        data: &tensor.data,
-        shape: &shape,
-    };
-    match provider.upload(&view) {
+    match upload_numeric_tensor(provider, &tensor) {
         Ok(handle) => Ok(Value::GpuTensor(handle)),
         Err(_) => Ok(tensor::tensor_into_value(tensor)),
     }
@@ -1419,7 +1502,9 @@ pub(crate) mod tests {
         block_on(super::cat_builtin(dim, rest))
     }
     use crate::builtins::common::test_support;
-    use runmat_accelerate_api::HostTensorView;
+    use runmat_accelerate_api::{
+        HostIntegerDataView, HostIntegerTensorView, HostTensorView, IntegerElementType,
+    };
     use runmat_builtins::{IntValue, IntegerStorage, Tensor};
 
     #[test]
@@ -1750,6 +1835,97 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![4, 1]);
             assert_eq!(gathered.data, vec![1.0, 3.0, 5.0, 7.0]);
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn cat_like_gpu_from_host_integer_inputs_uploads_exact_integer_storage() {
+        test_support::with_test_provider(|provider| {
+            let proto = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
+            let proto_handle = provider
+                .upload(&HostTensorView {
+                    data: &proto.data,
+                    shape: &proto.shape,
+                })
+                .expect("upload proto");
+            let left = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 4]), vec![1, 2])
+                .expect("left");
+            let right =
+                Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                    .expect("right");
+
+            let result = cat_builtin(
+                Value::Int(IntValue::I32(2)),
+                vec![
+                    Value::Tensor(left),
+                    Value::Tensor(right),
+                    Value::from("like"),
+                    Value::GpuTensor(proto_handle),
+                ],
+            )
+            .expect("cat with integer gpu like");
+            let Value::GpuTensor(handle) = result else {
+                panic!("expected gpu tensor");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&handle),
+                Some(IntegerElementType::U64)
+            );
+            let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
+            assert_eq!(gathered.shape, vec![1, 3]);
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![
+                    u64::MAX,
+                    4,
+                    9_007_199_254_740_993,
+                ]))
+            );
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn cat_gpu_integer_inputs_fallback_concatenates_exact_storage() {
+        test_support::with_test_provider(|provider| {
+            let left_values = [u64::MAX, 4];
+            let right_values = [9_007_199_254_740_993_u64];
+            let left = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&left_values),
+                    shape: &[1, 2],
+                })
+                .expect("upload left");
+            let right = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&right_values),
+                    shape: &[1, 1],
+                })
+                .expect("upload right");
+
+            let result = cat_builtin(
+                Value::Int(IntValue::I32(2)),
+                vec![Value::GpuTensor(left), Value::GpuTensor(right)],
+            )
+            .expect("cat gpu integers");
+            let Value::GpuTensor(handle) = result else {
+                panic!("expected resident gpu integer output");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&handle),
+                Some(IntegerElementType::U64)
+            );
+            let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
+            assert_eq!(gathered.shape, vec![1, 3]);
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![
+                    u64::MAX,
+                    4,
+                    9_007_199_254_740_993,
+                ]))
+            );
         });
     }
 
