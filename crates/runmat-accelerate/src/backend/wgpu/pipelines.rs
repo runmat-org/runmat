@@ -238,6 +238,7 @@ pub struct WgpuPipelines {
     pub scalar: PipelineBundle,
     pub transpose: PipelineBundle,
     pub permute: PipelineBundle,
+    pub integer_permute: PipelineBundle,
     pub flip: PipelineBundle,
     pub diff: PipelineBundle,
     pub gradient: PipelineBundle,
@@ -417,6 +418,19 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => PERMUTE_SHADER_F64,
                 NumericPrecision::F32 => PERMUTE_SHADER_F32,
             },
+        );
+        let integer_permute_shader = crate::backend::wgpu::shaders::permute::permute_shader_u32();
+        let integer_permute = create_pipeline(
+            device,
+            "runmat-integer-permute-layout",
+            "runmat-integer-permute-shader",
+            "runmat-integer-permute-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            &integer_permute_shader,
         );
 
         let flip = create_pipeline(
@@ -1601,6 +1615,7 @@ impl WgpuPipelines {
             scalar,
             transpose,
             permute,
+            integer_permute,
             flip,
             diff,
             gradient,
