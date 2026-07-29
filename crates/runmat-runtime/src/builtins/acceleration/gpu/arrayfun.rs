@@ -631,7 +631,7 @@ fn parse_uniform_output(value: Value) -> BuiltinResult<bool> {
     match value {
         Value::Bool(b) => Ok(b),
         Value::Num(n) => Ok(n != 0.0),
-        Value::Int(iv) => Ok(iv.to_f64() != 0.0),
+        Value::Int(iv) => Ok(!iv.is_zero()),
         Value::String(s) => parse_bool_string(&s)
             .ok_or_else(|| arrayfun_error(&ARRAYFUN_ERROR_UNIFORM_OUTPUT_OPTION)),
         Value::CharArray(ca) if ca.rows == 1 => {
@@ -1273,8 +1273,17 @@ fn classify_value(value: &Value) -> BuiltinResult<ClassifiedValue> {
     match value {
         Value::Bool(b) => Ok(ClassifiedValue::Logical(*b)),
         Value::LogicalArray(la) if la.len() == 1 => Ok(ClassifiedValue::Logical(la.data[0] != 0)),
-        Value::Int(i) => Ok(ClassifiedValue::Double(i.to_f64())),
+        Value::Int(_) => Err(arrayfun_error_with_detail(
+            &ARRAYFUN_ERROR_UNIFORM_OUTPUT_TYPE,
+            "native integer scalar output requires a typed uniform collector; refusing f64 fallback",
+        )),
         Value::Num(n) => Ok(ClassifiedValue::Double(*n)),
+        Value::Tensor(t) if t.integer_storage().is_some() && tensor::is_scalar_tensor(t) => {
+            Err(arrayfun_error_with_detail(
+                &ARRAYFUN_ERROR_UNIFORM_OUTPUT_TYPE,
+                "native integer tensor output requires a typed uniform collector; refusing f64 fallback",
+            ))
+        }
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
             Ok(ClassifiedValue::Double(tensor::tensor_value_f64(t, 0)))
         }
@@ -1401,18 +1410,26 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn uniform_classifier_reads_typed_integer_tensor_storage_exactly() {
+    fn uniform_classifier_rejects_poisoned_typed_integer_tensor_storage() {
         let mut tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
                 .expect("integer tensor");
         tensor.data.clear();
 
-        match classify_value(&Value::Tensor(tensor)).expect("classify") {
-            ClassifiedValue::Double(value) => {
-                assert_eq!(value, 9_007_199_254_740_993_u64 as f64);
-            }
-            _ => panic!("expected double classification"),
-        }
+        let error = match classify_value(&Value::Tensor(tensor)) {
+            Ok(_) => panic!("typed integer output must not use f64"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("typed uniform collector"));
+    }
+
+    #[test]
+    fn uniform_classifier_rejects_wide_integer_scalar_before_float_materialization() {
+        let error = match classify_value(&Value::Int(runmat_builtins::IntValue::I64(i64::MIN))) {
+            Ok(_) => panic!("wide integer scalar must not use f64"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("typed uniform collector"));
     }
 
     #[test]

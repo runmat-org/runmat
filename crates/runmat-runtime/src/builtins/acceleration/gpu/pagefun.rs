@@ -690,10 +690,10 @@ impl PageInput {
                 Tensor::new(vec![n], vec![1, 1])
                     .map_err(|e| pagefun_error_with_detail(&PAGEFUN_ERROR_INTERNAL, &e))?,
             ),
-            Value::Int(i) => Self::from_tensor(
-                Tensor::new(vec![i.to_f64()], vec![1, 1])
-                    .map_err(|e| pagefun_error_with_detail(&PAGEFUN_ERROR_INTERNAL, &e))?,
-            ),
+            Value::Int(_) => Err(pagefun_error_with_detail(
+                &PAGEFUN_ERROR_INVALID_INPUT,
+                "pagefun has no typed integer kernel; refusing f64 fallback",
+            )),
             Value::Bool(flag) => Self::from_tensor(
                 Tensor::new(vec![if flag { 1.0 } else { 0.0 }], vec![1, 1])
                     .map_err(|e| pagefun_error_with_detail(&PAGEFUN_ERROR_INTERNAL, &e))?,
@@ -712,6 +712,12 @@ impl PageInput {
     }
 
     fn from_tensor(tensor: Tensor) -> BuiltinResult<Self> {
+        if tensor.integer_storage().is_some() {
+            return Err(pagefun_error_with_detail(
+                &PAGEFUN_ERROR_INVALID_INPUT,
+                "pagefun has no typed integer kernel; refusing f64 fallback",
+            ));
+        }
         let shape = canonical_matrix_shape(&tensor.shape);
         let data = tensor_utils::tensor_into_values_f64(tensor);
         if data.len() != shape.iter().copied().product::<usize>() {
@@ -850,6 +856,12 @@ fn compute_strides(dims: &[usize]) -> Vec<usize> {
 fn tensor_matrix_data(value: Value) -> BuiltinResult<(Vec<f64>, usize, usize)> {
     match value {
         Value::Tensor(t) => {
+            if t.integer_storage().is_some() {
+                return Err(pagefun_error_with_detail(
+                    &PAGEFUN_ERROR_RESULT_TYPE,
+                    "pagefun callback returned a typed integer tensor; refusing f64 fallback",
+                ));
+            }
             if t.shape.len() > 2 {
                 return Err(pagefun_error_with_detail(
                     &PAGEFUN_ERROR_RESULT_TYPE,
@@ -869,7 +881,10 @@ fn tensor_matrix_data(value: Value) -> BuiltinResult<(Vec<f64>, usize, usize)> {
             Ok((data, rows, cols))
         }
         Value::Num(n) => Ok((vec![n], 1, 1)),
-        Value::Int(i) => Ok((vec![i.to_f64()], 1, 1)),
+        Value::Int(_) => Err(pagefun_error_with_detail(
+            &PAGEFUN_ERROR_RESULT_TYPE,
+            "pagefun callback returned an integer scalar; refusing f64 fallback",
+        )),
         other => Err(pagefun_error_with_detail(
             &PAGEFUN_ERROR_RESULT_TYPE,
             format!(
@@ -1109,7 +1124,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn pagefun_real_inputs_read_typed_integer_storage_exactly() {
+    fn pagefun_rejects_poisoned_typed_integer_inputs_before_float_materialization() {
         let mut lhs =
             Tensor::new_integer(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2]).unwrap();
         let mut rhs =
@@ -1122,19 +1137,13 @@ pub(crate) mod tests {
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
         );
-        let result = block_on(result).expect("pagefun");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![19.0, 43.0, 22.0, 50.0]);
-            }
-            other => panic!("expected tensor result, got {other:?}"),
-        }
+        let error = block_on(result).expect_err("typed integer page inputs must not use f64");
+        assert!(error.to_string().contains("typed integer kernel"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn pagefun_matrix_result_reader_uses_typed_integer_storage_exactly() {
+    fn pagefun_matrix_result_reader_rejects_poisoned_typed_integer_storage() {
         let mut result = Tensor::new_integer(
             IntegerStorage::U64(vec![9_007_199_254_740_993, 7]),
             vec![1, 2],
@@ -1142,9 +1151,21 @@ pub(crate) mod tests {
         .unwrap();
         result.data.fill(f64::NAN);
 
-        let (data, rows, cols) = tensor_matrix_data(Value::Tensor(result)).expect("matrix data");
-        assert_eq!(data, vec![9_007_199_254_740_992.0, 7.0]);
-        assert_eq!((rows, cols), (1, 2));
+        let error = tensor_matrix_data(Value::Tensor(result))
+            .expect_err("typed callback result must not use f64");
+        assert!(error.to_string().contains("typed integer tensor"));
+    }
+
+    #[test]
+    fn pagefun_rejects_wide_integer_scalar_before_float_materialization() {
+        let result = pagefun_builtin(
+            Value::FunctionHandle("mtimes".into()),
+            Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+            vec![Value::Num(1.0)],
+        );
+
+        let error = block_on(result).expect_err("wide integer scalar must not use f64");
+        assert!(error.to_string().contains("typed integer kernel"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

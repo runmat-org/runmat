@@ -1097,6 +1097,10 @@ fn coerce_host_value(value: Value) -> BuiltinResult<Tensor> {
 }
 
 fn cast_tensor(mut tensor: Tensor, dtype: DataClass) -> BuiltinResult<(Tensor, bool)> {
+    // This function is reached for non-integer destinations only.  Native integer
+    // inputs take the upload_integer path above unless the caller explicitly
+    // requested a floating or logical class, in which case this is the deliberate
+    // MATLAB-style cast boundary.
     if tensor.integer_storage().is_some() {
         tensor = tensor::integer_tensor_to_f64(tensor).map_err(|err| {
             gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_CONVERSION)

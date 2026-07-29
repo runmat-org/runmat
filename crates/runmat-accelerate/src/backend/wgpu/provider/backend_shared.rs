@@ -148,6 +148,27 @@ mod compute_binding_count_tests {
     }
 }
 
+#[cfg(test)]
+mod float_result_materialization_tests {
+    use super::host_tensor_from_value;
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
+
+    #[test]
+    fn rejects_wide_and_poisoned_native_integers() {
+        let scalar = host_tensor_from_value("eig", Value::Int(IntValue::U64(u64::MAX)))
+            .expect_err("wide integer scalar must not use f64");
+        assert!(scalar.to_string().contains("typed provider result path"));
+
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![1, 2])
+                .expect("integer tensor");
+        tensor.data.fill(f64::NAN);
+        let tensor = host_tensor_from_value("eig", Value::Tensor(tensor))
+            .expect_err("poisoned integer tensor must not use f64");
+        assert!(tensor.to_string().contains("typed provider result path"));
+    }
+}
+
 pub(super) fn parse_two_pass_mode(raw: &str) -> Option<ReductionTwoPassMode> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -504,11 +525,14 @@ pub(super) fn filter_state_shape(
 
 pub(crate) fn host_tensor_from_value(label: &str, value: Value) -> Result<Tensor> {
     match value {
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => Err(anyhow!(
+            "{label}: native integer tensor requires a typed provider result path; refusing f64 fallback"
+        )),
         Value::Tensor(tensor) => Ok(tensor),
         Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).map_err(|e| anyhow!("{label}: {e}")),
-        Value::Int(i) => {
-            Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| anyhow!("{label}: {e}"))
-        }
+        Value::Int(_) => Err(anyhow!(
+            "{label}: native integer scalar requires a typed provider result path; refusing f64 fallback"
+        )),
         Value::Bool(b) => Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
             .map_err(|e| anyhow!("{label}: {e}")),
         Value::ComplexTensor(_) => Err(anyhow!(
