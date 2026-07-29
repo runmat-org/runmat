@@ -4,7 +4,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntegerStorage, LogicalArray, Tensor, Type, Value,
+    ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -413,6 +413,13 @@ fn integer_storage_prototype_from_keyword(keyword: &str) -> Option<IntegerStorag
 async fn eye_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
     match proto {
         Value::LogicalArray(_) | Value::Bool(_) => eye_logical(shape),
+        Value::ComplexTensor(tensor) if tensor.integer_data.is_some() => eye_complex_integer_like(
+            tensor
+                .integer_data
+                .as_ref()
+                .expect("guarded typed complex integer storage"),
+            shape,
+        ),
         Value::ComplexTensor(_) | Value::Complex(_, _) => eye_complex(shape),
         Value::GpuTensor(handle) => eye_like_gpu(handle, shape).await,
         Value::Tensor(tensor) => match tensor.integer_storage() {
@@ -445,6 +452,26 @@ fn eye_integer_like(storage: &IntegerStorage, shape: &[usize]) -> Result<Value, 
     });
     let tensor = Tensor::new_integer(values, shape).map_err(|e| format!("eye: {e}"))?;
     Ok(tensor::tensor_into_value(tensor))
+}
+
+fn eye_complex_integer_like(
+    storage: &IntegerComplexStorage,
+    shape: &[usize],
+) -> Result<Value, String> {
+    let shape = shape.to_vec();
+    let len = tensor::element_count(&shape);
+    let mut real = storage.real.zeros_like(len);
+    let one = storage
+        .real
+        .ones_like(1)
+        .value_at(0)
+        .expect("one-element integer storage has a value");
+    visit_identity_positions(&shape, |index| {
+        real.set_value(index, one.clone())
+            .expect("identity index and integer class are valid");
+    });
+    let storage = IntegerComplexStorage::new(real, storage.imag.zeros_like(len))?;
+    ComplexTensor::new_integer(storage, shape).map(Value::ComplexTensor)
 }
 
 #[async_recursion::async_recursion(?Send)]
@@ -602,7 +629,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, IntegerStorage, Type};
+    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage, Type};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -876,6 +903,38 @@ pub(crate) mod tests {
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn eye_like_typed_complex_uint64_keeps_exact_integer_storage() {
+        let prototype = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![u64::MAX]),
+                IntegerStorage::U64(vec![9_007_199_254_740_993]),
+            )
+            .expect("typed complex prototype"),
+            vec![1, 1],
+        )
+        .expect("typed complex tensor");
+        let result = block_on(eye_builtin(vec![
+            Value::Num(2.0),
+            Value::from("like"),
+            Value::ComplexTensor(prototype),
+        ]))
+        .expect("eye like");
+        let Value::ComplexTensor(output) = result else {
+            panic!("expected typed complex output");
+        };
+        assert_eq!(
+            output.integer_data,
+            Some(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![1, 0, 0, 1]),
+                    IntegerStorage::U64(vec![0; 4]),
+                )
+                .expect("typed complex identity"),
+            )
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

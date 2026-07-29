@@ -161,7 +161,7 @@ fn missing_member_index_overload_error(base: &Value, op: ObjectIndexOp) -> Optio
     }
 }
 
-async fn linear_index_values_to_f64(values: &[Value]) -> Result<Vec<f64>, RuntimeError> {
+async fn linear_index_values(values: &[Value]) -> Result<Vec<usize>, RuntimeError> {
     let mut out = Vec::with_capacity(values.len());
     for value in values {
         let mut index_value = value.clone();
@@ -179,7 +179,7 @@ async fn linear_index_values_to_f64(values: &[Value]) -> Result<Vec<f64>, Runtim
         let index = index_val.positive_usize().ok_or_else(|| {
             crate::interpreter::errors::mex("IndexOutOfBounds", "Index out of bounds")
         })?;
-        out.push(index as f64);
+        out.push(index);
     }
     Ok(out)
 }
@@ -999,17 +999,17 @@ pub async fn paren_index_value(
             if let Some((name, parameters)) = expr.function_reference_signature() {
                 apply_symbolic_function_reference(name, parameters, &raw_indices)
             } else {
-                let numeric = linear_index_values_to_f64(&raw_indices).await?;
-                if numeric.len() == 1 && numeric[0] == 1.0 {
+                let indices = linear_index_values(&raw_indices).await?;
+                if indices == [1] {
                     Ok(Value::Symbolic(expr.clone()))
                 } else {
-                    idx_read_linear::generic_index(&Value::Symbolic(expr.clone()), &numeric).await
+                    idx_read_linear::generic_index(&Value::Symbolic(expr.clone()), &indices).await
                 }
             }
         }
         _ => {
-            let numeric = linear_index_values_to_f64(&raw_indices).await?;
-            idx_read_linear::generic_index(&base, &numeric).await
+            let indices = linear_index_values(&raw_indices).await?;
+            idx_read_linear::generic_index(&base, &indices).await
         }
     }
 }

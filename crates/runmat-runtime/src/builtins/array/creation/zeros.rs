@@ -7,7 +7,7 @@ use runmat_accelerate_api::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntegerStorage, LogicalArray, SparseTensor, Value,
+    ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, SparseTensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use std::sync::OnceLock;
@@ -583,6 +583,15 @@ async fn zeros_gpu(shape: &[usize]) -> crate::BuiltinResult<Value> {
 async fn zeros_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value> {
     match proto {
         Value::LogicalArray(_) | Value::Bool(_) => zeros_logical(shape),
+        Value::ComplexTensor(tensor) if tensor.integer_data.is_some() => {
+            zeros_complex_integer_like(
+                tensor
+                    .integer_data
+                    .as_ref()
+                    .expect("guarded typed complex integer storage"),
+                shape,
+            )
+        }
         Value::ComplexTensor(_) | Value::Complex(_, _) => {
             let tensor = ComplexTensor::zeros(shape.to_vec());
             Ok(Value::ComplexTensor(tensor))
@@ -620,6 +629,19 @@ fn zeros_integer_like(storage: &IntegerStorage, shape: &[usize]) -> crate::Built
     )
     .map_err(|e| builtin_error(format!("zeros: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
+}
+
+fn zeros_complex_integer_like(
+    storage: &IntegerComplexStorage,
+    shape: &[usize],
+) -> crate::BuiltinResult<Value> {
+    let len = tensor::element_count(shape);
+    let storage =
+        IntegerComplexStorage::new(storage.real.zeros_like(len), storage.imag.zeros_like(len))
+            .map_err(|e| builtin_error(format!("zeros: {e}")))?;
+    ComplexTensor::new_integer(storage, shape.to_vec())
+        .map(Value::ComplexTensor)
+        .map_err(|e| builtin_error(format!("zeros: {e}")))
 }
 
 fn zeros_sparse_like(proto: &SparseTensor, shape: &[usize]) -> crate::BuiltinResult<Value> {
@@ -841,7 +863,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage, SparseTensor, Tensor};
+    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage, SparseTensor, Tensor};
 
     fn clear_accel_provider_state() -> test_support::AccelTestGuard {
         test_support::accel_test_lock()
@@ -960,6 +982,38 @@ pub(crate) mod tests {
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn zeros_like_typed_complex_uint64_keeps_exact_integer_storage() {
+        let prototype = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+                IntegerStorage::U64(vec![u64::MAX, 1]),
+            )
+            .expect("typed complex prototype"),
+            vec![1, 2],
+        )
+        .expect("typed complex tensor");
+        let result = block_on(zeros_builtin(vec![
+            Value::Num(2.0),
+            Value::from("like"),
+            Value::ComplexTensor(prototype),
+        ]))
+        .expect("zeros like");
+        let Value::ComplexTensor(output) = result else {
+            panic!("expected typed complex output");
+        };
+        assert_eq!(
+            output.integer_data,
+            Some(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![0; 4]),
+                    IntegerStorage::U64(vec![0; 4]),
+                )
+                .expect("typed complex zeros"),
+            )
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -6,7 +6,7 @@ use runmat_accelerate_api::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntegerStorage, LogicalArray, Value,
+    ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -476,6 +476,13 @@ fn ones_logical(shape: &[usize]) -> crate::BuiltinResult<Value> {
 async fn ones_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value> {
     match proto {
         Value::LogicalArray(_) | Value::Bool(_) => ones_logical(shape),
+        Value::ComplexTensor(tensor) if tensor.integer_data.is_some() => ones_complex_integer_like(
+            tensor
+                .integer_data
+                .as_ref()
+                .expect("guarded typed complex integer storage"),
+            shape,
+        ),
         Value::ComplexTensor(_) | Value::Complex(_, _) => {
             let len = tensor::element_count(shape);
             let data = vec![(1.0, 0.0); len];
@@ -515,6 +522,19 @@ fn ones_integer_like(storage: &IntegerStorage, shape: &[usize]) -> crate::Builti
     )
     .map_err(|e| builtin_error(format!("ones: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
+}
+
+fn ones_complex_integer_like(
+    storage: &IntegerComplexStorage,
+    shape: &[usize],
+) -> crate::BuiltinResult<Value> {
+    let len = tensor::element_count(shape);
+    let storage =
+        IntegerComplexStorage::new(storage.real.ones_like(len), storage.imag.zeros_like(len))
+            .map_err(|e| builtin_error(format!("ones: {e}")))?;
+    ComplexTensor::new_integer(storage, shape.to_vec())
+        .map(Value::ComplexTensor)
+        .map_err(|e| builtin_error(format!("ones: {e}")))
 }
 
 #[async_recursion::async_recursion(?Send)]
@@ -656,7 +676,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
+    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage, Tensor};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -848,6 +868,38 @@ pub(crate) mod tests {
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn ones_like_typed_complex_int64_keeps_signed_storage() {
+        let prototype = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+                IntegerStorage::I64(vec![i64::MAX, i64::MIN]),
+            )
+            .expect("typed complex prototype"),
+            vec![1, 2],
+        )
+        .expect("typed complex tensor");
+        let result = block_on(ones_builtin(vec![
+            Value::Num(2.0),
+            Value::from("like"),
+            Value::ComplexTensor(prototype),
+        ]))
+        .expect("ones like");
+        let Value::ComplexTensor(output) = result else {
+            panic!("expected typed complex output");
+        };
+        assert_eq!(
+            output.integer_data,
+            Some(
+                IntegerComplexStorage::new(
+                    IntegerStorage::I64(vec![1; 4]),
+                    IntegerStorage::I64(vec![0; 4]),
+                )
+                .expect("typed complex ones"),
+            )
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Tensor, Type, Value,
+    IntValue, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -262,6 +262,72 @@ enum NanFlag {
     Omit,
 }
 
+/// A value used only while ordering observations.  Integer order statistics
+/// return doubles, but their input ordering and tie detection must not pass
+/// through the lossy f64 mirror first (notably for uint64 values above 2^53).
+#[derive(Clone)]
+enum OrderedValue {
+    Float(f64),
+    Integer(IntValue),
+}
+
+impl OrderedValue {
+    fn is_nan(&self) -> bool {
+        matches!(self, Self::Float(value) if value.is_nan())
+    }
+
+    fn as_f64(&self) -> f64 {
+        match self {
+            Self::Float(value) => *value,
+            Self::Integer(value) => value.to_f64(),
+        }
+    }
+}
+
+fn ordered_input_values(input: &Tensor) -> Vec<OrderedValue> {
+    if let Some(storage) = input.integer_storage() {
+        return storage
+            .exact_values()
+            .iter()
+            .cloned()
+            .map(OrderedValue::Integer)
+            .collect();
+    }
+    tensor::tensor_values_f64_cow(input)
+        .iter()
+        .copied()
+        .map(OrderedValue::Float)
+        .collect()
+}
+
+fn compare_ordered_values(left: &OrderedValue, right: &OrderedValue) -> Ordering {
+    match (left, right) {
+        (OrderedValue::Float(left), OrderedValue::Float(right)) => {
+            left.partial_cmp(right).unwrap_or(Ordering::Greater)
+        }
+        (OrderedValue::Integer(left), OrderedValue::Integer(right)) => match (left, right) {
+            (IntValue::I8(left), IntValue::I8(right)) => left.cmp(right),
+            (IntValue::I16(left), IntValue::I16(right)) => left.cmp(right),
+            (IntValue::I32(left), IntValue::I32(right)) => left.cmp(right),
+            (IntValue::I64(left), IntValue::I64(right)) => left.cmp(right),
+            (IntValue::U8(left), IntValue::U8(right)) => left.cmp(right),
+            (IntValue::U16(left), IntValue::U16(right)) => left.cmp(right),
+            (IntValue::U32(left), IntValue::U32(right)) => left.cmp(right),
+            (IntValue::U64(left), IntValue::U64(right)) => left.cmp(right),
+            _ => unreachable!("integer tensor storage is homogeneous"),
+        },
+        _ => unreachable!("an order-statistics input has one numeric representation"),
+    }
+}
+
+fn ordered_values_equal(left: &OrderedValue, right: &OrderedValue) -> bool {
+    match (left, right) {
+        (OrderedValue::Float(left), OrderedValue::Float(right)) => left == right,
+        (OrderedValue::Integer(left), OrderedValue::Integer(right)) => left == right,
+        _ => false,
+    }
+}
+
 struct QuantileArgs {
     input: Tensor,
     probabilities: Vec<f64>,
@@ -360,42 +426,44 @@ async fn parse_quantile_args(
     })
 }
 
-fn sorted_slice(mut values: Vec<f64>, nanflag: NanFlag) -> Vec<f64> {
+fn sorted_slice(mut values: Vec<OrderedValue>, nanflag: NanFlag) -> Vec<OrderedValue> {
     if values.is_empty() {
         return values;
     }
     match nanflag {
-        NanFlag::Include if values.iter().any(|value| value.is_nan()) => return vec![f64::NAN],
+        NanFlag::Include if values.iter().any(OrderedValue::is_nan) => {
+            return vec![OrderedValue::Float(f64::NAN)]
+        }
         NanFlag::Include => {}
         NanFlag::Omit => values.retain(|value| !value.is_nan()),
     }
-    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Greater));
+    values.sort_by(compare_ordered_values);
     values
 }
 
-fn quantile_from_sorted(values: &[f64], p: f64) -> f64 {
-    if values.is_empty() || values.iter().any(|value| value.is_nan()) {
+fn quantile_from_sorted(values: &[OrderedValue], p: f64) -> f64 {
+    if values.is_empty() || values.iter().any(OrderedValue::is_nan) {
         return f64::NAN;
     }
     if values.len() == 1 {
-        return values[0];
+        return values[0].as_f64();
     }
     let position = p * (values.len() - 1) as f64;
     let lo = position.floor() as usize;
     let hi = position.ceil() as usize;
     if lo == hi {
-        values[lo]
+        values[lo].as_f64()
     } else {
         let weight = position - lo as f64;
-        values[lo] * (1.0 - weight) + values[hi] * weight
+        values[lo].as_f64() * (1.0 - weight) + values[hi].as_f64() * weight
     }
 }
 
 fn quantile_tensor(args: QuantileArgs, name: &str) -> BuiltinResult<Value> {
-    let input_values = tensor::tensor_values_f64_cow(&args.input);
+    let input_values = ordered_input_values(&args.input);
     let shape = tensor::default_shape_for(&args.input.shape, input_values.len());
     if args.dim == 0 {
-        let values = sorted_slice(input_values.to_vec(), args.nanflag);
+        let values = sorted_slice(input_values, args.nanflag);
         let data = args
             .probabilities
             .iter()
@@ -427,7 +495,7 @@ fn quantile_tensor(args: QuantileArgs, name: &str) -> BuiltinResult<Value> {
             let mut slice = Vec::with_capacity(axis_len);
             for idx in 0..axis_len {
                 let src = prefix + idx * pre + suffix * pre * axis_len;
-                slice.push(input_values[src]);
+                slice.push(input_values[src].clone());
             }
             let slice = sorted_slice(slice, args.nanflag);
             for (p_idx, p) in args.probabilities.iter().enumerate() {
@@ -441,20 +509,20 @@ fn quantile_tensor(args: QuantileArgs, name: &str) -> BuiltinResult<Value> {
         .map_err(|err| order_error(name, format!("{name}: {err}")))
 }
 
-fn tiedrank_slice(values: &[f64]) -> (Vec<f64>, f64) {
+fn tiedrank_slice(values: &[OrderedValue]) -> (Vec<f64>, f64) {
     let mut indexed = values
         .iter()
-        .copied()
+        .cloned()
         .enumerate()
         .filter(|(_, value)| !value.is_nan())
         .collect::<Vec<_>>();
-    indexed.sort_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+    indexed.sort_by(|(_, a), (_, b)| compare_ordered_values(a, b));
     let mut ranks = vec![f64::NAN; values.len()];
     let mut tieadj = 0.0;
     let mut start = 0usize;
     while start < indexed.len() {
         let mut end = start + 1;
-        while end < indexed.len() && indexed[end].1 == indexed[start].1 {
+        while end < indexed.len() && ordered_values_equal(&indexed[end].1, &indexed[start].1) {
             end += 1;
         }
         let average_rank = (start + 1 + end) as f64 / 2.0;
@@ -475,7 +543,7 @@ fn is_vector_shape(shape: &[usize]) -> bool {
 }
 
 fn tiedrank_tensor(input: Tensor) -> BuiltinResult<(Value, Value)> {
-    let input_values = tensor::tensor_values_f64_cow(&input);
+    let input_values = ordered_input_values(&input);
     let shape = tensor::default_shape_for(&input.shape, input_values.len());
     if is_vector_shape(&shape) {
         let (ranks, tieadj) = tiedrank_slice(&input_values);
@@ -502,7 +570,7 @@ fn tiedrank_tensor(input: Tensor) -> BuiltinResult<(Value, Value)> {
             let mut slice = Vec::with_capacity(axis_len);
             for idx in 0..axis_len {
                 let src = prefix + idx * pre + suffix * pre * axis_len;
-                slice.push(input_values[src]);
+                slice.push(input_values[src].clone());
             }
             let (slice_ranks, slice_tieadj) = tiedrank_slice(&slice);
             let tie_dst = prefix + suffix * pre;
@@ -777,5 +845,44 @@ mod tests {
             }
             other => panic!("expected output list, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn tiedrank_uint64_distinguishes_values_beyond_f64_precision() {
+        let base = 1_u64 << 53;
+        let mut x =
+            Tensor::new_integer(IntegerStorage::U64(vec![base, base + 1, base]), vec![3, 1])
+                .unwrap();
+        x.data.clear();
+
+        let out = block_on(tiedrank::tiedrank_builtin(Value::Tensor(x))).unwrap();
+        match out {
+            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.5, 3.0, 1.5]),
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ordered_integer_comparison_covers_all_storage_classes() {
+        macro_rules! assert_ordered {
+            ($variant:ident, $lower:expr, $upper:expr) => {
+                assert_eq!(
+                    compare_ordered_values(
+                        &OrderedValue::Integer(IntValue::$variant($lower)),
+                        &OrderedValue::Integer(IntValue::$variant($upper)),
+                    ),
+                    Ordering::Less,
+                );
+            };
+        }
+
+        assert_ordered!(I8, -1, 1);
+        assert_ordered!(I16, -1, 1);
+        assert_ordered!(I32, -1, 1);
+        assert_ordered!(I64, -1, 1);
+        assert_ordered!(U8, 1, 2);
+        assert_ordered!(U16, 1, 2);
+        assert_ordered!(U32, 1, 2);
+        assert_ordered!(U64, 1, 2);
     }
 }

@@ -457,6 +457,87 @@ fn reduce_integer_data_dim(
     })
 }
 
+/// Reduce an exact integer buffer along one matrix dimension without routing
+/// values through the provider's f64 registry.  The index output deliberately
+/// remains f64 because MATLAB reduction indices are double-valued.
+fn reduce_integer_extrema_data_dim(
+    data: &HostIntegerDataOwned,
+    shape: &[usize],
+    dim: usize,
+    is_min: bool,
+) -> Result<(HostIntegerDataOwned, Vec<f64>, Vec<usize>)> {
+    ensure!(
+        shape.len() == 2,
+        "native integer extrema: only 2D tensors supported"
+    );
+    ensure!(
+        dim <= 1,
+        "native integer extrema: only dims 0 or 1 supported"
+    );
+    let rows = shape[0];
+    let cols = shape[1];
+    ensure!(
+        integer_data_len(data) == rows.saturating_mul(cols),
+        "native integer extrema: data length does not match shape"
+    );
+    ensure!(
+        rows != 0 && cols != 0,
+        "native integer extrema: empty inputs use the host fallback"
+    );
+    let output_shape = if dim == 0 {
+        vec![1, cols]
+    } else {
+        vec![rows, 1]
+    };
+    macro_rules! reduce {
+        ($values:expr, $owned:ident) => {{
+            let output_len = if dim == 0 { cols } else { rows };
+            let mut out = vec![$values[0]; output_len];
+            let mut indices = vec![1.0; output_len];
+            if dim == 0 {
+                for col in 0..cols {
+                    let mut best = $values[col * rows];
+                    for row in 1..rows {
+                        let value = $values[row + col * rows];
+                        if (is_min && value < best) || (!is_min && value > best) {
+                            best = value;
+                            indices[col] = (row + 1) as f64;
+                        }
+                    }
+                    out[col] = best;
+                }
+            } else {
+                for row in 0..rows {
+                    let mut best = $values[row];
+                    for col in 1..cols {
+                        let value = $values[row + col * rows];
+                        if (is_min && value < best) || (!is_min && value > best) {
+                            best = value;
+                            indices[row] = (col + 1) as f64;
+                        }
+                    }
+                    out[row] = best;
+                }
+            }
+            (
+                HostIntegerDataOwned::$owned(out),
+                indices,
+                output_shape.clone(),
+            )
+        }};
+    }
+    Ok(match data {
+        HostIntegerDataOwned::I8(values) => reduce!(values, I8),
+        HostIntegerDataOwned::I16(values) => reduce!(values, I16),
+        HostIntegerDataOwned::I32(values) => reduce!(values, I32),
+        HostIntegerDataOwned::I64(values) => reduce!(values, I64),
+        HostIntegerDataOwned::U8(values) => reduce!(values, U8),
+        HostIntegerDataOwned::U16(values) => reduce!(values, U16),
+        HostIntegerDataOwned::U32(values) => reduce!(values, U32),
+        HostIntegerDataOwned::U64(values) => reduce!(values, U64),
+    })
+}
+
 fn reduce_integer_mean_data_dim(
     data: &HostIntegerDataOwned,
     shape: &[usize],
@@ -8593,6 +8674,21 @@ impl AccelProvider for InProcessProvider {
         dim: usize,
     ) -> AccelProviderFuture<'a, runmat_accelerate_api::ReduceDimResult> {
         Box::pin(async move {
+            let integer_data = {
+                integer_registry()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(&a.buffer_id)
+                    .cloned()
+            };
+            if let Some(data) = integer_data {
+                let (values, indices, shape) =
+                    reduce_integer_extrema_data_dim(&data, &a.shape, dim, true)?;
+                return Ok(runmat_accelerate_api::ReduceDimResult {
+                    values: self.allocate_integer_tensor(values, shape.clone()),
+                    indices: self.allocate_tensor(indices, shape),
+                });
+            }
             if a.shape.len() != 2 {
                 return Err(anyhow::anyhow!("reduce_min_dim: only 2D supported"));
             }
@@ -8679,6 +8775,21 @@ impl AccelProvider for InProcessProvider {
         dim: usize,
     ) -> AccelProviderFuture<'a, runmat_accelerate_api::ReduceDimResult> {
         Box::pin(async move {
+            let integer_data = {
+                integer_registry()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(&a.buffer_id)
+                    .cloned()
+            };
+            if let Some(data) = integer_data {
+                let (values, indices, shape) =
+                    reduce_integer_extrema_data_dim(&data, &a.shape, dim, false)?;
+                return Ok(runmat_accelerate_api::ReduceDimResult {
+                    values: self.allocate_integer_tensor(values, shape.clone()),
+                    indices: self.allocate_tensor(indices, shape),
+                });
+            }
             if a.shape.len() != 2 {
                 return Err(anyhow::anyhow!("reduce_max_dim: only 2D supported"));
             }
@@ -9884,6 +9995,64 @@ mod tests {
         assert_eq!(
             runmat_accelerate_api::handle_integer_type(&prod),
             Some(runmat_accelerate_api::IntegerElementType::I8)
+        );
+    }
+
+    #[test]
+    fn inprocess_integer_extrema_hooks_keep_wide_values_resident_and_exact() {
+        let provider = InProcessProvider::new();
+        let unsigned = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&[u64::MAX, 1_u64 << 63, 9, 7]),
+                shape: &[2, 2],
+            })
+            .expect("upload uint64 extrema input");
+        let signed = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::I64(&[i64::MIN, -7, i64::MAX, 3]),
+                shape: &[2, 2],
+            })
+            .expect("upload int64 extrema input");
+        let downloads_before = provider.telemetry_snapshot().download_bytes;
+
+        let min = block_on(provider.reduce_min_dim(&unsigned, 0)).expect("uint64 min");
+        let max = block_on(provider.reduce_max_dim(&signed, 1)).expect("int64 max");
+
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&min.values),
+            Some(IntegerElementType::U64)
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&max.values),
+            Some(IntegerElementType::I64)
+        );
+        assert_eq!(
+            provider.telemetry_snapshot().download_bytes,
+            downloads_before
+        );
+        assert_eq!(
+            block_on(provider.download_integer(&min.values))
+                .expect("download uint64 min")
+                .data,
+            HostIntegerDataOwned::U64(vec![1_u64 << 63, 7])
+        );
+        assert_eq!(
+            block_on(provider.download_integer(&max.values))
+                .expect("download int64 max")
+                .data,
+            HostIntegerDataOwned::I64(vec![i64::MAX, 3])
+        );
+        assert_eq!(
+            block_on(provider.download(&min.indices))
+                .expect("download min indices")
+                .data,
+            vec![2.0, 2.0]
+        );
+        assert_eq!(
+            block_on(provider.download(&max.indices))
+                .expect("download max indices")
+                .data,
+            vec![2.0, 2.0]
         );
     }
 

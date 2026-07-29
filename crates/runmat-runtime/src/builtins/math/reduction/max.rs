@@ -2410,7 +2410,9 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
-    use runmat_accelerate_api::HostTensorView;
+    use runmat_accelerate_api::{
+        HostIntegerDataView, HostIntegerTensorView, HostTensorView, IntegerElementType,
+    };
     use runmat_builtins::{
         ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, Tensor, Value,
     };
@@ -2997,6 +2999,54 @@ pub(crate) mod tests {
             assert_eq!(gathered_vals.data, expected_vals.data);
             assert_eq!(gathered_idx.shape, expected_idx.shape);
             assert_eq!(gathered_idx.data, expected_idx.data);
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn max_gpu_uint64_reduction_matches_cpu_and_preserves_residency() {
+        let mut tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63, 9, 7]),
+            vec![2, 2],
+        )
+        .expect("uint64 tensor");
+        tensor.data.clear();
+        let (values_cpu, indices_cpu) = evaluate(Value::Tensor(tensor.clone()), &[])
+            .expect("cpu max")
+            .into_pair();
+
+        test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&[u64::MAX, 1_u64 << 63, 9, 7]),
+                    shape: &[2, 2],
+                })
+                .expect("upload exact uint64");
+            let (values_gpu, indices_gpu) = evaluate(Value::GpuTensor(handle), &[])
+                .expect("gpu max")
+                .into_pair();
+            let Value::GpuTensor(values_handle) = &values_gpu else {
+                panic!("expected resident uint64 values, got {values_gpu:?}");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(values_handle),
+                Some(IntegerElementType::U64)
+            );
+            assert!(matches!(indices_gpu, Value::GpuTensor(_)));
+            assert_eq!(
+                test_support::gather(values_gpu).expect("gather values"),
+                match values_cpu {
+                    Value::Tensor(values) => values,
+                    other => panic!("expected CPU tensor values, got {other:?}"),
+                }
+            );
+            assert_eq!(
+                test_support::gather(indices_gpu).expect("gather indices"),
+                match indices_cpu {
+                    Value::Tensor(indices) => indices,
+                    other => panic!("expected CPU tensor indices, got {other:?}"),
+                }
+            );
         });
     }
 
