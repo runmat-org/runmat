@@ -8,6 +8,7 @@ use std::sync::OnceLock;
 
 use runmat_accelerate_api::ReductionFlavor;
 use runmat_builtins::Value;
+use runmat_runtime::builtins::common::tensor::tensor_element_len;
 use serde::{Deserialize, Serialize};
 
 use crate::graph::{
@@ -544,7 +545,9 @@ fn value_is_placeholder(graph: &AccelGraph, vid: ValueId) -> bool {
         return false;
     };
     match constant {
-        Value::Tensor(t) => t.data.is_empty(),
+        // Native integer tensors may intentionally have no f64 mirror.  Their
+        // authoritative storage (and thus their emptiness) is the typed buffer.
+        Value::Tensor(t) => tensor_element_len(t) == 0,
         Value::LogicalArray(l) => l.data.is_empty(),
         Value::StringArray(sa) => sa.data.is_empty(),
         Value::CharArray(ca) => ca.data.is_empty(),
@@ -2875,7 +2878,11 @@ fn value_info_scalar(info: &ValueInfo) -> Option<f64> {
         // Float fusion pattern matching must not establish eligibility by
         // rounding a native integer scalar.
         Some(Value::Int(_)) => None,
-        Some(Value::Tensor(t)) if t.data.len() == 1 => Some(t.data[0]),
+        // Do not establish eligibility for a floating fusion by reading the
+        // lossy f64 mirror of a native integer tensor.
+        Some(Value::Tensor(t)) if t.integer_storage().is_none() && t.data.len() == 1 => {
+            Some(t.data[0])
+        }
         Some(Value::LogicalArray(arr)) if arr.data.len() == 1 => Some(arr.data[0] as f64),
         Some(Value::Bool(flag)) => Some(if *flag { 1.0 } else { 0.0 }),
         _ => None,
@@ -3198,7 +3205,14 @@ fn resolve_numeric_vector_constant(graph: &AccelGraph, vid: ValueId) -> Option<V
     }
     let info = graph.value(vid)?;
     match &info.constant {
-        Some(Value::Tensor(tensor)) if !tensor.data.is_empty() => Some(tensor.data.clone()),
+        // Axis and dimension vectors feed floating shader literals below, so
+        // native integer tensors must take the normal unfused path rather than
+        // being derived from their f64 mirror.
+        Some(Value::Tensor(tensor))
+            if tensor.integer_storage().is_none() && !tensor.data.is_empty() =>
+        {
+            Some(tensor.data.clone())
+        }
         Some(Value::LogicalArray(arr)) if !arr.data.is_empty() => Some(
             arr.data
                 .iter()
@@ -3812,6 +3826,30 @@ mod tests {
             assert!(!group.kernel.supported);
             assert!(group.generate_wgsl("f32").is_none());
         }
+    }
+
+    #[test]
+    fn native_integer_tensor_constants_do_not_use_a_poisoned_f64_mirror() {
+        let mut tensor = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![1_u64 << 63]),
+            vec![1, 1],
+        )
+        .expect("integer tensor");
+        tensor.data = vec![f64::NAN];
+        let value = Value::Tensor(tensor);
+        let info = ValueInfo {
+            id: 99,
+            origin: ValueOrigin::Constant,
+            ty: Type::Num,
+            shape: ShapeInfo::Tensor(vec![Some(1), Some(1)]),
+            constant: Some(value.clone()),
+        };
+
+        assert_eq!(value_info_scalar(&info), None);
+        let mut graph = simple_elementwise_graph();
+        graph.values.push(info);
+        assert!(!value_is_placeholder(&graph, 99));
+        assert_eq!(resolve_numeric_vector_constant(&graph, 99), None);
     }
 
     #[test]
