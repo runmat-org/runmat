@@ -702,11 +702,20 @@ fn numeric_scalar(field: &str, value: &Value) -> BuiltinResult<f64> {
 }
 
 fn logical_value(field: &str, value: &Value) -> BuiltinResult<bool> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return match integer.try_to_u64() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(optimoptions_error_with(
+                &OPTIMOPTIONS_ERROR_INVALID_OPTION_VALUE,
+                format!("optimoptions: option {field} must be logical 0 or 1"),
+            )),
+        };
+    }
     match value {
         Value::Bool(flag) => Ok(*flag),
         Value::LogicalArray(LogicalArray { data, .. }) if data.len() == 1 => Ok(data[0] != 0),
         Value::Num(n) => logical_from_number(field, *n),
-        Value::Int(i) => logical_from_number(field, i.to_f64()),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             logical_from_number(field, tensor::tensor_value_f64(tensor, 0))
         }
@@ -1316,6 +1325,25 @@ mod tests {
         assert_eq!(
             options.fields.get("SpecifyObjectiveGradient"),
             Some(&Value::Bool(true))
+        );
+    }
+
+    #[test]
+    fn optimoptions_rejects_wide_typed_integer_logicals_despite_poisoned_mirror() {
+        let mut gradient =
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .expect("SpecifyObjectiveGradient");
+        gradient.data = vec![1.0];
+
+        let err = run_optimoptions(vec![
+            Value::from("fminunc"),
+            Value::from("SpecifyObjectiveGradient"),
+            Value::Tensor(gradient),
+        ])
+        .expect_err("wide integer is not a logical scalar");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:optimoptions:InvalidOptionValue")
         );
     }
 

@@ -870,7 +870,7 @@ fn optional_field(st: &StructValue, name: &str) -> Option<Value> {
 }
 
 fn is_empty_value(value: &Value) -> bool {
-    matches!(value, Value::Tensor(t) if t.data.is_empty())
+    matches!(value, Value::Tensor(t) if tensor::tensor_element_len(t) == 0)
 }
 
 fn empty_value() -> Value {

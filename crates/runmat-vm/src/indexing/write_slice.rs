@@ -1553,6 +1553,44 @@ mod tests {
     }
 
     #[test]
+    fn integer_plan_assignment_preserves_all_typed_rhs_classes_with_poisoned_mirrors() {
+        macro_rules! assert_assignment {
+            ($storage:ident, $value:expr) => {{
+                let tensor = Tensor::new_integer(
+                    IntegerStorage::$storage(vec![Default::default(), Default::default()]),
+                    vec![1, 2],
+                )
+                .expect("destination tensor");
+                let mut rhs =
+                    Tensor::new_integer(IntegerStorage::$storage(vec![$value]), vec![1, 1])
+                        .expect("rhs tensor");
+                rhs.data = vec![f64::NAN];
+                let plan = IndexPlan::new(vec![1], vec![1, 1], vec![1], 1, vec![1, 2]);
+
+                let Value::Tensor(output) =
+                    block_on(assign_tensor_with_plan(tensor, &plan, &Value::Tensor(rhs)))
+                        .expect("assignment")
+                else {
+                    panic!("expected tensor");
+                };
+                assert_eq!(
+                    output.integer_storage(),
+                    Some(&IntegerStorage::$storage(vec![Default::default(), $value]))
+                );
+            }};
+        }
+
+        assert_assignment!(I8, i8::MIN);
+        assert_assignment!(I16, i16::MIN);
+        assert_assignment!(I32, i32::MIN);
+        assert_assignment!(I64, i64::MIN);
+        assert_assignment!(U8, u8::MAX);
+        assert_assignment!(U16, u16::MAX);
+        assert_assignment!(U32, u32::MAX);
+        assert_assignment!(U64, u64::MAX);
+    }
+
+    #[test]
     fn real_plan_assignment_reads_typed_integer_rhs_without_mirror() {
         let tensor = Tensor::new(vec![0.0, 0.0, 0.0], vec![1, 3]).expect("tensor");
         let mut rhs_tensor =

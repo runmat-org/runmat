@@ -503,10 +503,19 @@ fn option_bool(options: Option<&StructValue>, field: &str, default: bool) -> Bui
 }
 
 fn bool_value(field: &str, value: &Value) -> BuiltinResult<bool> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return match integer.try_to_u64() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(fminunc_error_with_detail(
+                &FMINUNC_ERROR_INVALID_ARGUMENT,
+                format!("option {field} must be logical 0 or 1"),
+            )),
+        };
+    }
     match value {
         Value::Bool(flag) => Ok(*flag),
         Value::Num(n) => bool_from_number(field, *n),
-        Value::Int(i) => bool_from_number(field, i.to_f64()),
         Value::LogicalArray(LogicalArray { data, .. }) if data.len() == 1 => Ok(data[0] != 0),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             bool_from_number(field, tensor::tensor_value_f64(tensor, 0))

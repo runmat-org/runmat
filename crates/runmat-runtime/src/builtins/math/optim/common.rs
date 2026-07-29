@@ -371,6 +371,21 @@ mod tests {
     }
 
     #[test]
+    fn option_usize_accepts_wide_typed_integer_storage_despite_poisoned_mirror() {
+        let wide = 9_007_199_254_740_993_u64;
+        let mut max_iter =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).unwrap();
+        max_iter.data = vec![1.0];
+        let mut options = StructValue::new();
+        options.insert("MaxIter", Value::Tensor(max_iter));
+
+        assert_eq!(
+            option_usize("optim_test", Some(&options), "MaxIter", 400).unwrap(),
+            wide as usize
+        );
+    }
+
+    #[test]
     fn option_usize_rejects_fractional_and_unrepresentable_double_values() {
         let mut options = StructValue::new();
         options.insert("MaxIter", Value::Num(3.5));

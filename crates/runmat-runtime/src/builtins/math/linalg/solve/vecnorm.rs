@@ -306,7 +306,11 @@ fn vecnorm_real_tensor(tensor: &Tensor, args: VecnormArgs) -> BuiltinResult<Tens
         &tensor.shape,
         dim,
         args.order,
-        |index| tensor.data[index].abs(),
+        // Typed integer tensors retain an f64 compatibility mirror that can
+        // be stale (and cannot represent every i64/u64 exactly).  vecnorm is
+        // a floating-point algorithm, so materialize from the authoritative
+        // storage before taking magnitudes.
+        |index| tensor::tensor_value_f64(tensor, index).abs(),
         dtype,
     )?;
     Ok(result)
@@ -784,6 +788,19 @@ mod tests {
         let err = call(Value::ComplexTensor(tensor), Vec::new())
             .expect_err("typed complex integer input must reject");
         assert!(err.message().contains("complex numbers with integer types"));
+    }
+
+    #[test]
+    fn vecnorm_reads_typed_integer_storage_not_f64_mirror() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, 0]), vec![2, 1])
+            .expect("typed integer tensor");
+        tensor.data.fill(f64::NAN);
+
+        let result = call(Value::Tensor(tensor), Vec::new()).expect("vecnorm");
+        match result {
+            Value::Num(value) => assert_eq!(value, (i64::MIN as f64).abs()),
+            other => panic!("expected scalar, got {other:?}"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
