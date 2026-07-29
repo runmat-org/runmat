@@ -89,7 +89,7 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
             "value": expr.to_string(),
         }),
         Value::Tensor(t) => {
-            let (preview, truncated) = if let Some(storage) = t.integer_storage() {
+            let (preview, truncated, length) = if let Some(storage) = t.integer_storage() {
                 let truncated = storage.len() > MAX_DATA_PREVIEW;
                 let preview = (0..storage.len().min(MAX_DATA_PREVIEW))
                     .map(|index| {
@@ -100,12 +100,13 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
                         )
                     })
                     .collect::<Vec<_>>();
-                (preview, truncated)
+                (preview, truncated, storage.len())
             } else {
                 let (preview, truncated) = preview_slice(&t.data, MAX_DATA_PREVIEW);
                 (
                     preview.into_iter().map(JsonValue::from).collect(),
                     truncated,
+                    t.data.len(),
                 )
             };
             json!({
@@ -115,14 +116,14 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
                 "cols": t.cols,
                 "dtype": t.dtype.class_name(),
                 "preview": preview,
-                "length": t.data.len(),
+                "length": length,
                 "truncated": truncated,
             })
         }
         Value::ComplexTensor(t) => {
             let (preview, truncated, length, dtype) = if let Some(storage) = &t.integer_data {
                 let length = storage.len();
-                let preview = (0..length.min(MAX_DATA_PREVIEW))
+                let preview: Vec<JsonValue> = (0..length.min(MAX_DATA_PREVIEW))
                     .map(|index| {
                         json!({
                             "real": integer_json_value(
@@ -142,7 +143,7 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
                 )
             } else {
                 let (preview, truncated) = preview_slice(&t.data, MAX_DATA_PREVIEW);
-                let preview = preview
+                let preview: Vec<JsonValue> = preview
                     .into_iter()
                     .map(|(re, im)| json!({ "real": re, "imag": im }))
                     .collect();
@@ -180,7 +181,7 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
                 "rowIndicesLength": st.row_indices.len(),
                 "rowIndicesTruncated": row_indices_truncated,
                 "valuesPreview": values_preview,
-                "valuesLength": st.values.len(),
+                "valuesLength": st.integer_storage().map_or(st.values.len(), |storage| storage.len()),
                 "valuesTruncated": values_truncated,
                 "preview": entry_preview,
                 "entryPreviewTruncated": entry_preview_truncated,
@@ -417,20 +418,23 @@ mod tests {
     use runmat_builtins::{
         ComplexTensor, IntegerComplexStorage, IntegerStorage, SparseTensor, Tensor,
     };
+    use wasm_bindgen_test::wasm_bindgen_test;
 
-    #[test]
+    #[wasm_bindgen_test]
     fn integer_json_preserves_exact_64_bit_values_and_dtype() {
         let scalar = value_to_json(&Value::Int(IntValue::U64(u64::MAX)), 0);
         assert_eq!(scalar["value"], "18446744073709551615");
 
-        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![42, u64::MAX]), vec![1, 2])
+        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![42, u64::MAX]), vec![1, 2])
             .expect("tensor");
+        tensor.data.clear();
         let json = value_to_json(&Value::Tensor(tensor), 0);
         assert_eq!(json["dtype"], "uint64");
         assert_eq!(json["preview"], json!([42, "18446744073709551615"]));
+        assert_eq!(json["length"], 2);
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn sparse_tensor_json_uses_bounded_storage_previews() {
         let rows = MAX_DATA_PREVIEW + 2;
         let cols = 1;
@@ -459,7 +463,7 @@ mod tests {
         assert_eq!(json["truncated"], true);
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn typed_complex_and_sparse_json_preserve_exact_64_bit_values() {
         let complex = ComplexTensor::new_integer(
             IntegerComplexStorage::new(
@@ -477,7 +481,7 @@ mod tests {
             json!([{"real": "18446744073709551615", "imag": "9007199254740993"}])
         );
 
-        let sparse = SparseTensor::new_integer(
+        let mut sparse = SparseTensor::new_integer(
             1,
             1,
             vec![0, 1],
@@ -485,6 +489,7 @@ mod tests {
             IntegerStorage::U64(vec![u64::MAX]),
         )
         .expect("sparse tensor");
+        sparse.values.clear();
         let sparse_json = value_to_json(&Value::SparseTensor(sparse), 0);
         assert_eq!(
             sparse_json["valuesPreview"],
@@ -494,5 +499,6 @@ mod tests {
             sparse_json["preview"],
             json!([{"row": 1, "col": 1, "value": "18446744073709551615"}])
         );
+        assert_eq!(sparse_json["valuesLength"], 1);
     }
 }
