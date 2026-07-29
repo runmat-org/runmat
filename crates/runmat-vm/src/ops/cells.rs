@@ -1,7 +1,7 @@
 use crate::indexing::selectors::IndexScalar;
 use crate::interpreter::errors::mex;
 use runmat_builtins::{CellArray, StructValue, Tensor, Value};
-use runmat_runtime::builtins::common::tensor::tensor_value_f64;
+use runmat_runtime::builtins::common::tensor::{tensor_element_len, tensor_value_f64};
 use runmat_runtime::RuntimeError;
 
 const CELL_END_PLUS_TAG_MASK: u64 = 0xffff_ffff_0000_0000;
@@ -45,7 +45,9 @@ fn parse_cell_index_value(value: &Value) -> Result<usize, RuntimeError> {
                 .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?,
         ),
         Value::Int(i) => IndexScalar::from_int(i),
-        Value::Tensor(t) if t.data.len() == 1 && t.shape.iter().product::<usize>() == 1 => {
+        Value::Tensor(t)
+            if tensor_element_len(t) == 1 && t.shape.iter().product::<usize>() == 1 =>
+        {
             if let Some(storage) = t.integer_storage() {
                 let value = storage.value_at(0).expect("scalar integer storage");
                 IndexScalar::from_int(&value)
@@ -99,7 +101,7 @@ fn parse_cell_index_value_for_len(value: &Value, len: usize) -> Result<usize, Ru
 
 fn parse_cell_index_values_for_assignment(value: &Value) -> Result<Vec<usize>, RuntimeError> {
     match value {
-        Value::Tensor(t) if t.data.len() > 1 => {
+        Value::Tensor(t) if tensor_element_len(t) > 1 => {
             if let Some(storage) = t.integer_storage() {
                 return storage
                     .exact_values()
@@ -338,7 +340,7 @@ pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Valu
                 Ok(vec![index_cell_value(ca, &[idx])?])
             }
             Value::Tensor(t) => {
-                if t.data.len() == 1 && t.shape.iter().product::<usize>() == 1 {
+                if tensor_element_len(t) == 1 && t.shape.iter().product::<usize>() == 1 {
                     let idx = parse_cell_index_value_for_len(&indices[0], ca.data.len())?;
                     return Ok(vec![index_cell_value(ca, &[idx])?]);
                 }
@@ -724,7 +726,10 @@ fn assign_cell_paren_from_cell(
 
 #[cfg(test)]
 mod tests {
-    use super::{assign_cell_member, expand_cell_indices, map_cell_shape_error};
+    use super::{
+        assign_cell_member, expand_cell_indices, map_cell_shape_error,
+        resolve_cell_assignment_positions,
+    };
     use runmat_builtins::{CellArray, IntegerStorage, StructValue, Tensor, Value};
 
     #[test]
@@ -868,6 +873,52 @@ mod tests {
         let values = expand_cell_indices(&cell, &[Value::Tensor(indices)])
             .expect("typed integer vector indices should use exact storage");
         assert_eq!(values, vec![Value::Num(30.0), Value::Num(10.0)]);
+    }
+
+    #[test]
+    fn typed_integer_cell_subscripts_use_storage_when_mirror_is_cleared() {
+        let cell = CellArray::new(
+            vec![Value::Num(10.0), Value::Num(20.0), Value::Num(30.0)],
+            1,
+            3,
+        )
+        .expect("cell");
+
+        let mut scalar = Tensor::new_integer(IntegerStorage::U64(vec![3]), vec![1, 1])
+            .expect("wide scalar selector");
+        scalar.data.clear();
+        let values = expand_cell_indices(&cell, &[Value::Tensor(scalar)])
+            .expect("typed scalar selector with cleared mirror");
+        assert_eq!(values, vec![Value::Num(30.0)]);
+
+        let mut vector = Tensor::new_integer(IntegerStorage::I64(vec![3, 1]), vec![1, 2])
+            .expect("signed vector selector");
+        vector.data.clear();
+        assert_eq!(
+            resolve_cell_assignment_positions(&cell, &[Value::Tensor(vector)])
+                .expect("typed vector selector with cleared mirror"),
+            vec![3, 1]
+        );
+
+        let mut wide =
+            Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1])
+                .expect("wide unsigned selector");
+        wide.data = vec![1.0];
+        let err = expand_cell_indices(&cell, &[Value::Tensor(wide)])
+            .expect_err("wide uint64 index must not use its poisoned mirror");
+        assert_eq!(err.identifier(), Some("RunMat:CellIndexOutOfBounds"));
+    }
+
+    #[test]
+    fn typed_integer_cell_subscript_bounds_do_not_fall_back_to_poisoned_mirror() {
+        let cell = CellArray::new(vec![Value::Num(10.0)], 1, 1).expect("cell");
+        let mut index = Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN]), vec![1, 1])
+            .expect("signed edge selector");
+        index.data = vec![1.0];
+
+        let err = expand_cell_indices(&cell, &[Value::Tensor(index)])
+            .expect_err("signed edge index must be rejected from exact storage");
+        assert_eq!(err.identifier(), Some("RunMat:CellIndexOutOfBounds"));
     }
 
     #[test]

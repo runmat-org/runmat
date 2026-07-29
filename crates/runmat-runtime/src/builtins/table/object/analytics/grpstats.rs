@@ -341,7 +341,9 @@ struct NumericMatrix {
 fn numeric_matrix(value: Value, context: &str) -> BuiltinResult<NumericMatrix> {
     match value {
         Value::Tensor(tensor) => {
-            let len = tensor.data.len();
+            // Typed tensors keep their exact values and authoritative element
+            // count outside the floating compatibility mirror.
+            let len = tensor_utils::tensor_element_len(&tensor);
             let mut rows = tensor.rows();
             let mut cols = tensor.cols();
             if rows == 1 && len > 1 {
@@ -539,7 +541,7 @@ fn grouping_columns(group: &Value, rows: usize) -> BuiltinResult<Vec<Vec<GroupAt
 
 fn grouping_vector_len(value: &Value) -> Option<usize> {
     match value {
-        Value::Tensor(tensor) => Some(tensor.data.len()),
+        Value::Tensor(tensor) => Some(tensor_utils::tensor_element_len(tensor)),
         Value::LogicalArray(array) => Some(array.data.len()),
         Value::StringArray(array) => Some(array.data.len()),
         Value::CharArray(array) => Some(array.rows),
@@ -661,6 +663,21 @@ mod tests {
         assert_eq!(matrix.data, vec![1.0, 2.0, 3.0]);
         assert_eq!(matrix.rows, 3);
         assert_eq!(matrix.cols, 1);
+    }
+
+    #[test]
+    fn grpstats_uses_typed_storage_for_row_and_group_lengths() {
+        let wide = (1_u64 << 53) + 1;
+        let mut data =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide, u64::MAX]), vec![1, 2]).unwrap();
+        data.data.clear();
+        let mut group = Tensor::new_integer(IntegerStorage::I64(vec![-3, -3]), vec![1, 2]).unwrap();
+        group.data = vec![f64::NAN];
+
+        let matrix = numeric_matrix(Value::Tensor(data), "grpstats").unwrap();
+        assert_eq!(matrix.rows, 2);
+        assert_eq!(matrix.cols, 1);
+        assert_eq!(grouping_vector_len(&Value::Tensor(group)), Some(2));
     }
 
     #[test]
