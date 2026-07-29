@@ -1555,7 +1555,15 @@ impl SparseTensor {
         self.row_indices[start..end]
             .binary_search(&row)
             .ok()
-            .map(|offset| self.values[start + offset])
+            .map(|offset| {
+                let index = start + offset;
+                self.integer_data
+                    .as_ref()
+                    .and_then(|storage| storage.value_at(index))
+                    // `get` is a legacy f64 API; typed sparse consumers should
+                    // use `integer_at` when exact wide integer values matter.
+                    .map_or_else(|| self.values[index], |value| value.to_f64())
+            })
     }
 
     /// Returns an exact stored integer value when this sparse matrix is typed.
@@ -1984,7 +1992,7 @@ mod sparse_tensor_tests {
 
     #[test]
     fn sparse_display_reports_exact_integer_class_and_values() {
-        let sparse = SparseTensor::new_integer(
+        let mut sparse = SparseTensor::new_integer(
             2,
             1,
             vec![0, 1],
@@ -1992,11 +2000,46 @@ mod sparse_tensor_tests {
             IntegerStorage::U64(vec![u64::MAX]),
         )
         .expect("uint64 sparse");
+        sparse.values.fill(f64::NAN);
         let text = sparse.to_string();
 
         assert!(text.contains("2x1 uint64 sparse matrix with 1 nonzero entries"));
         assert!(text.contains("18446744073709551615"));
         assert!(!text.contains("18446744073709552000"));
+    }
+
+    #[test]
+    fn sparse_legacy_reads_keep_integer_storage_authoritative_when_mirrors_are_poisoned() {
+        let mut unsigned = SparseTensor::new_integer(
+            2,
+            1,
+            vec![0, 1],
+            vec![1],
+            IntegerStorage::U64(vec![u64::MAX]),
+        )
+        .expect("uint64 sparse");
+        unsigned.values.fill(f64::NAN);
+        assert_eq!(unsigned.get(1, 0), Some(u64::MAX as f64));
+        let dense = unsigned.to_dense().expect("dense uint64 sparse");
+        assert_eq!(
+            dense.integer_storage(),
+            Some(&IntegerStorage::U64(vec![0, u64::MAX]))
+        );
+
+        let mut signed = SparseTensor::new_integer(
+            2,
+            2,
+            vec![0, 1, 2],
+            vec![0, 1],
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+        )
+        .expect("int64 sparse");
+        signed.values.fill(f64::NAN);
+        assert_eq!(signed.get(0, 0), Some(i64::MIN as f64));
+        assert_eq!(signed.get(1, 1), Some(i64::MAX as f64));
+        let text = signed.to_string();
+        assert!(text.contains("-9223372036854775808"));
+        assert!(text.contains("9223372036854775807"));
     }
 
     #[test]

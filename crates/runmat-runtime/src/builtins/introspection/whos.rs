@@ -579,7 +579,7 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> BuiltinResult
         Value::Tensor(t) => t.integer_storage().map_or_else(
             || t.data.len().saturating_mul(t.dtype.byte_size()),
             |storage| {
-                t.data
+                storage
                     .len()
                     .saturating_mul(integer_storage_element_bytes(storage))
             },
@@ -609,7 +609,7 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> BuiltinResult
         Value::ComplexTensor(t) => t.integer_data.as_ref().map_or_else(
             || t.data.len().saturating_mul(16),
             |storage| {
-                t.data
+                storage
                     .len()
                     .saturating_mul(integer_storage_element_bytes(&storage.real).saturating_mul(2))
             },
@@ -1292,7 +1292,8 @@ pub(crate) mod tests {
         let expected = [2, 4, 8, 16, 2, 4, 8, 16];
 
         for (storage, expected) in storages.into_iter().zip(expected) {
-            let tensor = Tensor::new_integer(storage, vec![1, 2]).expect("integer tensor");
+            let mut tensor = Tensor::new_integer(storage, vec![1, 2]).expect("integer tensor");
+            tensor.data.clear();
             assert_eq!(
                 value_memory_bytes(&Value::Tensor(tensor), &mut HashSet::new()).expect("bytes"),
                 expected
@@ -1302,7 +1303,7 @@ pub(crate) mod tests {
 
     #[test]
     fn whos_memory_bytes_use_native_width_for_typed_sparse_integer_values() {
-        let sparse = runmat_builtins::SparseTensor::new_integer(
+        let mut sparse = runmat_builtins::SparseTensor::new_integer(
             4,
             2,
             vec![0, 1, 2],
@@ -1310,6 +1311,7 @@ pub(crate) mod tests {
             IntegerStorage::U16(vec![1, u16::MAX]),
         )
         .expect("uint16 sparse");
+        sparse.values.clear();
         let expected = 2 * std::mem::size_of::<u16>()
             + 2 * std::mem::size_of::<usize>()
             + 3 * std::mem::size_of::<usize>();
@@ -1327,7 +1329,9 @@ pub(crate) mod tests {
             IntegerStorage::U16(vec![3, 4]),
         )
         .expect("typed complex storage");
-        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).expect("typed complex tensor");
+        let mut tensor =
+            ComplexTensor::new_integer(storage, vec![1, 2]).expect("typed complex tensor");
+        tensor.data.clear();
 
         assert_eq!(
             value_memory_bytes(&Value::ComplexTensor(tensor), &mut HashSet::new()).expect("bytes"),
