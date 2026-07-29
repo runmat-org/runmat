@@ -4,7 +4,8 @@ use std::cell::Cell;
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    IntValue, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -117,9 +118,11 @@ fn parse_digits(value: &Value) -> BuiltinResult<usize> {
         }
         return Err(digits_error(&DIGITS_ERRORS[1]));
     }
+    if let Some(value) = tensor::scalar_integer_value(value) {
+        return validate_integer_digits(&value);
+    }
     let parsed = match value {
         Value::Num(value) => *value,
-        Value::Int(value) => value.to_f64(),
         Value::Bool(value) => {
             if *value {
                 1.0
@@ -138,6 +141,22 @@ fn parse_digits(value: &Value) -> BuiltinResult<usize> {
         }
     };
     validate_digits(parsed)
+}
+
+pub(crate) fn validate_integer_digits(value: &IntValue) -> BuiltinResult<usize> {
+    let value = value
+        .try_to_usize()
+        .ok_or_else(|| digits_error(&DIGITS_ERRORS[1]))?;
+    if !(MIN_DIGITS..=MAX_DIGITS).contains(&value) {
+        return Err(digits_error_with_message(
+            &DIGITS_ERRORS[1],
+            format!(
+                "{}: supported range is {MIN_DIGITS}..={MAX_DIGITS}",
+                DIGITS_ERRORS[1].message
+            ),
+        ));
+    }
+    Ok(value)
 }
 
 pub(crate) fn validate_digits(value: f64) -> BuiltinResult<usize> {
@@ -223,15 +242,26 @@ mod tests {
     #[test]
     fn digits_reads_typed_integer_tensor_storage_exactly() {
         let _guard = lock_digits();
-        let mut precision =
-            Tensor::new_integer(IntegerStorage::U16(vec![40]), vec![1, 1]).expect("precision");
-        precision.data.clear();
+        for storage in [
+            IntegerStorage::I8(vec![40]),
+            IntegerStorage::I16(vec![40]),
+            IntegerStorage::I32(vec![40]),
+            IntegerStorage::I64(vec![40]),
+            IntegerStorage::U8(vec![40]),
+            IntegerStorage::U16(vec![40]),
+            IntegerStorage::U32(vec![40]),
+            IntegerStorage::U64(vec![40]),
+        ] {
+            set_current_digits_for_test(DEFAULT_DIGITS);
+            let mut precision = Tensor::new_integer(storage, vec![1, 1]).expect("precision");
+            precision.data.fill(f64::NAN);
 
-        assert_eq!(
-            block_on(digits_builtin(vec![Value::Tensor(precision)])).expect("digits"),
-            Value::Num(DEFAULT_DIGITS as f64)
-        );
-        assert_eq!(current_digits(), 40);
+            assert_eq!(
+                block_on(digits_builtin(vec![Value::Tensor(precision)])).expect("digits"),
+                Value::Num(DEFAULT_DIGITS as f64)
+            );
+            assert_eq!(current_digits(), 40);
+        }
     }
 
     #[test]

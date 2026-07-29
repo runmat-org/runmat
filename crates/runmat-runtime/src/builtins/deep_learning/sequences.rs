@@ -4,8 +4,8 @@ use runmat_macros::runtime_builtin;
 use crate::{builtins::common::tensor, gather_if_needed_async, BuiltinResult};
 
 use super::{
-    any_type, deep_learning_error, gather_args, numeric_scalar, parse_name_values, positive_usize,
-    scalar_text, tensor_value, MAX_COMBVEC_COLUMNS, MAX_PAD_ELEMENTS,
+    any_type, deep_learning_error, gather_args, logical_scalar, numeric_scalar, parse_name_values,
+    positive_usize, scalar_text, tensor_value, MAX_COMBVEC_COLUMNS, MAX_PAD_ELEMENTS,
 };
 
 #[runtime_builtin(
@@ -231,14 +231,14 @@ impl PaddingDirection {
 }
 
 #[derive(Clone, Copy)]
-enum SequenceLength {
+pub(super) enum SequenceLength {
     Longest,
     Shortest,
     Fixed(usize),
 }
 
 impl SequenceLength {
-    fn parse(value: &Value) -> BuiltinResult<Self> {
+    pub(super) fn parse(value: &Value) -> BuiltinResult<Self> {
         match value {
             Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => {
                 match scalar_text(value, "padsequences")?.to_ascii_lowercase().as_str() {
@@ -475,11 +475,6 @@ fn strides_for(shape: &[usize]) -> BuiltinResult<Vec<usize>> {
 
 fn parse_bool(value: &Value, function: &'static str, label: &str) -> BuiltinResult<bool> {
     match value {
-        Value::Bool(value) => Ok(*value),
-        Value::Num(n) if *n == 0.0 => Ok(false),
-        Value::Num(n) if *n == 1.0 => Ok(true),
-        Value::Int(i) if i.to_f64() == 0.0 => Ok(false),
-        Value::Int(i) if i.to_f64() == 1.0 => Ok(true),
         Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => {
             match scalar_text(value, function)?.to_ascii_lowercase().as_str() {
                 "true" | "on" | "yes" => Ok(true),
@@ -490,9 +485,8 @@ fn parse_bool(value: &Value, function: &'static str, label: &str) -> BuiltinResu
                 )),
             }
         }
-        other => Err(deep_learning_error(
-            function,
-            format!("{function}: {label} must be logical, got {other:?}"),
-        )),
+        _ => logical_scalar(value, function, label).map_err(|_| {
+            deep_learning_error(function, format!("{function}: {label} must be logical"))
+        }),
     }
 }

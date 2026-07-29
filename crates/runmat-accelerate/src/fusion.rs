@@ -3784,6 +3784,37 @@ mod tests {
     }
 
     #[test]
+    fn all_native_integer_constant_classes_decline_float_fusion() {
+        for constant in [
+            IntValue::I8(7),
+            IntValue::I16(7),
+            IntValue::I32(7),
+            IntValue::I64(i64::MAX),
+            IntValue::U8(7),
+            IntValue::U16(7),
+            IntValue::U32(7),
+            IntValue::U64(u64::MAX),
+        ] {
+            let mut graph = simple_elementwise_graph();
+            graph.values.push(ValueInfo {
+                id: 3,
+                origin: ValueOrigin::Constant,
+                ty: Type::Num,
+                shape: ShapeInfo::Scalar,
+                constant: Some(Value::Int(constant)),
+            });
+            graph.nodes[0].inputs = vec![0, 3];
+
+            let groups = detect_fusion_groups(&graph);
+            let plan = FusionPlan::from_graph(&graph, &groups);
+            let group = &plan.groups[0];
+            assert!(group.has_native_integer_constants());
+            assert!(!group.kernel.supported);
+            assert!(group.generate_wgsl("f32").is_none());
+        }
+    }
+
+    #[test]
     fn stack_pattern_tracks_repeated_constants() {
         let values = vec![
             ValueInfo {

@@ -1516,6 +1516,31 @@ mod tests {
     }
 
     #[test]
+    fn fitdist_random_shape_parser_ignores_all_typed_mirrors() {
+        let storages = [
+            IntegerStorage::I8(vec![2, 3]),
+            IntegerStorage::I16(vec![2, 3]),
+            IntegerStorage::I32(vec![2, 3]),
+            IntegerStorage::I64(vec![2, 3]),
+            IntegerStorage::U8(vec![2, 3]),
+            IntegerStorage::U16(vec![2, 3]),
+            IntegerStorage::U32(vec![2, 3]),
+            IntegerStorage::U64(vec![2, 3]),
+        ];
+
+        for storage in storages {
+            assert_eq!(
+                block_on(parse_shape_args(&[mirrorless_int_tensor(
+                    storage,
+                    vec![2, 1]
+                )]))
+                .unwrap(),
+                vec![2, 3]
+            );
+        }
+    }
+
+    #[test]
     fn fitdist_reads_typed_integer_storage_exactly() {
         let pd = block_on(fitdist_builtin(
             poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 3]), vec![3, 1]),

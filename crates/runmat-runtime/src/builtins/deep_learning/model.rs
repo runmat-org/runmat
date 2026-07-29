@@ -6,8 +6,8 @@ use crate::{builtins::common::tensor, BuiltinResult};
 
 use super::{
     any_type, autodiff, deep_learning_error, gather_args, layer_names, layers_from_value,
-    numeric_values, numeric_vector, object, parse_name_values, positive_usize, scalar_text,
-    string_array, tensor_value, unsupported_error,
+    logical_scalar, numeric_values, numeric_vector, object, parse_name_values, positive_usize,
+    scalar_text, string_array, tensor_value, unsupported_error,
 };
 
 pub(crate) const DLNETWORK_CLASS: &str = "dlnetwork";
@@ -268,39 +268,6 @@ fn remove_case_insensitive_option(
         .find(|key| key.eq_ignore_ascii_case(name))
         .cloned()?;
     options.remove(&key)
-}
-
-fn logical_scalar(value: &Value, function: &'static str, label: &str) -> BuiltinResult<bool> {
-    match value {
-        Value::Bool(flag) => Ok(*flag),
-        Value::Num(n) if *n == 0.0 || *n == 1.0 => Ok(*n != 0.0),
-        Value::Int(i) => {
-            let n = i.to_f64();
-            if n == 0.0 || n == 1.0 {
-                Ok(n != 0.0)
-            } else {
-                Err(deep_learning_error(
-                    function,
-                    format!("{function}: {label} must be logical scalar true or false"),
-                ))
-            }
-        }
-        Value::Tensor(t) if crate::builtins::common::tensor::is_scalar_tensor(t) => {
-            let n = crate::builtins::common::tensor::tensor_value_f64(t, 0);
-            if n == 0.0 || n == 1.0 {
-                Ok(n != 0.0)
-            } else {
-                Err(deep_learning_error(
-                    function,
-                    format!("{function}: {label} must be logical scalar true or false"),
-                ))
-            }
-        }
-        other => Err(deep_learning_error(
-            function,
-            format!("{function}: {label} must be logical scalar true or false, got {other:?}"),
-        )),
-    }
 }
 
 pub(super) fn learnables_struct(layers: &[Value], function: &'static str) -> BuiltinResult<Value> {

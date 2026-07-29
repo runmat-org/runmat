@@ -212,6 +212,42 @@ fn deep_learning_integer_parsers_reject_unrepresentable_double_bounds() {
 }
 
 #[test]
+fn structural_integer_parsers_ignore_poisoned_mirrors_for_every_storage_class() {
+    let storages = [
+        IntegerStorage::I8(vec![1]),
+        IntegerStorage::I16(vec![1]),
+        IntegerStorage::I32(vec![1]),
+        IntegerStorage::I64(vec![1]),
+        IntegerStorage::U8(vec![1]),
+        IntegerStorage::U16(vec![1]),
+        IntegerStorage::U32(vec![1]),
+        IntegerStorage::U64(vec![1]),
+    ];
+
+    for storage in storages {
+        let value = poisoned_int_tensor(storage, vec![1, 1], f64::NAN);
+        assert_eq!(super::positive_usize(&value, "test", "size").unwrap(), 1);
+        assert!(super::logical_scalar(&value, "test", "flag").unwrap());
+        assert_eq!(integer_scalar(&value, "BatchSize").unwrap(), 1);
+        assert!(matches!(
+            SequenceLength::parse(&value).unwrap(),
+            SequenceLength::Fixed(1)
+        ));
+    }
+}
+
+#[test]
+fn export_onnx_integer_options_reject_typed_values_beyond_i64() {
+    let value = poisoned_int_tensor(
+        IntegerStorage::U64(vec![(i64::MAX as u64) + 1]),
+        vec![1, 1],
+        f64::NAN,
+    );
+    assert!(integer_scalar(&value, "BatchSize").is_err());
+    assert!(integer_scalar(&Value::Num(i64::MAX as f64), "BatchSize").is_err());
+}
+
+#[test]
 fn recurrent_and_input_layers_accept_common_shapes() {
     let input = block_on(sequence_input_layer_builtin(
         Value::Tensor(Tensor::new(vec![4.0, 2.0], vec![1, 2]).unwrap()),

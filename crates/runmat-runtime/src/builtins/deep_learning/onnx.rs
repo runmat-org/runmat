@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use crate::BuiltinResult;
 
 use super::{
-    any_type, deep_learning_error, gather_args, model, parse_name_values, scalar_text,
-    unsupported_error,
+    any_type, deep_learning_error, gather_args, logical_scalar, model, parse_name_values,
+    positive_i64, scalar_text, unsupported_error,
 };
 
 const EXPORT_ONNX: &str = "exportONNXNetwork";
@@ -151,7 +151,7 @@ fn parse_export_options(args: &[Value]) -> BuiltinResult<ExportOptions> {
                 options.output_name = Some(single_name(&value, "OutputNames")?);
             }
             "verbose" => {
-                let _ = logical_scalar(&value, "Verbose")?;
+                let _ = logical_scalar(&value, EXPORT_ONNX, "Verbose")?;
             }
             other => {
                 return Err(deep_learning_error(
@@ -164,39 +164,8 @@ fn parse_export_options(args: &[Value]) -> BuiltinResult<ExportOptions> {
     Ok(options)
 }
 
-fn integer_scalar(value: &Value, label: &str) -> BuiltinResult<i64> {
-    let n = super::numeric_scalar(value, EXPORT_ONNX, label)?;
-    if n.fract().abs() > f64::EPSILON || n < 1.0 || n > i64::MAX as f64 {
-        return Err(deep_learning_error(
-            EXPORT_ONNX,
-            format!("exportONNXNetwork: {label} must be a positive integer scalar"),
-        ));
-    }
-    Ok(n as i64)
-}
-
-fn logical_scalar(value: &Value, label: &str) -> BuiltinResult<bool> {
-    match value {
-        Value::Bool(flag) => Ok(*flag),
-        Value::Num(n) if *n == 0.0 || *n == 1.0 => Ok(*n != 0.0),
-        Value::Tensor(t) if crate::builtins::common::tensor::is_scalar_tensor(t) => {
-            let n = crate::builtins::common::tensor::tensor_value_f64(t, 0);
-            if n == 0.0 || n == 1.0 {
-                Ok(n != 0.0)
-            } else {
-                Err(deep_learning_error(
-                    EXPORT_ONNX,
-                    format!("exportONNXNetwork: {label} must be logical scalar true or false"),
-                ))
-            }
-        }
-        other => Err(deep_learning_error(
-            EXPORT_ONNX,
-            format!(
-                "exportONNXNetwork: {label} must be logical scalar true or false, got {other:?}"
-            ),
-        )),
-    }
+pub(super) fn integer_scalar(value: &Value, label: &str) -> BuiltinResult<i64> {
+    positive_i64(value, EXPORT_ONNX, label)
 }
 
 fn single_name(value: &Value, label: &str) -> BuiltinResult<String> {

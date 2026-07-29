@@ -1186,6 +1186,27 @@ mod tests {
     }
 
     #[test]
+    fn outlier_window_parser_ignores_all_typed_mirrors() {
+        let storages = [
+            IntegerStorage::I8(vec![4]),
+            IntegerStorage::I16(vec![4]),
+            IntegerStorage::I32(vec![4]),
+            IntegerStorage::I64(vec![4]),
+            IntegerStorage::U8(vec![4]),
+            IntegerStorage::U16(vec![4]),
+            IntegerStorage::U32(vec![4]),
+            IntegerStorage::U64(vec![4]),
+        ];
+
+        for storage in storages {
+            assert_eq!(
+                scalar_usize(ISOUTLIER_NAME, &int_tensor(storage, vec![1, 1]), "window",).unwrap(),
+                4
+            );
+        }
+    }
+
+    #[test]
     fn outlier_scalar_usize_rejects_unrepresentable_double_boundary() {
         let err = scalar_usize(
             ISOUTLIER_NAME,

@@ -979,6 +979,26 @@ mod tests {
     }
 
     #[test]
+    fn binscatter_structural_integer_parsers_ignore_all_typed_mirrors() {
+        let storages = [
+            IntegerStorage::I8(vec![4]),
+            IntegerStorage::I16(vec![4]),
+            IntegerStorage::I32(vec![4]),
+            IntegerStorage::I64(vec![4]),
+            IntegerStorage::U8(vec![4]),
+            IntegerStorage::U16(vec![4]),
+            IntegerStorage::U32(vec![4]),
+            IntegerStorage::U64(vec![4]),
+        ];
+
+        for storage in storages {
+            let value = int_tensor(storage, vec![1, 1]);
+            assert_eq!(parse_num_bins(&value).unwrap(), [4, 4]);
+            assert_eq!(numeric_selector_index(&value).unwrap(), Some(3));
+        }
+    }
+
+    #[test]
     fn binscatter_rejects_invalid_typed_integer_options() {
         let err =
             parse_num_bins(&int_tensor(IntegerStorage::I16(vec![-1]), vec![1, 1])).unwrap_err();

@@ -177,6 +177,26 @@ mod tests {
     }
 
     #[test]
+    fn reduction_tensor_dims_ignore_poisoned_float_mirrors_for_all_integer_classes() {
+        macro_rules! assert_dims {
+            ($storage:expr) => {{
+                let mut dims = Tensor::new_integer($storage, vec![1, 2]).expect("dims");
+                dims.data.fill(f64::NAN);
+                assert_eq!(parse_tensor_dims(&dims), Some(vec![2, 3]));
+            }};
+        }
+
+        assert_dims!(IntegerStorage::I8(vec![2, 3]));
+        assert_dims!(IntegerStorage::I16(vec![2, 3]));
+        assert_dims!(IntegerStorage::I32(vec![2, 3]));
+        assert_dims!(IntegerStorage::I64(vec![2, 3]));
+        assert_dims!(IntegerStorage::U8(vec![2, 3]));
+        assert_dims!(IntegerStorage::U16(vec![2, 3]));
+        assert_dims!(IntegerStorage::U32(vec![2, 3]));
+        assert_dims!(IntegerStorage::U64(vec![2, 3]));
+    }
+
+    #[test]
     fn reduction_tensor_dims_reject_invalid_typed_integer_storage() {
         let mut zero = Tensor::new_integer(IntegerStorage::U8(vec![0]), vec![1, 1]).expect("zero");
         zero.data[0] = 1.0;

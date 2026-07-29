@@ -1,5 +1,6 @@
+use crate::indexing::selectors::IndexScalar;
 use crate::interpreter::errors::mex;
-use runmat_builtins::{CellArray, IntValue, StructValue, Tensor, Value};
+use runmat_builtins::{CellArray, StructValue, Tensor, Value};
 use runmat_runtime::builtins::common::tensor::tensor_value_f64;
 use runmat_runtime::RuntimeError;
 
@@ -31,39 +32,38 @@ fn exact_index_from_f64(value: f64) -> Option<i64> {
     Some(rounded as i64)
 }
 
-fn exact_index_from_int(value: &IntValue) -> Option<i64> {
-    value.try_to_i64()
-}
-
-fn parse_positive_cell_index(index: i64) -> Result<usize, RuntimeError> {
-    if index < 1 {
-        return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
-    }
-    usize::try_from(index).map_err(|_| mex("CellIndexOutOfBounds", "Cell index out of bounds"))
+fn parse_positive_cell_index(index: IndexScalar) -> Result<usize, RuntimeError> {
+    index
+        .positive_usize()
+        .ok_or_else(|| mex("CellIndexOutOfBounds", "Cell index out of bounds"))
 }
 
 fn parse_cell_index_value(value: &Value) -> Result<usize, RuntimeError> {
     let index = match value {
-        Value::Num(n) => exact_index_from_f64(*n)
-            .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?,
-        Value::Int(i) => exact_index_from_int(i)
-            .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?,
+        Value::Num(n) => IndexScalar::Signed(
+            exact_index_from_f64(*n)
+                .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?,
+        ),
+        Value::Int(i) => IndexScalar::from_int(i),
         Value::Tensor(t) if t.data.len() == 1 && t.shape.iter().product::<usize>() == 1 => {
             if let Some(storage) = t.integer_storage() {
                 let value = storage.value_at(0).expect("scalar integer storage");
-                exact_index_from_int(&value)
-                    .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?
+                IndexScalar::from_int(&value)
             } else {
-                exact_index_from_f64(t.data[0])
-                    .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?
+                IndexScalar::Signed(
+                    exact_index_from_f64(t.data[0])
+                        .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?,
+                )
             }
         }
         other => {
             let n: f64 = other
                 .try_into()
                 .map_err(|_| mex("CellIndexType", "Unsupported cell index type"))?;
-            exact_index_from_f64(n)
-                .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?
+            IndexScalar::Signed(
+                exact_index_from_f64(n)
+                    .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?,
+            )
         }
     };
     parse_positive_cell_index(index)
@@ -79,7 +79,11 @@ fn parse_cell_index_value_for_len(value: &Value, len: usize) -> Result<usize, Ru
                 return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
             }
         }
-        Value::Tensor(t) if t.data.len() == 1 && t.shape.iter().product::<usize>() == 1 => {
+        Value::Tensor(t)
+            if t.integer_storage().is_none()
+                && t.data.len() == 1
+                && t.shape.iter().product::<usize>() == 1 =>
+        {
             let scalar = tensor_value_f64(t, 0);
             if let Some(idx) = resolve_cell_end_relative_index(scalar, len)? {
                 return Ok(idx);
@@ -100,19 +104,16 @@ fn parse_cell_index_values_for_assignment(value: &Value) -> Result<Vec<usize>, R
                 return storage
                     .exact_values()
                     .into_iter()
-                    .map(|raw| {
-                        let idx = exact_index_from_int(&raw)
-                            .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?;
-                        parse_positive_cell_index(idx)
-                    })
+                    .map(|raw| parse_positive_cell_index(IndexScalar::from_int(&raw)))
                     .collect();
             }
             t.data
                 .iter()
                 .map(|&raw| {
-                    let idx = exact_index_from_f64(raw)
-                        .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?;
-                    parse_positive_cell_index(idx)
+                    parse_positive_cell_index(IndexScalar::Signed(
+                        exact_index_from_f64(raw)
+                            .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?,
+                    ))
                 })
                 .collect()
         }
@@ -346,10 +347,7 @@ pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Valu
                         .exact_values()
                         .into_iter()
                         .map(|val| {
-                            let idx = exact_index_from_int(&val).ok_or_else(|| {
-                                mex("CellIndexType", "Unsupported cell index type")
-                            })?;
-                            let idx = parse_positive_cell_index(idx)?;
+                            let idx = parse_positive_cell_index(IndexScalar::from_int(&val))?;
                             index_cell_value(ca, &[idx])
                         })
                         .collect();
@@ -357,9 +355,11 @@ pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Valu
                 t.data
                     .iter()
                     .map(|&val| {
-                        let idx = exact_index_from_f64(val)
-                            .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?;
-                        let idx = parse_positive_cell_index(idx)?;
+                        let idx = parse_positive_cell_index(IndexScalar::Signed(
+                            exact_index_from_f64(val).ok_or_else(|| {
+                                mex("CellIndexType", "Unsupported cell index type")
+                            })?,
+                        ))?;
                         index_cell_value(ca, &[idx])
                     })
                     .collect()
@@ -828,6 +828,29 @@ mod tests {
         let values = expand_cell_indices(&cell, &[Value::Tensor(row), Value::Tensor(col)])
             .expect("typed integer selectors should use exact storage");
         assert_eq!(values, vec![Value::Num(21.0)]);
+    }
+
+    #[test]
+    fn cell_scalar_indices_ignore_poisoned_integer_tensor_mirrors_for_all_classes() {
+        let cell = CellArray::new(vec![Value::Num(10.0), Value::Num(20.0)], 1, 2).expect("cell");
+        macro_rules! assert_index {
+            ($storage:expr) => {{
+                let mut index = Tensor::new_integer($storage, vec![1, 1]).expect("index");
+                index.data = vec![1.0];
+                let values = expand_cell_indices(&cell, &[Value::Tensor(index)])
+                    .expect("exact typed scalar index");
+                assert_eq!(values, vec![Value::Num(20.0)]);
+            }};
+        }
+
+        assert_index!(IntegerStorage::I8(vec![2]));
+        assert_index!(IntegerStorage::I16(vec![2]));
+        assert_index!(IntegerStorage::I32(vec![2]));
+        assert_index!(IntegerStorage::I64(vec![2]));
+        assert_index!(IntegerStorage::U8(vec![2]));
+        assert_index!(IntegerStorage::U16(vec![2]));
+        assert_index!(IntegerStorage::U32(vec![2]));
+        assert_index!(IntegerStorage::U64(vec![2]));
     }
 
     #[test]

@@ -323,6 +323,75 @@ pub(super) fn numeric_scalar(
     }
 }
 
+/// Parse a scalar flag without consulting an integer tensor's compatibility
+/// `f64` mirror.  Structural options use this rather than treating an integer
+/// value as ordinary numeric data.
+pub(super) fn logical_scalar(
+    value: &Value,
+    function: &'static str,
+    label: &str,
+) -> BuiltinResult<bool> {
+    if let Value::Bool(flag) = value {
+        return Ok(*flag);
+    }
+    if let Some(integer) = crate::builtins::common::tensor::scalar_integer_value(value) {
+        return match integer.try_to_i64() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(deep_learning_error(
+                function,
+                format!("{function}: {label} must be logical scalar true or false"),
+            )),
+        };
+    }
+    let number = match value {
+        Value::Num(number) => *number,
+        Value::Tensor(tensor) if crate::builtins::common::tensor::is_scalar_tensor(tensor) => {
+            crate::builtins::common::tensor::tensor_value_f64(tensor, 0)
+        }
+        other => {
+            return Err(deep_learning_error(
+                function,
+                format!("{function}: {label} must be logical scalar true or false, got {other:?}"),
+            ));
+        }
+    };
+    match number {
+        0.0 => Ok(false),
+        1.0 => Ok(true),
+        _ => Err(deep_learning_error(
+            function,
+            format!("{function}: {label} must be logical scalar true or false"),
+        )),
+    }
+}
+
+pub(super) fn positive_i64(
+    value: &Value,
+    function: &'static str,
+    label: &str,
+) -> BuiltinResult<i64> {
+    if let Some(integer) = crate::builtins::common::tensor::scalar_integer_value(value) {
+        return integer
+            .try_to_i64()
+            .filter(|value| *value >= 1)
+            .ok_or_else(|| {
+                deep_learning_error(
+                    function,
+                    format!("{function}: {label} must be a positive integer scalar"),
+                )
+            });
+    }
+    let number = numeric_scalar(value, function, label)?;
+    if number.fract().abs() > f64::EPSILON || number < 1.0 || number >= i64::MAX as f64 {
+        return Err(deep_learning_error(
+            function,
+            format!("{function}: {label} must be a positive integer scalar"),
+        ));
+    }
+    Ok(number as i64)
+}
+
 pub(super) fn positive_usize(
     value: &Value,
     function: &'static str,

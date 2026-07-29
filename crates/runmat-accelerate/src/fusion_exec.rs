@@ -1225,6 +1225,28 @@ mod tests {
     }
 
     #[test]
+    fn native_integer_scalars_never_use_float_fusion_fallbacks() {
+        for value in [
+            Value::Int(IntValue::I8(7)),
+            Value::Int(IntValue::I16(7)),
+            Value::Int(IntValue::I32(7)),
+            Value::Int(IntValue::I64(i64::MAX)),
+            Value::Int(IntValue::U8(7)),
+            Value::Int(IntValue::U16(7)),
+            Value::Int(IntValue::U32(7)),
+            Value::Int(IntValue::U64(u64::MAX)),
+        ] {
+            assert_eq!(value_to_f64(&value), None);
+            assert!(
+                reject_native_integer_fusion_values(std::slice::from_ref(&value), &[])
+                    .expect_err("integer scalar must require a typed fusion kernel")
+                    .to_string()
+                    .contains("refusing f64 fallback")
+            );
+        }
+    }
+
+    #[test]
     fn floating_scalar_remains_eligible_for_float_fusion() {
         let value = Value::Num(1.25);
 

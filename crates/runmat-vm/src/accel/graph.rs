@@ -779,13 +779,13 @@ impl<'a> GraphBuilder<'a> {
                     if rows == 1 && cols > 0 {
                         let mut dims: Vec<Option<usize>> = Vec::with_capacity(cols);
                         for j in 0..cols {
-                            dims.push(Some(t.data[j].round() as usize));
+                            dims.push(tensor_dimension_at(t, j));
                         }
                         out_type = Type::Tensor { shape: Some(dims) };
                     } else if cols == 1 && rows > 0 {
                         let mut dims: Vec<Option<usize>> = Vec::with_capacity(rows);
                         for i in 0..rows {
-                            dims.push(Some(t.data[i].round() as usize));
+                            dims.push(tensor_dimension_at(t, i));
                         }
                         out_type = Type::Tensor { shape: Some(dims) };
                     }
@@ -917,24 +917,14 @@ impl<'a> GraphBuilder<'a> {
                     // 1xN row vector
                     let mut out: Vec<Option<usize>> = Vec::with_capacity(cols);
                     for j in 0..cols {
-                        let v = t.data[j].round() as i64;
-                        if v >= 0 {
-                            out.push(Some(v as usize));
-                        } else {
-                            out.push(None);
-                        }
+                        out.push(tensor_dimension_at(t, j));
                     }
                     return Some(Type::Tensor { shape: Some(out) });
                 } else if (cols == 1 || cols == 0) && rows > 0 {
                     // Nx1 column vector
                     let mut out: Vec<Option<usize>> = Vec::with_capacity(rows);
                     for i in 0..rows {
-                        let v = t.data[i].round() as i64;
-                        if v >= 0 {
-                            out.push(Some(v as usize));
-                        } else {
-                            out.push(None);
-                        }
+                        out.push(tensor_dimension_at(t, i));
                     }
                     return Some(Type::Tensor { shape: Some(out) });
                 }
@@ -1067,6 +1057,24 @@ impl<'a> GraphBuilder<'a> {
     }
 }
 
+/// Read a tensor element used as structural metadata without consulting the
+/// compatibility f64 mirror for typed integer tensors.
+fn tensor_dimension_at(tensor: &runmat_builtins::Tensor, index: usize) -> Option<usize> {
+    if let Some(storage) = tensor.integer_storage() {
+        return storage
+            .value_at(index)
+            .and_then(|value| value.try_to_usize());
+    }
+    let value = *tensor.data.get(index)?;
+    if !value.is_finite() || value < 0.0 {
+        return None;
+    }
+    let rounded = value.round();
+    ((rounded - value).abs() <= f64::EPSILON)
+        .then_some(rounded)
+        .and_then(|value| usize::try_from(value as u128).ok())
+}
+
 fn categorize_builtin(tags: &[AccelGraphTag]) -> AccelOpCategory {
     if tags.iter().any(|t| matches!(t, AccelGraphTag::MatMul)) {
         AccelOpCategory::MatMul
@@ -1120,7 +1128,28 @@ fn primitive_tags(op: PrimitiveOp) -> Vec<AccelGraphTag> {
 mod tests {
     use super::*;
     use crate::instr::Instr;
-    use runmat_builtins::IntValue;
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
+
+    #[test]
+    fn structural_tensor_dimensions_ignore_poisoned_float_mirrors_for_all_integer_classes() {
+        macro_rules! assert_dimensions {
+            ($storage:expr) => {{
+                let mut tensor = Tensor::new_integer($storage, vec![1, 2]).expect("dimensions");
+                tensor.data.fill(f64::NAN);
+                assert_eq!(tensor_dimension_at(&tensor, 0), Some(2));
+                assert_eq!(tensor_dimension_at(&tensor, 1), Some(3));
+            }};
+        }
+
+        assert_dimensions!(IntegerStorage::I8(vec![2, 3]));
+        assert_dimensions!(IntegerStorage::I16(vec![2, 3]));
+        assert_dimensions!(IntegerStorage::I32(vec![2, 3]));
+        assert_dimensions!(IntegerStorage::I64(vec![2, 3]));
+        assert_dimensions!(IntegerStorage::U8(vec![2, 3]));
+        assert_dimensions!(IntegerStorage::U16(vec![2, 3]));
+        assert_dimensions!(IntegerStorage::U32(vec![2, 3]));
+        assert_dimensions!(IntegerStorage::U64(vec![2, 3]));
+    }
 
     #[test]
     fn graph_folding_declines_wide_integer_scalars() {

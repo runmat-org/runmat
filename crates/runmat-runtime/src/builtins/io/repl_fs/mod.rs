@@ -44,6 +44,15 @@ pub(crate) fn is_rooted_path(path: &Path) -> bool {
 }
 
 pub(crate) fn tensor_char_codes_to_string(value: &Tensor) -> Option<String> {
+    if let Some(storage) = value.integer_storage() {
+        let mut text = String::with_capacity(storage.len());
+        for code in storage.exact_values() {
+            let code = u32::try_from(code.try_to_usize()?).ok()?;
+            text.push(char::from_u32(code)?);
+        }
+        return Some(text);
+    }
+
     let codes = tensor::tensor_values_f64(value);
     let mut text = String::with_capacity(codes.len());
     for code in codes {
@@ -70,10 +79,21 @@ mod tests {
 
     #[test]
     fn tensor_char_codes_to_string_reads_typed_integer_storage_exactly() {
-        let mut tensor =
-            Tensor::new_integer(IntegerStorage::U16(vec![82, 77]), vec![1, 2]).expect("tensor");
-        tensor.data.clear();
-        assert_eq!(tensor_char_codes_to_string(&tensor).as_deref(), Some("RM"));
+        let storages = [
+            IntegerStorage::I8(vec![82, 77]),
+            IntegerStorage::I16(vec![82, 77]),
+            IntegerStorage::I32(vec![82, 77]),
+            IntegerStorage::I64(vec![82, 77]),
+            IntegerStorage::U8(vec![82, 77]),
+            IntegerStorage::U16(vec![82, 77]),
+            IntegerStorage::U32(vec![82, 77]),
+            IntegerStorage::U64(vec![82, 77]),
+        ];
+        for storage in storages {
+            let mut tensor = Tensor::new_integer(storage, vec![1, 2]).expect("tensor");
+            tensor.data.fill(f64::NAN);
+            assert_eq!(tensor_char_codes_to_string(&tensor).as_deref(), Some("RM"));
+        }
 
         let mut negative =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("tensor");
