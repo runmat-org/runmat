@@ -1,5 +1,7 @@
 use crate::bytecode::EndExpr;
-use crate::indexing::selectors::{index_scalar_from_value, IndexScalar, SliceSelector};
+use crate::indexing::selectors::{
+    index_scalar_from_value, materialize_index_value, IndexScalar, SliceSelector,
+};
 use crate::interpreter::errors::mex;
 use runmat_builtins::Value;
 use runmat_runtime::{builtins::common::shape::is_scalar_shape, RuntimeError};
@@ -512,6 +514,11 @@ where
                     .ok_or_else(|| mex("IndexOutOfBounds", "Index out of bounds"))?;
                 selectors.push(ExprSel::Scalar(index));
             } else {
+                // Vector selectors may be GPU-backed. Materialize them before
+                // inspecting their class so typed integer storage remains the
+                // source of truth instead of a floating-point compatibility view.
+                let materialized = materialize_index_value(v).await?;
+                let v = &materialized;
                 match v {
                     Value::Bool(b) => {
                         selectors.push(if *b {
@@ -920,6 +927,32 @@ mod tests {
         assert_indices!(IntegerStorage::U16(vec![1, 2]));
         assert_indices!(IntegerStorage::U32(vec![1, 2]));
         assert_indices!(IntegerStorage::U64(vec![1, 2]));
+    }
+
+    #[test]
+    fn expr_integer_index_vectors_reject_wide_values_from_poisoned_mirrors() {
+        let mut indices = Tensor::new_integer(IntegerStorage::U64(vec![1, u64::MAX]), vec![1, 2])
+            .expect("typed integer index tensor");
+        indices.data.fill(2.0);
+        let numeric = vec![Value::Tensor(indices)];
+
+        let err = futures::executor::block_on(build_expr_index_plan(
+            ExprPlanSpec {
+                dims: 1,
+                colon_mask: 0,
+                end_mask: 0,
+                range_dims: &[],
+                range_params: &[],
+                range_start_exprs: &[],
+                range_step_exprs: &[],
+                range_end_exprs: &[],
+                numeric: &numeric,
+                shape: &[1, 2],
+            },
+            |_, _| async { Ok(0.0) },
+        ))
+        .expect_err("wide exact integer index must not use its float mirror");
+        assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
     }
 
     #[test]

@@ -704,9 +704,11 @@ fn ldivide_real_real(divisor: &Tensor, numerator: &Tensor) -> BuiltinResult<Valu
             .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
+    let numerator_values = tensor::tensor_values_f64_cow(numerator);
+    let divisor_values = tensor::tensor_values_f64_cow(divisor);
     let mut out = vec![0.0f64; plan.len()];
     for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
-        out[out_idx] = numerator.data[idx_lhs] / divisor.data[idx_rhs];
+        out[out_idx] = numerator_values[idx_lhs] / divisor_values[idx_rhs];
     }
     let tensor = Tensor::new(out, plan.output_shape().to_vec())
         .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
@@ -724,11 +726,13 @@ fn ldivide_complex_complex(
             .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
         return Ok(complex_tensor_into_value(tensor));
     }
+    let numerator_values = tensor::complex_tensor_values_complex64(numerator);
+    let divisor_values = tensor::complex_tensor_values_complex64(divisor);
     let mut out = vec![(0.0f64, 0.0f64); plan.len()];
     for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
-        let (nr, ni) = numerator.data[idx_lhs];
-        let (dr, di) = divisor.data[idx_rhs];
-        let quotient = Complex64::new(nr, ni) / Complex64::new(dr, di);
+        let numerator = numerator_values[idx_lhs];
+        let divisor = divisor_values[idx_rhs];
+        let quotient = numerator / divisor;
         out[out_idx] = (quotient.re, quotient.im);
     }
     let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
@@ -744,11 +748,12 @@ fn ldivide_complex_real(divisor: &ComplexTensor, numerator: &Tensor) -> BuiltinR
             .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
         return Ok(complex_tensor_into_value(tensor));
     }
+    let numerator_values = tensor::tensor_values_f64_cow(numerator);
+    let divisor_values = tensor::complex_tensor_values_complex64(divisor);
     let mut out = vec![(0.0f64, 0.0f64); plan.len()];
     for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
-        let scalar = numerator.data[idx_lhs];
-        let (dr, di) = divisor.data[idx_rhs];
-        let quotient = Complex64::new(scalar, 0.0) / Complex64::new(dr, di);
+        let scalar = numerator_values[idx_lhs];
+        let quotient = Complex64::new(scalar, 0.0) / divisor_values[idx_rhs];
         out[out_idx] = (quotient.re, quotient.im);
     }
     let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
@@ -764,11 +769,13 @@ fn ldivide_real_complex(divisor: &Tensor, numerator: &ComplexTensor) -> BuiltinR
             .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
         return Ok(complex_tensor_into_value(tensor));
     }
+    let numerator_values = tensor::complex_tensor_values_complex64(numerator);
+    let divisor_values = tensor::tensor_values_f64_cow(divisor);
     let mut out = vec![(0.0f64, 0.0f64); plan.len()];
     for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
-        let (nr, ni) = numerator.data[idx_lhs];
-        let scalar = divisor.data[idx_rhs];
-        let quotient = Complex64::new(nr, ni) / Complex64::new(scalar, 0.0);
+        let numerator = numerator_values[idx_lhs];
+        let scalar = divisor_values[idx_rhs];
+        let quotient = numerator / Complex64::new(scalar, 0.0);
         out[out_idx] = (quotient.re, quotient.im);
     }
     let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
@@ -960,6 +967,25 @@ pub(crate) mod tests {
             result.integer_storage(),
             Some(&IntegerStorage::I64(vec![-2, 2, i64::MAX]))
         );
+    }
+
+    #[test]
+    fn ldivide_mixed_arrays_ignore_poisoned_integer_mirrors_and_return_double() {
+        let mut divisor = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, 4]),
+            vec![1, 2],
+        )
+        .expect("integer divisor");
+        divisor.data.fill(f64::NAN);
+        let numerator =
+            Tensor::new(vec![18_014_398_509_481_986.0, 20.0], vec![1, 2]).expect("numerator");
+
+        let result = ldivide_real_real(&divisor, &numerator).expect("ldivide helper");
+        let Value::Tensor(result) = result else {
+            panic!("expected double tensor");
+        };
+        assert_eq!(result.data, vec![2.0, 5.0]);
+        assert!(result.integer_storage().is_none());
     }
 
     #[test]

@@ -322,20 +322,25 @@ fn pow2_host_scale(mantissa: Value, exponent: Value) -> BuiltinResult<Value> {
     }
     match (mantissa_array, exponent_array) {
         (NumericArray::Real(m), NumericArray::Real(e)) => {
+            let mantissa_values = tensor::tensor_values_f64_cow(&m);
+            let exponent_values = tensor::tensor_values_f64_cow(&e);
             let mut out = vec![0.0f64; plan.len()];
             for (idx_out, idx_m, idx_e) in plan.iter() {
-                let scale = e.data[idx_e].exp2();
-                out[idx_out] = m.data[idx_m] * scale;
+                let scale = exponent_values[idx_e].exp2();
+                out[idx_out] = mantissa_values[idx_m] * scale;
             }
             let tensor = Tensor::new(out, plan.output_shape().to_vec())
                 .map_err(|e| pow2_error_with_detail(&POW2_ERROR_INTERNAL, e))?;
             Ok(tensor::tensor_into_value(tensor))
         }
         (NumericArray::Real(m), NumericArray::Complex(e)) => {
+            let mantissa_values = tensor::tensor_values_f64_cow(&m);
+            let exponent_values = tensor::complex_tensor_values_complex64(&e);
             let mut out = vec![(0.0f64, 0.0f64); plan.len()];
             for (idx_out, idx_m, idx_e) in plan.iter() {
-                let (re_pow, im_pow) = pow2_complex(e.data[idx_e].0, e.data[idx_e].1);
-                let scale = m.data[idx_m];
+                let exponent = exponent_values[idx_e];
+                let (re_pow, im_pow) = pow2_complex(exponent.re, exponent.im);
+                let scale = mantissa_values[idx_m];
                 out[idx_out] = (scale * re_pow, scale * im_pow);
             }
             let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
@@ -343,10 +348,13 @@ fn pow2_host_scale(mantissa: Value, exponent: Value) -> BuiltinResult<Value> {
             Ok(complex_tensor_into_value(tensor))
         }
         (NumericArray::Complex(m), NumericArray::Real(e)) => {
+            let mantissa_values = tensor::complex_tensor_values_complex64(&m);
+            let exponent_values = tensor::tensor_values_f64_cow(&e);
             let mut out = vec![(0.0f64, 0.0f64); plan.len()];
             for (idx_out, idx_m, idx_e) in plan.iter() {
-                let scale = e.data[idx_e].exp2();
-                let (re_m, im_m) = m.data[idx_m];
+                let scale = exponent_values[idx_e].exp2();
+                let mantissa = mantissa_values[idx_m];
+                let (re_m, im_m) = (mantissa.re, mantissa.im);
                 out[idx_out] = (re_m * scale, im_m * scale);
             }
             let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
@@ -354,10 +362,14 @@ fn pow2_host_scale(mantissa: Value, exponent: Value) -> BuiltinResult<Value> {
             Ok(complex_tensor_into_value(tensor))
         }
         (NumericArray::Complex(m), NumericArray::Complex(e)) => {
+            let mantissa_values = tensor::complex_tensor_values_complex64(&m);
+            let exponent_values = tensor::complex_tensor_values_complex64(&e);
             let mut out = vec![(0.0f64, 0.0f64); plan.len()];
             for (idx_out, idx_m, idx_e) in plan.iter() {
-                let (re_pow, im_pow) = pow2_complex(e.data[idx_e].0, e.data[idx_e].1);
-                let (re_m, im_m) = m.data[idx_m];
+                let exponent = exponent_values[idx_e];
+                let (re_pow, im_pow) = pow2_complex(exponent.re, exponent.im);
+                let mantissa = mantissa_values[idx_m];
+                let (re_m, im_m) = (mantissa.re, mantissa.im);
                 out[idx_out] = complex_mul(re_m, im_m, re_pow, im_pow);
             }
             let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
@@ -565,6 +577,28 @@ pub(crate) mod tests {
             .expect("pow2 scale");
 
         assert_eq!(result, Value::Num(40.0));
+    }
+
+    #[test]
+    fn pow2_binary_arrays_ignore_poisoned_integer_mirrors() {
+        let mut mantissa = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, 3]),
+            vec![1, 2],
+        )
+        .expect("mantissa");
+        let mut exponent =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 4]), vec![1, 2]).expect("exponent");
+        mantissa.data.fill(f64::NAN);
+        exponent.data.fill(-1000.0);
+
+        let result = pow2_builtin(Value::Tensor(mantissa), vec![Value::Tensor(exponent)])
+            .expect("pow2 scale");
+
+        let Value::Tensor(result) = result else {
+            panic!("expected double tensor result");
+        };
+        assert_eq!(result.data, vec![18_014_398_509_481_986.0, 48.0]);
+        assert!(result.integer_storage().is_none());
     }
 
     #[test]

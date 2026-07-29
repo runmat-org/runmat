@@ -19,7 +19,7 @@ use crate::indexing::write_linear as idx_write_linear;
 use crate::indexing::write_slice as idx_write_slice;
 use crate::interpreter::dispatch::calls::normalize_requested_outputs;
 use runmat_builtins::{CellArray, IntValue, IntegerStorage, SymbolicExpr, Tensor, Value};
-use runmat_runtime::builtins::common::tensor::tensor_value_f64;
+use runmat_runtime::builtins::common::tensor::{tensor_value_f64, tensor_values_f64_cow};
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use std::future::Future;
 use std::pin::Pin;
@@ -71,8 +71,7 @@ async fn assign_integer_scalar_with_plan(
 }
 
 fn logical_value_from_tensor(t: runmat_builtins::Tensor) -> Result<Value, RuntimeError> {
-    let logical_data: Vec<u8> = t
-        .data
+    let logical_data: Vec<u8> = tensor_values_f64_cow(&t)
         .iter()
         .map(|&v| if v != 0.0 { 1 } else { 0 })
         .collect();
@@ -1546,26 +1545,7 @@ pub async fn dispatch_indexing(
                     "logical slice missing result",
                 ))?;
                 let converted = match result {
-                    Value::Tensor(t) => {
-                        let logical_data: Vec<u8> = t
-                            .data
-                            .iter()
-                            .map(|&v| if v != 0.0 { 1 } else { 0 })
-                            .collect();
-                        if logical_data.len() <= 1 {
-                            Value::Bool(logical_data.first().copied().unwrap_or(0) != 0)
-                        } else {
-                            let logical =
-                                runmat_builtins::LogicalArray::new(logical_data, t.shape.clone())
-                                    .map_err(|e| {
-                                    crate::interpreter::errors::mex(
-                                        "SliceNonTensor",
-                                        &format!("slice: {e}"),
-                                    )
-                                })?;
-                            Value::LogicalArray(logical)
-                        }
-                    }
+                    Value::Tensor(t) => logical_value_from_tensor(t)?,
                     Value::Num(n) => Value::Bool(n != 0.0),
                     Value::Bool(_) | Value::LogicalArray(_) => result,
                     other => other,
@@ -2842,5 +2822,20 @@ mod tests {
         let indices = block_on(super::resolve_cell_indices(&[scalar]))
             .expect("scalar tensor index should pass");
         assert_eq!(indices, vec![2]);
+    }
+
+    #[test]
+    fn logical_value_from_integer_tensor_uses_native_storage_not_mirror() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2])
+            .expect("typed integer tensor");
+        tensor.data.fill(0.0);
+
+        let value = super::logical_value_from_tensor(tensor).expect("logical conversion");
+        assert_eq!(
+            value,
+            Value::LogicalArray(
+                runmat_builtins::LogicalArray::new(vec![0, 1], vec![1, 2]).expect("logical array")
+            )
+        );
     }
 }
