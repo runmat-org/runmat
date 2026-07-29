@@ -1231,15 +1231,26 @@ mod tests {
 
     #[test]
     fn range_spec_reads_typed_integer_storage_exactly() {
-        let mut range =
-            Tensor::new_integer(IntegerStorage::U16(vec![2, 3, 4, 5]), vec![1, 4]).unwrap();
-        range.data.clear();
+        let cases = [
+            IntegerStorage::I8(vec![2, 3, 4, 5]),
+            IntegerStorage::I16(vec![2, 3, 4, 5]),
+            IntegerStorage::I32(vec![2, 3, 4, 5]),
+            IntegerStorage::I64(vec![2, 3, 4, 5]),
+            IntegerStorage::U8(vec![2, 3, 4, 5]),
+            IntegerStorage::U16(vec![2, 3, 4, 5]),
+            IntegerStorage::U32(vec![2, 3, 4, 5]),
+            IntegerStorage::U64(vec![2, 3, 4, 5]),
+        ];
 
-        let parsed = RangeSpec::parse(&Value::Tensor(range)).unwrap();
-        assert_eq!(parsed.start_row, 1);
-        assert_eq!(parsed.start_col, 2);
-        assert_eq!(parsed.end_row, Some(3));
-        assert_eq!(parsed.end_col, Some(4));
+        for storage in cases {
+            let mut range = Tensor::new_integer(storage, vec![1, 4]).expect("range");
+            range.data = vec![999.0, 1_001.0, 1_003.0, 1_005.0];
+            let parsed = RangeSpec::parse(&Value::Tensor(range)).expect("typed range");
+            assert_eq!(parsed.start_row, 1);
+            assert_eq!(parsed.start_col, 2);
+            assert_eq!(parsed.end_row, Some(3));
+            assert_eq!(parsed.end_col, Some(4));
+        }
     }
 
     #[test]

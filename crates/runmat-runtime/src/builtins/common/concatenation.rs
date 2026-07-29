@@ -38,6 +38,22 @@ fn char_array_from_f64(value: f64) -> BuiltinResult<CharArray> {
     char_array_from_f64_with_prefix(value, "char concat")
 }
 
+fn char_array_from_int(value: &IntValue) -> BuiltinResult<CharArray> {
+    let code = match value {
+        IntValue::I8(value) => u32::try_from(*value),
+        IntValue::I16(value) => u32::try_from(*value),
+        IntValue::I32(value) => u32::try_from(*value),
+        IntValue::I64(value) => u32::try_from(*value),
+        IntValue::U8(value) => Ok(u32::from(*value)),
+        IntValue::U16(value) => Ok(u32::from(*value)),
+        IntValue::U32(value) => Ok(*value),
+        IntValue::U64(value) => u32::try_from(*value),
+    };
+    let code = code.map_err(|_| concat_error("char concat: code point out of range"))?;
+    let ch = char::from_u32(code).ok_or_else(|| concat_error("char concat: invalid code point"))?;
+    CharArray::new(vec![ch], 1, 1).map_err(concat_error)
+}
+
 /// Horizontally concatenate two matrices [A, B]
 /// In language: C = [A, B] creates a matrix with A and B side by side
 pub fn hcat_matrices(a: &Tensor, b: &Tensor) -> BuiltinResult<Tensor> {
@@ -339,7 +355,7 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
                     blocks.push(ca);
                 }
                 Value::Int(i) => {
-                    let ca = char_array_from_f64(i.to_f64())?;
+                    let ca = char_array_from_int(i)?;
                     if rows.is_none() {
                         rows = Some(1);
                     } else if rows != Some(1) {
@@ -603,7 +619,7 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
                     blocks.push(ca);
                 }
                 Value::Int(i) => {
-                    let ca = char_array_from_f64(i.to_f64())?;
+                    let ca = char_array_from_int(i)?;
                     if cols.is_none() {
                         cols = Some(1);
                     } else if cols != Some(1) {

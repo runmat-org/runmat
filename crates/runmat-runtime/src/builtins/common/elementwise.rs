@@ -137,7 +137,8 @@ pub fn elementwise_neg(a: &Value) -> Result<Value, String> {
                 return Tensor::new_integer(negate_integer_storage(storage), m.shape.clone())
                     .map(Value::Tensor);
             }
-            let data: Vec<f64> = m.data.iter().map(|x| -x).collect();
+            let values = tensor_utils::tensor_values_f64_cow(m);
+            let data: Vec<f64> = values.iter().map(|x| -x).collect();
             Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
         _ => Err(format!("Negation not supported for type: -{a:?}")),
@@ -239,21 +240,25 @@ pub async fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
 
         // Matrix-scalar cases (broadcasting)
         (Value::Tensor(m), Value::Num(s)) => {
-            let data: Vec<f64> = m.data.iter().map(|x| x * s).collect();
+            let values = tensor_utils::tensor_values_f64_cow(m);
+            let data: Vec<f64> = values.iter().map(|x| x * s).collect();
             Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
         (Value::Tensor(m), Value::Int(s)) => {
             let scalar = s.to_f64();
-            let data: Vec<f64> = m.data.iter().map(|x| x * scalar).collect();
+            let values = tensor_utils::tensor_values_f64_cow(m);
+            let data: Vec<f64> = values.iter().map(|x| x * scalar).collect();
             Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
         (Value::Num(s), Value::Tensor(m)) => {
-            let data: Vec<f64> = m.data.iter().map(|x| s * x).collect();
+            let values = tensor_utils::tensor_values_f64_cow(m);
+            let data: Vec<f64> = values.iter().map(|x| s * x).collect();
             Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
         (Value::Int(s), Value::Tensor(m)) => {
             let scalar = s.to_f64();
-            let data: Vec<f64> = m.data.iter().map(|x| scalar * x).collect();
+            let values = tensor_utils::tensor_values_f64_cow(m);
+            let data: Vec<f64> = values.iter().map(|x| scalar * x).collect();
             Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
 
@@ -268,12 +273,9 @@ pub async fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
                     m2.cols()
                 ));
             }
-            let data: Vec<f64> = m1
-                .data
-                .iter()
-                .zip(m2.data.iter())
-                .map(|(x, y)| x * y)
-                .collect();
+            let lhs = tensor_utils::tensor_values_f64_cow(m1);
+            let rhs = tensor_utils::tensor_values_f64_cow(m2);
+            let data: Vec<f64> = lhs.iter().zip(rhs.iter()).map(|(x, y)| x * y).collect();
             Ok(Value::Tensor(Tensor::new_2d(data, m1.rows(), m1.cols())?))
         }
 
@@ -430,27 +432,29 @@ pub async fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
 
         // Matrix-scalar cases (broadcasting)
         (Value::Tensor(m), Value::Num(s)) => {
+            let values = tensor_utils::tensor_values_f64_cow(m);
             if *s == 0.0 {
-                let data: Vec<f64> = m.data.iter().map(|x| f64::INFINITY * x.signum()).collect();
+                let data: Vec<f64> = values.iter().map(|x| f64::INFINITY * x.signum()).collect();
                 Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
             } else {
-                let data: Vec<f64> = m.data.iter().map(|x| x / s).collect();
+                let data: Vec<f64> = values.iter().map(|x| x / s).collect();
                 Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
             }
         }
         (Value::Tensor(m), Value::Int(s)) => {
             let scalar = s.to_f64();
+            let values = tensor_utils::tensor_values_f64_cow(m);
             if scalar == 0.0 {
-                let data: Vec<f64> = m.data.iter().map(|x| f64::INFINITY * x.signum()).collect();
+                let data: Vec<f64> = values.iter().map(|x| f64::INFINITY * x.signum()).collect();
                 Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
             } else {
-                let data: Vec<f64> = m.data.iter().map(|x| x / scalar).collect();
+                let data: Vec<f64> = values.iter().map(|x| x / scalar).collect();
                 Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
             }
         }
         (Value::Num(s), Value::Tensor(m)) => {
-            let data: Vec<f64> = m
-                .data
+            let values = tensor_utils::tensor_values_f64_cow(m);
+            let data: Vec<f64> = values
                 .iter()
                 .map(|x| {
                     if *x == 0.0 {
@@ -464,8 +468,8 @@ pub async fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
         }
         (Value::Int(s), Value::Tensor(m)) => {
             let scalar = s.to_f64();
-            let data: Vec<f64> = m
-                .data
+            let values = tensor_utils::tensor_values_f64_cow(m);
+            let data: Vec<f64> = values
                 .iter()
                 .map(|x| {
                     if *x == 0.0 {
@@ -489,10 +493,11 @@ pub async fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
                     m2.cols()
                 ));
             }
-            let data: Vec<f64> = m1
-                .data
+            let lhs = tensor_utils::tensor_values_f64_cow(m1);
+            let rhs = tensor_utils::tensor_values_f64_cow(m2);
+            let data: Vec<f64> = lhs
                 .iter()
-                .zip(m2.data.iter())
+                .zip(rhs.iter())
                 .map(|(x, y)| {
                     if *y == 0.0 {
                         f64::INFINITY * x.signum()
@@ -705,21 +710,25 @@ pub fn elementwise_pow(a: &Value, b: &Value) -> Result<Value, String> {
 
         // Matrix-scalar cases (broadcasting)
         (Value::Tensor(m), Value::Num(s)) => {
-            let data: Vec<f64> = m.data.iter().map(|x| x.powf(*s)).collect();
+            let values = tensor_utils::tensor_values_f64_cow(m);
+            let data: Vec<f64> = values.iter().map(|x| x.powf(*s)).collect();
             Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
         (Value::Tensor(m), Value::Int(s)) => {
             let scalar = s.to_f64();
-            let data: Vec<f64> = m.data.iter().map(|x| x.powf(scalar)).collect();
+            let values = tensor_utils::tensor_values_f64_cow(m);
+            let data: Vec<f64> = values.iter().map(|x| x.powf(scalar)).collect();
             Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
         (Value::Num(s), Value::Tensor(m)) => {
-            let data: Vec<f64> = m.data.iter().map(|x| s.powf(*x)).collect();
+            let values = tensor_utils::tensor_values_f64_cow(m);
+            let data: Vec<f64> = values.iter().map(|x| s.powf(*x)).collect();
             Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
         (Value::Int(s), Value::Tensor(m)) => {
             let scalar = s.to_f64();
-            let data: Vec<f64> = m.data.iter().map(|x| scalar.powf(*x)).collect();
+            let values = tensor_utils::tensor_values_f64_cow(m);
+            let data: Vec<f64> = values.iter().map(|x| scalar.powf(*x)).collect();
             Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
         }
 
@@ -734,10 +743,11 @@ pub fn elementwise_pow(a: &Value, b: &Value) -> Result<Value, String> {
                     m2.cols()
                 ));
             }
-            let data: Vec<f64> = m1
-                .data
+            let lhs = tensor_utils::tensor_values_f64_cow(m1);
+            let rhs = tensor_utils::tensor_values_f64_cow(m2);
+            let data: Vec<f64> = lhs
                 .iter()
-                .zip(m2.data.iter())
+                .zip(rhs.iter())
                 .map(|(x, y)| x.powf(*y))
                 .collect();
             Ok(Value::Tensor(Tensor::new_2d(data, m1.rows(), m1.cols())?))
@@ -1108,6 +1118,47 @@ mod tests {
         assert_eq!(
             quotient.integer_storage(),
             Some(&IntegerStorage::U64(vec![1_u64 << 63, (1_u64 << 62) + 1]))
+        );
+    }
+
+    #[test]
+    fn elementwise_integer_operations_read_typed_storage_not_poisoned_mirrors() {
+        let mut input = Tensor::new_integer(IntegerStorage::I64(vec![2, 3]), vec![1, 2])
+            .expect("integer tensor");
+        input.data.fill(f64::NAN);
+
+        let Value::Tensor(product) = block_on(elementwise_mul(
+            &Value::Tensor(input.clone()),
+            &Value::Num(0.5),
+        ))
+        .expect("product") else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            product.integer_storage(),
+            Some(&IntegerStorage::I64(vec![1, 2]))
+        );
+
+        let Value::Tensor(quotient) = block_on(elementwise_div(
+            &Value::Num(6.0),
+            &Value::Tensor(input.clone()),
+        ))
+        .expect("quotient") else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            quotient.integer_storage(),
+            Some(&IntegerStorage::I64(vec![3, 2]))
+        );
+
+        let Value::Tensor(powered) =
+            elementwise_pow(&Value::Tensor(input), &Value::Num(0.5)).expect("power")
+        else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            powered.integer_storage(),
+            Some(&IntegerStorage::I64(vec![1, 2]))
         );
     }
 

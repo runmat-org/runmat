@@ -869,7 +869,9 @@ fn atom_eq(left: &ValidationAtom, right: &ValidationAtom) -> bool {
         (ValidationAtom::Number(a), ValidationAtom::Number(b)) => a == b,
         (ValidationAtom::Integer(a), ValidationAtom::Integer(b)) => a == b,
         (ValidationAtom::Integer(a), ValidationAtom::Number(b))
-        | (ValidationAtom::Number(b), ValidationAtom::Integer(a)) => a.to_f64() == *b,
+        | (ValidationAtom::Number(b), ValidationAtom::Integer(a)) => {
+            integer_f64_order(a.clone(), *b) == Some(Ordering::Equal)
+        }
         (ValidationAtom::Text(a), ValidationAtom::Text(b)) => a == b,
         (ValidationAtom::Bool(a), ValidationAtom::Bool(b)) => a == b,
         _ => false,
@@ -1557,6 +1559,18 @@ mod tests {
                 Value::Int(IntValue::U64(0)),
                 Value::SparseTensor(sparse_allowed),
             ],
+        );
+    }
+
+    #[test]
+    fn member_validator_does_not_equate_wide_integer_with_rounded_double() {
+        let wide = 9_007_199_254_740_993_u64;
+        let rounded = (wide - 1) as f64;
+        assert_eq!(wide as f64, rounded);
+
+        err(
+            "mustBeMember",
+            vec![Value::Int(IntValue::U64(wide)), Value::Num(rounded)],
         );
     }
 
