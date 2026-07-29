@@ -826,7 +826,7 @@ async fn reduction_min_gpu(
         log::trace!("min: gpu path disabled (linear_index=true)");
         return Ok(None);
     }
-    let provider = match runmat_accelerate_api::provider() {
+    let provider = match runmat_accelerate_api::provider_for_handle(&handle) {
         Some(p) => p,
         None => {
             log::trace!(
@@ -1697,7 +1697,10 @@ async fn elementwise_min_gpu_pair(
     if comparison != ComparisonMethod::Auto {
         return None;
     }
-    let provider = runmat_accelerate_api::provider()?;
+    if a.device_id != b.device_id {
+        return None;
+    }
+    let provider = runmat_accelerate_api::provider_for_handle(a)?;
     // Equal-shape fast path
     if a.shape == b.shape {
         let values = provider.elem_min(a, b).await.ok()?;
@@ -1816,7 +1819,7 @@ async fn elementwise_min_gpu_scalar_left(
     if comparison != ComparisonMethod::Auto {
         return None;
     }
-    let provider = runmat_accelerate_api::provider()?;
+    let provider = runmat_accelerate_api::provider_for_handle(a)?;
     let scalar = extract_scalar(other)?;
     let values = provider.scalar_min(a, scalar).ok()?;
     // Try device mask; if unavailable, compute on host
@@ -1861,7 +1864,7 @@ async fn elementwise_min_gpu_scalar_right(
     if comparison != ComparisonMethod::Auto {
         return None;
     }
-    let provider = runmat_accelerate_api::provider()?;
+    let provider = runmat_accelerate_api::provider_for_handle(b)?;
     let scalar = extract_scalar(other)?;
     let values = provider.scalar_min(b, scalar).ok()?;
     // Try device mask; if unavailable, compute on host

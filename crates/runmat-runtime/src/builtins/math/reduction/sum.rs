@@ -765,7 +765,7 @@ async fn sum_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinRe
         return sum_gpu_with_omitnan(handle, parsed).await;
     }
 
-    let Some(provider) = runmat_accelerate_api::provider() else {
+    let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) else {
         return sum_gpu_fallback(&handle, parsed).await;
     };
 
@@ -831,7 +831,7 @@ async fn sum_gpu_with_omitnan(
             );
         }
     }
-    let Some(provider) = runmat_accelerate_api::provider() else {
+    let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) else {
         return sum_gpu_fallback(&handle, parsed).await;
     };
     let resolved = resolve_dims(&handle.shape, &parsed.selection)?;

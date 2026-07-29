@@ -908,9 +908,22 @@ impl WgpuProvider {
             _ => return Err(anyhow!("{operation_name}: only dims 0 or 1 are supported")),
         };
         if rows == 0 || cols == 0 {
-            return Err(anyhow!(
-                "{operation_name}: empty native integer extrema requires host empty-shape handling"
-            ));
+            // Keep empty extrema device-resident rather than routing through
+            // the f64 host gather fallback, which cannot reconstruct wide
+            // integers.
+            let values = self.register_integer_buffer(
+                self.create_storage_buffer(0, "runmat-integer-reduce-empty-extrema-values"),
+                out_shape.clone(),
+                0,
+                integer_type,
+                0,
+            );
+            let indices = self.register_existing_buffer(
+                self.create_storage_buffer(0, "runmat-integer-reduce-empty-extrema-indices"),
+                out_shape,
+                0,
+            );
+            return Ok(runmat_accelerate_api::ReduceDimResult { values, indices });
         }
         if rows > u32::MAX as usize || cols > u32::MAX as usize {
             return Err(gpu_dispatch_length_limit_error(
@@ -1707,6 +1720,40 @@ mod tests {
                 .data,
             vec![1.0, 1.0]
         );
+    }
+
+    #[test]
+    fn wgpu_native_integer_empty_extrema_keep_wide_values_and_indices_resident() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let input = provider
+            .upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&[]),
+                shape: &[0, 2],
+            })
+            .expect("upload empty packed u64 extrema input");
+        let min = block_on(provider.reduce_min_dim(&input, 0)).expect("public empty min hook");
+        let max = block_on(provider.reduce_max_dim(&input, 1)).expect("public empty max hook");
+
+        for (result, expected_shape) in [(&min, vec![1, 2]), (&max, vec![0, 1])] {
+            assert_eq!(result.values.shape, expected_shape);
+            assert_eq!(result.indices.shape, expected_shape);
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&result.values),
+                Some(IntegerElementType::U64)
+            );
+            assert_eq!(
+                block_on(provider.download_integer_exec(&result.values))
+                    .expect("download empty native extrema values")
+                    .data,
+                HostIntegerDataOwned::U64(Vec::new())
+            );
+            assert!(block_on(provider.download_exec(&result.indices))
+                .expect("download empty extrema indices")
+                .data
+                .is_empty());
+        }
     }
 
     #[test]

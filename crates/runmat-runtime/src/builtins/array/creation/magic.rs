@@ -3,12 +3,12 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Tensor, Type, Value,
+    IntValue, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
-use crate::builtins::common::tensor;
+use crate::builtins::common::{gpu_helpers, tensor};
 
 fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("magic").build()
@@ -112,7 +112,35 @@ async fn parse_order(args: Vec<Value>) -> crate::BuiltinResult<usize> {
     if args.len() != 1 {
         return Err(builtin_error("magic: requires exactly one input argument"));
     }
-    let value = &args[0];
+    parse_order_value(&args[0]).await
+}
+
+async fn parse_order_value(value: &Value) -> crate::BuiltinResult<usize> {
+    if let Value::GpuTensor(handle) = value {
+        let tensor = gpu_helpers::gather_tensor_async(handle)
+            .await
+            .map_err(|err| builtin_error(format!("magic: {err}")))?;
+        return parse_order_host(&Value::Tensor(tensor)).await;
+    }
+    parse_order_host(value).await
+}
+
+async fn parse_order_host(value: &Value) -> crate::BuiltinResult<usize> {
+    if let Value::Int(value) = value {
+        return parse_integer_order(value);
+    }
+    if let Value::Tensor(tensor) = value {
+        if !tensor::is_scalar_tensor(tensor) {
+            return Err(builtin_error("magic: input must be a numeric scalar"));
+        }
+        if let Some(storage) = tensor.integer_storage() {
+            return parse_integer_order(
+                &storage
+                    .value_at(0)
+                    .expect("scalar integer storage has one element"),
+            );
+        }
+    }
     let Some(raw) = tensor::scalar_f64_from_value_async(value)
         .await
         .map_err(|err| builtin_error(format!("magic: {err}")))?
@@ -129,7 +157,24 @@ async fn parse_order(args: Vec<Value>) -> crate::BuiltinResult<usize> {
     if rounded < 0.0 {
         return Err(builtin_error("magic: dimension must be non-negative"));
     }
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+        return Err(builtin_error(
+            "magic: dimension is too large for this platform",
+        ));
+    }
     let n = rounded as usize;
+    if n == 2 {
+        return Err(builtin_error(
+            "magic: magic squares of order 2 do not exist",
+        ));
+    }
+    Ok(n)
+}
+
+fn parse_integer_order(value: &IntValue) -> crate::BuiltinResult<usize> {
+    let n = value
+        .try_to_usize()
+        .ok_or_else(|| builtin_error("magic: dimension is outside the supported range"))?;
     if n == 2 {
         return Err(builtin_error(
             "magic: magic squares of order 2 do not exist",
@@ -268,6 +313,7 @@ fn swap_cells(
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn magic_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::magic_builtin(args))
@@ -289,6 +335,34 @@ mod tests {
             }
             other => panic!("expected empty tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn magic_parses_all_integer_classes_without_f64_rounding() {
+        let values = [
+            IntValue::I8(3),
+            IntValue::I16(3),
+            IntValue::I32(3),
+            IntValue::I64(3),
+            IntValue::U8(3),
+            IntValue::U16(3),
+            IntValue::U32(3),
+            IntValue::U64(3),
+        ];
+        for value in values {
+            assert!(matches!(
+                block_on(parse_order_value(&Value::Int(value))),
+                Ok(3)
+            ));
+        }
+
+        let exact = 9_007_199_254_740_993_u64;
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![exact]), vec![1, 1])
+            .expect("typed scalar");
+        assert!(matches!(
+            block_on(parse_order_value(&Value::Tensor(tensor))),
+            Ok(value) if value == exact as usize
+        ));
     }
 
     #[test]

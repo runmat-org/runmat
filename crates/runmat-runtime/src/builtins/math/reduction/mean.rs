@@ -546,7 +546,7 @@ async fn mean_native_integer_gpu(
     if dims.is_empty() {
         return Ok(Value::GpuTensor(handle));
     }
-    let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+    let provider = runmat_accelerate_api::provider_for_handle(&handle).ok_or_else(|| {
         mean_internal_error("mean: native integer gpuArray requires an acceleration provider")
     })?;
     let result = if dims.len() == handle.shape.len() {
@@ -872,7 +872,7 @@ async fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinRes
             );
         }
     }
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         // Include-NaN: use provider reduce_mean_* hooks
         if args.nan_mode == ReductionNaN::Include {
             if let Some(device_result) = mean_gpu_try(provider, &handle, &args.axes).await {

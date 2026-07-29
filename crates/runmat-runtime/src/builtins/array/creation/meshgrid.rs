@@ -1472,6 +1472,13 @@ fn to_complex_gpu_tensor_value(tensor: ComplexTensor) -> crate::BuiltinResult<Va
 }
 
 fn tensor_to_complex_tensor(tensor: Tensor) -> crate::BuiltinResult<ComplexTensor> {
+    if let Some(real) = tensor.integer_storage() {
+        let imag = real.zeros_like(real.len());
+        let storage = IntegerComplexStorage::new(real.clone(), imag)
+            .map_err(|e| builtin_error(format!("meshgrid: {e}")))?;
+        return ComplexTensor::new_integer(storage, tensor.shape.clone())
+            .map_err(|e| builtin_error(format!("meshgrid: {e}")));
+    }
     let values = tensor::tensor_values_f64_cow(&tensor);
     let data: Vec<(f64, f64)> = values.iter().map(|&re| (re, 0.0)).collect();
     ComplexTensor::new(data, tensor.shape.clone())
@@ -1798,6 +1805,16 @@ pub(crate) mod tests {
         let out = tensor_to_complex_tensor(tensor).expect("complex tensor");
         assert_eq!(out.shape, vec![1, 2]);
         assert_eq!(out.data, vec![(-3.0, 0.0), (5.0, 0.0)]);
+        assert_eq!(
+            out.integer_data,
+            Some(
+                IntegerComplexStorage::new(
+                    IntegerStorage::I64(vec![-3, 5]),
+                    IntegerStorage::I64(vec![0, 0]),
+                )
+                .expect("typed complex storage")
+            )
+        );
     }
 
     fn tensor_from_vec(data: Vec<f64>, rows: usize, cols: usize) -> Tensor {

@@ -27,7 +27,7 @@ use runmat_builtins::shape_rules::element_count_if_known;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LiteralValue, ResolveContext, Tensor, Type, Value,
+    IntValue, LiteralValue, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -610,6 +610,31 @@ fn make_tensor(data: Vec<f64>, shape: Vec<usize>) -> crate::BuiltinResult<Value>
 // ---------------------------------------------------------------------------
 
 async fn parse_scalar_n(value: &Value) -> crate::BuiltinResult<usize> {
+    if let Value::GpuTensor(handle) = value {
+        let tensor = gpu_helpers::gather_tensor_async(handle)
+            .await
+            .map_err(|e| builtin_error(format!("peaks: {e}")))?;
+        return parse_scalar_n_host(&Value::Tensor(tensor)).await;
+    }
+    parse_scalar_n_host(value).await
+}
+
+async fn parse_scalar_n_host(value: &Value) -> crate::BuiltinResult<usize> {
+    if let Value::Int(value) = value {
+        return parse_integer_n(value);
+    }
+    if let Value::Tensor(tensor) = value {
+        if !tensor::is_scalar_tensor(tensor) {
+            return Err(builtin_error("peaks: n must be a numeric scalar"));
+        }
+        if let Some(storage) = tensor.integer_storage() {
+            return parse_integer_n(
+                &storage
+                    .value_at(0)
+                    .expect("scalar integer storage has one element"),
+            );
+        }
+    }
     let Some(raw) = tensor::scalar_f64_from_value_async(value)
         .await
         .map_err(|e| builtin_error(format!("peaks: {e}")))?
@@ -630,6 +655,12 @@ async fn parse_scalar_n(value: &Value) -> crate::BuiltinResult<usize> {
         return Err(builtin_error("peaks: n is too large for this platform"));
     }
     Ok(rounded as usize)
+}
+
+fn parse_integer_n(value: &IntValue) -> crate::BuiltinResult<usize> {
+    value
+        .try_to_usize()
+        .ok_or_else(|| builtin_error("peaks: n is outside the supported platform range"))
 }
 
 async fn gather_tensor(value: &Value) -> crate::BuiltinResult<Tensor> {
@@ -679,6 +710,7 @@ mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{handle_precision, provider_for_handle, ProviderPrecision};
+    use runmat_builtins::IntegerStorage;
 
     fn peaks_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::peaks_builtin(rest))
@@ -718,6 +750,35 @@ mod tests {
         let gathered = gather_result(peaks_builtin(vec![Value::Num(0.0)]).expect("peaks"));
         assert_eq!(gathered.shape, vec![0, 0]);
         assert!(gathered.data.is_empty());
+    }
+
+    #[test]
+    fn peaks_parses_all_integer_classes_without_f64_rounding() {
+        let values = [
+            IntegerStorage::I8(vec![3]),
+            IntegerStorage::I16(vec![3]),
+            IntegerStorage::I32(vec![3]),
+            IntegerStorage::I64(vec![3]),
+            IntegerStorage::U8(vec![3]),
+            IntegerStorage::U16(vec![3]),
+            IntegerStorage::U32(vec![3]),
+            IntegerStorage::U64(vec![3]),
+        ];
+        for storage in values {
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed scalar");
+            assert!(matches!(
+                block_on(parse_scalar_n(&Value::Tensor(tensor))),
+                Ok(3)
+            ));
+        }
+
+        let exact = 9_007_199_254_740_993_u64;
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![exact]), vec![1, 1])
+            .expect("typed scalar");
+        assert!(matches!(
+            block_on(parse_scalar_n(&Value::Tensor(tensor))),
+            Ok(value) if value == exact as usize
+        ));
     }
 
     #[test]

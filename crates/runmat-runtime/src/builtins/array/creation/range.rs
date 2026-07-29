@@ -426,6 +426,18 @@ fn parse_dim_spec(value: &Value) -> crate::BuiltinResult<DimSelection> {
 }
 
 fn parse_dim_tensor(tensor: &Tensor) -> crate::BuiltinResult<DimSelection> {
+    if let Some(dims) = tensor::integer_tensor_dimension_vector(tensor, "range", false) {
+        let dims = dims.map_err(builtin_error)?;
+        if dims.is_empty() {
+            return Ok(DimSelection::Auto);
+        }
+        if !is_vector_shape(&tensor.shape) {
+            return Err(builtin_error(
+                "range: dimension vector must be a row or column vector",
+            ));
+        }
+        return Ok(DimSelection::Vec(dims));
+    }
     let values = tensor::tensor_values_f64_cow(tensor);
     if values.is_empty() {
         return Ok(DimSelection::Auto);
@@ -1022,6 +1034,17 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor output, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn range_dimension_vector_preserves_wide_uint64_before_resolution() {
+        let exact = 9_007_199_254_740_993_u64;
+        let dims = Tensor::new_integer(IntegerStorage::U64(vec![exact]), vec![1, 1])
+            .expect("typed dimensions");
+        assert!(matches!(
+            parse_dim_tensor(&dims),
+            Ok(DimSelection::Vec(values)) if values == vec![exact as usize]
+        ));
     }
 
     #[test]

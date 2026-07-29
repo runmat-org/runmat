@@ -790,7 +790,7 @@ async fn prod_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinR
         return prod_gpu_fallback(&handle, parsed).await;
     }
 
-    let Some(provider) = runmat_accelerate_api::provider() else {
+    let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) else {
         return prod_gpu_fallback(&handle, parsed).await;
     };
 

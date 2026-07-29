@@ -18,7 +18,7 @@ use crate::indexing::selectors::{
 use crate::indexing::write_linear as idx_write_linear;
 use crate::indexing::write_slice as idx_write_slice;
 use crate::interpreter::dispatch::calls::normalize_requested_outputs;
-use runmat_builtins::{CellArray, SymbolicExpr, Value};
+use runmat_builtins::{CellArray, IntValue, IntegerStorage, SymbolicExpr, Tensor, Value};
 use runmat_runtime::builtins::common::tensor::tensor_value_f64;
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use std::future::Future;
@@ -34,6 +34,23 @@ fn map_slice_plan_error(context: &str, err: RuntimeError) -> RuntimeError {
 
 fn map_slice_shape_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
     crate::interpreter::errors::mex("ShapeMismatch", &format!("{context}: {err}"))
+}
+
+/// Materializes an integer scalar for indexed assignment without routing it
+/// through the lossy floating-point tensor mirror.
+fn integer_scalar_tensor(value: IntValue) -> Result<Tensor, RuntimeError> {
+    let storage = match value {
+        IntValue::I8(value) => IntegerStorage::I8(vec![value]),
+        IntValue::I16(value) => IntegerStorage::I16(vec![value]),
+        IntValue::I32(value) => IntegerStorage::I32(vec![value]),
+        IntValue::I64(value) => IntegerStorage::I64(vec![value]),
+        IntValue::U8(value) => IntegerStorage::U8(vec![value]),
+        IntValue::U16(value) => IntegerStorage::U16(vec![value]),
+        IntValue::U32(value) => IntegerStorage::U32(vec![value]),
+        IntValue::U64(value) => IntegerStorage::U64(vec![value]),
+    };
+    Tensor::new_integer(storage, vec![1, 1])
+        .map_err(|e| map_slice_shape_error("scalar index assign", e))
 }
 
 fn logical_value_from_tensor(t: runmat_builtins::Tensor) -> Result<Value, RuntimeError> {
@@ -1270,8 +1287,7 @@ pub async fn dispatch_indexing(
                     );
                 }
                 Value::Int(i) => {
-                    let scalar = runmat_builtins::Tensor::new(vec![i.to_f64()], vec![1, 1])
-                        .map_err(|e| map_slice_shape_error("scalar index assign", e))?;
+                    let scalar = integer_scalar_tensor(i)?;
                     stack.push(
                         idx_write_linear::assign_tensor_scalar(scalar, &indices, &rhs, delete)
                             .await?,
@@ -2480,12 +2496,32 @@ pub async fn dispatch_indexing(
 mod tests {
     use super::{
         apply_cell_end_exprs_for_base, apply_cell_end_offsets_for_base,
-        apply_end_offsets_to_numeric, map_slice_plan_error, range_selector_scalar_to_f64,
-        symbolic_scalar_from_value, validate_expr_range_step_metadata, IndexContext,
+        apply_end_offsets_to_numeric, integer_scalar_tensor, map_slice_plan_error,
+        range_selector_scalar_to_f64, symbolic_scalar_from_value,
+        validate_expr_range_step_metadata, IndexContext,
     };
     use crate::bytecode::EndExpr;
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, IntegerStorage, SymbolicExpr, Tensor, Value};
+    use runmat_builtins::{CellArray, IntValue, IntegerStorage, SymbolicExpr, Tensor, Value};
+
+    #[test]
+    fn integer_scalar_index_assignment_materialization_preserves_all_integer_classes() {
+        macro_rules! assert_scalar_storage {
+            ($value:expr, $storage:expr) => {{
+                let tensor = integer_scalar_tensor($value).expect("integer scalar tensor");
+                assert_eq!(tensor.integer_storage(), Some(&$storage));
+            }};
+        }
+
+        assert_scalar_storage!(IntValue::I8(i8::MIN), IntegerStorage::I8(vec![i8::MIN]));
+        assert_scalar_storage!(IntValue::I16(i16::MIN), IntegerStorage::I16(vec![i16::MIN]));
+        assert_scalar_storage!(IntValue::I32(i32::MIN), IntegerStorage::I32(vec![i32::MIN]));
+        assert_scalar_storage!(IntValue::I64(i64::MIN), IntegerStorage::I64(vec![i64::MIN]));
+        assert_scalar_storage!(IntValue::U8(u8::MAX), IntegerStorage::U8(vec![u8::MAX]));
+        assert_scalar_storage!(IntValue::U16(u16::MAX), IntegerStorage::U16(vec![u16::MAX]));
+        assert_scalar_storage!(IntValue::U32(u32::MAX), IntegerStorage::U32(vec![u32::MAX]));
+        assert_scalar_storage!(IntValue::U64(u64::MAX), IntegerStorage::U64(vec![u64::MAX]));
+    }
 
     #[test]
     fn map_slice_plan_error_preserves_identifier_and_adds_context() {
