@@ -10,13 +10,15 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{
+    GpuTensorHandle, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
+};
 use runmat_builtins::shape_rules::element_count_if_known;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntegerComplexStorage, LogicalArray, ResolveContext, StringArray,
-    Tensor, Type, Value,
+    CharArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, ResolveContext,
+    StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -519,25 +521,57 @@ pub(crate) async fn permute_gpu(
             );
         }
     }
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         let zero_based: Vec<usize> = order.iter().map(|&idx| idx - 1).collect();
-        if let Ok(out) = provider.permute(&handle, &zero_based) {
-            return Ok(Value::GpuTensor(out));
+        if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
+            if let Ok(out) = provider.permute(&handle, &zero_based) {
+                return Ok(Value::GpuTensor(out));
+            }
         }
         let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
         let permuted = permute_tensor(builtin, host_tensor, order)?;
-        let view = HostTensorView {
-            data: &permuted.data,
-            shape: &permuted.shape,
-        };
-        provider
-            .upload(&view)
+        upload_tensor(provider, &permuted)
             .map(Value::GpuTensor)
             .map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))
     } else {
         let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
         permute_tensor(builtin, host_tensor, order).map(tensor::tensor_into_value)
     }
+}
+
+fn upload_tensor(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    tensor: &Tensor,
+) -> Result<GpuTensorHandle, String> {
+    if let Some(storage) = tensor.integer_storage() {
+        provider
+            .upload_integer(&integer_tensor_view(storage, &tensor.shape))
+            .map_err(|error| error.to_string())
+    } else {
+        provider
+            .upload(&HostTensorView {
+                data: &tensor.data,
+                shape: &tensor.shape,
+            })
+            .map_err(|error| error.to_string())
+    }
+}
+
+fn integer_tensor_view<'a>(
+    storage: &'a IntegerStorage,
+    shape: &'a [usize],
+) -> HostIntegerTensorView<'a> {
+    let data = match storage {
+        IntegerStorage::I8(values) => HostIntegerDataView::I8(values),
+        IntegerStorage::I16(values) => HostIntegerDataView::I16(values),
+        IntegerStorage::I32(values) => HostIntegerDataView::I32(values),
+        IntegerStorage::I64(values) => HostIntegerDataView::I64(values),
+        IntegerStorage::U8(values) => HostIntegerDataView::U8(values),
+        IntegerStorage::U16(values) => HostIntegerDataView::U16(values),
+        IntegerStorage::U32(values) => HostIntegerDataView::U32(values),
+        IntegerStorage::U64(values) => HostIntegerDataView::U64(values),
+    };
+    HostIntegerTensorView { data, shape }
 }
 
 fn permute_generic<T: Clone>(
@@ -631,6 +665,7 @@ fn is_vector(tensor: &Tensor) -> bool {
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView, IntegerElementType};
     use runmat_builtins::{IntegerComplexStorage, IntegerStorage};
 
     fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
@@ -922,6 +957,41 @@ pub(crate) mod tests {
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
             }
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn permute_gpu_integer_fallback_preserves_exact_storage_resident() {
+        test_support::with_test_provider(|provider| {
+            let values = [1_u64, 9_007_199_254_740_993, u64::MAX, 4_u64];
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&values),
+                    shape: &[2, 2],
+                })
+                .expect("upload integer");
+            let order = tensor(&[2.0, 1.0], &[1, 2]);
+            let value = permute_builtin(Value::GpuTensor(handle), Value::Tensor(order))
+                .expect("permute integer gpu");
+            let Value::GpuTensor(result) = value else {
+                panic!("expected resident gpuArray");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&result),
+                Some(IntegerElementType::U64)
+            );
+            let gathered = block_on(gpu_helpers::gather_tensor_async(&result)).expect("gather");
+            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![
+                    1_u64,
+                    u64::MAX,
+                    9_007_199_254_740_993,
+                    4_u64,
+                ]))
+            );
         });
     }
 

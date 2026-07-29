@@ -9,7 +9,9 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{
+    GpuTensorHandle, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
+};
 use runmat_builtins::shape_rules::element_count_if_known;
 use runmat_builtins::ResolveContext;
 use runmat_builtins::{
@@ -647,17 +649,15 @@ fn repmat_cell_array(cell: &CellArray, reps: &[usize]) -> crate::BuiltinResult<C
 }
 
 async fn repmat_gpu_tensor(handle: GpuTensorHandle, reps: &[usize]) -> crate::BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Ok(tiled) = provider.repmat(&handle, reps) {
-            return Ok(Value::GpuTensor(tiled));
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+        if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
+            if let Ok(tiled) = provider.repmat(&handle, reps) {
+                return Ok(Value::GpuTensor(tiled));
+            }
         }
         let gathered = gpu_helpers::gather_tensor_async(&handle).await?;
         let tiled = repmat_tensor(&gathered, reps)?;
-        let view = HostTensorView {
-            data: &tiled.data,
-            shape: &tiled.shape,
-        };
-        match provider.upload(&view) {
+        match upload_tensor(provider, &tiled) {
             Ok(new_handle) => Ok(Value::GpuTensor(new_handle)),
             Err(_) => Ok(tensor::tensor_into_value(tiled)),
         }
@@ -666,6 +666,41 @@ async fn repmat_gpu_tensor(handle: GpuTensorHandle, reps: &[usize]) -> crate::Bu
             "repmat: no acceleration provider is registered",
         ))
     }
+}
+
+fn upload_tensor(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    tensor: &Tensor,
+) -> Result<GpuTensorHandle, String> {
+    if let Some(storage) = tensor.integer_storage() {
+        provider
+            .upload_integer(&integer_tensor_view(storage, &tensor.shape))
+            .map_err(|error| error.to_string())
+    } else {
+        provider
+            .upload(&HostTensorView {
+                data: &tensor.data,
+                shape: &tensor.shape,
+            })
+            .map_err(|error| error.to_string())
+    }
+}
+
+fn integer_tensor_view<'a>(
+    storage: &'a IntegerStorage,
+    shape: &'a [usize],
+) -> HostIntegerTensorView<'a> {
+    let data = match storage {
+        IntegerStorage::I8(values) => HostIntegerDataView::I8(values),
+        IntegerStorage::I16(values) => HostIntegerDataView::I16(values),
+        IntegerStorage::I32(values) => HostIntegerDataView::I32(values),
+        IntegerStorage::I64(values) => HostIntegerDataView::I64(values),
+        IntegerStorage::U8(values) => HostIntegerDataView::U8(values),
+        IntegerStorage::U16(values) => HostIntegerDataView::U16(values),
+        IntegerStorage::U32(values) => HostIntegerDataView::U32(values),
+        IntegerStorage::U64(values) => HostIntegerDataView::U64(values),
+    };
+    HostIntegerTensorView { data, shape }
 }
 
 fn repmat_column_major<T: Clone>(
@@ -816,8 +851,10 @@ pub(crate) mod tests {
         block_on(super::repmat_builtin(value, rest))
     }
     use crate::builtins::common::test_support;
-    use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, Tensor};
+    use runmat_accelerate_api::{
+        HostIntegerDataView, HostIntegerTensorView, HostTensorView, IntegerElementType,
+    };
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
 
     #[test]
     fn repmat_type_preserves_logical_kind() {
@@ -1293,6 +1330,45 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![4, 2]);
             assert_eq!(gathered.data, vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0]);
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn repmat_gpu_integer_fallback_preserves_exact_storage_resident() {
+        test_support::with_test_provider(|provider| {
+            let values = [9_007_199_254_740_993_u64, u64::MAX];
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&values),
+                    shape: &[2, 1],
+                })
+                .expect("upload integer");
+            let result =
+                repmat_builtin(Value::GpuTensor(handle), vec![Value::Int(IntValue::I32(2))])
+                    .expect("repmat integer gpu");
+            let Value::GpuTensor(handle) = result else {
+                panic!("expected resident gpuArray");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&handle),
+                Some(IntegerElementType::U64)
+            );
+            let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
+            assert_eq!(gathered.shape, vec![4, 2]);
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![
+                    9_007_199_254_740_993,
+                    u64::MAX,
+                    9_007_199_254_740_993,
+                    u64::MAX,
+                    9_007_199_254_740_993,
+                    u64::MAX,
+                    9_007_199_254_740_993,
+                    u64::MAX,
+                ]))
+            );
         });
     }
 
