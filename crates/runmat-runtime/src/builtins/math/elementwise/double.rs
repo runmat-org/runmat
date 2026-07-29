@@ -5,7 +5,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, LogicalArray, SparseTensor, Tensor, Value,
+    CharArray, ComplexTensor, LogicalArray, NumericDType, SparseTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -195,10 +195,10 @@ async fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
         Value::Num(n) => Ok(Value::Num(n)),
         Value::Int(i) => Ok(Value::Num(i.to_f64())),
         Value::Bool(flag) => Ok(Value::Num(if flag { 1.0 } else { 0.0 })),
-        Value::Tensor(tensor) => Ok(Value::Tensor(tensor)),
+        Value::Tensor(tensor) => double_from_tensor(tensor),
         Value::SparseTensor(sparse) => double_from_sparse_tensor(sparse),
         Value::Complex(re, im) => Ok(Value::Complex(re, im)),
-        Value::ComplexTensor(tensor) => Ok(Value::ComplexTensor(tensor)),
+        Value::ComplexTensor(tensor) => double_from_complex_tensor(tensor),
         Value::LogicalArray(array) => double_from_logical(array),
         Value::CharArray(chars) => double_from_char_array(chars),
         Value::GpuTensor(handle) => double_from_gpu(handle).await,
@@ -230,6 +230,28 @@ fn double_from_logical(array: LogicalArray) -> BuiltinResult<Value> {
     Ok(tensor::tensor_into_value(tensor))
 }
 
+fn double_from_tensor(mut tensor: Tensor) -> BuiltinResult<Value> {
+    if tensor.integer_storage().is_some() {
+        tensor.data = tensor::tensor_values_f64(&tensor);
+        tensor.integer_data = None;
+    }
+    tensor.dtype = NumericDType::F64;
+    Ok(Value::Tensor(tensor))
+}
+
+fn double_from_complex_tensor(mut tensor: ComplexTensor) -> BuiltinResult<Value> {
+    if let Some(storage) = tensor.integer_data.take() {
+        let real = storage.real.exact_values();
+        let imag = storage.imag.exact_values();
+        tensor.data = real
+            .into_iter()
+            .zip(imag)
+            .map(|(re, im)| (re.to_f64(), im.to_f64()))
+            .collect();
+    }
+    Ok(Value::ComplexTensor(tensor))
+}
+
 fn double_from_sparse_tensor(sparse: SparseTensor) -> BuiltinResult<Value> {
     let tensor = sparse.to_dense().map_err(|err| {
         double_error_with_detail(
@@ -237,7 +259,7 @@ fn double_from_sparse_tensor(sparse: SparseTensor) -> BuiltinResult<Value> {
             format!("failed to densify sparse input: {err}"),
         )
     })?;
-    Ok(Value::Tensor(tensor))
+    double_from_tensor(tensor)
 }
 
 fn double_from_char_array(chars: CharArray) -> BuiltinResult<Value> {
@@ -251,7 +273,9 @@ async fn double_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let provider = runmat_accelerate_api::provider_for_handle(&handle);
 
     if let Some(provider) = provider {
-        if provider.precision() == ProviderPrecision::F64 {
+        if provider.precision() == ProviderPrecision::F64
+            && runmat_accelerate_api::handle_integer_type(&handle).is_none()
+        {
             match provider.unary_double(&handle).await {
                 Ok(result) => {
                     return Ok(Value::GpuTensor(result));
@@ -268,27 +292,37 @@ async fn double_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-    if let Some(provider) = provider {
-        if provider.precision() == ProviderPrecision::F64 {
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            match provider.upload(&view) {
-                Ok(new_handle) => return Ok(Value::GpuTensor(new_handle)),
-                Err(err) => {
-                    trace!("double: provider upload failed after gather ({err})");
+    let value = double_from_tensor(gpu_helpers::gather_tensor_async(&handle).await?)?;
+    match (provider, value) {
+        (Some(provider), Value::Tensor(tensor)) => {
+            if provider.precision() == ProviderPrecision::F64 {
+                let view = HostTensorView {
+                    data: &tensor.data,
+                    shape: &tensor.shape,
+                };
+                match provider.upload(&view) {
+                    Ok(new_handle) => return Ok(Value::GpuTensor(new_handle)),
+                    Err(err) => {
+                        trace!("double: provider upload failed after gather ({err})");
+                    }
                 }
+            } else {
+                trace!(
+                    "double: provider precision {:?} does not support float64 outputs; returning host tensor",
+                    provider.precision()
+                );
             }
-        } else {
+            Ok(Value::Tensor(tensor))
+        }
+        (Some(provider), value) => {
             trace!(
-                "double: provider precision {:?} does not support float64 outputs; returning host tensor",
+                "double: provider precision {:?} does not support float64 outputs; returning host value",
                 provider.precision()
             );
+            Ok(value)
         }
+        (None, value) => Ok(value),
     }
-    Ok(tensor::tensor_into_value(tensor))
 }
 
 #[derive(Clone)]
@@ -416,10 +450,13 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_accelerate_api::HostTensorView;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
-    use runmat_builtins::{IntValue, ResolveContext, SparseTensor, SymbolicExpr, Type};
+    use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView, HostTensorView};
+    use runmat_builtins::{
+        IntValue, IntegerComplexStorage, IntegerStorage, ResolveContext, SparseTensor,
+        SymbolicExpr, Type,
+    };
 
     fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::double_builtin(value, rest))
@@ -561,6 +598,48 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn double_tensor_reads_typed_integer_storage_and_clears_class() {
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]), vec![1, 2])
+                .unwrap();
+        tensor.data = vec![0.0, 0.0];
+
+        let result = double_builtin(Value::Tensor(tensor), Vec::new()).expect("double");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.dtype, NumericDType::F64);
+                assert!(t.integer_storage().is_none());
+                assert_eq!(t.data, vec![(1_u64 << 63) as f64, u64::MAX as f64]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn double_complex_tensor_reads_typed_integer_storage_and_clears_class() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![-2, 3]),
+            IntegerStorage::I16(vec![5, -7]),
+        )
+        .unwrap();
+        let mut tensor = ComplexTensor::new_integer(storage, vec![1, 2]).unwrap();
+        tensor.data = vec![(0.0, 0.0), (0.0, 0.0)];
+
+        let result = double_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("double");
+        match result {
+            Value::ComplexTensor(t) => {
+                assert!(t.integer_data.is_none());
+                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.data, vec![(-2.0, 5.0), (3.0, -7.0)]);
+            }
+            other => panic!("expected complex tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn double_sparse_tensor_densifies() {
         let sparse = SparseTensor::new(3, 2, vec![0, 1, 2], vec![1, 2], vec![4.0, -1.0]).unwrap();
         let result = double_builtin(Value::SparseTensor(sparse), Vec::new()).expect("double");
@@ -568,6 +647,29 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 2]);
                 assert_eq!(t.data, vec![0.0, 4.0, 0.0, 0.0, 0.0, -1.0]);
+            }
+            other => panic!("expected dense tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn double_sparse_tensor_reads_typed_integer_storage_and_clears_class() {
+        let sparse = SparseTensor::new_integer(
+            2,
+            2,
+            vec![0, 1, 2],
+            vec![1, 0],
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+        )
+        .unwrap();
+        let result = double_builtin(Value::SparseTensor(sparse), Vec::new()).expect("double");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.dtype, NumericDType::F64);
+                assert!(t.integer_storage().is_none());
+                assert_eq!(t.data, vec![0.0, i64::MIN as f64, i64::MAX as f64, 0.0]);
             }
             other => panic!("expected dense tensor, got {other:?}"),
         }
@@ -595,6 +697,33 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
             assert_eq!(gathered.data, tensor.data);
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn double_gpu_integer_handle_converts_to_double_resident_output() {
+        test_support::with_test_provider(|provider| {
+            let data = [1_u64 << 63, u64::MAX];
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&data),
+                    shape: &[1, 2],
+                })
+                .expect("upload integer");
+
+            let result = double_builtin(Value::GpuTensor(handle), Vec::new()).expect("double");
+            let Value::GpuTensor(result_handle) = result else {
+                panic!("expected f64-capable provider to keep double output resident");
+            };
+            assert!(runmat_accelerate_api::handle_integer_type(&result_handle).is_none());
+
+            let gathered =
+                test_support::gather(Value::GpuTensor(result_handle)).expect("gather double");
+            assert_eq!(gathered.shape, vec![1, 2]);
+            assert_eq!(gathered.dtype, NumericDType::F64);
+            assert!(gathered.integer_storage().is_none());
+            assert_eq!(gathered.data, vec![(1_u64 << 63) as f64, u64::MAX as f64]);
         });
     }
 
