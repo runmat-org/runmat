@@ -412,9 +412,11 @@ fn infer_k_from_start(start: &StartSpec) -> Option<usize> {
 }
 
 fn scalar_number(value: &Value) -> Option<f64> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return Some(integer.to_f64());
+    }
     match value {
         Value::Num(value) => Some(*value),
-        Value::Int(value) => Some(value.to_f64()),
         Value::Bool(value) => Some(if *value { 1.0 } else { 0.0 }),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             Some(tensor::tensor_value_f64(tensor, 0))
@@ -489,10 +491,12 @@ fn is_empty_option_value(value: &Value) -> bool {
 }
 
 fn bool_option(value: &Value) -> BuiltinResult<bool> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return Ok(!integer.is_zero());
+    }
     match value {
         Value::Bool(value) => Ok(*value),
         Value::Num(value) => Ok(*value != 0.0),
-        Value::Int(value) => Ok(value.to_f64() != 0.0),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             Ok(tensor::tensor_value_f64(tensor, 0) != 0.0)
         }
@@ -1167,6 +1171,25 @@ mod tests {
         let mut tensor = Tensor::new_integer(storage, shape).unwrap();
         tensor.data.fill(f64::NAN);
         Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn option_parsers_read_all_integer_storage_variants() {
+        let storages = [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+        for storage in storages {
+            let value = poisoned_int_tensor(storage, 1, 1);
+            assert_eq!(parse_positive_usize(&value, "k").unwrap(), 1);
+            assert!(bool_option(&value).unwrap());
+        }
     }
 
     fn cleared_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {

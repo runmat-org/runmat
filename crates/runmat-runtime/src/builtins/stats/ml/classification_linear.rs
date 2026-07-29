@@ -1672,9 +1672,11 @@ fn vector_values_predict(tensor: &Tensor, name: &str) -> BuiltinResult<Vec<f64>>
 }
 
 fn numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return Ok(integer.to_f64());
+    }
     match value {
         Value::Num(value) => Ok(*value),
-        Value::Int(value) => Ok(value.to_f64()),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             Ok(tensor::tensor_values_f64(tensor)[0])
         }
@@ -1686,6 +1688,15 @@ fn numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
 }
 
 fn logical_scalar(value: &Value, name: &str) -> BuiltinResult<bool> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return match integer.try_to_usize() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(fitclinear_invalid(format!(
+                "fitclinear: {name} must be logical scalar"
+            ))),
+        };
+    }
     match value {
         Value::Bool(value) => Ok(*value),
         Value::LogicalArray(array) if array.data.len() == 1 => Ok(array.data[0] != 0),
@@ -1856,6 +1867,26 @@ mod tests {
         let mut tensor = Tensor::new_integer(storage, shape).unwrap();
         tensor.data.fill(f64::NAN);
         Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn scalar_option_parsers_read_all_integer_storage_variants() {
+        let storages = [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+        for storage in storages {
+            let value = poisoned_int_tensor(storage, vec![1, 1]);
+            assert_eq!(numeric_scalar(&value, "Bias").unwrap(), 1.0);
+            assert!(logical_scalar(&value, "FitBias").unwrap());
+            assert_eq!(positive_integer(&value, "BatchLimit").unwrap(), 1);
+        }
     }
 
     #[tokio::test]

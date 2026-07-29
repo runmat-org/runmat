@@ -16,8 +16,8 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::logical::rel::integer_comparison::{
-    try_complex_integer_equality_comparison, try_integer_comparison, IntegerComparisonError,
-    IntegerComparisonOp,
+    integer_f64_order, try_complex_integer_equality_comparison, try_integer_comparison,
+    IntegerComparisonError, IntegerComparisonOp,
 };
 use crate::builtins::logical::type_resolvers::logical_binary_type;
 use crate::{build_runtime_error, RuntimeError};
@@ -274,6 +274,24 @@ fn scalar_ne_value(lhs: &Value, rhs: &Value) -> Option<crate::BuiltinResult<Valu
         let left = left_string?;
         let right = right_string?;
         return Some(Ok(Value::Bool(left != right)));
+    }
+
+    // Preserve native integer precision when comparing against an ordinary
+    // complex scalar. Typed complex storage is handled by the exact helper in
+    // `ne_host` before reaching this scalar fallback.
+    if let (Some(left), Some((right_re, right_im))) =
+        (tensor::scalar_integer_value(lhs), scalar_complex_value(rhs))
+    {
+        return Some(Ok(Value::Bool(
+            right_im != 0.0 || integer_f64_order(left, right_re) != Some(std::cmp::Ordering::Equal),
+        )));
+    }
+    if let (Some((left_re, left_im)), Some(right)) =
+        (scalar_complex_value(lhs), tensor::scalar_integer_value(rhs))
+    {
+        return Some(Ok(Value::Bool(
+            left_im != 0.0 || integer_f64_order(right, left_re) != Some(std::cmp::Ordering::Equal),
+        )));
     }
 
     let left = scalar_complex_value(lhs).or_else(|| scalar_numeric_value(lhs).map(|v| (v, 0.0)))?;
@@ -610,6 +628,37 @@ pub(crate) mod tests {
             scalar_numeric_value(&Value::Tensor(tensor)),
             Some(9_007_199_254_740_993_u64 as f64)
         );
+    }
+
+    #[test]
+    fn ne_scalar_complex_reads_all_typed_integer_classes_without_f64_mirrors() {
+        let cases = [
+            (IntegerStorage::I8(vec![-7]), -7.0, false),
+            (IntegerStorage::I16(vec![-300]), -300.0, false),
+            (IntegerStorage::I32(vec![-70_000]), -70_000.0, false),
+            (
+                IntegerStorage::I64(vec![-9_007_199_254_740_991]),
+                -9_007_199_254_740_991.0,
+                false,
+            ),
+            (IntegerStorage::U8(vec![7]), 7.0, false),
+            (IntegerStorage::U16(vec![300]), 300.0, false),
+            (IntegerStorage::U32(vec![70_000]), 70_000.0, false),
+            (
+                IntegerStorage::U64(vec![(1_u64 << 53) + 1]),
+                (1_u64 << 53) as f64,
+                true,
+            ),
+        ];
+
+        for (storage, real, expected) in cases {
+            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer scalar");
+            tensor.data = vec![f64::NAN];
+            assert_eq!(
+                run_ne(Value::Tensor(tensor), Value::Complex(real, 0.0)).expect("ne"),
+                Value::Bool(expected)
+            );
+        }
     }
 
     #[test]

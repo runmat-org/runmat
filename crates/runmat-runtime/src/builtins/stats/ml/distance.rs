@@ -623,9 +623,19 @@ fn split_pdist2_options(args: Vec<Value>) -> BuiltinResult<(Vec<Value>, Option<S
 }
 
 fn parse_positive_integer(name: &'static str, value: &Value, label: &str) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer
+            .try_to_usize()
+            .filter(|value| *value > 0)
+            .ok_or_else(|| {
+                distance_error(
+                    name,
+                    format!("{name}: {label} must be a positive integer scalar"),
+                )
+            });
+    }
     let raw = match value {
         Value::Num(value) => *value,
-        Value::Int(value) => value.to_f64(),
         Value::Bool(value) => {
             if *value {
                 1.0
@@ -771,10 +781,19 @@ async fn parse_knnsearch_options(args: Vec<Value>) -> BuiltinResult<(Vec<Value>,
 }
 
 fn parse_logical_scalar(value: &Value, label: &str) -> BuiltinResult<bool> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return match integer.try_to_usize() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(distance_error(
+                KNNSEARCH_NAME,
+                format!("knnsearch: {label} must be logical scalar, got {value:?}"),
+            )),
+        };
+    }
     match value {
         Value::Bool(value) => Ok(*value),
         Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
-        Value::Int(value) if value.to_i64() == 0 || value.to_i64() == 1 => Ok(value.to_i64() != 0),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             let raw = tensor::tensor_value_f64(tensor, 0);
             if raw == 0.0 || raw == 1.0 {
@@ -2007,5 +2026,27 @@ mod tests {
         ))
         .unwrap();
         assert!((tensor_out(out).data[0] - 10.0_f64.sqrt()).abs() < 1.0e-10);
+    }
+
+    #[test]
+    fn count_and_logical_parsers_read_all_integer_storage_variants() {
+        let storages = [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+        for storage in storages {
+            let value = poisoned_int_tensor(storage, 1, 1);
+            assert_eq!(
+                parse_positive_integer(KNNSEARCH_NAME, &value, "K").unwrap(),
+                1
+            );
+            assert!(parse_logical_scalar(&value, "IncludeTies").unwrap());
+        }
     }
 }

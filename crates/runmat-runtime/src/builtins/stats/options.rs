@@ -699,12 +699,19 @@ fn bool_or_on_off_value(field: &str, value: &Value) -> BuiltinResult<Value> {
     if is_empty_value(value) {
         return Ok(value.clone());
     }
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return match integer.try_to_usize() {
+            Some(0) => Ok(Value::Bool(false)),
+            Some(1) => Ok(Value::Bool(true)),
+            _ => Err(statset_error(
+                &STATSET_ERROR_INVALID_OPTION,
+                format!("statset: {field} must be logical or 'on'/'off'"),
+            )),
+        };
+    }
     match value {
         Value::Bool(flag) => Ok(Value::Bool(*flag)),
         Value::Num(n) if *n == 0.0 || *n == 1.0 => Ok(Value::Bool(*n != 0.0)),
-        Value::Int(i) if i.to_f64() == 0.0 || i.to_f64() == 1.0 => {
-            Ok(Value::Bool(i.to_f64() != 0.0))
-        }
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             let value = tensor::tensor_value_f64(tensor, 0);
             if value == 0.0 || value == 1.0 {
@@ -731,9 +738,11 @@ fn bool_or_on_off_value(field: &str, value: &Value) -> BuiltinResult<Value> {
 }
 
 fn numeric_scalar(field: &str, value: &Value) -> BuiltinResult<f64> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return Ok(integer.to_f64());
+    }
     let scalar = match value {
         Value::Num(n) => *n,
-        Value::Int(i) => i.to_f64(),
         Value::Bool(flag) => {
             if *flag {
                 1.0
@@ -924,6 +933,28 @@ mod tests {
             deriv_step.integer_storage()
         );
         assert_eq!(options.fields.get("UseParallel"), Some(&Value::Bool(true)));
+    }
+
+    #[test]
+    fn statset_scalar_options_read_all_integer_storage_variants() {
+        let storages = [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+        for storage in storages {
+            let mut scalar = Tensor::new_integer(storage, vec![1, 1]).unwrap();
+            scalar.data.fill(f64::NAN);
+            assert!(matches!(
+                bool_or_on_off_value("UseParallel", &Value::Tensor(scalar)),
+                Ok(Value::Bool(true))
+            ));
+        }
     }
 
     #[test]

@@ -1596,9 +1596,11 @@ fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
 }
 
 fn numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return Ok(integer.to_f64());
+    }
     match value {
         Value::Num(value) => Ok(*value),
-        Value::Int(value) => Ok(value.to_f64()),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             Ok(tensor::tensor_values_f64(tensor)[0])
         }
@@ -1612,6 +1614,17 @@ fn exclude_spec(value: &Value) -> BuiltinResult<ExcludeSpec> {
         Value::LogicalArray(array) => Ok(ExcludeSpec::Mask(
             array.data.iter().map(|value| *value != 0).collect(),
         )),
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            let indices = tensor
+                .integer_storage()
+                .expect("integer storage checked above")
+                .exact_values()
+                .iter()
+                .map(|value| value.try_to_usize().filter(|value| *value > 0))
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| fitlm_invalid("fitlm: Exclude indices must be positive integers"))?;
+            Ok(ExcludeSpec::Indices(indices))
+        }
         Value::Tensor(tensor) => {
             let values = tensor::tensor_values_f64(tensor);
             let mut indices = Vec::with_capacity(values.len());
@@ -1661,10 +1674,12 @@ fn exclude_mask(spec: Option<&ExcludeSpec>, rows: usize) -> BuiltinResult<Option
 }
 
 fn bool_scalar(value: &Value, name: &str) -> BuiltinResult<bool> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return Ok(!integer.is_zero());
+    }
     match value {
         Value::Bool(value) => Ok(*value),
         Value::Num(value) => Ok(*value != 0.0),
-        Value::Int(value) => Ok(value.to_f64() != 0.0),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             Ok(tensor::tensor_values_f64(tensor)[0] != 0.0)
         }
@@ -1816,6 +1831,28 @@ mod tests {
         let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
         tensor.data.fill(f64::NAN);
         Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn scalar_option_parsers_read_all_integer_storage_variants() {
+        let storages = [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+        for storage in storages {
+            let value = poisoned_int_tensor(storage, 1, 1);
+            assert_eq!(numeric_scalar(&value, "Alpha").unwrap(), 1.0);
+            assert!(bool_scalar(&value, "RobustOpts").unwrap());
+            assert!(
+                matches!(exclude_spec(&value), Ok(ExcludeSpec::Indices(indices)) if indices == vec![1])
+            );
+        }
     }
 
     fn object(value: Value) -> ObjectInstance {

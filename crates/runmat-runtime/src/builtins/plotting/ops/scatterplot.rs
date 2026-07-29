@@ -508,6 +508,14 @@ fn complex_samples(value: Value) -> BuiltinResult<Vec<(f64, f64)>> {
 }
 
 fn parse_nonnegative_integer(value: &Value, name: &str) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor_utils::scalar_integer_value(value) {
+        return integer.try_to_usize().ok_or_else(|| {
+            scatterplot_error(
+                format!("scatterplot: {name} is too large"),
+                &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
+            )
+        });
+    }
     let scalar = parse_numeric_scalar(value, name)?;
     if !scalar.is_finite() || scalar < 0.0 || scalar.fract() != 0.0 {
         return Err(scatterplot_error(
@@ -623,6 +631,19 @@ mod tests {
         tensor
     }
 
+    fn all_integer_scalar_storages(value: u8) -> [IntegerStorage; 8] {
+        [
+            IntegerStorage::I8(vec![value as i8]),
+            IntegerStorage::I16(vec![value as i16]),
+            IntegerStorage::I32(vec![value as i32]),
+            IntegerStorage::I64(vec![value as i64]),
+            IntegerStorage::U8(vec![value]),
+            IntegerStorage::U16(vec![value as u16]),
+            IntegerStorage::U32(vec![value as u32]),
+            IntegerStorage::U64(vec![value as u64]),
+        ]
+    }
+
     #[test]
     fn scatterplot_decimates_from_zero_based_offset() {
         let data = complex_tensor(&[(1.0, 10.0), (2.0, 20.0), (3.0, 30.0), (4.0, 40.0)]);
@@ -644,6 +665,14 @@ mod tests {
             parse_nonnegative_integer(&Value::Tensor(decimation), "n").expect("decimation"),
             2
         );
+    }
+
+    #[test]
+    fn scatterplot_count_parser_reads_all_integer_storages_without_mirrors() {
+        for storage in all_integer_scalar_storages(2) {
+            let value = Value::Tensor(poisoned_integer_tensor(storage, vec![1, 1]));
+            assert_eq!(parse_nonnegative_integer(&value, "n").unwrap(), 2);
+        }
     }
 
     #[test]

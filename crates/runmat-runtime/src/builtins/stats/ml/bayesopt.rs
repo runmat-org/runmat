@@ -1537,6 +1537,16 @@ fn value_to_text(value: &Value, label: &str) -> BuiltinResult<String> {
 }
 
 fn option_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return match integer.try_to_usize() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(bayesopt_error(
+                format!("bayesopt: option {name} must be logical scalar, got {value:?}"),
+                &ERROR_INVALID_ARGUMENT,
+            )),
+        };
+    }
     let parsed = match value {
         Value::Bool(value) => Ok(*value),
         Value::LogicalArray(logical) if logical.data.len() == 1 => Ok(logical.data[0] != 0),
@@ -1561,6 +1571,16 @@ fn option_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
 }
 
 fn option_usize(value: &Value, name: &str, min: usize, max: usize) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        let parsed = integer.try_to_usize();
+        return match parsed.filter(|parsed| *parsed >= min && *parsed <= max) {
+            Some(parsed) => Ok(parsed),
+            None => Err(bayesopt_error(
+                format!("bayesopt: option {name} must be an integer in [{min}, {max}]"),
+                &ERROR_INVALID_ARGUMENT,
+            )),
+        };
+    }
     let parsed = match value {
         Value::Num(value) => *value,
         Value::Int(value) => value.to_f64(),
@@ -1584,6 +1604,16 @@ fn option_usize(value: &Value, name: &str, min: usize, max: usize) -> BuiltinRes
 }
 
 fn option_unit_f64(value: &Value, name: &str) -> BuiltinResult<f64> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return match integer.try_to_usize() {
+            Some(0) => Ok(0.0),
+            Some(1) => Ok(1.0),
+            _ => Err(bayesopt_error(
+                format!("bayesopt: option {name} must be in [0, 1]"),
+                &ERROR_INVALID_ARGUMENT,
+            )),
+        };
+    }
     let parsed = match value {
         Value::Num(value) => *value,
         Value::Int(value) => value.to_f64(),
@@ -1679,6 +1709,29 @@ mod tests {
         let mut tensor = Tensor::new_integer(storage, shape).unwrap();
         tensor.data.fill(f64::NAN);
         Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn option_parsers_read_all_integer_storage_variants() {
+        let storages = [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+        for storage in storages {
+            let value = poisoned_int_tensor(storage, vec![1, 1]);
+            assert!(option_bool(&value, "Verbose").unwrap());
+            assert_eq!(
+                option_usize(&value, "MaxObjectiveEvaluations", 1, 2).unwrap(),
+                1
+            );
+            assert_eq!(option_unit_f64(&value, "ExplorationRatio").unwrap(), 1.0);
+        }
     }
 
     fn categorical_variable(name: &str, categories: Vec<&str>) -> Value {

@@ -520,7 +520,12 @@ async fn is_zero_scalar(value: &Value) -> bool {
         Value::Bool(b) => !b,
         Value::Tensor(t) => {
             if tensor::is_scalar_tensor(t) {
-                tensor::tensor_value_f64(t, 0).abs() <= EPS_SCALAR
+                t.integer_storage()
+                    .and_then(|storage| storage.value_at(0))
+                    .map_or_else(
+                        || tensor::tensor_value_f64(t, 0).abs() <= EPS_SCALAR,
+                        |value| value.is_zero(),
+                    )
             } else {
                 false
             }
@@ -1211,6 +1216,26 @@ pub(crate) mod tests {
         assert_eq!(eval.mode(), QrMode::Economy);
         assert_eq!(tensor_from_value(eval.q()).shape, vec![4, 3]);
         assert_eq!(tensor_from_value(eval.r()).shape, vec![3, 3]);
+    }
+
+    #[test]
+    fn qr_economy_option_zero_classifier_reads_all_integer_storage_variants() {
+        let options = [
+            IntegerStorage::I8(vec![0]),
+            IntegerStorage::I16(vec![0]),
+            IntegerStorage::I32(vec![0]),
+            IntegerStorage::I64(vec![0]),
+            IntegerStorage::U8(vec![0]),
+            IntegerStorage::U16(vec![0]),
+            IntegerStorage::U32(vec![0]),
+            IntegerStorage::U64(vec![0]),
+        ];
+
+        for storage in options {
+            let mut option = Matrix::new_integer(storage, vec![1, 1]).expect("option");
+            option.data[0] = 1.0;
+            assert!(block_on(is_zero_scalar(&Value::Tensor(option))));
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

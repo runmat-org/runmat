@@ -16,8 +16,8 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::logical::rel::integer_comparison::{
-    try_complex_integer_equality_comparison, try_integer_comparison, IntegerComparisonError,
-    IntegerComparisonOp,
+    integer_f64_order, try_complex_integer_equality_comparison, try_integer_comparison,
+    IntegerComparisonError, IntegerComparisonOp,
 };
 use crate::builtins::logical::type_resolvers::logical_binary_type;
 use crate::builtins::math::symbolic::{symbolic_expr_to_value, value_to_symbolic_scalar};
@@ -288,6 +288,25 @@ fn scalar_eq_value(lhs: &Value, rhs: &Value) -> Option<crate::BuiltinResult<Valu
         let left = left_string?;
         let right = right_string?;
         return Some(Ok(Value::Bool(left == right)));
+    }
+
+    // The ordinary complex scalar path below converts real values to f64. Keep
+    // a native integer scalar exact when it is compared with such a complex
+    // value; the complex-integer helper above already covers typed complex
+    // storage.
+    if let (Some(left), Some((right_re, right_im))) =
+        (tensor::scalar_integer_value(lhs), scalar_complex_value(rhs))
+    {
+        return Some(Ok(Value::Bool(
+            right_im == 0.0 && integer_f64_order(left, right_re) == Some(std::cmp::Ordering::Equal),
+        )));
+    }
+    if let (Some((left_re, left_im)), Some(right)) =
+        (scalar_complex_value(lhs), tensor::scalar_integer_value(rhs))
+    {
+        return Some(Ok(Value::Bool(
+            left_im == 0.0 && integer_f64_order(right, left_re) == Some(std::cmp::Ordering::Equal),
+        )));
     }
 
     let left = scalar_complex_value(lhs).or_else(|| scalar_numeric_value(lhs).map(|v| (v, 0.0)))?;
@@ -623,6 +642,37 @@ pub(crate) mod tests {
             scalar_numeric_value(&Value::Tensor(tensor)),
             Some(9_007_199_254_740_993_u64 as f64)
         );
+    }
+
+    #[test]
+    fn eq_scalar_complex_reads_all_typed_integer_classes_without_f64_mirrors() {
+        let cases = [
+            (IntegerStorage::I8(vec![-7]), -7.0, true),
+            (IntegerStorage::I16(vec![-300]), -300.0, true),
+            (IntegerStorage::I32(vec![-70_000]), -70_000.0, true),
+            (
+                IntegerStorage::I64(vec![-9_007_199_254_740_991]),
+                -9_007_199_254_740_991.0,
+                true,
+            ),
+            (IntegerStorage::U8(vec![7]), 7.0, true),
+            (IntegerStorage::U16(vec![300]), 300.0, true),
+            (IntegerStorage::U32(vec![70_000]), 70_000.0, true),
+            (
+                IntegerStorage::U64(vec![(1_u64 << 53) + 1]),
+                (1_u64 << 53) as f64,
+                false,
+            ),
+        ];
+
+        for (storage, real, expected) in cases {
+            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer scalar");
+            tensor.data = vec![f64::NAN];
+            assert_eq!(
+                run_eq(Value::Tensor(tensor), Value::Complex(real, 0.0)).expect("eq"),
+                Value::Bool(expected)
+            );
+        }
     }
 
     #[test]
