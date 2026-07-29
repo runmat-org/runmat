@@ -963,11 +963,42 @@ fn numeric_values_all(value: &Value, pred: impl Fn(f64) -> bool) -> bool {
         Value::Bool(v) => pred(if *v { 1.0 } else { 0.0 }),
         Value::LogicalArray(a) => a.data.iter().map(|v| f64::from(*v != 0)).all(pred),
         Value::Tensor(t) => tensor::tensor_values_f64(t).into_iter().all(pred),
+        Value::SparseTensor(t) if t.integer_storage().is_some() => {
+            let storage = t
+                .integer_storage()
+                .expect("integer storage was checked above");
+            let numel = t.rows.saturating_mul(t.cols);
+            (0..storage.len()).all(|index| {
+                pred(
+                    storage
+                        .value_at(index)
+                        .expect("sparse integer storage length is consistent")
+                        .to_f64(),
+                )
+            }) && (storage.len() >= numel || pred(0.0))
+        }
         Value::SparseTensor(t) => {
             let numel = t.rows.saturating_mul(t.cols);
             t.values.iter().copied().all(&pred) && (t.values.len() >= numel || pred(0.0))
         }
         Value::Complex(re, im) => *im == 0.0 && pred(*re),
+        Value::ComplexTensor(t) if t.integer_data.is_some() => {
+            let storage = t
+                .integer_data
+                .as_ref()
+                .expect("integer storage was checked above");
+            (0..storage.len()).all(|index| {
+                let real = storage
+                    .real
+                    .value_at(index)
+                    .expect("complex integer real storage length is consistent");
+                let imag = storage
+                    .imag
+                    .value_at(index)
+                    .expect("complex integer imaginary storage length is consistent");
+                imag.is_zero() && pred(real.to_f64())
+            })
+        }
         Value::ComplexTensor(t) => t.data.iter().all(|(re, im)| *im == 0.0 && pred(*re)),
         _ => false,
     }
@@ -1378,6 +1409,28 @@ mod tests {
         let value = Value::ComplexTensor(real_complex);
         assert!(!value_is_real(&value));
         assert!(!value_is_integer(&value));
+    }
+
+    #[test]
+    fn threshold_validators_ignore_typed_sparse_and_complex_integer_mirrors() {
+        let sparse = SparseTensor {
+            rows: 1,
+            cols: 2,
+            col_ptrs: vec![0, 1, 1],
+            row_indices: vec![0],
+            values: vec![f64::NAN],
+            integer_data: Some(IntegerStorage::U8(vec![1])),
+        };
+        ok("mustBeNonnegative", vec![Value::SparseTensor(sparse)]);
+
+        let mut complex = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(IntegerStorage::I16(vec![2]), IntegerStorage::I16(vec![0]))
+                .unwrap(),
+            vec![1, 1],
+        )
+        .unwrap();
+        complex.data.clear();
+        ok("mustBePositive", vec![Value::ComplexTensor(complex)]);
     }
 
     #[test]
