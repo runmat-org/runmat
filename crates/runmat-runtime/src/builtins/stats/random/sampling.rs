@@ -412,10 +412,19 @@ fn scalar_integer_value(value: &Value) -> Option<IntValue> {
 }
 
 fn parse_bool(name: &str, value: &Value, label: &str) -> BuiltinResult<bool> {
+    if let Some(value) = scalar_integer_value(value) {
+        return match value.try_to_usize() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(sampling_error(
+                name,
+                format!("{name}: {label} must be logical true or false, got {value:?}"),
+            )),
+        };
+    }
     match value {
         Value::Bool(v) => Ok(*v),
         Value::Num(v) if *v == 0.0 || *v == 1.0 => Ok(*v != 0.0),
-        Value::Int(i) if i.to_i64() == 0 || i.to_i64() == 1 => Ok(i.to_i64() != 0),
         other => Err(sampling_error(
             name,
             format!("{name}: {label} must be logical true or false, got {other:?}"),
@@ -1716,6 +1725,27 @@ mod tests {
             tensor.data.clear();
         }
         Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn boolean_options_read_every_integer_storage_variant_not_the_float_mirror() {
+        for storage in [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ] {
+            assert!(parse_bool(
+                "datasample",
+                &poisoned_int_tensor(storage, vec![1, 1], f64::NAN),
+                "Replace"
+            )
+            .unwrap());
+        }
     }
 
     #[test]

@@ -395,10 +395,16 @@ impl PartitionInput {
                 })?,
                 labels: None,
             }),
-            Value::Tensor(tensor) if tensor::is_scalar_tensor(&tensor) => Ok(Self {
-                n: positive_integer_number(tensor::tensor_value_f64(&tensor, 0), "n")?,
-                labels: None,
-            }),
+            Value::Tensor(tensor) if tensor::is_scalar_tensor(&tensor) => {
+                let n = if let Some(integer) = tensor.integer_storage().and_then(|s| s.value_at(0)) {
+                    integer.try_to_usize().filter(|n| *n > 0).ok_or_else(|| {
+                        invalid_argument("cvpartition: n must be a positive integer scalar")
+                    })?
+                } else {
+                    positive_integer_number(tensor::tensor_value_f64(&tensor, 0), "n")?
+                };
+                Ok(Self { n, labels: None })
+            }
             Value::Tensor(tensor) => numeric_labels(tensor),
             Value::LogicalArray(array) => logical_labels(array),
             Value::Bool(flag) => Ok(Self {
@@ -1048,7 +1054,7 @@ fn materialized_mask_len(rows: usize, cols: usize, label: &str) -> BuiltinResult
 }
 
 fn holdout_count(value: &Value, n: usize) -> BuiltinResult<usize> {
-    if let Value::Int(integer) = value {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
         return integer
             .try_to_usize()
             .filter(|count| *count > 0 && *count < n)
@@ -1211,6 +1217,30 @@ mod tests {
         let mut tensor = Tensor::new_integer(storage, shape).unwrap();
         tensor.data.clear();
         Value::Tensor(tensor)
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn scalar_counts_read_every_integer_storage_variant_not_the_float_mirror() {
+        for storage in [
+            IntegerStorage::I8(vec![2]),
+            IntegerStorage::I16(vec![2]),
+            IntegerStorage::I32(vec![2]),
+            IntegerStorage::I64(vec![2]),
+            IntegerStorage::U8(vec![2]),
+            IntegerStorage::U16(vec![2]),
+            IntegerStorage::U32(vec![2]),
+            IntegerStorage::U64(vec![2]),
+        ] {
+            let value = poisoned_int_tensor(storage, vec![1, 1]);
+            assert_eq!(PartitionInput::from_value(value.clone()).unwrap().n, 2);
+            assert_eq!(holdout_count(&value, 6).unwrap(), 2);
+        }
     }
 
     fn cv(first: Value, second: Value, rest: Vec<Value>) -> Value {

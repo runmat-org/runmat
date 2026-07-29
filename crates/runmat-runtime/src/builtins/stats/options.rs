@@ -645,6 +645,18 @@ fn positive_integer_value(field: &str, value: &Value) -> BuiltinResult<Value> {
     if is_empty_value(value) {
         return Ok(value.clone());
     }
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        let integer = integer
+            .try_to_usize()
+            .filter(|integer| *integer >= 1 && *integer <= MAX_OPTION_INTEGER)
+            .ok_or_else(|| {
+                statset_error(
+                    &STATSET_ERROR_INVALID_OPTION,
+                    format!("statset: {field} must be a positive integer"),
+                )
+            })?;
+        return Ok(Value::Num(integer as f64));
+    }
     let scalar = numeric_scalar(field, value)?;
     if scalar < 1.0 || scalar.fract() != 0.0 || scalar > MAX_OPTION_INTEGER as f64 {
         return Err(statset_error(
@@ -955,6 +967,31 @@ mod tests {
                 Ok(Value::Bool(true))
             ));
         }
+    }
+
+    #[test]
+    fn statset_integer_counts_read_all_integer_storage_variants() {
+        for storage in [
+            IntegerStorage::I8(vec![7]),
+            IntegerStorage::I16(vec![7]),
+            IntegerStorage::I32(vec![7]),
+            IntegerStorage::I64(vec![7]),
+            IntegerStorage::U8(vec![7]),
+            IntegerStorage::U16(vec![7]),
+            IntegerStorage::U32(vec![7]),
+            IntegerStorage::U64(vec![7]),
+        ] {
+            let mut value = Tensor::new_integer(storage, vec![1, 1]).unwrap();
+            value.data.fill(f64::NAN);
+            assert_eq!(
+                positive_integer_value("MaxIter", &Value::Tensor(value)).unwrap(),
+                Value::Num(7.0)
+            );
+        }
+        let mut wide =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap();
+        wide.data.fill(7.0);
+        assert!(positive_integer_value("MaxIter", &Value::Tensor(wide)).is_err());
     }
 
     #[test]

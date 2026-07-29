@@ -53,8 +53,8 @@ pub(crate) fn try_integer_comparison(
     Ok(Some(result))
 }
 
-/// Performs exact equality/inequality when at least one complex operand carries
-/// native integer component storage.
+/// Performs exact equality/inequality when a complex operand or its real
+/// counterpart carries native integer storage.
 pub(crate) fn try_complex_integer_equality_comparison(
     lhs: &Value,
     rhs: &Value,
@@ -70,16 +70,22 @@ pub(crate) fn try_complex_integer_equality_comparison(
         (Some(lhs), Some(rhs)) if lhs.has_integer_storage() || rhs.has_integer_storage() => {
             compare_complex_operands(&lhs, &rhs, operation)?
         }
-        (Some(lhs), None) if lhs.has_integer_storage() => {
+        (Some(lhs), None) => {
             let Some(rhs) = real_operand(rhs) else {
                 return Ok(None);
             };
+            if !lhs.has_integer_storage() && !rhs.has_integer_storage() {
+                return Ok(None);
+            }
             compare_complex_real(&lhs, &rhs, operation)?
         }
-        (None, Some(rhs)) if rhs.has_integer_storage() => {
+        (None, Some(rhs)) => {
             let Some(lhs) = real_operand(lhs) else {
                 return Ok(None);
             };
+            if !rhs.has_integer_storage() && !lhs.has_integer_storage() {
+                return Ok(None);
+            }
             compare_complex_real(&rhs, &lhs, operation)?
         }
         _ => return Ok(None),
@@ -196,6 +202,17 @@ struct RealOperand<'a> {
 }
 
 impl RealOperand<'_> {
+    fn has_integer_storage(&self) -> bool {
+        matches!(
+            self.source,
+            RealSource::ScalarInteger(_)
+                | RealSource::Tensor {
+                    integer_storage: Some(_),
+                    ..
+                }
+        )
+    }
+
     fn value_at(&self, index: usize) -> RealValue {
         match self.source {
             RealSource::ScalarInteger(ref value) => RealValue::Integer(value.clone()),
@@ -674,5 +691,88 @@ mod tests {
                 LogicalArray::new(vec![1, 1], vec![1, 2]).expect("logical result")
             ))
         );
+    }
+
+    #[test]
+    fn compares_all_integer_storage_classes_to_complex_tensors_without_f64_mirrors() {
+        let cases = [
+            (
+                IntegerStorage::I8(vec![-7, 5]),
+                vec![(-7.0, 0.0), (0.0, 0.0)],
+                vec![1, 0],
+            ),
+            (
+                IntegerStorage::I16(vec![-300, 5]),
+                vec![(-300.0, 0.0), (0.0, 0.0)],
+                vec![1, 0],
+            ),
+            (
+                IntegerStorage::I32(vec![-70_000, 5]),
+                vec![(-70_000.0, 0.0), (0.0, 0.0)],
+                vec![1, 0],
+            ),
+            (
+                IntegerStorage::I64(vec![i64::MAX, -9_007_199_254_740_991]),
+                vec![(i64::MAX as f64, 0.0), (-9_007_199_254_740_991.0, 0.0)],
+                vec![0, 1],
+            ),
+            (
+                IntegerStorage::U8(vec![7, 5]),
+                vec![(7.0, 0.0), (0.0, 0.0)],
+                vec![1, 0],
+            ),
+            (
+                IntegerStorage::U16(vec![300, 5]),
+                vec![(300.0, 0.0), (0.0, 0.0)],
+                vec![1, 0],
+            ),
+            (
+                IntegerStorage::U32(vec![70_000, 5]),
+                vec![(70_000.0, 0.0), (0.0, 0.0)],
+                vec![1, 0],
+            ),
+            (
+                IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+                vec![((1_u64 << 53) as f64, 0.0), (u64::MAX as f64, 0.0)],
+                vec![0, 0],
+            ),
+        ];
+
+        for (storage, complex_data, expected_eq) in cases {
+            let mut integer =
+                runmat_builtins::Tensor::new_integer(storage, vec![1, 2]).expect("integer tensor");
+            integer.data = vec![f64::NAN; 2];
+            let complex = Value::ComplexTensor(
+                ComplexTensor::new(complex_data, vec![1, 2]).expect("complex tensor"),
+            );
+            let integer = Value::Tensor(integer);
+
+            assert_eq!(
+                try_complex_integer_equality_comparison(
+                    &integer,
+                    &complex,
+                    IntegerComparisonOp::Eq,
+                )
+                .expect("comparison"),
+                Some(Value::LogicalArray(
+                    LogicalArray::new(expected_eq.clone(), vec![1, 2]).expect("logical result")
+                ))
+            );
+            assert_eq!(
+                try_complex_integer_equality_comparison(
+                    &complex,
+                    &integer,
+                    IntegerComparisonOp::Ne,
+                )
+                .expect("comparison"),
+                Some(Value::LogicalArray(
+                    LogicalArray::new(
+                        expected_eq.iter().map(|value| *value ^ 1).collect(),
+                        vec![1, 2],
+                    )
+                    .expect("logical result")
+                ))
+            );
+        }
     }
 }

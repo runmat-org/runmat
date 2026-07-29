@@ -465,7 +465,7 @@ fn shuffled_indices(indices: &[usize]) -> BuiltinResult<Vec<usize>> {
 }
 
 fn holdout_count(value: &Value, n: usize) -> BuiltinResult<usize> {
-    if let Value::Int(integer) = value {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
         return integer
             .try_to_usize()
             .filter(|count| *count > 0 && *count < n)
@@ -706,6 +706,31 @@ mod tests {
         let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
         tensor.data.clear();
         Value::Tensor(tensor)
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
+        tensor.data.fill(f64::NAN);
+        Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn holdout_reads_every_integer_storage_variant_not_the_float_mirror() {
+        for storage in [
+            IntegerStorage::I8(vec![2]),
+            IntegerStorage::I16(vec![2]),
+            IntegerStorage::I32(vec![2]),
+            IntegerStorage::I64(vec![2]),
+            IntegerStorage::U8(vec![2]),
+            IntegerStorage::U16(vec![2]),
+            IntegerStorage::U32(vec![2]),
+            IntegerStorage::U64(vec![2]),
+        ] {
+            assert_eq!(
+                holdout_count(&poisoned_int_tensor(storage, 1, 1), 6).unwrap(),
+                2
+            );
+        }
     }
 
     #[test]

@@ -227,6 +227,15 @@ fn parse_on_off_bool(value: &Value, label: &str) -> BuiltinResult<bool> {
             _ => Err(invalid(format!("lhsdesign: {label} must be 'on' or 'off'"))),
         };
     }
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return match integer.try_to_usize() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(invalid(format!(
+                "lhsdesign: {label} must be 'on', 'off', or logical"
+            ))),
+        };
+    }
     let number = scalar_f64(value).ok_or_else(|| {
         invalid(format!(
             "lhsdesign: {label} must be 'on', 'off', or logical"
@@ -510,6 +519,24 @@ mod tests {
         for value in tensor.data {
             let scaled = value * 4.0;
             assert!((scaled.fract() - 0.5).abs() < 1.0e-12);
+        }
+    }
+
+    #[test]
+    fn smooth_reads_every_integer_storage_variant_not_the_float_mirror() {
+        for storage in [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ] {
+            assert!(
+                parse_on_off_bool(&poisoned_int_tensor(storage, vec![1, 1]), "Smooth").unwrap()
+            );
         }
     }
 

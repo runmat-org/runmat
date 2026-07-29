@@ -1704,6 +1704,34 @@ pub(crate) mod tests {
         assert!(value_to_usize(&Value::Num(1.0e300), "option").is_err());
     }
 
+    #[test]
+    fn option_usize_ignores_poisoned_mirrors_for_every_integer_class() {
+        let classes = [
+            IntegerStorage::I8(vec![7]),
+            IntegerStorage::I16(vec![7]),
+            IntegerStorage::I32(vec![7]),
+            IntegerStorage::I64(vec![7]),
+            IntegerStorage::U8(vec![7]),
+            IntegerStorage::U16(vec![7]),
+            IntegerStorage::U32(vec![7]),
+            IntegerStorage::U64(vec![7]),
+        ];
+
+        for storage in classes {
+            let mut value = Tensor::new_integer(storage, vec![1, 1]).expect("typed option");
+            value.data = vec![f64::NAN];
+            assert_eq!(value_to_usize(&Value::Tensor(value), "option").unwrap(), 7);
+        }
+
+        let mut too_wide =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("wide");
+        too_wide.data = vec![f64::NAN];
+        assert_eq!(
+            value_to_usize(&Value::Tensor(too_wide), "option").ok(),
+            usize::try_from(u64::MAX).ok()
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn readmatrix_skips_header_lines() {

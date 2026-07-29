@@ -1856,6 +1856,36 @@ pub(crate) mod tests {
         assert!(parse_precision_value(&Value::Num((u32::MAX as f64) + 1.0)).is_err());
     }
 
+    #[test]
+    fn dlmwrite_structural_options_ignore_poisoned_mirrors_for_every_integer_class() {
+        let classes = [
+            IntegerStorage::I8(vec![7]),
+            IntegerStorage::I16(vec![7]),
+            IntegerStorage::I32(vec![7]),
+            IntegerStorage::I64(vec![7]),
+            IntegerStorage::U8(vec![7]),
+            IntegerStorage::U16(vec![7]),
+            IntegerStorage::U32(vec![7]),
+            IntegerStorage::U64(vec![7]),
+        ];
+
+        for storage in classes {
+            let mut offset = Tensor::new_integer(storage.clone(), vec![1, 1]).expect("offset");
+            offset.data = vec![f64::NAN];
+            assert_eq!(
+                parse_offset_value(&Value::Tensor(offset), "row offset").unwrap(),
+                7
+            );
+
+            let mut precision = Tensor::new_integer(storage, vec![1, 1]).expect("precision");
+            precision.data = vec![f64::NAN];
+            assert!(matches!(
+                parse_precision_value(&Value::Tensor(precision)),
+                Ok(PrecisionSpec::Significant(7))
+            ));
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmwrite_rejects_empty_delimiter() {

@@ -791,6 +791,26 @@ pub(crate) mod tests {
         assert!(parse_fid(&Value::Tensor(too_large)).is_err());
     }
 
+    #[test]
+    fn fprintf_fid_parser_ignores_poisoned_mirrors_for_every_integer_class() {
+        let classes = [
+            IntegerStorage::I8(vec![7]),
+            IntegerStorage::I16(vec![7]),
+            IntegerStorage::I32(vec![7]),
+            IntegerStorage::I64(vec![7]),
+            IntegerStorage::U8(vec![7]),
+            IntegerStorage::U16(vec![7]),
+            IntegerStorage::U32(vec![7]),
+            IntegerStorage::U64(vec![7]),
+        ];
+
+        for storage in classes {
+            let mut fid = Tensor::new_integer(storage, vec![1, 1]).expect("typed fid");
+            fid.data = vec![f64::NAN];
+            assert_eq!(parse_fid(&Value::Tensor(fid)).unwrap(), 7);
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fprintf_matrix_column_major() {
