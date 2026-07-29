@@ -22,7 +22,10 @@ use runmat_accelerate_api::{
     ProviderPrecision,
 };
 use runmat_builtins::{builtin_functions, AccelTag, Tensor, Value};
-use runmat_runtime::builtins::common::spec::{builtin_residency_policy, ResidencyPolicy};
+use runmat_runtime::builtins::common::{
+    spec::{builtin_residency_policy, ResidencyPolicy},
+    tensor::tensor_element_len,
+};
 use runmat_runtime::gather_if_needed_async;
 use serde::{Deserialize, Serialize};
 
@@ -651,7 +654,7 @@ fn update_cpu_cost(slot: &mut f64, candidate: f64) {
 
 fn value_len(value: &Value) -> Option<usize> {
     match value {
-        Value::Tensor(t) => Some(t.data.len()),
+        Value::Tensor(t) => Some(tensor_element_len(t)),
         Value::GpuTensor(handle) => Some(handle.shape.iter().product()),
         Value::Num(_) | Value::Bool(_) | Value::Int(_) => Some(1),
         Value::Complex(_, _) => Some(1),
@@ -801,9 +804,7 @@ impl NativeAutoOffload {
                 {
                     return Ok(value.clone());
                 }
-                let element_count = t
-                    .integer_storage()
-                    .map_or(t.data.len(), |storage| storage.len());
+                let element_count = tensor_element_len(t);
                 if element_count >= threshold && threshold > 0 {
                     log_promotion(|| {
                         format!(
@@ -1299,7 +1300,7 @@ fn max_or_min_reduction_call(args: &[Value]) -> bool {
 
 fn is_empty_placeholder_value(value: &Value) -> bool {
     match value {
-        Value::Tensor(t) => t.data.is_empty(),
+        Value::Tensor(t) => tensor_element_len(t) == 0,
         Value::LogicalArray(l) => l.data.is_empty(),
         Value::StringArray(sa) => sa.data.is_empty(),
         Value::CharArray(ca) => ca.data.is_empty(),
@@ -1455,6 +1456,34 @@ mod tests {
         provider
             .free(&handle)
             .expect("free mirrorless integer handle");
+    }
+
+    #[test]
+    fn native_auto_uses_integer_storage_for_lengths_and_empty_placeholders() {
+        let mut wide = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 7]),
+            vec![1, 2],
+        )
+        .expect("wide integer tensor");
+        wide.data.fill(f64::NAN);
+        assert_eq!(value_len(&Value::Tensor(wide.clone())), Some(2));
+        assert!(!is_empty_placeholder_value(&Value::Tensor(wide)));
+
+        let mut signed = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I64(vec![i64::MIN, -1, i64::MAX]),
+            vec![1, 3],
+        )
+        .expect("signed integer tensor");
+        signed.data.clear();
+        assert_eq!(value_len(&Value::Tensor(signed.clone())), Some(3));
+        assert!(!is_empty_placeholder_value(&Value::Tensor(signed)));
+
+        let mut empty =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U64(Vec::new()), vec![0, 0])
+                .expect("empty integer placeholder");
+        empty.data.push(f64::NAN);
+        assert_eq!(value_len(&Value::Tensor(empty.clone())), Some(0));
+        assert!(is_empty_placeholder_value(&Value::Tensor(empty)));
     }
 }
 
