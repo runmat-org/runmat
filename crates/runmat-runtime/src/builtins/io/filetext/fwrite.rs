@@ -792,44 +792,47 @@ fn write_elements(
     let endianness = machine.to_endianness();
     let skip_offset = skip as i64;
     for value in values {
-        let floating = value.as_f64();
         match spec.input {
             InputType::UInt8 => {
-                let byte = integer_unsigned(value, u8::MAX as u64)
-                    .map_or_else(|| to_u8(floating), |v| v as u8);
+                let byte = match integer_unsigned(value, u8::MAX as u64) {
+                    Some(value) => value as u8,
+                    None => to_u8(value.as_f64()),
+                };
                 write_bytes(file, &[byte])?;
             }
             InputType::Int8 => {
-                let byte = integer_signed(value, i8::MIN as i64, i8::MAX as i64)
-                    .map_or_else(|| to_i8(floating), |v| v as i8) as u8;
+                let byte = match integer_signed(value, i8::MIN as i64, i8::MAX as i64) {
+                    Some(value) => value as i8,
+                    None => to_i8(value.as_f64()),
+                } as u8;
                 write_bytes(file, &[byte])?;
             }
             InputType::UInt16 => {
-                let bytes = integer_unsigned(value, u16::MAX as u64).map_or_else(
-                    || encode_u16(floating, endianness),
-                    |v| endian_u16(v as u16, endianness),
-                );
+                let bytes = match integer_unsigned(value, u16::MAX as u64) {
+                    Some(value) => endian_u16(value as u16, endianness),
+                    None => encode_u16(value.as_f64(), endianness),
+                };
                 write_bytes(file, &bytes)?;
             }
             InputType::Int16 => {
-                let bytes = integer_signed(value, i16::MIN as i64, i16::MAX as i64).map_or_else(
-                    || encode_i16(floating, endianness),
-                    |v| endian_i16(v as i16, endianness),
-                );
+                let bytes = match integer_signed(value, i16::MIN as i64, i16::MAX as i64) {
+                    Some(value) => endian_i16(value as i16, endianness),
+                    None => encode_i16(value.as_f64(), endianness),
+                };
                 write_bytes(file, &bytes)?;
             }
             InputType::UInt32 => {
-                let bytes = integer_unsigned(value, u32::MAX as u64).map_or_else(
-                    || encode_u32(floating, endianness),
-                    |v| endian_u32(v as u32, endianness),
-                );
+                let bytes = match integer_unsigned(value, u32::MAX as u64) {
+                    Some(value) => endian_u32(value as u32, endianness),
+                    None => encode_u32(value.as_f64(), endianness),
+                };
                 write_bytes(file, &bytes)?;
             }
             InputType::Int32 => {
-                let bytes = integer_signed(value, i32::MIN as i64, i32::MAX as i64).map_or_else(
-                    || encode_i32(floating, endianness),
-                    |v| endian_i32(v as i32, endianness),
-                );
+                let bytes = match integer_signed(value, i32::MIN as i64, i32::MAX as i64) {
+                    Some(value) => endian_i32(value as i32, endianness),
+                    None => encode_i32(value.as_f64(), endianness),
+                };
                 write_bytes(file, &bytes)?;
             }
             InputType::UInt64 => {
@@ -837,7 +840,7 @@ fn write_elements(
                     WriteElement::Integer(_) => {
                         endian_u64(integer_unsigned(value, u64::MAX).unwrap(), endianness)
                     }
-                    _ => encode_u64(floating, endianness),
+                    _ => encode_u64(value.as_f64(), endianness),
                 };
                 write_bytes(file, &bytes)?;
             }
@@ -847,16 +850,16 @@ fn write_elements(
                         integer_signed(value, i64::MIN, i64::MAX).unwrap(),
                         endianness,
                     ),
-                    _ => encode_i64(floating, endianness),
+                    _ => encode_i64(value.as_f64(), endianness),
                 };
                 write_bytes(file, &bytes)?;
             }
             InputType::Float32 => {
-                let bytes = encode_f32(floating, endianness);
+                let bytes = encode_f32(value.as_f64(), endianness);
                 write_bytes(file, &bytes)?;
             }
             InputType::Float64 => {
-                let bytes = encode_f64(floating, endianness);
+                let bytes = encode_f64(value.as_f64(), endianness);
                 write_bytes(file, &bytes)?;
             }
         }
@@ -1156,6 +1159,28 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn fwrite_flattens_each_integer_storage_class_without_reading_f64_mirror() {
+        let cases = [
+            (IntegerStorage::I8(vec![-8]), -8_i128),
+            (IntegerStorage::I16(vec![-16]), -16),
+            (IntegerStorage::I32(vec![-32]), -32),
+            (IntegerStorage::I64(vec![i64::MIN]), i64::MIN as i128),
+            (IntegerStorage::U8(vec![8]), 8),
+            (IntegerStorage::U16(vec![16]), 16),
+            (IntegerStorage::U32(vec![32]), 32),
+            (IntegerStorage::U64(vec![u64::MAX]), u64::MAX as i128),
+        ];
+
+        for (storage, expected) in cases {
+            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed tensor");
+            tensor.data = vec![f64::NAN];
+            let elements = flatten_elements(&Value::Tensor(tensor)).expect("typed elements");
+            assert_eq!(elements.len(), 1);
+            assert_eq!(integer_raw(&elements[0]), Some(expected));
+        }
+    }
+
+    #[test]
     fn fwrite_scalar_parser_reads_typed_integer_storage_exactly() {
         let mut scalar =
             Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("scalar");
@@ -1241,7 +1266,7 @@ pub(crate) mod tests {
         let values = [9_007_199_254_740_993, u64::MAX];
         let mut tensor = Tensor::new_integer(IntegerStorage::U64(values.to_vec()), vec![2, 1])
             .expect("typed uint64 tensor");
-        tensor.data.clear();
+        tensor.data = vec![f64::NAN; values.len()];
 
         let eval = run_evaluate(
             &Value::Num(fid as f64),

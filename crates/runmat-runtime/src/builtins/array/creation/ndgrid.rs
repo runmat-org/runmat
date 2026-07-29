@@ -489,9 +489,9 @@ fn real_scalar_axis(value: f64, dtype: NumericDType) -> AxisData {
 }
 
 fn integer_scalar_axis(value: IntValue) -> AxisData {
-    let storage = IntegerStorage::from_scalar(value.clone());
+    let storage = IntegerStorage::from_scalar(value);
     AxisData {
-        values: vec![(value.to_f64(), 0.0)],
+        values: Vec::new(),
         len: 1,
         class: OutputClass::Integer,
         integer_storage: Some(storage),
@@ -1207,7 +1207,8 @@ mod tests {
                     source_values[1].clone(),
                 ])
                 .expect("second expected storage");
-            let axis = Tensor::new_integer(storage, vec![1, 2]).expect("integer axis");
+            let mut axis = Tensor::new_integer(storage, vec![1, 2]).expect("integer axis");
+            axis.data.fill(f64::NAN);
             let eval = eval(&[Value::Tensor(axis)], Some(2)).expect("ndgrid");
             let Value::Tensor(first_output) = output(&eval, 0).expect("grid output") else {
                 panic!("expected exact integer tensor");

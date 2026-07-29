@@ -945,6 +945,20 @@ fn log_plan_stack_pattern(stage: &str, plan: &FusionGroupPlan, graph: &AccelGrap
 }
 
 impl FusionGroupPlan {
+    /// Float WGSL fusion kernels cannot consume the provider's native integer
+    /// buffers.  Keep this check on the plan as well as at execution time: a
+    /// constant otherwise becomes an f32/f64 WGSL literal before the executor
+    /// gets a chance to reject the fusion.
+    pub fn has_native_integer_constants(&self) -> bool {
+        self.const_values
+            .values()
+            .chain(self.constants.values())
+            .any(|value| {
+                matches!(value, Value::Int(_))
+                    || matches!(value, Value::Tensor(t) if t.integer_storage().is_some())
+            })
+    }
+
     fn new(index: usize, group: FusionGroup, graph: &AccelGraph) -> Self {
         let node_set: HashSet<NodeId> = group.nodes.iter().copied().collect();
         let mut seen_inputs: HashMap<ValueId, usize> = HashMap::new();
@@ -1511,6 +1525,9 @@ impl FusionGroupPlan {
     }
 
     pub fn generate_wgsl(&self, scalar_ty: &str) -> Option<String> {
+        if self.has_native_integer_constants() {
+            return None;
+        }
         self.generate_wgsl_for_output(self.output?, scalar_ty)
     }
 
@@ -1634,6 +1651,9 @@ impl FusionGroupPlan {
         output_ids: &[ValueId],
         scalar_ty: &str,
     ) -> Option<String> {
+        if self.has_native_integer_constants() {
+            return None;
+        }
         if output_ids.is_empty() {
             return None;
         }
@@ -1708,6 +1728,9 @@ impl FusionGroupPlan {
     }
 
     pub fn generate_wgsl_for_output(&self, output_id: ValueId, scalar_ty: &str) -> Option<String> {
+        if self.has_native_integer_constants() {
+            return None;
+        }
         if !self.kernel.kind.is_elementwise() {
             return None;
         }
@@ -1763,6 +1786,9 @@ impl FusionGroupPlan {
     }
 
     pub fn generate_reduction_wgsl(&self, scalar_ty: &str) -> Option<String> {
+        if self.has_native_integer_constants() {
+            return None;
+        }
         if !self.kernel.kind.is_reduction() {
             return None;
         }

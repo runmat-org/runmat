@@ -62,7 +62,7 @@ pub(crate) enum IndexScalar {
 }
 
 impl IndexScalar {
-    fn from_int(value: &IntValue) -> Self {
+    pub(crate) fn from_int(value: &IntValue) -> Self {
         match value {
             IntValue::I8(value) => Self::Signed(i64::from(*value)),
             IntValue::I16(value) => Self::Signed(i64::from(*value)),

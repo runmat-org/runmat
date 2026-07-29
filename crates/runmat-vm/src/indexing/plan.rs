@@ -1,5 +1,5 @@
 use crate::bytecode::EndExpr;
-use crate::indexing::selectors::{index_scalar_from_value, SliceSelector};
+use crate::indexing::selectors::{index_scalar_from_value, IndexScalar, SliceSelector};
 use crate::interpreter::errors::mex;
 use runmat_builtins::Value;
 use runmat_runtime::{builtins::common::shape::is_scalar_shape, RuntimeError};
@@ -554,17 +554,31 @@ where
                             linear_output_shape = Some(idx_t.shape.clone());
                         }
                         let mut vv = Vec::with_capacity(len);
-                        for &val in &idx_t.data {
-                            let idx = exact_index_from_f64(val).ok_or_else(|| {
-                                mex(
-                                    "UnsupportedIndexType",
-                                    "Index values must be positive integers or logical values",
-                                )
-                            })?;
-                            if idx < 1 {
-                                return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+                        if let Some(storage) = idx_t.integer_storage() {
+                            for index in 0..len {
+                                let scalar = IndexScalar::from_int(
+                                    &storage
+                                        .value_at(index)
+                                        .expect("integer tensor storage length must match shape"),
+                                );
+                                let index = scalar.positive_usize().ok_or_else(|| {
+                                    mex("IndexOutOfBounds", "Index out of bounds")
+                                })?;
+                                vv.push(index);
                             }
-                            vv.push(idx as usize);
+                        } else {
+                            for &val in &idx_t.data {
+                                let idx = exact_index_from_f64(val).ok_or_else(|| {
+                                    mex(
+                                        "UnsupportedIndexType",
+                                        "Index values must be positive integers or logical values",
+                                    )
+                                })?;
+                                if idx < 1 {
+                                    return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+                                }
+                                vv.push(idx as usize);
+                            }
                         }
                         selectors.push(ExprSel::Indices(vv));
                     }
@@ -798,7 +812,7 @@ mod tests {
     };
     use crate::bytecode::EndExpr;
     use crate::indexing::selectors::{build_slice_selectors, SliceSelector};
-    use runmat_builtins::{LogicalArray, Tensor, Value};
+    use runmat_builtins::{IntegerStorage, LogicalArray, Tensor, Value};
 
     #[test]
     fn sparse_assignment_plan_expands_numeric_dimensions_but_keeps_colon_at_old_extent() {
@@ -868,6 +882,44 @@ mod tests {
             assert_eq!(plain.properties.full_row, expr.properties.full_row);
             assert_eq!(plain.properties.full_column, expr.properties.full_column);
         })
+    }
+
+    #[test]
+    fn expr_integer_index_vectors_use_exact_storage_for_all_classes() {
+        macro_rules! assert_indices {
+            ($storage:expr) => {{
+                let mut indices =
+                    Tensor::new_integer($storage, vec![1, 2]).expect("typed integer index tensor");
+                indices.data.clear();
+                let numeric = vec![Value::Tensor(indices)];
+                let plan = futures::executor::block_on(build_expr_index_plan(
+                    ExprPlanSpec {
+                        dims: 1,
+                        colon_mask: 0,
+                        end_mask: 0,
+                        range_dims: &[],
+                        range_params: &[],
+                        range_start_exprs: &[],
+                        range_step_exprs: &[],
+                        range_end_exprs: &[],
+                        numeric: &numeric,
+                        shape: &[1, 2],
+                    },
+                    |_, _| async { Ok(0.0) },
+                ))
+                .expect("exact integer vector index plan");
+                assert_eq!(plan.indices, vec![0, 1]);
+            }};
+        }
+
+        assert_indices!(IntegerStorage::I8(vec![1, 2]));
+        assert_indices!(IntegerStorage::I16(vec![1, 2]));
+        assert_indices!(IntegerStorage::I32(vec![1, 2]));
+        assert_indices!(IntegerStorage::I64(vec![1, 2]));
+        assert_indices!(IntegerStorage::U8(vec![1, 2]));
+        assert_indices!(IntegerStorage::U16(vec![1, 2]));
+        assert_indices!(IntegerStorage::U32(vec![1, 2]));
+        assert_indices!(IntegerStorage::U64(vec![1, 2]));
     }
 
     #[test]

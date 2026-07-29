@@ -957,7 +957,7 @@ pub(crate) mod tests {
 
         for (storage, expected) in cases {
             let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed tensor");
-            tensor.data.clear();
+            tensor.data = vec![f64::NAN];
             assert_eq!(
                 tensor_to_bytes(&tensor).expect("byte payload"),
                 vec![expected]

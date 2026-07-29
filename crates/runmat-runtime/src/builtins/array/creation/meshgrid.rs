@@ -802,7 +802,7 @@ fn axis_from_complex_tensor(tensor: ComplexTensor, index: usize) -> crate::Built
                 .imag
                 .exact_values()
                 .into_iter()
-                .any(|value| value.to_f64() != 0.0),
+                .any(|value| !value.is_zero()),
             None => tensor
                 .data
                 .iter()
@@ -1621,7 +1621,8 @@ pub(crate) mod tests {
 
         for storage in storages {
             let values = storage.exact_values();
-            let axis = Tensor::new_integer(storage.clone(), vec![1, 3]).expect("axis");
+            let mut axis = Tensor::new_integer(storage.clone(), vec![1, 3]).expect("axis");
+            axis.data.fill(f64::NAN);
             let eval = evaluate(&[Value::Tensor(axis)]).expect("meshgrid");
             let Value::Tensor(x) = eval_first(&eval).expect("X") else {
                 panic!("expected real integer X output");

@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ObjectInstance, StructValue, Tensor, Value,
+    IntValue, ObjectInstance, StructValue, Tensor, Value,
 };
 use runmat_filesystem::data_contract::{DataChunkDescriptor, DataChunkUploadRequest};
 use runmat_macros::runtime_builtin;
@@ -3123,7 +3123,15 @@ fn value_to_json(value: &Value) -> serde_json::Value {
 fn json_to_value(value: &serde_json::Value) -> Value {
     match value {
         serde_json::Value::Bool(b) => Value::Bool(*b),
-        serde_json::Value::Number(n) => Value::Num(n.as_f64().unwrap_or_default()),
+        serde_json::Value::Number(n) => {
+            if let Some(value) = n.as_i64() {
+                Value::Int(IntValue::I64(value))
+            } else if let Some(value) = n.as_u64() {
+                Value::Int(IntValue::U64(value))
+            } else {
+                Value::Num(n.as_f64().unwrap_or_default())
+            }
+        }
         serde_json::Value::String(s) => Value::String(s.clone()),
         serde_json::Value::Array(arr) => {
             let vals = arr.iter().map(json_to_value).collect::<Vec<_>>();
@@ -3270,6 +3278,14 @@ mod tests {
         ] {
             let json = value_to_json(&Value::Int(value.clone()));
             assert_eq!(json.to_string(), value.decimal_string());
+        }
+    }
+
+    #[test]
+    fn attribute_json_roundtrips_wide_integer_values_without_f64() {
+        for value in [IntValue::I64(i64::MIN), IntValue::U64(u64::MAX)] {
+            let json = value_to_json(&Value::Int(value.clone()));
+            assert_eq!(json_to_value(&json), Value::Int(value));
         }
     }
 
