@@ -8,7 +8,7 @@ use base64::Engine;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, StructValue, Tensor, Value,
+    CellArray, CharArray, IntegerStorage, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use url::Url;
@@ -600,11 +600,11 @@ fn execute_request(
             Ok(Value::CharArray(array))
         }
         ResolvedContentType::Binary => {
-            let data: Vec<f64> = response.body.iter().map(|b| f64::from(*b)).collect();
             let cols = response.body.len();
-            let tensor = Tensor::new(data, vec![1, cols]).map_err(|err| {
-                webread_error_with(&WEBREAD_ERROR_OUTPUT, format!("webread: {err}"))
-            })?;
+            let tensor = Tensor::new_integer(IntegerStorage::U8(response.body), vec![1, cols])
+                .map_err(|err| {
+                    webread_error_with(&WEBREAD_ERROR_OUTPUT, format!("webread: {err}"))
+                })?;
             Ok(Value::Tensor(tensor))
         }
     }
@@ -1026,10 +1026,28 @@ pub(crate) mod tests {
         let result = run_webread(Value::from(url), args).expect("webread binary response");
 
         match result {
-            Value::Tensor(tensor) => {
+            Value::Tensor(mut tensor) => {
                 assert_eq!(tensor.shape, vec![1, 5]);
-                let bytes: Vec<u8> = tensor.data.iter().map(|v| *v as u8).collect();
-                assert_eq!(bytes, payload);
+                assert_eq!(
+                    tensor.integer_storage(),
+                    Some(&IntegerStorage::U8(payload.to_vec()))
+                );
+
+                // Binary consumers must use exact uint8 backing storage rather
+                // than the compatibility f64 mirror.
+                tensor.data = vec![f64::NAN; payload.len()];
+                let persisted = crate::data::DataArrayPayload::from_value(
+                    "uint8".to_string(),
+                    &Value::Tensor(tensor),
+                )
+                .expect("persist binary payload");
+                let bytes = serde_json::to_vec(&persisted).expect("encode payload");
+                let decoded: crate::data::DataArrayPayload =
+                    serde_json::from_slice(&bytes).expect("decode payload");
+                assert_eq!(
+                    decoded.values,
+                    crate::data::DataArrayValues::U8(payload.to_vec())
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }
