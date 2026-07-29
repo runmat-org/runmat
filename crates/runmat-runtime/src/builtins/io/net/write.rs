@@ -576,6 +576,13 @@ fn flatten_numeric(value: &Value) -> BuiltinResult<Vec<WriteElement>> {
             let dense = s.to_dense().map_err(|err| {
                 write_error_with_message(format!("write: {err}"), &WRITE_ERROR_INTERNAL)
             })?;
+            if let Some(storage) = dense.integer_storage() {
+                return Ok(storage
+                    .exact_values()
+                    .into_iter()
+                    .map(WriteElement::Integer)
+                    .collect());
+            }
             Ok(dense.data.into_iter().map(WriteElement::Floating).collect())
         }
         Value::Num(n) => Ok(vec![WriteElement::Floating(*n)]),
@@ -963,7 +970,7 @@ pub(crate) mod tests {
     use crate::builtins::io::net::accept::{
         configure_stream, insert_client, remove_client_for_test,
     };
-    use runmat_builtins::{CharArray, IntValue, IntegerStorage, StructValue, Tensor};
+    use runmat_builtins::{CharArray, IntValue, IntegerStorage, SparseTensor, StructValue, Tensor};
     use std::io::Read;
     use std::net::{TcpListener, TcpStream};
     use std::sync::{Arc, Barrier};
@@ -1098,6 +1105,58 @@ pub(crate) mod tests {
         extend_u64(&mut expected, u64::MAX, ByteOrder::Little);
         assert_eq!(payload.elements, 2);
         assert_eq!(payload.bytes, expected);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn write_sparse_integer_payload_uses_exact_storage_not_f64_mirror() {
+        let wide = (1_u64 << 53) + 1;
+        let mut sparse = SparseTensor::new_integer(
+            2,
+            2,
+            vec![0, 1, 2],
+            vec![1, 0],
+            IntegerStorage::U64(vec![wide, u64::MAX]),
+        )
+        .expect("typed sparse tensor");
+        sparse.values = vec![0.0, 0.0];
+
+        let payload = prepare_payload(
+            &Value::SparseTensor(sparse),
+            DataType::UInt64,
+            ByteOrder::Little,
+        )
+        .expect("sparse uint64 payload");
+        let mut expected = Vec::new();
+        extend_u64(&mut expected, 0, ByteOrder::Little);
+        extend_u64(&mut expected, wide, ByteOrder::Little);
+        extend_u64(&mut expected, u64::MAX, ByteOrder::Little);
+        extend_u64(&mut expected, 0, ByteOrder::Little);
+        assert_eq!(payload.elements, 4);
+        assert_eq!(payload.bytes, expected);
+
+        let mut signed = SparseTensor::new_integer(
+            2,
+            1,
+            vec![0, 2],
+            vec![0, 1],
+            IntegerStorage::I16(vec![-7, 42]),
+        )
+        .expect("signed sparse tensor");
+        signed.values = vec![f64::NAN, f64::NAN];
+        let payload = prepare_payload(
+            &Value::SparseTensor(signed),
+            DataType::Int16,
+            ByteOrder::Little,
+        )
+        .expect("sparse int16 payload");
+        assert_eq!(
+            payload.bytes,
+            [-7_i16, 42]
+                .into_iter()
+                .flat_map(i16::to_le_bytes)
+                .collect::<Vec<_>>()
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
