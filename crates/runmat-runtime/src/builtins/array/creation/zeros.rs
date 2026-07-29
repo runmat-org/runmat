@@ -1,6 +1,9 @@
 //! MATLAB-compatible `zeros` builtin with GPU-aware semantics.
 
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
+use runmat_accelerate_api::{
+    GpuTensorHandle, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
+    IntegerElementType, ProviderPrecision,
+};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -634,7 +637,19 @@ fn zeros_sparse_like(proto: &SparseTensor, shape: &[usize]) -> crate::BuiltinRes
 
 #[async_recursion::async_recursion(?Send)]
 async fn zeros_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(integer_type) = runmat_accelerate_api::handle_integer_type(handle) {
+        let prototype = integer_storage_prototype_from_element_type(integer_type);
+        let storage = prototype.zeros_like(tensor::element_count(shape));
+        if let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) {
+            let view = integer_tensor_view(&storage, shape);
+            if let Ok(gpu) = provider.upload_integer(&view) {
+                return Ok(Value::GpuTensor(gpu));
+            }
+        }
+        return zeros_integer_like(&prototype, shape);
+    }
+
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) {
         let precision =
             runmat_accelerate_api::handle_precision(handle).unwrap_or_else(|| provider.precision());
         let dtype = dtype_from_precision(precision);
@@ -670,6 +685,36 @@ async fn zeros_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::Bui
         .map_err(|e| format!("zeros: {e}"))?;
     log_zeros_fallback(shape, NumericDType::F32, "gather-fallback");
     zeros_like(&gathered, shape).await
+}
+
+fn integer_storage_prototype_from_element_type(element_type: IntegerElementType) -> IntegerStorage {
+    match element_type {
+        IntegerElementType::I8 => IntegerStorage::I8(Vec::new()),
+        IntegerElementType::I16 => IntegerStorage::I16(Vec::new()),
+        IntegerElementType::I32 => IntegerStorage::I32(Vec::new()),
+        IntegerElementType::I64 => IntegerStorage::I64(Vec::new()),
+        IntegerElementType::U8 => IntegerStorage::U8(Vec::new()),
+        IntegerElementType::U16 => IntegerStorage::U16(Vec::new()),
+        IntegerElementType::U32 => IntegerStorage::U32(Vec::new()),
+        IntegerElementType::U64 => IntegerStorage::U64(Vec::new()),
+    }
+}
+
+fn integer_tensor_view<'a>(
+    storage: &'a IntegerStorage,
+    shape: &'a [usize],
+) -> HostIntegerTensorView<'a> {
+    let data = match storage {
+        IntegerStorage::I8(values) => HostIntegerDataView::I8(values),
+        IntegerStorage::I16(values) => HostIntegerDataView::I16(values),
+        IntegerStorage::I32(values) => HostIntegerDataView::I32(values),
+        IntegerStorage::I64(values) => HostIntegerDataView::I64(values),
+        IntegerStorage::U8(values) => HostIntegerDataView::U8(values),
+        IntegerStorage::U16(values) => HostIntegerDataView::U16(values),
+        IntegerStorage::U32(values) => HostIntegerDataView::U32(values),
+        IntegerStorage::U64(values) => HostIntegerDataView::U64(values),
+    };
+    HostIntegerTensorView { data, shape }
 }
 
 fn zeros_gpu_alloc(shape: &[usize], dtype: NumericDType) -> crate::BuiltinResult<Option<Value>> {
@@ -1114,6 +1159,40 @@ pub(crate) mod tests {
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
             }
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn zeros_gpu_integer_like_preserves_exact_class_resident() {
+        test_support::with_test_provider(|provider| {
+            let prototype_values = [u64::MAX, 9_007_199_254_740_993];
+            let prototype = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&prototype_values),
+                    shape: &[1, 2],
+                })
+                .expect("upload uint64 prototype");
+            let args = vec![
+                Value::Num(2.0),
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::GpuTensor(prototype),
+            ];
+            let result = block_on(zeros_builtin(args)).expect("zeros integer gpu like");
+            let Value::GpuTensor(handle) = result else {
+                panic!("expected resident gpuArray");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&handle),
+                Some(IntegerElementType::U64)
+            );
+            assert_eq!(handle.shape, vec![2, 2]);
+            let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![0; 4]))
+            );
         });
     }
 
