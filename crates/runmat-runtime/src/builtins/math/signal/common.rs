@@ -335,10 +335,7 @@ pub(crate) fn scalar_length_arg(value: Value) -> Result<usize, WindowArgError> {
         return Err(WindowArgError::InvalidLength);
     }
     let rounded = scalar.round();
-    if (rounded - scalar).abs() > 1e-9
-        || rounded > usize::MAX as f64
-        || (usize::BITS == 64 && rounded == usize::MAX as f64)
-    {
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
         return Err(WindowArgError::InvalidLength);
     }
     Ok(rounded as usize)
@@ -539,13 +536,6 @@ mod tests {
     fn scalar_length_arg_rejects_unrepresentable_double_boundary() {
         let err = scalar_length_arg(Value::Num(first_unrepresentable_usize_double()))
             .expect_err("unrepresentable length should fail");
-
-        assert_eq!(err, WindowArgError::InvalidLength);
-    }
-
-    #[test]
-    fn scalar_length_arg_rejects_fractional_double_lengths() {
-        let err = scalar_length_arg(Value::Num(4.25)).expect_err("fractional length should fail");
 
         assert_eq!(err, WindowArgError::InvalidLength);
     }
