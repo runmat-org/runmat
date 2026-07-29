@@ -986,7 +986,7 @@ fn parse_lengths_inner(
         Value::Num(n) => parse_numeric_dimension(*n).map(|d| vec![d]),
         Value::Tensor(tensor) => {
             let dims = if let Some(storage) = tensor.integer_storage() {
-                (0..tensor.data.len())
+                (0..storage.len())
                     .map(|index| {
                         let value = storage.value_at(index).ok_or_else(|| fspecial_error(err))?;
                         parse_integer_dimension(&value)
@@ -1286,9 +1286,10 @@ pub(crate) mod tests {
 
     #[test]
     fn fspecial_lengths_preserve_typed_integer_tensor_bounds() {
-        let dims =
+        let mut dims =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![2, 4]), vec![1, 2])
                 .expect("dims");
+        dims.data.clear();
         assert_eq!(
             parse_lengths_strict(
                 &Value::Tensor(dims),

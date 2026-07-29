@@ -856,9 +856,12 @@ impl BoundaryPositions {
                 shape: vec![1, 1],
             }),
             Value::Tensor(t) => {
-                let mut data = Vec::with_capacity(t.data.len());
+                let mut data = Vec::with_capacity(
+                    t.integer_storage()
+                        .map_or(t.data.len(), |storage| storage.len()),
+                );
                 if let Some(storage) = t.integer_storage() {
-                    for idx in 0..t.data.len() {
+                    for idx in 0..storage.len() {
                         let entry = storage.value_at(idx).ok_or_else(|| {
                             extract_between_error(&EXTRACT_BETWEEN_ERROR_POSITION_TYPE)
                         })?;
@@ -927,7 +930,7 @@ pub(crate) mod tests {
     fn extractBetween_position_vectors_read_typed_integer_storage_exactly() {
         let mut positions =
             Tensor::new_integer(IntegerStorage::U16(vec![2, 4]), vec![1, 2]).expect("positions");
-        positions.data.fill(1.0);
+        positions.data.clear();
 
         let parsed = BoundaryPositions::from_value(Value::Tensor(positions)).unwrap();
         assert_eq!(parsed.data, vec![2, 4]);
