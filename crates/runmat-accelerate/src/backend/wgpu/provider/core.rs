@@ -246,6 +246,31 @@ impl WgpuProvider {
             .0
     }
 
+    /// Allocate a raw-word buffer used by exact integer kernels. Integer
+    /// storage is packed as u32 words, independently of float precision.
+    pub(super) fn create_integer_word_buffer(
+        &self,
+        words: usize,
+        label: &str,
+    ) -> Result<Arc<wgpu::Buffer>> {
+        let bytes = (words as u64)
+            .checked_mul(std::mem::size_of::<u32>() as u64)
+            .ok_or_else(|| anyhow!("{label}: integer buffer size overflow"))?;
+        if bytes > self.adapter_limits.max_buffer_size {
+            return Err(anyhow!("{label}: integer buffer exceeds GPU limits"));
+        }
+        Ok(Arc::new(self.device.create_buffer(
+            &wgpu::BufferDescriptor {
+                label: Some(label),
+                size: bytes.max(4),
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )))
+    }
+
     pub(super) fn uniform_buffer<T: Pod>(&self, data: &T, label: &str) -> wgpu::Buffer {
         self.device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {

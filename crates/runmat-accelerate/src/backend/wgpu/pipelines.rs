@@ -268,6 +268,7 @@ pub struct WgpuPipelines {
     pub tril: PipelineBundle,
     pub triu: PipelineBundle,
     pub repmat: PipelineBundle,
+    pub integer_repmat: PipelineBundle,
     pub kron: PipelineBundle,
     pub matmul: PipelineBundle,
     pub matmul_vec4: PipelineBundle,
@@ -911,6 +912,19 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => REPMAT_SHADER_F64,
                 NumericPrecision::F32 => REPMAT_SHADER_F32,
             },
+        );
+        let integer_repmat_shader = crate::backend::wgpu::shaders::repmat::repmat_shader_u32();
+        let integer_repmat = create_pipeline(
+            device,
+            "runmat-integer-repmat-layout",
+            "runmat-integer-repmat-shader",
+            "runmat-integer-repmat-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            &integer_repmat_shader,
         );
 
         let kron = create_pipeline(
@@ -1617,6 +1631,7 @@ impl WgpuPipelines {
             tril,
             triu,
             repmat,
+            integer_repmat,
             kron,
             matmul,
             matmul_vec4,

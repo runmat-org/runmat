@@ -307,8 +307,18 @@ impl WgpuProvider {
             runmat_accelerate_api::GpuTensorStorage::Real => 1usize,
             runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved => 2usize,
         };
+        let integer_type = entry.integer_type;
+        let word_factor = integer_type.map_or(storage_factor, |element_type| match element_type {
+            runmat_accelerate_api::IntegerElementType::I64
+            | runmat_accelerate_api::IntegerElementType::U64 => 2,
+            _ => 1,
+        });
         let expected_input_len = orig_total
-            .checked_mul(storage_factor)
+            .checked_mul(if integer_type.is_some() {
+                1
+            } else {
+                storage_factor
+            })
             .ok_or_else(|| anyhow!("repmat: input storage length exceeds GPU limits"))?;
         ensure!(
             expected_input_len == entry.len || (orig_total == 0 && entry.len == 0),
@@ -321,7 +331,7 @@ impl WgpuProvider {
         })?;
 
         let storage_total = new_total
-            .checked_mul(storage_factor)
+            .checked_mul(word_factor)
             .ok_or_else(|| anyhow!("repmat: requested output exceeds GPU limits"))?;
 
         if storage_total > u32::MAX as usize {
@@ -365,12 +375,18 @@ impl WgpuProvider {
 
         // Use checked allocation so we fail with a clear error instead of
         // creating an invalid WebGPU buffer (which later triggers a validation error).
-        let out_buffer = self.create_storage_buffer_checked(storage_total, "runmat-repmat-out")?;
+        let out_buffer = if integer_type.is_some() {
+            self.create_integer_word_buffer(storage_total, "runmat-integer-repmat-out")?
+        } else {
+            self.create_storage_buffer_checked(storage_total, "runmat-repmat-out")?
+        };
         let out_shape = new_shape.clone();
         if storage_total == 0 {
-            return Ok(
-                self.register_existing_buffer_with_storage(out_buffer, out_shape, 0, storage)
-            );
+            return if let Some(element_type) = integer_type {
+                Ok(self.register_integer_buffer(out_buffer, out_shape, 0, element_type, 0))
+            } else {
+                Ok(self.register_existing_buffer_with_storage(out_buffer, out_shape, 0, storage))
+            };
         }
 
         {
@@ -383,7 +399,11 @@ impl WgpuProvider {
                 label: Some("runmat-repmat-noop-pass"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&self.pipelines.repmat.pipeline);
+            pass.set_pipeline(if integer_type.is_some() {
+                &self.pipelines.integer_repmat.pipeline
+            } else {
+                &self.pipelines.repmat.pipeline
+            });
             drop(pass);
             self.submit(enc);
         }
@@ -407,7 +427,7 @@ impl WgpuProvider {
                 len: chunk_len as u32,
                 offset: offset as u32,
                 rank: rank as u32,
-                storage_factor: storage_factor as u32,
+                storage_factor: word_factor as u32,
                 base_shape: base_shape_arr,
                 new_shape: new_shape_arr,
                 base_strides: strides_arr,
@@ -417,7 +437,11 @@ impl WgpuProvider {
                 .device_ref()
                 .create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("runmat-repmat-bind"),
-                    layout: &self.pipelines.repmat.layout,
+                    layout: if integer_type.is_some() {
+                        &self.pipelines.integer_repmat.layout
+                    } else {
+                        &self.pipelines.repmat.layout
+                    },
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
@@ -440,19 +464,33 @@ impl WgpuProvider {
             crate::backend::wgpu::dispatch::repmat::run(
                 self.device_ref(),
                 self.queue_ref(),
-                &self.pipelines.repmat.pipeline,
+                if integer_type.is_some() {
+                    &self.pipelines.integer_repmat.pipeline
+                } else {
+                    &self.pipelines.repmat.pipeline
+                },
                 &bind_group,
                 workgroups,
             );
             offset += chunk_len;
         }
 
-        Ok(self.register_existing_buffer_with_storage(
-            out_buffer,
-            out_shape,
-            storage_total,
-            storage,
-        ))
+        if let Some(element_type) = integer_type {
+            Ok(self.register_integer_buffer(
+                out_buffer,
+                out_shape,
+                new_total,
+                element_type,
+                (storage_total as u64) * std::mem::size_of::<u32>() as u64,
+            ))
+        } else {
+            Ok(self.register_existing_buffer_with_storage(
+                out_buffer,
+                out_shape,
+                storage_total,
+                storage,
+            ))
+        }
     }
     pub(crate) fn cat_exec(
         &self,
@@ -1858,6 +1896,60 @@ mod tests {
                 1.0, -1.0, 3.0, -3.0, 2.0, -2.0, 4.0, -4.0, 5.0, -5.0, 7.0, -7.0, 6.0, -6.0, 8.0,
                 -8.0,
             ]
+        );
+    }
+
+    #[test]
+    fn repmat_wide_uint64_uses_exact_integer_words_without_float_mirror() {
+        use runmat_accelerate_api::{
+            HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView, IntegerElementType,
+        };
+
+        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+            return;
+        };
+        let values = [u64::MAX, (1u64 << 63) + 17, (1u64 << 53) + 1];
+        let input = provider
+            .upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&values),
+                shape: &[3, 1],
+            })
+            .expect("exact integer upload");
+        let tiled = provider
+            .repmat_exec(&input, &[1, 3])
+            .expect("integer repmat");
+
+        assert_ne!(
+            input.buffer_id, tiled.buffer_id,
+            "repmat must materialize on device"
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&tiled),
+            Some(IntegerElementType::U64)
+        );
+        let raw = provider
+            .get_entry_raw(&tiled)
+            .expect("resident integer output");
+        assert_eq!(
+            raw.allocated_bytes,
+            9 * 2 * std::mem::size_of::<u32>() as u64
+        );
+        assert_eq!(tiled.shape, vec![3, 3]);
+        let gathered =
+            block_on(provider.download_integer_exec(&tiled)).expect("exact integer download");
+        assert_eq!(
+            gathered.data,
+            HostIntegerDataOwned::U64(vec![
+                u64::MAX,
+                (1u64 << 63) + 17,
+                (1u64 << 53) + 1,
+                u64::MAX,
+                (1u64 << 63) + 17,
+                (1u64 << 53) + 1,
+                u64::MAX,
+                (1u64 << 63) + 17,
+                (1u64 << 53) + 1
+            ])
         );
     }
 }
