@@ -899,7 +899,7 @@ pub fn delete_tensor_with_plan(
             "Linear deletion is only supported for vectors",
         ));
     }
-    let positions = sorted_unique_positions_desc(plan, t.data.len())?;
+    let positions = sorted_unique_positions_desc(plan, tensor_element_len(&t))?;
     if let Some(storage) = t.integer_data.take() {
         macro_rules! delete_positions {
             ($values:expr, $variant:ident) => {{
@@ -955,7 +955,7 @@ pub fn delete_complex_with_plan(
             "Linear deletion is only supported for vectors",
         ));
     }
-    let positions = sorted_unique_positions_desc(plan, t.data.len())?;
+    let positions = sorted_unique_positions_desc(plan, complex_tensor_element_len(&t))?;
     if let Some(storage) = t.integer_data.take() {
         let storage = delete_integer_complex_storage_positions(storage, &positions);
         let shape = deleted_vector_shape(t.rows, t.cols, storage.len());
@@ -1521,9 +1521,10 @@ fn integer_tensor_view<'a>(
 mod tests {
     use super::{
         assign_complex_with_plan, assign_sparse_with_plan, assign_tensor_with_plan,
-        build_complex_rhs_view, build_string_rhs_view, delete_gpu_slice_with_plan,
-        delete_tensor_with_plan, integer_gpu_rhs_indices_for_plan, map_acceleration_error,
-        materialize_rhs_linear_real, materialize_rhs_nd_real, ComplexRhsView,
+        build_complex_rhs_view, build_string_rhs_view, delete_complex_with_plan,
+        delete_gpu_slice_with_plan, delete_tensor_with_plan, integer_gpu_rhs_indices_for_plan,
+        map_acceleration_error, materialize_rhs_linear_real, materialize_rhs_nd_real,
+        ComplexRhsView,
     };
     use crate::indexing::plan::IndexPlan;
     use futures::executor::block_on;
@@ -1549,6 +1550,54 @@ mod tests {
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::U64(vec![u64::MAX, 9, 3]))
+        );
+    }
+
+    #[test]
+    fn typed_slice_deletion_uses_exact_storage_when_f64_mirrors_are_unavailable() {
+        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![1, u64::MAX, 3]), vec![1, 3])
+            .expect("tensor");
+        tensor.data.clear();
+        let plan = IndexPlan::new(vec![1], vec![1, 1], vec![1], 1, vec![1, 3]);
+        let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).expect("empty rhs"));
+
+        let Value::Tensor(output) =
+            delete_tensor_with_plan(tensor, &plan, &empty).expect("typed uint64 deletion")
+        else {
+            panic!("expected tensor");
+        };
+        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(vec![1, 3]))
+        );
+
+        let mut complex = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::I64(vec![i64::MIN, -2, i64::MAX]),
+                IntegerStorage::I64(vec![1, 2, 3]),
+            )
+            .expect("integer complex storage"),
+            vec![1, 3],
+        )
+        .expect("complex tensor");
+        complex.data = vec![(f64::NAN, f64::NAN)];
+
+        let Value::ComplexTensor(output) = delete_complex_with_plan(complex, &plan, &empty)
+            .expect("typed signed complex deletion")
+        else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(
+            output.integer_data,
+            Some(
+                IntegerComplexStorage::new(
+                    IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+                    IntegerStorage::I64(vec![1, 3]),
+                )
+                .expect("integer complex storage")
+            )
         );
     }
 
