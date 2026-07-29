@@ -123,6 +123,33 @@ fn integer_scalar_arithmetic_keeps_int64_and_uint64_exact_through_vm_dispatch() 
 }
 
 #[test]
+fn every_integer_class_uses_native_arithmetic_and_comparison_dispatch() {
+    let classes = [
+        ("int8", IntValue::I8(5)),
+        ("int16", IntValue::I16(5)),
+        ("int32", IntValue::I32(5)),
+        ("int64", IntValue::I64(5)),
+        ("uint8", IntValue::U8(5)),
+        ("uint16", IntValue::U16(5)),
+        ("uint32", IntValue::U32(5)),
+        ("uint64", IntValue::U64(5)),
+    ];
+    let source = classes
+        .iter()
+        .enumerate()
+        .map(|(index, (class, _))| {
+            format!("a{index} = {class}(2) + {class}(3); c{index} = {class}(5) > {class}(2);")
+        })
+        .collect::<String>();
+    let vars = execute_source(&source).expect("integer VM dispatch should execute");
+
+    for (index, (_, expected)) in classes.iter().enumerate() {
+        assert_eq!(vars[index * 2], Value::Int(expected.clone()));
+        assert!(logical_truth(&vars[index * 2 + 1]));
+    }
+}
+
+#[test]
 fn complex_integer_values_preserve_exact_components_through_vm_dispatch() {
     let vars = execute_source(
         "r = uint64([9223372036854775808 18446744073709551615]); z = complex(r, 1); zr = real(z); zi = imag(z); scalar = complex(int64(-9223372036854775808), int64(7)); sr = real(scalar); si = imag(scalar); tf = isreal(z); high = uint64(9223372036854775808) + 1; highz = complex(high, 1); highr = real(highz); picked = z([2 1]); pickedreal = real(picked); reshaped = reshape(z, 2, 1); reshapedreal = real(reshaped); scalarreshape = reshape(high, 1, 1, 1);",

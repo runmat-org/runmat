@@ -830,6 +830,7 @@ fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray
                     cols: sparse.cols,
                     col_ptrs: sparse.col_ptrs,
                     row_indices: sparse.row_indices,
+                    integer_data: sparse.integer_data,
                     values: sparse.values,
                 },
             }),
@@ -1068,7 +1069,16 @@ fn build_matrix_bytes(array: &MatArray, name: Option<&str>) -> BuiltinResult<Vec
             (f0, 0u32)
         }
         MatData::Logical { .. } => ((array.class.class_code()) | FLAG_LOGICAL, 0u32),
-        MatData::Sparse { values, .. } => (array.class.class_code(), values.len() as u32),
+        MatData::Sparse {
+            integer_data,
+            values,
+            ..
+        } => (
+            array.class.class_code(),
+            integer_data
+                .as_ref()
+                .map_or(values.len(), IntegerStorage::len) as u32,
+        ),
         _ => (array.class.class_code(), 0u32),
     };
 
@@ -1174,6 +1184,7 @@ fn build_matrix_bytes(array: &MatArray, name: Option<&str>) -> BuiltinResult<Vec
         MatData::Sparse {
             col_ptrs,
             row_indices,
+            integer_data,
             values,
             ..
         } => {
@@ -1181,11 +1192,16 @@ fn build_matrix_bytes(array: &MatArray, name: Option<&str>) -> BuiltinResult<Vec
             write_subelement(&mut buf, MI_INT32, &ir_bytes);
             let jc_bytes = encode_usize_i32_payload(col_ptrs, "sparse column pointer")?;
             write_subelement(&mut buf, MI_INT32, &jc_bytes);
-            let mut value_bytes = Vec::with_capacity(values.len() * 8);
-            for value in values {
-                value_bytes.extend_from_slice(&value.to_le_bytes());
+            if let Some(storage) = integer_data {
+                let (value_type, value_bytes) = encode_integer_payload(storage);
+                write_subelement(&mut buf, value_type, &value_bytes);
+            } else {
+                let mut value_bytes = Vec::with_capacity(values.len() * 8);
+                for value in values {
+                    value_bytes.extend_from_slice(&value.to_le_bytes());
+                }
+                write_subelement(&mut buf, MI_DOUBLE, &value_bytes);
             }
-            write_subelement(&mut buf, MI_DOUBLE, &value_bytes);
         }
     }
 

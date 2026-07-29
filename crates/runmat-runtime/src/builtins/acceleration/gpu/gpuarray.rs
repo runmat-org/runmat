@@ -1951,23 +1951,62 @@ pub(crate) mod tests {
     #[test]
     fn gpu_array_roundtrips_native_integer_inputs_and_class_requests() {
         test_support::with_test_provider(|_| {
-            for storage in [
-                IntegerStorage::I8(vec![1]),
-                IntegerStorage::I16(vec![1]),
-                IntegerStorage::I32(vec![1]),
-                IntegerStorage::I64(vec![1]),
-                IntegerStorage::U8(vec![1]),
-                IntegerStorage::U16(vec![1]),
-                IntegerStorage::U32(vec![1]),
-                IntegerStorage::U64(vec![u64::MAX]),
+            for (storage, element_type, class_name) in [
+                (
+                    IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+                    runmat_accelerate_api::IntegerElementType::I8,
+                    "int8",
+                ),
+                (
+                    IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+                    runmat_accelerate_api::IntegerElementType::I16,
+                    "int16",
+                ),
+                (
+                    IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+                    runmat_accelerate_api::IntegerElementType::I32,
+                    "int32",
+                ),
+                (
+                    IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+                    runmat_accelerate_api::IntegerElementType::I64,
+                    "int64",
+                ),
+                (
+                    IntegerStorage::U8(vec![0, u8::MAX]),
+                    runmat_accelerate_api::IntegerElementType::U8,
+                    "uint8",
+                ),
+                (
+                    IntegerStorage::U16(vec![0, u16::MAX]),
+                    runmat_accelerate_api::IntegerElementType::U16,
+                    "uint16",
+                ),
+                (
+                    IntegerStorage::U32(vec![0, u32::MAX]),
+                    runmat_accelerate_api::IntegerElementType::U32,
+                    "uint32",
+                ),
+                (
+                    IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
+                    runmat_accelerate_api::IntegerElementType::U64,
+                    "uint64",
+                ),
             ] {
                 let expected = storage.clone();
-                let value = Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).unwrap());
+                let value = Value::Tensor(Tensor::new_integer(storage, vec![1, 2]).unwrap());
                 let handle = match call(value, Vec::new()).expect("integer gpuArray upload") {
                     Value::GpuTensor(handle) => handle,
                     other => panic!("expected gpu tensor, got {other:?}"),
                 };
-                assert!(runmat_accelerate_api::handle_integer_type(&handle).is_some());
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(&handle),
+                    Some(element_type)
+                );
+                assert_eq!(
+                    runmat_accelerate_api::handle_class_name(&handle).as_deref(),
+                    Some(class_name)
+                );
                 let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
                 assert_eq!(gathered.integer_storage(), Some(&expected));
             }

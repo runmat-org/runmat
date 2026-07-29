@@ -132,6 +132,10 @@ pub enum MatData {
         cols: usize,
         col_ptrs: Vec<usize>,
         row_indices: Vec<usize>,
+        /// Exact sparse integer values when the MAT payload uses an integer
+        /// element type. `values` remains the compatibility view for floating
+        /// sparse matrices and existing consumers.
+        integer_data: Option<IntegerStorage>,
         values: Vec<f64>,
     },
 }

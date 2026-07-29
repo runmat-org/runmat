@@ -17,7 +17,10 @@ use anyhow::{anyhow, Result};
 use futures::lock::Mutex as AsyncMutex;
 use log::{debug, info, trace, warn};
 use once_cell::sync::{Lazy, OnceCell};
-use runmat_accelerate_api::{AccelProvider, ApiDeviceInfo, HostTensorView, ProviderPrecision};
+use runmat_accelerate_api::{
+    AccelProvider, ApiDeviceInfo, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
+    ProviderPrecision,
+};
 use runmat_builtins::{builtin_functions, AccelTag, Tensor, Value};
 use runmat_runtime::builtins::common::spec::{builtin_residency_policy, ResidencyPolicy};
 use runmat_runtime::gather_if_needed_async;
@@ -789,18 +792,35 @@ impl NativeAutoOffload {
         match value {
             Value::GpuTensor(_) => Ok(value.clone()),
             Value::Tensor(t) => {
-                if ensure_provider_supports_dtype(self.provider, t.dtype).is_err() {
+                // Exact integer buffers are a residency/transfer capability, not a
+                // float-kernel precision.  Try the provider's typed upload below;
+                // a provider that does not implement it simply leaves the value on
+                // the host rather than coercing it through f64.
+                if t.integer_storage().is_none()
+                    && ensure_provider_supports_dtype(self.provider, t.dtype).is_err()
+                {
                     return Ok(value.clone());
                 }
-                if t.data.len() >= threshold && threshold > 0 {
+                let element_count = t
+                    .integer_storage()
+                    .map_or(t.data.len(), |storage| storage.len());
+                if element_count >= threshold && threshold > 0 {
                     log_promotion(|| {
                         format!(
                             "Promoting tensor to GPU (len={}, threshold={})",
-                            t.data.len(),
-                            threshold
+                            element_count, threshold
                         )
                     });
-                    self.tensor_to_gpu(t)
+                    match self.tensor_to_gpu(t) {
+                        Ok(value) => Ok(value),
+                        Err(error) if t.integer_storage().is_some() => {
+                            debug!(
+                                "Auto-offload retaining integer tensor on host: provider has no exact integer upload ({error})"
+                            );
+                            Ok(value.clone())
+                        }
+                        Err(error) => Err(error),
+                    }
                 } else {
                     Ok(value.clone())
                 }
@@ -810,6 +830,26 @@ impl NativeAutoOffload {
     }
 
     fn tensor_to_gpu(&self, tensor: &Tensor) -> Result<Value> {
+        if let Some(storage) = tensor.integer_storage() {
+            let data = match storage {
+                runmat_builtins::IntegerStorage::I8(values) => HostIntegerDataView::I8(values),
+                runmat_builtins::IntegerStorage::I16(values) => HostIntegerDataView::I16(values),
+                runmat_builtins::IntegerStorage::I32(values) => HostIntegerDataView::I32(values),
+                runmat_builtins::IntegerStorage::I64(values) => HostIntegerDataView::I64(values),
+                runmat_builtins::IntegerStorage::U8(values) => HostIntegerDataView::U8(values),
+                runmat_builtins::IntegerStorage::U16(values) => HostIntegerDataView::U16(values),
+                runmat_builtins::IntegerStorage::U32(values) => HostIntegerDataView::U32(values),
+                runmat_builtins::IntegerStorage::U64(values) => HostIntegerDataView::U64(values),
+            };
+            let handle = self
+                .provider
+                .upload_integer(&HostIntegerTensorView {
+                    data,
+                    shape: &tensor.shape,
+                })
+                .map_err(|e| anyhow!(e.to_string()))?;
+            return Ok(Value::GpuTensor(handle));
+        }
         let view = HostTensorView {
             data: &tensor.data,
             shape: &tensor.shape,
@@ -1349,6 +1389,7 @@ fn value_kind(value: &Value) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_accelerate_api::HostIntegerDataOwned;
 
     #[test]
     fn max_detection_handles_placeholders() {
@@ -1364,6 +1405,56 @@ mod tests {
             Value::Num(1.0)
         ]));
         assert!(!max_or_min_reduction_call(&[data.clone(), Value::Num(0.0)]));
+    }
+
+    #[test]
+    fn auto_promotion_uploads_native_integer_storage_without_f64_conversion() {
+        crate::simple_provider::register_inprocess_provider();
+        let provider = runmat_accelerate_api::provider().expect("in-process provider");
+        let auto = NativeAutoOffload::new(provider, ThresholdConfig::default());
+        let expected = runmat_builtins::IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]);
+        let tensor = Tensor::new_integer(expected.clone(), vec![1, 2]).expect("integer tensor");
+
+        let promoted = auto
+            .promote_tensor_if_large(&Value::Tensor(tensor), 1)
+            .expect("exact integer promotion");
+        let Value::GpuTensor(handle) = promoted else {
+            panic!("expected resident integer gpuArray");
+        };
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&handle),
+            Some(runmat_accelerate_api::IntegerElementType::U64)
+        );
+        assert_eq!(
+            futures::executor::block_on(provider.download_integer(&handle))
+                .expect("exact integer download")
+                .data,
+            HostIntegerDataOwned::U64(vec![1_u64 << 63, u64::MAX])
+        );
+        provider.free(&handle).expect("free integer handle");
+
+        let mut mirrorless =
+            Tensor::new_integer(expected, vec![1, 2]).expect("mirrorless integer tensor");
+        mirrorless.data.clear();
+        let promoted = auto
+            .promote_tensor_if_large(&Value::Tensor(mirrorless), 1)
+            .expect("mirrorless exact integer promotion");
+        let Value::GpuTensor(handle) = promoted else {
+            panic!("expected mirrorless integer tensor to stay eligible for GPU residency");
+        };
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&handle),
+            Some(runmat_accelerate_api::IntegerElementType::U64)
+        );
+        assert_eq!(
+            futures::executor::block_on(provider.download_integer(&handle))
+                .expect("mirrorless exact integer download")
+                .data,
+            HostIntegerDataOwned::U64(vec![1_u64 << 63, u64::MAX])
+        );
+        provider
+            .free(&handle)
+            .expect("free mirrorless integer handle");
     }
 }
 

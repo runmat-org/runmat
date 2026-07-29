@@ -212,6 +212,13 @@ fn execute_elementwise_outputs(
             request.inputs.len()
         ));
     }
+    if request.inputs.iter().any(|value| {
+        matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+    }) {
+        return Err(anyhow!(
+            "fusion: native integer gpuArray inputs require a dedicated integer fusion kernel"
+        ));
+    }
     // Determine output shape from the fusion plan; if unknown, derive from runtime inputs via broadcasting.
     fn runtime_broadcast_shape(values: &[Value]) -> Option<Vec<usize>> {
         // Collect shapes; scalars map to empty shape which broadcasts to any
@@ -483,6 +490,13 @@ pub fn execute_reduction(
             "fusion input mismatch: expected {}, got {}",
             request.plan.inputs.len(),
             request.inputs.len()
+        ));
+    }
+    if request.inputs.iter().any(|value| {
+        matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+    }) {
+        return Err(anyhow!(
+            "fusion: native integer gpuArray inputs require a dedicated integer fusion kernel"
         ));
     }
     let len = reduce_len * num_slices;

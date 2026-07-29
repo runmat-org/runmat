@@ -1042,7 +1042,11 @@ fn parse_sparse_array(
 
     let real_elem = read_tagged(cursor, false, endian)?
         .ok_or_else(|| load_error("load: sparse array missing values"))?;
-    let values = decode_numeric_values(&real_elem, endian)?;
+    let integer_data = decode_sparse_integer_storage(&real_elem, endian)?;
+    let values = match &integer_data {
+        Some(storage) => storage.to_f64_vec(),
+        None => decode_numeric_values(&real_elem, endian)?,
+    };
 
     Ok(MatArray {
         class: MatClass::Sparse,
@@ -1052,9 +1056,28 @@ fn parse_sparse_array(
             cols,
             col_ptrs,
             row_indices,
+            integer_data,
             values,
         },
     })
+}
+
+fn decode_sparse_integer_storage(
+    elem: &TaggedData,
+    endian: Endian,
+) -> BuiltinResult<Option<IntegerStorage>> {
+    let class = match elem.data_type {
+        MI_INT8 => MatClass::Int8,
+        MI_UINT8 => MatClass::UInt8,
+        MI_INT16 => MatClass::Int16,
+        MI_UINT16 => MatClass::UInt16,
+        MI_INT32 => MatClass::Int32,
+        MI_UINT32 => MatClass::UInt32,
+        MI_INT64 => MatClass::Int64,
+        MI_UINT64 => MatClass::UInt64,
+        _ => return Ok(None),
+    };
+    decode_integer_storage(elem, class, endian).map(Some)
 }
 
 fn decode_numeric_values(elem: &TaggedData, endian: Endian) -> BuiltinResult<Vec<f64>> {
@@ -1360,10 +1383,16 @@ fn mat_array_to_value(array: MatArray) -> BuiltinResult<Value> {
             cols,
             col_ptrs,
             row_indices,
+            integer_data,
             values,
         } => {
-            let sparse = SparseTensor::new(rows, cols, col_ptrs, row_indices, values)
-                .map_err(|e| load_error(format!("load: {e}")))?;
+            let sparse = match integer_data {
+                Some(storage) => {
+                    SparseTensor::new_integer(rows, cols, col_ptrs, row_indices, storage)
+                }
+                None => SparseTensor::new(rows, cols, col_ptrs, row_indices, values),
+            }
+            .map_err(|e| load_error(format!("load: {e}")))?;
             Ok(Value::SparseTensor(sparse))
         }
     }
@@ -2090,6 +2119,78 @@ pub(crate) mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0, "S");
         assert_eq!(entries[0].1, Value::SparseTensor(sparse));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn load_save_sparse_integer_roundtrips_preserve_wide_dtype_and_shape() {
+        let cases = [
+            (
+                "signed",
+                SparseTensor::new_integer(
+                    4,
+                    3,
+                    vec![0, 1, 1, 3],
+                    vec![0, 1, 3],
+                    IntegerStorage::I64(vec![i64::MIN + 1, i64::MAX, -(1_i64 << 54)]),
+                )
+                .expect("signed sparse"),
+            ),
+            (
+                "unsigned",
+                SparseTensor::new_integer(
+                    2,
+                    4,
+                    vec![0, 0, 1, 2, 2],
+                    vec![1, 0],
+                    IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
+                )
+                .expect("unsigned sparse"),
+            ),
+        ];
+
+        let workspace: Vec<_> = cases
+            .iter()
+            .map(|(name, sparse)| (name.to_string(), Value::SparseTensor(sparse.clone())))
+            .collect();
+        let bytes = block_on(encode_workspace_to_mat_bytes(&workspace)).expect("encode MAT bytes");
+        let entries: HashMap<_, _> = load_entries_from_bytes(bytes).into_iter().collect();
+
+        for (name, expected) in cases {
+            let Value::SparseTensor(actual) = entries.get(name).expect("loaded sparse") else {
+                panic!("expected sparse matrix");
+            };
+            assert_eq!(actual.shape(), expected.shape());
+            assert_eq!(actual.col_ptrs, expected.col_ptrs);
+            assert_eq!(actual.row_indices, expected.row_indices);
+            assert_eq!(actual.integer_data, expected.integer_data);
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn load_save_empty_sparse_integer_roundtrip_preserves_dtype_and_shape() {
+        let sparse = SparseTensor::new_integer(
+            0,
+            5,
+            vec![0, 0, 0, 0, 0, 0],
+            Vec::new(),
+            IntegerStorage::U64(Vec::new()),
+        )
+        .expect("empty sparse");
+        let bytes = block_on(encode_workspace_to_mat_bytes(&[(
+            "empty".to_string(),
+            Value::SparseTensor(sparse),
+        )]))
+        .expect("encode MAT bytes");
+
+        let entries = load_entries_from_bytes(bytes);
+        let Value::SparseTensor(actual) = &entries[0].1 else {
+            panic!("expected sparse matrix");
+        };
+        assert_eq!(actual.shape(), vec![0, 5]);
+        assert_eq!(actual.col_ptrs, vec![0, 0, 0, 0, 0, 0]);
+        assert_eq!(actual.integer_data, Some(IntegerStorage::U64(Vec::new())));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
