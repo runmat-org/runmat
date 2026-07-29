@@ -646,7 +646,6 @@ pub fn coerce_tensor_dtype(mut tensor: Tensor, dtype: NumericDType) -> Tensor {
         }
         integer_dtype => {
             let shape = tensor.shape.clone();
-            let values = std::mem::take(&mut tensor.data);
             let prototype = match integer_dtype {
                 NumericDType::I8 => IntegerStorage::I8(Vec::new()),
                 NumericDType::I16 => IntegerStorage::I16(Vec::new()),
@@ -658,6 +657,21 @@ pub fn coerce_tensor_dtype(mut tensor: Tensor, dtype: NumericDType) -> Tensor {
                 NumericDType::U64 => IntegerStorage::U64(Vec::new()),
                 NumericDType::F32 | NumericDType::F64 => unreachable!(),
             };
+            if let Some(storage) = tensor.integer_storage() {
+                let values = storage
+                    .exact_values()
+                    .into_iter()
+                    .map(|value| prototype.cast_exact_assignment(&value))
+                    .collect();
+                return Tensor::new_integer(
+                    prototype
+                        .from_same_class_values(values)
+                        .expect("integer coercion produces target-class values"),
+                    shape,
+                )
+                .expect("dtype coercion preserves the tensor element count");
+            }
+            let values = std::mem::take(&mut tensor.data);
             return integer_tensor_from_f64_like(&prototype, values, &shape)
                 .expect("dtype coercion preserves the tensor element count");
         }
@@ -707,6 +721,77 @@ mod dtype_tests {
         let float = coerce_tensor_dtype(typed, NumericDType::F64);
         assert_eq!(float.dtype, NumericDType::F64);
         assert!(float.integer_storage().is_none());
+    }
+
+    #[test]
+    fn integer_to_integer_coercion_reads_exact_storage_not_f64_mirror() {
+        let wide = 9_007_199_254_740_993_u64;
+        let mut input = Tensor::new_integer(IntegerStorage::U64(vec![wide, u64::MAX]), vec![1, 2])
+            .expect("input");
+        input.data.clear();
+
+        let same_class = coerce_tensor_dtype(input.clone(), NumericDType::U64);
+        assert_eq!(same_class.dtype, NumericDType::U64);
+        assert_eq!(
+            same_class.integer_storage(),
+            Some(&IntegerStorage::U64(vec![wide, u64::MAX]))
+        );
+
+        let signed = coerce_tensor_dtype(input, NumericDType::I64);
+        assert_eq!(signed.dtype, NumericDType::I64);
+        assert_eq!(
+            signed.integer_storage(),
+            Some(&IntegerStorage::I64(vec![
+                i64::try_from(wide).expect("wide value fits int64"),
+                i64::MAX,
+            ]))
+        );
+    }
+
+    #[test]
+    fn integer_to_integer_coercion_preserves_every_integer_class_exactly() {
+        let cases = [
+            (IntegerStorage::I8(vec![i8::MIN, i8::MAX]), NumericDType::I8),
+            (
+                IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+                NumericDType::I16,
+            ),
+            (
+                IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+                NumericDType::I32,
+            ),
+            (
+                IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+                NumericDType::I64,
+            ),
+            (IntegerStorage::U8(vec![0, u8::MAX]), NumericDType::U8),
+            (IntegerStorage::U16(vec![0, u16::MAX]), NumericDType::U16),
+            (IntegerStorage::U32(vec![0, u32::MAX]), NumericDType::U32),
+            (IntegerStorage::U64(vec![0, u64::MAX]), NumericDType::U64),
+        ];
+
+        for (storage, dtype) in cases {
+            let mut input =
+                Tensor::new_integer(storage.clone(), vec![1, 2]).expect("integer input");
+            input.data.clear();
+            let output = coerce_tensor_dtype(input, dtype);
+            assert_eq!(output.dtype, dtype);
+            assert_eq!(output.integer_storage(), Some(&storage));
+        }
+    }
+
+    #[test]
+    fn integer_to_integer_coercion_preserves_empty_shape_and_storage_class() {
+        let input =
+            Tensor::new_integer(IntegerStorage::I64(Vec::new()), vec![0, 3]).expect("empty input");
+        let output = coerce_tensor_dtype(input, NumericDType::U64);
+
+        assert_eq!(output.shape, vec![0, 3]);
+        assert_eq!(output.dtype, NumericDType::U64);
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(Vec::new()))
+        );
     }
 }
 

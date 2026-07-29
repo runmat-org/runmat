@@ -803,11 +803,13 @@ pub async fn assign_tensor_with_plan(
         return Ok(Value::Tensor(t));
     }
     if matches!(rhs, Value::Complex(_, _) | Value::ComplexTensor(_)) {
-        if t.integer_storage().is_some() {
-            return Err(mex(
-                "UnsupportedTypedComplexInteger",
-                "typed complex integer assignment is not implemented",
-            ));
+        if let Some(real) = t.integer_data.take() {
+            let imag = real.zeros_like(real.len());
+            let storage = IntegerComplexStorage::new(real, imag)
+                .expect("same-class real and imaginary integer storage must be valid");
+            let tensor = ComplexTensor::new_integer(storage, t.shape)
+                .map_err(|error| map_slice_shape_error("typed complex integer promotion", error))?;
+            return assign_complex_with_plan(tensor, plan, rhs).await;
         }
         let mut ct = ComplexTensor {
             data: t.data.into_iter().map(|re| (re, 0.0)).collect(),
@@ -1620,6 +1622,122 @@ mod tests {
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::I8(vec![i8::MAX, i8::MAX]))
+        );
+    }
+
+    #[test]
+    fn real_integer_plan_assignment_promotes_to_complex_exact_storage_for_every_class() {
+        macro_rules! assert_promotion {
+            ($storage:ident, $values:expr, $real:expr, $imag:expr) => {{
+                let tensor = Tensor::new_integer(IntegerStorage::$storage($values), vec![2, 2])
+                    .expect("tensor");
+                let mut rhs_tensor = ComplexTensor::new_integer(
+                    IntegerComplexStorage::new(
+                        IntegerStorage::$storage(vec![$real]),
+                        IntegerStorage::$storage(vec![$imag]),
+                    )
+                    .expect("rhs storage"),
+                    vec![1, 1],
+                )
+                .expect("rhs");
+                rhs_tensor.data.clear();
+                let plan = IndexPlan::new(vec![0, 1, 2, 3], vec![2, 2], vec![2, 2], 2, vec![2, 2]);
+                let result = block_on(assign_tensor_with_plan(
+                    tensor,
+                    &plan,
+                    &Value::ComplexTensor(rhs_tensor),
+                ))
+                .expect("assign");
+                let Value::ComplexTensor(output) = result else {
+                    panic!("integer tensor should promote to complex tensor");
+                };
+                assert_eq!(
+                    output
+                        .integer_data
+                        .as_ref()
+                        .map(|storage| (&storage.real, &storage.imag)),
+                    Some((
+                        &IntegerStorage::$storage(vec![$real; 4]),
+                        &IntegerStorage::$storage(vec![$imag; 4]),
+                    ))
+                );
+            }};
+        }
+
+        assert_promotion!(I8, vec![i8::MIN, -1, 0, i8::MAX], i8::MIN, i8::MAX);
+        assert_promotion!(I16, vec![i16::MIN, -1, 0, i16::MAX], i16::MIN, i16::MAX);
+        assert_promotion!(I32, vec![i32::MIN, -1, 0, i32::MAX], i32::MIN, i32::MAX);
+        assert_promotion!(I64, vec![i64::MIN, -1, 0, i64::MAX], i64::MIN, i64::MAX);
+        assert_promotion!(U8, vec![0, 1, 2, u8::MAX], 1, u8::MAX);
+        assert_promotion!(U16, vec![0, 1, 2, u16::MAX], 1, u16::MAX);
+        assert_promotion!(U32, vec![0, 1, 2, u32::MAX], 1, u32::MAX);
+        assert_promotion!(
+            U64,
+            vec![0, 1, 2, u64::MAX],
+            9_223_372_036_854_775_809,
+            u64::MAX
+        );
+    }
+
+    #[test]
+    fn real_integer_complex_promotion_rejects_shape_mismatch() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![0; 4]), vec![2, 2]).expect("tensor");
+        let rhs = Value::ComplexTensor(
+            ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::I16(vec![1, 2, 3]),
+                    IntegerStorage::I16(vec![-1, -2, -3]),
+                )
+                .expect("rhs storage"),
+                vec![1, 3],
+            )
+            .expect("rhs"),
+        );
+        let plan = IndexPlan::new(vec![0, 1, 2, 3], vec![2, 2], vec![2, 2], 2, vec![2, 2]);
+
+        let error = block_on(assign_tensor_with_plan(tensor, &plan, &rhs))
+            .expect_err("incompatible complex RHS shape must fail");
+        assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
+    }
+
+    #[test]
+    fn real_integer_complex_promotion_preserves_exact_non_2d_scalar_expansion() {
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![1, 2, 3, 4]), vec![2, 1, 2])
+            .expect("tensor");
+        let rhs = Value::ComplexTensor(
+            ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![u64::MAX]),
+                    IntegerStorage::U64(vec![9_223_372_036_854_775_809]),
+                )
+                .expect("rhs storage"),
+                vec![1, 1, 1],
+            )
+            .expect("rhs"),
+        );
+        let plan = IndexPlan::new(
+            vec![0, 1, 2, 3],
+            vec![2, 1, 2],
+            vec![2, 1, 2],
+            3,
+            vec![2, 1, 2],
+        );
+
+        let result = block_on(assign_tensor_with_plan(tensor, &plan, &rhs)).expect("assign");
+        let Value::ComplexTensor(output) = result else {
+            panic!("integer tensor should promote to complex tensor");
+        };
+        assert_eq!(output.shape, vec![2, 1, 2]);
+        assert_eq!(
+            output
+                .integer_data
+                .as_ref()
+                .map(|storage| (&storage.real, &storage.imag)),
+            Some((
+                &IntegerStorage::U64(vec![u64::MAX; 4]),
+                &IntegerStorage::U64(vec![9_223_372_036_854_775_809; 4]),
+            ))
         );
     }
 
