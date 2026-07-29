@@ -8,7 +8,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, LogicalArray, ResolveContext, Tensor, Value,
+    ComplexTensor, IntegerStorage, LogicalArray, ResolveContext, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -204,6 +204,10 @@ async fn symrcm_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 
 /// Compute the symmetric reverse Cuthill-McKee ordering for a real tensor.
 pub fn symrcm_host_real_tensor(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
+    if let Some(storage) = tensor.integer_storage() {
+        return adjacency_from_integer_storage(&tensor.shape, storage)
+            .map(|adjacency| symmetric_reverse_cuthill_mckee(&adjacency));
+    }
     let values = tensor::tensor_values_f64_cow(tensor);
     symrcm_host_real_data(&tensor.shape, &values)
 }
@@ -228,6 +232,14 @@ pub fn symrcm_host_complex_data(shape: &[usize], data: &[(f64, f64)]) -> Builtin
 fn adjacency_from_real_data(shape: &[usize], data: &[f64]) -> BuiltinResult<Vec<Vec<usize>>> {
     let n = ensure_square_matrix_shape(shape)?;
     build_adjacency(n, n, data, |value| *value != 0.0)
+}
+
+fn adjacency_from_integer_storage(
+    shape: &[usize],
+    storage: &IntegerStorage,
+) -> BuiltinResult<Vec<Vec<usize>>> {
+    let n = ensure_square_matrix_shape(shape)?;
+    build_adjacency_from_integer_storage(n, storage)
 }
 
 fn adjacency_from_complex_data(
@@ -293,6 +305,49 @@ where
         }
     }
 
+    Ok(adjacency
+        .into_iter()
+        .map(|set| {
+            let mut neighbours: Vec<usize> = set.into_iter().collect();
+            neighbours.sort_unstable();
+            neighbours
+        })
+        .collect())
+}
+
+fn build_adjacency_from_integer_storage(
+    rows: usize,
+    storage: &IntegerStorage,
+) -> BuiltinResult<Vec<Vec<usize>>> {
+    if rows == 0 {
+        return Ok(Vec::new());
+    }
+    let expected = rows.checked_mul(rows).ok_or_else(|| {
+        symrcm_error_with_detail(
+            &SYMRCM_ERROR_INTERNAL,
+            "matrix dimensions overflow when computing adjacency",
+        )
+    })?;
+    if storage.len() < expected {
+        return Err(symrcm_error_with_detail(
+            &SYMRCM_ERROR_INVALID_INPUT,
+            "data does not match matrix dimensions",
+        ));
+    }
+
+    let mut adjacency: Vec<HashSet<usize>> = vec![HashSet::new(); rows];
+    for col in 0..rows {
+        for row in 0..rows {
+            if row == col {
+                continue;
+            }
+            let idx = row + col * rows;
+            if storage.value_at(idx).is_some_and(|value| !value.is_zero()) {
+                adjacency[row].insert(col);
+                adjacency[col].insert(row);
+            }
+        }
+    }
     Ok(adjacency
         .into_iter()
         .map(|set| {
@@ -501,6 +556,32 @@ pub(crate) mod tests {
                 assert_eq!(t.shape, vec![1, 5]);
                 assert_eq!(t.data, vec![5.0, 4.0, 3.0, 2.0, 1.0]);
             }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn symrcm_reads_wide_integer_storage_without_the_float_mirror() {
+        let mut tensor = Tensor::new_integer(
+            IntegerStorage::I64(vec![
+                0,
+                i64::MIN,
+                0, //
+                i64::MAX,
+                0,
+                -1, //
+                0,
+                1,
+                0,
+            ]),
+            vec![3, 3],
+        )
+        .expect("integer path graph");
+        tensor.data.fill(0.0);
+
+        let result = symrcm_builtin(Value::Tensor(tensor)).expect("symrcm");
+        match result {
+            Value::Tensor(t) => assert_eq!(t.data, vec![3.0, 2.0, 1.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }

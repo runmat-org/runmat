@@ -238,10 +238,10 @@ fn tensor_scalar(name: &str, tensor: &Tensor) -> crate::BuiltinResult<Scalar> {
 }
 
 fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> crate::BuiltinResult<Scalar> {
-    if tensor.data.len() != 1 {
-        return Err(builtin_error(format!("{name}: expected scalar input")));
-    }
     if let Some(storage) = tensor.integer_data.as_ref() {
+        if storage.len() != 1 {
+            return Err(builtin_error(format!("{name}: expected scalar input")));
+        }
         let re = storage
             .real
             .value_at(0)
@@ -253,6 +253,9 @@ fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> crate::BuiltinRe
             .expect("scalar complex integer tensor has one imaginary value")
             .to_f64();
         return Ok(Scalar::Complex { re, im });
+    }
+    if tensor.data.len() != 1 {
+        return Err(builtin_error(format!("{name}: expected scalar input")));
     }
     let (re, im) = tensor.data[0];
     Ok(Scalar::Complex { re, im })
@@ -699,12 +702,12 @@ pub(crate) mod tests {
                 .expect("start storage");
         let mut start =
             ComplexTensor::new_integer(start_storage, vec![1, 1]).expect("start tensor");
-        start.data[0] = (f64::NAN, f64::NAN);
+        start.data.clear();
         let stop_storage =
             IntegerComplexStorage::new(IntegerStorage::I16(vec![0]), IntegerStorage::I16(vec![2]))
                 .expect("stop storage");
         let mut stop = ComplexTensor::new_integer(stop_storage, vec![1, 1]).expect("stop tensor");
-        stop.data[0] = (f64::NAN, f64::NAN);
+        stop.data.clear();
 
         let result = logspace_builtin(
             Value::ComplexTensor(start),

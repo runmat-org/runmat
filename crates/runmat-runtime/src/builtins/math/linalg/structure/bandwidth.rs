@@ -331,6 +331,10 @@ pub fn bandwidth_host_complex_data(
 }
 
 pub fn bandwidth_host_real_tensor(tensor: &Tensor) -> BuiltinResult<(usize, usize)> {
+    if let Some(storage) = tensor.integer_storage() {
+        let (rows, cols) = ensure_matrix_shape(&tensor.shape)?;
+        return Ok(compute_integer_bandwidth(rows, cols, storage));
+    }
     let values = tensor::tensor_values_f64_cow(tensor);
     bandwidth_host_real_data(&tensor.shape, &values)
 }
@@ -354,6 +358,34 @@ fn compute_real_bandwidth(rows: usize, cols: usize, data: &[f64]) -> (usize, usi
             }
             let value = data[idx];
             if value != 0.0 || value.is_nan() {
+                if row >= col {
+                    lower = lower.max(row - col);
+                } else {
+                    upper = upper.max(col - row);
+                }
+            }
+        }
+    }
+    (lower, upper)
+}
+
+fn compute_integer_bandwidth(
+    rows: usize,
+    cols: usize,
+    storage: &runmat_builtins::IntegerStorage,
+) -> (usize, usize) {
+    if rows == 0 || cols == 0 {
+        return (0, 0);
+    }
+    let mut lower = 0usize;
+    let mut upper = 0usize;
+    for col in 0..cols {
+        for row in 0..rows {
+            let idx = row + col * rows;
+            let Some(value) = storage.value_at(idx) else {
+                break;
+            };
+            if !value.is_zero() {
                 if row >= col {
                     lower = lower.max(row - col);
                 } else {
@@ -546,6 +578,22 @@ pub(crate) mod tests {
         )
         .expect("integer matrix");
         tensor.data.fill(f64::NAN);
+
+        let result = bandwidth_builtin(Value::Tensor(tensor), Vec::new()).expect("bandwidth");
+        match result {
+            Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 1.0]),
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bandwidth_reads_wide_integer_storage_without_the_float_mirror() {
+        let mut tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![1, 0, u64::MAX, 1_u64 << 63, 1, 0, 0, 0, 1]),
+            vec![3, 3],
+        )
+        .expect("integer matrix");
+        tensor.data.fill(0.0);
 
         let result = bandwidth_builtin(Value::Tensor(tensor), Vec::new()).expect("bandwidth");
         match result {

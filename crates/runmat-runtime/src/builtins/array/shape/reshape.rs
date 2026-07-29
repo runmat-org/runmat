@@ -426,7 +426,7 @@ async fn parse_size_arguments(args: &[Value]) -> crate::BuiltinResult<Vec<DimTok
         let value = &args[0];
         match value {
             Value::Tensor(t) => {
-                if t.data.is_empty() {
+                if tensor::tensor_element_len(t) == 0 {
                     return Err(reshape_error(
                         "reshape: size vector must contain at least one element",
                     ));
@@ -640,6 +640,20 @@ pub(crate) mod tests {
             DimToken::Known(value) => assert_eq!(value, 3),
             other => panic!("expected known dimension, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn reshape_size_vector_reads_typed_integer_storage_without_mirror() {
+        let mut dims = Tensor::new_integer(IntegerStorage::U64(vec![2, 3]), vec![1, 2])
+            .expect("dimension tensor");
+        dims.data.clear();
+
+        let parsed =
+            block_on(parse_size_arguments(&[Value::Tensor(dims)])).expect("dimension vector");
+        assert!(matches!(
+            parsed.as_slice(),
+            [DimToken::Known(2), DimToken::Known(3)]
+        ));
     }
 
     fn tensor_from_slice(data: &[f64], shape: &[usize]) -> Tensor {

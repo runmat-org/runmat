@@ -5,7 +5,7 @@ use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, ProviderBandwidth
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, LogicalArray, SparseTensor, Tensor, Value,
+    ComplexTensor, IntValue, LogicalArray, SparseTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -351,6 +351,11 @@ enum MatrixInput {
         cols: usize,
         data: Vec<f64>,
     },
+    DenseInteger {
+        rows: usize,
+        cols: usize,
+        data: Vec<IntValue>,
+    },
     DenseComplex {
         rows: usize,
         cols: usize,
@@ -372,6 +377,9 @@ impl MatrixInput {
         match self {
             Self::DenseReal { rows, cols, data } => {
                 dense_real_satisfies(*rows, *cols, data, predicate)
+            }
+            Self::DenseInteger { rows, cols, data } => {
+                dense_integer_satisfies(*rows, *cols, data, predicate)
             }
             Self::DenseComplex { rows, cols, data } => {
                 dense_complex_satisfies(*rows, *cols, data, predicate)
@@ -443,10 +451,17 @@ fn matrix_from_real_tensor(tensor: Tensor, ctx: BuiltinContext) -> BuiltinResult
             "tensor shape exceeds backing data length",
         ));
     }
+    if let Some(storage) = tensor.integer_storage() {
+        return Ok(MatrixInput::DenseInteger {
+            rows,
+            cols,
+            data: storage.exact_values(),
+        });
+    }
     Ok(MatrixInput::DenseReal {
         rows,
         cols,
-        data: tensor_utils::tensor_into_values_f64(tensor),
+        data: tensor.data,
     })
 }
 
@@ -524,6 +539,20 @@ fn dense_real_satisfies(
             let value = data[row + col * rows];
             value != 0.0 || value.is_nan()
         },
+        predicate,
+    )
+}
+
+fn dense_integer_satisfies(
+    rows: usize,
+    cols: usize,
+    data: &[IntValue],
+    predicate: StructurePredicate,
+) -> bool {
+    scan_dense(
+        rows,
+        cols,
+        |row, col| !data[row + col * rows].is_zero(),
         predicate,
     )
 }
@@ -714,6 +743,24 @@ mod tests {
             call_istril(Value::Tensor(lower.clone())).unwrap()
         ));
         assert!(!expect_bool(call_istriu(Value::Tensor(lower)).unwrap()));
+    }
+
+    #[test]
+    fn dense_structure_predicates_read_wide_integer_storage_without_float_mirror() {
+        let mut upper = Tensor::new_integer(
+            IntegerStorage::U64(vec![1, 0, 0, u64::MAX, 1_u64 << 63, 0, 0, 1, 1]),
+            vec![3, 3],
+        )
+        .expect("upper triangular integer matrix");
+        upper.data.fill(0.0);
+
+        assert!(!expect_bool(
+            call_isdiag(Value::Tensor(upper.clone())).unwrap()
+        ));
+        assert!(!expect_bool(
+            call_istril(Value::Tensor(upper.clone())).unwrap()
+        ));
+        assert!(expect_bool(call_istriu(Value::Tensor(upper)).unwrap()));
     }
 
     #[test]
