@@ -4,7 +4,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, NumericDType, Tensor, Value,
+    ComplexTensor, IntValue, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -464,10 +464,17 @@ fn unravel_index(mut linear: usize, shape: &[usize], out: &mut [usize]) {
 fn parse_order(value: &Value) -> BuiltinResult<NormOrder> {
     match value {
         Value::Num(value) => parse_numeric_order(*value),
-        Value::Int(value) => parse_numeric_order(value.to_f64()),
+        Value::Int(value) => parse_integer_order(value),
         Value::Tensor(tensor) => {
             if tensor::is_scalar_tensor(tensor) {
-                parse_numeric_order(scalar_tensor_f64(tensor))
+                if let Some(integer) = tensor
+                    .integer_storage()
+                    .and_then(|storage| storage.value_at(0))
+                {
+                    parse_integer_order(&integer)
+                } else {
+                    parse_numeric_order(scalar_tensor_f64(tensor))
+                }
             } else {
                 Err(argument_error(format!(
                     "{NAME}: p must be a positive scalar or Inf."
@@ -513,6 +520,30 @@ fn parse_numeric_order(raw: f64) -> BuiltinResult<NormOrder> {
         return Ok(NormOrder::Two);
     }
     Ok(NormOrder::P(raw))
+}
+
+fn parse_integer_order(value: &IntValue) -> BuiltinResult<NormOrder> {
+    let raw = exact_integer_as_f64(value).ok_or_else(|| {
+        argument_error(format!(
+            "{NAME}: p integer is outside the exact double range."
+        ))
+    })?;
+    parse_numeric_order(raw)
+}
+
+fn exact_integer_as_f64(value: &IntValue) -> Option<f64> {
+    const MAX_EXACT_INTEGER: u64 = 1 << 53;
+    match value {
+        IntValue::I8(v) => Some(*v as f64),
+        IntValue::I16(v) => Some(*v as f64),
+        IntValue::I32(v) => Some(*v as f64),
+        IntValue::I64(v) if v.unsigned_abs() <= MAX_EXACT_INTEGER => Some(*v as f64),
+        IntValue::U8(v) => Some(*v as f64),
+        IntValue::U16(v) => Some(*v as f64),
+        IntValue::U32(v) => Some(*v as f64),
+        IntValue::U64(v) if *v <= MAX_EXACT_INTEGER => Some(*v as f64),
+        _ => None,
+    }
 }
 
 fn parse_dim(value: &Value) -> BuiltinResult<usize> {
@@ -917,6 +948,14 @@ mod tests {
                 Ok(NormOrder::One)
             ));
         }
+    }
+
+    #[test]
+    fn vecnorm_order_rejects_wide_integer_storage_instead_of_rounding() {
+        let mut wide = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("wide order");
+        wide.data = vec![1.0];
+        assert!(parse_order(&Value::Tensor(wide)).is_err());
     }
 
     #[test]

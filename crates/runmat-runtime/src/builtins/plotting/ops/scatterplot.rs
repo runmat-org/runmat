@@ -360,23 +360,39 @@ fn parse_marker(value: &Value) -> BuiltinResult<Value> {
 }
 
 fn parse_axes_handle(value: &Value) -> BuiltinResult<f64> {
-    let scalar = match value {
-        Value::Num(v) => *v,
-        Value::Int(v) => v.to_f64(),
-        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
-            tensor_utils::tensor_value_f64(tensor, 0)
-        }
-        Value::Tensor(_) => {
+    let scalar = if let Some(integer) = tensor_utils::scalar_integer_value(value) {
+        let encoded = integer.try_to_u64().ok_or_else(|| {
+            scatterplot_error(
+                "scatterplot: ax must be a valid axes handle",
+                &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
+            )
+        })?;
+        const MAX_AXES_HANDLE: u64 = ((u32::MAX as u64) << 20) | ((1 << 20) - 1);
+        if encoded == 0 || encoded > MAX_AXES_HANDLE {
             return Err(scatterplot_error(
-                "scatterplot: ax must be a scalar axes handle",
+                "scatterplot: ax must be a valid axes handle",
                 &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
             ));
         }
-        other => {
-            return Err(scatterplot_error(
-                format!("scatterplot: ax must be a scalar axes handle, got {other:?}"),
-                &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
-            ));
+        encoded as f64
+    } else {
+        match value {
+            Value::Num(v) => *v,
+            Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+                tensor_utils::tensor_value_f64(tensor, 0)
+            }
+            Value::Tensor(_) => {
+                return Err(scatterplot_error(
+                    "scatterplot: ax must be a scalar axes handle",
+                    &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
+                ));
+            }
+            other => {
+                return Err(scatterplot_error(
+                    format!("scatterplot: ax must be a scalar axes handle, got {other:?}"),
+                    &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
+                ));
+            }
         }
     };
     if !scalar.is_finite() || scalar <= 0.0 || scalar.fract() != 0.0 || scalar > (u64::MAX as f64) {
@@ -672,6 +688,14 @@ mod tests {
         for storage in all_integer_scalar_storages(2) {
             let value = Value::Tensor(poisoned_integer_tensor(storage, vec![1, 1]));
             assert_eq!(parse_nonnegative_integer(&value, "n").unwrap(), 2);
+        }
+    }
+
+    #[test]
+    fn scatterplot_axes_parser_reads_all_integer_storages_without_mirrors() {
+        for storage in all_integer_scalar_storages(1) {
+            let value = Value::Tensor(poisoned_integer_tensor(storage, vec![1, 1]));
+            assert!(parse_axes_handle(&value).is_err());
         }
     }
 
