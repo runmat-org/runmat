@@ -226,10 +226,7 @@ async fn range_selector_scalar_to_f64(value: &Value) -> Result<f64, RuntimeError
     match scalar {
         Value::Num(n) => Ok(n),
         Value::Int(i) => Ok(i.to_f64()),
-        Value::Tensor(t)
-            if t.data.len() == 1
-                && runmat_runtime::builtins::common::shape::is_scalar_shape(&t.shape) =>
-        {
+        Value::Tensor(t) if runmat_runtime::builtins::common::tensor::is_scalar_tensor(&t) => {
             Ok(tensor_value_f64(&t, 0))
         }
         _ => Err(crate::interpreter::errors::mex(
@@ -1054,7 +1051,9 @@ fn symbolic_scalar_from_value(value: &Value) -> Result<SymbolicExpr, RuntimeErro
         Value::Num(value) => Ok(SymbolicExpr::constant(*value)),
         Value::Int(value) => Ok(SymbolicExpr::constant(value.to_f64())),
         Value::Bool(value) => Ok(SymbolicExpr::constant(if *value { 1.0 } else { 0.0 })),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+        Value::Tensor(tensor)
+            if runmat_runtime::builtins::common::tensor::is_scalar_tensor(tensor) =>
+        {
             Ok(SymbolicExpr::constant(tensor_value_f64(tensor, 0)))
         }
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
@@ -2654,28 +2653,33 @@ mod tests {
     }
 
     #[test]
-    fn range_selector_scalar_to_f64_reads_typed_integer_storage_exactly() {
-        let mut tensor =
-            Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1])
-                .expect("typed integer scalar");
-        tensor.data[0] = 0.0;
+    fn typed_integer_scalar_range_and_symbolic_paths_ignore_f64_mirrors() {
+        macro_rules! assert_typed_scalar {
+            ($storage:expr, $expected:expr) => {{
+                let mut tensor =
+                    Tensor::new_integer($storage, vec![1, 1]).expect("typed integer scalar");
+                tensor.data.clear();
+                let value = Value::Tensor(tensor);
 
-        assert_eq!(
-            block_on(range_selector_scalar_to_f64(&Value::Tensor(tensor))).unwrap(),
-            9_007_199_254_740_992.0
-        );
-    }
+                assert_eq!(
+                    block_on(range_selector_scalar_to_f64(&value)).unwrap(),
+                    $expected
+                );
+                assert_eq!(
+                    symbolic_scalar_from_value(&value).unwrap(),
+                    SymbolicExpr::constant($expected)
+                );
+            }};
+        }
 
-    #[test]
-    fn symbolic_scalar_from_value_reads_typed_integer_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![42]), vec![1, 1])
-            .expect("typed integer scalar");
-        tensor.data[0] = 0.0;
-
-        assert_eq!(
-            symbolic_scalar_from_value(&Value::Tensor(tensor)).unwrap(),
-            SymbolicExpr::constant(42.0)
-        );
+        assert_typed_scalar!(IntegerStorage::I8(vec![-8]), -8.0);
+        assert_typed_scalar!(IntegerStorage::I16(vec![-16]), -16.0);
+        assert_typed_scalar!(IntegerStorage::I32(vec![-32]), -32.0);
+        assert_typed_scalar!(IntegerStorage::I64(vec![-64]), -64.0);
+        assert_typed_scalar!(IntegerStorage::U8(vec![8]), 8.0);
+        assert_typed_scalar!(IntegerStorage::U16(vec![16]), 16.0);
+        assert_typed_scalar!(IntegerStorage::U32(vec![32]), 32.0);
+        assert_typed_scalar!(IntegerStorage::U64(vec![64]), 64.0);
     }
 
     #[test]

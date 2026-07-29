@@ -6,7 +6,8 @@
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    IntValue, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -334,6 +335,13 @@ fn collect_file_ids(value: &Value) -> BuiltinResult<Vec<i32>> {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => Ok(vec![parse_scalar_fid(value)?]),
         Value::Tensor(t) => {
+            if let Some(storage) = t.integer_storage() {
+                return storage
+                    .exact_values()
+                    .iter()
+                    .map(parse_integer_fid)
+                    .collect();
+            }
             let mut ids = Vec::with_capacity(t.data.len());
             for n in tensor::tensor_values_f64(t) {
                 ids.push(parse_fid_from_f64(n)?);
@@ -371,12 +379,7 @@ fn collect_file_ids(value: &Value) -> BuiltinResult<Vec<i32>> {
 
 fn parse_scalar_fid(value: &Value) -> BuiltinResult<i32> {
     match value {
-        Value::Int(i) => i.try_to_i32().ok_or_else(|| {
-            fclose_error_with_detail(
-                &FCLOSE_ERROR_INVALID_INPUT,
-                "file identifier is out of range",
-            )
-        }),
+        Value::Int(i) => parse_integer_fid(i),
         Value::Num(n) => parse_fid_from_f64(*n),
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         _ => Err(fclose_error_with_detail(
@@ -384,6 +387,15 @@ fn parse_scalar_fid(value: &Value) -> BuiltinResult<i32> {
             "file identifier must be numeric or 'all'",
         )),
     }
+}
+
+fn parse_integer_fid(value: &IntValue) -> BuiltinResult<i32> {
+    value.try_to_i32().ok_or_else(|| {
+        fclose_error_with_detail(
+            &FCLOSE_ERROR_INVALID_INPUT,
+            "file identifier is out of range",
+        )
+    })
 }
 
 fn parse_fid_from_f64(value: f64) -> BuiltinResult<i32> {
@@ -626,6 +638,26 @@ pub(crate) mod tests {
             .expect("typed fid");
         too_large.data = vec![7.0];
         assert!(collect_file_ids(&Value::Tensor(too_large)).is_err());
+    }
+
+    #[test]
+    fn fclose_typed_identifier_tensors_ignore_poisoned_f64_mirrors() {
+        let classes = [
+            IntegerStorage::I8(vec![7]),
+            IntegerStorage::I16(vec![7]),
+            IntegerStorage::I32(vec![7]),
+            IntegerStorage::I64(vec![7]),
+            IntegerStorage::U8(vec![7]),
+            IntegerStorage::U16(vec![7]),
+            IntegerStorage::U32(vec![7]),
+            IntegerStorage::U64(vec![7]),
+        ];
+
+        for storage in classes {
+            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed fid");
+            tensor.data = vec![f64::NAN];
+            assert_eq!(collect_file_ids(&Value::Tensor(tensor)).unwrap(), vec![7]);
+        }
     }
 
     fn unique_path(prefix: &str) -> PathBuf {

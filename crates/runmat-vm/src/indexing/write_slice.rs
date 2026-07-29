@@ -1519,6 +1519,7 @@ mod tests {
         assign_complex_with_plan, assign_sparse_with_plan, assign_tensor_with_plan,
         build_complex_rhs_view, build_string_rhs_view, delete_gpu_slice_with_plan,
         delete_tensor_with_plan, integer_gpu_rhs_indices_for_plan, map_acceleration_error,
+        materialize_rhs_linear_real, materialize_rhs_nd_real,
     };
     use crate::indexing::plan::IndexPlan;
     use futures::executor::block_on;
@@ -1561,6 +1562,35 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(output.data, vec![4.0, 0.0, 9.0]);
+    }
+
+    #[test]
+    fn real_scalar_expansion_reads_all_typed_integer_classes_without_f64_mirrors() {
+        macro_rules! assert_scalar_expansion {
+            ($storage:expr, $expected:expr) => {{
+                let mut tensor = Tensor::new_integer($storage, vec![1, 1]).expect("scalar rhs");
+                tensor.data.clear();
+                let rhs = Value::Tensor(tensor);
+
+                assert_eq!(
+                    block_on(materialize_rhs_linear_real(&rhs, 3)).expect("linear expansion"),
+                    vec![$expected; 3]
+                );
+                assert_eq!(
+                    block_on(materialize_rhs_nd_real(&rhs, &[2, 2])).expect("nd expansion"),
+                    vec![$expected; 4]
+                );
+            }};
+        }
+
+        assert_scalar_expansion!(IntegerStorage::I8(vec![-8]), -8.0);
+        assert_scalar_expansion!(IntegerStorage::I16(vec![-16]), -16.0);
+        assert_scalar_expansion!(IntegerStorage::I32(vec![-32]), -32.0);
+        assert_scalar_expansion!(IntegerStorage::I64(vec![-64]), -64.0);
+        assert_scalar_expansion!(IntegerStorage::U8(vec![8]), 8.0);
+        assert_scalar_expansion!(IntegerStorage::U16(vec![16]), 16.0);
+        assert_scalar_expansion!(IntegerStorage::U32(vec![32]), 32.0);
+        assert_scalar_expansion!(IntegerStorage::U64(vec![64]), 64.0);
     }
 
     #[test]

@@ -31,11 +31,22 @@ mod tests {
     use runmat_builtins::{IntegerStorage, Tensor, Value};
 
     #[test]
-    fn value_to_f64_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor =
-            Tensor::new_integer(IntegerStorage::U16(vec![42]), vec![1, 1]).expect("scalar tensor");
-        tensor.data.clear();
+    fn value_to_f64_reads_all_typed_integer_tensor_classes_without_f64_mirrors() {
+        macro_rules! assert_typed_scalar {
+            ($storage:expr, $expected:expr) => {{
+                let mut tensor = Tensor::new_integer($storage, vec![1, 1]).expect("scalar tensor");
+                tensor.data.clear();
+                assert_eq!(value_to_f64(&Value::Tensor(tensor)).unwrap(), $expected);
+            }};
+        }
 
-        assert_eq!(value_to_f64(&Value::Tensor(tensor)).unwrap(), 42.0);
+        assert_typed_scalar!(IntegerStorage::I8(vec![-8]), -8.0);
+        assert_typed_scalar!(IntegerStorage::I16(vec![-16]), -16.0);
+        assert_typed_scalar!(IntegerStorage::I32(vec![-32]), -32.0);
+        assert_typed_scalar!(IntegerStorage::I64(vec![-64]), -64.0);
+        assert_typed_scalar!(IntegerStorage::U8(vec![8]), 8.0);
+        assert_typed_scalar!(IntegerStorage::U16(vec![16]), 16.0);
+        assert_typed_scalar!(IntegerStorage::U32(vec![32]), 32.0);
+        assert_typed_scalar!(IntegerStorage::U64(vec![64]), 64.0);
     }
 }

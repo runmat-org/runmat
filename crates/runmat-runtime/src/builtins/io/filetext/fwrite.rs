@@ -1226,6 +1226,27 @@ pub(crate) mod tests {
         assert!(parse_skip(Some(&Value::Tensor(too_large))).is_err());
     }
 
+    #[test]
+    fn fwrite_typed_scalar_parameters_ignore_poisoned_f64_mirrors() {
+        let classes = [
+            IntegerStorage::I8(vec![7]),
+            IntegerStorage::I16(vec![7]),
+            IntegerStorage::I32(vec![7]),
+            IntegerStorage::I64(vec![7]),
+            IntegerStorage::U8(vec![7]),
+            IntegerStorage::U16(vec![7]),
+            IntegerStorage::U32(vec![7]),
+            IntegerStorage::U64(vec![7]),
+        ];
+        for storage in classes {
+            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed scalar");
+            tensor.data = vec![f64::NAN];
+            let value = Value::Tensor(tensor);
+            assert_eq!(parse_fid(&value).unwrap(), 7);
+            assert_eq!(parse_skip(Some(&value)).unwrap(), 7);
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fwrite_default_uint8_bytes() {

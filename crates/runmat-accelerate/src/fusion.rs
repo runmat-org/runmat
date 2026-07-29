@@ -1386,7 +1386,12 @@ impl FusionGroupPlan {
         // - Elementwise: require WGSL generation at plan time.
         // - Reduction: require WGSL generation at plan time as well.
         // - Other kinds: executed via provider paths.
-        let supported = if plan.kernel.kind.is_elementwise() {
+        let supported = if plan.has_native_integer_constants() {
+            // Fusion WGSL has only floating scalar literals today.  Do not let
+            // integer constants reach generation, where they would be rounded
+            // while formatting an f32/f64 literal.
+            false
+        } else if plan.kernel.kind.is_elementwise() {
             // Keep scalar ops on the VM/runtime scalar path. Fusing scalar elementwise
             // spans can materialize scalar GPU handles that later leak into scalar-only
             // VM coercion boundaries.
@@ -1818,12 +1823,7 @@ impl FusionGroupPlan {
                     Value::Num(n) if *n >= 1.0 => {
                         axis = (*n as usize).saturating_sub(1);
                     }
-                    Value::Int(i) => {
-                        let val = i.to_f64();
-                        if val >= 1.0 {
-                            axis = (val as usize).saturating_sub(1);
-                        }
-                    }
+                    Value::Int(_) => return None,
                     _ => {}
                 }
             }
@@ -1835,13 +1835,7 @@ impl FusionGroupPlan {
                         axis = (*n as usize).saturating_sub(1);
                         break;
                     }
-                    Value::Int(i) => {
-                        let val = i.to_f64();
-                        if val >= 1.0 {
-                            axis = (val as usize).saturating_sub(1);
-                            break;
-                        }
-                    }
+                    Value::Int(_) => return None,
                     _ => {}
                 }
             }
@@ -1871,14 +1865,7 @@ impl FusionGroupPlan {
                         format!("{:?}", *n as f32)
                     }
                 }
-                Value::Int(i) => {
-                    let f = i.to_f64();
-                    if scalar_ty == "f64" {
-                        format!("f64({})", f)
-                    } else {
-                        format!("{:?}", f as f32)
-                    }
-                }
+                Value::Int(_) => return None,
                 Value::Tensor(t) if t.data.len() == 1 => {
                     let scalar = t.data[0];
                     if scalar_ty == "f64" {
@@ -2152,7 +2139,7 @@ fn detect_centered_gram(
         };
         let denom_const = match &denom_info.constant {
             Some(Value::Num(v)) => Some(*v),
-            Some(Value::Int(i)) => Some(i.to_f64()),
+            Some(Value::Int(_)) => None,
             _ => None,
         };
         if denom_const.is_some_and(|v| v == 0.0) {
@@ -2885,7 +2872,9 @@ fn resolve_scalar_constant(graph: &AccelGraph, vid: ValueId) -> Option<f64> {
 fn value_info_scalar(info: &ValueInfo) -> Option<f64> {
     match &info.constant {
         Some(Value::Num(v)) => Some(*v),
-        Some(Value::Int(i)) => Some(i.to_f64()),
+        // Float fusion pattern matching must not establish eligibility by
+        // rounding a native integer scalar.
+        Some(Value::Int(_)) => None,
         Some(Value::Tensor(t)) if t.data.len() == 1 => Some(t.data[0]),
         Some(Value::LogicalArray(arr)) if arr.data.len() == 1 => Some(arr.data[0] as f64),
         Some(Value::Bool(flag)) => Some(if *flag { 1.0 } else { 0.0 }),
@@ -3217,7 +3206,7 @@ fn resolve_numeric_vector_constant(graph: &AccelGraph, vid: ValueId) -> Option<V
                 .collect(),
         ),
         Some(Value::Bool(flag)) => Some(vec![if *flag { 1.0 } else { 0.0 }]),
-        Some(Value::Int(iv)) => Some(vec![iv.to_f64()]),
+        Some(Value::Int(_)) => None,
         Some(Value::Num(num)) => Some(vec![*num]),
         _ => None,
     }
@@ -3514,7 +3503,7 @@ mod tests {
         AccelGraph, AccelGraphTag, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan,
         PrimitiveOp, ValueId, ValueInfo, ValueOrigin, VarKind,
     };
-    use runmat_builtins::{Type, Value};
+    use runmat_builtins::{IntValue, Type, Value};
     use std::collections::HashMap as StdHashMap;
 
     fn simple_elementwise_graph() -> AccelGraph {
@@ -3769,6 +3758,29 @@ mod tests {
         let wgsl = group_plan.generate_wgsl("f32").expect("wgsl");
         assert!(wgsl.contains("@compute"));
         assert!(group_plan.group.element_count().is_some());
+    }
+
+    #[test]
+    fn wide_integer_constant_declines_float_fusion_before_wgsl_generation() {
+        let mut graph = simple_elementwise_graph();
+        let wide = u64::MAX;
+        let poisoned_f64_mirror = wide as f64;
+        assert_eq!(poisoned_f64_mirror, (wide - 1) as f64);
+        graph.values.push(ValueInfo {
+            id: 3,
+            origin: ValueOrigin::Constant,
+            ty: Type::Num,
+            shape: ShapeInfo::Scalar,
+            constant: Some(Value::Int(IntValue::U64(wide))),
+        });
+        graph.nodes[0].inputs = vec![0, 3];
+
+        let groups = detect_fusion_groups(&graph);
+        let plan = FusionPlan::from_graph(&graph, &groups);
+        let group = &plan.groups[0];
+        assert!(group.has_native_integer_constants());
+        assert!(!group.kernel.supported);
+        assert!(group.generate_wgsl("f32").is_none());
     }
 
     #[test]

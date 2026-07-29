@@ -2228,6 +2228,19 @@ pub(crate) mod tests {
         tensor
     }
 
+    fn integer_storage_in_same_class(storage: &IntegerStorage, value: i64) -> IntegerStorage {
+        match storage {
+            IntegerStorage::I8(_) => IntegerStorage::I8(vec![value as i8]),
+            IntegerStorage::I16(_) => IntegerStorage::I16(vec![value as i16]),
+            IntegerStorage::I32(_) => IntegerStorage::I32(vec![value as i32]),
+            IntegerStorage::I64(_) => IntegerStorage::I64(vec![value]),
+            IntegerStorage::U8(_) => IntegerStorage::U8(vec![value as u8]),
+            IntegerStorage::U16(_) => IntegerStorage::U16(vec![value as u16]),
+            IntegerStorage::U32(_) => IntegerStorage::U32(vec![value as u32]),
+            IntegerStorage::U64(_) => IntegerStorage::U64(vec![value as u64]),
+        }
+    }
+
     fn expect_tensor(value: Value) -> Tensor {
         match value {
             Value::Tensor(tensor) => tensor,
@@ -2265,6 +2278,38 @@ pub(crate) mod tests {
         );
         assert_eq!(sparse.shape(), vec![large as usize, 1]);
         assert_eq!(sparse.nnz(), 0);
+    }
+
+    #[test]
+    fn sparse_triplet_structural_args_read_all_integer_storage_classes() {
+        let classes = [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+
+        for index in classes {
+            let dimension = integer_storage_in_same_class(&index, 2);
+            let count = integer_storage_in_same_class(&index, 0);
+            let sparse = expect_sparse(
+                sparse_builtin(vec![
+                    Value::Tensor(poisoned_integer_tensor(index.clone(), vec![1, 1])),
+                    Value::Tensor(poisoned_integer_tensor(index, vec![1, 1])),
+                    Value::Num(0.0),
+                    Value::Tensor(poisoned_integer_tensor(dimension.clone(), vec![1, 1])),
+                    Value::Tensor(poisoned_integer_tensor(dimension, vec![1, 1])),
+                    Value::Tensor(poisoned_integer_tensor(count, vec![1, 1])),
+                ])
+                .expect("sparse typed structural arguments"),
+            );
+            assert_eq!(sparse.shape(), vec![2, 2]);
+            assert_eq!(sparse.nnz(), 0);
+        }
     }
 
     #[test]

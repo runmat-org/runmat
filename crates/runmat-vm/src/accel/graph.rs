@@ -144,7 +144,13 @@ impl<'a> GraphBuilder<'a> {
                         let info = &self.values[id as usize];
                         let val = match &info.constant {
                             Some(Value::Num(n)) => *n,
-                            Some(Value::Int(i)) => i.to_f64(),
+                            // A Tensor constant has f64 storage.  Keep native
+                            // integer literals out of this acceleration-only
+                            // fold instead of silently rounding them.
+                            Some(Value::Int(_)) => {
+                                elems.clear();
+                                break;
+                            }
                             _ => {
                                 elems.clear();
                                 break;
@@ -233,15 +239,13 @@ impl<'a> GraphBuilder<'a> {
                                 return;
                             }
                         }
-                        Some(Value::Int(i)) => {
-                            let v = i.to_i64();
-                            if v >= 0 {
-                                v as usize
-                            } else {
+                        Some(Value::Int(i)) => match i.try_to_usize() {
+                            Some(v) => v,
+                            None => {
                                 self.reset_stack();
                                 return;
                             }
-                        }
+                        },
                         _ => {
                             self.reset_stack();
                             return;
@@ -265,7 +269,10 @@ impl<'a> GraphBuilder<'a> {
                             let info = &self.values[id as usize];
                             match &info.constant {
                                 Some(Value::Num(n)) => row_values.push(*n),
-                                Some(Value::Int(i)) => row_values.push(i.to_f64()),
+                                Some(Value::Int(_)) => {
+                                    all_numeric = false;
+                                    row_values.push(0.0);
+                                }
                                 _ => {
                                     all_numeric = false;
                                     row_values.push(0.0);
@@ -876,14 +883,13 @@ impl<'a> GraphBuilder<'a> {
                     }
                     break;
                 }
-                Some(Value::Int(i)) => {
-                    let v = i.to_i64();
-                    if v >= 0 {
-                        dims.push(Some(v as usize));
+                Some(Value::Int(i)) => match i.try_to_usize() {
+                    Some(v) => {
+                        dims.push(Some(v));
                         continue;
                     }
-                    break;
-                }
+                    None => break,
+                },
                 Some(Value::String(_)) => break,
                 _ => break,
             }
@@ -1047,7 +1053,9 @@ impl<'a> GraphBuilder<'a> {
         };
         let folded = match constant {
             Value::Num(n) => Some(Value::Num((*n as f32) as f64)),
-            Value::Int(i) => Some(Value::Num((i.to_f64() as f32) as f64)),
+            // Preserve the runtime conversion semantics for integer inputs;
+            // graph folding has no native f32 integer representation.
+            Value::Int(_) => None,
             Value::Bool(flag) => Some(Value::Num(if *flag { 1.0f32 } else { 0.0f32 } as f64)),
             _ => None,
         };
@@ -1112,6 +1120,37 @@ fn primitive_tags(op: PrimitiveOp) -> Vec<AccelGraphTag> {
 mod tests {
     use super::*;
     use crate::instr::Instr;
+    use runmat_builtins::IntValue;
+
+    #[test]
+    fn graph_folding_declines_wide_integer_scalars() {
+        for constant in [
+            Value::Int(IntValue::I64(i64::MAX)),
+            Value::Int(IntValue::U64(u64::MAX)),
+        ] {
+            let mut builder = GraphBuilder::new(&[], &[]);
+            let input = builder.new_value(ValueOrigin::Constant, Type::Num, Some(constant));
+            let output = builder.new_value(ValueOrigin::Constant, Type::Num, None);
+
+            builder.maybe_fold_builtin_constant("single", &[input], output);
+            assert!(builder.values[output as usize].constant.is_none());
+        }
+    }
+
+    #[test]
+    fn graph_shape_inference_rejects_negative_integer_dimension() {
+        let mut builder = GraphBuilder::new(&[], &[]);
+        let dimension = builder.new_value(
+            ValueOrigin::Constant,
+            Type::Num,
+            Some(Value::Int(IntValue::I64(-1))),
+        );
+
+        assert_eq!(
+            builder.infer_array_constructor_from_tags(&[dimension]),
+            None
+        );
+    }
 
     #[test]
     fn accel_graph_mul_uses_matmul_shape() {

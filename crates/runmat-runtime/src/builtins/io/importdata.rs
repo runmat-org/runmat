@@ -793,6 +793,26 @@ mod tests {
         assert!(parse_header_lines(&Value::Num(1.0e300)).is_err());
     }
 
+    #[test]
+    fn importdata_headerlines_typed_integer_tensors_ignore_poisoned_f64_mirrors() {
+        let classes = [
+            runmat_builtins::IntegerStorage::I8(vec![2]),
+            runmat_builtins::IntegerStorage::I16(vec![2]),
+            runmat_builtins::IntegerStorage::I32(vec![2]),
+            runmat_builtins::IntegerStorage::I64(vec![2]),
+            runmat_builtins::IntegerStorage::U8(vec![2]),
+            runmat_builtins::IntegerStorage::U16(vec![2]),
+            runmat_builtins::IntegerStorage::U32(vec![2]),
+            runmat_builtins::IntegerStorage::U64(vec![2]),
+        ];
+
+        for storage in classes {
+            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("header lines");
+            tensor.data = vec![f64::NAN];
+            assert_eq!(parse_header_lines(&Value::Tensor(tensor)).unwrap(), 2);
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn importdata_detects_csv_header_and_colheaders() {

@@ -530,6 +530,30 @@ pub(crate) mod tests {
         assert!(futures::executor::block_on(parse_nchar(&[Value::Int(IntValue::I8(-1))])).is_err());
     }
 
+    #[test]
+    fn fgets_typed_scalar_parameters_ignore_poisoned_f64_mirrors() {
+        let classes = [
+            IntegerStorage::I8(vec![7]),
+            IntegerStorage::I16(vec![7]),
+            IntegerStorage::I32(vec![7]),
+            IntegerStorage::I64(vec![7]),
+            IntegerStorage::U8(vec![7]),
+            IntegerStorage::U16(vec![7]),
+            IntegerStorage::U32(vec![7]),
+            IntegerStorage::U64(vec![7]),
+        ];
+        for storage in classes {
+            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed scalar");
+            tensor.data = vec![f64::NAN];
+            let value = Value::Tensor(tensor);
+            assert_eq!(parse_fid(&value).unwrap(), 7);
+            assert_eq!(
+                futures::executor::block_on(parse_nchar(&[value])).unwrap(),
+                Some(7)
+            );
+        }
+    }
+
     fn unique_path(prefix: &str) -> PathBuf {
         let now = system_time_now()
             .duration_since(UNIX_EPOCH)
