@@ -62,6 +62,28 @@ impl AccelProvider for WgpuProvider {
     fn zeros_like(&self, prototype: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         self.zeros_exec(&prototype.shape)
     }
+
+    fn zeros_integer_like(
+        &self,
+        prototype: &GpuTensorHandle,
+        shape: &[usize],
+    ) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry_raw(prototype)?;
+        let element_type = entry.integer_type.ok_or_else(|| {
+            anyhow::anyhow!("zeros_integer_like requires a native integer gpuArray prototype")
+        })?;
+        anyhow::ensure!(
+            entry.storage == GpuTensorStorage::Real,
+            "zeros_integer_like does not support complex integer gpuArray buffers"
+        );
+        let len = shape.iter().try_fold(1usize, |total, &dim| {
+            total
+                .checked_mul(dim)
+                .ok_or_else(|| anyhow::anyhow!("zeros_integer_like: tensor size overflow"))
+        })?;
+        integer::identity_integer_buffer(self, element_type, len, shape, false)
+    }
+
     fn precision(&self) -> ProviderPrecision {
         self.provider_precision_exec()
     }

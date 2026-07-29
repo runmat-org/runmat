@@ -4572,6 +4572,33 @@ impl AccelProvider for InProcessProvider {
         self.zeros(&prototype.shape)
     }
 
+    fn zeros_integer_like(
+        &self,
+        prototype: &GpuTensorHandle,
+        shape: &[usize],
+    ) -> Result<GpuTensorHandle> {
+        let element_type =
+            runmat_accelerate_api::handle_integer_type(prototype).ok_or_else(|| {
+                anyhow!("zeros_integer_like requires a native integer gpuArray prototype")
+            })?;
+        let len = shape.iter().try_fold(1usize, |total, &dim| {
+            total
+                .checked_mul(dim)
+                .ok_or_else(|| anyhow!("zeros_integer_like: tensor size overflow"))
+        })?;
+        let data = match element_type {
+            IntegerElementType::I8 => HostIntegerDataOwned::I8(vec![0; len]),
+            IntegerElementType::I16 => HostIntegerDataOwned::I16(vec![0; len]),
+            IntegerElementType::I32 => HostIntegerDataOwned::I32(vec![0; len]),
+            IntegerElementType::I64 => HostIntegerDataOwned::I64(vec![0; len]),
+            IntegerElementType::U8 => HostIntegerDataOwned::U8(vec![0; len]),
+            IntegerElementType::U16 => HostIntegerDataOwned::U16(vec![0; len]),
+            IntegerElementType::U32 => HostIntegerDataOwned::U32(vec![0; len]),
+            IntegerElementType::U64 => HostIntegerDataOwned::U64(vec![0; len]),
+        };
+        Ok(self.allocate_integer_tensor(data, shape.to_vec()))
+    }
+
     fn ones(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
         let len: usize = shape.iter().copied().product();
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);

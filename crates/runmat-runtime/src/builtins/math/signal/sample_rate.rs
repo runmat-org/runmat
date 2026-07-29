@@ -1202,8 +1202,12 @@ fn upsample_gpu(
     else {
         return Ok(None);
     };
-    let storage = runmat_accelerate_api::handle_storage(handle);
-    let output = match provider.zeros_with_storage(&output_shape, storage) {
+    let allocation = match runmat_accelerate_api::handle_integer_type(handle) {
+        Some(_) => provider.zeros_integer_like(handle, &output_shape),
+        None => provider
+            .zeros_with_storage(&output_shape, runmat_accelerate_api::handle_storage(handle)),
+    };
+    let output = match allocation {
         Ok(output) => output,
         Err(_) => return Ok(None),
     };
@@ -1798,6 +1802,38 @@ mod tests {
             assert_eq!(gathered.shape, vec![4, 2]);
             assert_eq!(gathered.data, vec![0.0, 1.0, 0.0, 2.0, 0.0, 3.0, 0.0, 4.0]);
             let _ = provider.free(&handle);
+        });
+    }
+
+    #[test]
+    fn upsample_gpu_preserves_poisoned_uint64_storage_without_host_download() {
+        test_support::with_test_provider(|provider| {
+            let mut input =
+                Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]), vec![1, 2])
+                    .expect("native uint64 input");
+            input.data.fill(f64::NAN);
+            let handle = gpu_helpers::upload_tensor(provider, &input)
+                .expect("upload native uint64 input without mirror materialization");
+            provider.reset_telemetry();
+
+            let out = call_upsample(vec![Value::GpuTensor(handle.clone()), Value::Num(2.0)]);
+            let Value::GpuTensor(out_handle) = out else {
+                panic!("expected resident native integer gpu tensor");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&out_handle),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+            let gathered = test_support::gather(Value::GpuTensor(out_handle.clone()))
+                .expect("gather native integer output");
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![1_u64 << 63, 0, u64::MAX, 0]))
+            );
+            provider.free(&handle).expect("free input");
+            provider.free(&out_handle).expect("free output");
         });
     }
 

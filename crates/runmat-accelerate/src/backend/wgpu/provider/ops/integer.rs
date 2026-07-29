@@ -26,7 +26,7 @@ fn integer_word_count(element_type: IntegerElementType, len: usize) -> Result<us
         .ok_or_else(|| anyhow!("integer gpuArray word count overflow"))
 }
 
-fn identity_integer_buffer(
+pub(crate) fn identity_integer_buffer(
     provider: &WgpuProvider,
     element_type: IntegerElementType,
     len: usize,

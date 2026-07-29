@@ -1557,6 +1557,19 @@ pub trait AccelProvider: Send + Sync {
         self.zeros(&prototype.shape)
     }
 
+    /// Allocate an exact native-integer zero buffer using the element class of
+    /// `prototype`. Implementations must reject non-native-integer prototypes
+    /// rather than allocating a floating compatibility buffer.
+    fn zeros_integer_like(
+        &self,
+        _prototype: &GpuTensorHandle,
+        _shape: &[usize],
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!(
+            "zeros_integer_like not supported by provider"
+        ))
+    }
+
     /// Allocate a tensor filled with a constant value on the device.
     fn fill(&self, shape: &[usize], value: f64) -> anyhow::Result<GpuTensorHandle> {
         if value == 0.0 {
