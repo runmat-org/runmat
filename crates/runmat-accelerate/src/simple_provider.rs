@@ -2633,12 +2633,12 @@ fn states_to_column_major(
     out
 }
 
-fn permute_data(
-    data: &[f64],
+fn permute_data<T: Copy + Default>(
+    data: &[T],
     shape: &[usize],
     order: &[usize],
     lane_factor: usize,
-) -> Result<(Vec<f64>, Vec<usize>)> {
+) -> Result<(Vec<T>, Vec<usize>)> {
     ensure!(!order.is_empty(), "permute: order must not be empty");
     ensure!(lane_factor > 0, "permute: lane factor must be positive");
     let rank = order.len();
@@ -2700,7 +2700,7 @@ fn permute_data(
     let kernel_rank = kernel_order.len();
     let src_strides = compute_strides(&kernel_src_shape);
     let dst_total = product(&kernel_dst_shape);
-    let mut out = vec![0.0f64; dst_total];
+    let mut out = vec![T::default(); dst_total];
     let mut dst_coords = vec![0usize; kernel_rank];
     let mut src_coords = vec![0usize; kernel_rank];
 
@@ -2727,7 +2727,30 @@ fn permute_data(
     Ok((out, dst_shape))
 }
 
-fn flip_data(data: &[f64], shape: &[usize], axes: &[usize]) -> Result<Vec<f64>> {
+fn permute_integer_data(
+    data: &HostIntegerDataOwned,
+    shape: &[usize],
+    order: &[usize],
+) -> Result<(HostIntegerDataOwned, Vec<usize>)> {
+    macro_rules! permute {
+        ($values:expr, $kind:ident) => {
+            permute_data($values, shape, order, 1)
+                .map(|(values, shape)| (HostIntegerDataOwned::$kind(values), shape))
+        };
+    }
+    match data {
+        HostIntegerDataOwned::I8(values) => permute!(values, I8),
+        HostIntegerDataOwned::I16(values) => permute!(values, I16),
+        HostIntegerDataOwned::I32(values) => permute!(values, I32),
+        HostIntegerDataOwned::I64(values) => permute!(values, I64),
+        HostIntegerDataOwned::U8(values) => permute!(values, U8),
+        HostIntegerDataOwned::U16(values) => permute!(values, U16),
+        HostIntegerDataOwned::U32(values) => permute!(values, U32),
+        HostIntegerDataOwned::U64(values) => permute!(values, U64),
+    }
+}
+
+fn flip_data<T: Copy>(data: &[T], shape: &[usize], axes: &[usize]) -> Result<Vec<T>> {
     if axes.is_empty() || data.is_empty() {
         return Ok(data.to_vec());
     }
@@ -2766,6 +2789,28 @@ fn flip_data(data: &[f64], shape: &[usize], axes: &[usize]) -> Result<Vec<f64>> 
         out.push(data[src_idx]);
     }
     Ok(out)
+}
+
+fn flip_integer_data(
+    data: &HostIntegerDataOwned,
+    shape: &[usize],
+    axes: &[usize],
+) -> Result<HostIntegerDataOwned> {
+    macro_rules! flip {
+        ($values:expr, $kind:ident) => {
+            flip_data($values, shape, axes).map(HostIntegerDataOwned::$kind)
+        };
+    }
+    match data {
+        HostIntegerDataOwned::I8(values) => flip!(values, I8),
+        HostIntegerDataOwned::I16(values) => flip!(values, I16),
+        HostIntegerDataOwned::I32(values) => flip!(values, I32),
+        HostIntegerDataOwned::I64(values) => flip!(values, I64),
+        HostIntegerDataOwned::U8(values) => flip!(values, U8),
+        HostIntegerDataOwned::U16(values) => flip!(values, U16),
+        HostIntegerDataOwned::U32(values) => flip!(values, U32),
+        HostIntegerDataOwned::U64(values) => flip!(values, U64),
+    }
 }
 
 fn conv1d_output_shape(len: usize, orientation: ProviderConvOrientation) -> Vec<usize> {
@@ -3074,7 +3119,11 @@ fn triu_data(data: &[f64], shape: &[usize], offset: isize) -> Result<Vec<f64>> {
     Ok(out)
 }
 
-fn circshift_data(data: &[f64], shape: &[usize], shifts: &[isize]) -> Result<Vec<f64>> {
+fn circshift_data<T: Copy + Default>(
+    data: &[T],
+    shape: &[usize],
+    shifts: &[isize],
+) -> Result<Vec<T>> {
     ensure!(
         shape.len() == shifts.len(),
         "circshift: shift vector length must match tensor rank"
@@ -3113,7 +3162,7 @@ fn circshift_data(data: &[f64], shape: &[usize], shifts: &[isize]) -> Result<Vec
     }
 
     let strides = compute_strides(shape);
-    let mut out = vec![0.0f64; data.len()];
+    let mut out = vec![T::default(); data.len()];
     for (idx, out_value) in out.iter_mut().enumerate() {
         let coords = unravel_index(idx, shape);
         let mut src_idx = 0usize;
@@ -3131,6 +3180,28 @@ fn circshift_data(data: &[f64], shape: &[usize], shifts: &[isize]) -> Result<Vec
         *out_value = data[src_idx];
     }
     Ok(out)
+}
+
+fn circshift_integer_data(
+    data: &HostIntegerDataOwned,
+    shape: &[usize],
+    shifts: &[isize],
+) -> Result<HostIntegerDataOwned> {
+    macro_rules! circshift {
+        ($values:expr, $kind:ident) => {
+            circshift_data($values, shape, shifts).map(HostIntegerDataOwned::$kind)
+        };
+    }
+    match data {
+        HostIntegerDataOwned::I8(values) => circshift!(values, I8),
+        HostIntegerDataOwned::I16(values) => circshift!(values, I16),
+        HostIntegerDataOwned::I32(values) => circshift!(values, I32),
+        HostIntegerDataOwned::I64(values) => circshift!(values, I64),
+        HostIntegerDataOwned::U8(values) => circshift!(values, U8),
+        HostIntegerDataOwned::U16(values) => circshift!(values, U16),
+        HostIntegerDataOwned::U32(values) => circshift!(values, U32),
+        HostIntegerDataOwned::U64(values) => circshift!(values, U64),
+    }
 }
 
 fn unravel_index(mut index: usize, shape: &[usize]) -> Vec<usize> {
@@ -3165,7 +3236,11 @@ fn checked_total(shape: &[usize]) -> Result<usize> {
     })
 }
 
-fn repmat_numeric(data: &[f64], shape: &[usize], reps: &[usize]) -> Result<(Vec<f64>, Vec<usize>)> {
+fn repmat_numeric<T: Copy>(
+    data: &[T],
+    shape: &[usize],
+    reps: &[usize],
+) -> Result<(Vec<T>, Vec<usize>)> {
     ensure!(
         !reps.is_empty(),
         "repmat: replication factors must be specified"
@@ -3232,6 +3307,29 @@ fn repmat_numeric(data: &[f64], shape: &[usize], reps: &[usize]) -> Result<(Vec<
         out.push(data[src_index]);
     }
     Ok((out, new_shape))
+}
+
+fn repmat_integer_data(
+    data: &HostIntegerDataOwned,
+    shape: &[usize],
+    reps: &[usize],
+) -> Result<(HostIntegerDataOwned, Vec<usize>)> {
+    macro_rules! repmat {
+        ($values:expr, $kind:ident) => {
+            repmat_numeric($values, shape, reps)
+                .map(|(values, shape)| (HostIntegerDataOwned::$kind(values), shape))
+        };
+    }
+    match data {
+        HostIntegerDataOwned::I8(values) => repmat!(values, I8),
+        HostIntegerDataOwned::I16(values) => repmat!(values, I16),
+        HostIntegerDataOwned::I32(values) => repmat!(values, I32),
+        HostIntegerDataOwned::I64(values) => repmat!(values, I64),
+        HostIntegerDataOwned::U8(values) => repmat!(values, U8),
+        HostIntegerDataOwned::U16(values) => repmat!(values, U16),
+        HostIntegerDataOwned::U32(values) => repmat!(values, U32),
+        HostIntegerDataOwned::U64(values) => repmat!(values, U64),
+    }
 }
 
 fn repmat_complex_interleaved(
@@ -7636,6 +7734,21 @@ impl AccelProvider for InProcessProvider {
         })
     }
     fn permute(&self, handle: &GpuTensorHandle, order: &[usize]) -> Result<GpuTensorHandle> {
+        if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+            let data = integer_registry()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&handle.buffer_id)
+                .cloned()
+                .ok_or_else(|| {
+                    anyhow!(
+                        "permute: unknown integer tensor handle {}",
+                        handle.buffer_id
+                    )
+                })?;
+            let (permuted, new_shape) = permute_integer_data(&data, &handle.shape, order)?;
+            return Ok(self.allocate_integer_tensor(permuted, new_shape));
+        }
         let storage = runmat_accelerate_api::handle_storage(handle);
         let lane_factor = match storage {
             GpuTensorStorage::Real => 1usize,
@@ -7653,6 +7766,21 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn flip(&self, handle: &GpuTensorHandle, axes: &[usize]) -> Result<GpuTensorHandle> {
+        if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+            let data = integer_registry()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&handle.buffer_id)
+                .cloned()
+                .ok_or_else(|| {
+                    anyhow!("flip: unknown integer tensor handle {}", handle.buffer_id)
+                })?;
+            return Ok(self.allocate_integer_tensor(
+                flip_integer_data(&data, &handle.shape, axes)?,
+                handle.shape.clone(),
+            ));
+        }
+        let storage = runmat_accelerate_api::handle_storage(handle);
         let data = {
             let guard = registry().lock().unwrap();
             guard
@@ -7661,10 +7789,33 @@ impl AccelProvider for InProcessProvider {
                 .clone()
         };
         let flipped = flip_data(&data, &handle.shape, axes)?;
-        Ok(self.allocate_tensor(flipped, handle.shape.clone()))
+        Ok(self.allocate_tensor_with_storage(flipped, handle.shape.clone(), storage))
     }
 
     fn circshift(&self, handle: &GpuTensorHandle, shifts: &[isize]) -> Result<GpuTensorHandle> {
+        if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+            let data = integer_registry()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&handle.buffer_id)
+                .cloned()
+                .ok_or_else(|| {
+                    anyhow!(
+                        "circshift: unknown integer tensor handle {}",
+                        handle.buffer_id
+                    )
+                })?;
+            let mut shape = handle.shape.clone();
+            if shifts.len() > shape.len() {
+                shape.extend(std::iter::repeat_n(1, shifts.len() - shape.len()));
+            }
+            let mut full_shifts = vec![0isize; shape.len()];
+            full_shifts[..shifts.len()].copy_from_slice(shifts);
+            return Ok(self.allocate_integer_tensor(
+                circshift_integer_data(&data, &shape, &full_shifts)?,
+                shape,
+            ));
+        }
         let data = {
             let guard = registry().lock().unwrap();
             guard
@@ -7915,6 +8066,18 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn repmat(&self, handle: &GpuTensorHandle, reps: &[usize]) -> Result<GpuTensorHandle> {
+        if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+            let data = integer_registry()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&handle.buffer_id)
+                .cloned()
+                .ok_or_else(|| {
+                    anyhow!("repmat: unknown integer tensor handle {}", handle.buffer_id)
+                })?;
+            let (tiled, shape) = repmat_integer_data(&data, &handle.shape, reps)?;
+            return Ok(self.allocate_integer_tensor(tiled, shape));
+        }
         let data = {
             let guard = registry().lock().unwrap();
             guard
@@ -10059,6 +10222,56 @@ mod tests {
         assert_eq!(
             runmat_accelerate_api::handle_integer_type(&prod),
             Some(runmat_accelerate_api::IntegerElementType::I8)
+        );
+    }
+
+    #[test]
+    fn inprocess_integer_shape_moves_stay_exact_and_out_of_f64_registry() {
+        let provider = InProcessProvider::new();
+        let input = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&[
+                    u64::MAX,
+                    (1_u64 << 63) + 1,
+                    (1_u64 << 63) + 3,
+                    7,
+                ]),
+                shape: &[2, 2],
+            })
+            .expect("upload exact uint64");
+
+        let permuted = provider.permute(&input, &[1, 0]).expect("permute");
+        let flipped = provider.flip(&permuted, &[0]).expect("flip");
+        let shifted = provider.circshift(&flipped, &[1, 0]).expect("circshift");
+        let tiled = provider.repmat(&shifted, &[1, 2]).expect("repmat");
+
+        for handle in [&permuted, &flipped, &shifted, &tiled] {
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(handle),
+                Some(IntegerElementType::U64)
+            );
+            assert!(
+                !registry().lock().unwrap().contains_key(&handle.buffer_id),
+                "integer shape operation must not allocate an f64 mirror"
+            );
+        }
+        assert_eq!(permuted.shape, vec![2, 2]);
+        assert_eq!(shifted.shape, vec![2, 2]);
+        assert_eq!(tiled.shape, vec![2, 4]);
+        assert_eq!(
+            block_on(provider.download_integer(&tiled))
+                .expect("download exact uint64 shape result")
+                .data,
+            HostIntegerDataOwned::U64(vec![
+                u64::MAX,
+                (1_u64 << 63) + 3,
+                (1_u64 << 63) + 1,
+                7,
+                u64::MAX,
+                (1_u64 << 63) + 3,
+                (1_u64 << 63) + 1,
+                7
+            ])
         );
     }
 
