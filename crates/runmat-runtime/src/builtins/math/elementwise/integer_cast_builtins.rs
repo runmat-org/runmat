@@ -253,7 +253,10 @@ define_integer_cast_builtin!(
 mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_accelerate_api::{HostIntegerDataOwned, HostTensorView, IntegerElementType};
+    use runmat_accelerate_api::{
+        AccelProvider, HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView,
+        HostTensorView, IntegerElementType,
+    };
     use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, Tensor, Value};
 
     #[test]
@@ -359,6 +362,56 @@ mod tests {
                 HostIntegerDataOwned::U64(vec![0, 4])
             );
         });
+    }
+
+    #[test]
+    fn integer_cast_gpu_dispatch_uses_input_handle_owner() {
+        let _guard = test_support::accel_test_lock();
+        let provider_a: &'static runmat_accelerate::simple_provider::InProcessProvider = Box::leak(
+            Box::new(runmat_accelerate::simple_provider::InProcessProvider::new()),
+        );
+        let provider_b: &'static runmat_accelerate::simple_provider::InProcessProvider = Box::leak(
+            Box::new(runmat_accelerate::simple_provider::InProcessProvider::new()),
+        );
+        unsafe {
+            runmat_accelerate_api::register_provider(provider_a);
+            runmat_accelerate_api::register_provider(provider_b);
+        }
+        let _current = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider_b));
+
+        let input = provider_a
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&[0, 1_u64 << 63, u64::MAX]),
+                shape: &[1, 3],
+            })
+            .expect("upload provider-a integer");
+        assert_eq!(input.device_id, provider_a.device_id());
+        assert_eq!(
+            runmat_accelerate_api::provider()
+                .expect("current provider")
+                .device_id(),
+            provider_b.device_id()
+        );
+
+        let output = block_on(super::int64::int64_builtin(
+            Value::GpuTensor(input),
+            Vec::new(),
+        ))
+        .expect("int64 GPU conversion");
+        let Value::GpuTensor(output) = output else {
+            panic!("expected resident gpuArray output");
+        };
+        assert_eq!(output.device_id, provider_a.device_id());
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&output),
+            Some(IntegerElementType::I64)
+        );
+        assert_eq!(
+            block_on(provider_a.download_integer(&output))
+                .expect("download provider-a cast")
+                .data,
+            HostIntegerDataOwned::I64(vec![0, i64::MAX, i64::MAX])
+        );
     }
 
     #[test]

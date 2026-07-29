@@ -245,7 +245,7 @@ pub(crate) async fn cast_value(value: Value, target: IntegerTarget) -> Result<Va
             cast_tensor_value(target, tensor)
         }
         Value::GpuTensor(handle) => {
-            let provider = runmat_accelerate_api::provider()
+            let provider = runmat_accelerate_api::provider_for_handle(&handle)
                 .ok_or_else(|| CastError::Internal("no acceleration provider registered".into()))?;
             provider
                 .cast_to_integer(&handle, target.accelerator_type())
