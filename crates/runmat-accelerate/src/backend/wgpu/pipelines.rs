@@ -253,6 +253,7 @@ pub struct WgpuPipelines {
     pub cummin: PipelineBundle,
     pub cummax: PipelineBundle,
     pub circshift: PipelineBundle,
+    pub integer_circshift: PipelineBundle,
     pub fft_init: PipelineBundle,
     pub fft_stage: PipelineBundle,
     pub fft_reorder: PipelineBundle,
@@ -695,6 +696,20 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => CIRCSHIFT_SHADER_F64,
                 NumericPrecision::F32 => CIRCSHIFT_SHADER_F32,
             },
+        );
+        let integer_circshift_shader =
+            crate::backend::wgpu::shaders::circshift::circshift_shader_u32();
+        let integer_circshift = create_pipeline(
+            device,
+            "runmat-integer-circshift-layout",
+            "runmat-integer-circshift-shader",
+            "runmat-integer-circshift-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            &integer_circshift_shader,
         );
 
         let fft_init = create_pipeline(
@@ -1644,6 +1659,7 @@ impl WgpuPipelines {
             cummin,
             cummax,
             circshift,
+            integer_circshift,
             fft_init,
             fft_stage,
             fft_reorder,

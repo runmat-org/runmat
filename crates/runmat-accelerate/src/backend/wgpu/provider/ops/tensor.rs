@@ -1148,6 +1148,12 @@ impl WgpuProvider {
         shifts: &[isize],
     ) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(handle)?;
+        let integer_type = entry.integer_type;
+        let word_factor = integer_type.map_or(1usize, |element_type| match element_type {
+            runmat_accelerate_api::IntegerElementType::I64
+            | runmat_accelerate_api::IntegerElementType::U64 => 2,
+            _ => 1,
+        });
         if entry.len == 0 {
             return Ok(handle.clone());
         }
@@ -1245,7 +1251,15 @@ impl WgpuProvider {
                 crate::backend::wgpu::params::AlignedU32::new((normalized[axis] % denom) as u32);
         }
 
-        let out_buffer = self.create_storage_buffer(entry.len, "runmat-circshift-out");
+        let storage_len = entry
+            .len
+            .checked_mul(word_factor)
+            .ok_or_else(|| anyhow!("circshift: tensor storage length exceeds GPU limits"))?;
+        let out_buffer = if integer_type.is_some() {
+            self.create_integer_word_buffer(storage_len, "runmat-integer-circshift-out")?
+        } else {
+            self.create_storage_buffer(entry.len, "runmat-circshift-out")
+        };
         let out_shape = entry.shape.clone();
 
         {
@@ -1258,7 +1272,11 @@ impl WgpuProvider {
                 label: Some("runmat-circshift-noop-pass"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&self.pipelines.circshift.pipeline);
+            pass.set_pipeline(if integer_type.is_some() {
+                &self.pipelines.integer_circshift.pipeline
+            } else {
+                &self.pipelines.circshift.pipeline
+            });
             drop(pass);
             self.submit(enc);
         }
@@ -1282,7 +1300,7 @@ impl WgpuProvider {
                 len: chunk_len as u32,
                 offset: offset as u32,
                 rank: rank as u32,
-                _pad: 0,
+                _pad: word_factor as u32,
                 shape: shape_arr,
                 strides: strides_arr,
                 shifts: shifts_arr,
@@ -1292,7 +1310,11 @@ impl WgpuProvider {
                 .device_ref()
                 .create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("runmat-circshift-bind"),
-                    layout: &self.pipelines.circshift.layout,
+                    layout: if integer_type.is_some() {
+                        &self.pipelines.integer_circshift.layout
+                    } else {
+                        &self.pipelines.circshift.layout
+                    },
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
@@ -1315,16 +1337,28 @@ impl WgpuProvider {
             crate::backend::wgpu::dispatch::circshift::run(
                 self.device_ref(),
                 self.queue_ref(),
-                &self.pipelines.circshift.pipeline,
+                if integer_type.is_some() {
+                    &self.pipelines.integer_circshift.pipeline
+                } else {
+                    &self.pipelines.circshift.pipeline
+                },
                 &bind_group,
                 workgroups,
             );
             offset += chunk_len;
         }
 
-        let handle = self.register_existing_buffer(out_buffer, out_shape, entry.len);
-
-        Ok(handle)
+        if let Some(element_type) = integer_type {
+            Ok(self.register_integer_buffer(
+                out_buffer,
+                out_shape,
+                entry.len,
+                element_type,
+                (storage_len as u64) * std::mem::size_of::<u32>() as u64,
+            ))
+        } else {
+            Ok(self.register_existing_buffer(out_buffer, out_shape, entry.len))
+        }
     }
 
     pub(crate) async fn tril_exec(
@@ -2130,6 +2164,57 @@ mod tests {
                 u64::MAX,
                 (1u64 << 63) + 17,
                 (1u64 << 53) + 1
+            ])
+        );
+    }
+
+    #[test]
+    fn circshift_wide_uint64_uses_exact_integer_words_without_float_mirror() {
+        use runmat_accelerate_api::{
+            HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView, IntegerElementType,
+        };
+
+        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+            return;
+        };
+        let values = [u64::MAX, (1u64 << 63) + 17, (1u64 << 53) + 1, 19, 23, 29];
+        let input = provider
+            .upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&values),
+                shape: &[2, 3],
+            })
+            .expect("exact integer upload");
+        let shifted = provider
+            .circshift_exec(&input, &[1, -1])
+            .expect("integer circshift");
+
+        assert_ne!(
+            input.buffer_id, shifted.buffer_id,
+            "circshift must materialize on device"
+        );
+        assert_eq!(shifted.shape, vec![2, 3]);
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&shifted),
+            Some(IntegerElementType::U64)
+        );
+        let raw = provider
+            .get_entry_raw(&shifted)
+            .expect("resident integer output");
+        assert_eq!(
+            raw.allocated_bytes,
+            6 * 2 * std::mem::size_of::<u32>() as u64
+        );
+        let gathered =
+            block_on(provider.download_integer_exec(&shifted)).expect("exact integer download");
+        assert_eq!(
+            gathered.data,
+            HostIntegerDataOwned::U64(vec![
+                19,
+                (1u64 << 53) + 1,
+                29,
+                23,
+                (1u64 << 63) + 17,
+                u64::MAX
             ])
         );
     }
