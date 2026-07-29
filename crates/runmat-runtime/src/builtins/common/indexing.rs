@@ -224,17 +224,11 @@ pub fn matrix_set_element(
             "RunMat:IndexOutOfBounds",
         ));
     }
-    let index = (row - 1) + (col - 1) * tensor.rows();
-    let mut compatibility_value = value;
-    if let Some(storage) = &mut tensor.integer_data {
-        let exact = storage.cast_f64_assignment(value);
-        compatibility_value = exact.to_f64();
-        storage
-            .set_value(index, exact)
-            .map_err(|err| indexing_error_with_identifier(err, "RunMat:IndexOutOfBounds"))?;
-    }
+    // `Tensor::set2` owns integer assignment conversion and refreshes the
+    // compatibility view from exact storage. Keeping it in one place avoids
+    // a second lossy f64 round-trip for wide integer classes.
     tensor
-        .set2(row - 1, col - 1, compatibility_value)
+        .set2(row - 1, col - 1, value)
         .map_err(|err| indexing_error_with_identifier(err, "RunMat:IndexOutOfBounds"))
 }
 
@@ -818,12 +812,13 @@ mod tests {
             Some(&IntegerStorage::U64(vec![large, u64::MAX]))
         );
 
+        tensor.data.fill(f64::NAN);
         matrix_set_element(&mut tensor, 1, 2, -4.2).unwrap();
         assert_eq!(
             tensor.integer_storage(),
             Some(&IntegerStorage::U64(vec![large, u64::MAX, 0, 4]))
         );
-        assert_eq!(tensor.data[2], 0.0);
+        assert_eq!(tensor.data, tensor.integer_storage().unwrap().to_f64_vec());
     }
 
     #[test]

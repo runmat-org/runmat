@@ -845,6 +845,59 @@ mod integer_storage_tests {
     }
 
     #[test]
+    fn tensor_get2_reads_every_integer_class_from_exact_storage() {
+        let cases = [
+            IntegerStorage::I8(vec![-8, 7]),
+            IntegerStorage::I16(vec![-16, 15]),
+            IntegerStorage::I32(vec![-32, 31]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![8, u8::MAX]),
+            IntegerStorage::U16(vec![16, u16::MAX]),
+            IntegerStorage::U32(vec![32, u32::MAX]),
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for storage in cases {
+            let expected = storage.to_f64_vec();
+            let mut tensor = Tensor::new_integer(storage, vec![1, 2]).expect("integer tensor");
+            tensor.data.clear();
+
+            assert_eq!(tensor.get2(0, 0), Ok(expected[0]));
+            assert_eq!(tensor.get2(0, 1), Ok(expected[1]));
+        }
+    }
+
+    #[test]
+    fn tensor_set2_updates_exact_integer_storage_and_repairs_poisoned_mirror() {
+        let cases = [
+            IntegerStorage::I8(vec![0]),
+            IntegerStorage::I16(vec![0]),
+            IntegerStorage::I32(vec![0]),
+            IntegerStorage::I64(vec![0]),
+            IntegerStorage::U8(vec![0]),
+            IntegerStorage::U16(vec![0]),
+            IntegerStorage::U32(vec![0]),
+            IntegerStorage::U64(vec![0]),
+        ];
+
+        for storage in cases {
+            let expected = storage.cast_f64_assignment(-2.6);
+            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
+            tensor.data.fill(f64::NAN);
+
+            tensor.set2(0, 0, -2.6).expect("integer assignment");
+
+            assert_eq!(
+                tensor
+                    .integer_storage()
+                    .and_then(|storage| storage.value_at(0)),
+                Some(expected)
+            );
+            assert_eq!(tensor.data, tensor.integer_storage().unwrap().to_f64_vec());
+        }
+    }
+
+    #[test]
     fn integer_tensor_rejects_shape_length_mismatches() {
         let err = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![3, 1])
             .expect_err("shape mismatch");
@@ -1333,7 +1386,15 @@ impl Tensor {
             ));
         }
         // Column-major linearization: lin = row + col*rows
-        Ok(self.data[row + col * rows])
+        let index = row + col * rows;
+        // This legacy API deliberately returns f64, but typed tensors must
+        // source that conversion from their authoritative integer buffer.
+        // The f64 mirror can be lossy (or absent in migration tests).
+        Ok(self
+            .integer_data
+            .as_ref()
+            .and_then(|storage| storage.value_at(index))
+            .map_or_else(|| self.data[index], |value| value.to_f64()))
     }
 
     pub fn set2(&mut self, row: usize, col: usize, value: f64) -> Result<(), String> {
@@ -1345,7 +1406,16 @@ impl Tensor {
             ));
         }
         // Column-major linearization
-        self.data[row + col * rows] = value;
+        let index = row + col * rows;
+        if let Some(storage) = &mut self.integer_data {
+            // Assignment to a MATLAB integer array rounds and saturates to
+            // its existing class. Rebuild the compatibility view from the
+            // exact result so it cannot become authoritative by accident.
+            storage.set_f64_assignment(index, value)?;
+            self.data = storage.to_f64_vec();
+        } else {
+            self.data[index] = value;
+        }
         Ok(())
     }
 
