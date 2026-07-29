@@ -7936,6 +7936,9 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            if runmat_accelerate_api::handle_integer_type(a).is_some() {
+                return self.reduce_integer_sum_native(a).await;
+            }
             let guard = registry().lock().unwrap();
             let abuf = guard
                 .get(&a.buffer_id)
@@ -7959,6 +7962,9 @@ impl AccelProvider for InProcessProvider {
         dim: usize,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            if runmat_accelerate_api::handle_integer_type(a).is_some() {
+                return self.reduce_integer_sum_native_dim(a, dim).await;
+            }
             if a.shape.len() != 2 {
                 return Err(anyhow::anyhow!("reduce_sum_dim: only 2D supported"));
             }
@@ -8061,6 +8067,9 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            if runmat_accelerate_api::handle_integer_type(a).is_some() {
+                return self.reduce_integer_prod_native(a).await;
+            }
             let guard = registry().lock().unwrap();
             let abuf = guard
                 .get(&a.buffer_id)
@@ -8084,6 +8093,9 @@ impl AccelProvider for InProcessProvider {
         dim: usize,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            if runmat_accelerate_api::handle_integer_type(a).is_some() {
+                return self.reduce_integer_prod_native_dim(a, dim).await;
+            }
             if a.shape.len() != 2 {
                 return Err(anyhow::anyhow!("reduce_prod_dim: only 2D supported"));
             }
@@ -8255,6 +8267,9 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            if runmat_accelerate_api::handle_integer_type(a).is_some() {
+                return self.reduce_integer_mean_native(a).await;
+            }
             let guard = registry().lock().unwrap();
             let abuf = guard
                 .get(&a.buffer_id)
@@ -8281,6 +8296,9 @@ impl AccelProvider for InProcessProvider {
         dim: usize,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            if runmat_accelerate_api::handle_integer_type(a).is_some() {
+                return self.reduce_integer_mean_native_dim(a, dim).await;
+            }
             if a.shape.len() != 2 {
                 return Err(anyhow::anyhow!("reduce_mean_dim: only 2D supported"));
             }
@@ -9995,6 +10013,52 @@ mod tests {
         assert_eq!(
             runmat_accelerate_api::handle_integer_type(&prod),
             Some(runmat_accelerate_api::IntegerElementType::I8)
+        );
+    }
+
+    #[test]
+    fn inprocess_public_reductions_route_native_wide_integers() {
+        let provider = InProcessProvider::new();
+        let input = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&[(1_u64 << 63) + 1, (1_u64 << 63) + 3, 7, 9]),
+                shape: &[2, 2],
+            })
+            .expect("upload uint64");
+
+        let sum = block_on(provider.reduce_sum(&input)).expect("public uint64 sum");
+        let product = block_on(provider.reduce_prod(&input)).expect("public uint64 product");
+        let mean = block_on(provider.reduce_mean_dim(&input, 0)).expect("public uint64 mean");
+
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&sum),
+            Some(IntegerElementType::U64)
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&product),
+            Some(IntegerElementType::U64)
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&mean),
+            Some(IntegerElementType::U64)
+        );
+        assert_eq!(
+            block_on(provider.download_integer(&sum))
+                .expect("download uint64 sum")
+                .data,
+            HostIntegerDataOwned::U64(vec![u64::MAX])
+        );
+        assert_eq!(
+            block_on(provider.download_integer(&product))
+                .expect("download uint64 product")
+                .data,
+            HostIntegerDataOwned::U64(vec![u64::MAX])
+        );
+        assert_eq!(
+            block_on(provider.download_integer(&mean))
+                .expect("download uint64 mean")
+                .data,
+            HostIntegerDataOwned::U64(vec![(1_u64 << 63) + 2, 8])
         );
     }
 

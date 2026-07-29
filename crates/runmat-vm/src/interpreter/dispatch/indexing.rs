@@ -8,7 +8,7 @@ use crate::call::shared::{
 use crate::indexing::end_expr as idx_end_expr;
 use crate::indexing::plan::{
     build_expr_index_plan, build_expr_sparse_assignment_plan, build_index_plan,
-    build_sparse_assignment_plan, ExprPlanSpec,
+    build_sparse_assignment_plan, ExprPlanSpec, IndexPlan,
 };
 use crate::indexing::read_linear as idx_read_linear;
 use crate::indexing::read_slice as idx_read_slice;
@@ -51,6 +51,23 @@ fn integer_scalar_tensor(value: IntValue) -> Result<Tensor, RuntimeError> {
     };
     Tensor::new_integer(storage, vec![1, 1])
         .map_err(|e| map_slice_shape_error("scalar index assign", e))
+}
+
+/// Applies a slice assignment to an integer scalar after materializing its
+/// exact storage. This keeps StoreSlice and StoreSliceExpr on the same path as
+/// StoreIndex instead of constructing an f64 compatibility tensor first.
+async fn assign_integer_scalar_with_plan(
+    value: IntValue,
+    plan: &IndexPlan,
+    rhs: &Value,
+    delete: bool,
+) -> Result<Value, RuntimeError> {
+    let tensor = integer_scalar_tensor(value)?;
+    if delete {
+        idx_write_slice::delete_tensor_with_plan(tensor, plan, rhs)
+    } else {
+        idx_write_slice::assign_tensor_with_plan(tensor, plan, rhs).await
+    }
 }
 
 fn logical_value_from_tensor(t: runmat_builtins::Tensor) -> Result<Value, RuntimeError> {
@@ -1633,6 +1650,19 @@ pub async fn dispatch_indexing(
                         idx_write_slice::assign_tensor_with_plan(t, &plan, &rhs).await?
                     });
                 }
+                Value::Int(value) => {
+                    let tensor = integer_scalar_tensor(value.clone())?;
+                    let selectors = build_slice_selectors(
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        &numeric,
+                        &tensor.shape,
+                    )
+                    .await?;
+                    let plan = build_index_plan(&selectors, *dims, &tensor.shape)?;
+                    stack.push(assign_integer_scalar_with_plan(value, &plan, &rhs, delete).await?);
+                }
                 Value::LogicalArray(la) => {
                     let data: Vec<f64> = la
                         .data
@@ -1843,6 +1873,22 @@ pub async fn dispatch_indexing(
                         apply_end_offsets_to_numeric(
                             &numeric,
                             IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &t.shape),
+                            end_numeric_exprs,
+                            vars,
+                        )
+                        .await?
+                    }
+                    Value::Int(value) => {
+                        let tensor = integer_scalar_tensor(value.clone())?;
+                        apply_end_offsets_to_numeric(
+                            &numeric,
+                            IndexContext::new(
+                                *dims,
+                                *colon_mask,
+                                *end_mask,
+                                range_dims,
+                                &tensor.shape,
+                            ),
                             end_numeric_exprs,
                             vars,
                         )
@@ -2313,6 +2359,28 @@ pub async fn dispatch_indexing(
                         idx_write_slice::assign_tensor_with_plan(t, &vm_plan, &rhs).await?
                     });
                 }
+                Value::Int(value) => {
+                    let tensor = integer_scalar_tensor(value.clone())?;
+                    let vm_plan = build_expr_slice_plan(
+                        ExprPlanSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            numeric: &numeric,
+                            shape: &tensor.shape,
+                        },
+                        vars,
+                    )
+                    .await?;
+                    stack.push(
+                        assign_integer_scalar_with_plan(value, &vm_plan, &rhs, delete).await?,
+                    );
+                }
                 Value::GpuTensor(h) => {
                     let vm_plan = build_expr_slice_plan(
                         ExprPlanSpec {
@@ -2496,11 +2564,12 @@ pub async fn dispatch_indexing(
 mod tests {
     use super::{
         apply_cell_end_exprs_for_base, apply_cell_end_offsets_for_base,
-        apply_end_offsets_to_numeric, integer_scalar_tensor, map_slice_plan_error,
-        range_selector_scalar_to_f64, symbolic_scalar_from_value,
+        apply_end_offsets_to_numeric, assign_integer_scalar_with_plan, integer_scalar_tensor,
+        map_slice_plan_error, range_selector_scalar_to_f64, symbolic_scalar_from_value,
         validate_expr_range_step_metadata, IndexContext,
     };
     use crate::bytecode::EndExpr;
+    use crate::indexing::plan::IndexPlan;
     use futures::executor::block_on;
     use runmat_builtins::{CellArray, IntValue, IntegerStorage, SymbolicExpr, Tensor, Value};
 
@@ -2521,6 +2590,35 @@ mod tests {
         assert_scalar_storage!(IntValue::U16(u16::MAX), IntegerStorage::U16(vec![u16::MAX]));
         assert_scalar_storage!(IntValue::U32(u32::MAX), IntegerStorage::U32(vec![u32::MAX]));
         assert_scalar_storage!(IntValue::U64(u64::MAX), IntegerStorage::U64(vec![u64::MAX]));
+    }
+
+    #[test]
+    fn integer_scalar_slice_assignment_preserves_all_integer_classes() {
+        macro_rules! assert_slice_assignment {
+            ($value:expr, $storage:expr) => {{
+                let plan = IndexPlan::new(vec![0], vec![1, 1], vec![1], 1, vec![1, 1]);
+                let result = block_on(assign_integer_scalar_with_plan(
+                    $value.clone(),
+                    &plan,
+                    &Value::Int($value),
+                    false,
+                ))
+                .expect("integer scalar slice assignment");
+                let Value::Tensor(tensor) = result else {
+                    panic!("integer scalar slice assignment must return a tensor");
+                };
+                assert_eq!(tensor.integer_storage(), Some(&$storage));
+            }};
+        }
+
+        assert_slice_assignment!(IntValue::I8(i8::MIN), IntegerStorage::I8(vec![i8::MIN]));
+        assert_slice_assignment!(IntValue::I16(i16::MIN), IntegerStorage::I16(vec![i16::MIN]));
+        assert_slice_assignment!(IntValue::I32(i32::MIN), IntegerStorage::I32(vec![i32::MIN]));
+        assert_slice_assignment!(IntValue::I64(i64::MIN), IntegerStorage::I64(vec![i64::MIN]));
+        assert_slice_assignment!(IntValue::U8(u8::MAX), IntegerStorage::U8(vec![u8::MAX]));
+        assert_slice_assignment!(IntValue::U16(u16::MAX), IntegerStorage::U16(vec![u16::MAX]));
+        assert_slice_assignment!(IntValue::U32(u32::MAX), IntegerStorage::U32(vec![u32::MAX]));
+        assert_slice_assignment!(IntValue::U64(u64::MAX), IntegerStorage::U64(vec![u64::MAX]));
     }
 
     #[test]

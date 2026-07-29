@@ -1256,6 +1256,9 @@ fn nonzero_diagonal_offsets(matrix: &ExtractionMatrix) -> Vec<isize> {
 }
 
 fn parse_diag_offsets(value: &Value, label: &str) -> BuiltinResult<Vec<isize>> {
+    if let Some(offsets) = parse_integer_diag_offsets(value, label) {
+        return offsets;
+    }
     numeric_vector(value, "d")?
         .into_iter()
         .map(|raw| {
@@ -1274,6 +1277,46 @@ fn parse_diag_offsets(value: &Value, label: &str) -> BuiltinResult<Vec<isize>> {
             Ok(raw as isize)
         })
         .collect()
+}
+
+/// Parse typed diagonal offsets from their integer backing storage.  Offsets
+/// are selectors, rather than numeric data, so routing them through the f64
+/// compatibility mirror can silently change wide `uint64` values.
+fn parse_integer_diag_offsets(value: &Value, label: &str) -> Option<BuiltinResult<Vec<isize>>> {
+    let values = match value {
+        Value::Int(value) => vec![value.clone()],
+        Value::Tensor(tensor) => {
+            if !is_vector_shape(&tensor.shape) {
+                return None;
+            }
+            tensor_integer_values(tensor)?
+        }
+        Value::SparseTensor(sparse) => {
+            if !is_vector_shape(&[sparse.rows, sparse.cols]) || sparse.integer_storage().is_none() {
+                return None;
+            }
+            let dense = match dense_typed_triplet_sparse(sparse, "d") {
+                Ok(dense) => dense,
+                Err(err) => return Some(Err(err)),
+            };
+            tensor_integer_values(&dense).expect("typed sparse tensor remains typed when densified")
+        }
+        _ => return None,
+    };
+
+    Some(
+        values
+            .iter()
+            .map(|value| {
+                value.try_to_isize().ok_or_else(|| {
+                    sparse_error(
+                        &SPARSE_ERROR_INVALID_INPUT,
+                        format!("{label}: diagonal number exceeds supported range"),
+                    )
+                })
+            })
+            .collect(),
+    )
 }
 
 fn extract_diagonals(matrix: &ExtractionMatrix, offsets: &[isize]) -> BuiltinResult<Tensor> {
@@ -2842,6 +2885,43 @@ pub(crate) mod tests {
         assert_eq!(sparse.get(2, 1), Some(20.0));
         assert_eq!(sparse.get(0, 1), Some(1.0));
         assert_eq!(sparse.get(1, 2), Some(2.0));
+    }
+
+    #[test]
+    fn spdiags_offset_parser_reads_all_integer_classes_without_f64_rounding() {
+        let cases = [
+            (IntegerStorage::I8(vec![-1, 1]), vec![-1, 1]),
+            (IntegerStorage::I16(vec![-2, 2]), vec![-2, 2]),
+            (IntegerStorage::I32(vec![-3, 3]), vec![-3, 3]),
+            (IntegerStorage::I64(vec![-4, 4]), vec![-4, 4]),
+            (IntegerStorage::U8(vec![0, 1]), vec![0, 1]),
+            (IntegerStorage::U16(vec![0, 2]), vec![0, 2]),
+            (IntegerStorage::U32(vec![0, 3]), vec![0, 3]),
+            (IntegerStorage::U64(vec![0, 4]), vec![0, 4]),
+        ];
+
+        for (storage, expected) in cases {
+            let tensor = poisoned_integer_tensor(storage, vec![1, 2]);
+            assert_eq!(
+                parse_diag_offsets(&Value::Tensor(tensor), "spdiags").expect("typed offsets"),
+                expected
+            );
+        }
+
+        let wide = 9_007_199_254_740_993_u64;
+        let wide_offsets = parse_diag_offsets(&Value::Int(IntValue::U64(wide)), "spdiags");
+        if let Ok(wide) = isize::try_from(wide) {
+            assert_eq!(wide_offsets.expect("wide host offset"), vec![wide]);
+        } else {
+            assert!(
+                wide_offsets.is_err(),
+                "unrepresentable wide offset must fail"
+            );
+        }
+
+        let err = parse_diag_offsets(&Value::Int(IntValue::U64(u64::MAX)), "spdiags")
+            .expect_err("wide uint64 offset must be rejected instead of rounded");
+        assert!(err.to_string().contains("exceeds supported range"));
     }
 
     #[test]

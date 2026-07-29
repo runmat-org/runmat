@@ -2499,6 +2499,60 @@ mod tests {
     }
 
     #[test]
+    fn wgpu_public_reductions_route_native_wide_integers_without_f64_readback() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let signed = provider
+            .upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::I64(&[i64::MAX, 1, i64::MIN, -1]),
+                shape: &[2, 2],
+            })
+            .expect("upload int64");
+        let unsigned = provider
+            .upload_integer_exec(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&[(1_u64 << 63) + 1, (1_u64 << 63) + 3, 7, 9]),
+                shape: &[2, 2],
+            })
+            .expect("upload uint64");
+
+        let sum = block_on(provider.reduce_sum(&signed)).expect("public int64 sum");
+        let prod = block_on(provider.reduce_prod(&unsigned)).expect("public uint64 prod");
+        let mean = block_on(provider.reduce_mean_dim(&unsigned, 0)).expect("public uint64 mean");
+
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&sum),
+            Some(IntegerElementType::I64)
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&prod),
+            Some(IntegerElementType::U64)
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&mean),
+            Some(IntegerElementType::U64)
+        );
+        assert_eq!(
+            block_on(provider.download_integer_exec(&sum))
+                .expect("download int64 sum")
+                .data,
+            HostIntegerDataOwned::I64(vec![0])
+        );
+        assert_eq!(
+            block_on(provider.download_integer_exec(&prod))
+                .expect("download uint64 prod")
+                .data,
+            HostIntegerDataOwned::U64(vec![u64::MAX])
+        );
+        assert_eq!(
+            block_on(provider.download_integer_exec(&mean))
+                .expect("download uint64 mean")
+                .data,
+            HostIntegerDataOwned::U64(vec![(1_u64 << 63) + 2, 8])
+        );
+    }
+
+    #[test]
     fn wgpu_integer_cast_from_real_gpuarray_stays_resident() {
         let Some(provider) = register_wgpu_provider_for_test() else {
             return;

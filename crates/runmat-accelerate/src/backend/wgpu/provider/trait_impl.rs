@@ -289,7 +289,13 @@ impl AccelProvider for WgpuProvider {
         a: &'a GpuTensorHandle,
         dims_zero_based: &'a [usize],
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.reduce_nd_mean_exec(a, dims_zero_based).await })
+        Box::pin(async move {
+            if self.get_entry_raw(a)?.integer_type.is_some() {
+                self.integer_reduce_mean_dims_exec(dims_zero_based, "mean", a)
+            } else {
+                self.reduce_nd_mean_exec(a, dims_zero_based).await
+            }
+        })
     }
 
     fn reduce_moments_nd<'a>(
@@ -1364,7 +1370,11 @@ impl AccelProvider for WgpuProvider {
         dim: usize,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            self.reduce_dim_sum_mean_exec(a, dim, crate::backend::wgpu::types::DimReduceOp::Sum)
+            if self.get_entry_raw(a)?.integer_type.is_some() {
+                self.integer_reduce_sum_prod_dim_exec(false, dim, "sum", a)
+            } else {
+                self.reduce_dim_sum_mean_exec(a, dim, crate::backend::wgpu::types::DimReduceOp::Sum)
+            }
         })
     }
     fn reduce_integer_sum_native<'a>(
@@ -1399,7 +1409,15 @@ impl AccelProvider for WgpuProvider {
         dim: usize,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            self.reduce_dim_sum_mean_exec(a, dim, crate::backend::wgpu::types::DimReduceOp::Prod)
+            if self.get_entry_raw(a)?.integer_type.is_some() {
+                self.integer_reduce_sum_prod_dim_exec(true, dim, "prod", a)
+            } else {
+                self.reduce_dim_sum_mean_exec(
+                    a,
+                    dim,
+                    crate::backend::wgpu::types::DimReduceOp::Prod,
+                )
+            }
         })
     }
     fn reduce_integer_prod_native<'a>(
@@ -1448,7 +1466,15 @@ impl AccelProvider for WgpuProvider {
         dim: usize,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            self.reduce_dim_sum_mean_exec(a, dim, crate::backend::wgpu::types::DimReduceOp::Mean)
+            if self.get_entry_raw(a)?.integer_type.is_some() {
+                self.integer_reduce_mean_dim_exec(dim, "mean", a)
+            } else {
+                self.reduce_dim_sum_mean_exec(
+                    a,
+                    dim,
+                    crate::backend::wgpu::types::DimReduceOp::Mean,
+                )
+            }
         })
     }
     fn reduce_any_dim<'a>(
@@ -1504,7 +1530,11 @@ impl AccelProvider for WgpuProvider {
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Sum)
+            if self.get_entry_raw(a)?.integer_type.is_some() {
+                self.integer_reduce_sum_prod_global_exec(false, "sum", a)
+            } else {
+                self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Sum)
+            }
         })
     }
 
@@ -1522,7 +1552,11 @@ impl AccelProvider for WgpuProvider {
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Prod)
+            if self.get_entry_raw(a)?.integer_type.is_some() {
+                self.integer_reduce_sum_prod_global_exec(true, "prod", a)
+            } else {
+                self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Prod)
+            }
         })
     }
 
@@ -1530,7 +1564,13 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.reduce_mean_global_exec(a) })
+        Box::pin(async move {
+            if self.get_entry_raw(a)?.integer_type.is_some() {
+                self.integer_reduce_mean_global_exec("mean", a)
+            } else {
+                self.reduce_mean_global_exec(a)
+            }
+        })
     }
     fn reduce_std<'a>(
         &'a self,

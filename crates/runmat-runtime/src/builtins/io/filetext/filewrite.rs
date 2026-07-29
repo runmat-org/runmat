@@ -589,7 +589,7 @@ fn tensor_to_bytes(tensor: &Tensor) -> BuiltinResult<Vec<u8>> {
             let value = storage
                 .value_at(idx)
                 .expect("integer storage mirrors tensor shape");
-            match float_to_byte(value.to_f64()) {
+            match int_value_to_byte(&value) {
                 Ok(byte) => out.push(byte),
                 Err(msg) => {
                     return Err(filewrite_error_with_detail(
@@ -940,6 +940,50 @@ pub(crate) mod tests {
         assert_eq!(bytes, vec![0u8, 127u8, 255u8]);
 
         let _ = test_support::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tensor_to_bytes_reads_each_integer_storage_class() {
+        let cases = [
+            (IntegerStorage::I8(vec![1]), 1),
+            (IntegerStorage::I16(vec![2]), 2),
+            (IntegerStorage::I32(vec![3]), 3),
+            (IntegerStorage::I64(vec![4]), 4),
+            (IntegerStorage::U8(vec![5]), 5),
+            (IntegerStorage::U16(vec![6]), 6),
+            (IntegerStorage::U32(vec![7]), 7),
+            (IntegerStorage::U64(vec![8]), 8),
+        ];
+
+        for (storage, expected) in cases {
+            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed tensor");
+            tensor.data.clear();
+            assert_eq!(
+                tensor_to_bytes(&tensor).expect("byte payload"),
+                vec![expected]
+            );
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn filewrite_typed_integer_tensor_range_errors_keep_exact_wide_values() {
+        let path = unique_path("filewrite_typed_integer_range");
+        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("typed integer tensor");
+        tensor.data.clear();
+
+        let err = unwrap_error_message(
+            run_filewrite(
+                Value::from(path.to_string_lossy().to_string()),
+                Value::Tensor(tensor),
+                vec![Value::from("Encoding"), Value::from("raw")],
+            )
+            .expect_err("wide uint64 must not fit in a byte"),
+        );
+
+        assert!(err.contains(&u64::MAX.to_string()), "{err}");
+        assert!(!err.contains("18446744073709552000"), "{err}");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
