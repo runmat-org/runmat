@@ -2,6 +2,8 @@
 
 use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
 
+use crate::builtins::common::broadcast::BroadcastPlan;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ExtremaDirection {
     Min,
@@ -35,6 +37,137 @@ pub(crate) enum CumulativeExtremaDirection {
 pub(crate) struct IntegerExtrema {
     pub(crate) values: Value,
     pub(crate) indices: Value,
+}
+
+/// Selects elementwise extrema from two exact integer arrays of the same class.
+///
+/// This is intentionally limited to matching typed classes. Mixed-class and
+/// double/integer calls retain their existing MATLAB dispatch paths, where the
+/// output class is governed by the full promotion rules.
+pub(crate) fn elementwise_extrema(
+    left: &IntegerStorage,
+    left_shape: &[usize],
+    right: &IntegerStorage,
+    right_shape: &[usize],
+    direction: ExtremaDirection,
+) -> Result<IntegerExtrema, String> {
+    let plan = BroadcastPlan::new(left_shape, right_shape)?;
+    let shape = plan.output_shape().to_vec();
+
+    macro_rules! select {
+        ($left:expr, $right:expr, $variant:ident, $choose:expr) => {{
+            let mut values = Vec::with_capacity(plan.len());
+            let mut indices = Vec::with_capacity(plan.len());
+            for (_, left_index, right_index) in plan.iter() {
+                let a = $left[left_index];
+                let b = $right[right_index];
+                if $choose(a, b) {
+                    values.push(a);
+                    indices.push(1.0);
+                } else {
+                    values.push(b);
+                    indices.push(2.0);
+                }
+            }
+            (IntegerStorage::$variant(values), indices)
+        }};
+    }
+
+    let (storage, indices) = match (left, right, direction) {
+        (IntegerStorage::I8(a), IntegerStorage::I8(b), ExtremaDirection::Min) => {
+            select!(a, b, I8, |a, b| a <= b)
+        }
+        (IntegerStorage::I16(a), IntegerStorage::I16(b), ExtremaDirection::Min) => {
+            select!(a, b, I16, |a, b| a <= b)
+        }
+        (IntegerStorage::I32(a), IntegerStorage::I32(b), ExtremaDirection::Min) => {
+            select!(a, b, I32, |a, b| a <= b)
+        }
+        (IntegerStorage::I64(a), IntegerStorage::I64(b), ExtremaDirection::Min) => {
+            select!(a, b, I64, |a, b| a <= b)
+        }
+        (IntegerStorage::U8(a), IntegerStorage::U8(b), ExtremaDirection::Min) => {
+            select!(a, b, U8, |a, b| a <= b)
+        }
+        (IntegerStorage::U16(a), IntegerStorage::U16(b), ExtremaDirection::Min) => {
+            select!(a, b, U16, |a, b| a <= b)
+        }
+        (IntegerStorage::U32(a), IntegerStorage::U32(b), ExtremaDirection::Min) => {
+            select!(a, b, U32, |a, b| a <= b)
+        }
+        (IntegerStorage::U64(a), IntegerStorage::U64(b), ExtremaDirection::Min) => {
+            select!(a, b, U64, |a, b| a <= b)
+        }
+        (IntegerStorage::I8(a), IntegerStorage::I8(b), ExtremaDirection::Max) => {
+            select!(a, b, I8, |a, b| a >= b)
+        }
+        (IntegerStorage::I16(a), IntegerStorage::I16(b), ExtremaDirection::Max) => {
+            select!(a, b, I16, |a, b| a >= b)
+        }
+        (IntegerStorage::I32(a), IntegerStorage::I32(b), ExtremaDirection::Max) => {
+            select!(a, b, I32, |a, b| a >= b)
+        }
+        (IntegerStorage::I64(a), IntegerStorage::I64(b), ExtremaDirection::Max) => {
+            select!(a, b, I64, |a, b| a >= b)
+        }
+        (IntegerStorage::U8(a), IntegerStorage::U8(b), ExtremaDirection::Max) => {
+            select!(a, b, U8, |a, b| a >= b)
+        }
+        (IntegerStorage::U16(a), IntegerStorage::U16(b), ExtremaDirection::Max) => {
+            select!(a, b, U16, |a, b| a >= b)
+        }
+        (IntegerStorage::U32(a), IntegerStorage::U32(b), ExtremaDirection::Max) => {
+            select!(a, b, U32, |a, b| a >= b)
+        }
+        (IntegerStorage::U64(a), IntegerStorage::U64(b), ExtremaDirection::Max) => {
+            select!(a, b, U64, |a, b| a >= b)
+        }
+        _ => {
+            return Err("elementwise integer extrema require matching integer classes".to_string())
+        }
+    };
+    Ok(IntegerExtrema {
+        values: integer_storage_into_value(storage, shape.clone())?,
+        indices: numeric_tensor_into_value(indices, shape)?,
+    })
+}
+
+/// Dispatches elementwise extrema only when both operands retain exact typed
+/// integer storage. All other operand combinations use their caller's normal
+/// MATLAB promotion path.
+pub(crate) fn elementwise_value_extrema(
+    left: &Value,
+    right: &Value,
+    direction: ExtremaDirection,
+) -> Result<Option<IntegerExtrema>, String> {
+    let Some((left_storage, left_shape)) = integer_storage_and_shape(left) else {
+        return Ok(None);
+    };
+    let Some((right_storage, right_shape)) = integer_storage_and_shape(right) else {
+        return Ok(None);
+    };
+    if left_storage.class_name() != right_storage.class_name() {
+        return Ok(None);
+    }
+    elementwise_extrema(
+        &left_storage,
+        &left_shape,
+        &right_storage,
+        &right_shape,
+        direction,
+    )
+    .map(Some)
+}
+
+fn integer_storage_and_shape(value: &Value) -> Option<(IntegerStorage, Vec<usize>)> {
+    match value {
+        Value::Int(value) => Some((storage_from_scalar(value), vec![1, 1])),
+        Value::Tensor(tensor) => tensor
+            .integer_storage()
+            .cloned()
+            .map(|storage| (storage, tensor.shape.clone())),
+        _ => None,
+    }
 }
 
 /// Reduces an integer tensor by saturated native addition along zero-based

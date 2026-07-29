@@ -1197,6 +1197,13 @@ pub async fn delete_gpu_slice_with_plan(
             "No acceleration provider registered",
         )
     })?;
+    if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+        let tensor = download_integer_tensor(handle).await?;
+        let Value::Tensor(updated) = delete_tensor_with_plan(tensor, plan, rhs)? else {
+            unreachable!("integer slice deletion must produce a real tensor")
+        };
+        return upload_tensor_to_gpu(&updated);
+    }
     let host = provider
         .download(handle)
         .await
@@ -1510,8 +1517,8 @@ fn integer_tensor_view<'a>(
 mod tests {
     use super::{
         assign_complex_with_plan, assign_sparse_with_plan, assign_tensor_with_plan,
-        build_complex_rhs_view, build_string_rhs_view, delete_tensor_with_plan,
-        integer_gpu_rhs_indices_for_plan, map_acceleration_error,
+        build_complex_rhs_view, build_string_rhs_view, delete_gpu_slice_with_plan,
+        delete_tensor_with_plan, integer_gpu_rhs_indices_for_plan, map_acceleration_error,
     };
     use crate::indexing::plan::IndexPlan;
     use futures::executor::block_on;
@@ -1928,6 +1935,43 @@ mod tests {
             Some(&IntegerStorage::I64(vec![1, 3]))
         );
         assert_eq!(output.shape, vec![1, 2]);
+    }
+
+    #[test]
+    fn gpu_integer_plan_deletion_preserves_wide_uint64_storage() {
+        runmat_accelerate_api::set_thread_provider(None);
+        runmat_accelerate_api::clear_provider();
+        runmat_accelerate::simple_provider::register_inprocess_provider();
+        let provider = runmat_accelerate_api::provider().expect("test provider");
+        let _thread_provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let source = provider
+            .upload_integer(&runmat_accelerate_api::HostIntegerTensorView {
+                data: runmat_accelerate_api::HostIntegerDataView::U64(&[
+                    1,
+                    9_223_372_036_854_775_808,
+                    u64::MAX,
+                ]),
+                shape: &[1, 3],
+            })
+            .expect("upload integer source");
+        let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).expect("empty"));
+        let plan = IndexPlan::new(vec![1], vec![1, 1], vec![1], 1, vec![1, 3]);
+
+        let Value::GpuTensor(updated) =
+            block_on(delete_gpu_slice_with_plan(&source, &plan, &empty)).expect("delete")
+        else {
+            panic!("expected gpu tensor");
+        };
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&updated),
+            Some(runmat_accelerate_api::IntegerElementType::U64)
+        );
+        let host = block_on(provider.download_integer(&updated)).expect("download updated");
+        assert_eq!(host.shape, vec![1, 2]);
+        assert_eq!(
+            host.data,
+            runmat_accelerate_api::HostIntegerDataOwned::U64(vec![1, u64::MAX])
+        );
     }
 
     #[test]

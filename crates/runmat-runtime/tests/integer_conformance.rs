@@ -417,3 +417,114 @@ fn native_integer_reductions_preserve_class_shape_and_empty_identities() {
         1u64
     );
 }
+
+#[test]
+fn integer_elementwise_extrema_preserve_all_classes_and_broadcast_exactly() {
+    macro_rules! check {
+        ($class:ident, $left:expr, $right:expr, $min:expr, $max:expr) => {{
+            let left = integer_tensor(IntegerStorage::$class($left), vec![2, 1]);
+            let right = integer_tensor(IntegerStorage::$class($right), vec![1, 2]);
+            expect_integer(
+                runmat_runtime::call_builtin("min", &[left.clone(), right.clone()])
+                    .expect("integer min"),
+                &[2, 2],
+                IntegerStorage::$class($min),
+            );
+            expect_integer(
+                runmat_runtime::call_builtin("max", &[left, right]).expect("integer max"),
+                &[2, 2],
+                IntegerStorage::$class($max),
+            );
+        }};
+    }
+    check!(
+        I8,
+        vec![-3i8, 4],
+        vec![2i8, -5],
+        vec![-3i8, 2, -5, -5],
+        vec![2i8, 4, -3, 4]
+    );
+    check!(
+        I16,
+        vec![-3i16, 4],
+        vec![2i16, -5],
+        vec![-3i16, 2, -5, -5],
+        vec![2i16, 4, -3, 4]
+    );
+    check!(
+        I32,
+        vec![-3i32, 4],
+        vec![2i32, -5],
+        vec![-3i32, 2, -5, -5],
+        vec![2i32, 4, -3, 4]
+    );
+    check!(
+        I64,
+        vec![i64::MIN, 4],
+        vec![-3i64, i64::MAX],
+        vec![i64::MIN, -3, i64::MIN, 4],
+        vec![-3i64, 4, i64::MAX, i64::MAX]
+    );
+    check!(
+        U8,
+        vec![3u8, 4],
+        vec![2u8, 5],
+        vec![2u8, 2, 3, 4],
+        vec![3u8, 4, 5, 5]
+    );
+    check!(
+        U16,
+        vec![3u16, 4],
+        vec![2u16, 5],
+        vec![2u16, 2, 3, 4],
+        vec![3u16, 4, 5, 5]
+    );
+    check!(
+        U32,
+        vec![3u32, 4],
+        vec![2u32, 5],
+        vec![2u32, 2, 3, 4],
+        vec![3u32, 4, 5, 5]
+    );
+    check!(
+        U64,
+        vec![(1_u64 << 53) + 1, u64::MAX],
+        vec![1_u64 << 53, u64::MAX - 1],
+        vec![1_u64 << 53, 1_u64 << 53, (1_u64 << 53) + 1, u64::MAX - 1],
+        vec![(1_u64 << 53) + 1, u64::MAX, u64::MAX - 1, u64::MAX]
+    );
+}
+
+#[test]
+fn integer_logical_reductions_and_nnz_use_typed_storage_for_all_classes() {
+    macro_rules! check {
+        ($class:ident, $values:expr) => {{
+            let mut tensor = Tensor::new_integer(IntegerStorage::$class($values), vec![2, 2])
+                .expect("integer tensor");
+            tensor.data.clear();
+            let value = Value::Tensor(tensor);
+            expect_logical(
+                runmat_runtime::call_builtin("any", std::slice::from_ref(&value)).expect("any"),
+                &[1, 2],
+                &[1, 1],
+            );
+            expect_logical(
+                runmat_runtime::call_builtin("all", std::slice::from_ref(&value)).expect("all"),
+                &[1, 2],
+                &[0, 1],
+            );
+            assert_eq!(
+                runmat_runtime::call_builtin("nnz", &[value]).expect("nnz"),
+                Value::Num(3.0),
+            );
+        }};
+    }
+    check!(I8, vec![0i8, -1, 2, 3]);
+    check!(I16, vec![0i16, -1, 2, 3]);
+    check!(I32, vec![0i32, -1, 2, 3]);
+    check!(I64, vec![0i64, i64::MIN, 2, 3]);
+    check!(U8, vec![0u8, 1, 2, 3]);
+    check!(U16, vec![0u16, 1, 2, 3]);
+    check!(U32, vec![0u32, 1, 2, 3]);
+    check!(U64, vec![0u64, (1_u64 << 53) + 1, 2, u64::MAX]);
+}

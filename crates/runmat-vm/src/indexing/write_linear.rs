@@ -6,7 +6,9 @@ use crate::indexing::write_slice::{
     upload_tensor_to_gpu,
 };
 use crate::interpreter::errors::mex;
-use runmat_builtins::{ComplexTensor, IntValue, IntegerStorage, SparseTensor, Tensor, Value};
+use runmat_builtins::{
+    ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, SparseTensor, Tensor, Value,
+};
 use runmat_runtime::builtins::common::tensor::{
     complex_tensor_element_len, complex_tensor_value_complex64, is_scalar_tensor,
     tensor_element_len, tensor_value_f64,
@@ -399,11 +401,13 @@ pub async fn assign_tensor_scalar(
             };
         }
         if matches!(rhs, Value::Complex(_, _) | Value::ComplexTensor(_)) {
-            if t.integer_storage().is_some() {
-                return Err(mex(
-                    "UnsupportedTypedComplexInteger",
-                    "typed complex integer assignment is not implemented",
-                ));
+            if let Some(real) = t.integer_data.take() {
+                let imag = real.zeros_like(real.len());
+                let storage = IntegerComplexStorage::new(real, imag)
+                    .expect("real integer storage and zero imaginary storage must agree");
+                let tensor = ComplexTensor::new_integer(storage, t.shape)
+                    .map_err(map_assignment_shape_error)?;
+                return assign_complex_scalar(tensor, indices, rhs, false).await;
             }
             return assign_complex_scalar(tensor_to_complex(t), indices, rhs, false).await;
         }
@@ -449,11 +453,13 @@ pub async fn assign_tensor_scalar(
             ));
         }
         if matches!(rhs, Value::Complex(_, _) | Value::ComplexTensor(_)) {
-            if t.integer_storage().is_some() {
-                return Err(mex(
-                    "UnsupportedTypedComplexInteger",
-                    "typed complex integer assignment is not implemented",
-                ));
+            if let Some(real) = t.integer_data.take() {
+                let imag = real.zeros_like(real.len());
+                let storage = IntegerComplexStorage::new(real, imag)
+                    .expect("real integer storage and zero imaginary storage must agree");
+                let tensor = ComplexTensor::new_integer(storage, t.shape)
+                    .map_err(map_assignment_shape_error)?;
+                return assign_complex_scalar(tensor, indices, rhs, false).await;
             }
             return assign_complex_scalar(tensor_to_complex(t), indices, rhs, false).await;
         }
@@ -820,7 +826,9 @@ mod tests {
         map_assignment_shape_error,
     };
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
+    use runmat_builtins::{
+        ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, Tensor, Value,
+    };
 
     #[test]
     fn integer_linear_assignment_preserves_exact_uint64_rhs() {
@@ -840,6 +848,40 @@ mod tests {
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::U64(vec![1, u64::MAX]))
+        );
+    }
+
+    #[test]
+    fn integer_scalar_complex_assignment_promotes_without_losing_wide_components() {
+        let tensor = Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![1, 2])
+            .expect("tensor");
+        let rhs = Value::ComplexTensor(
+            ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::I64(vec![i64::MAX]),
+                    IntegerStorage::I64(vec![i64::MIN]),
+                )
+                .expect("integer complex storage"),
+                vec![1, 1],
+            )
+            .expect("rhs"),
+        );
+
+        let result = block_on(assign_tensor_scalar(tensor, &[2], &rhs, false))
+            .expect("typed complex integer assignment");
+
+        let Value::ComplexTensor(output) = result else {
+            panic!("integer tensor should promote to typed complex integer tensor");
+        };
+        assert_eq!(
+            output
+                .integer_data
+                .as_ref()
+                .map(|storage| (&storage.real, &storage.imag)),
+            Some((
+                &IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+                &IntegerStorage::I64(vec![0, i64::MIN]),
+            ))
         );
     }
 

@@ -1834,6 +1834,21 @@ async fn elementwise_max(value: Value, args: ElementwiseArgs) -> BuiltinResult<M
         nan_mode,
         comparison,
     } = args;
+    if matches!(comparison, ComparisonMethod::Auto | ComparisonMethod::Real) {
+        if let Some(eval) =
+            crate::builtins::math::reduction::integer_native::elementwise_value_extrema(
+                &value,
+                &other,
+                crate::builtins::math::reduction::integer_native::ExtremaDirection::Max,
+            )
+            .map_err(|error| max_size_mismatch(format!("max: {error}")))?
+        {
+            return Ok(MaxEvaluation {
+                values: eval.values,
+                indices: eval.indices,
+            });
+        }
+    }
     match (value, other) {
         (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {
             if gpu_tensor_is_scalar(&handle_b) {

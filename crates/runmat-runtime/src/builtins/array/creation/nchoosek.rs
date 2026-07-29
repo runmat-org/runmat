@@ -3,8 +3,8 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, LogicalArray, NumericDType, ResolveContext, Tensor, Type,
-    Value,
+    CharArray, ComplexTensor, IntValue, IntegerComplexStorage, LogicalArray, NumericDType,
+    ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -376,6 +376,23 @@ fn combinations_tensor(tensor: Tensor, k: usize) -> BuiltinResult<Value> {
 }
 
 fn combinations_complex_tensor(tensor: ComplexTensor, k: usize) -> BuiltinResult<Value> {
+    let n = vector_len(&tensor.shape)?;
+    let rows = checked_rows(n, k)?;
+    if let Some(storage) = tensor.integer_data {
+        let real = storage
+            .real
+            .from_exact_values_like(combination_columns(&storage.real.exact_values(), rows, k)?)
+            .map_err(|error| nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {error}")))?;
+        let imag = storage
+            .imag
+            .from_exact_values_like(combination_columns(&storage.imag.exact_values(), rows, k)?)
+            .map_err(|error| nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {error}")))?;
+        let storage = IntegerComplexStorage::new(real, imag)
+            .map_err(|error| nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {error}")))?;
+        return ComplexTensor::new_integer(storage, vec![rows, k])
+            .map(Value::ComplexTensor)
+            .map_err(|error| nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {error}")));
+    }
     combinations_complex(tensor.data, tensor.shape, k)
 }
 
@@ -827,6 +844,67 @@ mod tests {
                 assert_eq!(output.shape, shape);
                 assert_eq!(output.integer_storage(), Some(&empty));
             }
+        }
+    }
+
+    #[test]
+    fn exact_complex_integer_vector_combinations_preserve_all_classes() {
+        let storages = [
+            IntegerStorage::I8(vec![i8::MIN, -2, i8::MAX]),
+            IntegerStorage::I16(vec![i16::MIN, -300, i16::MAX]),
+            IntegerStorage::I32(vec![i32::MIN, -9_007_199, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, -9_007_199_254_740_993, i64::MAX]),
+            IntegerStorage::U8(vec![0, 7, u8::MAX]),
+            IntegerStorage::U16(vec![0, 700, u16::MAX]),
+            IntegerStorage::U32(vec![0, 9_007_199, u32::MAX]),
+            IntegerStorage::U64(vec![0, 9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for real in storages {
+            let real_values = real.exact_values();
+            let imag = real
+                .from_exact_values_like(vec![
+                    real_values[2].clone(),
+                    real_values[1].clone(),
+                    real_values[0].clone(),
+                ])
+                .expect("imaginary storage");
+            let imag_values = imag.exact_values();
+            let expected = IntegerComplexStorage::new(
+                real.from_exact_values_like(vec![
+                    real_values[0].clone(),
+                    real_values[0].clone(),
+                    real_values[1].clone(),
+                    real_values[1].clone(),
+                    real_values[2].clone(),
+                    real_values[2].clone(),
+                ])
+                .expect("expected real storage"),
+                imag.from_exact_values_like(vec![
+                    imag_values[0].clone(),
+                    imag_values[0].clone(),
+                    imag_values[1].clone(),
+                    imag_values[1].clone(),
+                    imag_values[2].clone(),
+                    imag_values[2].clone(),
+                ])
+                .expect("expected imaginary storage"),
+            )
+            .expect("expected complex storage");
+            let mut input = ComplexTensor::new_integer(
+                IntegerComplexStorage::new(real, imag).expect("complex integer input"),
+                vec![1, 3],
+            )
+            .expect("complex integer tensor");
+            input.data.clear();
+
+            let Value::ComplexTensor(output) =
+                call(Value::ComplexTensor(input), Value::Num(2.0)).expect("combinations")
+            else {
+                panic!("expected exact complex integer combinations");
+            };
+            assert_eq!(output.shape, vec![3, 2]);
+            assert_eq!(output.integer_data, Some(expected));
         }
     }
 

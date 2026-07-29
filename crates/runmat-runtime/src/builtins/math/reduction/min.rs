@@ -1634,6 +1634,21 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
 
 async fn elementwise_min(value: Value, args: ElementwiseArgs) -> BuiltinResult<MinEvaluation> {
     let ElementwiseArgs { other, comparison } = args;
+    if matches!(comparison, ComparisonMethod::Auto | ComparisonMethod::Real) {
+        if let Some(eval) =
+            crate::builtins::math::reduction::integer_native::elementwise_value_extrema(
+                &value,
+                &other,
+                crate::builtins::math::reduction::integer_native::ExtremaDirection::Min,
+            )
+            .map_err(|error| min_size_mismatch(format!("min: {error}")))?
+        {
+            return Ok(MinEvaluation {
+                values: eval.values,
+                indices: eval.indices,
+            });
+        }
+    }
     match (value, other) {
         (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {
             if let Some(eval) = elementwise_min_gpu_pair(&handle_a, &handle_b, comparison).await {
