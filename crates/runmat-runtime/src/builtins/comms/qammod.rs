@@ -1208,5 +1208,20 @@ mod tests {
             &out.data,
             &[(-1.0, 1.0), (1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)],
         );
+
+        for storage in [
+            IntegerStorage::I8(vec![4]),
+            IntegerStorage::I16(vec![4]),
+            IntegerStorage::I32(vec![4]),
+            IntegerStorage::I64(vec![4]),
+            IntegerStorage::U8(vec![4]),
+            IntegerStorage::U16(vec![4]),
+            IntegerStorage::U32(vec![4]),
+            IntegerStorage::U64(vec![4]),
+        ] {
+            let mut order = Tensor::new_integer(storage, vec![1, 1]).expect("typed order");
+            order.data.fill(f64::NAN);
+            assert_eq!(parse_modulation_order(&Value::Tensor(order)).unwrap(), 4);
+        }
     }
 }

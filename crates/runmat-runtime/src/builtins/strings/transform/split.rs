@@ -968,6 +968,12 @@ fn parse_bool_for_builtin(
         }
         Value::Tensor(tensor) => {
             if tensor::is_scalar_tensor(tensor) {
+                if let Some(value) = tensor
+                    .integer_storage()
+                    .and_then(|storage| storage.value_at(0))
+                {
+                    return Ok(!value.is_zero());
+                }
                 Ok(tensor::tensor_value_f64(tensor, 0) != 0.0)
             } else {
                 Err(builtin_error_with_descriptor(
@@ -1262,10 +1268,20 @@ pub(crate) mod tests {
     fn split_bool_options_read_wide_uint64_truth_exactly() {
         assert!(parse_bool(&Value::Int(IntValue::U64(u64::MAX)), "IncludeDelimiters").unwrap());
 
-        let mut enabled =
-            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("enabled");
-        enabled.data.clear();
-        assert!(parse_bool(&Value::Tensor(enabled), "IncludeDelimiters").unwrap());
+        for storage in [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![u64::MAX]),
+        ] {
+            let mut enabled = Tensor::new_integer(storage, vec![1, 1]).expect("enabled");
+            enabled.data.clear();
+            assert!(parse_bool(&Value::Tensor(enabled), "IncludeDelimiters").unwrap());
+        }
 
         let mut disabled =
             Tensor::new_integer(IntegerStorage::I16(vec![0]), vec![1, 1]).expect("disabled");

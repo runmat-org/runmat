@@ -1714,6 +1714,21 @@ mod tests {
             12.0
         );
 
+        for storage in [
+            IntegerStorage::I8(vec![2]),
+            IntegerStorage::I16(vec![2]),
+            IntegerStorage::I32(vec![2]),
+            IntegerStorage::I64(vec![2]),
+            IntegerStorage::U8(vec![2]),
+            IntegerStorage::U16(vec![2]),
+            IntegerStorage::U32(vec![2]),
+            IntegerStorage::U64(vec![2]),
+        ] {
+            let mut width = Tensor::new_integer(storage, vec![1, 1]).expect("typed width");
+            width.data.fill(f64::NAN);
+            assert_eq!(parse_width(&Value::Tensor(width)).unwrap(), Some(2));
+        }
+
         let mut empty = Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 1]).unwrap();
         empty.data = vec![1.0];
         assert!(is_empty_numeric(&Value::Tensor(empty)));

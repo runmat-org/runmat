@@ -1014,7 +1014,11 @@ fn classify_value(value: &Value) -> BuiltinResult<ClassifiedValue> {
         Value::Int(iv) => Ok(ClassifiedValue::Double(iv.to_f64())),
         Value::Complex(re, im) => Ok(ClassifiedValue::Complex((*re, *im))),
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
-            Ok(ClassifiedValue::Double(tensor::tensor_value_f64(t, 0)))
+            let value = t
+                .integer_storage()
+                .and_then(|storage| storage.value_at(0))
+                .map_or_else(|| tensor::tensor_value_f64(t, 0), |value| value.to_f64());
+            Ok(ClassifiedValue::Double(value))
         }
         Value::LogicalArray(la) if la.data.len() == 1 => {
             Ok(ClassifiedValue::Logical(la.data[0] != 0))

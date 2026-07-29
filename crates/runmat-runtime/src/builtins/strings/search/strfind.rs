@@ -452,6 +452,8 @@ fn parse_bool_like(value: &Value) -> BuiltinResult<bool> {
                     ),
                     &STRFIND_ERROR_INVALID_OPTION,
                 ))
+            } else if let Some(value) = tensor.integer_storage().and_then(|storage| storage.value_at(0)) {
+                Ok(!value.is_zero())
             } else if !tensor::tensor_value_f64(tensor, 0).is_finite() {
                 Err(strfind_error_with_message(
                     "strfind: option values must be finite numeric scalars",

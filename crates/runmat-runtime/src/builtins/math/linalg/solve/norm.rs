@@ -635,6 +635,12 @@ fn parse_order_value(value: &Value) -> BuiltinResult<NormOrder> {
 }
 
 fn scalar_tensor_f64(tensor: &Tensor) -> f64 {
+    if let Some(integer) = tensor
+        .integer_storage()
+        .and_then(|storage| storage.value_at(0))
+    {
+        return integer.to_f64();
+    }
     tensor::tensor_value_f64(tensor, 0)
 }
 
@@ -829,6 +835,28 @@ pub(crate) mod tests {
         match value {
             Value::Num(v) => assert_close(v, 7.0),
             other => panic!("expected scalar value, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn norm_order_uses_all_integer_storage_classes_without_mirror() {
+        let storages = vec![
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+        for storage in storages {
+            let mut order = Tensor::new_integer(storage, vec![1, 1]).expect("order");
+            order.data = vec![f64::NAN];
+            assert!(matches!(
+                parse_order_value(&Value::Tensor(order)),
+                Ok(NormOrder::One)
+            ));
         }
     }
 

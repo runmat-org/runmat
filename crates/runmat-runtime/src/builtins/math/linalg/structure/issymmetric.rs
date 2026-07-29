@@ -385,7 +385,7 @@ fn parse_tolerance_value(value: &Value) -> BuiltinResult<f64> {
     let raw = match value {
         Value::Num(n) => *n,
         Value::Int(i) => i.to_f64(),
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => tensor::tensor_values_f64(t)[0],
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => scalar_tensor_f64(t),
         Value::Bool(b) => {
             if *b {
                 1.0
@@ -420,6 +420,16 @@ fn parse_tolerance_value(value: &Value) -> BuiltinResult<f64> {
         ));
     }
     Ok(raw)
+}
+
+fn scalar_tensor_f64(tensor: &Tensor) -> f64 {
+    if let Some(integer) = tensor
+        .integer_storage()
+        .and_then(|storage| storage.value_at(0))
+    {
+        return integer.to_f64();
+    }
+    tensor::tensor_value_f64(tensor, 0)
 }
 
 fn matrix_dimensions_for(shape: &[usize]) -> BuiltinResult<(usize, usize)> {
@@ -791,6 +801,28 @@ pub(crate) mod tests {
         let result = issymmetric_builtin(Value::Tensor(tensor), vec![Value::Tensor(tolerance)])
             .expect("issymmetric");
         assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn tolerance_uses_all_integer_storage_classes_without_mirror() {
+        let storages = vec![
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+        for storage in storages {
+            let mut tolerance = Tensor::new_integer(storage, vec![1, 1]).expect("tolerance");
+            tolerance.data = vec![f64::NAN];
+            assert_eq!(
+                parse_tolerance_value(&Value::Tensor(tolerance)).unwrap(),
+                1.0
+            );
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -628,6 +628,16 @@ fn logical_scalar(value: &Value) -> BuiltinResult<bool> {
         Value::Bool(value) => Ok(*value),
         Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
         Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            if let Some(value) = tensor
+                .integer_storage()
+                .and_then(|storage| storage.value_at(0))
+            {
+                return match value.try_to_u64() {
+                    Some(0) => Ok(false),
+                    Some(1) => Ok(true),
+                    _ => Err(text_analytics_error("addEntityDetails", format!("addEntityDetails: logical scalar option must be true or false, got {value:?}"))),
+                };
+            }
             match tensor_utils::tensor_value_f64(tensor, 0) {
                 0.0 => Ok(false),
                 1.0 => Ok(true),

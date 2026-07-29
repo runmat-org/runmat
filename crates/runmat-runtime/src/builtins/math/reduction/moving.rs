@@ -9,7 +9,7 @@ use runmat_accelerate_api::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, ResolveContext, Tensor, Type, Value,
+    ComplexTensor, IntValue, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -1694,6 +1694,9 @@ async fn parse_variance_normalization(
     name: &'static str,
     value: &Value,
 ) -> BuiltinResult<Option<VarianceNormalization>> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return parse_integer_variance_normalization(name, &integer).map(Some);
+    }
     let values = match value {
         Value::Tensor(tensor) if tensor_len(tensor) == 0 => {
             return Ok(Some(VarianceNormalization::Sample));
@@ -1725,6 +1728,12 @@ async fn parse_variance_normalization(
                 return Ok(Some(VarianceNormalization::Sample));
             }
             if tensor::is_scalar_tensor(&tensor) {
+                if let Some(integer) = tensor
+                    .integer_storage()
+                    .and_then(|storage| storage.value_at(0))
+                {
+                    return parse_integer_variance_normalization(name, &integer).map(Some);
+                }
                 vec![tensor::tensor_value_f64(&tensor, 0)]
             } else {
                 return Err(invalid_argument(
@@ -1753,6 +1762,20 @@ async fn parse_variance_normalization(
     }
 }
 
+fn parse_integer_variance_normalization(
+    name: &'static str,
+    value: &IntValue,
+) -> BuiltinResult<VarianceNormalization> {
+    match value.try_to_i64() {
+        Some(0) => Ok(VarianceNormalization::Sample),
+        Some(1) => Ok(VarianceNormalization::Population),
+        _ => Err(invalid_argument(
+            name,
+            format!("{name}: normalization flag must be 0 or 1"),
+        )),
+    }
+}
+
 async fn looks_like_dimension(value: &Value) -> BuiltinResult<bool> {
     tensor::dimension_from_value_async(value, "moving", false)
         .await
@@ -1761,6 +1784,31 @@ async fn looks_like_dimension(value: &Value) -> BuiltinResult<bool> {
 }
 
 async fn parse_window(name: &'static str, value: &Value) -> BuiltinResult<WindowSpec> {
+    if let Some(values) = integer_vector(value).await? {
+        return match values.as_slice() {
+            [raw] => {
+                let k = positive_integer_value(name, raw, "window length")?;
+                let before = k / 2;
+                let after = (k - 1) / 2;
+                WindowSpec::Counts { before, after }
+                    .checked_count_len(name)?
+                    .map(|_| WindowSpec::Counts { before, after })
+                    .ok_or_else(|| internal(name, format!("{name}: invalid window")))
+            }
+            [before, after] => {
+                let before = nonnegative_integer_value(name, before, "window backward length")?;
+                let after = nonnegative_integer_value(name, after, "window forward length")?;
+                WindowSpec::Counts { before, after }
+                    .checked_count_len(name)?
+                    .map(|_| WindowSpec::Counts { before, after })
+                    .ok_or_else(|| internal(name, format!("{name}: invalid window")))
+            }
+            _ => Err(invalid_argument(
+                name,
+                format!("{name}: window must be a scalar or a two-element vector"),
+            )),
+        };
+    }
     let values = numeric_vector(name, value).await?;
     match values.as_slice() {
         [raw] => {
@@ -1785,6 +1833,27 @@ async fn parse_window(name: &'static str, value: &Value) -> BuiltinResult<Window
             format!("{name}: window must be a scalar or a two-element vector"),
         )),
     }
+}
+
+async fn integer_vector(value: &Value) -> BuiltinResult<Option<Vec<IntValue>>> {
+    let tensor = match value {
+        Value::Int(value) => return Ok(Some(vec![value.clone()])),
+        Value::Tensor(tensor) => tensor,
+        Value::GpuTensor(handle) => {
+            let tensor = gpu_helpers::gather_tensor_async(handle).await?;
+            return Ok(tensor.integer_storage().map(|storage| {
+                (0..storage.len())
+                    .filter_map(|index| storage.value_at(index))
+                    .collect()
+            }));
+        }
+        _ => return Ok(None),
+    };
+    Ok(tensor.integer_storage().map(|storage| {
+        (0..storage.len())
+            .filter_map(|index| storage.value_at(index))
+            .collect()
+    }))
 }
 
 async fn parse_sample_window(name: &'static str, value: &Value) -> BuiltinResult<WindowSpec> {
@@ -1906,6 +1975,34 @@ fn positive_integer(name: &'static str, raw: f64, what: &str) -> BuiltinResult<u
         ));
     }
     Ok(value)
+}
+
+fn positive_integer_value(
+    name: &'static str,
+    value: &IntValue,
+    what: &str,
+) -> BuiltinResult<usize> {
+    let value = nonnegative_integer_value(name, value, what)?;
+    if value == 0 {
+        return Err(invalid_argument(
+            name,
+            format!("{name}: {what} must be positive"),
+        ));
+    }
+    Ok(value)
+}
+
+fn nonnegative_integer_value(
+    name: &'static str,
+    value: &IntValue,
+    what: &str,
+) -> BuiltinResult<usize> {
+    value.try_to_usize().ok_or_else(|| {
+        invalid_argument(
+            name,
+            format!("{name}: {what} must be a nonnegative integer"),
+        )
+    })
 }
 
 fn nonnegative_integer(name: &'static str, raw: f64, what: &str) -> BuiltinResult<usize> {
@@ -2218,6 +2315,31 @@ mod tests {
     }
 
     #[test]
+    fn moving_window_uses_all_integer_storage_classes_without_mirror() {
+        let storages = vec![
+            IntegerStorage::I8(vec![3]),
+            IntegerStorage::I16(vec![3]),
+            IntegerStorage::I32(vec![3]),
+            IntegerStorage::I64(vec![3]),
+            IntegerStorage::U8(vec![3]),
+            IntegerStorage::U16(vec![3]),
+            IntegerStorage::U32(vec![3]),
+            IntegerStorage::U64(vec![3]),
+        ];
+        for storage in storages {
+            let mut window = Tensor::new_integer(storage, vec![1, 1]).expect("window");
+            window.data = vec![f64::NAN];
+            assert!(matches!(
+                block_on(parse_window("movsum", &Value::Tensor(window))),
+                Ok(WindowSpec::Counts {
+                    before: 1,
+                    after: 1
+                })
+            ));
+        }
+    }
+
+    #[test]
     fn movmin_fill_endpoint_includes_fill_value() {
         let result = call(
             "movmin",
@@ -2306,6 +2428,32 @@ mod tests {
         assert!((output.data[0] - 2.0).abs() < 1e-12);
         assert!((output.data[1] - (8.0_f64 / 3.0).sqrt()).abs() < 1e-12);
         assert!((output.data[2] - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn moving_normalization_uses_all_integer_storage_classes_without_mirror() {
+        let storages = vec![
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+        for storage in storages {
+            let mut normalization =
+                Tensor::new_integer(storage, vec![1, 1]).expect("normalization");
+            normalization.data = vec![f64::NAN];
+            assert!(matches!(
+                block_on(parse_variance_normalization(
+                    "movstd",
+                    &Value::Tensor(normalization)
+                )),
+                Ok(Some(VarianceNormalization::Population))
+            ));
+        }
     }
 
     #[test]

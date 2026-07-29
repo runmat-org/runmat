@@ -2472,6 +2472,21 @@ fn parse_bool_scalar(value: &Value, fn_name: &str) -> BuiltinResult<bool> {
         Value::Bool(value) => Ok(*value),
         Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
         Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            if let Some(value) = tensor
+                .integer_storage()
+                .and_then(|storage| storage.value_at(0))
+            {
+                return match value.try_to_u64() {
+                    Some(0) => Ok(false),
+                    Some(1) => Ok(true),
+                    _ => Err(embedding_error(
+                        fn_name,
+                        format!(
+                            "{fn_name}: logical scalar option must be true or false, got {value:?}"
+                        ),
+                    )),
+                };
+            }
             match tensor_utils::tensor_value_f64(tensor, 0) {
                 0.0 => Ok(false),
                 1.0 => Ok(true),
@@ -2506,7 +2521,14 @@ fn parse_positive_integer(value: &Value, fn_name: &str) -> BuiltinResult<usize> 
         Value::Num(value) => positive_platform_usize(*value),
         Value::Int(value) => value.try_to_usize().filter(|value| *value > 0),
         Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
-            positive_platform_usize(tensor_utils::tensor_value_f64(tensor, 0))
+            if let Some(storage) = tensor.integer_storage() {
+                storage
+                    .value_at(0)
+                    .and_then(|value| value.try_to_usize())
+                    .filter(|value| *value > 0)
+            } else {
+                positive_platform_usize(tensor_utils::tensor_value_f64(tensor, 0))
+            }
         }
         _ => None,
     };
@@ -3466,6 +3488,21 @@ mod tests {
             .unwrap(),
             7
         );
+        for storage in [
+            IntegerStorage::I8(vec![2]),
+            IntegerStorage::I16(vec![2]),
+            IntegerStorage::I32(vec![2]),
+            IntegerStorage::I64(vec![2]),
+            IntegerStorage::U8(vec![2]),
+            IntegerStorage::U16(vec![2]),
+            IntegerStorage::U32(vec![2]),
+            IntegerStorage::U64(vec![2]),
+        ] {
+            assert_eq!(
+                parse_positive_integer(&poisoned_integer_scalar(storage), "test").unwrap(),
+                2
+            );
+        }
         assert_eq!(
             parse_numeric_scalar(
                 &poisoned_integer_scalar(IntegerStorage::I16(vec![-4])),
@@ -3484,11 +3521,18 @@ mod tests {
             .unwrap(),
             11.0
         );
-        assert!(parse_bool_scalar(
-            &poisoned_integer_scalar(IntegerStorage::U8(vec![1])),
-            "test"
-        )
-        .unwrap());
+        for storage in [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ] {
+            assert!(parse_bool_scalar(&poisoned_integer_scalar(storage), "test").unwrap());
+        }
         for value in [
             Value::Int(runmat_builtins::IntValue::I8(-1)),
             Value::Num(1.5),

@@ -1303,6 +1303,24 @@ mod tests {
             Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![1, 2]), vec![1, 2])
                 .expect("vector");
         assert!(numeric_scalar(&Value::Tensor(vector), "LoopCount").is_err());
+
+        for storage in [
+            runmat_builtins::IntegerStorage::I8(vec![1]),
+            runmat_builtins::IntegerStorage::I16(vec![1]),
+            runmat_builtins::IntegerStorage::I32(vec![1]),
+            runmat_builtins::IntegerStorage::I64(vec![1]),
+            runmat_builtins::IntegerStorage::U8(vec![1]),
+            runmat_builtins::IntegerStorage::U16(vec![1]),
+            runmat_builtins::IntegerStorage::U32(vec![1]),
+            runmat_builtins::IntegerStorage::U64(vec![1]),
+        ] {
+            let mut scalar = Tensor::new_integer(storage, vec![1, 1]).expect("scalar");
+            scalar.data.fill(f64::NAN);
+            assert_eq!(
+                numeric_scalar(&Value::Tensor(scalar), "LoopCount").unwrap(),
+                1.0
+            );
+        }
     }
 
     #[test]

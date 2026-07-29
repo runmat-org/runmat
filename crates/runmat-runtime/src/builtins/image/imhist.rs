@@ -1012,6 +1012,24 @@ mod tests {
             .expect("negative bin count");
         assert!(parse_optional_bin_count(&Value::Tensor(negative)).is_err());
         assert!(parse_optional_bin_count(&Value::Int(IntValue::U64(MAX_BINS as u64 + 1))).is_err());
+
+        for storage in [
+            IntegerStorage::I8(vec![2]),
+            IntegerStorage::I16(vec![2]),
+            IntegerStorage::I32(vec![2]),
+            IntegerStorage::I64(vec![2]),
+            IntegerStorage::U8(vec![2]),
+            IntegerStorage::U16(vec![2]),
+            IntegerStorage::U32(vec![2]),
+            IntegerStorage::U64(vec![2]),
+        ] {
+            let mut bins = Tensor::new_integer(storage, vec![1, 1]).expect("typed bin count");
+            bins.data.fill(f64::NAN);
+            assert_eq!(
+                parse_optional_bin_count(&Value::Tensor(bins)).unwrap(),
+                Some(2)
+            );
+        }
     }
 
     #[test]

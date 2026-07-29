@@ -559,13 +559,14 @@ fn time_vector_from_value(value: Value) -> BuiltinResult<Vec<f64>> {
         )
     })?;
     ensure_vector("time", &tensor.shape)?;
-    if tensor.data.is_empty() {
+    let values = tensor::tensor_into_values_f64(tensor);
+    if values.is_empty() {
         return Err(impulse_error_with_detail(
             &IMPULSE_ERROR_INVALID_TIME,
             "time vector cannot be empty",
         ));
     }
-    Ok(tensor::tensor_values_f64(&tensor))
+    Ok(values)
 }
 
 fn validate_time_vector(system: &TfSystem, values: &[f64]) -> BuiltinResult<()> {
@@ -1000,6 +1001,28 @@ mod tests {
             panic!("expected output list");
         };
         assert_eq!(tensor_data(outputs[1].clone()), vec![0.0, 1.0]);
+    }
+
+    #[test]
+    fn impulse_time_vector_parser_ignores_poisoned_integer_mirrors_for_all_classes() {
+        let storages = [
+            IntegerStorage::I8(vec![0, 1]),
+            IntegerStorage::I16(vec![0, 1]),
+            IntegerStorage::I32(vec![0, 1]),
+            IntegerStorage::I64(vec![0, 1]),
+            IntegerStorage::U8(vec![0, 1]),
+            IntegerStorage::U16(vec![0, 1]),
+            IntegerStorage::U32(vec![0, 1]),
+            IntegerStorage::U64(vec![0, 1]),
+        ];
+
+        for storage in storages {
+            assert_eq!(
+                time_vector_from_value(integer_tensor(storage, vec![1, 2]))
+                    .expect("typed integer time vector"),
+                vec![0.0, 1.0]
+            );
+        }
     }
 
     #[test]

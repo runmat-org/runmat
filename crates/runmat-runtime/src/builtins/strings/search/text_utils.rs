@@ -235,6 +235,12 @@ fn parse_logical_value(fn_name: &str, value: &Value) -> BuiltinResult<bool> {
                     ),
                 ));
             }
+            if let Some(value) = tensor
+                .integer_storage()
+                .and_then(|storage| storage.value_at(0))
+            {
+                return Ok(!value.is_zero());
+            }
             let value = tensor::tensor_value_f64(tensor, 0);
             if !value.is_finite() {
                 return Err(text_error(

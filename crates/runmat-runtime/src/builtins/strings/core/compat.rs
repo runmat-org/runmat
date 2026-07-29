@@ -928,11 +928,13 @@ fn parse_nonnegative_usize(value: &Value, fn_name: &str) -> BuiltinResult<usize>
     let index = match value {
         Value::Num(n) => nonnegative_platform_usize(*n),
         Value::Int(i) => i.try_to_usize(),
-        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => tensor
-            .integer_storage()
-            .and_then(|storage| storage.value_at(0))
-            .and_then(|value| value.try_to_usize())
-            .or_else(|| nonnegative_platform_usize(tensor_utils::tensor_value_f64(tensor, 0))),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                storage.value_at(0).and_then(|value| value.try_to_usize())
+            } else {
+                nonnegative_platform_usize(tensor_utils::tensor_value_f64(tensor, 0))
+            }
+        }
         _ => {
             return Err(compat_error(
                 fn_name,

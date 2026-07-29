@@ -466,6 +466,9 @@ fn property_scalar(object: &ObjectInstance, name: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_value_f64(tensor, 0))
+        }
         other => Err(step_error_with_detail(
             &STEP_ERROR_INVALID_MODEL,
             format!("tf {name} property must be a scalar, got {other:?}"),
@@ -1063,6 +1066,31 @@ mod tests {
         let time = tensor_data(outputs[1].clone());
         assert_eq!(time.first().copied(), Some(0.0));
         assert_eq!(time.last().copied(), Some(2.0));
+    }
+
+    #[test]
+    fn step_sample_time_parser_ignores_poisoned_integer_mirrors_for_all_classes() {
+        let storages = [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+
+        for storage in storages {
+            let mut sample_time = Tensor::new_integer(storage, vec![1, 1]).expect("sample time");
+            sample_time.data.fill(f64::NAN);
+            let mut object = ObjectInstance::new("tf".to_string());
+            object
+                .properties
+                .insert("Ts".to_string(), Value::Tensor(sample_time));
+
+            assert_eq!(property_scalar(&object, "Ts").expect("sample time"), 1.0);
+        }
     }
 
     #[test]

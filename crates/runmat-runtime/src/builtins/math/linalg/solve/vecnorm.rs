@@ -463,7 +463,7 @@ fn parse_order(value: &Value) -> BuiltinResult<NormOrder> {
         Value::Int(value) => parse_numeric_order(value.to_f64()),
         Value::Tensor(tensor) => {
             if tensor::is_scalar_tensor(tensor) {
-                parse_numeric_order(tensor::tensor_value_f64(tensor, 0))
+                parse_numeric_order(scalar_tensor_f64(tensor))
             } else {
                 Err(argument_error(format!(
                     "{NAME}: p must be a positive scalar or Inf."
@@ -564,6 +564,16 @@ fn parse_dim(value: &Value) -> BuiltinResult<usize> {
         )));
     }
     Ok(rounded as usize)
+}
+
+fn scalar_tensor_f64(tensor: &Tensor) -> f64 {
+    if let Some(integer) = tensor
+        .integer_storage()
+        .and_then(|storage| storage.value_at(0))
+    {
+        return integer.to_f64();
+    }
+    tensor::tensor_value_f64(tensor, 0)
 }
 
 fn approx_eq(a: f64, b: f64) -> bool {
@@ -867,6 +877,28 @@ mod tests {
         match result {
             Value::Num(value) => assert_close(value, 7.0),
             other => panic!("expected scalar, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn vecnorm_order_uses_all_integer_storage_classes_without_mirror() {
+        let storages = vec![
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+        for storage in storages {
+            let mut order = Tensor::new_integer(storage, vec![1, 1]).expect("order");
+            order.data = vec![f64::NAN];
+            assert!(matches!(
+                parse_order(&Value::Tensor(order)),
+                Ok(NormOrder::One)
+            ));
         }
     }
 
