@@ -695,10 +695,19 @@ pub(crate) fn validate_face_alpha(value: f64) -> BuiltinResult<()> {
 }
 
 pub(crate) fn option_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return match integer.try_to_u64() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(invalid(format!("histogram2: {name} must be 0 or 1"))),
+        };
+    }
     match value {
         Value::Bool(value) => Ok(*value),
         Value::Num(value) => numeric_bool(*value, name),
-        Value::Int(value) => numeric_bool(value.to_f64(), name),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            numeric_bool(tensor::tensor_value_f64(tensor, 0), name)
+        }
         _ => {
             if let Some(text) = tensor::value_to_string(value) {
                 match text.trim().to_ascii_lowercase().as_str() {
@@ -793,6 +802,26 @@ mod tests {
             option_scalar(&Value::Tensor(tensor), "FaceAlpha").unwrap(),
             1.0
         );
+    }
+
+    #[test]
+    fn histogram2_boolean_option_reads_all_integer_storage_classes_with_poisoned_f64_mirrors() {
+        let storages = [
+            runmat_builtins::IntegerStorage::I8(vec![1]),
+            runmat_builtins::IntegerStorage::I16(vec![1]),
+            runmat_builtins::IntegerStorage::I32(vec![1]),
+            runmat_builtins::IntegerStorage::I64(vec![1]),
+            runmat_builtins::IntegerStorage::U8(vec![1]),
+            runmat_builtins::IntegerStorage::U16(vec![1]),
+            runmat_builtins::IntegerStorage::U32(vec![1]),
+            runmat_builtins::IntegerStorage::U64(vec![1]),
+        ];
+
+        for storage in storages {
+            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("logical");
+            tensor.data = vec![f64::NAN];
+            assert!(option_bool(&Value::Tensor(tensor), "ShowEmptyBins").expect("logical"));
+        }
     }
 
     #[test]

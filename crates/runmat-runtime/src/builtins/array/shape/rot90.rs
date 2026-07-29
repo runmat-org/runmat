@@ -368,6 +368,15 @@ fn parse_numeric_rotation(value: f64) -> crate::BuiltinResult<i64> {
             &ROT90_ERROR_INVALID_ROTATION,
         ));
     }
+    if rounded < i64::MIN as f64
+        || rounded > i64::MAX as f64
+        || (i64::BITS == 64 && rounded == i64::MAX as f64)
+    {
+        return Err(rot90_error_with_message(
+            "rot90: K is outside the supported signed range",
+            &ROT90_ERROR_INVALID_ROTATION,
+        ));
+    }
     Ok(rounded as i64)
 }
 

@@ -6,7 +6,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderCondNorm};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
+    ComplexTensor, IntValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -478,8 +478,14 @@ fn parse_norm_value(value: &Value) -> BuiltinResult<CondNorm> {
     }
     match value {
         Value::Num(n) => parse_norm_numeric(*n),
-        Value::Int(i) => parse_norm_numeric(i.to_f64()),
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => parse_norm_numeric(scalar_tensor_f64(t)),
+        Value::Int(i) => parse_integer_norm(i),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+            if let Some(integer) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                parse_integer_norm(&integer)
+            } else {
+                parse_norm_numeric(scalar_tensor_f64(t))
+            }
+        }
         Value::Bool(b) => {
             if *b {
                 Ok(CondNorm::One)
@@ -506,6 +512,16 @@ fn parse_norm_value(value: &Value) -> BuiltinResult<CondNorm> {
 
 fn scalar_tensor_f64(tensor: &Tensor) -> f64 {
     tensor::tensor_value_f64(tensor, 0)
+}
+
+fn parse_integer_norm(value: &IntValue) -> BuiltinResult<CondNorm> {
+    match value.try_to_i64() {
+        Some(1) => Ok(CondNorm::One),
+        Some(2) => Ok(CondNorm::Two),
+        _ => Err(argument_error(format!(
+            "{NAME}: norm must be 1, 2, Inf, or 'fro'"
+        ))),
+    }
 }
 
 fn parse_norm_numeric(raw: f64) -> BuiltinResult<CondNorm> {
@@ -694,6 +710,32 @@ pub(crate) mod tests {
             Value::Num(value) => assert!((value - 2.142_857_142_857_143).abs() < 1e-9),
             other => panic!("expected scalar result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn cond_norm_uses_exact_storage_for_every_integer_class_and_rejects_wide_values() {
+        let storages = vec![
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+        for storage in storages {
+            let mut order = Tensor::new_integer(storage, vec![1, 1]).expect("order");
+            order.data = vec![f64::NAN];
+            assert!(matches!(
+                parse_norm_value(&Value::Tensor(order)),
+                Ok(CondNorm::One)
+            ));
+        }
+        let mut wide = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("wide order");
+        wide.data = vec![1.0];
+        assert!(parse_norm_value(&Value::Tensor(wide)).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

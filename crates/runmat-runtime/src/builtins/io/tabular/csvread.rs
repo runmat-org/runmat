@@ -1111,6 +1111,29 @@ pub(crate) mod tests {
         assert!(value_to_start_index(&Value::Num(1.0e300), "row").is_err());
     }
 
+    #[test]
+    fn csvread_start_offsets_read_all_integer_storage_classes_with_poisoned_f64_mirrors() {
+        let storages = [
+            IntegerStorage::I8(vec![7]),
+            IntegerStorage::I16(vec![7]),
+            IntegerStorage::I32(vec![7]),
+            IntegerStorage::I64(vec![7]),
+            IntegerStorage::U8(vec![7]),
+            IntegerStorage::U16(vec![7]),
+            IntegerStorage::U32(vec![7]),
+            IntegerStorage::U64(vec![7]),
+        ];
+
+        for storage in storages {
+            let mut tensor = BuiltinTensor::new_integer(storage, vec![1, 1]).expect("index");
+            tensor.data = vec![f64::NAN];
+            assert_eq!(
+                value_to_start_index(&Value::Tensor(tensor), "row").expect("index"),
+                7
+            );
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn csvread_empty_fields_become_zero() {

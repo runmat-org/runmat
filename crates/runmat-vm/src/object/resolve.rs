@@ -566,22 +566,32 @@ fn is_invalid_graphics_handle_error(err: &RuntimeError) -> bool {
 fn is_possible_graphics_handle_value(value: &Value) -> bool {
     match value {
         Value::Num(v) => v.is_finite() && *v >= 0.0,
-        Value::Int(i) => i.to_f64() >= 0.0,
+        Value::Int(i) => i.try_to_u64().is_some(),
         _ => false,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{load_member, load_static_member, store_member};
+    use super::{is_possible_graphics_handle_value, load_member, load_static_member, store_member};
     use runmat_builtins::{
-        get_static_property_value, register_class, Access, ClassDef, MethodDef, ObjectInstance,
-        PropertyDef, Value,
+        get_static_property_value, register_class, Access, ClassDef, IntValue, MethodDef,
+        ObjectInstance, PropertyDef, Value,
     };
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn graphics_handle_predicate_preserves_wide_integer_sign() {
+        assert!(is_possible_graphics_handle_value(&Value::Int(
+            IntValue::U64(u64::MAX)
+        )));
+        assert!(!is_possible_graphics_handle_value(&Value::Int(
+            IntValue::I64(-1)
+        )));
+    }
 
     fn unique_class_name(prefix: &str) -> String {
         let id = TEST_CLASS_COUNTER.fetch_add(1, Ordering::Relaxed);

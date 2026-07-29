@@ -560,6 +560,26 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn linspace_count_parser_ignores_poisoned_f64_mirrors_for_all_integer_classes() {
+        let storages = [
+            IntegerStorage::I8(vec![2]),
+            IntegerStorage::I16(vec![2]),
+            IntegerStorage::I32(vec![2]),
+            IntegerStorage::I64(vec![2]),
+            IntegerStorage::U8(vec![2]),
+            IntegerStorage::U16(vec![2]),
+            IntegerStorage::U32(vec![2]),
+            IntegerStorage::U64(vec![2]),
+        ];
+
+        for storage in storages {
+            let mut count = Tensor::new_integer(storage, vec![1, 1]).expect("integer count");
+            count.data.fill(f64::NAN);
+            assert_eq!(parse_count_host(&Value::Tensor(count)).unwrap(), 2);
+        }
+    }
+
+    #[test]
     fn linspace_count_parser_rejects_negative_typed_integer_tensors() {
         let mut count = Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).unwrap();
         count.data.clear();

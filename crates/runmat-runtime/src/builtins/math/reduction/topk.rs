@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, ResolveContext, Tensor, Type, Value,
+    ComplexTensor, IntValue, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -417,6 +417,9 @@ async fn parse_topk_args(kind: TopKKind, rest: &[Value]) -> BuiltinResult<TopKAr
 }
 
 async fn parse_k(kind: TopKKind, value: &Value) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return parse_integer_k(kind, &integer);
+    }
     let Some(raw) = tensor::scalar_f64_from_value_async(value)
         .await
         .map_err(|message| topk_invalid_argument(kind, message))?
@@ -433,7 +436,22 @@ async fn parse_k(kind: TopKKind, value: &Value) -> BuiltinResult<usize> {
     if rounded < 0.0 {
         return Err(topk_invalid_argument(kind, "k must be nonnegative"));
     }
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+        return Err(topk_invalid_argument(
+            kind,
+            "k is outside the supported range",
+        ));
+    }
     Ok(rounded as usize)
+}
+
+fn parse_integer_k(kind: TopKKind, value: &IntValue) -> BuiltinResult<usize> {
+    value.try_to_usize().ok_or_else(|| {
+        topk_invalid_argument(
+            kind,
+            "k must be a nonnegative integer in the supported range",
+        )
+    })
 }
 
 fn parse_comparison(kind: TopKKind, value: &Value) -> BuiltinResult<ComparisonMethod> {
@@ -931,6 +949,36 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.message().contains("k must be nonnegative"));
+    }
+
+    #[tokio::test]
+    async fn topk_k_uses_exact_storage_for_every_integer_class_and_rejects_wide_values() {
+        let storages = vec![
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+        for storage in storages {
+            let mut k = Tensor::new_integer(storage, vec![1, 1]).expect("k");
+            k.data = vec![f64::NAN];
+            assert_eq!(parse_k(TopKKind::Max, &Value::Tensor(k)).await.unwrap(), 1);
+        }
+        let mut wide =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("wide k");
+        wide.data = vec![1.0];
+        if usize::BITS == 64 {
+            assert_eq!(
+                parse_k(TopKKind::Max, &Value::Tensor(wide)).await.unwrap(),
+                usize::MAX
+            );
+        } else {
+            assert!(parse_k(TopKKind::Max, &Value::Tensor(wide)).await.is_err());
+        }
     }
 
     #[tokio::test]

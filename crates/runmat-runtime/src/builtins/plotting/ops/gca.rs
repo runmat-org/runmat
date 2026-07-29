@@ -7,7 +7,7 @@ use runmat_builtins::{
 use runmat_builtins::{StructValue, Value};
 use runmat_macros::runtime_builtin;
 
-use super::op_common::handles::handle_from_scalar;
+use super::op_common::handles::{handle_from_integer, handle_from_scalar};
 use super::plotting_error;
 use super::properties::{map_figure_error, resolve_plot_handle, PlotHandle};
 use super::state::{
@@ -156,10 +156,19 @@ fn figure_handle_arg(value: &Value) -> crate::BuiltinResult<Option<FigureHandle>
 
     match value {
         Value::Num(v) => Ok(Some(handle_from_scalar(*v, "gca")?)),
-        Value::Int(i) => Ok(Some(handle_from_scalar(i.to_f64(), "gca")?)),
-        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => Ok(Some(
-            handle_from_scalar(tensor_utils::tensor_value_f64(tensor, 0), "gca")?,
-        )),
+        Value::Int(i) => Ok(Some(handle_from_integer(i, "gca")?)),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                return Ok(Some(handle_from_integer(
+                    &storage.value_at(0).expect("one-element integer storage"),
+                    "gca",
+                )?));
+            }
+            Ok(Some(handle_from_scalar(
+                tensor_utils::tensor_value_f64(tensor, 0),
+                "gca",
+            )?))
+        }
         _ => Ok(None),
     }
 }

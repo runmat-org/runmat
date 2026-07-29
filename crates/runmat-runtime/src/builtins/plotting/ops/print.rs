@@ -20,7 +20,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor as tensor_utils;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-use super::op_common::handles::handle_from_scalar;
+use super::op_common::handles::{handle_from_integer, handle_from_scalar};
 use super::state::{current_figure_handle, FigureHandle};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::print")]
@@ -291,10 +291,19 @@ fn parse_print_args(args: &[Value]) -> BuiltinResult<PrintRequest> {
 fn figure_handle_arg(value: &Value) -> BuiltinResult<Option<FigureHandle>> {
     match value {
         Value::Num(v) => Ok(Some(handle_from_scalar(*v, BUILTIN_NAME)?)),
-        Value::Int(i) => Ok(Some(handle_from_scalar(i.to_f64(), BUILTIN_NAME)?)),
-        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => Ok(Some(
-            handle_from_scalar(tensor_utils::tensor_value_f64(tensor, 0), BUILTIN_NAME)?,
-        )),
+        Value::Int(i) => Ok(Some(handle_from_integer(i, BUILTIN_NAME)?)),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                return Ok(Some(handle_from_integer(
+                    &storage.value_at(0).expect("one-element integer storage"),
+                    BUILTIN_NAME,
+                )?));
+            }
+            Ok(Some(handle_from_scalar(
+                tensor_utils::tensor_value_f64(tensor, 0),
+                BUILTIN_NAME,
+            )?))
+        }
         _ => Ok(None),
     }
 }

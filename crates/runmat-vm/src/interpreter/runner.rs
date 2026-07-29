@@ -1612,7 +1612,7 @@ mod tests {
         assert!(value_is_integer(&Value::Tensor(tensor)));
         let non_integer = Tensor::new(vec![1.0, 2.5], vec![1, 2]).expect("tensor");
         assert!(!value_is_integer(&Value::Tensor(non_integer)));
-        assert!(!value_is_integer(&Value::Bool(true)));
+        assert!(value_is_integer(&Value::Bool(true)));
     }
 
     #[test]

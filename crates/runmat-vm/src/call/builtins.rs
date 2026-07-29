@@ -10,7 +10,9 @@ use crate::runtime::workspace::{
 use runmat_builtins::Value;
 use runmat_hir::{CallableIdentity, FunctionId, QualifiedName, SymbolName};
 use runmat_parser::{parse_with_options, CompatMode, ParserOptions};
-use runmat_runtime::builtins::common::tensor::{is_scalar_tensor, tensor_value_f64};
+use runmat_runtime::builtins::common::tensor::{
+    is_scalar_tensor, scalar_integer_value, tensor_value_f64,
+};
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_thread_local::runmat_thread_local;
 use std::collections::{HashMap, HashSet};
@@ -223,9 +225,17 @@ fn parse_finite_arity_bound(
     builtin: &str,
     name: &str,
 ) -> Result<usize, RuntimeError> {
+    if let Some(integer) = scalar_integer_value(value) {
+        return integer.try_to_usize().ok_or_else(|| {
+            mex(
+                &format!("{builtin}ArgumentInvalid"),
+                &format!("{builtin}: {name} exceeds the platform argument-count range"),
+            )
+        });
+    }
+
     let number = match value {
         Value::Num(value) => *value,
-        Value::Int(value) => value.to_f64(),
         Value::Tensor(tensor) if is_scalar_tensor(tensor) => tensor_value_f64(tensor, 0),
         other => {
             return Err(mex(
@@ -1482,7 +1492,7 @@ mod tests {
         imported_builtin_qualified_name, parse_finite_arity_bound,
         rethrow_without_explicit_exception,
     };
-    use runmat_builtins::{IntegerStorage, Tensor, Value};
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
 
     #[test]
     fn imported_builtin_qualified_name_uses_typed_segments() {
@@ -1527,6 +1537,26 @@ mod tests {
             parse_finite_arity_bound(&Value::Tensor(tensor), "narginchk", "minArgs").unwrap(),
             7
         );
+    }
+
+    #[test]
+    fn arity_bound_rejects_wide_integer_scalars_and_poisoned_tensor_mirrors() {
+        let scalar = Value::Int(IntValue::U64(u64::MAX));
+        if usize::BITS == 64 {
+            assert_eq!(
+                parse_finite_arity_bound(&scalar, "narginchk", "minArgs").unwrap(),
+                usize::MAX
+            );
+        } else {
+            assert!(parse_finite_arity_bound(&scalar, "narginchk", "minArgs").is_err());
+        }
+
+        let mut tensor =
+            Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("arity tensor");
+        // The f64 mirror is intentionally plausible but must never decide an
+        // integer-only argument bound.
+        tensor.data[0] = 1.0;
+        assert!(parse_finite_arity_bound(&Value::Tensor(tensor), "narginchk", "minArgs",).is_err());
     }
 
     #[cfg(feature = "native-accel")]

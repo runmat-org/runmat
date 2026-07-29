@@ -1,4 +1,4 @@
-use runmat_builtins::Value;
+use runmat_builtins::{IntValue, Value};
 
 use crate::builtins::common::tensor;
 use crate::builtins::plotting::plotting_error;
@@ -9,8 +9,26 @@ use crate::{build_runtime_error, BuiltinResult};
 pub fn handles_from_value(value: &Value, ctx: &str) -> BuiltinResult<Vec<FigureHandle>> {
     match value {
         Value::Num(v) => Ok(vec![handle_from_scalar(*v, ctx)?]),
-        Value::Int(i) => Ok(vec![handle_from_scalar(i.to_f64(), ctx)?]),
+        Value::Int(i) => Ok(vec![handle_from_integer(i, ctx)?]),
         Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                if storage.len() == 0 {
+                    return Err(plotting_error(
+                        ctx,
+                        format!("{ctx}: handle array cannot be empty"),
+                    ));
+                }
+                return (0..storage.len())
+                    .map(|index| {
+                        handle_from_integer(
+                            &storage
+                                .value_at(index)
+                                .expect("integer storage index is in bounds"),
+                            ctx,
+                        )
+                    })
+                    .collect();
+            }
             let data = tensor::tensor_values_f64(tensor);
             if data.is_empty() {
                 return Err(plotting_error(
@@ -35,6 +53,22 @@ pub fn handles_from_value(value: &Value, ctx: &str) -> BuiltinResult<Vec<FigureH
             format!("{ctx}: unsupported argument type"),
         )),
     }
+}
+
+/// Parse an integer figure ID without first rounding it through f64.
+pub fn handle_from_integer(value: &IntValue, ctx: &str) -> BuiltinResult<FigureHandle> {
+    let raw = value
+        .try_to_u64()
+        .ok_or_else(|| plotting_error(ctx, format!("{ctx}: figure handle must be positive")))?;
+    if raw == 0 {
+        return Err(plotting_error(
+            ctx,
+            format!("{ctx}: figure handle must be positive"),
+        ));
+    }
+    let id = u32::try_from(raw)
+        .map_err(|_| plotting_error(ctx, format!("{ctx}: figure handle is too large")))?;
+    Ok(FigureHandle::from(id))
 }
 
 pub fn parse_string(value: &Value) -> Option<String> {
@@ -99,11 +133,19 @@ pub fn parse_optional_figure_handle(
             parse_string_handle_or_next(&text, ctx)
         }
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
-            let value = tensor::tensor_value_f64(tensor, 0);
-            Ok(Some(handle_from_scalar(value, ctx)?))
+            if let Some(storage) = tensor.integer_storage() {
+                return Ok(Some(handle_from_integer(
+                    &storage.value_at(0).expect("one-element integer storage"),
+                    ctx,
+                )?));
+            }
+            Ok(Some(handle_from_scalar(
+                tensor::tensor_value_f64(tensor, 0),
+                ctx,
+            )?))
         }
         Value::Num(v) => Ok(Some(handle_from_scalar(*v, ctx)?)),
-        Value::Int(i) => Ok(Some(handle_from_scalar(i.to_f64(), ctx)?)),
+        Value::Int(i) => Ok(Some(handle_from_integer(i, ctx)?)),
         _ => Err(plotting_error(
             ctx,
             format!("{ctx}: unsupported handle type"),
@@ -133,6 +175,29 @@ mod tests {
         let handles = handles_from_value(&value, "figure").expect("handles");
 
         assert_eq!(handles, vec![FigureHandle::from(1), FigureHandle::from(2)]);
+    }
+
+    #[test]
+    fn handles_read_all_integer_storage_classes_with_poisoned_f64_mirrors() {
+        let storages = [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+
+        for storage in storages {
+            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("handle");
+            tensor.data = vec![f64::NAN];
+            assert_eq!(
+                handles_from_value(&Value::Tensor(tensor), "figure").expect("handle"),
+                vec![FigureHandle::from(1)]
+            );
+        }
     }
 
     #[test]

@@ -177,9 +177,13 @@ fn parse_depth(args: &[Value]) -> crate::BuiltinResult<(Option<usize>, &[Value])
 }
 
 fn depth_from_value(value: &Value) -> crate::BuiltinResult<usize> {
+    if let Some(integer) = tensor_utils::scalar_integer_value(value) {
+        return integer
+            .try_to_usize()
+            .ok_or_else(|| invalid_argument("-depth must be a nonnegative integer or Inf"));
+    }
     let number = match value {
         Value::Num(value) => *value,
-        Value::Int(value) => value.to_f64(),
         Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
             tensor_utils::tensor_value_f64(tensor, 0)
         }
@@ -638,6 +642,26 @@ mod tests {
         tensor.data.clear();
 
         assert_eq!(depth_from_value(&Value::Tensor(tensor)).unwrap(), 3);
+    }
+
+    #[test]
+    fn findobj_depth_reads_all_integer_storage_classes_with_poisoned_f64_mirrors() {
+        let storages = [
+            IntegerStorage::I8(vec![3]),
+            IntegerStorage::I16(vec![3]),
+            IntegerStorage::I32(vec![3]),
+            IntegerStorage::I64(vec![3]),
+            IntegerStorage::U8(vec![3]),
+            IntegerStorage::U16(vec![3]),
+            IntegerStorage::U32(vec![3]),
+            IntegerStorage::U64(vec![3]),
+        ];
+
+        for storage in storages {
+            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("depth");
+            tensor.data = vec![f64::NAN];
+            assert_eq!(depth_from_value(&Value::Tensor(tensor)).expect("depth"), 3);
+        }
     }
 
     #[test]

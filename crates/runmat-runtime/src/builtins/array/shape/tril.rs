@@ -293,6 +293,15 @@ fn scalar_to_isize(value: &Value, name: &str) -> crate::BuiltinResult<isize> {
                     &TRIL_ERROR_INVALID_OFFSET,
                 ));
             }
+            if rounded < isize::MIN as f64
+                || rounded > isize::MAX as f64
+                || (isize::BITS == 64 && rounded == isize::MAX as f64)
+            {
+                return Err(tril_error_with_message(
+                    format!("{name}: diagonal offset is outside the supported range"),
+                    &TRIL_ERROR_INVALID_OFFSET,
+                ));
+            }
             Ok(rounded as isize)
         }
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => {

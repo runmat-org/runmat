@@ -858,6 +858,29 @@ mod dimension_tests {
     }
 
     #[test]
+    fn typed_integer_dimension_parsers_ignore_poisoned_f64_mirrors_for_all_classes() {
+        let storages = [
+            IntegerStorage::I8(vec![2]),
+            IntegerStorage::I16(vec![2]),
+            IntegerStorage::I32(vec![2]),
+            IntegerStorage::I64(vec![2]),
+            IntegerStorage::U8(vec![2]),
+            IntegerStorage::U16(vec![2]),
+            IntegerStorage::U32(vec![2]),
+            IntegerStorage::U64(vec![2]),
+        ];
+
+        for storage in storages {
+            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer dim");
+            tensor.data.fill(f64::NAN);
+            assert_eq!(
+                block_on(dims_from_value_async(&Value::Tensor(tensor))),
+                Ok(Some(vec![2]))
+            );
+        }
+    }
+
+    #[test]
     fn typed_integer_tensor_dimension_parsers_preserve_large_values_exactly() {
         let large = 9_007_199_254_740_993_u64;
         let mut scalar = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1])

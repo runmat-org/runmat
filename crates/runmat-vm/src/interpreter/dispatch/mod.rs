@@ -136,7 +136,7 @@ fn requested_outputs_from_slot(vars: &[Value], slot: usize) -> Result<usize, Run
             }
             Ok(*n as usize)
         }
-        Value::Int(i) => usize::try_from(i.to_i64()).map_err(|_| {
+        Value::Int(i) => i.try_to_usize().ok_or_else(|| {
             crate::interpreter::errors::mex(
                 "InvalidOutputCountValue",
                 "requested output count slot must contain a nonnegative integer scalar",

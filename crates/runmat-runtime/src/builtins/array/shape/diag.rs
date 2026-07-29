@@ -1166,6 +1166,15 @@ fn scalar_to_isize(value: &Value) -> BuiltinResult<isize> {
                     "diag: diagonal offset must be an integer",
                 ));
             }
+            if rounded < isize::MIN as f64
+                || rounded > isize::MAX as f64
+                || (isize::BITS == 64 && rounded == isize::MAX as f64)
+            {
+                return Err(diag_error(
+                    MESSAGE_ID_INVALID_OFFSET,
+                    "diag: diagonal offset is outside the supported range",
+                ));
+            }
             Ok(rounded as isize)
         }
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
