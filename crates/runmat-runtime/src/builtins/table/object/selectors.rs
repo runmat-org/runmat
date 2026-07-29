@@ -511,7 +511,7 @@ pub(in crate::builtins::table) fn value_is_missing_scalar(value: &Value) -> bool
         Value::CharArray(array) => array.data.iter().all(|ch| ch.is_whitespace()),
         Value::Tensor(tensor) => {
             if tensor.integer_storage().is_some() {
-                tensor.data.is_empty()
+                tensor_utils::tensor_element_len(tensor) == 0
             } else {
                 tensor
                     .data
@@ -681,7 +681,7 @@ mod tests {
     #[test]
     fn value_is_missing_scalar_typed_integer_ignores_f64_mirror() {
         let mut tensor = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
-        tensor.data[0] = f64::NAN;
+        tensor.data.clear();
 
         assert!(!value_is_missing_scalar(&Value::Tensor(tensor)));
 

@@ -1277,10 +1277,19 @@ fn convert_to_logical_value(data: Value) -> Result<Value, String> {
     match data {
         Value::LogicalArray(_) => Ok(data),
         Value::Tensor(tensor) => {
-            let mut bits = Vec::with_capacity(tensor.data.len());
-            for &value in &tensor.data {
-                bits.push(if value != 0.0 { 1 } else { 0 });
-            }
+            let bits = if let Some(storage) = tensor.integer_storage() {
+                storage
+                    .exact_values()
+                    .iter()
+                    .map(|value| if value.is_zero() { 0 } else { 1 })
+                    .collect()
+            } else {
+                tensor
+                    .data
+                    .iter()
+                    .map(|value| if *value != 0.0 { 1 } else { 0 })
+                    .collect()
+            };
             LogicalArray::new(bits, tensor.shape.clone())
                 .map(Value::LogicalArray)
                 .map_err(|e| format!("fread: {e}"))
@@ -1810,6 +1819,24 @@ pub(crate) mod tests {
 
         run_fclose(&[Value::Num(fid as f64)]).unwrap();
         test_support::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn fread_logical_conversion_uses_typed_integer_storage_when_mirror_is_poisoned() {
+        let mut tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![0, 9_007_199_254_740_993, u64::MAX]),
+            vec![3, 1],
+        )
+        .expect("integer tensor");
+        tensor.data = vec![f64::NAN];
+
+        let Value::LogicalArray(logical) =
+            convert_to_logical_value(Value::Tensor(tensor)).expect("logical conversion")
+        else {
+            panic!("expected logical array");
+        };
+        assert_eq!(logical.shape, vec![3, 1]);
+        assert_eq!(logical.data, vec![0, 1, 1]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -65,7 +65,7 @@ pub async fn value_numel(value: &Value) -> Result<usize, RuntimeError> {
     let numel = match value {
         Value::Tensor(t) => tensor_utils::tensor_element_len(t),
         Value::SparseTensor(t) => t.rows.saturating_mul(t.cols),
-        Value::ComplexTensor(t) => t.data.len(),
+        Value::ComplexTensor(t) => tensor_utils::complex_tensor_element_len(t),
         Value::LogicalArray(la) => la.data.len(),
         Value::StringArray(sa) => sa.data.len(),
         Value::CharArray(ca) => ca.rows * ca.cols,
@@ -151,6 +151,22 @@ pub(crate) mod tests {
         tensor.data.clear();
 
         assert_eq!(block_on(value_numel(&Value::Tensor(tensor))).unwrap(), 3);
+    }
+
+    #[test]
+    fn numel_reads_typed_complex_integer_storage_length_exactly() {
+        let storage = runmat_builtins::IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX, 7]),
+            IntegerStorage::U64(vec![0, 0]),
+        )
+        .unwrap();
+        let mut tensor = runmat_builtins::ComplexTensor::new_integer(storage, vec![1, 2]).unwrap();
+        tensor.data.clear();
+
+        assert_eq!(
+            block_on(value_numel(&Value::ComplexTensor(tensor))).unwrap(),
+            2
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

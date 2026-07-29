@@ -98,7 +98,7 @@ pub(super) fn option_value_is_empty(value: &Value) -> bool {
         Value::StringArray(array) => {
             array.data.is_empty() || (array.data.len() == 1 && array.data[0].trim().is_empty())
         }
-        Value::Tensor(tensor) => tensor.data.is_empty(),
+        Value::Tensor(tensor) => crate::builtins::common::tensor::tensor_element_len(tensor) == 0,
         Value::LogicalArray(array) => array.data.is_empty(),
         Value::Cell(cell) => {
             cell.data.is_empty() || cell.data.iter().all(|handle| option_value_is_empty(handle))
@@ -236,6 +236,17 @@ mod tests {
                 2
             );
         }
+    }
+
+    #[test]
+    fn option_empty_check_uses_typed_integer_storage_length() {
+        let mut scalar = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
+        scalar.data.clear();
+        assert!(!option_value_is_empty(&Value::Tensor(scalar)));
+
+        let mut empty = Tensor::new_integer(IntegerStorage::U8(Vec::new()), vec![0, 0]).unwrap();
+        empty.data.push(1.0);
+        assert!(option_value_is_empty(&Value::Tensor(empty)));
     }
 
     #[test]

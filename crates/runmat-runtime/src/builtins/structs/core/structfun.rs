@@ -363,7 +363,7 @@ fn parse_bool_option(value: &Value) -> BuiltinResult<bool> {
     match value {
         Value::Bool(flag) => Ok(*flag),
         Value::Num(n) => Ok(*n != 0.0),
-        Value::Int(int) => Ok(int.to_f64() != 0.0),
+        Value::Int(int) => Ok(!int.is_zero()),
         Value::String(text) => parse_bool_text(text).ok_or_else(uniform_option_error),
         Value::CharArray(chars) if chars.rows == 1 => {
             let text: String = chars.data.iter().collect();
@@ -713,6 +713,12 @@ mod tests {
             }
             _ => panic!("expected double classification"),
         }
+    }
+
+    #[test]
+    fn uniform_output_boolean_uses_exact_integer_zero_test() {
+        assert!(parse_bool_option(&Value::Int(runmat_builtins::IntValue::U64(u64::MAX))).unwrap());
+        assert!(!parse_bool_option(&Value::Int(runmat_builtins::IntValue::I64(0))).unwrap());
     }
 
     #[test]

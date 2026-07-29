@@ -866,6 +866,31 @@ mod integer_storage_tests {
     }
 
     #[test]
+    fn reshape_and_display_use_integer_storage_when_mirror_is_missing() {
+        let mut tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            vec![2],
+        )
+        .expect("integer tensor");
+        tensor.data.clear();
+
+        let tensor = tensor.reshape(vec![1, 2]).expect("reshape");
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]))
+        );
+
+        let mut vector = tensor.clone();
+        vector.shape = vec![2];
+        vector.rows = 1;
+        vector.cols = 2;
+        assert_eq!(
+            vector.to_string(),
+            "[9007199254740993 18446744073709551615]"
+        );
+    }
+
+    #[test]
     fn integer_complex_storage_preserves_paired_uint64_values() {
         let storage = IntegerComplexStorage::new(
             IntegerStorage::U64(vec![9_223_372_036_854_775_809, u64::MAX]),
@@ -882,6 +907,22 @@ mod integer_storage_tests {
                 .as_ref()
                 .map(IntegerComplexStorage::class_name),
             Some("uint64")
+        );
+    }
+
+    #[test]
+    fn integer_complex_display_uses_storage_when_mirror_is_missing() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+        )
+        .expect("matching storage");
+        let mut tensor = ComplexTensor::new_integer(storage, vec![2]).expect("complex tensor");
+        tensor.data.clear();
+
+        assert_eq!(
+            tensor.to_string(),
+            "[9007199254740993+18446744073709551615i 18446744073709551615+9007199254740993i]"
         );
     }
 
@@ -1200,14 +1241,6 @@ impl Tensor {
     /// Change only shape metadata while retaining the underlying numeric storage.
     pub fn reshape(mut self, shape: Vec<usize>) -> Result<Self, String> {
         let expected: usize = shape.iter().product();
-        if self.data.len() != expected {
-            return Err(format!(
-                "Tensor data length {} doesn't match shape {:?} ({} elements)",
-                self.data.len(),
-                shape,
-                expected
-            ));
-        }
         if let Some(storage) = &self.integer_data {
             if storage.len() != expected {
                 return Err(format!(
@@ -1217,6 +1250,13 @@ impl Tensor {
                     expected
                 ));
             }
+        } else if self.data.len() != expected {
+            return Err(format!(
+                "Tensor data length {} doesn't match shape {:?} ({} elements)",
+                self.data.len(),
+                shape,
+                expected
+            ));
         }
         let (rows, cols) = if shape.len() >= 2 {
             (shape[0], shape[1])
@@ -2214,7 +2254,11 @@ impl fmt::Display for Tensor {
             0 | 1 => {
                 // Treat as row vector for display
                 write!(f, "[")?;
-                for i in 0..self.data.len() {
+                let len = self
+                    .integer_data
+                    .as_ref()
+                    .map_or(self.data.len(), IntegerStorage::len);
+                for i in 0..len {
                     if i > 0 {
                         write!(f, " ")?;
                     }
@@ -3765,7 +3809,11 @@ impl fmt::Display for ComplexTensor {
         match self.shape.len() {
             0 | 1 => {
                 write!(f, "[")?;
-                for i in 0..self.data.len() {
+                let len = self
+                    .integer_data
+                    .as_ref()
+                    .map_or(self.data.len(), IntegerComplexStorage::len);
+                for i in 0..len {
                     if i > 0 {
                         write!(f, " ")?;
                     }

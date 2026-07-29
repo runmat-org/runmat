@@ -369,7 +369,7 @@ pub fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<OrderFieldsEvalua
                         return Err(orderfields_error(&ORDERFIELDS_ERROR_NO_FIELDS));
                     }
                     if let Value::Tensor(tensor) = arg {
-                        if tensor.data.is_empty() {
+                        if tensor::tensor_element_len(tensor) == 0 {
                             return Ok(OrderFieldsEvaluation::new(Value::Cell(cell), permutation));
                         }
                         return Err(orderfields_error(&ORDERFIELDS_ERROR_NO_FIELDS));
@@ -611,19 +611,29 @@ fn extract_indices(current: &[String], arg: &Value) -> BuiltinResult<Option<Vec<
     let Value::Tensor(tensor) = arg else {
         return Ok(None);
     };
-    if tensor.data.is_empty() && current.is_empty() {
+    let tensor_len = tensor::tensor_element_len(tensor);
+    if tensor_len == 0 && current.is_empty() {
         return Ok(Some(Vec::new()));
     }
-    if tensor.data.len() != current.len() {
+    if tensor_len != current.len() {
         return Err(orderfields_error(&ORDERFIELDS_ERROR_INVALID_PERMUTATION));
     }
     let mut seen = HashSet::with_capacity(current.len());
     let mut order = Vec::with_capacity(current.len());
-    for value in &tensor.data {
-        if !value.is_finite() || value.fract() != 0.0 {
-            return Err(orderfields_error(&ORDERFIELDS_ERROR_INDEX_NOT_INTEGER));
-        }
-        let idx = *value as isize;
+    for index in 0..tensor_len {
+        let idx = match tensor.integer_storage() {
+            Some(storage) => storage
+                .value_at(index)
+                .and_then(|value| value.try_to_isize())
+                .ok_or_else(|| orderfields_error(&ORDERFIELDS_ERROR_INDEX_OUT_OF_RANGE))?,
+            None => {
+                let value = tensor.data[index];
+                if !value.is_finite() || value.fract() != 0.0 {
+                    return Err(orderfields_error(&ORDERFIELDS_ERROR_INDEX_NOT_INTEGER));
+                }
+                value as isize
+            }
+        };
         if idx < 1 || idx as usize > current.len() {
             return Err(orderfields_error(&ORDERFIELDS_ERROR_INDEX_OUT_OF_RANGE));
         }
@@ -856,6 +866,24 @@ pub(crate) mod tests {
                 "second".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn typed_integer_index_vector_ignores_f64_mirror() {
+        let mut st = StructValue::new();
+        st.fields.insert("first".to_string(), Value::Num(1.0));
+        st.fields.insert("second".to_string(), Value::Num(2.0));
+        let mut permutation =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U8(vec![2, 1]), vec![1, 2])
+                .unwrap();
+        permutation.data.clear();
+
+        let Value::Struct(reordered) =
+            run_orderfields(Value::Struct(st), vec![Value::Tensor(permutation)]).unwrap()
+        else {
+            panic!("expected struct result");
+        };
+        assert_eq!(field_order(&reordered), vec!["second", "first"]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

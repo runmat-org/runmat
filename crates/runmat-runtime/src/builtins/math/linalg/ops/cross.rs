@@ -343,7 +343,7 @@ fn cross_real_tensor(a: &Tensor, b: &Tensor, dim: Option<usize>) -> BuiltinResul
     let stride_before = dim_product(&shape[..dim_index]);
     let stride_after = dim_product(&shape[dim_index + 1..]);
     let slice_stride = stride_before * 3;
-    let mut output = vec![0.0f64; a.data.len()];
+    let mut output = vec![0.0f64; a_values.len()];
 
     for after in 0..stride_after {
         let slice_base = after * slice_stride;
@@ -416,7 +416,9 @@ fn complex_sub(lhs: (f64, f64), rhs: (f64, f64)) -> (f64, f64) {
 }
 
 fn ensure_same_size(a: &Tensor, b: &Tensor) -> BuiltinResult<()> {
-    if a.data.len() != b.data.len() || canonical_shape_tensor(a) != canonical_shape_tensor(b) {
+    if tensor::tensor_element_len(a) != tensor::tensor_element_len(b)
+        || canonical_shape_tensor(a) != canonical_shape_tensor(b)
+    {
         return Err(cross_error(&CROSS_ERROR_INVALID_INPUT));
     }
     Ok(())
@@ -646,6 +648,26 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
                 assert_eq!(t.data, vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cross_uses_integer_storage_length_when_mirrors_are_empty() {
+        let mut lhs =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 0, 0]), vec![1, 3]).expect("lhs");
+        lhs.data.clear();
+        let mut rhs =
+            Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 0]), vec![1, 3]).expect("rhs");
+        rhs.data.clear();
+
+        let value =
+            cross_builtin(Value::Tensor(lhs), Value::Tensor(rhs), Vec::new()).expect("cross");
+        match value {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.data, vec![0.0, 0.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
