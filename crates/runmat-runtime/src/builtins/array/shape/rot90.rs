@@ -14,7 +14,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -495,20 +495,17 @@ async fn rot90_gpu(handle: GpuTensorHandle, steps: usize) -> crate::BuiltinResul
             );
         }
     }
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Some(out) = rot90_gpu_via_provider(provider, &handle, steps) {
-            return Ok(Value::GpuTensor(out));
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+        if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
+            if let Some(out) = rot90_gpu_via_provider(provider, &handle, steps) {
+                return Ok(Value::GpuTensor(out));
+            }
         }
     }
     let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let rotated = rot90_tensor(host_tensor, steps)?;
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        let view = HostTensorView {
-            data: &rotated.data,
-            shape: &rotated.shape,
-        };
-        provider
-            .upload(&view)
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+        gpu_helpers::upload_tensor(provider, &rotated)
             .map(Value::GpuTensor)
             .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL))
     } else {
@@ -672,6 +669,7 @@ pub(crate) mod tests {
         block_on(super::rot90_builtin(value, rest))
     }
     use crate::builtins::common::test_support;
+    use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage, Tensor, Type};
 
     #[test]

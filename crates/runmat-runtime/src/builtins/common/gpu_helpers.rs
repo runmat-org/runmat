@@ -2,7 +2,7 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, GpuTensorStorage, HostIntegerDataView, HostIntegerTensorView,
     HostTensorView, IntegerElementType,
 };
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{ComplexTensor, IntegerStorage, Tensor, Value};
 
 use crate::build_runtime_error;
 
@@ -78,6 +78,38 @@ pub fn upload_complex_tensor(
     runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::ComplexInterleaved);
     runmat_accelerate_api::set_handle_precision(&handle, provider.precision());
     Ok(handle)
+}
+
+/// Upload a host tensor while retaining its exact typed-integer backing store.
+pub fn upload_tensor(
+    provider: &dyn AccelProvider,
+    tensor: &Tensor,
+) -> Result<GpuTensorHandle, String> {
+    if let Some(storage) = tensor.integer_storage() {
+        let data = match storage {
+            IntegerStorage::I8(values) => HostIntegerDataView::I8(values),
+            IntegerStorage::I16(values) => HostIntegerDataView::I16(values),
+            IntegerStorage::I32(values) => HostIntegerDataView::I32(values),
+            IntegerStorage::I64(values) => HostIntegerDataView::I64(values),
+            IntegerStorage::U8(values) => HostIntegerDataView::U8(values),
+            IntegerStorage::U16(values) => HostIntegerDataView::U16(values),
+            IntegerStorage::U32(values) => HostIntegerDataView::U32(values),
+            IntegerStorage::U64(values) => HostIntegerDataView::U64(values),
+        };
+        provider
+            .upload_integer(&HostIntegerTensorView {
+                data,
+                shape: &tensor.shape,
+            })
+            .map_err(|error| error.to_string())
+    } else {
+        provider
+            .upload(&HostTensorView {
+                data: &tensor.data,
+                shape: &tensor.shape,
+            })
+            .map_err(|error| error.to_string())
+    }
 }
 
 /// Upload a finite integral scalar in the native integer class of `prototype`.

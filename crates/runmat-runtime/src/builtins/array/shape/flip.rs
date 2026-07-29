@@ -14,7 +14,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -612,19 +612,16 @@ pub(crate) async fn flip_gpu_with(
             format!("{builtin}: dimension indices must be >= 1"),
         ));
     }
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         let zero_based: Vec<usize> = dims.iter().map(|&d| d - 1).collect();
-        if let Ok(out) = provider.flip(&handle, &zero_based) {
-            return Ok(Value::GpuTensor(out));
+        if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
+            if let Ok(out) = provider.flip(&handle, &zero_based) {
+                return Ok(Value::GpuTensor(out));
+            }
         }
         let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
         let flipped = flip_tensor_with(builtin, host_tensor, dims)?;
-        let view = HostTensorView {
-            data: &flipped.data,
-            shape: &flipped.shape,
-        };
-        provider
-            .upload(&view)
+        gpu_helpers::upload_tensor(provider, &flipped)
             .map(Value::GpuTensor)
             .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))
     } else {
@@ -723,6 +720,9 @@ pub(crate) mod tests {
         block_on(super::flip_builtin(value, rest))
     }
     use crate::builtins::common::test_support;
+    use runmat_accelerate_api::{
+        HostIntegerDataView, HostIntegerTensorView, HostTensorView, IntegerElementType,
+    };
     use runmat_builtins::{
         CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
         StringArray, Tensor,
@@ -742,6 +742,39 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(2), Some(1)])
             }
         );
+    }
+
+    #[test]
+    fn flip_gpu_integer_fallback_preserves_exact_storage_resident() {
+        test_support::with_test_provider(|provider| {
+            let values = [1_u64, 9_007_199_254_740_993, 4_u64, u64::MAX];
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&values),
+                    shape: &[2, 2],
+                })
+                .expect("upload integer");
+            let Value::GpuTensor(result) =
+                flip_builtin(Value::GpuTensor(handle), Vec::new()).expect("flip integer gpu")
+            else {
+                panic!("expected resident gpuArray");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&result),
+                Some(IntegerElementType::U64)
+            );
+            let gathered = block_on(gpu_helpers::gather_tensor_async(&result)).expect("gather");
+            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![
+                    9_007_199_254_740_993,
+                    1,
+                    u64::MAX,
+                    4,
+                ]))
+            );
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

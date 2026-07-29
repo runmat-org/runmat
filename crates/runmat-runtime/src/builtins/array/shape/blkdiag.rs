@@ -195,6 +195,13 @@ async fn blkdiag_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 async fn blkdiag_gpu(args: Vec<Value>) -> BuiltinResult<Value> {
+    let provider = args
+        .iter()
+        .find_map(|value| match value {
+            Value::GpuTensor(handle) => runmat_accelerate_api::provider_for_handle(handle),
+            _ => None,
+        })
+        .ok_or_else(|| error_with_detail(&ERROR_GPU, "no acceleration provider is registered"))?;
     let mut gathered = Vec::with_capacity(args.len());
     for value in args {
         let gathered_value = gpu_helpers::gather_value_async(&value)
@@ -203,7 +210,7 @@ async fn blkdiag_gpu(args: Vec<Value>) -> BuiltinResult<Value> {
         gathered.push(gathered_value);
     }
     let host = blkdiag_host(gathered)?;
-    upload_gpu_result(host)
+    upload_gpu_result(provider, host)
 }
 
 fn blkdiag_host(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -1104,17 +1111,13 @@ fn complex_tensor_into_blkdiag_value(tensor: ComplexTensor) -> Value {
     }
 }
 
-fn upload_gpu_result(value: Value) -> BuiltinResult<Value> {
-    let provider = runmat_accelerate_api::provider()
-        .ok_or_else(|| error_with_detail(&ERROR_GPU, "no acceleration provider is registered"))?;
+fn upload_gpu_result(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    value: Value,
+) -> BuiltinResult<Value> {
     match value {
         Value::Tensor(tensor) => {
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider
-                .upload(&view)
+            let handle = gpu_helpers::upload_tensor(provider, &tensor)
                 .map_err(|err| error_with_detail(&ERROR_GPU, err))?;
             runmat_accelerate_api::set_handle_logical(&handle, false);
             runmat_accelerate_api::set_handle_storage(

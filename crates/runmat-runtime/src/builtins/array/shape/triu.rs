@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -374,20 +374,18 @@ async fn triu_gpu(handle: GpuTensorHandle, offset: isize) -> crate::BuiltinResul
             );
         }
     }
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        match provider.triu(&handle, offset).await {
-            Ok(out) => return Ok(Value::GpuTensor(out)),
-            Err(_) => {
-                // Fall through to the gather path.
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+        if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
+            match provider.triu(&handle, offset).await {
+                Ok(out) => return Ok(Value::GpuTensor(out)),
+                Err(_) => {
+                    // Fall through to the gather path.
+                }
             }
         }
         let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
         let result = triu_tensor(tensor, offset)?;
-        let view = HostTensorView {
-            data: &result.data,
-            shape: &result.shape,
-        };
-        let uploaded = provider.upload(&view).map_err(|e| {
+        let uploaded = gpu_helpers::upload_tensor(provider, &result).map_err(|e| {
             triu_error_with_message(
                 format!("triu: failed to upload fallback result: {e}"),
                 &TRIU_ERROR_INTERNAL,
@@ -460,6 +458,9 @@ pub(crate) mod tests {
         block_on(super::triu_builtin(value, rest))
     }
     use crate::builtins::common::test_support;
+    use runmat_accelerate_api::{
+        HostIntegerDataView, HostIntegerTensorView, HostTensorView, IntegerElementType,
+    };
     use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, Type};
 
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
@@ -477,6 +478,34 @@ pub(crate) mod tests {
         let err = scalar_to_isize(&Value::Int(IntValue::U64(u64::MAX)), "triu")
             .expect_err("unrepresentable typed offset must not saturate");
         assert_eq!(err.identifier(), TRIU_ERROR_INVALID_OFFSET.identifier);
+    }
+
+    #[test]
+    fn triu_gpu_integer_fallback_preserves_exact_storage_resident() {
+        test_support::with_test_provider(|provider| {
+            let values = [u64::MAX, 9_007_199_254_740_993, 7_u64, 0_u64];
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&values),
+                    shape: &[2, 2],
+                })
+                .expect("upload integer");
+            let Value::GpuTensor(result) =
+                triu_builtin(Value::GpuTensor(handle), Vec::new()).expect("triu integer gpu")
+            else {
+                panic!("expected resident gpuArray");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&result),
+                Some(IntegerElementType::U64)
+            );
+            let gathered = block_on(gpu_helpers::gather_tensor_async(&result)).expect("gather");
+            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![u64::MAX, 0, 7, 0]))
+            );
+        });
     }
 
     #[test]

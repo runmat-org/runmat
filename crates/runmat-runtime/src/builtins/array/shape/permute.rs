@@ -10,15 +10,13 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
-use runmat_accelerate_api::{
-    GpuTensorHandle, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
-};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::shape_rules::element_count_if_known;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, ResolveContext,
-    StringArray, Tensor, Type, Value,
+    CharArray, ComplexTensor, IntegerComplexStorage, LogicalArray, ResolveContext, StringArray,
+    Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -530,48 +528,13 @@ pub(crate) async fn permute_gpu(
         }
         let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
         let permuted = permute_tensor(builtin, host_tensor, order)?;
-        upload_tensor(provider, &permuted)
+        gpu_helpers::upload_tensor(provider, &permuted)
             .map(Value::GpuTensor)
             .map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))
     } else {
         let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
         permute_tensor(builtin, host_tensor, order).map(tensor::tensor_into_value)
     }
-}
-
-fn upload_tensor(
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-    tensor: &Tensor,
-) -> Result<GpuTensorHandle, String> {
-    if let Some(storage) = tensor.integer_storage() {
-        provider
-            .upload_integer(&integer_tensor_view(storage, &tensor.shape))
-            .map_err(|error| error.to_string())
-    } else {
-        provider
-            .upload(&HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            })
-            .map_err(|error| error.to_string())
-    }
-}
-
-fn integer_tensor_view<'a>(
-    storage: &'a IntegerStorage,
-    shape: &'a [usize],
-) -> HostIntegerTensorView<'a> {
-    let data = match storage {
-        IntegerStorage::I8(values) => HostIntegerDataView::I8(values),
-        IntegerStorage::I16(values) => HostIntegerDataView::I16(values),
-        IntegerStorage::I32(values) => HostIntegerDataView::I32(values),
-        IntegerStorage::I64(values) => HostIntegerDataView::I64(values),
-        IntegerStorage::U8(values) => HostIntegerDataView::U8(values),
-        IntegerStorage::U16(values) => HostIntegerDataView::U16(values),
-        IntegerStorage::U32(values) => HostIntegerDataView::U32(values),
-        IntegerStorage::U64(values) => HostIntegerDataView::U64(values),
-    };
-    HostIntegerTensorView { data, shape }
 }
 
 fn permute_generic<T: Clone>(
@@ -665,7 +628,9 @@ fn is_vector(tensor: &Tensor) -> bool {
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView, IntegerElementType};
+    use runmat_accelerate_api::{
+        HostIntegerDataView, HostIntegerTensorView, HostTensorView, IntegerElementType,
+    };
     use runmat_builtins::{IntegerComplexStorage, IntegerStorage};
 
     fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {

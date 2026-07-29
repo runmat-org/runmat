@@ -188,39 +188,48 @@ async fn kron_gpu_gpu(
     left: GpuTensorHandle,
     right: GpuTensorHandle,
 ) -> crate::BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Ok(handle) = provider.kron(&left, &right) {
-            return Ok(Value::GpuTensor(handle));
+    let provider = runmat_accelerate_api::provider_for_handle(&left);
+    if let Some(provider) = provider.as_deref() {
+        if runmat_accelerate_api::handle_integer_type(&left).is_none()
+            && runmat_accelerate_api::handle_integer_type(&right).is_none()
+        {
+            if let Ok(handle) = provider.kron(&left, &right) {
+                return Ok(Value::GpuTensor(handle));
+            }
         }
     }
 
     let left_tensor = gpu_helpers::gather_tensor_async(&left).await?;
     let right_tensor = gpu_helpers::gather_tensor_async(&right).await?;
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = provider.as_deref() {
         let _ = provider.free(&left);
         let _ = provider.free(&right);
     }
     let left_value = tensor::tensor_into_value(left_tensor);
     let right_value = tensor::tensor_into_value(right_tensor);
     let numeric = compute_numeric(left_value, right_value)?;
-    finalize_numeric(numeric, true)
+    finalize_numeric(numeric, provider.as_deref())
 }
 
 async fn kron_gpu_mixed_left(left: GpuTensorHandle, right: Value) -> crate::BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    let provider = runmat_accelerate_api::provider_for_handle(&left);
+    if let Some(provider) = provider.as_deref() {
         if let Ok(tensor_right) = tensor::value_into_tensor_for("kron", right.clone()) {
-            let view = HostTensorView {
-                data: &tensor_right.data,
-                shape: &tensor_right.shape,
-            };
-            if let Ok(uploaded) = provider.upload(&view) {
-                match provider.kron(&left, &uploaded) {
-                    Ok(handle) => {
-                        let _ = provider.free(&uploaded);
-                        return Ok(Value::GpuTensor(handle));
-                    }
-                    Err(_) => {
-                        let _ = provider.free(&uploaded);
+            if runmat_accelerate_api::handle_integer_type(&left).is_none()
+                && tensor_right.integer_storage().is_none()
+            {
+                if let Ok(uploaded) = provider.upload(&HostTensorView {
+                    data: &tensor_right.data,
+                    shape: &tensor_right.shape,
+                }) {
+                    match provider.kron(&left, &uploaded) {
+                        Ok(handle) => {
+                            let _ = provider.free(&uploaded);
+                            return Ok(Value::GpuTensor(handle));
+                        }
+                        Err(_) => {
+                            let _ = provider.free(&uploaded);
+                        }
                     }
                 }
             }
@@ -228,29 +237,33 @@ async fn kron_gpu_mixed_left(left: GpuTensorHandle, right: Value) -> crate::Buil
     }
 
     let left_tensor = gpu_helpers::gather_tensor_async(&left).await?;
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = provider.as_deref() {
         let _ = provider.free(&left);
     }
     let left_value = tensor::tensor_into_value(left_tensor);
     let numeric = compute_numeric(left_value, right)?;
-    finalize_numeric(numeric, true)
+    finalize_numeric(numeric, provider.as_deref())
 }
 
 async fn kron_gpu_mixed_right(left: Value, right: GpuTensorHandle) -> crate::BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    let provider = runmat_accelerate_api::provider_for_handle(&right);
+    if let Some(provider) = provider.as_deref() {
         if let Ok(tensor_left) = tensor::value_into_tensor_for("kron", left.clone()) {
-            let view = HostTensorView {
-                data: &tensor_left.data,
-                shape: &tensor_left.shape,
-            };
-            if let Ok(uploaded) = provider.upload(&view) {
-                match provider.kron(&uploaded, &right) {
-                    Ok(handle) => {
-                        let _ = provider.free(&uploaded);
-                        return Ok(Value::GpuTensor(handle));
-                    }
-                    Err(_) => {
-                        let _ = provider.free(&uploaded);
+            if runmat_accelerate_api::handle_integer_type(&right).is_none()
+                && tensor_left.integer_storage().is_none()
+            {
+                if let Ok(uploaded) = provider.upload(&HostTensorView {
+                    data: &tensor_left.data,
+                    shape: &tensor_left.shape,
+                }) {
+                    match provider.kron(&uploaded, &right) {
+                        Ok(handle) => {
+                            let _ = provider.free(&uploaded);
+                            return Ok(Value::GpuTensor(handle));
+                        }
+                        Err(_) => {
+                            let _ = provider.free(&uploaded);
+                        }
                     }
                 }
             }
@@ -258,12 +271,12 @@ async fn kron_gpu_mixed_right(left: Value, right: GpuTensorHandle) -> crate::Bui
     }
 
     let right_tensor = gpu_helpers::gather_tensor_async(&right).await?;
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = provider.as_deref() {
         let _ = provider.free(&right);
     }
     let right_value = tensor::tensor_into_value(right_tensor);
     let numeric = compute_numeric(left, right_value)?;
-    finalize_numeric(numeric, true)
+    finalize_numeric(numeric, provider.as_deref())
 }
 
 fn kron_host(left: Value, right: Value) -> crate::BuiltinResult<Value> {
@@ -273,7 +286,7 @@ fn kron_host(left: Value, right: Value) -> crate::BuiltinResult<Value> {
         }
     }
     let numeric = compute_numeric(left, right)?;
-    finalize_numeric(numeric, false)
+    finalize_numeric(numeric, None)
 }
 
 fn contains_complex(value: &Value) -> bool {
@@ -469,18 +482,15 @@ fn compute_numeric_inputs(
     }
 }
 
-fn finalize_numeric(numeric: KronNumericResult, prefer_gpu: bool) -> crate::BuiltinResult<Value> {
+fn finalize_numeric(
+    numeric: KronNumericResult,
+    provider: Option<&dyn runmat_accelerate_api::AccelProvider>,
+) -> crate::BuiltinResult<Value> {
     match numeric {
         KronNumericResult::Real(tensor) => {
-            if prefer_gpu {
-                if let Some(provider) = runmat_accelerate_api::provider() {
-                    let view = HostTensorView {
-                        data: &tensor.data,
-                        shape: &tensor.shape,
-                    };
-                    if let Ok(handle) = provider.upload(&view) {
-                        return Ok(Value::GpuTensor(handle));
-                    }
+            if let Some(provider) = provider {
+                if let Ok(handle) = gpu_helpers::upload_tensor(provider, &tensor) {
+                    return Ok(Value::GpuTensor(handle));
                 }
             }
             Ok(tensor::tensor_into_value(tensor))

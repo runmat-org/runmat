@@ -2123,10 +2123,76 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn load_save_sparse_integer_roundtrips_preserve_wide_dtype_and_shape() {
+    fn load_save_sparse_integer_roundtrips_preserve_every_dtype_and_exact_values() {
         let cases = [
             (
-                "signed",
+                "i8",
+                SparseTensor::new_integer(
+                    2,
+                    1,
+                    vec![0, 2],
+                    vec![0, 1],
+                    IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+                )
+                .expect("int8 sparse"),
+            ),
+            (
+                "u8",
+                SparseTensor::new_integer(
+                    2,
+                    1,
+                    vec![0, 2],
+                    vec![0, 1],
+                    IntegerStorage::U8(vec![0, u8::MAX]),
+                )
+                .expect("uint8 sparse"),
+            ),
+            (
+                "i16",
+                SparseTensor::new_integer(
+                    2,
+                    1,
+                    vec![0, 2],
+                    vec![0, 1],
+                    IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+                )
+                .expect("int16 sparse"),
+            ),
+            (
+                "u16",
+                SparseTensor::new_integer(
+                    2,
+                    1,
+                    vec![0, 2],
+                    vec![0, 1],
+                    IntegerStorage::U16(vec![0, u16::MAX]),
+                )
+                .expect("uint16 sparse"),
+            ),
+            (
+                "i32",
+                SparseTensor::new_integer(
+                    2,
+                    1,
+                    vec![0, 2],
+                    vec![0, 1],
+                    IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+                )
+                .expect("int32 sparse"),
+            ),
+            (
+                "u32",
+                SparseTensor::new_integer(
+                    2,
+                    1,
+                    vec![0, 2],
+                    vec![0, 1],
+                    IntegerStorage::U32(vec![0, u32::MAX]),
+                )
+                .expect("uint32 sparse"),
+            ),
+            (
+                "i64",
                 SparseTensor::new_integer(
                     4,
                     3,
@@ -2134,18 +2200,18 @@ pub(crate) mod tests {
                     vec![0, 1, 3],
                     IntegerStorage::I64(vec![i64::MIN + 1, i64::MAX, -(1_i64 << 54)]),
                 )
-                .expect("signed sparse"),
+                .expect("int64 sparse"),
             ),
             (
-                "unsigned",
+                "u64",
                 SparseTensor::new_integer(
                     2,
                     4,
                     vec![0, 0, 1, 2, 2],
                     vec![1, 0],
-                    IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
+                    IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
                 )
-                .expect("unsigned sparse"),
+                .expect("uint64 sparse"),
             ),
         ];
 

@@ -14,7 +14,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -903,16 +903,20 @@ async fn circshift_gpu(
         return Ok(Value::GpuTensor(handle));
     }
 
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         let mut working = handle.clone();
-        if plan.ext_shape != working.shape {
+        if runmat_accelerate_api::handle_integer_type(&handle).is_none()
+            && plan.ext_shape != working.shape
+        {
             match provider.reshape(&working, &plan.ext_shape) {
                 Ok(reshaped) => working = reshaped,
                 Err(_) => return circshift_gpu_fallback(handle, dims, shifts).await,
             }
         }
-        if let Ok(out) = provider.circshift(&working, &plan.provider) {
-            return Ok(Value::GpuTensor(out));
+        if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
+            if let Ok(out) = provider.circshift(&working, &plan.provider) {
+                return Ok(Value::GpuTensor(out));
+            }
         }
     }
 
@@ -926,13 +930,8 @@ async fn circshift_gpu_fallback(
 ) -> crate::BuiltinResult<Value> {
     let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let rotated = circshift_tensor(host_tensor, dims, shifts)?;
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        let view = HostTensorView {
-            data: &rotated.data,
-            shape: &rotated.shape,
-        };
-        return provider
-            .upload(&view)
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+        return gpu_helpers::upload_tensor(provider, &rotated)
             .map(Value::GpuTensor)
             .map_err(|e| circshift_internal(format!("circshift: {e}")));
     }
@@ -1020,6 +1019,7 @@ pub(crate) mod tests {
         block_on(super::circshift_builtin(value, shift, rest))
     }
     use crate::builtins::common::test_support;
+    use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, IntValue, IntegerStorage, LogicalArray, StringArray, Tensor};
 
     #[test]

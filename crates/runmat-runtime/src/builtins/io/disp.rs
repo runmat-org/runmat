@@ -207,10 +207,13 @@ fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
                 .map(|line| line.to_string())
                 .collect(),
             RenderMode::Nested => {
-                let nnz = sparse.values.len();
+                let nnz = sparse.nnz();
                 vec![format!(
-                    "<sparse {}x{} nnz={}>",
-                    sparse.rows, sparse.cols, nnz
+                    "<sparse {}x{} {} nnz={}>",
+                    sparse.rows,
+                    sparse.cols,
+                    sparse.class_name(),
+                    nnz
                 )]
             }
         },
@@ -603,8 +606,9 @@ fn summarize_for_cell(value: &Value) -> String {
             }
         }
         Value::SparseTensor(sparse) => format!(
-            "[{} sparse double]",
-            dims_to_string(&[sparse.rows, sparse.cols])
+            "[{} sparse {}]",
+            dims_to_string(&[sparse.rows, sparse.cols]),
+            sparse.class_name()
         ),
         Value::ComplexTensor(tensor) => {
             let len = tensor::complex_tensor_element_len(tensor);
@@ -1004,6 +1008,32 @@ pub(crate) mod tests {
         let lines = render_value(&Value::Struct(fields), RenderMode::TopLevel);
 
         assert_eq!(lines, vec!["    values: [1x2 int16]".to_string()]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn integer_sparse_cell_summary_preserves_class() {
+        let sparse = runmat_builtins::SparseTensor::new_integer(
+            2,
+            2,
+            vec![0, 1, 2],
+            vec![0, 1],
+            IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+        )
+        .expect("integer sparse");
+        let cell = make_cell(vec![Value::SparseTensor(sparse.clone())], 1, 1).expect("cell");
+
+        assert_eq!(
+            format_for_disp(&cell),
+            vec!["    [2x2 sparse uint64]".to_string()]
+        );
+
+        let mut fields = StructValue::new();
+        fields.insert("values", Value::SparseTensor(sparse));
+        assert_eq!(
+            format_for_disp(&Value::Struct(fields)),
+            vec!["    values: <sparse 2x2 uint64 nnz=2>".to_string()]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

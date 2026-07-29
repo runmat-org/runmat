@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -376,20 +376,18 @@ async fn tril_gpu(handle: GpuTensorHandle, offset: isize) -> crate::BuiltinResul
             );
         }
     }
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        match provider.tril(&handle, offset).await {
-            Ok(out) => return Ok(Value::GpuTensor(out)),
-            Err(_) => {
-                // Fall through to gather path.
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+        if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
+            match provider.tril(&handle, offset).await {
+                Ok(out) => return Ok(Value::GpuTensor(out)),
+                Err(_) => {
+                    // Fall through to gather path.
+                }
             }
         }
         let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
         let result = tril_tensor(tensor, offset)?;
-        let view = HostTensorView {
-            data: &result.data,
-            shape: &result.shape,
-        };
-        let uploaded = provider.upload(&view).map_err(|e| {
+        let uploaded = gpu_helpers::upload_tensor(provider, &result).map_err(|e| {
             tril_error_with_message(
                 format!("tril: failed to upload fallback result: {e}"),
                 &TRIL_ERROR_INTERNAL,
@@ -460,6 +458,7 @@ pub(crate) mod tests {
         block_on(super::tril_builtin(value, rest))
     }
     use crate::builtins::common::test_support;
+    use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, Type};
 
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
