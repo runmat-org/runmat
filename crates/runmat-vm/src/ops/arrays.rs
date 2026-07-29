@@ -1,5 +1,6 @@
 use crate::interpreter::errors::mex;
 use runmat_builtins::{ComplexTensor, IntValue, IntegerStorage, LogicalArray, Tensor, Value};
+use runmat_runtime::builtins::common::tensor::is_scalar_tensor;
 use runmat_runtime::RuntimeError;
 use std::future::Future;
 
@@ -125,7 +126,9 @@ fn pack_numeric_values(
 fn leftmost_integer_target(values: &[Value]) -> Option<IntegerStorage> {
     values.iter().find_map(|value| match value {
         Value::Int(value) => Some(IntegerStorage::from_scalar(value.clone()).zeros_like(0)),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor
+        // Typed integer tensors may deliberately omit their lossy f64 mirror.
+        // Shape/storage, rather than the mirror length, determines scalarity.
+        Value::Tensor(tensor) if is_scalar_tensor(tensor) => tensor
             .integer_storage()
             .map(|storage| storage.zeros_like(0)),
         _ => None,
@@ -142,7 +145,7 @@ fn scalar_to_integer(value: &Value, target: &IntegerStorage) -> Result<IntValue,
 fn scalar_integer_value(value: &Value) -> Option<IntValue> {
     match value {
         Value::Int(value) => Some(value.clone()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor
+        Value::Tensor(tensor) if is_scalar_tensor(tensor) => tensor
             .integer_storage()
             .and_then(|storage| storage.value_at(0)),
         _ => None,
@@ -308,8 +311,9 @@ mod tests {
 
     #[test]
     fn create_matrix_preserves_exact_integer_storage_column_major() {
-        let scalar = Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63]), vec![1, 1])
+        let mut scalar = Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63]), vec![1, 1])
             .expect("scalar integer tensor");
+        scalar.data.clear();
         let mut stack = vec![
             Value::Tensor(scalar),
             Value::Int(IntValue::U64(u64::MAX)),
@@ -326,6 +330,24 @@ mod tests {
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::U64(vec![1_u64 << 63, 7, u64::MAX, 11]))
+        );
+    }
+
+    #[test]
+    fn pack_uses_cleared_typed_scalar_storage_for_class_and_value() {
+        let mut scalar = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("scalar integer tensor");
+        scalar.data.clear();
+        let mut stack = vec![Value::Tensor(scalar), Value::Num(3.5)];
+
+        pack_to_row(&mut stack, 2).expect("pack row");
+
+        let Value::Tensor(output) = stack.pop().expect("output") else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX, 4]))
         );
     }
 }

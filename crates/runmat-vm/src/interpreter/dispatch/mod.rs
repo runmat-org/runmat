@@ -14,7 +14,9 @@ use crate::runtime::workspace::{
 };
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{IntValue, ObjectInstance, StructValue, Tensor, Value};
-use runmat_runtime::builtins::common::tensor::tensor_value_f64;
+use runmat_runtime::builtins::common::tensor::{
+    is_scalar_tensor, tensor_element_len, tensor_value_f64,
+};
 use runmat_runtime::dispatcher::gather_if_needed_async;
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use std::collections::{HashMap, HashSet};
@@ -98,12 +100,12 @@ pub async fn logical_truth_from_value(value: &Value, label: &str) -> Result<bool
                 array.data.len()
             ),
         )),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor_value_f64(tensor, 0) != 0.0),
+        Value::Tensor(tensor) if is_scalar_tensor(tensor) => Ok(tensor_value_f64(tensor, 0) != 0.0),
         Value::Tensor(tensor) => Err(crate::interpreter::errors::mex(
             "InvalidConditionType",
             &format!(
                 "{label}: expected scalar logical or numeric value, got numeric array with {} elements",
-                tensor.data.len()
+                tensor_element_len(tensor)
             ),
         )),
         Value::GpuTensor(_) => {
@@ -2402,6 +2404,19 @@ mod tests {
         nonzero.data[0] = 0.0;
         assert!(block_on(logical_truth_from_value(
             &Value::Tensor(nonzero),
+            "if condition"
+        ))
+        .unwrap());
+    }
+
+    #[test]
+    fn logical_truth_accepts_typed_integer_scalar_with_cleared_mirror() {
+        let mut value = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("integer scalar");
+        value.data.clear();
+
+        assert!(block_on(logical_truth_from_value(
+            &Value::Tensor(value),
             "if condition"
         ))
         .unwrap());
