@@ -1,7 +1,6 @@
 use runmat_builtins::Value;
 use runmat_plot::plots::{LegendStyle, TextStyle};
 
-use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::properties::{parse_text_style_pairs, split_legend_style_pairs};
 use crate::builtins::plotting::state::{
     axes_handle_exists, current_axes_state, decode_axes_handle, FigureError, FigureHandle,
@@ -9,6 +8,8 @@ use crate::builtins::plotting::state::{
 use crate::builtins::plotting::style::value_as_string;
 use crate::builtins::plotting::{plotting_error, plotting_error_with_source};
 use crate::BuiltinResult;
+
+use super::handles::numeric_handle_scalar;
 
 #[derive(Clone, Debug)]
 pub struct TextCommand {
@@ -171,14 +172,7 @@ pub(crate) fn split_axes_target<'a>(
 }
 
 fn try_parse_axes_target(value: &Value) -> Option<(FigureHandle, usize)> {
-    match value {
-        Value::Num(v) => decode_axes_handle(*v).ok(),
-        Value::Int(i) => decode_axes_handle(i.to_f64()).ok(),
-        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
-            decode_axes_handle(tensor_utils::tensor_value_f64(tensor, 0)).ok()
-        }
-        _ => None,
-    }
+    decode_axes_handle(numeric_handle_scalar(value)?).ok()
 }
 
 fn collect_label_strings(builtin: &'static str, args: &[Value]) -> BuiltinResult<Vec<String>> {

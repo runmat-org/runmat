@@ -12,6 +12,7 @@ use super::state::{
     LinkAxesMode,
 };
 use crate::builtins::common::tensor as tensor_utils;
+use crate::builtins::plotting::op_common::handles::numeric_handle_from_integer;
 use crate::builtins::plotting::style::value_as_string;
 use crate::builtins::plotting::type_resolvers::set_type;
 
@@ -136,8 +137,28 @@ fn link_mode_from_value(value: &Value) -> crate::BuiltinResult<Option<LinkAxesMo
 fn axes_handles_from_value(value: &Value) -> crate::BuiltinResult<Vec<(FigureHandle, usize)>> {
     let raw = match value {
         Value::Num(handle) => vec![*handle],
-        Value::Int(handle) => vec![handle.to_f64()],
-        Value::Tensor(tensor) => tensor_utils::tensor_values_f64(tensor),
+        Value::Int(handle) => vec![numeric_handle_from_integer(handle).ok_or_else(|| {
+            plotting_error("linkaxes", "linkaxes: axes must be valid axes handles")
+        })?],
+        Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                (0..storage.len())
+                    .map(|index| {
+                        storage
+                            .value_at(index)
+                            .and_then(|value| numeric_handle_from_integer(&value))
+                            .ok_or_else(|| {
+                                plotting_error(
+                                    "linkaxes",
+                                    "linkaxes: axes must be valid axes handles",
+                                )
+                            })
+                    })
+                    .collect::<crate::BuiltinResult<Vec<_>>>()?
+            } else {
+                tensor_utils::tensor_values_f64(tensor)
+            }
+        }
         _ => {
             return Err(plotting_error(
                 "linkaxes",

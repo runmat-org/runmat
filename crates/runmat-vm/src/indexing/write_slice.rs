@@ -8,7 +8,8 @@ use runmat_builtins::{
     ComplexTensor, IntegerComplexStorage, IntegerStorage, SparseTensor, StringArray, Tensor, Value,
 };
 use runmat_runtime::builtins::common::tensor::{
-    self, complex_tensor_element_len, is_scalar_tensor, tensor_element_len, tensor_value_f64,
+    self, complex_tensor_element_len, complex_tensor_values_complex64, is_scalar_tensor,
+    tensor_element_len, tensor_value_f64,
 };
 use runmat_runtime::RuntimeError;
 
@@ -168,7 +169,10 @@ pub fn build_complex_rhs_view(
                 racc *= shape[d];
             }
             Ok(ComplexRhsView::Tensor {
-                data: rt.data.clone(),
+                data: complex_tensor_values_complex64(rt)
+                    .into_iter()
+                    .map(|value| (value.re, value.im))
+                    .collect(),
                 shape,
                 strides: rstrides,
             })
@@ -1519,7 +1523,7 @@ mod tests {
         assign_complex_with_plan, assign_sparse_with_plan, assign_tensor_with_plan,
         build_complex_rhs_view, build_string_rhs_view, delete_gpu_slice_with_plan,
         delete_tensor_with_plan, integer_gpu_rhs_indices_for_plan, map_acceleration_error,
-        materialize_rhs_linear_real, materialize_rhs_nd_real,
+        materialize_rhs_linear_real, materialize_rhs_nd_real, ComplexRhsView,
     };
     use crate::indexing::plan::IndexPlan;
     use futures::executor::block_on;
@@ -2025,6 +2029,41 @@ mod tests {
             Err(err) => err,
         };
         assert_eq!(err.identifier(), Some("RunMat:InvalidSliceAssignmentRhs"));
+    }
+
+    #[test]
+    fn complex_rhs_view_reads_all_typed_integer_classes_without_f64_mirrors() {
+        macro_rules! assert_typed_rhs {
+            ($storage:ident, $real:expr, $imag:expr) => {{
+                let mut rhs = ComplexTensor::new_integer(
+                    IntegerComplexStorage::new(
+                        IntegerStorage::$storage(vec![$real]),
+                        IntegerStorage::$storage(vec![$imag]),
+                    )
+                    .expect("typed integer components"),
+                    vec![1, 1],
+                )
+                .expect("typed complex rhs");
+                rhs.data = vec![(f64::NAN, f64::NAN)];
+
+                let ComplexRhsView::Tensor { data, .. } =
+                    build_complex_rhs_view(&Value::ComplexTensor(rhs), &[1])
+                        .expect("typed complex rhs view")
+                else {
+                    panic!("complex tensor rhs must produce a tensor view");
+                };
+                assert_eq!(data, vec![($real as f64, $imag as f64)]);
+            }};
+        }
+
+        assert_typed_rhs!(I8, i8::MIN, i8::MAX);
+        assert_typed_rhs!(I16, i16::MIN, i16::MAX);
+        assert_typed_rhs!(I32, i32::MIN, i32::MAX);
+        assert_typed_rhs!(I64, i64::MIN, i64::MAX);
+        assert_typed_rhs!(U8, u8::MIN, u8::MAX);
+        assert_typed_rhs!(U16, u16::MIN, u16::MAX);
+        assert_typed_rhs!(U32, u32::MIN, u32::MAX);
+        assert_typed_rhs!(U64, u64::MIN, u64::MAX);
     }
 
     #[test]

@@ -240,6 +240,12 @@ pub(in crate::builtins::table) fn import_numeric_column(
     options: &ReadTableOptions,
     dtype: NumericDType,
 ) -> BuiltinResult<Value> {
+    // Integer text must reach the typed parser directly. Building an f64
+    // compatibility vector first rounds values such as uint64::MAX before
+    // `coerce_tensor_dtype` can materialize native storage.
+    if let Some(target) = integer_target_for_dtype(dtype) {
+        return import_integer_column(values, options, target);
+    }
     let mut numeric = Vec::with_capacity(values.len());
     for value in &values {
         let parsed = numeric_from_import_cell(value, options, dtype.class_name())?;
@@ -248,6 +254,24 @@ pub(in crate::builtins::table) fn import_numeric_column(
     let tensor = Tensor::new(numeric, vec![values.len(), 1])
         .map_err(|err| invalid_variable(format!("readtable: {err}")))?;
     Ok(Value::Tensor(tensor::coerce_tensor_dtype(tensor, dtype)))
+}
+
+fn integer_target_for_dtype(
+    dtype: NumericDType,
+) -> Option<crate::builtins::math::elementwise::integer_cast::IntegerTarget> {
+    use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
+
+    match dtype {
+        NumericDType::I8 => Some(IntegerTarget::I8),
+        NumericDType::I16 => Some(IntegerTarget::I16),
+        NumericDType::I32 => Some(IntegerTarget::I32),
+        NumericDType::I64 => Some(IntegerTarget::I64),
+        NumericDType::U8 => Some(IntegerTarget::U8),
+        NumericDType::U16 => Some(IntegerTarget::U16),
+        NumericDType::U32 => Some(IntegerTarget::U32),
+        NumericDType::U64 => Some(IntegerTarget::U64),
+        NumericDType::F32 | NumericDType::F64 => None,
+    }
 }
 
 pub(in crate::builtins::table) fn numeric_from_import_cell(
@@ -771,5 +795,56 @@ mod tests {
             tensor.integer_storage(),
             Some(&IntegerStorage::I16(vec![i16::MIN, -8, 1, i16::MAX]))
         );
+    }
+
+    #[test]
+    fn import_numeric_column_parses_every_integer_text_class_without_f64_rounding() {
+        let cases = [
+            (NumericDType::I8, "-128", IntegerStorage::I8(vec![i8::MIN])),
+            (
+                NumericDType::I16,
+                "-32768",
+                IntegerStorage::I16(vec![i16::MIN]),
+            ),
+            (
+                NumericDType::I32,
+                "-2147483648",
+                IntegerStorage::I32(vec![i32::MIN]),
+            ),
+            (
+                NumericDType::I64,
+                "-9223372036854775808",
+                IntegerStorage::I64(vec![i64::MIN]),
+            ),
+            (NumericDType::U8, "255", IntegerStorage::U8(vec![u8::MAX])),
+            (
+                NumericDType::U16,
+                "65535",
+                IntegerStorage::U16(vec![u16::MAX]),
+            ),
+            (
+                NumericDType::U32,
+                "4294967295",
+                IntegerStorage::U32(vec![u32::MAX]),
+            ),
+            (
+                NumericDType::U64,
+                "18446744073709551615",
+                IntegerStorage::U64(vec![u64::MAX]),
+            ),
+        ];
+
+        for (dtype, text, expected) in cases {
+            let out = import_numeric_column(
+                vec![ImportCell::Text(text.to_string())],
+                &ReadTableOptions::default(),
+                dtype,
+            )
+            .expect("integer import");
+            let Value::Tensor(tensor) = out else {
+                panic!("expected tensor");
+            };
+            assert_eq!(tensor.integer_storage(), Some(&expected), "{dtype:?}");
+        }
     }
 }

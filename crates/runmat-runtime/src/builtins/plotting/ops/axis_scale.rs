@@ -6,7 +6,7 @@ use super::state::{
     set_log_modes_for_axes, FigureHandle,
 };
 use super::{plotting_error, plotting_error_with_source};
-use crate::builtins::common::tensor as tensor_utils;
+use crate::builtins::plotting::op_common::handles::numeric_handle_scalar;
 use crate::builtins::plotting::style::value_as_string;
 use crate::BuiltinResult;
 
@@ -96,14 +96,7 @@ fn split_optional_axes_target(
 }
 
 fn numeric_scalar(value: &Value) -> Option<f64> {
-    match value {
-        Value::Num(v) => Some(*v),
-        Value::Int(i) => Some(i.to_f64()),
-        Value::Tensor(t) if tensor_utils::is_scalar_tensor(t) => {
-            Some(tensor_utils::tensor_value_f64(t, 0))
-        }
-        _ => None,
-    }
+    numeric_handle_scalar(value)
 }
 
 fn query_scale(

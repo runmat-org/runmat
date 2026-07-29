@@ -4,7 +4,7 @@ use glam::{Vec3, Vec4};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ObjectInstance, StringArray, StructValue, Tensor, Value,
+    IntValue, ObjectInstance, StringArray, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{Figure, TextStyle};
@@ -265,6 +265,13 @@ fn split_leading_parent_handle(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
 }
 
 fn numeric_figure_parent(value: &Value) -> Option<FigureHandle> {
+    if let Some(integer) = exact_integer_scalar(value) {
+        let id = integer.try_to_u64()?;
+        return u32::try_from(id)
+            .ok()
+            .filter(|id| *id > 0)
+            .map(FigureHandle::from);
+    }
     let scalar = value_as_f64(value)?;
     if scalar.is_finite() && scalar > 0.0 && scalar.fract() == 0.0 && scalar <= u32::MAX as f64 {
         Some(FigureHandle::from(scalar as u32))
@@ -1284,6 +1291,11 @@ fn numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
 }
 
 fn nonnegative_integer(value: &Value, name: &str) -> BuiltinResult<usize> {
+    if let Some(integer) = exact_integer_scalar(value) {
+        return integer
+            .try_to_usize()
+            .ok_or_else(|| wordcloud_error(format!("{name} must be a nonnegative integer")));
+    }
     let scalar = numeric_scalar(value, name)?;
     if scalar.fract() != 0.0
         || scalar < 0.0
@@ -1295,6 +1307,17 @@ fn nonnegative_integer(value: &Value, name: &str) -> BuiltinResult<usize> {
         )));
     }
     Ok(scalar as usize)
+}
+
+/// Return a scalar integer from its typed storage, avoiding the lossy f64 mirror.
+fn exact_integer_scalar(value: &Value) -> Option<IntValue> {
+    match value {
+        Value::Int(value) => Some(value.clone()),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0)),
+        _ => None,
+    }
 }
 
 fn max_display_words_value(value: &Value) -> BuiltinResult<usize> {
@@ -1510,6 +1533,46 @@ mod tests {
 
     fn tensor(values: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(values, shape).unwrap())
+    }
+
+    fn integer_scalar_storages(value: u64) -> [runmat_builtins::IntegerStorage; 8] {
+        [
+            runmat_builtins::IntegerStorage::I8(vec![value as i8]),
+            runmat_builtins::IntegerStorage::I16(vec![value as i16]),
+            runmat_builtins::IntegerStorage::I32(vec![value as i32]),
+            runmat_builtins::IntegerStorage::I64(vec![value as i64]),
+            runmat_builtins::IntegerStorage::U8(vec![value as u8]),
+            runmat_builtins::IntegerStorage::U16(vec![value as u16]),
+            runmat_builtins::IntegerStorage::U32(vec![value as u32]),
+            runmat_builtins::IntegerStorage::U64(vec![value]),
+        ]
+    }
+
+    #[test]
+    fn wordcloud_integer_options_read_all_typed_storage_classes_with_poisoned_f64_mirrors() {
+        for storage in integer_scalar_storages(2) {
+            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer option");
+            tensor.data = vec![f64::NAN];
+            let value = Value::Tensor(tensor);
+
+            let mut options = WordCloudOptions::default();
+            apply_option(&mut options, "maxdisplaywords", &value).expect("MaxDisplayWords");
+            assert_eq!(options.max_display_words, 2);
+            apply_option(&mut options, "layoutnum", &value).expect("LayoutNum");
+            assert_eq!(options.layout_num, 2);
+        }
+    }
+
+    #[test]
+    fn wordcloud_parent_reads_all_typed_storage_classes_with_poisoned_f64_mirrors() {
+        for storage in integer_scalar_storages(1) {
+            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer parent");
+            tensor.data = vec![f64::NAN];
+            assert_eq!(
+                numeric_figure_parent(&Value::Tensor(tensor)),
+                Some(FigureHandle::from(1))
+            );
+        }
     }
 
     #[test]

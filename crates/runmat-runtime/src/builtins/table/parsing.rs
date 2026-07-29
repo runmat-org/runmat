@@ -193,6 +193,19 @@ mod tests {
     use super::*;
     use runmat_builtins::{IntegerStorage, Tensor};
 
+    fn integer_storages(values: &[u64]) -> Vec<IntegerStorage> {
+        vec![
+            IntegerStorage::I8(values.iter().map(|&value| value as i8).collect()),
+            IntegerStorage::I16(values.iter().map(|&value| value as i16).collect()),
+            IntegerStorage::I32(values.iter().map(|&value| value as i32).collect()),
+            IntegerStorage::I64(values.iter().map(|&value| value as i64).collect()),
+            IntegerStorage::U8(values.iter().map(|&value| value as u8).collect()),
+            IntegerStorage::U16(values.iter().map(|&value| value as u16).collect()),
+            IntegerStorage::U32(values.iter().map(|&value| value as u32).collect()),
+            IntegerStorage::U64(values.to_vec()),
+        ]
+    }
+
     #[test]
     fn table_usize_parsers_read_typed_integer_storage_exactly() {
         let exact = (1_u64 << 53) + 1;
@@ -211,6 +224,18 @@ mod tests {
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("count");
         negative.data.clear();
         assert!(nonnegative_usize(&Value::Tensor(negative), "head row count").is_err());
+    }
+
+    #[test]
+    fn table_usize_parsers_ignore_poisoned_mirrors_for_every_integer_class() {
+        for storage in integer_storages(&[2]) {
+            let mut count = Tensor::new_integer(storage, vec![1, 1]).expect("count");
+            count.data.fill(f64::NAN);
+            assert_eq!(
+                nonnegative_usize(&Value::Tensor(count), "count").unwrap(),
+                2
+            );
+        }
     }
 
     #[test]

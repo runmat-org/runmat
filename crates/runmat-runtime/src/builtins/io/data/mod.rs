@@ -3174,28 +3174,36 @@ mod tests {
 
     #[test]
     fn data_shape_and_slice_parsers_read_typed_integer_storage_exactly() {
-        let mut shape =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![2, 3]), vec![1, 2])
-                .expect("shape");
-        shape.data.clear();
-        assert_eq!(
-            parse_shape_from_value(&Value::Tensor(shape)).expect("shape"),
-            vec![2, 3]
-        );
+        let cases = [
+            runmat_builtins::IntegerStorage::I8(vec![2, 3]),
+            runmat_builtins::IntegerStorage::I16(vec![2, 3]),
+            runmat_builtins::IntegerStorage::I32(vec![2, 3]),
+            runmat_builtins::IntegerStorage::I64(vec![2, 3]),
+            runmat_builtins::IntegerStorage::U8(vec![2, 3]),
+            runmat_builtins::IntegerStorage::U16(vec![2, 3]),
+            runmat_builtins::IntegerStorage::U32(vec![2, 3]),
+            runmat_builtins::IntegerStorage::U64(vec![2, 3]),
+        ];
+        for storage in cases {
+            let mut shape = Tensor::new_integer(storage.clone(), vec![1, 2]).expect("shape");
+            shape.data = vec![999.0, 1_001.0];
+            assert_eq!(
+                parse_shape_from_value(&Value::Tensor(shape)).expect("shape"),
+                vec![2, 3]
+            );
+
+            let mut range = Tensor::new_integer(storage, vec![1, 2]).expect("range");
+            range.data = vec![999.0, 1_001.0];
+            let parsed = parse_dim_range(&Value::Tensor(range), 5).expect("range");
+            assert_eq!(parsed.start, 1);
+            assert_eq!(parsed.end, 3);
+        }
 
         let mut negative =
             Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![-1]), vec![1, 1])
                 .expect("shape");
         negative.data.clear();
         assert!(parse_shape_from_value(&Value::Tensor(negative)).is_err());
-
-        let mut range =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![2, 4]), vec![1, 2])
-                .expect("range");
-        range.data.clear();
-        let parsed = parse_dim_range(&Value::Tensor(range), 5).expect("range");
-        assert_eq!(parsed.start, 1);
-        assert_eq!(parsed.end, 4);
 
         let mut invalid = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![u64::MAX, u64::MAX]),

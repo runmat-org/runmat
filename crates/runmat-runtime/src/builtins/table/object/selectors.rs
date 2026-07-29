@@ -611,6 +611,19 @@ mod tests {
     use super::*;
     use runmat_builtins::{IntegerStorage, Tensor};
 
+    fn integer_storages(values: &[u64]) -> Vec<IntegerStorage> {
+        vec![
+            IntegerStorage::I8(values.iter().map(|&value| value as i8).collect()),
+            IntegerStorage::I16(values.iter().map(|&value| value as i16).collect()),
+            IntegerStorage::I32(values.iter().map(|&value| value as i32).collect()),
+            IntegerStorage::I64(values.iter().map(|&value| value as i64).collect()),
+            IntegerStorage::U8(values.iter().map(|&value| value as u8).collect()),
+            IntegerStorage::U16(values.iter().map(|&value| value as u16).collect()),
+            IntegerStorage::U32(values.iter().map(|&value| value as u32).collect()),
+            IntegerStorage::U64(values.to_vec()),
+        ]
+    }
+
     #[test]
     fn typed_row_and_variable_selectors_do_not_round_uint64() {
         let rows = parse_row_selector(
@@ -635,6 +648,23 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(err.contains("exceeds bounds"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn table_index_selectors_ignore_poisoned_mirrors_for_every_integer_class() {
+        let names = vec!["left".to_string(), "right".to_string()];
+        for storage in integer_storages(&[1, 2]) {
+            let mut selector = Tensor::new_integer(storage, vec![1, 2]).unwrap();
+            selector.data.fill(f64::NAN);
+            assert_eq!(
+                parse_row_selector(Some(&Value::Tensor(selector.clone())), 2).unwrap(),
+                vec![0, 1]
+            );
+            assert_eq!(
+                parse_variable_selector(Some(&Value::Tensor(selector)), &names).unwrap(),
+                names
+            );
+        }
     }
 
     #[test]

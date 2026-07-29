@@ -1527,21 +1527,43 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_pointer_width = "64")]
     fn schema_dimension_tensors_preserve_exact_integer_storage() {
-        let input = Tensor::new_integer(
-            IntegerStorage::U64(vec![1_u64 << 53, (1_u64 << 53) + 1]),
-            vec![1, 2],
-        )
-        .expect("uint64 dimension tensor");
-        let parsed = parse_usize_vector(&Value::Tensor(input)).expect("typed dimensions");
-        assert_eq!(
-            parsed,
-            vec![
-                usize::try_from(1_u64 << 53).expect("representable first dimension"),
-                usize::try_from((1_u64 << 53) + 1).expect("representable second dimension"),
-            ]
-        );
+        let cases = [
+            IntegerStorage::I8(vec![2, 3]),
+            IntegerStorage::I16(vec![2, 3]),
+            IntegerStorage::I32(vec![2, 3]),
+            IntegerStorage::I64(vec![2, 3]),
+            IntegerStorage::U8(vec![2, 3]),
+            IntegerStorage::U16(vec![2, 3]),
+            IntegerStorage::U32(vec![2, 3]),
+            IntegerStorage::U64(vec![2, 3]),
+        ];
+
+        for storage in cases {
+            let mut input = Tensor::new_integer(storage, vec![1, 2]).expect("dimension tensor");
+            input.data = vec![999.0, 1_001.0];
+            assert_eq!(
+                parse_usize_vector(&Value::Tensor(input)).expect("typed dimensions"),
+                vec![2, 3]
+            );
+        }
+
+        #[cfg(target_pointer_width = "64")]
+        {
+            let mut input = Tensor::new_integer(
+                IntegerStorage::U64(vec![1_u64 << 53, (1_u64 << 53) + 1]),
+                vec![1, 2],
+            )
+            .expect("uint64 dimension tensor");
+            input.data = vec![0.0, 0.0];
+            assert_eq!(
+                parse_usize_vector(&Value::Tensor(input)).expect("wide typed dimensions"),
+                vec![
+                    usize::try_from(1_u64 << 53).expect("representable first dimension"),
+                    usize::try_from((1_u64 << 53) + 1).expect("representable second dimension"),
+                ]
+            );
+        }
     }
 
     #[test]

@@ -1216,6 +1216,19 @@ mod tests {
     use super::*;
     use runmat_builtins::IntegerStorage;
 
+    fn integer_storages(values: &[u64]) -> Vec<IntegerStorage> {
+        vec![
+            IntegerStorage::I8(values.iter().map(|&value| value as i8).collect()),
+            IntegerStorage::I16(values.iter().map(|&value| value as i16).collect()),
+            IntegerStorage::I32(values.iter().map(|&value| value as i32).collect()),
+            IntegerStorage::I64(values.iter().map(|&value| value as i64).collect()),
+            IntegerStorage::U8(values.iter().map(|&value| value as u8).collect()),
+            IntegerStorage::U16(values.iter().map(|&value| value as u16).collect()),
+            IntegerStorage::U32(values.iter().map(|&value| value as u32).collect()),
+            IntegerStorage::U64(values.to_vec()),
+        ]
+    }
+
     #[test]
     fn range_spec_reads_typed_integer_storage_exactly() {
         let mut range =
@@ -1227,6 +1240,24 @@ mod tests {
         assert_eq!(parsed.start_col, 2);
         assert_eq!(parsed.end_row, Some(3));
         assert_eq!(parsed.end_col, Some(4));
+    }
+
+    #[test]
+    fn range_and_sheet_parsers_ignore_poisoned_mirrors_for_every_integer_class() {
+        for storage in integer_storages(&[2, 3]) {
+            let mut range = Tensor::new_integer(storage, vec![1, 2]).unwrap();
+            range.data.fill(f64::NAN);
+            let parsed = RangeSpec::parse(&Value::Tensor(range)).unwrap();
+            assert_eq!((parsed.start_row, parsed.start_col), (1, 2));
+        }
+        for storage in integer_storages(&[2]) {
+            let mut sheet = Tensor::new_integer(storage, vec![1, 1]).unwrap();
+            sheet.data.fill(f64::NAN);
+            assert!(matches!(
+                SheetSelector::parse(&Value::Tensor(sheet)).unwrap(),
+                SheetSelector::Index(1)
+            ));
+        }
     }
 
     #[test]

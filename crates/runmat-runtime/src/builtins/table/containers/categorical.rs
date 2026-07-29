@@ -262,17 +262,26 @@ pub(crate) fn categorical_labels(value: &Value) -> BuiltinResult<Vec<String>> {
             .into_iter()
             .map(|value| normalize_category_label(&value))
             .collect()),
-        Value::Tensor(tensor) => Ok(tensor
-            .data
-            .iter()
-            .map(|value| {
-                if value.is_nan() {
-                    String::new()
-                } else {
-                    format_key_number(*value)
-                }
-            })
-            .collect()),
+        Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                return Ok(storage
+                    .exact_values()
+                    .iter()
+                    .map(runmat_builtins::IntValue::decimal_string)
+                    .collect());
+            }
+            Ok(tensor
+                .data
+                .iter()
+                .map(|value| {
+                    if value.is_nan() {
+                        String::new()
+                    } else {
+                        format_key_number(*value)
+                    }
+                })
+                .collect())
+        }
         Value::LogicalArray(array) => Ok(array
             .data
             .iter()
@@ -486,6 +495,13 @@ fn normalize_category_label(value: &str) -> String {
 fn categorical_object_labels(object: &ObjectInstance) -> BuiltinResult<Vec<String>> {
     let categories = categorical_categories(object)?;
     let codes = categorical_codes(object)?;
+    if let Some(storage) = codes.integer_storage() {
+        return Ok(storage
+            .exact_values()
+            .iter()
+            .map(|code| category_label_for_integer_code(code, &categories).unwrap_or_default())
+            .collect());
+    }
     Ok(codes
         .data
         .iter()
@@ -527,6 +543,16 @@ fn category_label_for_code(code: f64, categories: &[String]) -> Option<String> {
         return None;
     }
     categories.get(idx - 1).cloned()
+}
+
+fn category_label_for_integer_code(
+    code: &runmat_builtins::IntValue,
+    categories: &[String],
+) -> Option<String> {
+    code.try_to_usize()
+        .and_then(|index| index.checked_sub(1))
+        .and_then(|index| categories.get(index))
+        .cloned()
 }
 
 struct CategoricalCompareBase {
@@ -578,14 +604,27 @@ fn categorical_compare_operand(
         Value::Object(object) if object.is_class(CATEGORICAL_CLASS) => {
             let object_categories = categorical_categories(object)?;
             let codes = categorical_codes(object)?;
-            let mapped = codes
-                .data
-                .iter()
-                .map(|code| {
-                    category_label_for_code(*code, &object_categories)
-                        .and_then(|label| categories.iter().position(|category| category == &label))
-                })
-                .collect();
+            let mapped = if let Some(storage) = codes.integer_storage() {
+                storage
+                    .exact_values()
+                    .iter()
+                    .map(|code| {
+                        category_label_for_integer_code(code, &object_categories).and_then(
+                            |label| categories.iter().position(|category| category == &label),
+                        )
+                    })
+                    .collect()
+            } else {
+                codes
+                    .data
+                    .iter()
+                    .map(|code| {
+                        category_label_for_code(*code, &object_categories).and_then(|label| {
+                            categories.iter().position(|category| category == &label)
+                        })
+                    })
+                    .collect()
+            };
             Ok(CategoricalCompareOperand {
                 codes: mapped,
                 shape: codes.shape,
@@ -629,5 +668,60 @@ fn categorical_logical_result(data: Vec<u8>, shape: Vec<usize>) -> BuiltinResult
         LogicalArray::new(data, shape)
             .map(Value::LogicalArray)
             .map_err(invalid_variable)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::IntegerStorage;
+
+    fn integer_storages(values: &[u64]) -> Vec<IntegerStorage> {
+        vec![
+            IntegerStorage::I8(values.iter().map(|&value| value as i8).collect()),
+            IntegerStorage::I16(values.iter().map(|&value| value as i16).collect()),
+            IntegerStorage::I32(values.iter().map(|&value| value as i32).collect()),
+            IntegerStorage::I64(values.iter().map(|&value| value as i64).collect()),
+            IntegerStorage::U8(values.iter().map(|&value| value as u8).collect()),
+            IntegerStorage::U16(values.iter().map(|&value| value as u16).collect()),
+            IntegerStorage::U32(values.iter().map(|&value| value as u32).collect()),
+            IntegerStorage::U64(values.to_vec()),
+        ]
+    }
+
+    #[test]
+    fn categorical_metadata_ignores_poisoned_mirrors_for_every_integer_class() {
+        for storage in integer_storages(&[2]) {
+            let mut values = Tensor::new_integer(storage.clone(), vec![1, 1]).unwrap();
+            values.data.fill(f64::NAN);
+            assert_eq!(
+                categorical_labels(&Value::Tensor(values)).unwrap(),
+                vec!["2"]
+            );
+
+            let mut codes = Tensor::new_integer(storage, vec![1, 1]).unwrap();
+            codes.data.fill(f64::NAN);
+            let mut object = ObjectInstance::new(CATEGORICAL_CLASS.to_string());
+            object
+                .properties
+                .insert("Codes".to_string(), Value::Tensor(codes));
+            object.properties.insert(
+                "Categories".to_string(),
+                Value::StringArray(
+                    StringArray::new(vec!["one".into(), "two".into()], vec![1, 2]).unwrap(),
+                ),
+            );
+            assert_eq!(categorical_object_labels(&object).unwrap(), vec!["two"]);
+            assert!(matches!(
+                categorical_compare(
+                    &Value::Object(object),
+                    &Value::String("two".to_string()),
+                    CategoricalComparison::Eq,
+                )
+                .unwrap()
+                .unwrap(),
+                Value::Bool(true)
+            ));
+        }
     }
 }
