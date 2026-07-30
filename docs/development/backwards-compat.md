@@ -1,0 +1,138 @@
+---
+title: "Semantic Compatibility Engineering Policy"
+category: "Development"
+section: "14.7"
+last_updated: "July 30, 2026"
+---
+
+# Semantic Compatibility Engineering Policy
+
+RunMat is an independent runtime for MATLAB-language source code. Compatibility work is based on publicly available documentation and independent engineering. This policy explains how the project selects a documented semantic reference, evaluates behavior that has changed across releases, and preserves older source code where practical.
+
+MATLAB is a registered trademark of The MathWorks, Inc. RunMat is not affiliated with or endorsed by The MathWorks, Inc.
+
+## Scope
+
+This policy applies to observable behavior in RunMat-supported surfaces, including:
+
+- language syntax and evaluation semantics;
+- values, classes, shapes, indexing, and assignment;
+- builtin inputs, outputs, warnings, and errors;
+- persistence and documented file-format behavior; and
+- CPU and accelerated execution of supported operations.
+
+This policy does not:
+
+- claim complete coverage of the MATLAB language or product family;
+- make implementation details of another runtime part of RunMat's contract;
+- reproduce product licensing or packaging;
+- require RunMat to share another product's performance characteristics, resource limits, or internal architecture; or
+- turn undocumented behavior into a compatibility requirement.
+
+Feature support is documented separately. A compatibility target identifies the reference used for matching semantic behavior. It does not imply that every toolbox or feature in that release is implemented, but language behavior will aim to match compatibility with existing code written for that release.
+
+## Current semantic target
+
+The current semantic compatibility target for RunMat is **MATLAB R2026a**.
+
+## Compatibility vocabulary
+
+**Semantic target**: The pinned release whose observable or online documented behavior is the primary reference for supported behavior.
+
+**Legacy compatibility envelope**: Documented behavior from earlier releases that RunMat can preserve without conflicting with the semantic target.
+
+**Conflict**: A case where the same supported program and inputs cannot exhibit both the target behavior and an older behavior.
+
+**RunMat extension**: Deliberate behavior or syntax provided by RunMat that is outside the documented target surface.
+
+**Observable behavior**: A program-visible result such as a value, class, shape, side effect, warning, error, or accepted call form. Internal algorithms and data structures are not observable behavior for this policy.
+
+## Decision order
+
+When implementing or reviewing a supported surface, use this order:
+
+1. Follow behavior explicitly documented for the semantic target.
+2. Follow documented target-release errors, warnings, and unsupported cases when they are material to program behavior.
+3. Preserve older call forms and behaviors that the target still accepts.
+4. Preserve additional documented legacy behavior when it does not conflict with the target.
+5. Treat behavior beyond that surface as a RunMat extension only after an explicit engineering decision.
+6. When reliable public evidence is insufficient, record the ambiguity and use a safe, deterministic provisional behavior rather than claiming parity.
+
+Current target behavior takes precedence in a genuine conflict. This rule keeps the runtime forward-facing without unnecessarily excluding older source code.
+
+## Backward compatibility policy
+
+RunMat aims to execute existing MATLAB-language source code across a broad compatibility envelope. That aim is applied behavior by behavior rather than by declaring that every script from a particular historical release is supported.
+
+The RunMat project should:
+
+- continue to support an older call form when the semantic target still supports it;
+- distinguish "not recommended" from removed or unsupported functionality;
+- avoid requiring source rewrites solely to use a newer preferred spelling;
+- preserve nonconflicting legacy syntax and semantics when the implementation cost and maintenance burden are reasonable;
+- preserve documented interchange formats where the relevant RunMat feature supports them; and
+- test legacy behavior that RunMat intentionally retains.
+
+The project is not required to preserve an older behavior when it conflicts with the semantic target. In such a case, the target behavior applies unless
+the project explicitly adopts a mode-gated RunMat extension.
+
+There is no blanket earliest-supported MATLAB release. A historical behavior is inside the compatibility envelope only when it is supported by adequate public evidence, relevant to a RunMat surface, and not displaced by this policy.
+
+## Compatibility modes
+
+RunMat's `runmat`, `matlab`, and `strict` modes are language-policy modes, not intended to emulate different MATLAB releases.
+
+- Supported MATLAB-language programs should have consistent numeric values, classes, shapes, and indexing results across modes.
+- `matlab` mode excludes RunMat-only language features where accepting them would contradict the mode's purpose and controls MATLAB-style error identifiers where implemented.
+- `strict` mode controls permissive syntax, including command-style calls. It does not select historical numeric semantics.
+- `runmat` mode may expose deliberate extensions, subject to the extension rules below.
+
+Release-specific runtime modes should not be introduced without a separate design review. They would multiply the semantic and testing surface and are not part of the current compatibility strategy.
+
+## RunMat extensions
+
+RunMat extends the MATLAB language with intentional language features that are not part of MathWork's MATLAB. Language extensions are designed to be a superset of MATLAB semantics, and are designed to not conflict with existing MATLAB code. Language extensions can be disabled with the compatability configuration flag described in the [Configuration Reference](/docs/runtime/getting-started/config). An extension must be classified before it becomes part of supported behavior.
+
+| Classification | Meaning | Policy |
+| --- | --- | --- |
+| Safe extension | Adds capability without changing a program accepted by the semantic target | May be available in `runmat` mode and documented as an extension |
+| Mode-gated extension | Accepting it conflicts with documented target behavior | May be considered for `runmat` mode; must not silently alter `matlab` mode |
+| Incompatible divergence | Changes the result of a program accepted by the target | Do not introduce without a separate compatibility decision |
+
+The existence of a useful internal representation or implementation path does not by itself justify exposing a new language behavior. Extensions must be intentional, documented, and tested.
+
+## Evidence policy
+
+Compatibility decisions should be based on publicly available information and literature only. RunMat is a clean-room implementation of MATLAB compatable syntax, and as a result we do not rely on proprietary binaries, disassembly, or reverse engineering. Prefer evidence in this order:
+
+1. Publically available explicit behavior documentation.
+2. Publicly available release notes and documented version history.
+3. Publicly available bug reports.
+4. Publicly available Answers and authored explanatory material.
+5. Independent technical sources that corroborate or clarify primary sources.
+6. Community discussion as a signal about adoption or risk, not as sole authority for a semantic rule.
+
+## Recording a semantic decision
+
+A nontrivial decision should record enough information to reproduce and validate semantic behavior with tests, with notes within comments relevant:
+
+| Field | Purpose |
+| --- | --- |
+| Target release | Release used as the primary reference |
+| Surface | Operator, builtin, syntax, storage, or execution environment |
+| Target behavior | Documented behavior for the target |
+| Legacy behavior | Relevant earlier behavior, if different |
+| Change release | Release in which public documentation reports a change |
+| Conflict | Whether target and legacy behavior can coexist |
+| Applicability | Core language, toolbox, accelerator, code generation, or other surface |
+| Evidence | Direct public sources and whether the conclusion is explicit or inferred |
+| RunMat policy | Behavior selected for RunMat |
+| Tests | Conformance evidence in the repository |
+| Remaining ambiguity | Unresolved or weakly supported details |
+
+## Related documentation
+
+- [Language Compatibility](/docs/runtime/getting-started/compatability)
+- [Configuration Reference](/docs/runtime/getting-started/config)
+- [Testing Strategy](/docs/runtime/development/testing)
+- [Integer dtype compatibility status](/docs/runtime/development/integer-dtype-status)
