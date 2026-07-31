@@ -1304,25 +1304,11 @@ pub(crate) mod tests {
     }
 
     fn tensor_from(data: &[f64]) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![data.len()],
-            rows: data.len(),
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), vec![data.len()]).expect("bar test vector")
     }
 
     fn matrix_tensor(data: &[f64], rows: usize, cols: usize) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![rows, cols],
-            rows,
-            cols,
-            dtype: runmat_builtins::NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), vec![rows, cols]).expect("bar test matrix")
     }
 
     fn poisoned_integer_matrix(storage: IntegerStorage, rows: usize, cols: usize) -> Tensor {
@@ -1332,14 +1318,7 @@ pub(crate) mod tests {
     }
 
     fn row_vector_tensor(data: &[f64]) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![1, data.len()],
-            rows: 1,
-            cols: data.len(),
-            dtype: runmat_builtins::NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), vec![1, data.len()]).expect("bar test row vector")
     }
 
     fn gpu_handle_with_shape(shape: &[usize]) -> GpuTensorHandle {

@@ -690,28 +690,16 @@ fn parse_area_args(
         let y = Tensor::try_from(&first)
             .map_err(|e| area_error_with_detail(&AREA_ERROR_INVALID_ARGUMENT, &e))?;
         let (rows, _) = area_shape_from_tensor(&y);
-        let x = Tensor {
-            data: (1..=rows).map(|i| i as f64).collect(),
-            integer_data: None,
-            shape: vec![rows],
-            rows,
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        };
+        let x = Tensor::new((1..=rows).map(|i| i as f64).collect(), vec![rows])
+            .expect("implicit area axis");
         return Ok((target_axes, Value::Tensor(x), first, Vec::new()));
     };
     if matches!(second, Value::String(_) | Value::CharArray(_)) {
         let y = Tensor::try_from(&first)
             .map_err(|e| area_error_with_detail(&AREA_ERROR_INVALID_ARGUMENT, &e))?;
         let (rows, _) = area_shape_from_tensor(&y);
-        let x = Tensor {
-            data: (1..=rows).map(|i| i as f64).collect(),
-            integer_data: None,
-            shape: vec![rows],
-            rows,
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        };
+        let x = Tensor::new((1..=rows).map(|i| i as f64).collect(), vec![rows])
+            .expect("implicit area axis");
         let mut rest = vec![second];
         rest.extend(it);
         return Ok((target_axes, Value::Tensor(x), first, rest));
@@ -755,13 +743,14 @@ fn area_series_from_tensor(x: Vec<f64>, y: &Tensor) -> crate::BuiltinResult<Area
             "X length must match the number of rows in Y",
         ));
     }
+    let y_values = tensor_utils::tensor_values_f64_cow(y);
     let mut out: AreaSeries = Vec::with_capacity(cols);
     let mut cumulative = vec![0.0; rows];
     for col in 0..cols {
         let mut top = Vec::with_capacity(rows);
         for row in 0..rows {
             let idx = if cols == 1 { row } else { col * rows + row };
-            cumulative[row] += y.data.get(idx).copied().unwrap_or(0.0);
+            cumulative[row] += y_values.get(idx).copied().unwrap_or(0.0);
             top.push(cumulative[row]);
         }
         let lower = if col == 0 {
@@ -785,14 +774,7 @@ mod tests {
     use runmat_plot::plots::PlotElement;
 
     fn matrix_tensor(data: Vec<f64>, rows: usize, cols: usize) -> Tensor {
-        Tensor {
-            data,
-            integer_data: None,
-            shape: vec![rows, cols],
-            rows,
-            cols,
-            dtype: runmat_builtins::NumericDType::F64,
-        }
+        Tensor::new(data, vec![rows, cols]).expect("area test matrix")
     }
 
     #[test]
@@ -809,6 +791,20 @@ mod tests {
             vec![-1.0, 0.0, 1.0]
         );
         assert_eq!(area_shape_from_tensor(&x), (3, 1));
+    }
+
+    #[test]
+    fn area_series_reads_typed_integer_storage_without_mirror() {
+        let mut y = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![1, 2, 3, 4]),
+            vec![2, 2],
+        )
+        .expect("typed area matrix");
+        y.data.clear();
+
+        let series = area_series_from_tensor(vec![1.0, 2.0], &y).expect("area series");
+        assert_eq!(series[0], (vec![1.0, 2.0], None));
+        assert_eq!(series[1], (vec![4.0, 6.0], Some(vec![1.0, 2.0])));
     }
 
     #[test]
@@ -864,14 +860,9 @@ mod tests {
         reset_hold_state_for_run();
         let _ = clear_figure(None);
         let handle = area_builtin(vec![
-            Value::Tensor(Tensor {
-                data: vec![1.0, 2.0, 3.0, 4.0, 5.0],
-                integer_data: None,
-                shape: vec![5],
-                rows: 5,
-                cols: 1,
-                dtype: runmat_builtins::NumericDType::F64,
-            }),
+            Value::Tensor(
+                Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0], vec![5]).expect("area x vector"),
+            ),
             Value::Tensor(matrix_tensor(
                 vec![
                     1.0, 2.0, 3.0, 2.0, 1.0, 2.0, 1.0, 2.0, 3.0, 2.0, 1.0, 2.0, 1.0, 2.0, 3.0,
@@ -907,22 +898,10 @@ mod tests {
         reset_hold_state_for_run();
         let _ = clear_figure(None);
         let _ = area_builtin(vec![
-            Value::Tensor(Tensor {
-                data: vec![0.0, 0.2, 0.4, 0.6],
-                integer_data: None,
-                shape: vec![4],
-                rows: 4,
-                cols: 1,
-                dtype: runmat_builtins::NumericDType::F64,
-            }),
-            Value::Tensor(Tensor {
-                data: vec![2.0, 2.2, 2.4, 2.6],
-                integer_data: None,
-                shape: vec![1, 4],
-                rows: 1,
-                cols: 4,
-                dtype: runmat_builtins::NumericDType::F64,
-            }),
+            Value::Tensor(Tensor::new(vec![0.0, 0.2, 0.4, 0.6], vec![4]).expect("area x vector")),
+            Value::Tensor(
+                Tensor::new(vec![2.0, 2.2, 2.4, 2.6], vec![1, 4]).expect("area row vector"),
+            ),
         ])
         .unwrap();
         let fig = clone_figure(current_figure_handle()).unwrap();
