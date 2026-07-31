@@ -816,7 +816,7 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
-    use runmat_builtins::{NumericDType, Tensor};
+    use runmat_builtins::Tensor;
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -836,14 +836,10 @@ mod tests {
         )
         .unwrap();
 
-        axis_builtin(vec![Value::Tensor(Tensor {
-            rows: 1,
-            cols: 6,
-            shape: vec![1, 6],
-            data: vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
-            integer_data: None,
-            dtype: NumericDType::F64,
-        })])
+        axis_builtin(vec![Value::Tensor(
+            Tensor::new(vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0], vec![1, 6])
+                .expect("six-element axis limits"),
+        )])
         .unwrap();
         let zlim = get_builtin(vec![Value::Num(ax), Value::String("ZLim".into())]).unwrap();
         let zlim = Tensor::try_from(&zlim).unwrap();
@@ -892,14 +888,9 @@ mod tests {
         let _guard = setup();
         let ax = crate::builtins::plotting::gca::gca_builtin(vec![]).unwrap();
 
-        axis_builtin(vec![Value::Tensor(Tensor {
-            rows: 1,
-            cols: 4,
-            shape: vec![1, 4],
-            data: vec![0.0, 10.0, -2.0, 2.0],
-            integer_data: None,
-            dtype: NumericDType::F64,
-        })])
+        axis_builtin(vec![Value::Tensor(
+            Tensor::new(vec![0.0, 10.0, -2.0, 2.0], vec![1, 4]).expect("four-element axis limits"),
+        )])
         .unwrap();
         axis_builtin(vec![Value::String("image".into())]).unwrap();
 
@@ -1068,14 +1059,9 @@ mod tests {
     #[test]
     fn colormap_accepts_rgb_matrix_lookup_tables() {
         let _guard = setup();
-        colormap_builtin(vec![Value::Tensor(Tensor {
-            rows: 2,
-            cols: 3,
-            shape: vec![2, 3],
-            data: vec![0.2, 0.8, 0.4, 0.1, 0.6, 0.0],
-            integer_data: None,
-            dtype: NumericDType::F64,
-        })])
+        colormap_builtin(vec![Value::Tensor(
+            Tensor::new(vec![0.2, 0.8, 0.4, 0.1, 0.6, 0.0], vec![2, 3]).expect("RGB colormap"),
+        )])
         .unwrap();
 
         let figure = clone_figure(current_figure_handle()).expect("current figure");
