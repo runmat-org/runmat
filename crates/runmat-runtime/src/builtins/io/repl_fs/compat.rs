@@ -9,7 +9,8 @@ use std::process::Command;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinOutputMode, BuiltinParamArity,
     BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CellArray, CharArray,
-    IntegerStorage, LogicalArray, NumericDType, ObjectInstance, StructValue, Tensor, Value,
+    IntegerStorage, LogicalArray, NumericDType, NumericScalar, ObjectInstance, StructValue, Tensor,
+    Value,
 };
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
@@ -1167,14 +1168,10 @@ impl MemmapFormat {
     fn to_value(&self) -> BuiltinResult<Value> {
         if let Some(field) = &self.field {
             let shape_values = self.shape.iter().map(|value| *value as f64).collect();
-            let shape = Value::Tensor(Tensor {
-                data: shape_values,
-                integer_data: None,
-                shape: vec![1, self.shape.len()],
-                rows: 1,
-                cols: self.shape.len(),
-                dtype: NumericDType::F64,
-            });
+            let shape = Value::Tensor(
+                Tensor::new(shape_values, vec![1, self.shape.len()])
+                    .map_err(|err| compat_error("memmapfile", err))?,
+            );
             return Ok(Value::Cell(
                 CellArray::new(
                     vec![char_value(&self.dtype), shape, char_value(field)],
@@ -1206,11 +1203,6 @@ impl MemmapFormat {
         } else if shape.iter().product::<usize>() != total_values {
             shape = vec![total_values, 1];
         }
-        let (rows, cols) = if shape.len() >= 2 {
-            (shape[0], shape[1])
-        } else {
-            (shape.first().copied().unwrap_or(0), 1)
-        };
         let tensor = if let Some(storage) = decode_integer_storage(&self.dtype, bytes, total_values)
         {
             Value::Tensor(
@@ -1226,14 +1218,10 @@ impl MemmapFormat {
                     &bytes[start..start + element_size],
                 )?);
             }
-            Value::Tensor(Tensor {
-                data,
-                integer_data: None,
-                shape,
-                rows,
-                cols,
-                dtype: tensor_dtype(&self.dtype),
-            })
+            Value::Tensor(
+                Tensor::new_with_dtype(data, shape, tensor_dtype(&self.dtype))
+                    .map_err(|err| compat_error("memmapfile", err))?,
+            )
         };
         if let Some(field) = &self.field {
             let mut st = StructValue::new();
@@ -1250,25 +1238,32 @@ fn shape_from_value(value: &Value) -> BuiltinResult<Vec<usize>> {
         Value::Num(v) => Ok(vec![positive_platform_usize(*v, "Format shape")?, 1]),
         Value::Int(v) => Ok(vec![positive_integer_shape_dim(v)?, 1]),
         Value::Tensor(tensor) => {
-            if let Some(storage) = tensor.integer_storage() {
-                let mut shape = Vec::with_capacity(storage.len());
-                for index in 0..storage.len() {
-                    let value = storage.value_at(index).expect("integer storage length");
-                    shape.push(positive_integer_shape_dim(&value)?);
-                }
-                Ok(shape)
-            } else {
-                let mut shape = Vec::with_capacity(tensor.data.len());
-                for value in &tensor.data {
-                    shape.push(positive_platform_usize(*value, "Format shape")?);
-                }
-                Ok(shape)
+            let len = tensor.shape.iter().product();
+            let mut shape = Vec::with_capacity(len);
+            for index in 0..len {
+                let value = tensor.numeric_value_at(index).ok_or_else(|| {
+                    compat_error("memmapfile", "memmapfile: invalid Format shape storage")
+                })?;
+                shape.push(shape_dim_from_numeric_scalar(value)?);
             }
+            Ok(shape)
         }
         _ => Err(compat_error(
             "memmapfile",
             "memmapfile: Format shape must be a positive numeric vector",
         )),
+    }
+}
+
+fn shape_dim_from_numeric_scalar(value: NumericScalar) -> BuiltinResult<usize> {
+    match value {
+        NumericScalar::F64(value) => positive_platform_usize(value, "Format shape"),
+        NumericScalar::F32(value) => positive_platform_usize(f64::from(value), "Format shape"),
+        integer => positive_integer_shape_dim(
+            &integer
+                .into_int_value()
+                .expect("non-floating numeric scalar must be integer"),
+        ),
     }
 }
 
@@ -1569,14 +1564,7 @@ mod tests {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
         let path = std::env::temp_dir().join("runmat_memmapfile_test.bin");
         std::fs::write(&path, [1u8, 0, 2, 0]).unwrap();
-        let shape = Value::Tensor(Tensor {
-            data: vec![2.0, 1.0],
-            integer_data: None,
-            shape: vec![1, 2],
-            rows: 1,
-            cols: 2,
-            dtype: NumericDType::F64,
-        });
+        let shape = Value::Tensor(Tensor::new(vec![2.0, 1.0], vec![1, 2]).unwrap());
         let fmt = Value::Cell(
             CellArray::new(
                 vec![char_value("uint16"), shape, char_value("samples")],
@@ -1600,7 +1588,6 @@ mod tests {
         let Some(Value::Tensor(samples)) = data.fields.get("samples") else {
             panic!("expected samples tensor");
         };
-        assert_eq!(samples.data, vec![1.0, 2.0]);
         assert_eq!(samples.shape, vec![2, 1]);
         assert_eq!(
             samples.integer_storage(),
@@ -1617,10 +1604,14 @@ mod tests {
             shape_from_value(&Value::Int(IntValue::U16(7))).unwrap(),
             vec![7, 1]
         );
-        let mut shape = Tensor::new_integer(IntegerStorage::U64(vec![2, 3]), vec![1, 2])
+        let shape = Tensor::new_integer(IntegerStorage::U64(vec![2, 3]), vec![1, 2])
             .expect("typed shape vector");
-        shape.data.clear();
         assert_eq!(shape_from_value(&Value::Tensor(shape)).unwrap(), vec![2, 3]);
+        let single_shape = Tensor::from_f32(vec![4.0, 5.0], vec![1, 2]).expect("single shape");
+        assert_eq!(
+            shape_from_value(&Value::Tensor(single_shape)).unwrap(),
+            vec![4, 5]
+        );
         assert!(shape_from_value(&Value::Int(IntValue::I8(-1))).is_err());
         assert!(shape_from_value(&Value::Int(IntValue::U8(0))).is_err());
         assert!(shape_from_value(&Value::Num(2.5)).is_err());
