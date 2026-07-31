@@ -424,25 +424,11 @@ pub(crate) mod tests {
     }
 
     fn tensor_from(data: &[f64]) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![data.len()],
-            rows: data.len(),
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), vec![data.len()]).expect("contourf test vector")
     }
 
     fn matrix_from(data: &[f64], rows: usize, cols: usize) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![rows, cols],
-            rows,
-            cols,
-            dtype: runmat_builtins::NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), vec![rows, cols]).expect("contourf test matrix")
     }
 
     fn assert_flat_finite_triangles(vertices: &[runmat_plot::core::Vertex]) {
@@ -505,14 +491,9 @@ pub(crate) mod tests {
     fn contourf_returns_handle() {
         setup_plot_tests();
         let handle = contourf_builtin(
-            Value::Tensor(Tensor {
-                data: vec![0.0, 1.0, 1.0, 0.0],
-                integer_data: None,
-                shape: vec![2, 2],
-                rows: 2,
-                cols: 2,
-                dtype: runmat_builtins::NumericDType::F64,
-            }),
+            Value::Tensor(
+                Tensor::new(vec![0.0, 1.0, 1.0, 0.0], vec![2, 2]).expect("contourf surface"),
+            ),
             Vec::new(),
         )
         .expect("contourf should return handle");
@@ -526,14 +507,9 @@ pub(crate) mod tests {
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             vec![
                 Value::Tensor(tensor_from(&[0.0, 1.0])),
-                Value::Tensor(Tensor {
-                    data: vec![0.0, 1.0, 1.0, 0.0],
-                    integer_data: None,
-                    shape: vec![2, 2],
-                    rows: 2,
-                    cols: 2,
-                    dtype: runmat_builtins::NumericDType::F64,
-                }),
+                Value::Tensor(
+                    Tensor::new(vec![0.0, 1.0, 1.0, 0.0], vec![2, 2]).expect("contourf surface"),
+                ),
                 Value::Num(12.0),
             ],
         )
