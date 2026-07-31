@@ -689,7 +689,10 @@ mod tests {
 
     fn tensor_data(value: Value) -> Vec<f64> {
         match value {
-            Value::Tensor(tensor) => tensor.data,
+            Value::Tensor(tensor) => tensor
+                .into_numeric_storage()
+                .expect("valid tensor storage")
+                .materialize_f64(),
             Value::Num(number) => vec![number],
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -702,20 +705,12 @@ mod tests {
         }
     }
 
-    fn cleared_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
-        tensor.data.clear();
-        Value::Tensor(tensor)
-    }
-
-    fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
-        tensor.data.fill(f64::NAN);
-        Value::Tensor(tensor)
+    fn int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, vec![rows, cols]).unwrap())
     }
 
     #[test]
-    fn holdout_reads_every_integer_storage_variant_not_the_float_mirror() {
+    fn holdout_reads_every_integer_storage_variant() {
         for storage in [
             IntegerStorage::I8(vec![2]),
             IntegerStorage::I16(vec![2]),
@@ -726,10 +721,7 @@ mod tests {
             IntegerStorage::U32(vec![2]),
             IntegerStorage::U64(vec![2]),
         ] {
-            assert_eq!(
-                holdout_count(&poisoned_int_tensor(storage, 1, 1), 6).unwrap(),
-                2
-            );
+            assert_eq!(holdout_count(&int_tensor(storage, 1, 1), 6).unwrap(), 2);
         }
     }
 
@@ -786,7 +778,7 @@ mod tests {
     #[test]
     fn classes_option_stratifies_holdout() {
         random::set_seed(13).expect("seed");
-        let classes = cleared_int_tensor(IntegerStorage::U8(vec![1, 1, 1, 1, 2, 2, 2, 2]), 8, 1);
+        let classes = int_tensor(IntegerStorage::U8(vec![1, 1, 1, 1, 2, 2, 2, 2]), 8, 1);
         let outputs = output_list(
             call(
                 vec![
@@ -839,18 +831,14 @@ mod tests {
     fn typed_integer_partition_counts_are_exact_and_lossy_f64_is_rejected() {
         let typed_six = Value::Int(runmat_builtins::IntValue::U16(6));
         assert_eq!(observation_count(&typed_six).unwrap(), 6);
-        let typed_tensor_six = cleared_int_tensor(IntegerStorage::U16(vec![6]), 1, 1);
+        let typed_tensor_six = int_tensor(IntegerStorage::U16(vec![6]), 1, 1);
         assert_eq!(observation_count(&typed_tensor_six).unwrap(), 6);
         assert_eq!(
             positive_integer(&Value::Int(runmat_builtins::IntValue::U8(3)), "KFold").unwrap(),
             3
         );
         assert_eq!(
-            positive_integer(
-                &cleared_int_tensor(IntegerStorage::U8(vec![3]), 1, 1),
-                "KFold"
-            )
-            .unwrap(),
+            positive_integer(&int_tensor(IntegerStorage::U8(vec![3]), 1, 1), "KFold").unwrap(),
             3
         );
         assert_eq!(
@@ -858,14 +846,14 @@ mod tests {
             2
         );
         assert_eq!(
-            holdout_count(&cleared_int_tensor(IntegerStorage::U8(vec![2]), 1, 1), 6).unwrap(),
+            holdout_count(&int_tensor(IntegerStorage::U8(vec![2]), 1, 1), 6).unwrap(),
             2
         );
 
         let folds = crossvalind_compute(vec![
             Value::from("KFold"),
             typed_tensor_six,
-            cleared_int_tensor(IntegerStorage::U8(vec![3]), 1, 1),
+            int_tensor(IntegerStorage::U8(vec![3]), 1, 1),
         ])
         .unwrap();
         let PartitionOutput::Folds(Value::Tensor(folds)) = folds else {
