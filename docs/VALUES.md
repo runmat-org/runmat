@@ -85,7 +85,7 @@ Column-major shape semantics are preserved across tensor construction, indexing,
 
 The compatibility mirror is transitional, not the target value model. Dense real numeric tensors are moving to one private homogeneous storage enum with native variants for `f64`, `f32`, and all eight integer classes. Dtype will be derived from that storage, `single` will use native `f32`, and no integer tensor will retain an eager or persistent `f64` mirror.
 
-`NumericStorage`, `NumericStorageView`, and `NumericStorageViewMut` define that exhaustive native storage contract in `runmat-builtins`. During Phase 1 they coexist with the current public `Tensor` fields; the later field-privatization migration moves `Tensor` ownership onto this contract and uses compiler diagnostics to enumerate every consumer.
+`NumericStorage`, `NumericScalar`, `NumericStorageView`, and `NumericStorageViewMut` define that exhaustive native storage contract in `runmat-builtins`. Exact scalar access, same-class mutation, zero/one allocation, shape-validated clone, gather, and reorder preserve the storage variant; `materialize_f64` and `materialize_f32` are the explicitly named potentially lossy boundaries. During Phase 1 these primitives coexist with the current public `Tensor` fields; the later field-privatization migration moves `Tensor` ownership onto this contract and uses compiler diagnostics to enumerate every consumer.
 
 Sparse values, complex values, provider transfer views, and GPU handle metadata will use the same authoritative element-type contract while retaining container/backend-appropriate physical layouts. In particular, “unified” does not require sparse CSC values and packed WGPU words to share an in-memory layout.
 
@@ -98,7 +98,7 @@ Until the migration removes `Tensor::data`, a consumer that reads it from a valu
 3. **Validated scalar parameter:** convert only after proving the exact integer is in the destination domain, such as `usize`, `u32`, or the exact-double interval.
 4. **Unsupported integer input:** reject before reading the mirror.
 
-A direct mirror read without one of these justifications is an integer threading defect. Poisoned-mirror tests should replace `data`/`values` with invalid sentinels while retaining exact storage and verify that exact consumers still produce the right result. The durable migration ledger and census live in [Integer Storage Migration Ledger](/docs/development/integer-storage-migration-ledger).
+A direct mirror read without one of these justifications is an integer threading defect. Poisoned-mirror tests should replace `data`/`values` with invalid sentinels while retaining exact storage and verify that exact consumers still produce the right result. The repository census script remains a discovery and regression aid; completion is established by private storage, exhaustive typed dispatch, compiler diagnostics, and semantic tests.
 
 Logical arrays use `LogicalArray`. Logical scalars use `Bool`, while logical N-D arrays store normalized `0` or `1` bytes with an explicit shape.
 

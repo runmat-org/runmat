@@ -135,4 +135,3 @@ A nontrivial decision should record enough information to reproduce and validate
 - [Language Compatibility](/docs/runtime/getting-started/compatability)
 - [Configuration Reference](/docs/runtime/getting-started/config)
 - [Testing Strategy](/docs/runtime/development/testing)
-- [Integer dtype compatibility status](/docs/runtime/development/integer-dtype-status)

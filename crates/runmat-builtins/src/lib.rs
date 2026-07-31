@@ -709,6 +709,24 @@ pub enum NumericStorage {
     U64(Vec<u64>),
 }
 
+/// One exact scalar read from or written to [`NumericStorage`].
+///
+/// The variant is part of the value: extracting an integer does not first
+/// route it through a floating-point representation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum NumericScalar {
+    F64(f64),
+    F32(f32),
+    I8(i8),
+    I16(i16),
+    I32(i32),
+    I64(i64),
+    U8(u8),
+    U16(u16),
+    U32(u32),
+    U64(u64),
+}
+
 /// Immutable typed view over authoritative real numeric storage.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum NumericStorageView<'a> {
@@ -740,6 +758,36 @@ pub enum NumericStorageViewMut<'a> {
 }
 
 impl NumericStorage {
+    pub fn zeros(dtype: NumericDType, len: usize) -> Self {
+        match dtype {
+            NumericDType::F64 => Self::F64(vec![0.0; len]),
+            NumericDType::F32 => Self::F32(vec![0.0; len]),
+            NumericDType::I8 => Self::I8(vec![0; len]),
+            NumericDType::I16 => Self::I16(vec![0; len]),
+            NumericDType::I32 => Self::I32(vec![0; len]),
+            NumericDType::I64 => Self::I64(vec![0; len]),
+            NumericDType::U8 => Self::U8(vec![0; len]),
+            NumericDType::U16 => Self::U16(vec![0; len]),
+            NumericDType::U32 => Self::U32(vec![0; len]),
+            NumericDType::U64 => Self::U64(vec![0; len]),
+        }
+    }
+
+    pub fn ones(dtype: NumericDType, len: usize) -> Self {
+        match dtype {
+            NumericDType::F64 => Self::F64(vec![1.0; len]),
+            NumericDType::F32 => Self::F32(vec![1.0; len]),
+            NumericDType::I8 => Self::I8(vec![1; len]),
+            NumericDType::I16 => Self::I16(vec![1; len]),
+            NumericDType::I32 => Self::I32(vec![1; len]),
+            NumericDType::I64 => Self::I64(vec![1; len]),
+            NumericDType::U8 => Self::U8(vec![1; len]),
+            NumericDType::U16 => Self::U16(vec![1; len]),
+            NumericDType::U32 => Self::U32(vec![1; len]),
+            NumericDType::U64 => Self::U64(vec![1; len]),
+        }
+    }
+
     pub fn numeric_dtype(&self) -> NumericDType {
         match self {
             Self::F64(_) => NumericDType::F64,
@@ -780,6 +828,62 @@ impl NumericStorage {
 
     pub fn checked_byte_len(&self) -> Option<usize> {
         self.len().checked_mul(self.numeric_dtype().byte_size())
+    }
+
+    pub fn value_at(&self, index: usize) -> Option<NumericScalar> {
+        match self {
+            Self::F64(values) => values.get(index).copied().map(NumericScalar::F64),
+            Self::F32(values) => values.get(index).copied().map(NumericScalar::F32),
+            Self::I8(values) => values.get(index).copied().map(NumericScalar::I8),
+            Self::I16(values) => values.get(index).copied().map(NumericScalar::I16),
+            Self::I32(values) => values.get(index).copied().map(NumericScalar::I32),
+            Self::I64(values) => values.get(index).copied().map(NumericScalar::I64),
+            Self::U8(values) => values.get(index).copied().map(NumericScalar::U8),
+            Self::U16(values) => values.get(index).copied().map(NumericScalar::U16),
+            Self::U32(values) => values.get(index).copied().map(NumericScalar::U32),
+            Self::U64(values) => values.get(index).copied().map(NumericScalar::U64),
+        }
+    }
+
+    /// Stores a same-class scalar without numeric conversion.
+    pub fn set_value(&mut self, index: usize, value: NumericScalar) -> Result<(), String> {
+        let storage_class = self.class_name();
+        let value_class = value.class_name();
+        match (self, value) {
+            (Self::F64(values), NumericScalar::F64(value)) => {
+                set_numeric_element(values, index, value, storage_class)
+            }
+            (Self::F32(values), NumericScalar::F32(value)) => {
+                set_numeric_element(values, index, value, storage_class)
+            }
+            (Self::I8(values), NumericScalar::I8(value)) => {
+                set_numeric_element(values, index, value, storage_class)
+            }
+            (Self::I16(values), NumericScalar::I16(value)) => {
+                set_numeric_element(values, index, value, storage_class)
+            }
+            (Self::I32(values), NumericScalar::I32(value)) => {
+                set_numeric_element(values, index, value, storage_class)
+            }
+            (Self::I64(values), NumericScalar::I64(value)) => {
+                set_numeric_element(values, index, value, storage_class)
+            }
+            (Self::U8(values), NumericScalar::U8(value)) => {
+                set_numeric_element(values, index, value, storage_class)
+            }
+            (Self::U16(values), NumericScalar::U16(value)) => {
+                set_numeric_element(values, index, value, storage_class)
+            }
+            (Self::U32(values), NumericScalar::U32(value)) => {
+                set_numeric_element(values, index, value, storage_class)
+            }
+            (Self::U64(values), NumericScalar::U64(value)) => {
+                set_numeric_element(values, index, value, storage_class)
+            }
+            _ => Err(format!(
+                "cannot store {value_class} in {storage_class} numeric storage"
+            )),
+        }
     }
 
     pub fn view(&self) -> NumericStorageView<'_> {
@@ -891,6 +995,88 @@ impl NumericStorage {
         Ok(())
     }
 
+    pub fn zeros_like(&self, len: usize) -> Self {
+        Self::zeros(self.numeric_dtype(), len)
+    }
+
+    pub fn ones_like(&self, len: usize) -> Self {
+        Self::ones(self.numeric_dtype(), len)
+    }
+
+    /// Clones storage for a new shape after validating its element count.
+    ///
+    /// Shape remains container metadata rather than duplicated storage state.
+    pub fn clone_for_shape(&self, shape: &[usize]) -> Result<Self, String> {
+        self.validate_shape(shape)?;
+        Ok(self.clone())
+    }
+
+    /// Selects elements by zero-based flat index without changing class.
+    pub fn gather(&self, indices: &[usize]) -> Result<Self, String> {
+        let class_name = self.class_name();
+        match self {
+            Self::F64(values) => gather_numeric_values(values, indices, class_name).map(Self::F64),
+            Self::F32(values) => gather_numeric_values(values, indices, class_name).map(Self::F32),
+            Self::I8(values) => gather_numeric_values(values, indices, class_name).map(Self::I8),
+            Self::I16(values) => gather_numeric_values(values, indices, class_name).map(Self::I16),
+            Self::I32(values) => gather_numeric_values(values, indices, class_name).map(Self::I32),
+            Self::I64(values) => gather_numeric_values(values, indices, class_name).map(Self::I64),
+            Self::U8(values) => gather_numeric_values(values, indices, class_name).map(Self::U8),
+            Self::U16(values) => gather_numeric_values(values, indices, class_name).map(Self::U16),
+            Self::U32(values) => gather_numeric_values(values, indices, class_name).map(Self::U32),
+            Self::U64(values) => gather_numeric_values(values, indices, class_name).map(Self::U64),
+        }
+    }
+
+    /// Reorders all elements using zero-based flat source indices.
+    pub fn reorder(&self, indices: &[usize]) -> Result<Self, String> {
+        if indices.len() != self.len() {
+            return Err(format!(
+                "{} reorder has {} indices for {} elements",
+                self.class_name(),
+                indices.len(),
+                self.len()
+            ));
+        }
+        self.gather(indices)
+    }
+
+    /// Explicitly materializes this storage in the `f64` computation domain.
+    ///
+    /// Integer values outside the exact binary64 range may lose precision.
+    pub fn materialize_f64(&self) -> Vec<f64> {
+        match self {
+            Self::F64(values) => values.clone(),
+            Self::F32(values) => values.iter().map(|&value| f64::from(value)).collect(),
+            Self::I8(values) => values.iter().map(|&value| f64::from(value)).collect(),
+            Self::I16(values) => values.iter().map(|&value| f64::from(value)).collect(),
+            Self::I32(values) => values.iter().map(|&value| f64::from(value)).collect(),
+            Self::I64(values) => values.iter().map(|&value| value as f64).collect(),
+            Self::U8(values) => values.iter().map(|&value| f64::from(value)).collect(),
+            Self::U16(values) => values.iter().map(|&value| f64::from(value)).collect(),
+            Self::U32(values) => values.iter().map(|&value| f64::from(value)).collect(),
+            Self::U64(values) => values.iter().map(|&value| value as f64).collect(),
+        }
+    }
+
+    /// Explicitly materializes this storage in the `f32` computation domain.
+    ///
+    /// Wider floating and integer values may lose precision or overflow.
+    pub fn materialize_f32(&self) -> Vec<f32> {
+        match self {
+            Self::F64(values) => values.iter().map(|&value| value as f32).collect(),
+            Self::F32(values) => values.clone(),
+            Self::I8(values) => values.iter().map(|&value| f32::from(value)).collect(),
+            Self::I16(values) => values.iter().map(|&value| f32::from(value)).collect(),
+            Self::I32(values) => values.iter().map(|&value| value as f32).collect(),
+            Self::I64(values) => values.iter().map(|&value| value as f32).collect(),
+            Self::U8(values) => values.iter().map(|&value| f32::from(value)).collect(),
+            Self::U16(values) => values.iter().map(|&value| f32::from(value)).collect(),
+            Self::U32(values) => values.iter().map(|&value| value as f32).collect(),
+            Self::U64(values) => values.iter().map(|&value| value as f32).collect(),
+        }
+    }
+
     pub fn from_integer_storage(storage: IntegerStorage) -> Self {
         match storage {
             IntegerStorage::I8(values) => Self::I8(values),
@@ -916,6 +1102,27 @@ impl NumericStorage {
             Self::U64(values) => Ok(IntegerStorage::U64(values)),
             storage @ (Self::F64(_) | Self::F32(_)) => Err(storage),
         }
+    }
+}
+
+impl NumericScalar {
+    pub fn numeric_dtype(self) -> NumericDType {
+        match self {
+            Self::F64(_) => NumericDType::F64,
+            Self::F32(_) => NumericDType::F32,
+            Self::I8(_) => NumericDType::I8,
+            Self::I16(_) => NumericDType::I16,
+            Self::I32(_) => NumericDType::I32,
+            Self::I64(_) => NumericDType::I64,
+            Self::U8(_) => NumericDType::U8,
+            Self::U16(_) => NumericDType::U16,
+            Self::U32(_) => NumericDType::U32,
+            Self::U64(_) => NumericDType::U64,
+        }
+    }
+
+    pub fn class_name(self) -> &'static str {
+        self.numeric_dtype().class_name()
     }
 }
 
@@ -1048,6 +1255,37 @@ fn set_integer_element<T>(values: &mut [T], index: usize, value: T) -> Result<()
     Ok(())
 }
 
+fn set_numeric_element<T>(
+    values: &mut [T],
+    index: usize,
+    value: T,
+    class_name: &str,
+) -> Result<(), String> {
+    let slot = values
+        .get_mut(index)
+        .ok_or_else(|| format!("{class_name} numeric storage index {index} is out of bounds"))?;
+    *slot = value;
+    Ok(())
+}
+
+fn gather_numeric_values<T: Copy>(
+    values: &[T],
+    indices: &[usize],
+    class_name: &str,
+) -> Result<Vec<T>, String> {
+    indices
+        .iter()
+        .enumerate()
+        .map(|(output_index, &source_index)| {
+            values.get(source_index).copied().ok_or_else(|| {
+                format!(
+                    "{class_name} numeric storage index {source_index} at reorder position {output_index} is out of bounds"
+                )
+            })
+        })
+        .collect()
+}
+
 impl NumericDType {
     pub fn class_name(self) -> &'static str {
         match self {
@@ -1084,7 +1322,7 @@ impl NumericDType {
 mod integer_storage_tests {
     use super::{
         ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericDType,
-        NumericStorage, NumericStorageView, NumericStorageViewMut, Tensor,
+        NumericScalar, NumericStorage, NumericStorageView, NumericStorageViewMut, Tensor,
     };
 
     #[test]
@@ -1238,6 +1476,124 @@ mod integer_storage_tests {
         );
         assert_eq!(floating.as_f32_slice(), Some(&[0.1][..]));
         assert!(floating.as_f64_slice().is_none());
+    }
+
+    #[test]
+    fn numeric_storage_reads_and_writes_exact_scalars_for_every_native_class() {
+        let mut cases = [
+            (NumericStorage::F64(vec![0.0]), NumericScalar::F64(64.25)),
+            (NumericStorage::F32(vec![0.0]), NumericScalar::F32(32.25)),
+            (NumericStorage::I8(vec![0]), NumericScalar::I8(i8::MIN)),
+            (NumericStorage::I16(vec![0]), NumericScalar::I16(i16::MIN)),
+            (NumericStorage::I32(vec![0]), NumericScalar::I32(i32::MIN)),
+            (NumericStorage::I64(vec![0]), NumericScalar::I64(i64::MIN)),
+            (NumericStorage::U8(vec![0]), NumericScalar::U8(u8::MAX)),
+            (NumericStorage::U16(vec![0]), NumericScalar::U16(u16::MAX)),
+            (NumericStorage::U32(vec![0]), NumericScalar::U32(u32::MAX)),
+            (NumericStorage::U64(vec![0]), NumericScalar::U64(u64::MAX)),
+        ];
+
+        for (storage, value) in &mut cases {
+            assert_eq!(value.numeric_dtype(), storage.numeric_dtype());
+            assert_eq!(value.class_name(), storage.class_name());
+            storage.set_value(0, *value).expect("same-class write");
+            assert_eq!(storage.value_at(0), Some(*value));
+            assert_eq!(storage.value_at(1), None);
+        }
+
+        assert!(cases[9].0.set_value(0, NumericScalar::F64(1.0)).is_err());
+        assert!(cases[9].0.set_value(1, NumericScalar::U64(1)).is_err());
+    }
+
+    #[test]
+    fn numeric_storage_allocates_zero_and_one_in_every_native_class() {
+        let dtypes = [
+            NumericDType::F64,
+            NumericDType::F32,
+            NumericDType::I8,
+            NumericDType::I16,
+            NumericDType::I32,
+            NumericDType::I64,
+            NumericDType::U8,
+            NumericDType::U16,
+            NumericDType::U32,
+            NumericDType::U64,
+        ];
+
+        for dtype in dtypes {
+            let zeros = NumericStorage::zeros(dtype, 3);
+            let ones = NumericStorage::ones(dtype, 3);
+            assert_eq!(zeros.numeric_dtype(), dtype);
+            assert_eq!(ones.numeric_dtype(), dtype);
+            assert_eq!(zeros.len(), 3);
+            assert_eq!(ones.len(), 3);
+            assert_eq!(zeros, ones.zeros_like(3));
+            assert_eq!(ones, zeros.ones_like(3));
+        }
+
+        assert_eq!(
+            NumericStorage::zeros(NumericDType::U64, 2),
+            NumericStorage::U64(vec![0, 0])
+        );
+        assert_eq!(
+            NumericStorage::ones(NumericDType::F32, 2),
+            NumericStorage::F32(vec![1.0, 1.0])
+        );
+    }
+
+    #[test]
+    fn numeric_storage_gather_and_reorder_preserve_every_native_class() {
+        let cases = [
+            NumericStorage::F64(vec![1.0, 2.0, 3.0]),
+            NumericStorage::F32(vec![1.0, 2.0, 3.0]),
+            NumericStorage::I8(vec![1, 2, 3]),
+            NumericStorage::I16(vec![1, 2, 3]),
+            NumericStorage::I32(vec![1, 2, 3]),
+            NumericStorage::I64(vec![1, 2, 3]),
+            NumericStorage::U8(vec![1, 2, 3]),
+            NumericStorage::U16(vec![1, 2, 3]),
+            NumericStorage::U32(vec![1, 2, 3]),
+            NumericStorage::U64(vec![1, 9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for storage in cases {
+            assert_eq!(storage.clone_for_shape(&[1, 3]), Ok(storage.clone()));
+            assert!(storage.clone_for_shape(&[2, 2]).is_err());
+            let gathered = storage.gather(&[2, 0, 2]).expect("exact gather");
+            assert_eq!(gathered.numeric_dtype(), storage.numeric_dtype());
+            assert_eq!(gathered.value_at(0), storage.value_at(2));
+            assert_eq!(gathered.value_at(1), storage.value_at(0));
+            assert_eq!(gathered.value_at(2), storage.value_at(2));
+            assert_eq!(
+                storage.reorder(&[2, 1, 0]).unwrap().value_at(0),
+                storage.value_at(2)
+            );
+            assert!(storage.gather(&[3]).is_err());
+            assert!(storage.reorder(&[0]).is_err());
+        }
+    }
+
+    #[test]
+    fn numeric_storage_floating_materialization_is_explicit_and_may_be_lossy() {
+        let exact =
+            NumericStorage::U64(vec![9_007_199_254_740_992, 9_007_199_254_740_993, u64::MAX]);
+        let as_f64 = exact.materialize_f64();
+        let as_f32 = exact.materialize_f32();
+
+        assert_eq!(
+            exact.value_at(1),
+            Some(NumericScalar::U64(9_007_199_254_740_993))
+        );
+        assert_eq!(as_f64[0], as_f64[1]);
+        assert_eq!(as_f32.len(), 3);
+        assert_eq!(
+            NumericStorage::F32(vec![0.1, f32::MAX]).materialize_f64(),
+            vec![f64::from(0.1_f32), f64::from(f32::MAX)]
+        );
+        assert_eq!(
+            NumericStorage::F64(vec![0.1, f64::MAX]).materialize_f32(),
+            vec![0.1_f32, f32::INFINITY]
+        );
     }
 
     #[test]
