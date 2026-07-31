@@ -557,14 +557,7 @@ mod tests {
     use runmat_plot::plots::PlotElement;
 
     fn tensor_from(data: &[f64]) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![data.len()],
-            rows: data.len(),
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), vec![data.len()]).expect("histogram test vector")
     }
 
     #[test]
@@ -575,14 +568,7 @@ mod tests {
         let _ = clear_figure(None);
         let out = futures::executor::block_on(histogram_builtin(vec![
             Value::Tensor(tensor_from(&[0.1, 0.2, 0.9, 1.1])),
-            Value::Tensor(Tensor {
-                data: vec![0.0, 1.0, 2.0],
-                integer_data: None,
-                shape: vec![1, 3],
-                rows: 1,
-                cols: 3,
-                dtype: runmat_builtins::NumericDType::F64,
-            }),
+            Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).expect("histogram edges")),
         ]));
         let out = out.unwrap();
         let counts = Tensor::try_from(
@@ -637,14 +623,9 @@ mod tests {
                 f64::NAN,
                 f64::INFINITY,
             ])),
-            Value::Tensor(Tensor {
-                data: vec![0.0, 1.0, 2.0, 3.0],
-                integer_data: None,
-                shape: vec![1, 4],
-                rows: 1,
-                cols: 4,
-                dtype: runmat_builtins::NumericDType::F64,
-            }),
+            Value::Tensor(
+                Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]).expect("histogram edges"),
+            ),
         ]))
         .unwrap();
         let counts = Tensor::try_from(
@@ -664,14 +645,9 @@ mod tests {
         let _ = clear_figure(None);
         let handle = futures::executor::block_on(histogram_builtin(vec![
             Value::Tensor(tensor_from(&[0.0, 0.2, 1.0, 2.0])),
-            Value::Tensor(Tensor {
-                data: vec![0.0, 1.0, 2.0, 3.0],
-                integer_data: None,
-                shape: vec![1, 4],
-                rows: 1,
-                cols: 4,
-                dtype: runmat_builtins::NumericDType::F64,
-            }),
+            Value::Tensor(
+                Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]).expect("histogram edges"),
+            ),
             Value::String("DisplayName".into()),
             Value::String("angles".into()),
         ]))

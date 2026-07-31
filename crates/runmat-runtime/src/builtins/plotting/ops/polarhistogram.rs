@@ -485,14 +485,8 @@ fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
 }
 
 fn tensor_from_vec(data: Vec<f64>) -> Tensor {
-    Tensor {
-        rows: data.len(),
-        cols: 1,
-        shape: vec![data.len()],
-        data,
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    }
+    let len = data.len();
+    Tensor::new(data, vec![len]).expect("polar histogram result")
 }
 
 fn validate_edges(edges: &[f64]) -> BuiltinResult<()> {
@@ -663,18 +657,10 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
-    use runmat_builtins::NumericDType;
     use runmat_plot::plots::PlotElement;
 
     fn tensor(data: &[f64]) -> Value {
-        Value::Tensor(Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![data.len()],
-            rows: data.len(),
-            cols: 1,
-            dtype: NumericDType::F64,
-        })
+        Value::Tensor(Tensor::new(data.to_vec(), vec![data.len()]).expect("polar histogram vector"))
     }
 
     #[test]
@@ -701,14 +687,9 @@ mod tests {
 
         let handle = futures::executor::block_on(polarhistogram_builtin(vec![
             tensor(&[0.0, 0.2, 1.0, 2.0]),
-            Value::Tensor(Tensor {
-                data: vec![0.0, 1.0, 2.0, 3.0],
-                integer_data: None,
-                shape: vec![1, 4],
-                rows: 1,
-                cols: 4,
-                dtype: NumericDType::F64,
-            }),
+            Value::Tensor(
+                Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]).expect("polar histogram edges"),
+            ),
         ]))
         .expect("polarhistogram");
 
