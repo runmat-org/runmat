@@ -1497,6 +1497,22 @@ pub(crate) mod tests {
         tensor
     }
 
+    fn real_tensor_parts(value: Value, context: &str) -> (Vec<f64>, Vec<usize>) {
+        let tensor = match value {
+            Value::Tensor(tensor) => tensor,
+            other => panic!("expected {context} tensor, got {other:?}"),
+        };
+        let shape = tensor.shape.clone();
+        let storage = tensor
+            .into_numeric_storage()
+            .unwrap_or_else(|err| panic!("invalid {context} tensor storage: {err}"));
+        let data = storage
+            .as_f64_slice()
+            .unwrap_or_else(|| panic!("expected {context} tensor to use double storage"))
+            .to_vec();
+        (data, shape)
+    }
+
     #[test]
     fn filter_type_preserves_signal_shape() {
         let out = filter_type(
@@ -1585,19 +1601,13 @@ pub(crate) mod tests {
             evaluate(Value::Tensor(b), Value::Tensor(a), Value::Tensor(x), &[]).expect("filter");
         let (y, zf) = eval.clone().into_pair();
 
-        let Tensor { data, .. } = match y {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor output, got {other:?}"),
-        };
+        let (data, _) = real_tensor_parts(y, "output");
         approx_eq_slice(
             &data,
             &[0.3333333333, 2.0, 2.6666666667, 2.3333333333, 1.6666666667],
         );
 
-        let Tensor { data: z_data, .. } = match zf {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor final state, got {other:?}"),
-        };
+        let (z_data, _) = real_tensor_parts(zf, "final-state");
         approx_eq_slice(&z_data, &[1.0, 1.0]);
     }
 
@@ -1618,14 +1628,11 @@ pub(crate) mod tests {
         .expect("filter");
         let (y, zf) = eval.into_pair();
 
-        let Tensor { data: y_data, .. } = match y {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor output, got {other:?}"),
-        };
+        let (y_data, _) = real_tensor_parts(y, "output");
         approx_eq_slice(&y_data, &[9.0, 5.0]);
 
         let zf_data = match zf {
-            Value::Tensor(t) => t.data,
+            Value::Tensor(t) => real_tensor_parts(Value::Tensor(t), "final-state").0,
             Value::Num(n) => vec![n],
             other => panic!("expected numeric final state, got {other:?}"),
         };
@@ -1644,10 +1651,7 @@ pub(crate) mod tests {
             evaluate(Value::Tensor(b), Value::Tensor(a), Value::Tensor(x), &[]).expect("filter");
         let (y, _) = eval.into_pair();
 
-        let Tensor { data, .. } = match y {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor output, got {other:?}"),
-        };
+        let (data, _) = real_tensor_parts(y, "output");
         approx_eq_slice(&data, &[0.2, 0.16, 0.128, 0.1024, 0.08192]);
     }
 
@@ -1668,16 +1672,10 @@ pub(crate) mod tests {
         .expect("filter");
         let (y, zf) = eval.into_pair();
 
-        let Tensor { data, .. } = match y {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor output, got {other:?}"),
-        };
+        let (data, _) = real_tensor_parts(y, "output");
         approx_eq_slice(&data, &[2.0, 3.0]);
 
-        let Tensor { data, .. } = match zf {
-            Value::Tensor(t) => t,
-            other => panic!("expected empty tensor final state, got {other:?}"),
-        };
+        let (data, _) = real_tensor_parts(zf, "final-state");
         assert!(data.is_empty());
     }
 
@@ -1696,16 +1694,10 @@ pub(crate) mod tests {
         )
         .expect("filter");
         let (y1, zf1) = eval1.clone().into_pair();
-        let Tensor { data: y1_data, .. } = match y1 {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor output, got {other:?}"),
-        };
+        let (y1_data, _) = real_tensor_parts(y1, "output");
         approx_eq_slice(&y1_data, &[0.3333333333, 2.0, 2.6666666667]);
 
-        let Tensor { data: zf_data, .. } = match zf1.clone() {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor final state, got {other:?}"),
-        };
+        let (zf_data, _) = real_tensor_parts(zf1.clone(), "final-state");
         approx_eq_slice(&zf_data, &[2.3333333333, 0.6666666667]);
 
         let x2 = Tensor::new(vec![0.0, 3.0], vec![1, 2]).unwrap();
@@ -1718,16 +1710,10 @@ pub(crate) mod tests {
         .expect("filter");
         let (y2, zf2) = eval2.into_pair();
 
-        let Tensor { data: y2_data, .. } = match y2 {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor output, got {other:?}"),
-        };
+        let (y2_data, _) = real_tensor_parts(y2, "output");
         approx_eq_slice(&y2_data, &[2.3333333333, 1.6666666667]);
 
-        let Tensor { data: zf2_data, .. } = match zf2 {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor final state, got {other:?}"),
-        };
+        let (zf2_data, _) = real_tensor_parts(zf2, "final-state");
         approx_eq_slice(&zf2_data, &[1.0, 1.0]);
     }
 
@@ -1757,24 +1743,12 @@ pub(crate) mod tests {
         let (y_default, z_default) = eval_default.into_pair();
         let (y_placeholder, z_placeholder) = eval_placeholder.into_pair();
 
-        let Tensor { data: y_def, .. } = match y_default {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor output, got {other:?}"),
-        };
-        let Tensor { data: y_ph, .. } = match y_placeholder {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor output, got {other:?}"),
-        };
+        let (y_def, _) = real_tensor_parts(y_default, "output");
+        let (y_ph, _) = real_tensor_parts(y_placeholder, "output");
         approx_eq_slice(&y_def, &y_ph);
 
-        let Tensor { data: z_def, .. } = match z_default {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor final state, got {other:?}"),
-        };
-        let Tensor { data: z_ph, .. } = match z_placeholder {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor final state, got {other:?}"),
-        };
+        let (z_def, _) = real_tensor_parts(z_default, "final-state");
+        let (z_ph, _) = real_tensor_parts(z_placeholder, "final-state");
         approx_eq_slice(&z_def, &z_ph);
     }
 
@@ -1795,21 +1769,11 @@ pub(crate) mod tests {
         .expect("filter");
         let (y, zf) = eval.into_pair();
 
-        let Tensor { data, shape, .. } = match y {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor output, got {other:?}"),
-        };
+        let (data, shape) = real_tensor_parts(y, "output");
         assert_eq!(shape, vec![2, 4]);
         approx_eq_slice(&data, &[1.0, 0.0, 1.0, 1.0, 1.0, -1.0, 1.0, 1.0]);
 
-        let Tensor {
-            data: state_data,
-            shape: state_shape,
-            ..
-        } = match zf {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor final state, got {other:?}"),
-        };
+        let (state_data, state_shape) = real_tensor_parts(zf, "final-state");
         assert_eq!(state_shape, vec![2, 1]);
         approx_eq_slice(&state_data, &[-4.0, -1.0]);
     }
@@ -1903,10 +1867,7 @@ pub(crate) mod tests {
             let eval_cpu = evaluate(Value::Tensor(b), Value::Tensor(a), Value::Tensor(x), &[])
                 .expect("cpu filter");
             let (y_cpu, _) = eval_cpu.into_pair();
-            let Tensor { data: cpu_data, .. } = match y_cpu {
-                Value::Tensor(t) => t,
-                other => panic!("expected tensor, got {other:?}"),
-            };
+            let (cpu_data, _) = real_tensor_parts(y_cpu, "output");
 
             approx_eq_slice(&gathered.data, &cpu_data);
         });
