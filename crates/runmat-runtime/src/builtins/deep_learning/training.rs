@@ -11,7 +11,7 @@ use super::{
     any_type, autodiff, deep_learning_error, ensure_dlarray_class_registered, gather_args, model,
     object, parse_name_values, positive_usize, scalar_text, text_or_missing, unsupported_error,
 };
-use crate::builtins::common::gpu_helpers;
+use crate::builtins::common::{gpu_helpers, tensor};
 
 const DLUPDATE_MAX_DEPTH: usize = 256;
 
@@ -993,7 +993,9 @@ fn gpu_optimizer_state<'a>(
 ) -> BuiltinResult<GpuOptimizerState<'a>> {
     match value {
         Value::GpuTensor(handle) => Ok(GpuOptimizerState::Resident(handle)),
-        Value::Tensor(tensor) if tensor.data.is_empty() => Ok(GpuOptimizerState::Empty),
+        Value::Tensor(tensor) if tensor::tensor_element_len(tensor) == 0 => {
+            Ok(GpuOptimizerState::Empty)
+        }
         Value::Tensor(_) | Value::Num(_) | Value::Int(_) => Ok(GpuOptimizerState::HostFallback),
         other => Err(deep_learning_error(
             "adamupdate",
@@ -1069,22 +1071,28 @@ impl NumericPayload {
                 repr: NumericRepr::Scalar,
             },
             Value::Tensor(tensor) => {
-                if !matches!(tensor.dtype, NumericDType::F64 | NumericDType::F32) {
+                let dtype = tensor.numeric_dtype();
+                if !matches!(dtype, NumericDType::F64 | NumericDType::F32) {
                     return Err(deep_learning_error(
                         "adamupdate",
                         format!(
                             "adamupdate: {label} tensor must be double or single, got {}",
-                            tensor.dtype.class_name()
+                            dtype.class_name()
                         ),
                     ));
                 }
-                ensure_finite(&tensor.data, label)?;
+                let data = tensor
+                    .clone()
+                    .into_numeric_storage()
+                    .map_err(|err| deep_learning_error("adamupdate", err))?
+                    .materialize_f64();
+                ensure_finite(&data, label)?;
                 Self {
-                    data: tensor.data.clone(),
+                    data,
                     shape: tensor.shape.clone(),
-                    repr: NumericRepr::Tensor {
+                    repr: NumericRepr::Dense {
                         shape: tensor.shape.clone(),
-                        dtype: tensor.dtype,
+                        dtype,
                     },
                 }
             }
@@ -1155,7 +1163,7 @@ impl NumericPayload {
 #[derive(Clone)]
 enum NumericRepr {
     Scalar,
-    Tensor {
+    Dense {
         shape: Vec<usize>,
         dtype: NumericDType,
     },
@@ -1178,7 +1186,7 @@ impl NumericRepr {
                         .map_err(|err| deep_learning_error("adamupdate", err))
                 }
             },
-            Self::Tensor { shape, dtype } => Tensor::new_with_dtype(data, shape.clone(), *dtype)
+            Self::Dense { shape, dtype } => Tensor::new_with_dtype(data, shape.clone(), *dtype)
                 .map(Value::Tensor)
                 .map_err(|err| deep_learning_error("adamupdate", err)),
             Self::Dlarray {
@@ -1319,9 +1327,8 @@ mod tests {
         assert!(positive_iteration(&Value::Int(IntValue::I8(-1))).is_err());
 
         let exact = (1_u64 << 53) + 1;
-        let mut typed =
+        let typed =
             Tensor::new_integer(IntegerStorage::U64(vec![exact]), vec![1, 1]).expect("iteration");
-        typed.data.fill(f64::NAN);
         let parsed = positive_iteration(&Value::Tensor(typed));
         if usize::BITS == 64 {
             assert_eq!(parsed.unwrap(), exact as usize);
@@ -1336,6 +1343,22 @@ mod tests {
             assert_eq!(boundary.unwrap(), usize::MAX);
         }
         assert!(positive_iteration(&Value::Num((usize::MAX as f64) + 1.0)).is_err());
+    }
+
+    #[test]
+    fn adamupdate_payload_preserves_native_single_representation() {
+        let input = Tensor::from_f32(vec![0.1, f32::MAX], vec![1, 2]).expect("single input");
+        let payload = NumericPayload::parse(&Value::Tensor(input), "parameters", true)
+            .expect("single payload");
+        assert_eq!(payload.data, vec![f64::from(0.1_f32), f64::from(f32::MAX)]);
+        let output = payload.materialize(vec![0.25, 0.5]).expect("single output");
+        let Value::Tensor(output) = output else {
+            panic!("expected tensor output");
+        };
+        assert_eq!(
+            output.into_numeric_storage().expect("single storage"),
+            runmat_builtins::NumericStorage::F32(vec![0.25, 0.5])
+        );
     }
 
     #[test]
