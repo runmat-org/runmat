@@ -803,6 +803,18 @@ mod integer_storage_tests {
     }
 
     #[test]
+    fn single_constructor_preserves_f32_values_and_dtype_across_storage_migration() {
+        let source = vec![f32::MIN_POSITIVE, 1.0 / 10.0, f32::MAX];
+        let expected: Vec<f64> = source.iter().map(|&value| f64::from(value)).collect();
+        let tensor = Tensor::from_f32(source, vec![1, 3]).expect("single tensor");
+
+        assert_eq!(tensor.dtype, NumericDType::F32);
+        assert_eq!(tensor.shape, vec![1, 3]);
+        assert_eq!(tensor.data, expected);
+        assert!(tensor.integer_storage().is_none());
+    }
+
+    #[test]
     fn typed_constructor_materializes_exact_integer_storage() {
         let tensor =
             Tensor::new_with_dtype(vec![-2.2, 12.8, 99_999.0], vec![1, 3], NumericDType::I16)
