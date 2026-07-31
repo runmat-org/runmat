@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, NumericDType, StructValue, Tensor, Type, Value,
+    CellArray, StructValue, Tensor, Type, Value,
 };
 use runmat_filesystem::OpenOptions;
 use runmat_macros::runtime_builtin;
@@ -1089,14 +1089,13 @@ fn handles_value(handles: &[FigureHandle]) -> Value {
     if handles.len() == 1 {
         Value::Num(handles[0].as_u32() as f64)
     } else {
-        Value::Tensor(Tensor {
-            data: handles.iter().map(|h| h.as_u32() as f64).collect(),
-            integer_data: None,
-            shape: vec![1, handles.len()],
-            rows: 1,
-            cols: handles.len(),
-            dtype: NumericDType::F64,
-        })
+        Value::Tensor(
+            Tensor::new(
+                handles.iter().map(|h| h.as_u32() as f64).collect(),
+                vec![1, handles.len()],
+            )
+            .expect("figure handle row"),
+        )
     }
 }
 
@@ -1278,14 +1277,7 @@ mod tests {
     }
 
     fn tensor(data: &[f64]) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![data.len()],
-            rows: data.len(),
-            cols: 1,
-            dtype: NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), vec![data.len()]).expect("persistence test vector")
     }
 
     fn temp_path(stem: &str) -> PathBuf {
@@ -1340,14 +1332,8 @@ mod tests {
         block_on(plot_builtin(vec![Value::Tensor(tensor(&[1.0, 2.0, 3.0]))])).expect("plot one");
         let second = figure_builtin(vec![Value::String("next".into())]).expect("figure two");
         block_on(plot_builtin(vec![Value::Tensor(tensor(&[3.0, 2.0, 1.0]))])).expect("plot two");
-        let handles = Value::Tensor(Tensor {
-            data: vec![first, second],
-            integer_data: None,
-            shape: vec![1, 2],
-            rows: 1,
-            cols: 2,
-            dtype: NumericDType::F64,
-        });
+        let handles =
+            Value::Tensor(Tensor::new(vec![first, second], vec![1, 2]).expect("figure handle row"));
 
         let path = temp_path("multi");
         let _ = std::fs::remove_file(&path);
@@ -1409,14 +1395,8 @@ mod tests {
         let _guard = setup();
         let fig = figure_builtin(vec![]).expect("figure");
         block_on(plot_builtin(vec![Value::Tensor(tensor(&[1.0, 2.0, 3.0]))])).expect("plot");
-        let handles = Value::Tensor(Tensor {
-            data: vec![fig, fig],
-            integer_data: None,
-            shape: vec![1, 2],
-            rows: 1,
-            cols: 2,
-            dtype: NumericDType::F64,
-        });
+        let handles =
+            Value::Tensor(Tensor::new(vec![fig, fig], vec![1, 2]).expect("figure handle row"));
 
         let path = temp_path("dedupe");
         let _ = std::fs::remove_file(&path);
