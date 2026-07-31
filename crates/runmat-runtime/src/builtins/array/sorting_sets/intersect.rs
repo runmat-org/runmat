@@ -1601,21 +1601,14 @@ fn scalar_complex_tensor(re: f64, im: f64) -> crate::BuiltinResult<ComplexTensor
 }
 
 fn tensor_to_complex_owned(name: &str, tensor: Tensor) -> crate::BuiltinResult<ComplexTensor> {
-    let Tensor {
-        data,
-        integer_data,
-        shape,
-        ..
-    } = tensor;
-    let complex: Vec<(f64, f64)> = if let Some(storage) = integer_data {
-        storage
-            .exact_values()
-            .into_iter()
-            .map(|value| (value.to_f64(), 0.0))
-            .collect()
-    } else {
-        data.into_iter().map(|re| (re, 0.0)).collect()
-    };
+    let shape = tensor.shape.clone();
+    let complex = tensor
+        .into_numeric_storage()
+        .map_err(|e| intersect_internal_error(format!("{name}: {e}")))?
+        .materialize_f64()
+        .into_iter()
+        .map(|real| (real, 0.0))
+        .collect();
     ComplexTensor::new(complex, shape).map_err(|e| intersect_internal_error(format!("{name}: {e}")))
 }
 

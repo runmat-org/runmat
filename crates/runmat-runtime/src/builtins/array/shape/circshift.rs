@@ -18,8 +18,8 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, LogicalArray, ResolveContext, StringArray, Tensor, Type,
-    Value,
+    CharArray, ComplexTensor, IntValue, LogicalArray, NumericStorage, ResolveContext, StringArray,
+    Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 use std::collections::HashSet;
@@ -727,35 +727,47 @@ fn circshift_tensor(
     dims: &[usize],
     shifts: &[isize],
 ) -> crate::BuiltinResult<Tensor> {
-    let Tensor {
-        data,
-        integer_data,
-        shape,
-        ..
-    } = tensor;
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| circshift_internal(format!("circshift: {e}")))?;
     let plan = build_shift_plan(&shape, dims, shifts)?;
-    if data.is_empty() || plan.is_noop() {
-        if let Some(storage) = integer_data {
-            return Tensor::new_integer(storage, shape)
-                .map_err(|e| circshift_internal(format!("circshift: {e}")));
-        }
-        return Tensor::new(data, shape).map_err(|e| circshift_internal(format!("circshift: {e}")));
+    if storage.is_empty() || plan.is_noop() {
+        return Tensor::from_numeric_storage(storage, shape)
+            .map_err(|e| circshift_internal(format!("circshift: {e}")));
     }
     let ShiftPlan {
         ext_shape,
         positive,
         ..
     } = plan;
-    if let Some(storage) = integer_data {
-        let values = circshift_generic(&storage.exact_values(), &ext_shape, &positive)?;
-        let storage = storage
-            .from_exact_values_like(values)
-            .map_err(|e| circshift_internal(format!("circshift: {e}")))?;
-        return Tensor::new_integer(storage, ext_shape)
-            .map_err(|e| circshift_internal(format!("circshift: {e}")));
+    let storage = circshift_numeric_storage(storage, &ext_shape, &positive)?;
+    Tensor::from_numeric_storage(storage, ext_shape)
+        .map_err(|e| circshift_internal(format!("circshift: {e}")))
+}
+
+fn circshift_numeric_storage(
+    storage: NumericStorage,
+    shape: &[usize],
+    positive: &[usize],
+) -> crate::BuiltinResult<NumericStorage> {
+    macro_rules! shift {
+        ($values:expr, $variant:ident) => {
+            NumericStorage::$variant(circshift_generic(&$values, shape, positive)?)
+        };
     }
-    let rotated = circshift_generic(&data, &ext_shape, &positive)?;
-    Tensor::new(rotated, ext_shape).map_err(|e| circshift_internal(format!("circshift: {e}")))
+    Ok(match storage {
+        NumericStorage::F64(values) => shift!(values, F64),
+        NumericStorage::F32(values) => shift!(values, F32),
+        NumericStorage::I8(values) => shift!(values, I8),
+        NumericStorage::I16(values) => shift!(values, I16),
+        NumericStorage::I32(values) => shift!(values, I32),
+        NumericStorage::I64(values) => shift!(values, I64),
+        NumericStorage::U8(values) => shift!(values, U8),
+        NumericStorage::U16(values) => shift!(values, U16),
+        NumericStorage::U32(values) => shift!(values, U32),
+        NumericStorage::U64(values) => shift!(values, U64),
+    })
 }
 
 fn circshift_complex_tensor(
@@ -1163,6 +1175,23 @@ pub(crate) mod tests {
                 )
             );
         }
+    }
+
+    #[test]
+    fn circshift_preserves_native_single_storage() {
+        let input = Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("single");
+        let Value::Tensor(output) = circshift_builtin(
+            Value::Tensor(input),
+            Value::Int(IntValue::I32(1)),
+            vec![Value::Int(IntValue::I32(2))],
+        )
+        .expect("circshift") else {
+            panic!("expected tensor output");
+        };
+        assert_eq!(
+            output.into_numeric_storage().expect("single storage"),
+            NumericStorage::F32(vec![3.0, 4.0, 1.0, 2.0])
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

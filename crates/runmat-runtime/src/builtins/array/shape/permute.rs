@@ -15,8 +15,8 @@ use runmat_builtins::shape_rules::element_count_if_known;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntegerComplexStorage, LogicalArray, ResolveContext, StringArray,
-    Tensor, Type, Value,
+    CharArray, ComplexTensor, IntegerComplexStorage, LogicalArray, NumericStorage, ResolveContext,
+    StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -356,25 +356,39 @@ pub(crate) fn permute_tensor(
     tensor: Tensor,
     order: &[usize],
 ) -> crate::BuiltinResult<Tensor> {
-    let Tensor {
-        data,
-        shape,
-        integer_data,
-        ..
-    } = tensor;
-    match integer_data {
-        Some(storage) => {
-            // Exact integer storage is the authoritative buffer. Do not first
-            // permute the lossy f64 compatibility view on this fast path.
-            let (storage, new_shape) = permute_integer_storage(builtin, storage, &shape, order)?;
-            Tensor::new_integer(storage, new_shape)
-                .map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))
-        }
-        None => {
-            let (out, new_shape) = permute_generic(builtin, &data, &shape, order)?;
-            Tensor::new(out, new_shape)
-                .map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))
-        }
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))?;
+    let (storage, new_shape) = permute_numeric_storage(builtin, storage, &shape, order)?;
+    Tensor::from_numeric_storage(storage, new_shape)
+        .map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))
+}
+
+fn permute_numeric_storage(
+    builtin: &'static str,
+    storage: NumericStorage,
+    shape: &[usize],
+    order: &[usize],
+) -> crate::BuiltinResult<(NumericStorage, Vec<usize>)> {
+    macro_rules! permute_storage {
+        ($values:expr, $variant:ident) => {{
+            let (values, new_shape) = permute_generic(builtin, &$values, shape, order)?;
+            Ok((NumericStorage::$variant(values), new_shape))
+        }};
+    }
+
+    match storage {
+        NumericStorage::F64(values) => permute_storage!(values, F64),
+        NumericStorage::F32(values) => permute_storage!(values, F32),
+        NumericStorage::I8(values) => permute_storage!(values, I8),
+        NumericStorage::I16(values) => permute_storage!(values, I16),
+        NumericStorage::I32(values) => permute_storage!(values, I32),
+        NumericStorage::I64(values) => permute_storage!(values, I64),
+        NumericStorage::U8(values) => permute_storage!(values, U8),
+        NumericStorage::U16(values) => permute_storage!(values, U16),
+        NumericStorage::U32(values) => permute_storage!(values, U32),
+        NumericStorage::U64(values) => permute_storage!(values, U64),
     }
 }
 
@@ -384,25 +398,16 @@ fn permute_integer_storage(
     shape: &[usize],
     order: &[usize],
 ) -> crate::BuiltinResult<(runmat_builtins::IntegerStorage, Vec<usize>)> {
-    use runmat_builtins::IntegerStorage;
-
-    macro_rules! permute_storage {
-        ($values:expr, $variant:ident) => {{
-            let (values, new_shape) = permute_generic(builtin, &$values, shape, order)?;
-            Ok((IntegerStorage::$variant(values), new_shape))
-        }};
-    }
-
-    match storage {
-        IntegerStorage::I8(values) => permute_storage!(values, I8),
-        IntegerStorage::I16(values) => permute_storage!(values, I16),
-        IntegerStorage::I32(values) => permute_storage!(values, I32),
-        IntegerStorage::I64(values) => permute_storage!(values, I64),
-        IntegerStorage::U8(values) => permute_storage!(values, U8),
-        IntegerStorage::U16(values) => permute_storage!(values, U16),
-        IntegerStorage::U32(values) => permute_storage!(values, U32),
-        IntegerStorage::U64(values) => permute_storage!(values, U64),
-    }
+    let (storage, shape) = permute_numeric_storage(
+        builtin,
+        NumericStorage::from_integer_storage(storage),
+        shape,
+        order,
+    )?;
+    let storage = storage
+        .into_integer_storage()
+        .map_err(|_| permute_error(builtin, format!("{builtin}: expected integer storage")))?;
+    Ok((storage, shape))
 }
 
 pub(crate) fn permute_complex_tensor(
@@ -897,6 +902,16 @@ pub(crate) mod tests {
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::U64(vec![1, 3, u64::MAX, 4]))
+        );
+    }
+
+    #[test]
+    fn permute_preserves_native_single_storage() {
+        let input = Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("single");
+        let output = permute_tensor("permute", input, &[2, 1]).expect("permute");
+        assert_eq!(
+            output.into_numeric_storage().expect("single storage"),
+            NumericStorage::F32(vec![1.0, 3.0, 2.0, 4.0])
         );
     }
 
