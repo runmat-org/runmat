@@ -599,18 +599,15 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
-    use runmat_builtins::{IntegerStorage, NumericDType};
+    use runmat_builtins::IntegerStorage;
     use runmat_plot::plots::PlotElement;
 
     fn truecolor_tensor() -> Tensor {
-        Tensor {
-            data: vec![1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0],
-            integer_data: None,
-            shape: vec![2, 2, 3],
-            rows: 2,
-            cols: 2,
-            dtype: NumericDType::F64,
-        }
+        Tensor::new(
+            vec![1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0],
+            vec![2, 2, 3],
+        )
+        .expect("truecolor image")
     }
 
     fn typed_truecolor_tensor() -> Tensor {
@@ -671,31 +668,11 @@ mod tests {
         ensure_plot_test_env();
         reset_hold_state_for_run();
         let _ = clear_figure(None);
-        let c = Tensor {
-            data: (1..=12).map(|v| v as f64).collect(),
-            integer_data: None,
-            shape: vec![3, 4],
-            rows: 3,
-            cols: 4,
-            dtype: NumericDType::F64,
-        };
+        let c =
+            Tensor::new((1..=12).map(|v| v as f64).collect(), vec![3, 4]).expect("indexed image");
         let _ = futures::executor::block_on(image_builtin(vec![
-            Value::Tensor(Tensor {
-                data: vec![10.0, 20.0],
-                integer_data: None,
-                shape: vec![2],
-                rows: 2,
-                cols: 1,
-                dtype: NumericDType::F64,
-            }),
-            Value::Tensor(Tensor {
-                data: vec![1.0, 5.0],
-                integer_data: None,
-                shape: vec![2],
-                rows: 2,
-                cols: 1,
-                dtype: NumericDType::F64,
-            }),
+            Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![2]).expect("image x extent")),
+            Value::Tensor(Tensor::new(vec![1.0, 5.0], vec![2]).expect("image y extent")),
             Value::Tensor(c),
         ]))
         .expect("image with extent vectors should succeed");

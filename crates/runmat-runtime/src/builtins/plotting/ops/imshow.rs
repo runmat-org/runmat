@@ -759,14 +759,7 @@ mod tests {
     use runmat_plot::plots::PlotElement;
 
     fn matrix(data: Vec<f64>, rows: usize, cols: usize) -> Tensor {
-        Tensor {
-            data,
-            integer_data: None,
-            shape: vec![rows, cols],
-            rows,
-            cols,
-            dtype: NumericDType::F64,
-        }
+        Tensor::new(data, vec![rows, cols]).expect("imshow test matrix")
     }
 
     fn reset() -> crate::builtins::plotting::state::PlotTestLockGuard {
@@ -896,14 +889,8 @@ mod tests {
     #[test]
     fn imshow_uint8_grayscale_defaults_to_0_255() {
         let _guard = reset();
-        let tensor = Tensor {
-            data: vec![0.0, 128.0, 200.0, 255.0],
-            integer_data: None,
-            shape: vec![2, 2],
-            rows: 2,
-            cols: 2,
-            dtype: NumericDType::U8,
-        };
+        let tensor = Tensor::new_integer(IntegerStorage::U8(vec![0, 128, 200, 255]), vec![2, 2])
+            .expect("uint8 grayscale image");
         futures::executor::block_on(imshow_builtin(vec![Value::Tensor(tensor)])).unwrap();
         let fig = clone_figure(current_figure_handle()).unwrap();
         let PlotElement::Surface(surface) = fig.plots().next().unwrap() else {
@@ -924,14 +911,9 @@ mod tests {
     #[test]
     fn imshow_uint16_grayscale_defaults_to_0_65535() {
         let _guard = reset();
-        let tensor = Tensor {
-            data: vec![0.0, 1000.0, 40000.0, 65535.0],
-            integer_data: None,
-            shape: vec![2, 2],
-            rows: 2,
-            cols: 2,
-            dtype: NumericDType::U16,
-        };
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U16(vec![0, 1000, 40000, 65535]), vec![2, 2])
+                .expect("uint16 grayscale image");
         futures::executor::block_on(imshow_builtin(vec![Value::Tensor(tensor)])).unwrap();
         let fig = clone_figure(current_figure_handle()).unwrap();
         let PlotElement::Surface(surface) = fig.plots().next().unwrap() else {
@@ -980,14 +962,11 @@ mod tests {
     #[test]
     fn imshow_truecolor_builds_color_grid() {
         let _guard = reset();
-        let tensor = Tensor {
-            data: vec![1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0],
-            integer_data: None,
-            shape: vec![2, 2, 3],
-            rows: 2,
-            cols: 2,
-            dtype: NumericDType::F64,
-        };
+        let tensor = Tensor::new(
+            vec![1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0],
+            vec![2, 2, 3],
+        )
+        .expect("truecolor image");
         futures::executor::block_on(imshow_builtin(vec![Value::Tensor(tensor)])).unwrap();
         let fig = clone_figure(current_figure_handle()).unwrap();
         let PlotElement::Surface(surface) = fig.plots().next().unwrap() else {

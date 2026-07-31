@@ -295,18 +295,11 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
-    use runmat_builtins::{NumericDType, Tensor};
+    use runmat_builtins::Tensor;
     use runmat_plot::plots::PlotElement;
 
     fn grid_tensor(data: Vec<f64>, rows: usize, cols: usize) -> Tensor {
-        Tensor {
-            data,
-            integer_data: None,
-            shape: vec![rows, cols],
-            rows,
-            cols,
-            dtype: NumericDType::F64,
-        }
+        Tensor::new(data, vec![rows, cols]).expect("imagesc test grid")
     }
 
     #[test]
@@ -341,22 +334,8 @@ mod tests {
         crate::builtins::plotting::state::set_color_limits_runtime(Some((0.0, 10.0)));
 
         let _ = futures::executor::block_on(imagesc_builtin(vec![
-            Value::Tensor(Tensor {
-                data: vec![10.0, 20.0],
-                integer_data: None,
-                shape: vec![2],
-                rows: 2,
-                cols: 1,
-                dtype: NumericDType::F64,
-            }),
-            Value::Tensor(Tensor {
-                data: vec![1.0, 2.0],
-                integer_data: None,
-                shape: vec![2],
-                rows: 2,
-                cols: 1,
-                dtype: NumericDType::F64,
-            }),
+            Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![2]).expect("imagesc x extent")),
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).expect("imagesc y extent")),
             Value::Tensor(grid_tensor(vec![1.0, 2.0, 3.0, 4.0], 2, 2)),
         ]));
         let fig = clone_figure(current_figure_handle()).unwrap();
@@ -375,22 +354,8 @@ mod tests {
         reset_hold_state_for_run();
         let _ = clear_figure(None);
         let _ = futures::executor::block_on(imagesc_builtin(vec![
-            Value::Tensor(Tensor {
-                data: vec![10.0, 20.0],
-                integer_data: None,
-                shape: vec![2],
-                rows: 2,
-                cols: 1,
-                dtype: NumericDType::F64,
-            }),
-            Value::Tensor(Tensor {
-                data: vec![1.0, 5.0],
-                integer_data: None,
-                shape: vec![2],
-                rows: 2,
-                cols: 1,
-                dtype: NumericDType::F64,
-            }),
+            Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![2]).expect("imagesc x extent")),
+            Value::Tensor(Tensor::new(vec![1.0, 5.0], vec![2]).expect("imagesc y extent")),
             Value::Tensor(grid_tensor((1..=12).map(|v| v as f64).collect(), 3, 4)),
         ]))
         .expect("imagesc with extent vectors should succeed");
