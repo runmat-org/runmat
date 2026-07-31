@@ -1378,27 +1378,13 @@ fn ensure_data_len(
 
 fn vector_value(values: Vec<f64>) -> Value {
     let len = values.len();
-    Value::Tensor(Tensor {
-        rows: 1,
-        cols: len,
-        shape: vec![1, len],
-        data: values,
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    Value::Tensor(Tensor::new(values, vec![1, len]).expect("textscatter row vector"))
 }
 
 fn color_data_value(colors: Option<&[Vec4]>) -> Value {
     match colors {
         Some(colors) => color_matrix_value(colors),
-        None => Value::Tensor(Tensor {
-            rows: 0,
-            cols: 0,
-            shape: vec![0, 0],
-            data: Vec::new(),
-            integer_data: None,
-            dtype: runmat_builtins::NumericDType::F64,
-        }),
+        None => Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).expect("empty color data")),
     }
 }
 
@@ -1410,14 +1396,7 @@ fn color_matrix_value(colors: &[Vec4]) -> Value {
             data.push(color[component] as f64);
         }
     }
-    Value::Tensor(Tensor {
-        rows,
-        cols: 3,
-        shape: vec![rows, 3],
-        data,
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    Value::Tensor(Tensor::new(data, vec![rows, 3]).expect("textscatter color matrix"))
 }
 
 fn marker_color_value(color: &TextScatterMarkerColor) -> Value {
@@ -1440,7 +1419,7 @@ fn handles_value(handles: Vec<f64>) -> Value {
 }
 
 fn is_empty_numeric(value: &Value) -> bool {
-    matches!(value, Value::Tensor(tensor) if tensor.data.is_empty())
+    matches!(value, Value::Tensor(tensor) if tensor_utils::tensor_element_len(tensor) == 0)
 }
 
 fn default_colors() -> Vec<Vec4> {
@@ -1502,6 +1481,15 @@ mod tests {
         .expect("integer tensor");
         tensor.data.clear();
         tensor
+    }
+
+    #[test]
+    fn typed_integer_tensor_is_not_empty_when_mirror_is_cleared() {
+        let value = Value::Tensor(int_tensor(vec![1, 2], 1, 2));
+        assert!(!is_empty_numeric(&value));
+        assert!(is_empty_numeric(&Value::Tensor(
+            Tensor::new(Vec::new(), vec![0, 0]).expect("empty tensor")
+        )));
     }
 
     #[test]
