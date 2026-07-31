@@ -2,8 +2,8 @@
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
-    Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::AxesKind;
@@ -18,7 +18,7 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use super::line::handles_value;
 use super::op_common::polar::{
     evaluate_theta_rho_tensors, is_real_numeric_value, polar_to_cartesian, real_tensor_from_value,
-    tensor_columns, tensor_is_vector, EvaluatedPolarData,
+    tensor_is_vector, EvaluatedPolarData,
 };
 use super::op_common::{apply_axes_target, split_leading_axes_handle};
 use super::plotting_error;
@@ -351,18 +351,17 @@ fn series_style_value(
         return value.clone();
     }
     if tensor.rows == point_count && tensor.cols == series_count {
-        let column = tensor_columns(tensor)
-            .into_iter()
-            .nth(series_idx)
-            .unwrap_or_default();
-        return Value::Tensor(runmat_builtins::Tensor {
-            rows: point_count,
-            cols: 1,
-            shape: vec![point_count, 1],
-            data: column,
-            integer_data: None,
-            dtype: tensor.dtype,
-        });
+        let start = series_idx * point_count;
+        let indices: Vec<usize> = (start..start + point_count).collect();
+        let storage = tensor
+            .clone()
+            .into_numeric_storage()
+            .and_then(|storage| storage.gather(&indices))
+            .expect("series style column is valid native storage");
+        return Value::Tensor(
+            Tensor::from_numeric_storage(storage, vec![point_count, 1])
+                .expect("series style column shape"),
+        );
     }
     if is_color_arg && (tensor.cols == 3 || tensor.cols == 4) && tensor.rows == point_count {
         return value.clone();
@@ -420,14 +419,7 @@ mod tests {
     use runmat_builtins::{IntegerStorage, NumericDType, Tensor};
 
     fn tensor(data: &[f64], rows: usize, cols: usize) -> Value {
-        Value::Tensor(Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![rows, cols],
-            rows,
-            cols,
-            dtype: NumericDType::F64,
-        })
+        Value::Tensor(Tensor::new(data.to_vec(), vec![rows, cols]).expect("polar scatter tensor"))
     }
 
     fn cleared_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
@@ -445,6 +437,11 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(tensor.data, vec![30.0, 40.0]);
+        assert_eq!(tensor.numeric_dtype(), NumericDType::U8);
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::U8(vec![30, 40]))
+        );
     }
 
     #[test]

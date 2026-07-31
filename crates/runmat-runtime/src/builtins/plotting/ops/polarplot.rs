@@ -517,17 +517,10 @@ mod tests {
     use crate::builtins::plotting::{
         clone_figure, current_figure_handle, reset_hold_state_for_run, reset_plot_state,
     };
-    use runmat_builtins::{NumericDType, Tensor};
+    use runmat_builtins::Tensor;
 
     fn tensor(data: &[f64]) -> Value {
-        Value::Tensor(Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![data.len()],
-            rows: data.len(),
-            cols: 1,
-            dtype: NumericDType::F64,
-        })
+        Value::Tensor(Tensor::new(data.to_vec(), vec![data.len()]).expect("polar plot vector"))
     }
 
     #[test]
@@ -580,14 +573,7 @@ mod tests {
 
     #[test]
     fn matrix_rho_expands_to_column_series() {
-        let rho = Tensor {
-            data: vec![1.0, 2.0, 3.0, 4.0],
-            integer_data: None,
-            shape: vec![2, 2],
-            rows: 2,
-            cols: 2,
-            dtype: NumericDType::F64,
-        };
+        let rho = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("polar plot matrix");
         let data = futures::executor::block_on(evaluate_polar_data(PolarSeriesInput::Rho(
             Value::Tensor(rho),
         )))
@@ -629,14 +615,7 @@ mod tests {
         reset_plot_state();
         reset_hold_state_for_run();
 
-        let empty = Value::Tensor(Tensor {
-            data: Vec::new(),
-            integer_data: None,
-            shape: vec![0, 0],
-            rows: 0,
-            cols: 0,
-            dtype: NumericDType::F64,
-        });
+        let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).expect("empty polar plot"));
         futures::executor::block_on(polarplot_builtin(vec![empty])).unwrap();
 
         let mut figure = clone_figure(current_figure_handle()).unwrap();
@@ -659,14 +638,9 @@ mod tests {
         reset_hold_state_for_run();
 
         let theta = tensor(&[0.0, std::f64::consts::FRAC_PI_2]);
-        let rho = Value::Tensor(Tensor {
-            data: vec![1.0, 2.0, 3.0, 4.0],
-            integer_data: None,
-            shape: vec![2, 2],
-            rows: 2,
-            cols: 2,
-            dtype: NumericDType::F64,
-        });
+        let rho = Value::Tensor(
+            Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("polar plot matrix"),
+        );
         futures::executor::block_on(polarplot_builtin(vec![
             theta,
             rho,
