@@ -439,8 +439,14 @@ fn align_numeric_arrays(lhs: NumericArray, rhs: NumericArray) -> BuiltinResult<N
 fn into_complex(input: NumericArray) -> BuiltinResult<ComplexTensor> {
     match input {
         NumericArray::Real(t) => {
-            let Tensor { data, shape, .. } = t;
-            let complex: Vec<(f64, f64)> = data.into_iter().map(|re| (re, 0.0)).collect();
+            let shape = t.shape.clone();
+            let complex = t
+                .into_numeric_storage()
+                .map_err(|e| rem_error_with_detail(&REM_ERROR_INTERNAL, e))?
+                .materialize_f64()
+                .into_iter()
+                .map(|real| (real, 0.0))
+                .collect();
             ComplexTensor::new(complex, shape)
                 .map_err(|e| rem_error_with_detail(&REM_ERROR_INTERNAL, e))
         }
