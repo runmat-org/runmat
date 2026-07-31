@@ -404,14 +404,7 @@ fn vector_value(data: Vec<f64>) -> Value {
 }
 
 fn matrix_value(data: Vec<f64>, rows: usize, cols: usize) -> Value {
-    Value::Tensor(Tensor {
-        data,
-        rows,
-        cols,
-        shape: vec![rows, cols],
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    Value::Tensor(Tensor::new(data, vec![rows, cols]).expect("plotmatrix result"))
 }
 
 fn empty_matrix() -> Value {
@@ -594,14 +587,7 @@ mod tests {
     }
 
     fn matrix(data: Vec<f64>, rows: usize, cols: usize) -> Value {
-        Value::Tensor(Tensor {
-            data,
-            rows,
-            cols,
-            shape: vec![rows, cols],
-            integer_data: None,
-            dtype: runmat_builtins::NumericDType::F64,
-        })
+        Value::Tensor(Tensor::new(data, vec![rows, cols]).expect("plotmatrix test matrix"))
     }
 
     fn assert_tensor_shape(value: &Value, rows: usize, cols: usize) {

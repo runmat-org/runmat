@@ -540,17 +540,15 @@ fn vertex_index(value: f64, point_count: usize) -> BuiltinResult<usize> {
 }
 
 fn column_tensor(tensor: &Tensor, col: usize) -> Tensor {
-    let data = (0..tensor.rows)
-        .map(|row| tensor_utils::tensor_value_f64(tensor, row + col * tensor.rows))
+    let indices = (0..tensor.rows)
+        .map(|row| row + col * tensor.rows)
         .collect::<Vec<_>>();
-    Tensor {
-        rows: tensor.rows,
-        cols: 1,
-        shape: vec![tensor.rows, 1],
-        data,
-        integer_data: None,
-        dtype: tensor.dtype,
-    }
+    let storage = tensor
+        .clone()
+        .into_numeric_storage()
+        .and_then(|storage| storage.gather(&indices))
+        .expect("triplot column indices");
+    Tensor::from_numeric_storage(storage, vec![tensor.rows, 1]).expect("triplot column shape")
 }
 
 fn is_vector_tensor(tensor: &Tensor) -> bool {
@@ -605,14 +603,7 @@ mod tests {
     use runmat_plot::plots::PlotElement;
 
     fn tensor(data: &[f64], rows: usize, cols: usize) -> Value {
-        Value::Tensor(Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            rows,
-            cols,
-            shape: vec![rows, cols],
-            dtype: runmat_builtins::NumericDType::F64,
-        })
+        Value::Tensor(Tensor::new(data.to_vec(), vec![rows, cols]).expect("triplot test tensor"))
     }
 
     fn int_tensor(data: Vec<i16>, rows: usize, cols: usize) -> Tensor {
@@ -650,6 +641,11 @@ mod tests {
         let column = column_tensor(&int_tensor(vec![1, 2, 3, 4], 2, 2), 1);
 
         assert_eq!(column.data, vec![3.0, 4.0]);
+        assert_eq!(column.numeric_dtype(), runmat_builtins::NumericDType::I16);
+        assert_eq!(
+            column.integer_storage(),
+            Some(&runmat_builtins::IntegerStorage::I16(vec![3, 4]))
+        );
     }
 
     #[test]

@@ -329,14 +329,7 @@ fn apply_selector_modes(
 
 fn handles_tensor(handles: Vec<f64>) -> Value {
     let len = handles.len();
-    Value::Tensor(Tensor {
-        data: handles,
-        integer_data: None,
-        shape: vec![1, len],
-        rows: 1,
-        cols: len,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    Value::Tensor(Tensor::new(handles, vec![1, len]).expect("plotyy handle row"))
 }
 
 fn invalid(message: impl Into<String>) -> RuntimeError {
@@ -374,14 +367,7 @@ mod tests {
     }
 
     fn tensor(data: &[f64]) -> Value {
-        Value::Tensor(Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![1, data.len()],
-            rows: 1,
-            cols: data.len(),
-            dtype: runmat_builtins::NumericDType::F64,
-        })
+        Value::Tensor(Tensor::new(data.to_vec(), vec![1, data.len()]).expect("plotyy row vector"))
     }
 
     #[test]
