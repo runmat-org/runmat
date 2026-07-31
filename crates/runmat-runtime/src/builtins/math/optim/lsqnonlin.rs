@@ -795,7 +795,7 @@ async fn bound_vector(
 
 fn is_empty_value(value: &Value) -> bool {
     match value {
-        Value::Tensor(Tensor { data, .. }) => data.is_empty(),
+        Value::Tensor(tensor) => tensor::tensor_element_len(tensor) == 0,
         Value::LogicalArray(LogicalArray { data, .. }) => data.is_empty(),
         _ => false,
     }
@@ -947,7 +947,7 @@ mod tests {
     fn lsqnonlin_bound_vector_reads_typed_integer_storage_exactly() {
         let mut input =
             Tensor::new_integer(IntegerStorage::I16(vec![-1, 2]), vec![2, 1]).expect("integer");
-        input.data.fill(f64::NAN);
+        input.data.clear();
 
         let parsed = block_on(bound_vector(
             "lower bounds",
