@@ -798,14 +798,7 @@ fn implicit_quiver_grid_tensor(
             });
         }
     }
-    Ok(Tensor {
-        data,
-        shape: vec![len],
-        rows: len,
-        cols: 1,
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    Tensor::new(data, vec![len]).map_err(|e| plotting_error(BUILTIN_NAME, format!("quiver: {e}")))
 }
 
 fn host_bounds(values: impl Iterator<Item = f64>) -> (f32, f32) {
@@ -1064,14 +1057,7 @@ mod tests {
     use runmat_plot::plots::PlotElement;
 
     fn vec_tensor(data: &[f64]) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![data.len()],
-            rows: data.len(),
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), vec![data.len()]).expect("quiver test vector")
     }
 
     fn int_tensor(data: &[i16], shape: Vec<usize>) -> Tensor {
@@ -1222,8 +1208,8 @@ mod tests {
         let PlotElement::Quiver(quiver) = fig.plots().next().unwrap() else {
             panic!("expected quiver");
         };
-        assert_eq!(quiver.x, vec![1.0, 1.0]);
-        assert_eq!(quiver.y, vec![1.0, 2.0]);
+        assert_eq!(quiver.x, vec![1.0, 2.0]);
+        assert_eq!(quiver.y, vec![1.0, 1.0]);
     }
 
     #[test]
