@@ -3,7 +3,7 @@ use crate::dispatcher::download_handle_async;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use num_complex::Complex;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorOwned};
-use runmat_builtins::{ComplexTensor, IntValue, Tensor, Value};
+use runmat_builtins::{ComplexTensor, IntValue, NumericStorage, Tensor, Value};
 use rustfft::FftPlanner;
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -746,6 +746,31 @@ pub fn apply_shift<T: Clone>(
     }
 
     Ok(result)
+}
+
+pub fn apply_shift_numeric_storage(
+    builtin: &str,
+    storage: NumericStorage,
+    shape: &[usize],
+    shifts: &[usize],
+) -> BuiltinResult<NumericStorage> {
+    macro_rules! shift {
+        ($values:expr, $variant:ident) => {
+            NumericStorage::$variant(apply_shift(builtin, &$values, shape, shifts)?)
+        };
+    }
+    Ok(match storage {
+        NumericStorage::F64(values) => shift!(values, F64),
+        NumericStorage::F32(values) => shift!(values, F32),
+        NumericStorage::I8(values) => shift!(values, I8),
+        NumericStorage::I16(values) => shift!(values, I16),
+        NumericStorage::I32(values) => shift!(values, I32),
+        NumericStorage::I64(values) => shift!(values, I64),
+        NumericStorage::U8(values) => shift!(values, U8),
+        NumericStorage::U16(values) => shift!(values, U16),
+        NumericStorage::U32(values) => shift!(values, U32),
+        NumericStorage::U64(values) => shift!(values, U64),
+    })
 }
 
 /// Compute the zero-based dimension indices to shift.

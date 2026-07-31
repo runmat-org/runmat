@@ -3,7 +3,9 @@
 //! `ifftshift` moves the zero-frequency component back to the origin, undoing
 //! the reordering performed by `fftshift` and preparing spectra for inverse FFTs.
 
-use super::common::{apply_shift, build_shift_plan, compute_shift_dims, ShiftKind};
+use super::common::{
+    apply_shift, apply_shift_numeric_storage, build_shift_plan, compute_shift_dims, ShiftKind,
+};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -272,42 +274,17 @@ async fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResu
 }
 
 fn ifftshift_tensor(tensor: Tensor, dims: &[usize]) -> BuiltinResult<Tensor> {
-    let Tensor {
-        data,
-        integer_data,
-        shape,
-        ..
-    } = tensor;
+    let shape = tensor.shape.clone();
+    let storage = tensor.into_numeric_storage().map_err(|source| {
+        ifftshift_error_with_detail(
+            &IFFTSHIFT_ERROR_INTERNAL,
+            format!("invalid tensor storage: {source}"),
+        )
+    })?;
     let plan = build_shift_plan(&shape, dims, ShiftKind::Ifft);
-    if let Some(storage) = integer_data {
-        let rotated = storage
-            .reorder(|values| {
-                apply_shift(BUILTIN_NAME, values, &plan.ext_shape, &plan.positive)
-                    .map_err(|error| error.to_string())
-            })
-            .map_err(|source| {
-                ifftshift_error_with_detail(
-                    &IFFTSHIFT_ERROR_INTERNAL,
-                    format!("integer shift failed: {source}"),
-                )
-            })?;
-        return Tensor::new_integer(rotated, shape).map_err(|source| {
-            ifftshift_error_with_detail(
-                &IFFTSHIFT_ERROR_INTERNAL,
-                format!("integer tensor reconstruction failed: {source}"),
-            )
-        });
-    }
-    if data.is_empty() || plan.is_noop() {
-        return Tensor::new(data, shape).map_err(|source| {
-            ifftshift_error_with_detail(
-                &IFFTSHIFT_ERROR_INTERNAL,
-                format!("tensor reconstruction failed: {source}"),
-            )
-        });
-    }
-    let rotated = apply_shift(BUILTIN_NAME, &data, &plan.ext_shape, &plan.positive)?;
-    Tensor::new(rotated, shape).map_err(|source| {
+    let rotated =
+        apply_shift_numeric_storage(BUILTIN_NAME, storage, &plan.ext_shape, &plan.positive)?;
+    Tensor::from_numeric_storage(rotated, shape).map_err(|source| {
         ifftshift_error_with_detail(
             &IFFTSHIFT_ERROR_INTERNAL,
             format!("tensor reconstruction failed: {source}"),
