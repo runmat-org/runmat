@@ -7,6 +7,7 @@ _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/r
 ### Runtime
 
 * Fixed `addpath` and `addpath(genpath(...))` so `.m` functions on the session search path are callable immediately and across later REPL inputs through direct calls, `feval`, function handles, and callbacks, with `which`, path precedence, `rmpath`, packages, and private functions using the same runtime resolution behavior.
+* Added consistent TTY-aware ANSI styling throughout human-facing CLI diagnostics, help, logs, headings, progress, and summaries, with per-stream detection, `--color=auto|always|never`, `NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE`, `FORCE_COLOR`, and `TERM=dumb` support while keeping structured, raw, and program-owned output plain.
 
 ## [v0.6.0](https://github.com/runmat-org/runmat/compare/v0.5.6...v0.6.0) - July 2026
 

@@ -2,7 +2,7 @@
 title: "Command Line Interface"
 category: "Getting Started"
 section: "1.3"
-last_updated: "May 29, 2026"
+last_updated: "July 31, 2026"
 ---
 
 # RunMat Command Line Interface (CLI)
@@ -145,6 +145,7 @@ Common options:
 | Option | Use |
 | --- | --- |
 | `--config PATH` | Load a specific `runmat.toml` or `runmat.json`. |
+| `--color MODE` | Control ANSI styling for human output (auto | always | never). |
 | `--debug` | Enable debug logging. |
 | `--log-level LEVEL` | Set log verbosity. |
 | `--verbose` | Print more execution detail. |
@@ -160,6 +161,22 @@ Common options:
 | `--plot-backend BACKEND` | Select plotting backend (auto | wgpu | static | web). |
 
 Configuration is resolved from built-in defaults, project files, environment variables, and CLI flags. CLI flags have the highest precedence. See [Configuration Reference](/docs/runtime/getting-started/config).
+
+## Color and Terminal Output
+
+RunMat uses restrained ANSI styling for human-readable diagnostics, help, headings, status messages, and summaries. The default `--color=auto` mode checks stdout and stderr independently, styles only streams connected to capable interactive terminals, and stays plain when output is redirected, `TERM=dumb`, or a non-empty `NO_COLOR` value is present.
+
+Use the global color option before or after a subcommand:
+
+```bash
+runmat --color=never check analysis.m
+runmat check analysis.m --color=never
+runmat --color=always check analysis.m | less -R
+```
+
+An explicit `--color=always` or `--color=never` overrides the environment. Without an explicit option, a non-empty `NO_COLOR` disables color; `CLICOLOR=0` also disables it; and `CLICOLOR_FORCE` or `FORCE_COLOR` can request color for eligible human output. `NO_COLOR` takes precedence over those environment force variables. An empty `NO_COLOR` value is treated as unset.
+
+Structured and byte-oriented output remains plain even under `--color=always`. This includes JSON, TOML configuration, bytecode, stable tab-separated remote listings, telemetry payloads, and raw remote file contents. RunMat also leaves MATLAB stdout and stderr, displayed MATLAB values, and REPL shell-command output unchanged.
 
 ## Emit Bytecode
 

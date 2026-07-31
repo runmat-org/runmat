@@ -4,14 +4,21 @@ use std::process::ExitCode;
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    let matches = runmat::Cli::command().get_matches();
+    let args = std::env::args_os().collect::<Vec<_>>();
+    let requested_color = runmat::presentation::requested_color_mode(&args).unwrap_or_default();
+    let matches = runmat::Cli::command()
+        .color(runmat::presentation::clap_color_choice(requested_color))
+        .styles(runmat::presentation::clap_styles())
+        .get_matches_from(args);
     let cli = match runmat::Cli::from_arg_matches(&matches) {
         Ok(cli) => cli,
         Err(err) => {
-            eprintln!("Error: {err}");
+            let styles = runmat::presentation::Presentation::detect(requested_color).stderr();
+            eprintln!("{}: {err}", styles.error("Error"));
             return ExitCode::from(1);
         }
     };
+    runmat::presentation::initialize(cli.color, runmat::presentation::cli_output_mode(&cli));
     let sources = runmat::CliOverrideSources::from_matches(&matches);
     let exit_code = match runmat::run_cli(cli, sources).await {
         Ok(()) => 0,
@@ -20,7 +27,7 @@ async fn main() -> ExitCode {
                 .downcast_ref::<runmat::AlreadyReportedCliError>()
                 .is_none()
             {
-                eprintln!("Error: {err}");
+                eprintln!("{}: {err}", runmat::presentation::stderr().error("Error"));
             }
             1
         }

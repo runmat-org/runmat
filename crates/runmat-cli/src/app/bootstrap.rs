@@ -12,6 +12,7 @@ use crate::logging::format_log_record;
 use crate::telemetry;
 
 pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
+    crate::presentation::initialize(cli.color, crate::presentation::cli_output_mode(&cli));
     if cli.generate_config {
         let sample_config = ConfigLoader::generate_sample_config();
         println!("{sample_config}");

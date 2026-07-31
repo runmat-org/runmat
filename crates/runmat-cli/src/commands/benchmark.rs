@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use crate::commands::session::create_session;
 use crate::diagnostics::format_frontend_error;
+use crate::presentation;
 use crate::telemetry::{capture_provider_snapshot, RuntimeExecutionCounters, TelemetryRunKind};
 use crate::AlreadyReportedCliError;
 
@@ -39,7 +40,7 @@ pub async fn execute_benchmark(
     let mut jit_executions: u64 = 0;
     let mut interpreter_executions: u64 = 0;
 
-    println!("Warming up...");
+    println!("{}", presentation::stdout().info("Warming up..."));
     for _ in 0..3 {
         let request = ExecutionRequest::for_source(
             SourceInput::Text {
@@ -72,7 +73,10 @@ pub async fn execute_benchmark(
                         provider: capture_provider_snapshot(),
                     });
                 }
-                eprintln!("Benchmark error: {error}");
+                eprintln!(
+                    "{}: {error}",
+                    presentation::stderr().error("Benchmark error")
+                );
                 return Err(AlreadyReportedCliError.into());
             }
             Err(err) => {
@@ -98,14 +102,14 @@ pub async fn execute_benchmark(
                 }) {
                     eprintln!("{diag}");
                 } else {
-                    eprintln!("Benchmark error: {err}");
+                    eprintln!("{}: {err}", presentation::stderr().error("Benchmark error"));
                 }
                 return Err(AlreadyReportedCliError.into());
             }
         }
     }
 
-    println!("Running benchmark...");
+    println!("{}", presentation::stdout().info("Running benchmark..."));
     for i in 1..=iterations {
         let request = ExecutionRequest::for_source(
             SourceInput::Text {
@@ -143,7 +147,7 @@ pub async fn execute_benchmark(
                 }) {
                     eprintln!("{diag}");
                 } else {
-                    eprintln!("Benchmark error: {err}");
+                    eprintln!("{}: {err}", presentation::stderr().error("Benchmark error"));
                 }
                 return Err(AlreadyReportedCliError.into());
             }
@@ -181,7 +185,10 @@ pub async fn execute_benchmark(
         }
 
         if i % 10 == 0 {
-            println!("  Completed {i} iterations");
+            println!(
+                "  {}",
+                presentation::stdout().muted(format!("Completed {i} iterations"))
+            );
         }
     }
 
@@ -194,7 +201,7 @@ pub async fn execute_benchmark(
     }
 
     let avg_time = total_time / iterations;
-    println!("\nBenchmark Results:");
+    println!("\n{}", presentation::stdout().heading("Benchmark Results:"));
     println!("  Total iterations: {iterations}");
     println!("  JIT executions: {jit_executions}");
     println!("  Interpreter executions: {interpreter_executions}");

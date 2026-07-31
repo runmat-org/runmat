@@ -83,6 +83,62 @@ fn test_help_command() {
 }
 
 #[test]
+fn help_and_argument_errors_follow_color_choice() {
+    let forced_help = run_runmat(&["--color=always", "--help"]);
+    assert!(forced_help.status.success());
+    assert!(forced_help.stdout.windows(2).any(|bytes| bytes == b"\x1b["));
+
+    let plain_help = run_runmat(&["--color=never", "--help"]);
+    assert!(plain_help.status.success());
+    assert!(!plain_help.stdout.windows(2).any(|bytes| bytes == b"\x1b["));
+
+    let forced_error = run_runmat(&["--color=always", "--definitely-invalid"]);
+    assert!(!forced_error.status.success());
+    assert!(forced_error
+        .stderr
+        .windows(2)
+        .any(|bytes| bytes == b"\x1b["));
+
+    let plain_error = run_runmat(&["--color=never", "--definitely-invalid"]);
+    assert!(!plain_error.status.success());
+    assert!(!plain_error.stderr.windows(2).any(|bytes| bytes == b"\x1b["));
+}
+
+#[test]
+fn forced_color_does_not_style_program_output() {
+    let temp_dir = TempDir::new().unwrap();
+    let script_path = temp_dir.path().join("program_output.m");
+    fs::write(&script_path, "disp('PROGRAM_OUTPUT_SENTINEL');").unwrap();
+
+    let output = run_runmat(&["--color=always", "run", script_path.to_str().unwrap()]);
+    assert!(output.status.success(), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stdout).contains("PROGRAM_OUTPUT_SENTINEL"));
+    assert!(!output.stdout.windows(2).any(|bytes| bytes == b"\x1b["));
+}
+
+#[test]
+fn forced_color_does_not_style_config_or_bytecode_data() {
+    let config = run_runmat(&["--color=always", "config", "show", "--format", "json"]);
+    assert!(config.status.success(), "{config:?}");
+    assert!(!config.stdout.windows(2).any(|bytes| bytes == b"\x1b["));
+    assert!(!config.stderr.windows(2).any(|bytes| bytes == b"\x1b["));
+    serde_json::from_slice::<serde_json::Value>(&config.stdout).unwrap();
+
+    let temp_dir = TempDir::new().unwrap();
+    let script_path = temp_dir.path().join("bytecode_data.m");
+    fs::write(&script_path, "value = 1 + 2;").unwrap();
+    let bytecode = run_runmat(&[
+        "--color=always",
+        "--emit-bytecode",
+        script_path.to_str().unwrap(),
+    ]);
+    assert!(bytecode.status.success(), "{bytecode:?}");
+    assert!(String::from_utf8_lossy(&bytecode.stdout).contains("# Bytecode"));
+    assert!(!bytecode.stdout.windows(2).any(|bytes| bytes == b"\x1b["));
+    assert!(!bytecode.stderr.windows(2).any(|bytes| bytes == b"\x1b["));
+}
+
+#[test]
 fn test_version_command() {
     let output = run_runmat(&["--version"]);
     assert!(output.status.success());

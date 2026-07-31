@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::cli::parse::{parse_bool_env, parse_figure_size, parse_log_level_env};
 use crate::cli::remote::{FsCommand, OrgCommand, ProjectCommand, RemoteCommand};
 use crate::cli::value_types::{CaptureFiguresMode, FigureSize, GcPreset, LogLevel, OptLevel};
+use crate::cli::ColorMode;
 
 #[derive(Parser, Clone)]
 #[command(
@@ -49,12 +50,20 @@ Environment Variables:
   RUNMAT_SERVER_URL=<url>     Remote server URL (remote commands)
   RUNMAT_ORG_ID=<uuid>        Remote org override (remote commands)
   RUNMAT_PROJECT_ID=<uuid>    Remote project override (remote commands)
+  NO_COLOR=<non-empty>        Disable ANSI color by default
+  CLICOLOR=0                  Disable automatic ANSI color
+  CLICOLOR_FORCE=<non-zero>   Force ANSI color for human output
+  FORCE_COLOR=<1..3>          Force a specific color level
 
 For more information, visit: https://github.com/runmat-org/runmat
 "#
 )]
 #[command(propagate_version = true)]
 pub struct Cli {
+    /// Control ANSI styling for human-readable output
+    #[arg(long, value_enum, default_value = "auto", global = true)]
+    pub color: ColorMode,
+
     /// Enable debug logging
     #[arg(short, long, value_parser = parse_bool_env)]
     pub debug: bool,
