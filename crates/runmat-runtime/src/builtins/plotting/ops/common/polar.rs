@@ -183,14 +183,7 @@ pub(crate) fn is_real_numeric_value(value: &Value) -> bool {
 }
 
 pub(crate) fn scalar_tensor(value: f64) -> Tensor {
-    Tensor {
-        data: vec![value],
-        integer_data: None,
-        shape: vec![1],
-        rows: 1,
-        cols: 1,
-        dtype: runmat_builtins::NumericDType::F64,
-    }
+    Tensor::new(vec![value], vec![1]).expect("scalar tensor shape")
 }
 
 fn polar_data_err(builtin: &'static str, msg: impl Into<String>) -> RuntimeError {

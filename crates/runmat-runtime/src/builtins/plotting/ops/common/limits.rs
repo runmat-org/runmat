@@ -68,14 +68,7 @@ pub fn limit_value(limits: Option<(f64, f64)>) -> Value {
         Some((lo, hi)) => vec![lo, hi],
         None => vec![f64::NAN, f64::NAN],
     };
-    Value::Tensor(Tensor {
-        rows: 1,
-        cols: 2,
-        shape: vec![1, 2],
-        data,
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    Value::Tensor(Tensor::new(data, vec![1, 2]).expect("limit vector shape"))
 }
 
 #[cfg(test)]
