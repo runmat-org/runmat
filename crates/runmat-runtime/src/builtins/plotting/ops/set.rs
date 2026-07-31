@@ -290,14 +290,9 @@ mod tests {
         set_builtin(vec![
             Value::Num(ax),
             Value::String("YLim".into()),
-            Value::Tensor(runmat_builtins::Tensor {
-                rows: 1,
-                cols: 2,
-                shape: vec![1, 2],
-                data: vec![2.0, 8.0],
-                integer_data: None,
-                dtype: runmat_builtins::NumericDType::F64,
-            }),
+            Value::Tensor(
+                runmat_builtins::Tensor::new(vec![2.0, 8.0], vec![1, 2]).expect("y limits"),
+            ),
             Value::String("Colorbar".into()),
             Value::Bool(true),
             Value::String("Colormap".into()),
@@ -467,14 +462,7 @@ mod tests {
     fn set_updates_stem_properties() {
         let _guard = setup();
         let handle = crate::builtins::plotting::stem::stem_builtin(vec![Value::Tensor(
-            runmat_builtins::Tensor {
-                rows: 2,
-                cols: 1,
-                shape: vec![2],
-                data: vec![1.0, 2.0],
-                integer_data: None,
-                dtype: runmat_builtins::NumericDType::F64,
-            },
+            runmat_builtins::Tensor::new(vec![1.0, 2.0], vec![2]).expect("stem values"),
         )])
         .unwrap();
         set_builtin(vec![

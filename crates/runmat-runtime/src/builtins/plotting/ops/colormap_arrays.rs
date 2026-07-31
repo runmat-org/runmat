@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, NumericDType, Tensor, Type, Value,
+    IntValue, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::surface::ColorMap;
@@ -423,14 +423,7 @@ fn rgb_tensor_from_colors(colors: &[[f64; 3]]) -> Tensor {
     for color in colors {
         data.push(color[2]);
     }
-    Tensor {
-        data,
-        shape: vec![rows, 3],
-        rows,
-        cols: 3,
-        integer_data: None,
-        dtype: NumericDType::F64,
-    }
+    Tensor::new(data, vec![rows, 3]).expect("RGB colormap matrix")
 }
 
 fn sample_colormap(map: &ColorMap, idx: usize, len: usize) -> [f64; 3] {
@@ -602,14 +595,8 @@ mod tests {
         assert!(matches!(map, ColorMap::Listed(_)));
         assert_eq!(len, 8);
 
-        let custom = Tensor {
-            data: vec![0.0, 1.0, 0.0, 0.5, 1.0, 0.0],
-            integer_data: None,
-            shape: vec![2, 3],
-            rows: 2,
-            cols: 3,
-            dtype: NumericDType::F64,
-        };
+        let custom =
+            Tensor::new(vec![0.0, 1.0, 0.0, 0.5, 1.0, 0.0], vec![2, 3]).expect("custom colormap");
         let (map, len) = parse_rgb_colormap_tensor(&custom, "colormap").expect("parse custom");
         assert_eq!(len, 2);
         assert!(matches!(map, ColorMap::Listed(_)));

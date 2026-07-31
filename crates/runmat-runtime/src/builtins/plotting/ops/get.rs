@@ -290,14 +290,9 @@ mod tests {
         crate::builtins::plotting::set::set_builtin(vec![
             Value::Num(ax),
             Value::String("XLim".into()),
-            Value::Tensor(runmat_builtins::Tensor {
-                rows: 1,
-                cols: 2,
-                shape: vec![1, 2],
-                data: vec![1.0, 5.0],
-                integer_data: None,
-                dtype: runmat_builtins::NumericDType::F64,
-            }),
+            Value::Tensor(
+                runmat_builtins::Tensor::new(vec![1.0, 5.0], vec![1, 2]).expect("x limits"),
+            ),
             Value::String("XScale".into()),
             Value::String("log".into()),
             Value::String("Grid".into()),
@@ -416,14 +411,9 @@ mod tests {
     fn stem_handle_exposes_runtime_properties() {
         let _guard = setup();
         let handle = crate::builtins::plotting::stem::stem_builtin(vec![
-            Value::Tensor(runmat_builtins::Tensor {
-                rows: 2,
-                cols: 1,
-                shape: vec![2],
-                data: vec![1.0, 2.0],
-                integer_data: None,
-                dtype: runmat_builtins::NumericDType::F64,
-            }),
+            Value::Tensor(
+                runmat_builtins::Tensor::new(vec![1.0, 2.0], vec![2]).expect("stem values"),
+            ),
             Value::String("DisplayName".into()),
             Value::String("Impulse".into()),
             Value::String("BaseValue".into()),
