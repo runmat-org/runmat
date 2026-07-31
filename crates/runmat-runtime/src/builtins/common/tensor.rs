@@ -630,22 +630,21 @@ pub fn clamp_u32(value: f64) -> f64 {
     value.round().clamp(0.0, u32::MAX as f64)
 }
 
-/// Cast all elements of a tensor to the target dtype in-place, preserving the f64 backing store.
-pub fn coerce_tensor_dtype(mut tensor: Tensor, dtype: NumericDType) -> Tensor {
+/// Cast all elements of a tensor to the target dtype through typed constructors.
+pub fn coerce_tensor_dtype(tensor: Tensor, dtype: NumericDType) -> Tensor {
+    let shape = tensor.shape.clone();
     match dtype {
-        NumericDType::F64 => {
-            tensor.integer_data = None;
-            tensor.dtype = NumericDType::F64;
-        }
-        NumericDType::F32 => {
-            tensor.integer_data = None;
-            for value in &mut tensor.data {
-                *value = (*value as f32) as f64;
-            }
-            tensor.dtype = NumericDType::F32;
-        }
+        NumericDType::F64 => Tensor::new(tensor_values_f64(&tensor), shape)
+            .expect("dtype coercion preserves the tensor element count"),
+        NumericDType::F32 => Tensor::from_f32(
+            tensor_values_f64(&tensor)
+                .into_iter()
+                .map(|value| value as f32)
+                .collect(),
+            shape,
+        )
+        .expect("dtype coercion preserves the tensor element count"),
         integer_dtype => {
-            let shape = tensor.shape.clone();
             let prototype = match integer_dtype {
                 NumericDType::I8 => IntegerStorage::I8(Vec::new()),
                 NumericDType::I16 => IntegerStorage::I16(Vec::new()),
@@ -671,12 +670,10 @@ pub fn coerce_tensor_dtype(mut tensor: Tensor, dtype: NumericDType) -> Tensor {
                 )
                 .expect("dtype coercion preserves the tensor element count");
             }
-            let values = std::mem::take(&mut tensor.data);
-            return integer_tensor_from_f64_like(&prototype, values, &shape)
-                .expect("dtype coercion preserves the tensor element count");
+            integer_tensor_from_f64_like(&prototype, tensor.data, &shape)
+                .expect("dtype coercion preserves the tensor element count")
         }
     }
-    tensor
 }
 
 #[cfg(test)]

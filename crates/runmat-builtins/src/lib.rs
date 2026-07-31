@@ -1597,6 +1597,34 @@ mod integer_storage_tests {
     }
 
     #[test]
+    fn tensor_numeric_storage_bridge_round_trips_every_native_class() {
+        let cases = [
+            NumericStorage::F64(vec![f64::MIN_POSITIVE, f64::MAX]),
+            NumericStorage::F32(vec![f32::MIN_POSITIVE, f32::MAX]),
+            NumericStorage::I8(vec![i8::MIN, i8::MAX]),
+            NumericStorage::I16(vec![i16::MIN, i16::MAX]),
+            NumericStorage::I32(vec![i32::MIN, i32::MAX]),
+            NumericStorage::I64(vec![i64::MIN, i64::MAX]),
+            NumericStorage::U8(vec![u8::MIN, u8::MAX]),
+            NumericStorage::U16(vec![u16::MIN, u16::MAX]),
+            NumericStorage::U32(vec![u32::MIN, u32::MAX]),
+            NumericStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for storage in cases {
+            let dtype = storage.numeric_dtype();
+            let mut tensor =
+                Tensor::from_numeric_storage(storage.clone(), vec![1, 2]).expect("tensor bridge");
+            assert_eq!(tensor.numeric_dtype(), dtype);
+            if tensor.integer_storage().is_some() {
+                tensor.dtype = NumericDType::F64;
+                assert_eq!(tensor.numeric_dtype(), dtype);
+            }
+            assert_eq!(tensor.into_numeric_storage(), Ok(storage));
+        }
+    }
+
+    #[test]
     fn typed_constructor_materializes_exact_integer_storage() {
         let tensor =
             Tensor::new_with_dtype(vec![-2.2, 12.8, 99_999.0], vec![1, 3], NumericDType::I16)
@@ -1991,78 +2019,18 @@ impl StringArray {
 
 impl Tensor {
     pub fn new(data: Vec<f64>, shape: Vec<usize>) -> Result<Self, String> {
-        let expected: usize = shape.iter().product();
-        if data.len() != expected {
-            return Err(format!(
-                "Tensor data length {} doesn't match shape {:?} ({} elements)",
-                data.len(),
-                shape,
-                expected
-            ));
-        }
-        let (rows, cols) = if shape.len() >= 2 {
-            (shape[0], shape[1])
-        } else if shape.len() == 1 {
-            (1, shape[0])
-        } else {
-            (0, 0)
-        };
-        Ok(Tensor {
-            data,
-            integer_data: None,
-            shape,
-            rows,
-            cols,
-            dtype: NumericDType::F64,
-        })
+        Self::from_numeric_storage(NumericStorage::F64(data), shape)
     }
 
-    pub fn new_2d(data: Vec<f64>, rows: usize, cols: usize) -> Result<Self, String> {
-        Self::new(data, vec![rows, cols])
-    }
-
-    pub fn from_f32(data: Vec<f32>, shape: Vec<usize>) -> Result<Self, String> {
-        let converted: Vec<f64> = data.into_iter().map(|v| v as f64).collect();
-        Self::new_with_dtype(converted, shape, NumericDType::F32)
-    }
-
-    pub fn from_f32_slice(data: &[f32], shape: &[usize]) -> Result<Self, String> {
-        let converted: Vec<f64> = data.iter().map(|&v| v as f64).collect();
-        Self::new_with_dtype(converted, shape.to_vec(), NumericDType::F32)
-    }
-
-    pub fn new_with_dtype(
-        data: Vec<f64>,
-        shape: Vec<usize>,
-        dtype: NumericDType,
-    ) -> Result<Self, String> {
-        if let Some(prototype) = integer_storage_prototype(dtype) {
-            let values = data
-                .into_iter()
-                .map(|value| prototype.cast_f64_assignment(value))
-                .collect();
-            return Self::new_integer(prototype.from_same_class_values(values)?, shape);
-        }
-        let mut t = Self::new(data, shape)?;
-        t.dtype = dtype;
-        Ok(t)
-    }
-
-    /// Construct a tensor backed by an exact homogeneous integer buffer.
+    /// Constructs a dense tensor from one authoritative native numeric buffer.
     ///
-    /// The floating `data` member is retained only as a compatibility view for
-    /// legacy numeric consumers. Integer-aware code must use `integer_data`.
-    pub fn new_integer(storage: IntegerStorage, shape: Vec<usize>) -> Result<Self, String> {
-        let expected: usize = shape.iter().product();
-        if storage.len() != expected {
-            return Err(format!(
-                "integer tensor data length {} doesn't match shape {:?} ({} elements)",
-                storage.len(),
-                shape,
-                expected
-            ));
-        }
-
+    /// During the field-migration phase this is the single boundary that
+    /// derives legacy public compatibility fields from native storage.
+    pub fn from_numeric_storage(
+        storage: NumericStorage,
+        shape: Vec<usize>,
+    ) -> Result<Self, String> {
+        storage.validate_shape(&shape)?;
         let (rows, cols) = if shape.len() >= 2 {
             (shape[0], shape[1])
         } else if shape.len() == 1 {
@@ -2071,9 +2039,26 @@ impl Tensor {
             (0, 0)
         };
         let dtype = storage.numeric_dtype();
+        let (data, integer_data) = match storage {
+            NumericStorage::F64(values) => (values, None),
+            NumericStorage::F32(values) => (values.into_iter().map(f64::from).collect(), None),
+            storage @ (NumericStorage::I8(_)
+            | NumericStorage::I16(_)
+            | NumericStorage::I32(_)
+            | NumericStorage::I64(_)
+            | NumericStorage::U8(_)
+            | NumericStorage::U16(_)
+            | NumericStorage::U32(_)
+            | NumericStorage::U64(_)) => {
+                let integer_data = storage
+                    .into_integer_storage()
+                    .expect("integer NumericStorage variant");
+                (integer_data.to_f64_vec(), Some(integer_data))
+            }
+        };
         Ok(Tensor {
-            data: storage.to_f64_vec(),
-            integer_data: Some(storage),
+            data,
+            integer_data,
             shape,
             rows,
             cols,
@@ -2081,8 +2066,87 @@ impl Tensor {
         })
     }
 
+    pub fn new_2d(data: Vec<f64>, rows: usize, cols: usize) -> Result<Self, String> {
+        Self::new(data, vec![rows, cols])
+    }
+
+    pub fn from_f32(data: Vec<f32>, shape: Vec<usize>) -> Result<Self, String> {
+        Self::from_numeric_storage(NumericStorage::F32(data), shape)
+    }
+
+    pub fn from_f32_slice(data: &[f32], shape: &[usize]) -> Result<Self, String> {
+        Self::from_numeric_storage(NumericStorage::F32(data.to_vec()), shape.to_vec())
+    }
+
+    pub fn new_with_dtype(
+        data: Vec<f64>,
+        shape: Vec<usize>,
+        dtype: NumericDType,
+    ) -> Result<Self, String> {
+        match dtype {
+            NumericDType::F64 => Self::from_numeric_storage(NumericStorage::F64(data), shape),
+            NumericDType::F32 => Self::from_numeric_storage(
+                NumericStorage::F32(data.into_iter().map(|value| value as f32).collect()),
+                shape,
+            ),
+            integer_dtype => {
+                let prototype =
+                    integer_storage_prototype(integer_dtype).expect("integer dtype prototype");
+                let values = data
+                    .into_iter()
+                    .map(|value| prototype.cast_f64_assignment(value))
+                    .collect();
+                Self::new_integer(prototype.from_same_class_values(values)?, shape)
+            }
+        }
+    }
+
+    /// Construct a tensor backed by an exact homogeneous integer buffer.
+    ///
+    /// The floating `data` member is retained only as a compatibility view for
+    /// legacy numeric consumers. Integer-aware code must use `integer_data`.
+    pub fn new_integer(storage: IntegerStorage, shape: Vec<usize>) -> Result<Self, String> {
+        Self::from_numeric_storage(NumericStorage::from_integer_storage(storage), shape)
+    }
+
     pub fn integer_storage(&self) -> Option<&IntegerStorage> {
         self.integer_data.as_ref()
+    }
+
+    pub fn numeric_dtype(&self) -> NumericDType {
+        self.integer_storage()
+            .map_or(self.dtype, IntegerStorage::numeric_dtype)
+    }
+
+    /// Consumes transitional tensor fields into one native numeric buffer.
+    ///
+    /// This is the ownership bridge used while call sites migrate away from
+    /// direct access to the legacy public fields.
+    pub fn into_numeric_storage(self) -> Result<NumericStorage, String> {
+        let Self {
+            data,
+            integer_data,
+            shape,
+            dtype,
+            ..
+        } = self;
+        let storage = match integer_data {
+            Some(storage) => NumericStorage::from_integer_storage(storage),
+            None => match dtype {
+                NumericDType::F64 => NumericStorage::F64(data),
+                NumericDType::F32 => {
+                    NumericStorage::F32(data.into_iter().map(|value| value as f32).collect())
+                }
+                integer_dtype => {
+                    return Err(format!(
+                        "{} tensor is missing authoritative integer storage",
+                        integer_dtype.class_name()
+                    ));
+                }
+            },
+        };
+        storage.validate_shape(&shape)?;
+        Ok(storage)
     }
 
     /// Change only shape metadata while retaining the underlying numeric storage.
@@ -2120,40 +2184,14 @@ impl Tensor {
 
     pub fn zeros(shape: Vec<usize>) -> Self {
         let size: usize = shape.iter().product();
-        let (rows, cols) = if shape.len() >= 2 {
-            (shape[0], shape[1])
-        } else if shape.len() == 1 {
-            (1, shape[0])
-        } else {
-            (0, 0)
-        };
-        Tensor {
-            data: vec![0.0; size],
-            integer_data: None,
-            shape,
-            rows,
-            cols,
-            dtype: NumericDType::F64,
-        }
+        Self::from_numeric_storage(NumericStorage::zeros(NumericDType::F64, size), shape)
+            .expect("zero storage length matches shape")
     }
 
     pub fn ones(shape: Vec<usize>) -> Self {
         let size: usize = shape.iter().product();
-        let (rows, cols) = if shape.len() >= 2 {
-            (shape[0], shape[1])
-        } else if shape.len() == 1 {
-            (1, shape[0])
-        } else {
-            (0, 0)
-        };
-        Tensor {
-            data: vec![1.0; size],
-            integer_data: None,
-            shape,
-            rows,
-            cols,
-            dtype: NumericDType::F64,
-        }
+        Self::from_numeric_storage(NumericStorage::ones(NumericDType::F64, size), shape)
+            .expect("one storage length matches shape")
     }
 
     // 2D helpers for transitional call sites
@@ -2214,14 +2252,11 @@ impl Tensor {
     }
 
     pub fn scalar_to_tensor2(scalar: f64, rows: usize, cols: usize) -> Tensor {
-        Tensor {
-            data: vec![scalar; rows * cols],
-            integer_data: None,
-            shape: vec![rows, cols],
-            rows,
-            cols,
-            dtype: NumericDType::F64,
-        }
+        Self::from_numeric_storage(
+            NumericStorage::F64(vec![scalar; rows * cols]),
+            vec![rows, cols],
+        )
+        .expect("scalar expansion length matches shape")
     }
     // No-compat constructors: prefer new/new_2d/zeros/zeros2/ones/ones2
 }

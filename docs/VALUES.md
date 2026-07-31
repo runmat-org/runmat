@@ -87,6 +87,8 @@ The compatibility mirror is transitional, not the target value model. Dense real
 
 `NumericStorage`, `NumericScalar`, `NumericStorageView`, and `NumericStorageViewMut` define that exhaustive native storage contract in `runmat-builtins`. Exact scalar access, same-class mutation, zero/one allocation, shape-validated clone, gather, and reorder preserve the storage variant; `materialize_f64` and `materialize_f32` are the explicitly named potentially lossy boundaries. During Phase 1 these primitives coexist with the current public `Tensor` fields; the later field-privatization migration moves `Tensor` ownership onto this contract and uses compiler diagnostics to enumerate every consumer.
 
+`Tensor::from_numeric_storage` is the Phase 2 construction boundary for all ten native classes, and `Tensor::into_numeric_storage` is the transitional consuming ownership bridge. Until field privatization completes, the constructor derives legacy public compatibility fields from its native input; new construction paths should enter through this boundary rather than assemble those fields independently.
+
 Sparse values, complex values, provider transfer views, and GPU handle metadata will use the same authoritative element-type contract while retaining container/backend-appropriate physical layouts. In particular, “unified” does not require sparse CSC values and packed WGPU words to share an in-memory layout.
 
 ### Numeric boundary rule
