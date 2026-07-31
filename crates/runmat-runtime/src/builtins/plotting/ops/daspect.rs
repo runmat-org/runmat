@@ -223,14 +223,7 @@ fn set_ratio_and_mode(target: AxesTarget, ratio: [f64; 3], mode: &str) -> Builti
 }
 
 fn ratio_value(ratio: [f64; 3]) -> Value {
-    Value::Tensor(Tensor {
-        rows: 1,
-        cols: 3,
-        shape: vec![1, 3],
-        data: ratio.to_vec(),
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    Value::Tensor(Tensor::new(ratio.to_vec(), vec![1, 3]).expect("aspect-ratio row vector"))
 }
 
 fn value_as_string(value: &Value) -> Option<String> {
@@ -347,14 +340,9 @@ mod tests {
     }
 
     fn ratio(values: &[f64]) -> Value {
-        Value::Tensor(Tensor {
-            rows: 1,
-            cols: values.len(),
-            shape: vec![1, values.len()],
-            data: values.to_vec(),
-            integer_data: None,
-            dtype: runmat_builtins::NumericDType::F64,
-        })
+        Value::Tensor(
+            Tensor::new(values.to_vec(), vec![1, values.len()]).expect("aspect-ratio test vector"),
+        )
     }
 
     fn tensor_data(value: Value) -> Vec<f64> {

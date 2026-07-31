@@ -262,14 +262,8 @@ fn ticks_or_auto(explicit: Option<&[f64]>, bounds: Option<(f64, f64)>) -> Vec<f6
 }
 
 fn tick_value(data: Vec<f64>) -> Value {
-    Value::Tensor(Tensor {
-        rows: 1,
-        cols: data.len(),
-        shape: vec![1, data.len()],
-        data,
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    let len = data.len();
+    Value::Tensor(Tensor::new(data, vec![1, len]).expect("tick row vector"))
 }
 
 fn value_as_string(value: &Value) -> Option<String> {

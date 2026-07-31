@@ -596,26 +596,15 @@ pub(super) fn handles_value(handles: Vec<f64>) -> Value {
     if handles.len() == 1 {
         Value::Num(handles[0])
     } else {
-        Value::Tensor(Tensor {
-            rows: 1,
-            cols: handles.len(),
-            shape: vec![1, handles.len()],
-            data: handles,
-            integer_data: None,
-            dtype: runmat_builtins::NumericDType::F64,
-        })
+        let len = handles.len();
+        Value::Tensor(Tensor::new(handles, vec![1, len]).expect("line handle row vector"))
     }
 }
 
 fn vector_value(data: &[f64]) -> Value {
-    Value::Tensor(Tensor {
-        data: data.to_vec(),
-        integer_data: None,
-        rows: 1,
-        cols: data.len(),
-        shape: vec![1, data.len()],
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    Value::Tensor(
+        Tensor::new(data.to_vec(), vec![1, data.len()]).expect("line property row vector"),
+    )
 }
 
 fn begins_with_name_value(args: &[Value]) -> bool {
@@ -665,14 +654,7 @@ mod tests {
     }
 
     fn tensor(data: &[f64], rows: usize, cols: usize) -> Value {
-        Value::Tensor(Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            rows,
-            cols,
-            shape: vec![rows, cols],
-            dtype: runmat_builtins::NumericDType::F64,
-        })
+        Value::Tensor(Tensor::new(data.to_vec(), vec![rows, cols]).expect("line test tensor"))
     }
 
     fn cleared_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Tensor {

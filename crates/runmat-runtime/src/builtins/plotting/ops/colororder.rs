@@ -296,14 +296,7 @@ fn colors_to_tensor(colors: Vec<Vec4>) -> Value {
     for color in &colors {
         data.push(color.z as f64);
     }
-    Value::Tensor(Tensor {
-        data,
-        shape: vec![rows, 3],
-        rows,
-        cols: 3,
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    Value::Tensor(Tensor::new(data, vec![rows, 3]).expect("color-order matrix"))
 }
 
 fn named_palette(name: &str) -> Option<Vec<Vec4>> {
@@ -412,14 +405,7 @@ mod tests {
     }
 
     fn rgb_matrix(data: Vec<f64>, rows: usize) -> Value {
-        Value::Tensor(Tensor {
-            cols: 3,
-            rows,
-            shape: vec![rows, 3],
-            data,
-            integer_data: None,
-            dtype: runmat_builtins::NumericDType::F64,
-        })
+        Value::Tensor(Tensor::new(data, vec![rows, 3]).expect("RGB matrix"))
     }
 
     fn integer_rgb_matrix(data: Vec<u8>, rows: usize) -> Value {
@@ -524,14 +510,7 @@ mod tests {
     #[test]
     fn colororder_recolors_existing_and_future_implicit_lines() {
         let _guard = setup_plot_tests();
-        let y = Value::Tensor(Tensor {
-            data: vec![1.0, 2.0, 3.0],
-            integer_data: None,
-            shape: vec![1, 3],
-            rows: 1,
-            cols: 3,
-            dtype: runmat_builtins::NumericDType::F64,
-        });
+        let y = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).expect("line data"));
         let _ = futures::executor::block_on(plot_builtin(vec![y.clone()])).unwrap();
         let colors = rgb_matrix(vec![1.0, 0.0, 0.0], 1);
         let _ = colororder_builtin(vec![colors]).unwrap();

@@ -241,22 +241,11 @@ fn parse_view_angles(args: &[Value]) -> crate::BuiltinResult<(f32, f32)> {
 
 fn scalar_or_tensor(value: &Value) -> crate::BuiltinResult<Tensor> {
     match value {
-        Value::Num(v) => Ok(Tensor {
-            rows: 1,
-            cols: 1,
-            shape: vec![1, 1],
-            data: vec![*v],
-            integer_data: None,
-            dtype: runmat_builtins::NumericDType::F64,
-        }),
-        Value::Int(i) => Ok(Tensor {
-            rows: 1,
-            cols: 1,
-            shape: vec![1, 1],
-            data: vec![i.to_f64()],
-            integer_data: None,
-            dtype: runmat_builtins::NumericDType::F64,
-        }),
+        Value::Num(v) => {
+            Tensor::new(vec![*v], vec![1, 1]).map_err(|_| view_error(&VIEW_ERROR_INVALID_ARGUMENT))
+        }
+        Value::Int(i) => Tensor::new(vec![i.to_f64()], vec![1, 1])
+            .map_err(|_| view_error(&VIEW_ERROR_INVALID_ARGUMENT)),
         other => Tensor::try_from(other).map_err(|_| view_error(&VIEW_ERROR_INVALID_ARGUMENT)),
     }
 }
@@ -278,25 +267,15 @@ pub fn view_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             .map_err(map_view_figure_error)?;
         let az = meta.view_azimuth_deg.unwrap_or(-37.5) as f64;
         let el = meta.view_elevation_deg.unwrap_or(30.0) as f64;
-        return Ok(Value::Tensor(Tensor {
-            rows: 1,
-            cols: 2,
-            shape: vec![1, 2],
-            data: vec![az, el],
-            integer_data: None,
-            dtype: runmat_builtins::NumericDType::F64,
-        }));
+        return Ok(Value::Tensor(
+            Tensor::new(vec![az, el], vec![1, 2]).expect("view vector"),
+        ));
     }
     let (az, el) = parse_view_angles(rest)?;
     set_view_for_axes(target.0, target.1, az, el).map_err(map_view_figure_error)?;
-    Ok(Value::Tensor(Tensor {
-        rows: 1,
-        cols: 2,
-        shape: vec![1, 2],
-        data: vec![az as f64, el as f64],
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    }))
+    Ok(Value::Tensor(
+        Tensor::new(vec![az as f64, el as f64], vec![1, 2]).expect("view vector"),
+    ))
 }
 
 #[cfg(test)]
@@ -380,14 +359,7 @@ mod tests {
         set_builtin(vec![
             ax,
             Value::String("View".into()),
-            Value::Tensor(Tensor {
-                rows: 1,
-                cols: 2,
-                shape: vec![1, 2],
-                data: vec![180.0, -30.0],
-                integer_data: None,
-                dtype: runmat_builtins::NumericDType::F64,
-            }),
+            Value::Tensor(Tensor::new(vec![180.0, -30.0], vec![1, 2]).expect("view vector")),
         ])
         .unwrap();
         let fig = clone_figure(current_figure_handle()).unwrap();
