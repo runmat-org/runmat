@@ -2,6 +2,12 @@
 
 _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/runmat/releases) for runtime release binaries._
 
+## [v0.6.1](https://github.com/runmat-org/runmat/compare/v0.6.0...v0.6.1) - July 2026
+
+### Runtime
+
+* Fixed `addpath` and `addpath(genpath(...))` so `.m` functions on the session search path are callable immediately and across later REPL inputs through direct calls, `feval`, function handles, and callbacks, with `which`, path precedence, `rmpath`, packages, and private functions using the same runtime resolution behavior.
+
 ## [v0.6.0](https://github.com/runmat-org/runmat/compare/v0.5.6...v0.6.0) - July 2026
 
 ### Desktop

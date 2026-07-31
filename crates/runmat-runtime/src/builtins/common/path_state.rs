@@ -1,4 +1,4 @@
-//! Session-wide MATLAB path state shared between the `path` builtin and
+//! MATLAB-style source search-path state shared by the `path` builtin and
 //! filesystem helpers such as `exist` or `which`.
 //!
 //! The MATLAB search path is represented as a single platform-specific string
@@ -6,9 +6,15 @@
 //! Windows, `:` everywhere else).  RunMat keeps the current working directory
 //! separate from this list so callers can freely replace or manipulate the path
 //! without losing the implicit `pwd` entry that MATLAB always prioritises.
+//! Active runtime sessions provide their own [`SearchPath`]; the process state
+//! below remains as the initialization and standalone-builtin compatibility
+//! context.
 
 use once_cell::sync::Lazy;
-use std::sync::RwLock;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, RwLock,
+};
 
 use crate::builtins::common::env as runtime_env;
 
@@ -25,6 +31,62 @@ impl PathState {
     fn initialise() -> Self {
         Self {
             current: initial_path_string(),
+        }
+    }
+}
+
+/// Ordered, session-owned source search path used by filesystem discovery and
+/// runtime callable resolution.
+#[derive(Debug)]
+pub struct SearchPath {
+    current: RwLock<String>,
+    generation: AtomicU64,
+}
+
+impl SearchPath {
+    pub fn new(current: String) -> Self {
+        Self {
+            current: RwLock::new(current),
+            generation: AtomicU64::new(0),
+        }
+    }
+
+    pub fn current_string(&self) -> String {
+        self.current
+            .read()
+            .map(|guard| guard.clone())
+            .unwrap_or_else(|poison| poison.into_inner().clone())
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Acquire)
+    }
+
+    fn replace(&self, new_path: &str) {
+        let mut guard = self
+            .current
+            .write()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if *guard != new_path {
+            *guard = new_path.to_string();
+            self.generation.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+
+    fn append(&self, segments: &[String]) {
+        if segments.is_empty() {
+            return;
+        }
+        let mut guard = self
+            .current
+            .write()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let mut parts = split_segments(&guard);
+        parts.extend(segments.iter().cloned());
+        let next = join_parts(&parts);
+        if *guard != next {
+            *guard = next;
+            self.generation.fetch_add(1, Ordering::AcqRel);
         }
     }
 }
@@ -61,6 +123,9 @@ static PATH_STATE: Lazy<RwLock<PathState>> = Lazy::new(|| RwLock::new(PathState:
 /// Return the current MATLAB path string (without the implicit current
 /// directory entry).
 pub fn current_path_string() -> String {
+    if let Some(search_path) = active_search_path() {
+        return search_path.current_string();
+    }
     PATH_STATE
         .read()
         .map(|guard| guard.current.clone())
@@ -68,6 +133,10 @@ pub fn current_path_string() -> String {
 }
 
 pub fn append_to_path(segments: &[String]) {
+    if let Some(search_path) = active_search_path() {
+        search_path.append(segments);
+        return;
+    }
     if segments.is_empty() {
         return;
     }
@@ -79,10 +148,14 @@ pub fn append_to_path(segments: &[String]) {
     guard.current = join_parts(&parts);
 }
 
-/// Replace the MATLAB path string for the current session. When `new_path` is
-/// empty the session path becomes empty and the `RUNMAT_PATH` environment
-/// variable is removed.
+/// Replace the MATLAB path string for the active session. Without an active
+/// runtime context this updates the compatibility process state and mirrors it
+/// to `RUNMAT_PATH`.
 pub fn set_path_string(new_path: &str) {
+    if let Some(search_path) = active_search_path() {
+        search_path.replace(new_path);
+        return;
+    }
     if new_path.is_empty() {
         runtime_env::remove_var("RUNMAT_PATH");
     } else {
@@ -93,6 +166,10 @@ pub fn set_path_string(new_path: &str) {
         .write()
         .unwrap_or_else(|poison| poison.into_inner());
     guard.current = new_path.to_string();
+}
+
+fn active_search_path() -> Option<Arc<SearchPath>> {
+    crate::user_functions::active_runtime_context().map(|context| Arc::clone(context.search_path()))
 }
 
 /// Split the current MATLAB path string into individual entries, omitting
@@ -120,5 +197,30 @@ pub(crate) mod tests {
         let parts = vec!["/tmp/a".to_string(), "/tmp/b".to_string()];
         let joined = join_parts(&parts);
         assert_eq!(split_segments(&joined), parts);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn active_runtime_context_owns_path_and_generation() {
+        let first = Arc::new(SearchPath::new("first".to_string()));
+        let _first_context = crate::user_functions::install_runtime_context(Arc::new(
+            crate::user_functions::RuntimeContext::new(Arc::clone(&first)),
+        ));
+        assert_eq!(current_path_string(), "first");
+        set_path_string("first");
+        assert_eq!(first.generation(), 0, "no-op replacement is not a mutation");
+        let updated = format!("first{PATH_LIST_SEPARATOR}added");
+        set_path_string(&updated);
+        assert_eq!(current_path_string(), updated);
+        assert_eq!(first.generation(), 1);
+
+        let second = Arc::new(SearchPath::new("second".to_string()));
+        {
+            let _second_context = crate::user_functions::install_runtime_context(Arc::new(
+                crate::user_functions::RuntimeContext::new(second),
+            ));
+            assert_eq!(current_path_string(), "second");
+        }
+        assert_eq!(current_path_string(), updated);
     }
 }
