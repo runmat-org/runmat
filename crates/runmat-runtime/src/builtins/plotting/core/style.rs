@@ -1422,28 +1422,14 @@ pub(crate) mod tests {
         let opts = LineStyleParseOptions::plot();
         parse_color_value(
             &opts,
-            &Value::Tensor(Tensor {
-                data: vec![0.1, 0.2, 1.0],
-                integer_data: None,
-                shape: vec![1, 3],
-                rows: 1,
-                cols: 3,
-                dtype: runmat_builtins::NumericDType::F64,
-            }),
+            &Value::Tensor(Tensor::new(vec![0.1, 0.2, 1.0], vec![1, 3]).expect("RGB triplet")),
         )
         .expect("valid rgb");
 
         for data in [vec![1.2, 0.0, 0.0], vec![0.0, f64::NAN, 0.0]] {
             let err = parse_color_value(
                 &opts,
-                &Value::Tensor(Tensor {
-                    data,
-                    integer_data: None,
-                    shape: vec![1, 3],
-                    rows: 1,
-                    cols: 3,
-                    dtype: runmat_builtins::NumericDType::F64,
-                }),
+                &Value::Tensor(Tensor::new(data, vec![1, 3]).expect("RGB triplet")),
             )
             .expect_err("invalid rgb should fail");
             assert!(err.message.contains("RGB color components"));
@@ -1499,14 +1485,9 @@ pub(crate) mod tests {
     #[test]
     fn bar_style_does_not_treat_rgb_triplet_as_positional_width() {
         let defaults = BarStyleDefaults::new(Vec4::new(0.2, 0.6, 0.9, 1.0), 0.8);
-        let rest = vec![Value::Tensor(Tensor {
-            data: vec![0.8, 0.1, 0.2],
-            integer_data: None,
-            shape: vec![1, 3],
-            rows: 1,
-            cols: 3,
-            dtype: runmat_builtins::NumericDType::F64,
-        })];
+        let rest = vec![Value::Tensor(
+            Tensor::new(vec![0.8, 0.1, 0.2], vec![1, 3]).expect("RGB triplet"),
+        )];
 
         let err = parse_bar_style_args("barh", &rest, defaults).expect_err("rgb is not width");
         assert!(err.message.contains("name-value arguments"));

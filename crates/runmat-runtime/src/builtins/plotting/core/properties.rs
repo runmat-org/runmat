@@ -881,14 +881,9 @@ fn get_axes_property(
         Some("view") => {
             let az = meta.view_azimuth_deg.unwrap_or(-37.5) as f64;
             let el = meta.view_elevation_deg.unwrap_or(30.0) as f64;
-            Ok(Value::Tensor(runmat_builtins::Tensor {
-                rows: 1,
-                cols: 2,
-                shape: vec![1, 2],
-                data: vec![az, el],
-                integer_data: None,
-                dtype: runmat_builtins::NumericDType::F64,
-            }))
+            Ok(Value::Tensor(
+                Tensor::new(vec![az, el], vec![1, 2]).expect("view vector"),
+            ))
         }
         Some("grid") => Ok(Value::Bool(meta.grid_enabled)),
         Some("minorgrid") => Ok(Value::Bool(meta.minor_grid_enabled)),
@@ -2601,14 +2596,7 @@ fn child_base_struct(kind: &str, figure: FigureHandle, axes_index: usize) -> Str
 }
 
 fn figure_position_value(position: [f64; 4]) -> Value {
-    Value::Tensor(Tensor {
-        rows: 1,
-        cols: 4,
-        shape: vec![1, 4],
-        data: position.to_vec(),
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    Value::Tensor(Tensor::new(position.to_vec(), vec![1, 4]).expect("figure position vector"))
 }
 
 fn parse_figure_position(value: &Value, builtin: &'static str) -> BuiltinResult<[f64; 4]> {
@@ -2647,14 +2635,13 @@ fn is_figure_position_vector_shape(tensor: &Tensor) -> bool {
 }
 
 fn text_position_value(position: glam::Vec3) -> Value {
-    Value::Tensor(Tensor {
-        rows: 1,
-        cols: 3,
-        shape: vec![1, 3],
-        data: vec![position.x as f64, position.y as f64, position.z as f64],
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    Value::Tensor(
+        Tensor::new(
+            vec![position.x as f64, position.y as f64, position.z as f64],
+            vec![1, 3],
+        )
+        .expect("text position vector"),
+    )
 }
 
 fn parse_text_position(value: &Value, builtin: &'static str) -> BuiltinResult<glam::Vec3> {
@@ -6703,25 +6690,13 @@ fn text_value(text: Option<String>) -> Value {
 }
 
 fn handles_value(handles: Vec<f64>) -> Value {
-    Value::Tensor(runmat_builtins::Tensor {
-        rows: 1,
-        cols: handles.len(),
-        shape: vec![1, handles.len()],
-        data: handles,
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    let len = handles.len();
+    Value::Tensor(Tensor::new(handles, vec![1, len]).expect("handle row vector"))
 }
 
 fn tensor_from_vec(data: Vec<f64>) -> Value {
-    Value::Tensor(runmat_builtins::Tensor {
-        rows: 1,
-        cols: data.len(),
-        shape: vec![1, data.len()],
-        data,
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    let len = data.len();
+    Value::Tensor(Tensor::new(data, vec![1, len]).expect("property row vector"))
 }
 
 fn string_array_from_vec(data: Vec<String>) -> BuiltinResult<Value> {
@@ -6769,14 +6744,7 @@ fn tensor_from_matrix(data: Vec<Vec<f64>>) -> Value {
     let rows = data.len();
     let cols = data.first().map(|row| row.len()).unwrap_or(0);
     let flat = data.into_iter().flat_map(|row| row.into_iter()).collect();
-    Value::Tensor(runmat_builtins::Tensor {
-        rows,
-        cols,
-        shape: vec![rows, cols],
-        data: flat,
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    Value::Tensor(Tensor::new(flat, vec![rows, cols]).expect("property matrix"))
 }
 
 fn surface_x_data_value(surface: &runmat_plot::plots::SurfacePlot) -> Value {
@@ -6810,14 +6778,7 @@ fn surface_grid_to_tensor(grid: &[Vec<f64>]) -> Value {
     for column in grid {
         data.extend(column.iter().copied());
     }
-    Value::Tensor(runmat_builtins::Tensor {
-        rows,
-        cols,
-        shape: vec![rows, cols],
-        data,
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    Value::Tensor(Tensor::new(data, vec![rows, cols]).expect("surface grid"))
 }
 
 fn surface_coordinate_data_from_value(
@@ -7016,14 +6977,7 @@ fn vertices_tensor(vertices: &[glam::Vec3]) -> Value {
             });
         }
     }
-    Value::Tensor(runmat_builtins::Tensor {
-        rows,
-        cols,
-        shape: vec![rows, cols],
-        data,
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    Value::Tensor(Tensor::new(data, vec![rows, cols]).expect("patch vertices"))
 }
 
 fn faces_tensor(faces: &[Vec<usize>]) -> Value {
@@ -7039,14 +6993,7 @@ fn faces_tensor(faces: &[Vec<usize>]) -> Value {
             );
         }
     }
-    Value::Tensor(runmat_builtins::Tensor {
-        rows,
-        cols,
-        shape: vec![rows, cols],
-        data,
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    Value::Tensor(Tensor::new(data, vec![rows, cols]).expect("patch faces"))
 }
 
 fn patch_color_property(mode: runmat_plot::plots::PatchFaceColorMode, color: glam::Vec4) -> Value {
