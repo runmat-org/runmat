@@ -194,7 +194,7 @@ mod tests {
     use crate::builtins::plotting::subplot::subplot_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
-    use runmat_builtins::{NumericDType, Tensor};
+    use runmat_builtins::Tensor;
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -205,14 +205,7 @@ mod tests {
     }
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
-        Value::Tensor(Tensor {
-            rows: shape.first().copied().unwrap_or(1),
-            cols: shape.get(1).copied().unwrap_or(1),
-            shape,
-            data,
-            integer_data: None,
-            dtype: NumericDType::F64,
-        })
+        Value::Tensor(Tensor::new(data, shape).expect("linkaxes test tensor"))
     }
 
     fn numeric_vec(value: Value) -> Vec<f64> {

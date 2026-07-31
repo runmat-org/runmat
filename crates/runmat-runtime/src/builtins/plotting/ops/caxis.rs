@@ -94,7 +94,7 @@ mod tests {
     use super::*;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
-    use runmat_builtins::{NumericDType, Tensor};
+    use runmat_builtins::Tensor;
 
     #[test]
     fn caxis_descriptor_signatures_cover_core_forms() {
@@ -115,14 +115,9 @@ mod tests {
         reset_hold_state_for_run();
         let _ = clear_figure(None);
 
-        let _ = caxis_builtin(vec![Value::Tensor(Tensor {
-            data: vec![0.1, 0.9],
-            integer_data: None,
-            shape: vec![1, 2],
-            rows: 1,
-            cols: 2,
-            dtype: NumericDType::F64,
-        })])
+        let _ = caxis_builtin(vec![Value::Tensor(
+            Tensor::new(vec![0.1, 0.9], vec![1, 2]).expect("caxis limits"),
+        )])
         .unwrap();
 
         let queried = caxis_builtin(Vec::new()).unwrap();

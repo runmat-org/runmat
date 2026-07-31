@@ -121,14 +121,9 @@ mod tests {
         reset_hold_state_for_run();
         let _ = clear_figure(None);
 
-        let _ = ylim_builtin(vec![Value::Tensor(runmat_builtins::Tensor {
-            data: vec![1.0, 5.0],
-            integer_data: None,
-            shape: vec![1, 2],
-            rows: 1,
-            cols: 2,
-            dtype: runmat_builtins::NumericDType::F64,
-        })])
+        let _ = ylim_builtin(vec![Value::Tensor(
+            runmat_builtins::Tensor::new(vec![1.0, 5.0], vec![1, 2]).expect("y limits"),
+        )])
         .unwrap();
         let _ = ylim_builtin(vec![Value::String("auto".into())]).unwrap();
         let queried = ylim_builtin(Vec::new()).unwrap();

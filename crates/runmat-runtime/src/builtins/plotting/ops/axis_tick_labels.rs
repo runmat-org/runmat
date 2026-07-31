@@ -373,14 +373,8 @@ pub(crate) fn label_cell_texts(value: &Value) -> Vec<String> {
 
 #[cfg(test)]
 pub(crate) fn tensor(data: Vec<f64>) -> Value {
-    Value::Tensor(runmat_builtins::Tensor {
-        rows: 1,
-        cols: data.len(),
-        shape: vec![1, data.len()],
-        data,
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    let len = data.len();
+    Value::Tensor(runmat_builtins::Tensor::new(data, vec![1, len]).expect("tick label test row"))
 }
 
 #[cfg(test)]

@@ -121,14 +121,9 @@ mod tests {
         reset_hold_state_for_run();
         let _ = clear_figure(None);
 
-        let result = xlim_builtin(vec![Value::Tensor(runmat_builtins::Tensor {
-            data: vec![0.0, 10.0],
-            integer_data: None,
-            shape: vec![1, 2],
-            rows: 1,
-            cols: 2,
-            dtype: runmat_builtins::NumericDType::F64,
-        })])
+        let result = xlim_builtin(vec![Value::Tensor(
+            runmat_builtins::Tensor::new(vec![0.0, 10.0], vec![1, 2]).expect("x limits"),
+        )])
         .unwrap();
         assert!(matches!(result, Value::Tensor(_)));
         let queried = xlim_builtin(Vec::new()).unwrap();
