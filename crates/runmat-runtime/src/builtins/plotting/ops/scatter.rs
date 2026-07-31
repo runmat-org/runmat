@@ -1221,14 +1221,7 @@ pub(crate) mod tests {
     }
 
     fn tensor_from(data: &[f64]) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![data.len()],
-            rows: data.len(),
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), vec![data.len()]).expect("scatter test vector")
     }
 
     fn assert_plotting_unavailable(err: &RuntimeError) {
@@ -1288,14 +1281,7 @@ pub(crate) mod tests {
         setup_plot_tests();
         let rest = vec![
             Value::Num(49.0),
-            Value::Tensor(Tensor {
-                data: vec![0.9, 0.2, 0.2],
-                integer_data: None,
-                shape: vec![1, 3],
-                rows: 1,
-                cols: 3,
-                dtype: runmat_builtins::NumericDType::F64,
-            }),
+            Value::Tensor(Tensor::new(vec![0.9, 0.2, 0.2], vec![1, 3]).expect("RGB row")),
             Value::String("filled".into()),
             Value::String("Marker".into()),
             Value::String("o".into()),

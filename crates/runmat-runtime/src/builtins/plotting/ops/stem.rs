@@ -776,14 +776,10 @@ fn parse_stem_args(
         let y_tensor =
             Tensor::try_from(&y).map_err(|e| plotting_error(BUILTIN_NAME, format!("stem: {e}")))?;
         let len = tensor_utils::tensor_element_len(&y_tensor);
-        let x = Value::Tensor(Tensor {
-            data: (1..=len).map(|i| i as f64).collect(),
-            integer_data: None,
-            shape: vec![len],
-            rows: len,
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        });
+        let x = Value::Tensor(
+            Tensor::new((1..=len).map(|i| i as f64).collect(), vec![len])
+                .expect("implicit stem axis"),
+        );
         return Ok((target_axes, x, y, Vec::new()));
     };
     if matches!(second, Value::String(_) | Value::CharArray(_)) {
@@ -791,14 +787,10 @@ fn parse_stem_args(
         let y_tensor =
             Tensor::try_from(&y).map_err(|e| plotting_error(BUILTIN_NAME, format!("stem: {e}")))?;
         let len = tensor_utils::tensor_element_len(&y_tensor);
-        let x = Value::Tensor(Tensor {
-            data: (1..=len).map(|i| i as f64).collect(),
-            integer_data: None,
-            shape: vec![len],
-            rows: len,
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        });
+        let x = Value::Tensor(
+            Tensor::new((1..=len).map(|i| i as f64).collect(), vec![len])
+                .expect("implicit stem axis"),
+        );
         let mut rest = vec![second];
         rest.extend(it);
         return Ok((target_axes, x, y, rest));
@@ -819,14 +811,7 @@ mod tests {
     use runmat_plot::plots::PlotElement;
 
     fn tensor_from(data: &[f64]) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![data.len()],
-            rows: data.len(),
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), vec![data.len()]).expect("stem test vector")
     }
 
     #[test]

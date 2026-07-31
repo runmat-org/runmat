@@ -1113,14 +1113,7 @@ pub(crate) mod tests {
     }
 
     fn tensor_from(data: &[f64]) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![data.len()],
-            rows: data.len(),
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), vec![data.len()]).expect("scatter3 test vector")
     }
 
     fn assert_plotting_unavailable(err: &RuntimeError) {
@@ -1157,14 +1150,9 @@ pub(crate) mod tests {
     #[test]
     fn scatter3_accepts_per_point_sizes() {
         setup_plot_tests();
-        let rest = vec![Value::Tensor(Tensor {
-            data: vec![1.0, 2.0],
-            integer_data: None,
-            shape: vec![2],
-            rows: 2,
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        })];
+        let rest = vec![Value::Tensor(
+            Tensor::new(vec![1.0, 2.0], vec![2]).expect("point sizes"),
+        )];
         let args = PointArgs::parse(rest, LineStyleParseOptions::scatter3()).unwrap();
         let style = resolve_scatter3_style(2, &args, "scatter3").expect("style");
         assert!(style.per_point_sizes.is_some());
@@ -1199,14 +1187,7 @@ pub(crate) mod tests {
         setup_plot_tests();
         let rest = vec![
             Value::Num(49.0),
-            Value::Tensor(Tensor {
-                data: vec![0.9, 0.2, 0.2],
-                integer_data: None,
-                shape: vec![1, 3],
-                rows: 1,
-                cols: 3,
-                dtype: runmat_builtins::NumericDType::F64,
-            }),
+            Value::Tensor(Tensor::new(vec![0.9, 0.2, 0.2], vec![1, 3]).expect("RGB row")),
             Value::String("filled".into()),
             Value::String("Marker".into()),
             Value::String("o".into()),

@@ -494,14 +494,9 @@ fn infer_stairs_x_from_y(y: &Value) -> BuiltinResult<Value> {
         }
     };
     let data = (1..=len).map(|i| i as f64).collect::<Vec<_>>();
-    Ok(Value::Tensor(Tensor {
-        data,
-        shape: vec![len],
-        rows: len,
-        cols: 1,
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    }))
+    Ok(Value::Tensor(
+        Tensor::new(data, vec![len]).expect("implicit stairs axis"),
+    ))
 }
 
 fn build_stairs_gpu_plot(
@@ -637,14 +632,7 @@ pub(crate) mod tests {
     }
 
     fn tensor_from(data: &[f64]) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![data.len()],
-            rows: data.len(),
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), vec![data.len()]).expect("stairs test vector")
     }
 
     fn cleared_int_value(storage: IntegerStorage, shape: Vec<usize>) -> Value {

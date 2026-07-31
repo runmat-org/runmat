@@ -15,6 +15,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, RuntimeError};
 
@@ -699,18 +700,13 @@ fn is_numericish(value: &Value) -> bool {
 }
 
 fn infer_errorbar_x_from_y(y: &Value) -> crate::BuiltinResult<Value> {
-    let len = Tensor::try_from(y)
-        .map_err(|e| plotting_error(BUILTIN_NAME, format!("errorbar: {e}")))?
-        .data
-        .len();
-    Ok(Value::Tensor(Tensor {
-        data: (1..=len).map(|i| i as f64).collect(),
-        integer_data: None,
-        shape: vec![len],
-        rows: len,
-        cols: 1,
-        dtype: runmat_builtins::NumericDType::F64,
-    }))
+    let tensor =
+        Tensor::try_from(y).map_err(|e| plotting_error(BUILTIN_NAME, format!("errorbar: {e}")))?;
+    let len = tensor_utils::tensor_element_len(&tensor);
+    Ok(Value::Tensor(
+        Tensor::new((1..=len).map(|i| i as f64).collect(), vec![len])
+            .expect("implicit errorbar axis"),
+    ))
 }
 
 #[cfg(test)]
@@ -723,17 +719,25 @@ mod tests {
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
         subplot::subplot_builtin,
     };
+    use runmat_builtins::IntegerStorage;
     use runmat_plot::plots::PlotElement;
 
     fn vec_tensor(data: &[f64]) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![data.len()],
-            rows: data.len(),
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), vec![data.len()]).expect("errorbar test vector")
+    }
+
+    #[test]
+    fn implicit_errorbar_axis_uses_exact_integer_storage_length() {
+        let mut y = Tensor::new_integer(IntegerStorage::U64(vec![7, 8, 9]), vec![1, 3])
+            .expect("integer y values");
+        y.data.clear();
+
+        let x = infer_errorbar_x_from_y(&Value::Tensor(y)).expect("implicit x");
+        let Value::Tensor(x) = x else {
+            panic!("expected tensor axis");
+        };
+        assert_eq!(x.data, vec![1.0, 2.0, 3.0]);
+        assert_eq!(x.shape, vec![3]);
     }
 
     #[test]
