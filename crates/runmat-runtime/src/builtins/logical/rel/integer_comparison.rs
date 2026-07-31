@@ -3,7 +3,7 @@
 use std::cmp::Ordering;
 
 use runmat_builtins::{
-    ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, Value,
+    ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericScalar, Tensor, Value,
 };
 
 use crate::builtins::common::broadcast::BroadcastPlan;
@@ -148,42 +148,27 @@ struct ComplexOperand<'a> {
 
 impl ComplexOperand<'_> {
     fn has_integer_storage(&self) -> bool {
-        matches!(
-            self.source,
-            ComplexSource::Tensor {
-                integer_storage: Some(_),
-                ..
-            }
-        )
+        match self.source {
+            ComplexSource::Scalar(_, _) => false,
+            ComplexSource::Dense(tensor) => tensor.integer_storage().is_some(),
+        }
     }
 
     fn real_imag_at(&self, index: usize) -> ComplexValue {
         match self.source {
             ComplexSource::Scalar(real, imag) => ComplexValue::Float(real, imag),
-            ComplexSource::Tensor {
-                data: _,
-                integer_storage: Some(storage),
-            } => ComplexValue::Integer(
-                storage_value(&storage.real, index),
-                storage_value(&storage.imag, index),
+            ComplexSource::Dense(tensor) => complex_value_from_scalars(
+                tensor
+                    .numeric_value_at(index)
+                    .expect("complex tensor storage must match shape"),
             ),
-            ComplexSource::Tensor {
-                data,
-                integer_storage: None,
-            } => {
-                let (real, imag) = data[index];
-                ComplexValue::Float(real, imag)
-            }
         }
     }
 }
 
 enum ComplexSource<'a> {
     Scalar(f64, f64),
-    Tensor {
-        data: &'a [(f64, f64)],
-        integer_storage: Option<&'a IntegerComplexStorage>,
-    },
+    Dense(&'a ComplexTensor),
 }
 
 enum ComplexValue {
@@ -196,6 +181,36 @@ enum RealValue {
     Float(f64),
 }
 
+fn real_value_from_scalar(value: NumericScalar) -> RealValue {
+    match value {
+        NumericScalar::F64(value) => RealValue::Float(value),
+        NumericScalar::F32(value) => RealValue::Float(f64::from(value)),
+        integer => RealValue::Integer(
+            integer
+                .into_int_value()
+                .expect("non-floating numeric scalar must be integer"),
+        ),
+    }
+}
+
+fn complex_value_from_scalars((real, imag): (NumericScalar, NumericScalar)) -> ComplexValue {
+    match (real.into_int_value(), imag.into_int_value()) {
+        (Some(real), Some(imag)) => ComplexValue::Integer(real, imag),
+        (None, None) => {
+            ComplexValue::Float(floating_scalar_to_f64(real), floating_scalar_to_f64(imag))
+        }
+        _ => unreachable!("complex storage components must use the same numeric domain"),
+    }
+}
+
+fn floating_scalar_to_f64(value: NumericScalar) -> f64 {
+    match value {
+        NumericScalar::F64(value) => value,
+        NumericScalar::F32(value) => f64::from(value),
+        _ => unreachable!("expected floating numeric scalar"),
+    }
+}
+
 struct RealOperand<'a> {
     source: RealSource<'a>,
     shape: Vec<usize>,
@@ -203,28 +218,22 @@ struct RealOperand<'a> {
 
 impl RealOperand<'_> {
     fn has_integer_storage(&self) -> bool {
-        matches!(
-            self.source,
-            RealSource::ScalarInteger(_)
-                | RealSource::Tensor {
-                    integer_storage: Some(_),
-                    ..
-                }
-        )
+        match self.source {
+            RealSource::ScalarInteger(_) => true,
+            RealSource::Dense(tensor) => tensor.integer_storage().is_some(),
+            RealSource::ScalarFloat(_) | RealSource::Logical { .. } => false,
+        }
     }
 
     fn value_at(&self, index: usize) -> RealValue {
         match self.source {
             RealSource::ScalarInteger(ref value) => RealValue::Integer(value.clone()),
             RealSource::ScalarFloat(value) => RealValue::Float(value),
-            RealSource::Tensor {
-                data: _,
-                integer_storage: Some(storage),
-            } => RealValue::Integer(storage_value(storage, index)),
-            RealSource::Tensor {
-                data,
-                integer_storage: None,
-            } => RealValue::Float(data[index]),
+            RealSource::Dense(tensor) => real_value_from_scalar(
+                tensor
+                    .numeric_value_at(index)
+                    .expect("tensor storage must match shape"),
+            ),
             RealSource::Logical { data } => RealValue::Float(f64::from(data[index] != 0)),
         }
     }
@@ -233,13 +242,8 @@ impl RealOperand<'_> {
 enum RealSource<'a> {
     ScalarInteger(IntValue),
     ScalarFloat(f64),
-    Tensor {
-        data: &'a [f64],
-        integer_storage: Option<&'a IntegerStorage>,
-    },
-    Logical {
-        data: &'a [u8],
-    },
+    Dense(&'a Tensor),
+    Logical { data: &'a [u8] },
 }
 
 fn compare_complex_operands(
@@ -341,10 +345,7 @@ fn complex_operand(value: &Value) -> Option<ComplexOperand<'_>> {
 
 fn complex_tensor_operand(tensor: &ComplexTensor) -> ComplexOperand<'_> {
     ComplexOperand {
-        source: ComplexSource::Tensor {
-            data: &tensor.data,
-            integer_storage: tensor.integer_data.as_ref(),
-        },
+        source: ComplexSource::Dense(tensor),
         shape: tensor.shape.clone(),
     }
 }
@@ -403,10 +404,7 @@ fn real_operand(value: &Value) -> Option<RealOperand<'_>> {
             shape: vec![1, 1],
         }),
         Value::Tensor(tensor) => Some(RealOperand {
-            source: RealSource::Tensor {
-                data: &tensor.data,
-                integer_storage: tensor.integer_storage(),
-            },
+            source: RealSource::Dense(tensor),
             shape: tensor.shape.clone(),
         }),
         Value::LogicalArray(array) => Some(RealOperand {
@@ -492,7 +490,7 @@ fn integer_as_i128(value: &IntValue) -> i128 {
 
 enum NumericOperand<'a> {
     Scalar(f64),
-    Tensor(&'a [f64], &'a [usize]),
+    Dense(&'a Tensor),
     Logical(&'a [u8], &'a [usize]),
 }
 
@@ -500,14 +498,22 @@ impl NumericOperand<'_> {
     fn shape(&self) -> &[usize] {
         match self {
             Self::Scalar(_) => &[1, 1],
-            Self::Tensor(_, shape) | Self::Logical(_, shape) => shape,
+            Self::Dense(tensor) => &tensor.shape,
+            Self::Logical(_, shape) => shape,
         }
     }
 
     fn value_at(&self, index: usize) -> f64 {
         match self {
             Self::Scalar(value) => *value,
-            Self::Tensor(data, _) => data[index],
+            Self::Dense(tensor) => match tensor
+                .numeric_value_at(index)
+                .expect("tensor storage must match shape")
+            {
+                NumericScalar::F64(value) => value,
+                NumericScalar::F32(value) => f64::from(value),
+                _ => unreachable!("integer tensors use the exact integer operand path"),
+            },
             Self::Logical(data, _) => f64::from(data[index] != 0),
         }
     }
@@ -518,7 +524,7 @@ fn numeric_operand(value: &Value) -> Option<NumericOperand<'_>> {
         Value::Num(value) => Some(NumericOperand::Scalar(*value)),
         Value::Bool(value) => Some(NumericOperand::Scalar(if *value { 1.0 } else { 0.0 })),
         Value::Tensor(tensor) if tensor.integer_storage().is_none() => {
-            Some(NumericOperand::Tensor(&tensor.data, &tensor.shape))
+            Some(NumericOperand::Dense(tensor))
         }
         Value::LogicalArray(array) => Some(NumericOperand::Logical(&array.data, &array.shape)),
         _ => None,
@@ -694,7 +700,7 @@ mod tests {
     }
 
     #[test]
-    fn compares_all_integer_storage_classes_to_complex_tensors_without_f64_mirrors() {
+    fn compares_all_integer_storage_classes_to_complex_tensors_exactly() {
         let cases = [
             (
                 IntegerStorage::I8(vec![-7, 5]),
@@ -739,9 +745,8 @@ mod tests {
         ];
 
         for (storage, complex_data, expected_eq) in cases {
-            let mut integer =
+            let integer =
                 runmat_builtins::Tensor::new_integer(storage, vec![1, 2]).expect("integer tensor");
-            integer.data = vec![f64::NAN; 2];
             let complex = Value::ComplexTensor(
                 ComplexTensor::new(complex_data, vec![1, 2]).expect("complex tensor"),
             );

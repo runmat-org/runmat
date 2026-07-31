@@ -727,6 +727,37 @@ pub enum NumericScalar {
     U64(u64),
 }
 
+impl From<IntValue> for NumericScalar {
+    fn from(value: IntValue) -> Self {
+        match value {
+            IntValue::I8(value) => Self::I8(value),
+            IntValue::I16(value) => Self::I16(value),
+            IntValue::I32(value) => Self::I32(value),
+            IntValue::I64(value) => Self::I64(value),
+            IntValue::U8(value) => Self::U8(value),
+            IntValue::U16(value) => Self::U16(value),
+            IntValue::U32(value) => Self::U32(value),
+            IntValue::U64(value) => Self::U64(value),
+        }
+    }
+}
+
+impl NumericScalar {
+    pub fn into_int_value(self) -> Option<IntValue> {
+        match self {
+            Self::I8(value) => Some(IntValue::I8(value)),
+            Self::I16(value) => Some(IntValue::I16(value)),
+            Self::I32(value) => Some(IntValue::I32(value)),
+            Self::I64(value) => Some(IntValue::I64(value)),
+            Self::U8(value) => Some(IntValue::U8(value)),
+            Self::U16(value) => Some(IntValue::U16(value)),
+            Self::U32(value) => Some(IntValue::U32(value)),
+            Self::U64(value) => Some(IntValue::U64(value)),
+            Self::F64(_) | Self::F32(_) => None,
+        }
+    }
+}
+
 /// Immutable typed view over authoritative real numeric storage.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum NumericStorageView<'a> {
@@ -1620,6 +1651,9 @@ mod integer_storage_tests {
                 tensor.dtype = NumericDType::F64;
                 assert_eq!(tensor.numeric_dtype(), dtype);
             }
+            assert_eq!(tensor.numeric_value_at(0), storage.value_at(0));
+            assert_eq!(tensor.numeric_value_at(1), storage.value_at(1));
+            assert_eq!(tensor.numeric_value_at(2), None);
             assert_eq!(tensor.into_numeric_storage(), Ok(storage));
         }
     }
@@ -1775,13 +1809,19 @@ mod integer_storage_tests {
         let tensor = ComplexTensor::new_integer(storage.clone(), vec![1, 2])
             .expect("integer complex tensor");
 
-        assert_eq!(tensor.integer_data, Some(storage));
+        assert_eq!(tensor.integer_storage(), Some(&storage));
         assert_eq!(
             tensor
-                .integer_data
-                .as_ref()
+                .integer_storage()
                 .map(IntegerComplexStorage::class_name),
             Some("uint64")
+        );
+        assert_eq!(
+            tensor.numeric_value_at(0),
+            Some((
+                NumericScalar::U64(9_223_372_036_854_775_809),
+                NumericScalar::U64(u64::MAX)
+            ))
         );
     }
 
@@ -2116,6 +2156,22 @@ impl Tensor {
     pub fn numeric_dtype(&self) -> NumericDType {
         self.integer_storage()
             .map_or(self.dtype, IntegerStorage::numeric_dtype)
+    }
+
+    /// Read one element without routing an integer through floating-point storage.
+    pub fn numeric_value_at(&self, index: usize) -> Option<NumericScalar> {
+        if let Some(storage) = self.integer_storage() {
+            return storage.value_at(index).map(NumericScalar::from);
+        }
+        match self.dtype {
+            NumericDType::F64 => self.data.get(index).copied().map(NumericScalar::F64),
+            NumericDType::F32 => self
+                .data
+                .get(index)
+                .copied()
+                .map(|value| NumericScalar::F32(value as f32)),
+            _ => None,
+        }
     }
 
     /// Consumes transitional tensor fields into one native numeric buffer.
@@ -3017,6 +3073,24 @@ impl ComplexTensor {
             rows,
             cols,
         }
+    }
+
+    pub fn integer_storage(&self) -> Option<&IntegerComplexStorage> {
+        self.integer_data.as_ref()
+    }
+
+    /// Read one complex element without routing integer components through floating point.
+    pub fn numeric_value_at(&self, index: usize) -> Option<(NumericScalar, NumericScalar)> {
+        if let Some(storage) = self.integer_storage() {
+            return Some((
+                NumericScalar::from(storage.real.value_at(index)?),
+                NumericScalar::from(storage.imag.value_at(index)?),
+            ));
+        }
+        self.data
+            .get(index)
+            .copied()
+            .map(|(real, imag)| (NumericScalar::F64(real), NumericScalar::F64(imag)))
     }
 
     /// Formats one element using its exact integer components when present.
