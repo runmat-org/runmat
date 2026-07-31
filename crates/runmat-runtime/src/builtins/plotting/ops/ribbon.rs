@@ -470,18 +470,11 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
-    use runmat_builtins::{IntegerStorage, NumericDType};
+    use runmat_builtins::IntegerStorage;
     use runmat_plot::plots::PlotElement;
 
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
-        Value::Tensor(Tensor {
-            data,
-            rows,
-            cols,
-            shape: vec![rows, cols],
-            integer_data: None,
-            dtype: NumericDType::F64,
-        })
+        Value::Tensor(Tensor::new(data, vec![rows, cols]).expect("ribbon test tensor"))
     }
 
     fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {

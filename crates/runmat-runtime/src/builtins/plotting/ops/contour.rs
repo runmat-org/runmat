@@ -2044,7 +2044,6 @@ fn triangulate_band_triangle(
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
-    use runmat_builtins::NumericDType;
     use runmat_builtins::{ResolveContext, Type};
 
     fn setup_plot_tests() {
@@ -2056,14 +2055,7 @@ pub(crate) mod tests {
         if cols > 1 {
             shape.push(cols);
         }
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape,
-            rows,
-            cols,
-            dtype: NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), shape).expect("contour test tensor")
     }
 
     fn assert_contour_vertices_within_bounds(vertices: &[Vertex], x_axis: &[f64], y_axis: &[f64]) {

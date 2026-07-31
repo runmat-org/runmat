@@ -601,7 +601,7 @@ mod tests {
     use crate::builtins::plotting::state::{clear_figure, reset_hold_state_for_run};
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use futures::executor::block_on;
-    use runmat_builtins::{NumericDType, Tensor};
+    use runmat_builtins::Tensor;
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -612,14 +612,7 @@ mod tests {
     }
 
     fn tensor(data: &[f64]) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![data.len()],
-            rows: data.len(),
-            cols: 1,
-            dtype: NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), vec![data.len()]).expect("print test vector")
     }
 
     fn unique_temp_path(stem: &str) -> PathBuf {

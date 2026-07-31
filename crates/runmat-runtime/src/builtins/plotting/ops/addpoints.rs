@@ -304,14 +304,9 @@ mod tests {
     }
 
     fn vector(values: &[f64]) -> Value {
-        Value::Tensor(Tensor {
-            data: values.to_vec(),
-            integer_data: None,
-            rows: 1,
-            cols: values.len(),
-            shape: vec![1, values.len()],
-            dtype: runmat_builtins::NumericDType::F64,
-        })
+        Value::Tensor(
+            Tensor::new(values.to_vec(), vec![1, values.len()]).expect("addpoints row vector"),
+        )
     }
 
     fn integer_vector(values: &[i16]) -> Value {

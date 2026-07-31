@@ -223,14 +223,10 @@ pub(crate) fn reference_line_builtin(
     if handles.len() == 1 {
         Ok(Value::Num(handles[0]))
     } else {
-        Ok(Value::Tensor(Tensor {
-            data: handles.clone(),
-            integer_data: None,
-            rows: 1,
-            cols: handles.len(),
-            shape: vec![1, handles.len()],
-            dtype: runmat_builtins::NumericDType::F64,
-        }))
+        Ok(Value::Tensor(
+            Tensor::new(handles.clone(), vec![1, handles.len()])
+                .expect("reference line handle row"),
+        ))
     }
 }
 
@@ -378,7 +374,7 @@ fn coordinates_from_value(value: &Value, builtin: &'static str) -> BuiltinResult
     }
     let tensor =
         Tensor::try_from(value).map_err(|err| reference_line_error(builtin, err.to_string()))?;
-    if tensor.data.is_empty() {
+    if tensor_utils::tensor_element_len(&tensor) == 0 {
         return Err(reference_line_error(
             builtin,
             "coordinate vector cannot be empty",
@@ -426,7 +422,7 @@ mod tests {
             vec![1, data.len()],
         )
         .unwrap();
-        tensor.data.fill(f64::NAN);
+        tensor.data.clear();
         tensor
     }
 

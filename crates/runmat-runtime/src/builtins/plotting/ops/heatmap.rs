@@ -388,22 +388,21 @@ fn default_axis(len: usize) -> Vec<f64> {
 }
 
 fn transpose_for_surface(tensor: &Tensor) -> Tensor {
-    let mut data = vec![0.0; tensor_utils::tensor_element_len(tensor)];
+    let mut indices = vec![0; tensor_utils::tensor_element_len(tensor)];
     for row in 0..tensor.rows {
         for col in 0..tensor.cols {
             let src = row + tensor.rows * col;
             let dst = col + tensor.cols * row;
-            data[dst] = tensor_utils::tensor_value_f64(tensor, src);
+            indices[dst] = src;
         }
     }
-    Tensor {
-        data,
-        shape: vec![tensor.cols, tensor.rows],
-        rows: tensor.cols,
-        cols: tensor.rows,
-        integer_data: None,
-        dtype: tensor.dtype,
-    }
+    let storage = tensor
+        .clone()
+        .into_numeric_storage()
+        .and_then(|storage| storage.reorder(&indices))
+        .expect("heatmap transpose permutation");
+    Tensor::from_numeric_storage(storage, vec![tensor.cols, tensor.rows])
+        .expect("heatmap transpose shape")
 }
 
 #[cfg(test)]
@@ -415,7 +414,7 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
-    use runmat_builtins::{CellArray, NumericDType, Value};
+    use runmat_builtins::{CellArray, Value};
     use runmat_plot::plots::PlotElement;
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
@@ -427,14 +426,7 @@ mod tests {
     }
 
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Tensor {
-        Tensor {
-            data,
-            integer_data: None,
-            shape: vec![rows, cols],
-            rows,
-            cols,
-            dtype: NumericDType::F64,
-        }
+        Tensor::new(data, vec![rows, cols]).expect("heatmap test matrix")
     }
 
     fn int_tensor(data: Vec<i16>, rows: usize, cols: usize) -> Tensor {
@@ -452,6 +444,16 @@ mod tests {
         assert_eq!(transposed.rows, 3);
         assert_eq!(transposed.cols, 2);
         assert_eq!(transposed.data, vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]);
+        assert_eq!(
+            transposed.numeric_dtype(),
+            runmat_builtins::NumericDType::I16
+        );
+        assert_eq!(
+            transposed.integer_storage(),
+            Some(&runmat_builtins::IntegerStorage::I16(vec![
+                1, 3, 5, 2, 4, 6
+            ]))
+        );
     }
 
     #[test]

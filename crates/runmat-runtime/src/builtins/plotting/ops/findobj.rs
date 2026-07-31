@@ -580,14 +580,8 @@ fn handle_array(handles: Vec<f64>) -> Value {
                 .expect("empty handle tensor shape is valid"),
         );
     }
-    Value::Tensor(Tensor {
-        rows: handles.len(),
-        cols: 1,
-        shape: vec![handles.len(), 1],
-        data: handles,
-        integer_data: None,
-        dtype: NumericDType::F64,
-    })
+    let len = handles.len();
+    Value::Tensor(Tensor::new(handles, vec![len, 1]).expect("findobj handle column"))
 }
 
 fn invalid_argument(detail: impl AsRef<str>) -> RuntimeError {

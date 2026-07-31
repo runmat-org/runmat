@@ -158,14 +158,9 @@ fn ancestor_array(
         return Ok(empty_handle_array());
     }
     let len = data.len();
-    Ok(Value::Tensor(Tensor {
-        data,
-        shape: vec![1, len],
-        rows: 1,
-        cols: len,
-        integer_data: None,
-        dtype: NumericDType::F64,
-    }))
+    Ok(Value::Tensor(
+        Tensor::new(data, vec![1, len]).expect("ancestor handle row"),
+    ))
 }
 
 fn ancestor_scalar(handle_value: f64, types: &TypeSelector, toplevel: bool) -> Option<f64> {

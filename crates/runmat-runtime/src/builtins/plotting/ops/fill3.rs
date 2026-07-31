@@ -422,7 +422,6 @@ mod tests {
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, clone_figure, current_figure_handle};
     use glam::Vec4;
-    use runmat_builtins::NumericDType;
     use runmat_plot::plots::figure::PlotElement;
     use runmat_plot::plots::{PatchEdgeColorMode, PatchFaceColorMode};
 
@@ -435,14 +434,7 @@ mod tests {
     }
 
     fn tensor(rows: usize, cols: usize, data: &[f64]) -> Value {
-        Value::Tensor(Tensor {
-            rows,
-            cols,
-            shape: vec![rows, cols],
-            data: data.to_vec(),
-            integer_data: None,
-            dtype: NumericDType::F64,
-        })
+        Value::Tensor(Tensor::new(data.to_vec(), vec![rows, cols]).expect("fill3 test tensor"))
     }
 
     #[test]

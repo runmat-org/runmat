@@ -733,17 +733,10 @@ mod tests {
     use super::*;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
-    use runmat_builtins::{IntegerStorage, NumericDType};
+    use runmat_builtins::IntegerStorage;
 
     fn tensor(rows: usize, cols: usize, data: &[f64]) -> Value {
-        Value::Tensor(Tensor {
-            rows,
-            cols,
-            shape: vec![rows, cols],
-            data: data.to_vec(),
-            integer_data: None,
-            dtype: NumericDType::F64,
-        })
+        Value::Tensor(Tensor::new(data.to_vec(), vec![rows, cols]).expect("patch test tensor"))
     }
 
     fn int_tensor(rows: usize, cols: usize, storage: IntegerStorage) -> Value {
