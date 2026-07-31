@@ -690,6 +690,325 @@ impl IntegerStorage {
     }
 }
 
+/// Authoritative homogeneous host storage for a real numeric array.
+///
+/// Each variant owns values in the native Rust representation for its MATLAB
+/// numeric class. Consumers must dispatch on the variant or request a matching
+/// typed slice; this type deliberately provides no implicit `f64` view.
+#[derive(Debug, Clone, PartialEq)]
+pub enum NumericStorage {
+    F64(Vec<f64>),
+    F32(Vec<f32>),
+    I8(Vec<i8>),
+    I16(Vec<i16>),
+    I32(Vec<i32>),
+    I64(Vec<i64>),
+    U8(Vec<u8>),
+    U16(Vec<u16>),
+    U32(Vec<u32>),
+    U64(Vec<u64>),
+}
+
+/// Immutable typed view over authoritative real numeric storage.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum NumericStorageView<'a> {
+    F64(&'a [f64]),
+    F32(&'a [f32]),
+    I8(&'a [i8]),
+    I16(&'a [i16]),
+    I32(&'a [i32]),
+    I64(&'a [i64]),
+    U8(&'a [u8]),
+    U16(&'a [u16]),
+    U32(&'a [u32]),
+    U64(&'a [u64]),
+}
+
+/// Mutable typed view over authoritative real numeric storage.
+#[derive(Debug)]
+pub enum NumericStorageViewMut<'a> {
+    F64(&'a mut [f64]),
+    F32(&'a mut [f32]),
+    I8(&'a mut [i8]),
+    I16(&'a mut [i16]),
+    I32(&'a mut [i32]),
+    I64(&'a mut [i64]),
+    U8(&'a mut [u8]),
+    U16(&'a mut [u16]),
+    U32(&'a mut [u32]),
+    U64(&'a mut [u64]),
+}
+
+impl NumericStorage {
+    pub fn numeric_dtype(&self) -> NumericDType {
+        match self {
+            Self::F64(_) => NumericDType::F64,
+            Self::F32(_) => NumericDType::F32,
+            Self::I8(_) => NumericDType::I8,
+            Self::I16(_) => NumericDType::I16,
+            Self::I32(_) => NumericDType::I32,
+            Self::I64(_) => NumericDType::I64,
+            Self::U8(_) => NumericDType::U8,
+            Self::U16(_) => NumericDType::U16,
+            Self::U32(_) => NumericDType::U32,
+            Self::U64(_) => NumericDType::U64,
+        }
+    }
+
+    pub fn class_name(&self) -> &'static str {
+        self.numeric_dtype().class_name()
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            Self::F64(values) => values.len(),
+            Self::F32(values) => values.len(),
+            Self::I8(values) => values.len(),
+            Self::I16(values) => values.len(),
+            Self::I32(values) => values.len(),
+            Self::I64(values) => values.len(),
+            Self::U8(values) => values.len(),
+            Self::U16(values) => values.len(),
+            Self::U32(values) => values.len(),
+            Self::U64(values) => values.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn checked_byte_len(&self) -> Option<usize> {
+        self.len().checked_mul(self.numeric_dtype().byte_size())
+    }
+
+    pub fn view(&self) -> NumericStorageView<'_> {
+        match self {
+            Self::F64(values) => NumericStorageView::F64(values),
+            Self::F32(values) => NumericStorageView::F32(values),
+            Self::I8(values) => NumericStorageView::I8(values),
+            Self::I16(values) => NumericStorageView::I16(values),
+            Self::I32(values) => NumericStorageView::I32(values),
+            Self::I64(values) => NumericStorageView::I64(values),
+            Self::U8(values) => NumericStorageView::U8(values),
+            Self::U16(values) => NumericStorageView::U16(values),
+            Self::U32(values) => NumericStorageView::U32(values),
+            Self::U64(values) => NumericStorageView::U64(values),
+        }
+    }
+
+    pub fn view_mut(&mut self) -> NumericStorageViewMut<'_> {
+        match self {
+            Self::F64(values) => NumericStorageViewMut::F64(values),
+            Self::F32(values) => NumericStorageViewMut::F32(values),
+            Self::I8(values) => NumericStorageViewMut::I8(values),
+            Self::I16(values) => NumericStorageViewMut::I16(values),
+            Self::I32(values) => NumericStorageViewMut::I32(values),
+            Self::I64(values) => NumericStorageViewMut::I64(values),
+            Self::U8(values) => NumericStorageViewMut::U8(values),
+            Self::U16(values) => NumericStorageViewMut::U16(values),
+            Self::U32(values) => NumericStorageViewMut::U32(values),
+            Self::U64(values) => NumericStorageViewMut::U64(values),
+        }
+    }
+
+    pub fn as_f64_slice(&self) -> Option<&[f64]> {
+        match self {
+            Self::F64(values) => Some(values),
+            Self::F32(_)
+            | Self::I8(_)
+            | Self::I16(_)
+            | Self::I32(_)
+            | Self::I64(_)
+            | Self::U8(_)
+            | Self::U16(_)
+            | Self::U32(_)
+            | Self::U64(_) => None,
+        }
+    }
+
+    pub fn as_f32_slice(&self) -> Option<&[f32]> {
+        match self {
+            Self::F32(values) => Some(values),
+            Self::F64(_)
+            | Self::I8(_)
+            | Self::I16(_)
+            | Self::I32(_)
+            | Self::I64(_)
+            | Self::U8(_)
+            | Self::U16(_)
+            | Self::U32(_)
+            | Self::U64(_) => None,
+        }
+    }
+
+    pub fn as_f64_slice_mut(&mut self) -> Option<&mut [f64]> {
+        match self {
+            Self::F64(values) => Some(values),
+            Self::F32(_)
+            | Self::I8(_)
+            | Self::I16(_)
+            | Self::I32(_)
+            | Self::I64(_)
+            | Self::U8(_)
+            | Self::U16(_)
+            | Self::U32(_)
+            | Self::U64(_) => None,
+        }
+    }
+
+    pub fn as_f32_slice_mut(&mut self) -> Option<&mut [f32]> {
+        match self {
+            Self::F32(values) => Some(values),
+            Self::F64(_)
+            | Self::I8(_)
+            | Self::I16(_)
+            | Self::I32(_)
+            | Self::I64(_)
+            | Self::U8(_)
+            | Self::U16(_)
+            | Self::U32(_)
+            | Self::U64(_) => None,
+        }
+    }
+
+    pub fn validate_shape(&self, shape: &[usize]) -> Result<(), String> {
+        let expected = shape
+            .iter()
+            .try_fold(1usize, |count, &dimension| count.checked_mul(dimension));
+        let Some(expected) = expected else {
+            return Err(format!("numeric tensor shape {shape:?} overflows usize"));
+        };
+        if self.len() != expected {
+            return Err(format!(
+                "{} storage length {} doesn't match shape {:?} ({} elements)",
+                self.class_name(),
+                self.len(),
+                shape,
+                expected
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn from_integer_storage(storage: IntegerStorage) -> Self {
+        match storage {
+            IntegerStorage::I8(values) => Self::I8(values),
+            IntegerStorage::I16(values) => Self::I16(values),
+            IntegerStorage::I32(values) => Self::I32(values),
+            IntegerStorage::I64(values) => Self::I64(values),
+            IntegerStorage::U8(values) => Self::U8(values),
+            IntegerStorage::U16(values) => Self::U16(values),
+            IntegerStorage::U32(values) => Self::U32(values),
+            IntegerStorage::U64(values) => Self::U64(values),
+        }
+    }
+
+    pub fn into_integer_storage(self) -> Result<IntegerStorage, Self> {
+        match self {
+            Self::I8(values) => Ok(IntegerStorage::I8(values)),
+            Self::I16(values) => Ok(IntegerStorage::I16(values)),
+            Self::I32(values) => Ok(IntegerStorage::I32(values)),
+            Self::I64(values) => Ok(IntegerStorage::I64(values)),
+            Self::U8(values) => Ok(IntegerStorage::U8(values)),
+            Self::U16(values) => Ok(IntegerStorage::U16(values)),
+            Self::U32(values) => Ok(IntegerStorage::U32(values)),
+            Self::U64(values) => Ok(IntegerStorage::U64(values)),
+            storage @ (Self::F64(_) | Self::F32(_)) => Err(storage),
+        }
+    }
+}
+
+impl NumericStorageView<'_> {
+    pub fn numeric_dtype(self) -> NumericDType {
+        match self {
+            Self::F64(_) => NumericDType::F64,
+            Self::F32(_) => NumericDType::F32,
+            Self::I8(_) => NumericDType::I8,
+            Self::I16(_) => NumericDType::I16,
+            Self::I32(_) => NumericDType::I32,
+            Self::I64(_) => NumericDType::I64,
+            Self::U8(_) => NumericDType::U8,
+            Self::U16(_) => NumericDType::U16,
+            Self::U32(_) => NumericDType::U32,
+            Self::U64(_) => NumericDType::U64,
+        }
+    }
+
+    pub fn len(self) -> usize {
+        match self {
+            Self::F64(values) => values.len(),
+            Self::F32(values) => values.len(),
+            Self::I8(values) => values.len(),
+            Self::I16(values) => values.len(),
+            Self::I32(values) => values.len(),
+            Self::I64(values) => values.len(),
+            Self::U8(values) => values.len(),
+            Self::U16(values) => values.len(),
+            Self::U32(values) => values.len(),
+            Self::U64(values) => values.len(),
+        }
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl NumericStorageViewMut<'_> {
+    pub fn numeric_dtype(&self) -> NumericDType {
+        match self {
+            Self::F64(_) => NumericDType::F64,
+            Self::F32(_) => NumericDType::F32,
+            Self::I8(_) => NumericDType::I8,
+            Self::I16(_) => NumericDType::I16,
+            Self::I32(_) => NumericDType::I32,
+            Self::I64(_) => NumericDType::I64,
+            Self::U8(_) => NumericDType::U8,
+            Self::U16(_) => NumericDType::U16,
+            Self::U32(_) => NumericDType::U32,
+            Self::U64(_) => NumericDType::U64,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            Self::F64(values) => values.len(),
+            Self::F32(values) => values.len(),
+            Self::I8(values) => values.len(),
+            Self::I16(values) => values.len(),
+            Self::I32(values) => values.len(),
+            Self::I64(values) => values.len(),
+            Self::U8(values) => values.len(),
+            Self::U16(values) => values.len(),
+            Self::U32(values) => values.len(),
+            Self::U64(values) => values.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl From<Vec<f64>> for NumericStorage {
+    fn from(values: Vec<f64>) -> Self {
+        Self::F64(values)
+    }
+}
+
+impl From<Vec<f32>> for NumericStorage {
+    fn from(values: Vec<f32>) -> Self {
+        Self::F32(values)
+    }
+}
+
+impl From<IntegerStorage> for NumericStorage {
+    fn from(storage: IntegerStorage) -> Self {
+        Self::from_integer_storage(storage)
+    }
+}
+
 fn cast_exact_unsigned(value: &IntValue, max: u64) -> u64 {
     match value {
         IntValue::U64(value) => (*value).min(max),
@@ -764,7 +1083,8 @@ impl NumericDType {
 #[cfg(test)]
 mod integer_storage_tests {
     use super::{
-        ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericDType, Tensor,
+        ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericDType,
+        NumericStorage, NumericStorageView, NumericStorageViewMut, Tensor,
     };
 
     #[test]
@@ -812,6 +1132,112 @@ mod integer_storage_tests {
         assert_eq!(tensor.shape, vec![1, 3]);
         assert_eq!(tensor.data, expected);
         assert!(tensor.integer_storage().is_none());
+    }
+
+    #[test]
+    fn numeric_storage_derives_dtype_length_and_bytes_for_every_native_class() {
+        let cases = [
+            (NumericStorage::F64(vec![1.0, 2.0]), NumericDType::F64),
+            (NumericStorage::F32(vec![1.0, 2.0]), NumericDType::F32),
+            (NumericStorage::I8(vec![1, 2]), NumericDType::I8),
+            (NumericStorage::I16(vec![1, 2]), NumericDType::I16),
+            (NumericStorage::I32(vec![1, 2]), NumericDType::I32),
+            (NumericStorage::I64(vec![1, 2]), NumericDType::I64),
+            (NumericStorage::U8(vec![1, 2]), NumericDType::U8),
+            (NumericStorage::U16(vec![1, 2]), NumericDType::U16),
+            (NumericStorage::U32(vec![1, 2]), NumericDType::U32),
+            (NumericStorage::U64(vec![1, 2]), NumericDType::U64),
+        ];
+
+        for (storage, dtype) in cases {
+            assert_eq!(storage.numeric_dtype(), dtype);
+            assert_eq!(storage.class_name(), dtype.class_name());
+            assert_eq!(storage.len(), 2);
+            assert!(!storage.is_empty());
+            assert_eq!(storage.checked_byte_len(), Some(2 * dtype.byte_size()));
+            assert_eq!(storage.view().numeric_dtype(), dtype);
+            assert_eq!(storage.view().len(), 2);
+            assert!(!storage.view().is_empty());
+        }
+    }
+
+    #[test]
+    fn numeric_storage_views_are_typed_and_mutate_without_coercion() {
+        let mut cases = [
+            NumericStorage::F64(vec![0.0]),
+            NumericStorage::F32(vec![0.0]),
+            NumericStorage::I8(vec![0]),
+            NumericStorage::I16(vec![0]),
+            NumericStorage::I32(vec![0]),
+            NumericStorage::I64(vec![0]),
+            NumericStorage::U8(vec![0]),
+            NumericStorage::U16(vec![0]),
+            NumericStorage::U32(vec![0]),
+            NumericStorage::U64(vec![0]),
+        ];
+
+        for storage in &mut cases {
+            let dtype = storage.numeric_dtype();
+            let view = storage.view_mut();
+            assert_eq!(view.numeric_dtype(), dtype);
+            assert_eq!(view.len(), 1);
+            assert!(!view.is_empty());
+            match view {
+                NumericStorageViewMut::F64(values) => values[0] = 64.0,
+                NumericStorageViewMut::F32(values) => values[0] = 32.0,
+                NumericStorageViewMut::I8(values) => values[0] = -8,
+                NumericStorageViewMut::I16(values) => values[0] = -16,
+                NumericStorageViewMut::I32(values) => values[0] = -32,
+                NumericStorageViewMut::I64(values) => values[0] = -64,
+                NumericStorageViewMut::U8(values) => values[0] = 8,
+                NumericStorageViewMut::U16(values) => values[0] = 16,
+                NumericStorageViewMut::U32(values) => values[0] = 32,
+                NumericStorageViewMut::U64(values) => values[0] = 64,
+            }
+        }
+
+        assert!(matches!(cases[0].view(), NumericStorageView::F64([64.0])));
+        assert!(matches!(cases[1].view(), NumericStorageView::F32([32.0])));
+        assert!(matches!(cases[2].view(), NumericStorageView::I8([-8])));
+        assert!(matches!(cases[3].view(), NumericStorageView::I16([-16])));
+        assert!(matches!(cases[4].view(), NumericStorageView::I32([-32])));
+        assert!(matches!(cases[5].view(), NumericStorageView::I64([-64])));
+        assert!(matches!(cases[6].view(), NumericStorageView::U8([8])));
+        assert!(matches!(cases[7].view(), NumericStorageView::U16([16])));
+        assert!(matches!(cases[8].view(), NumericStorageView::U32([32])));
+        assert!(matches!(cases[9].view(), NumericStorageView::U64([64])));
+    }
+
+    #[test]
+    fn numeric_storage_shape_validation_is_exact_and_overflow_safe() {
+        let storage = NumericStorage::U64(vec![0, u64::MAX]);
+        assert_eq!(storage.validate_shape(&[1, 2]), Ok(()));
+        assert_eq!(storage.validate_shape(&[2]), Ok(()));
+        assert!(storage.validate_shape(&[3]).is_err());
+        assert!(storage.validate_shape(&[usize::MAX, 2]).is_err());
+
+        let empty = NumericStorage::I16(Vec::new());
+        assert_eq!(empty.validate_shape(&[0, 7, 3]), Ok(()));
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn numeric_storage_moves_integer_buffers_without_floating_conversion() {
+        let exact = IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]);
+        let storage = NumericStorage::from_integer_storage(exact.clone());
+
+        assert_eq!(storage.numeric_dtype(), NumericDType::U64);
+        assert!(storage.as_f64_slice().is_none());
+        assert!(storage.as_f32_slice().is_none());
+        assert_eq!(storage.into_integer_storage(), Ok(exact));
+
+        let floating = NumericStorage::F32(vec![0.1]);
+        assert_eq!(
+            floating.clone().into_integer_storage(),
+            Err(floating.clone())
+        );
+        assert_eq!(floating.as_f32_slice(), Some(&[0.1][..]));
+        assert!(floating.as_f64_slice().is_none());
     }
 
     #[test]

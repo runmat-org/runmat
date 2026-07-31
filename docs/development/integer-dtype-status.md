@@ -7,37 +7,22 @@ last_updated: "July 31, 2026"
 
 # Integer dtype compatibility status
 
-This document is the durable status and recovery ledger for the first-class
-integer work on `end-july-work`. The work tracks eval-loop issue
-`ri-b4e5076574b9`.
+This document is the durable status and recovery ledger for the first-class integer work on `end-july-work`. The work tracks eval-loop issue `ri-b4e5076574b9`.
 
-The branch forks from the integer commit that was subsequently merged through
-`dev` and `main` (`66ead7582`). It intentionally does not include later `dev`
-or `main` changes.
+The branch forks from the integer commit that was subsequently merged through `dev` and `main` (`66ead7582`). It intentionally does not include later `dev` or `main` changes.
 
-The completion program is controlled by the external operator artifacts
-`../MATLAB_INTEGER_PLAN.md` and `../MATLAB_INTEGER_PROGRESS.md`. The durable
-compiler/callsite disposition format is
-[`integer-storage-migration-ledger.md`](./integer-storage-migration-ledger.md).
-The architectural endpoint is one private authoritative native storage model
-for `f64`, `f32`, and all eight integer classes, not indefinite maintenance of
-the compatibility mirrors described below.
+The completion program is controlled by the external operator artifacts `../MATLAB_INTEGER_PLAN.md` and `../MATLAB_INTEGER_PROGRESS.md`. The durable compiler/callsite disposition format is [`integer-storage-migration-ledger.md`](./integer-storage-migration-ledger.md). The architectural endpoint is one private authoritative native storage model for `f64`, `f32`, and all eight integer classes, not indefinite maintenance of the compatibility mirrors described below.
 
 ## Status vocabulary
 
 - **Verified**: implemented with focused exact-storage or poisoned-mirror tests.
-- **Implemented**: a typed path exists, but the full per-operation matrix has
-  not been rerun in this recovery pass.
-- **Rejected**: the operation deliberately returns an error instead of
-  coercing through an `f64` compatibility buffer.
-- **Open audit**: broad support exists, but exhaustive closure evidence is not
-  yet available.
+- **Implemented**: a typed path exists, but the full per-operation matrix has not been rerun in this recovery pass.
+- **Rejected**: the operation deliberately returns an error instead of coercing through an `f64` compatibility buffer.
+- **Open audit**: broad support exists, but exhaustive closure evidence is not yet available.
 
 ## Per-dtype matrix
 
-The storage and dispatch implementation is shared across the eight integer
-classes. Tests named below use class matrices where practical and boundary
-tests for `i64`/`u64`.
+The storage and dispatch implementation is shared across the eight integer classes. Tests named below use class matrices where practical and boundary tests for `i64`/`u64`.
 
 | Surface | int8 | int16 | int32 | int64 | uint8 | uint16 | uint32 | uint64 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -57,42 +42,25 @@ tests for `i64`/`u64`.
 ## Verified compatibility areas
 
 - `IntegerStorage` and `IntValue` cover all signed and unsigned widths.
-- Dense real tensors preserve integer storage through construction, casts,
-  indexing, assignment, reshape, concatenation, comparisons, arithmetic, and
-  native reductions.
-- Complex integer tensors preserve paired typed storage through supported
-  structural, display, and persistence operations.
-- Unsupported complex integer arithmetic is rejected before consulting the
-  compatibility mirror.
-- Sparse integer tensors preserve class and exact values through construction,
-  transpose, dense conversion, display, MAT save/load, network writes, and
-  WASM serialization.
-- VM selectors, expression indexing, cell indexing, and `end` conversion read
-  typed storage and reject values that cannot be represented by the relevant
-  host index or exact-double boundary.
-- Provider transfers use typed upload/download paths. Typed operations must
-  remain resident or reject/fall back before a lossy result conversion.
-- In-process provider `permute`, `flip`, `circshift`, and `repmat` preserve
-  integer registries without allocating `f64` mirrors.
-- WGPU coverage includes typed upload/download and focused wide `i64`/`u64`
-  shape and reduction paths.
-- Broad builtin parser sweeps cover numeric counts, dimensions, flags, table
-  metadata, statistics, optimization, plotting, I/O, strings, and signal
-  processing.
+- Dense real tensors preserve integer storage through construction, casts, indexing, assignment, reshape, concatenation, comparisons, arithmetic, and native reductions.
+- Complex integer tensors preserve paired typed storage through supported structural, display, and persistence operations.
+- Unsupported complex integer arithmetic is rejected before consulting the compatibility mirror.
+- Sparse integer tensors preserve class and exact values through construction, transpose, dense conversion, display, MAT save/load, network writes, and WASM serialization.
+- VM selectors, expression indexing, cell indexing, and `end` conversion read typed storage and reject values that cannot be represented by the relevant host index or exact-double boundary.
+- Provider transfers use typed upload/download paths. Typed operations must remain resident or reject/fall back before a lossy result conversion.
+- In-process provider `permute`, `flip`, `circshift`, and `repmat` preserve integer registries without allocating `f64` mirrors.
+- WGPU coverage includes typed upload/download and focused wide `i64`/`u64` shape and reduction paths.
+- Broad builtin parser sweeps cover numeric counts, dimensions, flags, table metadata, statistics, optimization, plotting, I/O, strings, and signal processing.
 
 Primary conformance suites:
 
 - `crates/runmat-runtime/tests/integer_conformance.rs`
 - `crates/runmat-runtime/tests/data_integer_persistence.rs`
-- integer-storage unit tests in `runmat-builtins`, `runmat-runtime`,
-  `runmat-vm`, `runmat-accelerate`, and `runmat-wasm`
+- integer-storage unit tests in `runmat-builtins`, `runmat-runtime`, `runmat-vm`, `runmat-accelerate`, and `runmat-wasm`
 
 ## Current representation and authoritative-storage target
 
-The current integer implementation uses dual representations in several host
-value types. This is the migration starting point, not the target architecture.
-“Mirror” means a lossy compatibility view retained for legacy floating
-consumers; it never means a second source of truth.
+The current integer implementation uses dual representations in several host value types. This is the migration starting point, not the target architecture. “Mirror” means a lossy compatibility view retained for legacy floating consumers; it never means a second source of truth.
 
 | Layer/value | Current authority | Transitional/secondary state | Target |
 | --- | --- | --- | --- |
@@ -107,12 +75,9 @@ consumers; it never means a second source of truth.
 | WGPU buffer | native float or packed `u32` integer words | two words for 64-bit integers | Keep backend layout; dispatch from shared numeric type contract |
 | WASM/JSON preview | typed value extraction | JSON number where safe; decimal string above JS safe range | Preserve exact type/value through wire contract |
 
-The floating mirror is legitimate only at a documented conversion to a
-floating result/domain. Examples include `double(A)`, a builtin whose integer
-input is documented to produce double, plotting geometry, or a numerical
-algorithm that explicitly accepts integer input by conversion. A consumer that
-uses a mirror for integer comparison, ordering, hashing, indexing, assignment,
-class-preserving arithmetic, serialization, or transfer is defective.
+Phase 1 has introduced `NumericStorage` with exhaustive native `F64`, `F32`, and eight integer variants, plus immutable and mutable typed views, dtype/length/byte-size derivation, overflow-safe shape validation, and lossless adapters from the transitional `IntegerStorage`. `Tensor` has not yet moved onto this field; that separation keeps the type-definition slice buildable before Phase 2 compiler enumeration.
+
+The floating mirror is legitimate only at a documented conversion to a floating result/domain. Examples include `double(A)`, a builtin whose integer input is documented to produce double, plotting geometry, or a numerical algorithm that explicitly accepts integer input by conversion. A consumer that uses a mirror for integer comparison, ordering, hashing, indexing, assignment, class-preserving arithmetic, serialization, or transfer is defective.
 
 ### Current mechanical census
 
@@ -122,17 +87,9 @@ Run the stable census from the repository root:
 scripts/development/integer-storage-census.sh
 ```
 
-The July 31 pre-migration baseline is recorded in
-[`integer-storage-migration-ledger.md`](./integer-storage-migration-ledger.md).
-It includes 667 files constructing dense tensors, a strong lower bound of 248
-files with named direct-data access, 320 runtime files mentioning floating
-materialization, 357 files using `HostTensorView`, and 35 files using
-`HostIntegerTensorView`.
+The July 31 pre-migration baseline is recorded in [`integer-storage-migration-ledger.md`](./integer-storage-migration-ledger.md). It includes 667 files constructing dense tensors, a strong lower bound of 248 files with named direct-data access, 320 runtime files mentioning floating materialization, 357 files using `HostTensorView`, and 35 files using `HostIntegerTensorView`.
 
-These patterns overlap and include tests, unrelated `data` fields, and
-intentional floating algorithms. They are search frontiers, not defect counts
-or semantic progress measures. Phase 2 field privatization and compiler
-diagnostics establish the authoritative direct-access inventory.
+These patterns overlap and include tests, unrelated `data` fields, and intentional floating algorithms. They are search frontiers, not defect counts or semantic progress measures. Phase 2 field privatization and compiler diagnostics establish the authoritative direct-access inventory.
 
 ### Threading status by boundary
 
@@ -193,63 +150,38 @@ Every compiler-ledger boundary must receive one recorded disposition:
 8. **Test-only typed inspection.**
 9. **Removed or superseded.**
 
-The migration ledger defines the evidence required for each disposition.
-Closure requires private storage, compiler diagnostics, a maintained ledger,
-and tests—not a falling grep count. New generic numeric helpers accept typed
-views or declare an explicit conversion/domain contract; they do not accept
-`Vec<f64>` without provenance.
+The migration ledger defines the evidence required for each disposition. Closure requires private storage, compiler diagnostics, a maintained ledger, and tests—not a falling grep count. New generic numeric helpers accept typed views or declare an explicit conversion/domain contract; they do not accept `Vec<f64>` without provenance.
 
 ## Recovery ledger
 
-The interrupted parallel pass originally left 82 dirty writer worktrees. Their
-tracked states were captured and compared against the branch before cleanup.
-As of the July 31 Phase 0 baseline, only the primary `end-july-work` worktree
-exists.
+The interrupted parallel pass originally left 82 dirty writer worktrees. Their tracked states were captured and compared against the branch before cleanup. As of the July 31 Phase 0 baseline, only the primary `end-july-work` worktree exists.
 
 - 166 file patches were already present or merged to a no-op.
-- 70 patches overlapped later work and were reconciled by tracing their added
-  helpers/tests and exact-storage behavior into the current tree.
+- 70 patches overlapped later work and were reconciled by tracing their added helpers/tests and exact-storage behavior into the current tree.
 - The current sparse network-write result was committed as `d0c82a92d`.
-- Seven useful historical residual files were corrected, tested, and committed
-  as `c8063adee`.
-- Missing wide-integer `vecnorm` order handling and bounded scatterplot axes
-  parsing were committed as `fa031e80f`.
+- Seven useful historical residual files were corrected, tested, and committed as `c8063adee`.
+- Missing wide-integer `vecnorm` order handling and bounded scatterplot axes parsing were committed as `fa031e80f`.
 - WASM real/sparse integer lengths were recovered during the mirror-read audit.
 
 Archived changes deliberately not integrated:
 
 - a visibility-only `integer_word_count` change with no remaining caller;
 - a comment-only Toeplitz change;
-- a complex integer `ldivide` test that contradicted the deliberate rejection
-  policy;
+- a complex integer `ldivide` test that contradicted the deliberate rejection policy;
 - a graph test that treated `u64::MAX` as unrepresentable on 64-bit hosts;
 - an optimization test that rejected an exact integer value that fits `usize`.
 
 ## Remaining closure work
 
-The eval-loop epic must remain active. This branch is the furthest recovered
-integer lineage, not proof of exhaustive MATLAB parity.
+The eval-loop epic must remain active. This branch is the furthest recovered integer lineage, not proof of exhaustive MATLAB parity.
 
-- Complete a generated operation-by-dtype conformance run for every matrix
-  cell rather than relying on shared implementations and representative class
-  tests.
-- Finish the WGPU/provider matrix for every operation that can preserve
-  residency, including parity, no-download, error, and resource-cleanup cases.
-- Repeat the builtin mirror-read audit after later `dev`/`main` reconciliation;
-  those changes are intentionally outside this branch recovery.
-- Replace dense, complex, and sparse compatibility mirrors with the private
-  authoritative storage model, using compiler diagnostics to populate and
-  close the migration ledger.
-- Add a durable lint or generated inventory that flags new direct mirror reads
-  in exact semantic domains.
-- Decide how explicit `gpuArray` intent is represented separately from
-  auto-offload residency before claiming MATLAB unsupported-call parity.
-- Thread compatibility mode into builtin signature/option dispatch before
-  relying on mode-gated integer extensions.
-- Replace floating-span integer RNG generation before treating full-width
-  `int64`/`uint64` `randi` as a completed extension.
-- Decide product scope for complex integer arithmetic beyond structural and
-  persistence support. Until then, deterministic rejection is the supported
-  behavior.
-- Reconcile `end-july-work` with the later `dev`/`main` histories only after
-  this branch passes its standalone verification gates.
+- Complete a generated operation-by-dtype conformance run for every matrix cell rather than relying on shared implementations and representative class tests.
+- Finish the WGPU/provider matrix for every operation that can preserve residency, including parity, no-download, error, and resource-cleanup cases.
+- Repeat the builtin mirror-read audit after later `dev`/`main` reconciliation; those changes are intentionally outside this branch recovery.
+- Replace dense, complex, and sparse compatibility mirrors with the private authoritative storage model, using compiler diagnostics to populate and close the migration ledger.
+- Add a durable lint or generated inventory that flags new direct mirror reads in exact semantic domains.
+- Decide how explicit `gpuArray` intent is represented separately from auto-offload residency before claiming MATLAB unsupported-call parity.
+- Thread compatibility mode into builtin signature/option dispatch before relying on mode-gated integer extensions.
+- Replace floating-span integer RNG generation before treating full-width `int64`/`uint64` `randi` as a completed extension.
+- Decide product scope for complex integer arithmetic beyond structural and persistence support. Until then, deterministic rejection is the supported behavior.
+- Reconcile `end-july-work` with the later `dev`/`main` histories only after this branch passes its standalone verification gates.

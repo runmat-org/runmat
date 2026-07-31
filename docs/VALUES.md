@@ -52,10 +52,7 @@ The enum lives in `runmat-builtins` because builtins, VM dispatch, runtime servi
 
 ## Dense Arrays And Shape
 
-RunMat stores dense numeric arrays as `Tensor` or `ComplexTensor`. During the
-authoritative-storage migration, the current `Tensor` owns both the ordinary
-floating representation and, for integer arrays, an authoritative exact
-backing store:
+RunMat stores dense numeric arrays as `Tensor` or `ComplexTensor`. During the authoritative-storage migration, the current `Tensor` owns both the ordinary floating representation and, for integer arrays, an authoritative exact backing store:
 
 ```rust
 pub struct Tensor {
@@ -76,62 +73,32 @@ pub struct Tensor {
 | `rows` / `cols` | Cached 2-D dimensions for common matrix paths and interop. |
 | `dtype` | MATLAB-visible numeric class. Integer dtypes must agree with `integer_data`. |
 
-`IntegerStorage` is not optional optimization metadata. Integer-aware code must
-read it before `data`; mutation must update exact storage and then repair the
-mirror. The mirror exists for legacy algorithms and intentional conversions to
-a floating computation domain. It must not be used for integer comparison,
-ordering, hashing, indexing, assignment into integer storage, class-preserving
-arithmetic, serialization, or exact host/device transfer.
+`IntegerStorage` is not optional optimization metadata. Integer-aware code must read it before `data`; mutation must update exact storage and then repair the mirror. The mirror exists for legacy algorithms and intentional conversions to a floating computation domain. It must not be used for integer comparison, ordering, hashing, indexing, assignment into integer storage, class-preserving arithmetic, serialization, or exact host/device transfer.
 
-`ComplexTensor` follows the same rule. Ordinary complex values use
-`Vec<(f64,f64)>`; typed complex integers additionally carry authoritative
-paired `IntegerStorage` values for their real and imaginary components.
+`ComplexTensor` follows the same rule. Ordinary complex values use `Vec<(f64,f64)>`; typed complex integers additionally carry authoritative paired `IntegerStorage` values for their real and imaginary components.
 
-`SparseTensor` stores CSC structure plus a floating `values` compatibility
-view. Typed sparse integers carry authoritative `IntegerStorage` for stored
-nonzeros. Exact consumers use `integer_storage`/`integer_at`, not the legacy
-floating `get` path.
+`SparseTensor` stores CSC structure plus a floating `values` compatibility view. Typed sparse integers carry authoritative `IntegerStorage` for stored nonzeros. Exact consumers use `integer_storage`/`integer_at`, not the legacy floating `get` path.
 
-Column-major shape semantics are preserved across tensor construction,
-indexing, builtin dispatch, workspace inspection, and host materialization.
-Code that reports memory footprint must account for both the compatibility
-view and native storage while both are retained.
+Column-major shape semantics are preserved across tensor construction, indexing, builtin dispatch, workspace inspection, and host materialization. Code that reports memory footprint must account for both the compatibility view and native storage while both are retained.
 
 ### Authoritative-storage target
 
-The compatibility mirror is transitional, not the target value model. Dense
-real numeric tensors are moving to one private homogeneous storage enum with
-native variants for `f64`, `f32`, and all eight integer classes. Dtype will be
-derived from that storage, `single` will use native `f32`, and no integer tensor
-will retain an eager or persistent `f64` mirror.
+The compatibility mirror is transitional, not the target value model. Dense real numeric tensors are moving to one private homogeneous storage enum with native variants for `f64`, `f32`, and all eight integer classes. Dtype will be derived from that storage, `single` will use native `f32`, and no integer tensor will retain an eager or persistent `f64` mirror.
 
-Sparse values, complex values, provider transfer views, and GPU handle metadata
-will use the same authoritative element-type contract while retaining
-container/backend-appropriate physical layouts. In particular, “unified”
-does not require sparse CSC values and packed WGPU words to share an in-memory
-layout.
+`NumericStorage`, `NumericStorageView`, and `NumericStorageViewMut` define that exhaustive native storage contract in `runmat-builtins`. During Phase 1 they coexist with the current public `Tensor` fields; the later field-privatization migration moves `Tensor` ownership onto this contract and uses compiler diagnostics to enumerate every consumer.
+
+Sparse values, complex values, provider transfer views, and GPU handle metadata will use the same authoritative element-type contract while retaining container/backend-appropriate physical layouts. In particular, “unified” does not require sparse CSC values and packed WGPU words to share an in-memory layout.
 
 ### Numeric boundary rule
 
-Until the migration removes `Tensor::data`, a consumer that reads it from a
-value that may be integer must fall into one of these categories:
+Until the migration removes `Tensor::data`, a consumer that reads it from a value that may be integer must fall into one of these categories:
 
-1. **Exact consumer:** branch on `integer_storage` and operate on
-   `IntegerStorage`/`IntValue`.
-2. **Intentional floating boundary:** the documented operation converts
-   integer input to single/double output or a floating algorithm domain. The
-   conversion is explicit and any loss above `flintmax` is part of that public
-   conversion.
-3. **Validated scalar parameter:** convert only after proving the exact integer
-   is in the destination domain, such as `usize`, `u32`, or the exact-double
-   interval.
+1. **Exact consumer:** branch on `integer_storage` and operate on `IntegerStorage`/`IntValue`.
+2. **Intentional floating boundary:** the documented operation converts integer input to single/double output or a floating algorithm domain. The conversion is explicit and any loss above `flintmax` is part of that public conversion.
+3. **Validated scalar parameter:** convert only after proving the exact integer is in the destination domain, such as `usize`, `u32`, or the exact-double interval.
 4. **Unsupported integer input:** reject before reading the mirror.
 
-A direct mirror read without one of these justifications is an integer
-threading defect. Poisoned-mirror tests should replace `data`/`values` with
-invalid sentinels while retaining exact storage and verify that exact consumers
-still produce the right result. The durable migration ledger and census live in
-[Integer Storage Migration Ledger](/docs/development/integer-storage-migration-ledger).
+A direct mirror read without one of these justifications is an integer threading defect. Poisoned-mirror tests should replace `data`/`values` with invalid sentinels while retaining exact storage and verify that exact consumers still produce the right result. The durable migration ledger and census live in [Integer Storage Migration Ledger](/docs/development/integer-storage-migration-ledger).
 
 Logical arrays use `LogicalArray`. Logical scalars use `Bool`, while logical N-D arrays store normalized `0` or `1` bytes with an explicit shape.
 
@@ -155,28 +122,15 @@ For details on allocation, roots, barriers, and finalizers, see [Memory Manageme
 
 ## GPU Residency
 
-`Value::GpuTensor` is a handle to provider-owned device data. The handle itself
-contains shape, device identity, and buffer identity. Provider/API registries
-carry precision, real/complex layout, logical status, and exact integer element
-type.
+`Value::GpuTensor` is a handle to provider-owned device data. The handle itself contains shape, device identity, and buffer identity. Provider/API registries carry precision, real/complex layout, logical status, and exact integer element type.
 
 Runtime and builtin paths gather GPU tensors only when host materialization is required. Device-capable builtins and fusion paths can keep data resident and return another `Value::GpuTensor`. Host-only builtins gather explicitly before operating.
 
-Exact integer transfers use the provider's `upload_integer` and
-`download_integer` methods. Providers that cannot preserve native integer
-storage must reject those methods; they must not substitute the floating
-upload/download path. The WGPU provider uses packed `u32` words, with two words
-per `int64`/`uint64` element.
+Exact integer transfers use the provider's `upload_integer` and `download_integer` methods. Providers that cannot preserve native integer storage must reject those methods; they must not substitute the floating upload/download path. The WGPU provider uses packed `u32` words, with two words per `int64`/`uint64` element.
 
-The current handle metadata does not distinguish a tensor created by explicit
-`gpuArray` syntax from one created by automatic promotion. Host fallback is
-therefore an acceleration policy over the shared representation, not proof of
-MATLAB `gpuArray` unsupported-call parity.
+The current handle metadata does not distinguish a tensor created by explicit `gpuArray` syntax from one created by automatic promotion. Host fallback is therefore an acceleration policy over the shared representation, not proof of MATLAB `gpuArray` unsupported-call parity.
 
-The migration target embeds authoritative numeric element metadata in the
-durable handle/provider state and converges floating and integer host transfer
-views on one exhaustive numeric type contract. Backend storage remains
-specialized.
+The migration target embeds authoritative numeric element metadata in the durable handle/provider state and converges floating and integer host transfer views on one exhaustive numeric type contract. Backend storage remains specialized.
 
 For details on residency and fusion planning, see [GPU Acceleration & Fusion Engine](/docs/runtime/gpu).
 
