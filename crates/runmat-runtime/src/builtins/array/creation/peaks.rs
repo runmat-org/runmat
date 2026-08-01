@@ -478,10 +478,7 @@ async fn peaks_from_xy(
         // Provider absent or failed: gather to host and continue.
         let x_tensor = gpu_helpers::gather_tensor_async(x_handle).await?;
         let y_tensor = gpu_helpers::gather_tensor_async(y_handle).await?;
-        validate_xy_shapes(&x_tensor, &y_tensor)?;
-        let (rows, cols) = matrix_shape(&x_tensor)?;
-        let z_mat = compute_z(&x_tensor.data, &y_tensor.data, rows, cols);
-        return build_output(x_tensor.data, y_tensor.data, z_mat, rows, cols, out_count);
+        return peaks_from_host_tensors(x_tensor, y_tensor, out_count);
     }
 
     // Mixed-residency: at least one input is a GpuTensor but not both (the
@@ -491,19 +488,28 @@ async fn peaks_from_xy(
     if matches!(x_val, Value::GpuTensor(_)) || matches!(y_val, Value::GpuTensor(_)) {
         let x_tensor = gather_tensor_or_gpu(x_val).await?;
         let y_tensor = gather_tensor_or_gpu(y_val).await?;
-        validate_xy_shapes(&x_tensor, &y_tensor)?;
-        let (rows, cols) = matrix_shape(&x_tensor)?;
-        let z_mat = compute_z(&x_tensor.data, &y_tensor.data, rows, cols);
-        return build_output(x_tensor.data, y_tensor.data, z_mat, rows, cols, out_count);
+        return peaks_from_host_tensors(x_tensor, y_tensor, out_count);
     }
 
     // Host path.
     let x_tensor = gather_tensor(x_val).await?;
     let y_tensor = gather_tensor(y_val).await?;
+    peaks_from_host_tensors(x_tensor, y_tensor, out_count)
+}
+
+fn peaks_from_host_tensors(
+    x_tensor: Tensor,
+    y_tensor: Tensor,
+    out_count: Option<usize>,
+) -> crate::BuiltinResult<Value> {
     validate_xy_shapes(&x_tensor, &y_tensor)?;
     let (rows, cols) = matrix_shape(&x_tensor)?;
-    let z_mat = compute_z(&x_tensor.data, &y_tensor.data, rows, cols);
-    build_output(x_tensor.data, y_tensor.data, z_mat, rows, cols, out_count)
+    // The peaks formula and its host outputs are defined in the f64 sample
+    // domain. Typed inputs cross that boundary exactly once, after validation.
+    let x_data = tensor::tensor_into_values_f64(x_tensor);
+    let y_data = tensor::tensor_into_values_f64(y_tensor);
+    let z_mat = compute_z(&x_data, &y_data, rows, cols);
+    build_output(x_data, y_data, z_mat, rows, cols, out_count)
 }
 
 // ---------------------------------------------------------------------------
@@ -826,6 +832,26 @@ mod tests {
                 }
             }
             other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn peaks_xy_reads_typed_integer_coordinates_from_authoritative_storage() {
+        let mut x = Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 0, 1]), vec![2, 2]).unwrap();
+        let mut y = Tensor::new_integer(IntegerStorage::I16(vec![0, 0, 1, 1]), vec![2, 2]).unwrap();
+        x.data.fill(f64::NAN);
+        y.data.fill(f64::NAN);
+
+        let value = peaks_builtin(vec![Value::Tensor(x), Value::Tensor(y)]).expect("peaks");
+        let Value::Tensor(tensor) = value else {
+            panic!("expected tensor");
+        };
+        for (index, (&x, &y)) in [0.0, 1.0, 0.0, 1.0]
+            .iter()
+            .zip([0.0, 0.0, 1.0, 1.0].iter())
+            .enumerate()
+        {
+            assert!((tensor.data[index] - peaks_at(x, y)).abs() < 1.0e-12);
         }
     }
 
