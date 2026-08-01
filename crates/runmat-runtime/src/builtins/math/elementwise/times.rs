@@ -5,7 +5,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, NumericDType, Tensor, Value,
+    CharArray, ComplexTensor, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -692,30 +692,60 @@ fn times_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
         return Ok(result);
     }
     match (classify_operand(lhs)?, classify_operand(rhs)?) {
-        (TimesOperand::Real(a), TimesOperand::Real(b)) => times_real_real(&a, &b),
+        (TimesOperand::Real(a), TimesOperand::Real(b)) => times_real_real(a, b),
         (TimesOperand::Complex(a), TimesOperand::Complex(b)) => times_complex_complex(&a, &b),
         (TimesOperand::Complex(a), TimesOperand::Real(b)) => times_complex_real(&a, &b),
         (TimesOperand::Real(a), TimesOperand::Complex(b)) => times_real_complex(&a, &b),
     }
 }
 
-fn times_real_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Value> {
+fn times_real_real(lhs: Tensor, rhs: Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
         .map_err(|err| times_error_with_detail(&TIMES_ERROR_SIZE_MISMATCH, &err))?;
-    let dtype = real_result_dtype(lhs, rhs);
-    if plan.is_empty() {
-        let mut tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| builtin_error(format!("times: {e}")))?;
-        apply_result_dtype(&mut tensor, dtype);
-        return Ok(tensor::tensor_into_value(tensor));
-    }
-    let mut out = vec![0.0f64; plan.len()];
-    for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
-        out[out_idx] = lhs.data[idx_lhs] * rhs.data[idx_rhs];
-    }
-    let mut tensor = Tensor::new(out, plan.output_shape().to_vec())
+    let output_shape = plan.output_shape().to_vec();
+    let lhs = lhs
+        .into_numeric_storage()
         .map_err(|e| builtin_error(format!("times: {e}")))?;
-    apply_result_dtype(&mut tensor, dtype);
+    let rhs = rhs
+        .into_numeric_storage()
+        .map_err(|e| builtin_error(format!("times: {e}")))?;
+    let output = match (lhs, rhs) {
+        (NumericStorage::F32(lhs), NumericStorage::F32(rhs)) => {
+            let mut output = vec![0.0f32; plan.len()];
+            for (output_index, lhs_index, rhs_index) in plan.iter() {
+                output[output_index] = lhs[lhs_index] * rhs[rhs_index];
+            }
+            NumericStorage::F32(output)
+        }
+        (NumericStorage::F64(lhs), NumericStorage::F64(rhs)) => {
+            let mut output = vec![0.0f64; plan.len()];
+            for (output_index, lhs_index, rhs_index) in plan.iter() {
+                output[output_index] = lhs[lhs_index] * rhs[rhs_index];
+            }
+            NumericStorage::F64(output)
+        }
+        (NumericStorage::F32(lhs), NumericStorage::F64(rhs)) => {
+            let mut output = vec![0.0f32; plan.len()];
+            for (output_index, lhs_index, rhs_index) in plan.iter() {
+                output[output_index] = (f64::from(lhs[lhs_index]) * rhs[rhs_index]) as f32;
+            }
+            NumericStorage::F32(output)
+        }
+        (NumericStorage::F64(lhs), NumericStorage::F32(rhs)) => {
+            let mut output = vec![0.0f32; plan.len()];
+            for (output_index, lhs_index, rhs_index) in plan.iter() {
+                output[output_index] = (lhs[lhs_index] * f64::from(rhs[rhs_index])) as f32;
+            }
+            NumericStorage::F32(output)
+        }
+        _ => {
+            return Err(builtin_error(
+                "times: integer operands did not use the exact integer arithmetic path",
+            ))
+        }
+    };
+    let tensor = Tensor::from_numeric_storage(output, output_shape)
+        .map_err(|e| builtin_error(format!("times: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -748,47 +778,18 @@ fn times_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value>
             .map_err(|e| builtin_error(format!("times: {e}")))?;
         return Ok(complex_tensor_into_value(tensor));
     }
+    // Complex storage is currently double precision, so real operands enter
+    // this explicitly floating complex-arithmetic boundary as f64 values.
+    let rhs_values = tensor::tensor_values_f64_cow(rhs);
     let mut out = vec![(0.0f64, 0.0f64); plan.len()];
     for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
         let (ar, ai) = lhs.data[idx_lhs];
-        let scalar = rhs.data[idx_rhs];
+        let scalar = rhs_values[idx_rhs];
         out[out_idx] = (ar * scalar, ai * scalar);
     }
     let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
         .map_err(|e| builtin_error(format!("times: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
-}
-
-fn real_result_dtype(lhs: &Tensor, rhs: &Tensor) -> NumericDType {
-    if lhs.dtype == NumericDType::F32 && rhs.dtype == NumericDType::F32 {
-        NumericDType::F32
-    } else {
-        NumericDType::F64
-    }
-}
-
-fn apply_result_dtype(tensor: &mut Tensor, dtype: NumericDType) {
-    match dtype {
-        NumericDType::F64 => {
-            tensor.dtype = NumericDType::F64;
-        }
-        NumericDType::F32 => {
-            for value in &mut tensor.data {
-                *value = (*value as f32) as f64;
-            }
-            tensor.dtype = NumericDType::F32;
-        }
-        NumericDType::I8
-        | NumericDType::I16
-        | NumericDType::I32
-        | NumericDType::I64
-        | NumericDType::U8
-        | NumericDType::U16
-        | NumericDType::U32
-        | NumericDType::U64 => {
-            tensor.dtype = NumericDType::F64;
-        }
-    }
 }
 
 fn times_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
@@ -799,9 +800,12 @@ fn times_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> BuiltinResult<Value>
             .map_err(|e| builtin_error(format!("times: {e}")))?;
         return Ok(complex_tensor_into_value(tensor));
     }
+    // Complex storage is currently double precision, so real operands enter
+    // this explicitly floating complex-arithmetic boundary as f64 values.
+    let lhs_values = tensor::tensor_values_f64_cow(lhs);
     let mut out = vec![(0.0f64, 0.0f64); plan.len()];
     for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
-        let scalar = lhs.data[idx_lhs];
+        let scalar = lhs_values[idx_lhs];
         let (br, bi) = rhs.data[idx_rhs];
         out[out_idx] = (scalar * br, scalar * bi);
     }
@@ -998,6 +1002,45 @@ pub(crate) mod tests {
                 assert_eq!(t.data, vec![2.0, 4.0, 6.0, 8.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn times_preserves_single_for_single_and_mixed_floating_inputs() {
+        let single_lhs = Tensor::from_f32(vec![1.5, -2.0], vec![2, 1]).unwrap();
+        let single_rhs = Tensor::from_f32(vec![2.0, 4.0], vec![2, 1]).unwrap();
+        let result = times_builtin(
+            Value::Tensor(single_lhs.clone()),
+            Value::Tensor(single_rhs),
+            Vec::new(),
+        )
+        .expect("single times single");
+        let Value::Tensor(result) = result else {
+            panic!("expected tensor result");
+        };
+        assert_eq!(
+            result.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![3.0, -8.0])
+        );
+
+        for (lhs, rhs) in [
+            (
+                Value::Tensor(single_lhs.clone()),
+                Value::Tensor(Tensor::new(vec![0.2, 0.5], vec![2, 1]).unwrap()),
+            ),
+            (
+                Value::Tensor(Tensor::new(vec![0.2, 0.5], vec![2, 1]).unwrap()),
+                Value::Tensor(single_lhs.clone()),
+            ),
+        ] {
+            let result = times_builtin(lhs, rhs, Vec::new()).expect("mixed floating times");
+            let Value::Tensor(result) = result else {
+                panic!("expected tensor result");
+            };
+            assert_eq!(
+                result.into_numeric_storage().unwrap(),
+                NumericStorage::F32(vec![0.3, -1.0])
+            );
         }
     }
 
