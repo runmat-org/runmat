@@ -12,8 +12,8 @@ use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, CharArray, ClassDef, ComplexTensor, HandleRef, IntValue, IntegerComplexStorage,
-    IntegerStorage, LogicalArray, MethodDef, ObjectInstance, PropertyDef, SparseTensor,
-    StringArray, StructValue, Tensor, Value,
+    IntegerStorage, LogicalArray, MethodDef, NumericScalar, ObjectInstance, PropertyDef,
+    SparseTensor, StringArray, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -980,18 +980,17 @@ fn ints_equal(a: &IntValue, b: &IntValue) -> bool {
 }
 
 fn tensors_equal(a: &Tensor, b: &Tensor) -> bool {
-    if a.shape != b.shape || a.dtype != b.dtype || a.data.len() != b.data.len() {
+    if a.shape != b.shape || a.numeric_dtype() != b.numeric_dtype() || a.len() != b.len() {
         return false;
     }
-    match (a.integer_storage(), b.integer_storage()) {
-        (Some(a), Some(b)) => return a == b,
-        (Some(_), None) | (None, Some(_)) => return false,
-        (None, None) => {}
-    }
-    a.data
-        .iter()
-        .zip(b.data.iter())
-        .all(|(x, y)| floats_equal_nan(*x, *y))
+    (0..a.len()).all(|index| {
+        numeric_scalars_equal_nan(
+            a.numeric_value_at(index)
+                .expect("validated tensor storage length"),
+            b.numeric_value_at(index)
+                .expect("validated tensor storage length"),
+        )
+    })
 }
 
 fn sparse_tensors_equal(a: &SparseTensor, b: &SparseTensor) -> bool {
@@ -1015,18 +1014,27 @@ fn sparse_tensors_equal(a: &SparseTensor, b: &SparseTensor) -> bool {
 }
 
 fn complex_tensors_equal(a: &ComplexTensor, b: &ComplexTensor) -> bool {
-    if a.shape != b.shape || a.data.len() != b.data.len() {
+    let len = tensor::complex_tensor_element_len(a);
+    if a.shape != b.shape || len != tensor::complex_tensor_element_len(b) {
         return false;
     }
-    match (&a.integer_data, &b.integer_data) {
-        (Some(a), Some(b)) => return a == b,
-        (Some(_), None) | (None, Some(_)) => return false,
-        (None, None) => {}
+    (0..len).all(|index| {
+        let (a_real, a_imag) = a
+            .numeric_value_at(index)
+            .expect("validated complex tensor storage length");
+        let (b_real, b_imag) = b
+            .numeric_value_at(index)
+            .expect("validated complex tensor storage length");
+        numeric_scalars_equal_nan(a_real, b_real) && numeric_scalars_equal_nan(a_imag, b_imag)
+    })
+}
+
+fn numeric_scalars_equal_nan(a: NumericScalar, b: NumericScalar) -> bool {
+    match (a, b) {
+        (NumericScalar::F64(a), NumericScalar::F64(b)) => floats_equal_nan(a, b),
+        (NumericScalar::F32(a), NumericScalar::F32(b)) => a == b || (a.is_nan() && b.is_nan()),
+        _ => a == b,
     }
-    a.data
-        .iter()
-        .zip(b.data.iter())
-        .all(|(x, y)| floats_equal_nan(x.0, y.0) && floats_equal_nan(x.1, y.1))
 }
 
 fn string_arrays_equal(a: &StringArray, b: &StringArray) -> bool {
@@ -1090,13 +1098,20 @@ fn values_fingerprint(values: &[Value]) -> String {
 fn value_fingerprint(value: &Value) -> String {
     match value {
         Value::Num(value) if value.is_nan() => "num:NaN".to_string(),
-        Value::Tensor(tensor) => format!(
-            "tensor:{:?}:{:?}:{:?}:{:?}",
-            tensor.dtype,
-            tensor.shape,
-            tensor.integer_storage(),
-            tensor.data
-        ),
+        Value::Tensor(tensor) => {
+            let values = (0..tensor.len())
+                .map(|index| {
+                    tensor
+                        .numeric_value_at(index)
+                        .expect("validated tensor storage length")
+                })
+                .collect::<Vec<_>>();
+            format!(
+                "tensor:{:?}:{:?}:{values:?}",
+                tensor.numeric_dtype(),
+                tensor.shape
+            )
+        }
         Value::SparseTensor(tensor) => format!(
             "sparse:{}x{}:{:?}:{:?}:{:?}:{:?}",
             tensor.rows,
@@ -1106,10 +1121,16 @@ fn value_fingerprint(value: &Value) -> String {
             tensor.integer_storage(),
             tensor.values
         ),
-        Value::ComplexTensor(tensor) => format!(
-            "complex:{:?}:{:?}:{:?}",
-            tensor.shape, tensor.integer_data, tensor.data
-        ),
+        Value::ComplexTensor(tensor) => {
+            let values = (0..tensor::complex_tensor_element_len(tensor))
+                .map(|index| {
+                    tensor
+                        .numeric_value_at(index)
+                        .expect("validated complex tensor storage length")
+                })
+                .collect::<Vec<_>>();
+            format!("complex:{:?}:{values:?}", tensor.shape)
+        }
         Value::Cell(cell) => format!("cell:{:?}:{}", cell.shape, values_fingerprint(&cell.data)),
         Value::Struct(struct_value) => format!(
             "struct:{}",
@@ -1163,7 +1184,9 @@ mod tests {
                 *counter.lock().unwrap() += 1;
                 let base = match args.first() {
                     Some(Value::Num(value)) => *value,
-                    Some(Value::Tensor(tensor)) => tensor.data.first().copied().unwrap_or(0.0),
+                    Some(Value::Tensor(tensor)) if !tensor.is_empty() => {
+                        tensor::tensor_value_f64(tensor, 0)
+                    }
                     _ => 0.0,
                 };
                 if requested_outputs == 2 {
@@ -1213,9 +1236,8 @@ mod tests {
 
     #[test]
     fn parse_cache_size_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![3]), vec![1, 1]).expect("cache size");
-        tensor.data.clear();
 
         assert_eq!(
             parse_cache_size(Some(&Value::Tensor(tensor))).expect("cache size"),
@@ -1229,9 +1251,8 @@ mod tests {
             name: "step".to_string(),
             function: 42,
         };
-        let mut enabled =
+        let enabled =
             Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("enabled");
-        enabled.data[0] = 0.0;
 
         let mut object = ObjectInstance::new(MEMOIZED_FUNCTION_CLASS.to_string());
         object
@@ -1278,6 +1299,22 @@ mod tests {
             value_fingerprint(&left),
             value_fingerprint(&rounded_collision)
         );
+    }
+
+    #[test]
+    fn cache_value_equality_distinguishes_native_single_from_double() {
+        let single = Value::Tensor(
+            Tensor::from_f32(vec![1.25, f32::NAN], vec![1, 2]).expect("single tensor"),
+        );
+        let same_single = Value::Tensor(
+            Tensor::from_f32(vec![1.25, f32::NAN], vec![1, 2]).expect("same single tensor"),
+        );
+        let double =
+            Value::Tensor(Tensor::new(vec![1.25, f64::NAN], vec![1, 2]).expect("double tensor"));
+
+        assert!(value_equal_for_cache(&single, &same_single));
+        assert!(!value_equal_for_cache(&single, &double));
+        assert_ne!(value_fingerprint(&single), value_fingerprint(&double));
     }
 
     #[test]
