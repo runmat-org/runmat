@@ -1,8 +1,8 @@
 //! MATLAB-compatible `zeros` builtin with GPU-aware semantics.
 
 use runmat_accelerate_api::{
-    GpuTensorHandle, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
-    IntegerElementType, ProviderPrecision,
+    GpuTensorHandle, HostIntegerDataView, HostIntegerTensorView, IntegerElementType,
+    ProviderPrecision,
 };
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
@@ -18,7 +18,7 @@ use crate::builtins::common::spec::{
     FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
     ShapeRequirements,
 };
-use crate::builtins::common::{shape::normalize_scalar_shape, tensor};
+use crate::builtins::common::{gpu_helpers, shape::normalize_scalar_shape, tensor};
 use runmat_builtins::NumericDType;
 use runmat_builtins::Type;
 
@@ -566,11 +566,7 @@ async fn zeros_gpu(shape: &[usize]) -> crate::BuiltinResult<Value> {
         }
         // Fallback: build a host tensor and upload
         let host = tensor::zeros_with_dtype(shape, dtype)?;
-        let view = HostTensorView {
-            data: &host.data,
-            shape: &host.shape,
-        };
-        if let Ok(gpu) = provider.upload(&view) {
+        if let Ok(gpu) = gpu_helpers::upload_tensor(provider, &host) {
             runmat_accelerate_api::set_handle_precision(&gpu, precision);
             return Ok(Value::GpuTensor(gpu));
         }
@@ -598,22 +594,12 @@ async fn zeros_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Valu
         }
         Value::GpuTensor(handle) => zeros_like_gpu(handle, shape).await,
         Value::SparseTensor(sparse) => zeros_sparse_like(sparse, shape),
-        Value::Tensor(t) => match t.integer_storage() {
-            Some(storage) => zeros_integer_like(storage, shape),
-            None => match t.dtype {
-                NumericDType::F32 => zeros_single(shape),
-                NumericDType::F64 => zeros_double(shape),
-                NumericDType::I8
-                | NumericDType::I16
-                | NumericDType::I32
-                | NumericDType::I64
-                | NumericDType::U8
-                | NumericDType::U16
-                | NumericDType::U32
-                | NumericDType::U64 => tensor::zeros_with_dtype(shape, t.dtype)
-                    .map(Value::Tensor)
-                    .map_err(|e| builtin_error(format!("zeros: {e}"))),
-            },
+        Value::Tensor(t) => match t.numeric_dtype() {
+            NumericDType::F32 => zeros_single(shape),
+            NumericDType::F64 => zeros_double(shape),
+            dtype => tensor::zeros_with_dtype(shape, dtype)
+                .map(Value::Tensor)
+                .map_err(|e| builtin_error(format!("zeros: {e}"))),
         },
         Value::Int(value) => zeros_integer_like(&IntegerStorage::from_scalar(value.clone()), shape),
         Value::Num(_) => zeros_double(shape),
@@ -688,11 +674,7 @@ async fn zeros_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::Bui
         }
         // Fallback: build a host tensor with dtype matching provider precision and upload
         let host = tensor::zeros_with_dtype(shape, dtype)?;
-        let view = HostTensorView {
-            data: &host.data,
-            shape: &host.shape,
-        };
-        if let Ok(gpu) = provider.upload(&view) {
+        if let Ok(gpu) = gpu_helpers::upload_tensor(provider, &host) {
             runmat_accelerate_api::set_handle_precision(&gpu, precision);
             return Ok(Value::GpuTensor(gpu));
         } else {
@@ -913,7 +895,7 @@ pub(crate) mod tests {
         let result = block_on(zeros_builtin(args)).expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape, vec![3, 3]);
-        assert!(tensor.data.iter().all(|&x| x == 0.0));
+        assert!(tensor.materialize_f64().iter().all(|&x| x == 0.0));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -924,7 +906,7 @@ pub(crate) mod tests {
         let result = block_on(zeros_builtin(args)).expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape, vec![2, 4]);
-        assert_eq!(tensor.data.len(), 8);
+        assert_eq!(tensor.len(), 8);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -962,7 +944,7 @@ pub(crate) mod tests {
         let result = block_on(zeros_builtin(args)).expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape, vec![2, 2]);
-        assert!(tensor.data.iter().all(|&x| x == 0.0));
+        assert!(tensor.materialize_f64().iter().all(|&x| x == 0.0));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1030,7 +1012,7 @@ pub(crate) mod tests {
         let result = block_on(zeros_builtin(args)).expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape, vec![2, 3]);
-        assert!(tensor.data.iter().all(|&x| x == 0.0));
+        assert!(tensor.materialize_f64().iter().all(|&x| x == 0.0));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1042,7 +1024,7 @@ pub(crate) mod tests {
         let result = block_on(zeros_builtin(args)).expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape, vec![2, 2]);
-        assert!(tensor.data.iter().all(|&x| x == 0.0));
+        assert!(tensor.materialize_f64().iter().all(|&x| x == 0.0));
     }
 
     #[test]
@@ -1168,7 +1150,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 0]);
-                assert!(t.data.is_empty());
+                assert!(t.is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
         }
@@ -1193,11 +1175,7 @@ pub(crate) mod tests {
     fn zeros_gpu_like_alloc() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let args = vec![
                 Value::Num(2.0),
                 Value::Num(2.0),
@@ -1209,7 +1187,7 @@ pub(crate) mod tests {
                 Value::GpuTensor(gpu) => {
                     assert_eq!(gpu.shape, vec![2, 2]);
                     let gathered = test_support::gather(Value::GpuTensor(gpu)).expect("gather");
-                    assert!(gathered.data.iter().all(|&x| x == 0.0));
+                    assert!(gathered.materialize_f64().iter().all(|&x| x == 0.0));
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
             }
@@ -1263,7 +1241,7 @@ pub(crate) mod tests {
                 let gathered =
                     test_support::gather(Value::GpuTensor(handle)).expect("gather to host");
                 assert_eq!(gathered.shape, vec![2, 2]);
-                assert!(gathered.data.iter().all(|&x| x == 0.0));
+                assert!(gathered.materialize_f64().iter().all(|&x| x == 0.0));
             }
             other => panic!("expected gpu tensor, got {other:?}"),
         }
