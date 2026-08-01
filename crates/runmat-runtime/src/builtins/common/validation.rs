@@ -8,7 +8,7 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, CharArray, ComplexTensor, IntValue, IntegerStorage, NumericDType, SparseTensor,
-    Tensor, Value,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -427,7 +427,7 @@ pub fn value_shape_2d(value: &Value) -> (usize, usize) {
 
 pub fn value_is_empty(value: &Value) -> bool {
     match value {
-        Value::Tensor(t) => tensor_len(t) == 0,
+        Value::Tensor(t) => t.is_empty(),
         Value::SparseTensor(t) => t.rows == 0 || t.cols == 0,
         Value::ComplexTensor(t) => tensor::complex_tensor_element_len(t) == 0,
         Value::LogicalArray(a) => a.data.is_empty(),
@@ -439,19 +439,15 @@ pub fn value_is_empty(value: &Value) -> bool {
     }
 }
 
-fn tensor_len(tensor: &Tensor) -> usize {
-    tensor
-        .integer_storage()
-        .map_or(tensor.data.len(), |storage| storage.len())
-}
-
 pub fn value_is_finite(value: &Value) -> bool {
     match value {
         Value::Num(v) => v.is_finite(),
         Value::Int(_) | Value::Bool(_) => true,
         Value::Complex(re, im) => re.is_finite() && im.is_finite(),
         Value::Tensor(t) if t.integer_storage().is_some() => true,
-        Value::Tensor(t) => t.data.iter().all(|v| v.is_finite()),
+        Value::Tensor(t) => tensor::tensor_values_f64_cow(t)
+            .iter()
+            .all(|v| v.is_finite()),
         Value::SparseTensor(t) if t.integer_storage().is_some() => true,
         Value::SparseTensor(t) => t.values.iter().all(|v| v.is_finite()),
         Value::ComplexTensor(t) if t.integer_data.is_some() => true,
@@ -482,7 +478,7 @@ pub fn value_is_float(value: &Value) -> bool {
     match value {
         Value::Num(_) | Value::Complex(_, _) => true,
         Value::ComplexTensor(tensor) => tensor.integer_data.is_none(),
-        Value::Tensor(t) => matches!(t.dtype, NumericDType::F64 | NumericDType::F32),
+        Value::Tensor(t) => matches!(t.numeric_dtype(), NumericDType::F64 | NumericDType::F32),
         Value::SparseTensor(tensor) => tensor.integer_storage().is_none(),
         Value::GpuTensor(handle) => {
             !handle_is_logical(handle) && handle_integer_type(handle).is_none()
@@ -555,7 +551,9 @@ pub fn value_is_integer(value: &Value) -> bool {
         Value::Bool(_) | Value::LogicalArray(_) => true,
         Value::Num(v) => v.is_finite() && v.fract() == 0.0,
         Value::Tensor(t) if t.integer_storage().is_some() => true,
-        Value::Tensor(t) => t.data.iter().all(|v| v.is_finite() && v.fract() == 0.0),
+        Value::Tensor(t) => tensor::tensor_values_f64_cow(t)
+            .iter()
+            .all(|v| v.is_finite() && v.fract() == 0.0),
         Value::SparseTensor(t) if t.integer_storage().is_some() => true,
         Value::SparseTensor(t) => t.values.iter().all(|v| v.is_finite() && v.fract() == 0.0),
         Value::Complex(re, im) => *im == 0.0 && re.is_finite() && re.fract() == 0.0,
@@ -576,7 +574,7 @@ pub fn value_is_non_nan(value: &Value) -> bool {
         Value::Num(v) => !v.is_nan(),
         Value::Complex(re, im) => !re.is_nan() && !im.is_nan(),
         Value::Tensor(t) if t.integer_storage().is_some() => true,
-        Value::Tensor(t) => t.data.iter().all(|v| !v.is_nan()),
+        Value::Tensor(t) => tensor::tensor_values_f64_cow(t).iter().all(|v| !v.is_nan()),
         Value::SparseTensor(t) if t.integer_storage().is_some() => true,
         Value::SparseTensor(t) => t.values.iter().all(|v| !v.is_nan()),
         Value::ComplexTensor(t) if t.integer_data.is_some() => true,
@@ -741,11 +739,13 @@ pub fn value_matches_class(value: &Value, class_name: &str) -> bool {
         "sparse" => matches!(value, Value::SparseTensor(_)),
         "double" => {
             matches!(value, Value::Num(_) | Value::Complex(_, _))
-                || matches!(value, Value::Tensor(t) if t.dtype == NumericDType::F64)
+                || matches!(value, Value::Tensor(t) if t.numeric_dtype() == NumericDType::F64)
                 || matches!(value, Value::SparseTensor(t) if t.integer_storage().is_none())
                 || matches!(value, Value::ComplexTensor(t) if t.integer_data.is_none())
         }
-        "single" => matches!(value, Value::Tensor(t) if t.dtype == NumericDType::F32),
+        "single" => {
+            matches!(value, Value::Tensor(t) if t.numeric_dtype() == NumericDType::F32)
+        }
         "gpuarray" => matches!(value, Value::GpuTensor(_)),
         _ => class_name_for_value(value).eq_ignore_ascii_case(requested),
     }
@@ -815,7 +815,11 @@ pub fn atoms(value: &Value) -> Result<Vec<ValidationAtom>, RuntimeError> {
                     .map(ValidationAtom::Integer)
                     .collect());
             }
-            Ok(t.data.iter().copied().map(ValidationAtom::Number).collect())
+            Ok(tensor::tensor_values_f64_cow(t)
+                .iter()
+                .copied()
+                .map(ValidationAtom::Number)
+                .collect())
         }
         Value::SparseTensor(t) => sparse_atoms(t),
         Value::LogicalArray(a) => Ok(a
@@ -1293,14 +1297,12 @@ mod tests {
 
     #[test]
     fn numeric_validators_read_typed_integer_storage_exactly() {
-        let mut positive =
+        let positive =
             Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![1, 2]).expect("positive");
-        positive.data.clear();
         ok("mustBePositive", vec![Value::Tensor(positive)]);
 
-        let mut negative =
+        let negative =
             Tensor::new_integer(IntegerStorage::I16(vec![-1, -2]), vec![1, 2]).expect("negative");
-        negative.data.clear();
         ok("mustBeNegative", vec![Value::Tensor(negative)]);
 
         let zero = Tensor::new_integer(IntegerStorage::I16(vec![0]), vec![1, 1]).expect("zero");
@@ -1309,9 +1311,8 @@ mod tests {
         let wide = 9_007_199_254_740_993_u64;
         let adjacent = wide - 1;
         assert_eq!(wide as f64, adjacent as f64);
-        let mut wide_nonzero =
+        let wide_nonzero =
             Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("wide");
-        wide_nonzero.data = vec![0.0];
         ok("mustBeNonzero", vec![Value::Tensor(wide_nonzero)]);
 
         let mut complex_nonzero = ComplexTensor::new_integer(
@@ -1329,9 +1330,7 @@ mod tests {
 
     #[test]
     fn value_is_empty_uses_typed_integer_storage_length() {
-        let mut scalar =
-            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("scalar");
-        scalar.data.clear();
+        let scalar = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("scalar");
         assert!(!value_is_empty(&Value::Tensor(scalar)));
 
         let empty =
@@ -1358,9 +1357,7 @@ mod tests {
 
     #[test]
     fn finite_integer_and_nan_predicates_read_typed_integer_storage_exactly() {
-        let mut tensor =
-            Tensor::new_integer(IntegerStorage::I16(vec![-1, 0, 2]), vec![1, 3]).unwrap();
-        tensor.data = vec![f64::NAN, f64::INFINITY, 1.5];
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![-1, 0, 2]), vec![1, 3]).unwrap();
         let value = Value::Tensor(tensor);
 
         assert!(value_is_finite(&value));
@@ -1776,28 +1773,22 @@ mod tests {
 
     #[test]
     fn threshold_validators_read_typed_integer_storage_exactly() {
-        let mut lower =
-            Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("lower");
-        lower.data.clear();
+        let lower = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("lower");
         ok(
             "mustBeGreaterThan",
             vec![Value::Num(2.0), Value::Tensor(lower)],
         );
 
-        let mut upper =
-            Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).expect("upper");
-        upper.data.clear();
+        let upper = Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).expect("upper");
         ok(
             "mustBeLessThan",
             vec![Value::Num(2.0), Value::Tensor(upper)],
         );
 
-        let mut range_lower =
+        let range_lower =
             Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("range lower");
-        range_lower.data.clear();
-        let mut range_upper =
+        let range_upper =
             Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).expect("range upper");
-        range_upper.data.clear();
         ok(
             "mustBeInRange",
             vec![
@@ -1812,9 +1803,8 @@ mod tests {
         let rounded = adjacent as f64;
         assert_eq!(wide as f64, rounded);
 
-        let mut wide_value =
+        let wide_value =
             Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("wide value");
-        wide_value.data = vec![rounded];
         ok(
             "mustBeGreaterThan",
             vec![Value::Tensor(wide_value.clone()), Value::Num(rounded)],
