@@ -2,11 +2,11 @@
 
 use async_recursion::async_recursion;
 use num_complex::Complex64;
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
+    CharArray, ComplexTensor, IntegerStorage, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -339,13 +339,7 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
         Value::Tensor(tensor) => {
-            let data = tensor::tensor_values_f64_cow(&tensor);
-            let view = HostTensorView {
-                data: &data,
-                shape: &tensor.shape,
-            };
-            let handle = provider
-                .upload(&view)
+            let handle = gpu_helpers::upload_tensor(provider, &tensor)
                 .map_err(|e| builtin_error(format!("rdivide: failed to upload GPU result: {e}")))?;
             Ok(Value::GpuTensor(handle))
         }
@@ -354,7 +348,11 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
                 .map_err(|e| builtin_error(format!("rdivide: {e}")))?;
             convert_to_gpu(Value::Tensor(tensor))
         }
-        Value::Int(i) => convert_to_gpu(Value::Num(i.to_f64())),
+        Value::Int(i) => {
+            let tensor = Tensor::new_integer(IntegerStorage::from_scalar(i), vec![1, 1])
+                .map_err(|e| builtin_error(format!("rdivide: {e}")))?;
+            convert_to_gpu(Value::Tensor(tensor))
+        }
         Value::Bool(b) => convert_to_gpu(Value::Num(if b { 1.0 } else { 0.0 })),
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)
@@ -449,9 +447,10 @@ async fn real_to_complex(value: Value) -> BuiltinResult<Value> {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(t) => {
-            let data: Vec<(f64, f64)> = tensor::tensor_values_f64_cow(&t)
-                .iter()
-                .map(|&v| (v, 0.0))
+            let data: Vec<(f64, f64)> = t
+                .materialize_f64()
+                .into_iter()
+                .map(|value| (value, 0.0))
                 .collect();
             let tensor = ComplexTensor::new(data, t.shape.clone())
                 .map_err(|e| builtin_error(format!("rdivide: {e}")))?;
@@ -617,26 +616,59 @@ fn rdivide_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
         return Ok(result);
     }
     match (classify_operand(lhs)?, classify_operand(rhs)?) {
-        (RdivideOperand::Real(a), RdivideOperand::Real(b)) => rdivide_real_real(&a, &b),
+        (RdivideOperand::Real(a), RdivideOperand::Real(b)) => rdivide_real_real(a, b),
         (RdivideOperand::Complex(a), RdivideOperand::Complex(b)) => rdivide_complex_complex(&a, &b),
         (RdivideOperand::Complex(a), RdivideOperand::Real(b)) => rdivide_complex_real(&a, &b),
         (RdivideOperand::Real(a), RdivideOperand::Complex(b)) => rdivide_real_complex(&a, &b),
     }
 }
 
-fn rdivide_real_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Value> {
+fn rdivide_real_real(lhs: Tensor, rhs: Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
         .map_err(|err| rdivide_error_with_detail(&RDIVIDE_ERROR_SIZE_MISMATCH, &err))?;
-    if plan.is_empty() {
-        let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| builtin_error(format!("rdivide: {e}")))?;
-        return Ok(tensor::tensor_into_value(tensor));
-    }
-    let mut out = vec![0.0f64; plan.len()];
-    for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
-        out[out_idx] = lhs.data[idx_lhs] / rhs.data[idx_rhs];
-    }
-    let tensor = Tensor::new(out, plan.output_shape().to_vec())
+    let output_shape = plan.output_shape().to_vec();
+    let lhs = lhs
+        .into_numeric_storage()
+        .map_err(|e| builtin_error(format!("rdivide: {e}")))?;
+    let rhs = rhs
+        .into_numeric_storage()
+        .map_err(|e| builtin_error(format!("rdivide: {e}")))?;
+    let output = match (lhs, rhs) {
+        (NumericStorage::F32(lhs), NumericStorage::F32(rhs)) => {
+            let mut output = vec![0.0f32; plan.len()];
+            for (output_index, lhs_index, rhs_index) in plan.iter() {
+                output[output_index] = lhs[lhs_index] / rhs[rhs_index];
+            }
+            NumericStorage::F32(output)
+        }
+        (NumericStorage::F64(lhs), NumericStorage::F64(rhs)) => {
+            let mut output = vec![0.0f64; plan.len()];
+            for (output_index, lhs_index, rhs_index) in plan.iter() {
+                output[output_index] = lhs[lhs_index] / rhs[rhs_index];
+            }
+            NumericStorage::F64(output)
+        }
+        (NumericStorage::F32(lhs), NumericStorage::F64(rhs)) => {
+            let mut output = vec![0.0f32; plan.len()];
+            for (output_index, lhs_index, rhs_index) in plan.iter() {
+                output[output_index] = (f64::from(lhs[lhs_index]) / rhs[rhs_index]) as f32;
+            }
+            NumericStorage::F32(output)
+        }
+        (NumericStorage::F64(lhs), NumericStorage::F32(rhs)) => {
+            let mut output = vec![0.0f32; plan.len()];
+            for (output_index, lhs_index, rhs_index) in plan.iter() {
+                output[output_index] = (lhs[lhs_index] / f64::from(rhs[rhs_index])) as f32;
+            }
+            NumericStorage::F32(output)
+        }
+        _ => {
+            return Err(builtin_error(
+                "rdivide: integer operands did not use the exact integer arithmetic path",
+            ))
+        }
+    };
+    let tensor = Tensor::from_numeric_storage(output, output_shape)
         .map_err(|e| builtin_error(format!("rdivide: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
@@ -669,10 +701,11 @@ fn rdivide_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Valu
             .map_err(|e| builtin_error(format!("rdivide: {e}")))?;
         return Ok(complex_tensor_into_value(tensor));
     }
+    let rhs_values = rhs.materialize_f64();
     let mut out = vec![(0.0f64, 0.0f64); plan.len()];
     for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
         let (ar, ai) = lhs.data[idx_lhs];
-        let scalar = rhs.data[idx_rhs];
+        let scalar = rhs_values[idx_rhs];
         let quotient = Complex64::new(ar, ai) / Complex64::new(scalar, 0.0);
         out[out_idx] = (quotient.re, quotient.im);
     }
@@ -689,9 +722,10 @@ fn rdivide_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> BuiltinResult<Valu
             .map_err(|e| builtin_error(format!("rdivide: {e}")))?;
         return Ok(complex_tensor_into_value(tensor));
     }
+    let lhs_values = lhs.materialize_f64();
     let mut out = vec![(0.0f64, 0.0f64); plan.len()];
     for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
-        let scalar = lhs.data[idx_lhs];
+        let scalar = lhs_values[idx_lhs];
         let (br, bi) = rhs.data[idx_rhs];
         let quotient = Complex64::new(scalar, 0.0) / Complex64::new(br, bi);
         out[out_idx] = (quotient.re, quotient.im);
@@ -819,7 +853,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_accelerate_api::{GpuTensorStorage, HostTensorView};
+    use runmat_accelerate_api::GpuTensorStorage;
     use runmat_builtins::{
         CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, ResolveContext, Tensor,
         Type,
@@ -831,12 +865,15 @@ pub(crate) mod tests {
         block_on(super::rdivide_builtin(lhs, rhs, rest))
     }
 
+    fn double_values(tensor: &Tensor) -> &[f64] {
+        tensor.as_f64_slice().expect("double tensor")
+    }
+
     #[test]
     fn scalar_extractors_read_typed_integer_tensor_storage_exactly() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
                 .expect("integer tensor");
-        tensor.data.clear();
         let value = Value::Tensor(tensor);
 
         assert_eq!(
@@ -936,9 +973,23 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn rdivide_float_arrays_preserve_native_single_class() {
+        let lhs = Tensor::from_f32(vec![9.0, 5.0], vec![1, 2]).unwrap();
+        let rhs = Tensor::new(vec![3.0, 2.0], vec![1, 2]).unwrap();
+        let Value::Tensor(result) =
+            rdivide_builtin(Value::Tensor(lhs), Value::Tensor(rhs), Vec::new()).unwrap()
+        else {
+            panic!("expected single tensor");
+        };
+        assert_eq!(
+            result.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![3.0, 2.5])
+        );
+    }
+
+    #[test]
     fn rdivide_like_complex_conversion_reads_typed_integer_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::I32(vec![-4, 5]), vec![1, 2]).unwrap();
-        tensor.data.fill(0.0);
+        let tensor = Tensor::new_integer(IntegerStorage::I32(vec![-4, 5]), vec![1, 2]).unwrap();
 
         let result =
             block_on(super::real_to_complex(Value::Tensor(tensor))).expect("complex conversion");
@@ -961,7 +1012,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![1.0, 2.0, 3.0, 4.0]);
+                assert_eq!(double_values(&t), &[1.0, 2.0, 3.0, 4.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -978,7 +1029,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
                 let expected = [0.1, 0.2, 0.3, 0.05, 0.10, 0.15, 0.025, 0.05, 0.075];
-                for (got, exp) in t.data.iter().zip(expected.iter()) {
+                for (got, exp) in double_values(&t).iter().zip(expected.iter()) {
                     assert!((got - exp).abs() < EPS);
                 }
             }
@@ -1017,10 +1068,11 @@ pub(crate) mod tests {
             rdivide_builtin(Value::Tensor(tensor), Value::Num(0.0), Vec::new()).expect("rdivide");
         match result {
             Value::Tensor(t) => {
-                assert!(t.data[0].is_nan());
-                assert!(t.data[1].is_infinite());
-                assert!(t.data[2].is_infinite());
-                assert!(t.data[2].is_sign_negative());
+                let values = double_values(&t);
+                assert!(values[0].is_nan());
+                assert!(values[1].is_infinite());
+                assert!(values[2].is_infinite());
+                assert!(values[2].is_sign_negative());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1041,7 +1093,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
                 let expected = [1.0, 0.0, 0.25, 0.125];
-                for (got, exp) in t.data.iter().zip(expected.iter()) {
+                for (got, exp) in double_values(&t).iter().zip(expected.iter()) {
                     assert!((got - exp).abs() < EPS);
                 }
             }
@@ -1058,8 +1110,8 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert!((t.data[0] - 32.5).abs() < EPS);
-                assert!((t.data[1] - 33.0).abs() < EPS);
+                assert!((double_values(&t)[0] - 32.5).abs() < EPS);
+                assert!((double_values(&t)[1] - 33.0).abs() < EPS);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1071,21 +1123,13 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let lhs = Tensor::new(vec![10.0, 20.0, 30.0], vec![3, 1]).unwrap();
             let rhs = Tensor::new(vec![2.0, 5.0, 10.0], vec![3, 1]).unwrap();
-            let view_l = HostTensorView {
-                data: &lhs.data,
-                shape: &lhs.shape,
-            };
-            let view_r = HostTensorView {
-                data: &rhs.data,
-                shape: &rhs.shape,
-            };
-            let ha = provider.upload(&view_l).expect("upload lhs");
-            let hb = provider.upload(&view_r).expect("upload rhs");
+            let ha = gpu_helpers::upload_tensor(provider, &lhs).expect("upload lhs");
+            let hb = gpu_helpers::upload_tensor(provider, &rhs).expect("upload rhs");
             let result = rdivide_builtin(Value::GpuTensor(ha), Value::GpuTensor(hb), Vec::new())
                 .expect("gpu rdivide");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![3, 1]);
-            assert_eq!(gathered.data, vec![5.0, 4.0, 3.0]);
+            assert_eq!(double_values(&gathered), &[5.0, 4.0, 3.0]);
         });
     }
 
@@ -1179,11 +1223,8 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let lhs = Tensor::new(vec![2.0, 4.0], vec![2, 1]).unwrap();
             let rhs = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-            let proto_view = HostTensorView {
-                data: &[0.0],
-                shape: &[1, 1],
-            };
-            let proto = provider.upload(&proto_view).expect("upload proto");
+            let proto_tensor = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
+            let proto = gpu_helpers::upload_tensor(provider, &proto_tensor).expect("upload proto");
             let result = rdivide_builtin(
                 Value::Tensor(lhs),
                 Value::Tensor(rhs),
@@ -1193,7 +1234,7 @@ pub(crate) mod tests {
             match result {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-                    assert_eq!(gathered.data, vec![2.0, 2.0]);
+                    assert_eq!(double_values(&gathered), &[2.0, 2.0]);
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
             }
@@ -1204,14 +1245,9 @@ pub(crate) mod tests {
     #[test]
     fn rdivide_like_gpu_prototype_uploads_typed_integer_storage_exactly() {
         test_support::with_test_provider(|provider| {
-            let mut lhs =
-                Tensor::new_integer(IntegerStorage::U32(vec![10, 20]), vec![2, 1]).unwrap();
-            lhs.data.fill(0.0);
-            let proto_view = HostTensorView {
-                data: &[0.0],
-                shape: &[1, 1],
-            };
-            let proto = provider.upload(&proto_view).expect("upload");
+            let lhs = Tensor::new_integer(IntegerStorage::U32(vec![10, 20]), vec![2, 1]).unwrap();
+            let proto_tensor = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
+            let proto = gpu_helpers::upload_tensor(provider, &proto_tensor).expect("upload");
 
             let result = rdivide_builtin(
                 Value::Tensor(lhs),
@@ -1222,7 +1258,10 @@ pub(crate) mod tests {
 
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 1]);
-            assert_eq!(gathered.data, vec![5.0, 10.0]);
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U32(vec![5, 10]))
+            );
         });
     }
 
@@ -1232,16 +1271,8 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let lhs = Tensor::new(vec![8.0, 18.0], vec![2, 1]).unwrap();
             let rhs = Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap();
-            let view_l = HostTensorView {
-                data: &lhs.data,
-                shape: &lhs.shape,
-            };
-            let view_r = HostTensorView {
-                data: &rhs.data,
-                shape: &rhs.shape,
-            };
-            let ha = provider.upload(&view_l).expect("upload lhs");
-            let hb = provider.upload(&view_r).expect("upload rhs");
+            let ha = gpu_helpers::upload_tensor(provider, &lhs).expect("upload lhs");
+            let hb = gpu_helpers::upload_tensor(provider, &rhs).expect("upload rhs");
             let result = rdivide_builtin(
                 Value::GpuTensor(ha),
                 Value::GpuTensor(hb),
@@ -1252,7 +1283,7 @@ pub(crate) mod tests {
                 panic!("expected tensor result after host gather");
             };
             assert_eq!(t.shape, vec![2, 1]);
-            assert_eq!(t.data, vec![4.0, 6.0]);
+            assert_eq!(double_values(&t), &[4.0, 6.0]);
         });
     }
 
@@ -1302,11 +1333,8 @@ pub(crate) mod tests {
             let keyword = CharArray::new_row("LIKE");
             let lhs = Value::Num(2.0);
             let rhs = Value::Num(5.0);
-            let proto_view = HostTensorView {
-                data: &[0.0],
-                shape: &[1, 1],
-            };
-            let proto = provider.upload(&proto_view).expect("upload");
+            let proto_tensor = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
+            let proto = gpu_helpers::upload_tensor(provider, &proto_tensor).expect("upload");
             let result = rdivide_builtin(
                 lhs,
                 rhs,
@@ -1316,7 +1344,7 @@ pub(crate) mod tests {
             match result {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-                    assert_eq!(gathered.data, vec![0.4]);
+                    assert_eq!(double_values(&gathered), &[0.4]);
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
             }
@@ -1333,32 +1361,19 @@ pub(crate) mod tests {
         let lhs = Tensor::new(vec![4.0, 9.0, 16.0, 25.0], vec![2, 2]).unwrap();
         let rhs = Tensor::new(vec![2.0, 3.0, 4.0, 5.0], vec![2, 2]).unwrap();
         let cpu = rdivide_host(Value::Tensor(lhs.clone()), Value::Tensor(rhs.clone())).unwrap();
-        let view_l = HostTensorView {
-            data: &lhs.data,
-            shape: &lhs.shape,
-        };
-        let view_r = HostTensorView {
-            data: &rhs.data,
-            shape: &rhs.shape,
-        };
-        let ha = runmat_accelerate_api::provider()
-            .unwrap()
-            .upload(&view_l)
-            .unwrap();
-        let hb = runmat_accelerate_api::provider()
-            .unwrap()
-            .upload(&view_r)
-            .unwrap();
+        let provider = runmat_accelerate_api::provider().unwrap();
+        let ha = gpu_helpers::upload_tensor(provider, &lhs).unwrap();
+        let hb = gpu_helpers::upload_tensor(provider, &rhs).unwrap();
         let gpu = block_on(rdivide_gpu_pair(ha, hb)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match cpu {
             Value::Tensor(t) => {
-                assert_eq!(gathered.data.len(), t.data.len());
-                for (ga, ca) in gathered.data.iter().zip(t.data.iter()) {
+                assert_eq!(gathered.len(), t.len());
+                for (ga, ca) in double_values(&gathered).iter().zip(double_values(&t)) {
                     assert!((ga - ca).abs() < EPS);
                 }
             }
-            Value::Num(n) => assert_eq!(gathered.data, vec![n]),
+            Value::Num(n) => assert_eq!(double_values(&gathered), &[n]),
             other => panic!("unexpected cpu result {other:?}"),
         }
     }
