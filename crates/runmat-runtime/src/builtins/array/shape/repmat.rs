@@ -16,7 +16,7 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
-    LogicalArray, StringArray, Tensor, Type, Value,
+    LogicalArray, NumericScalar, NumericStorage, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -439,16 +439,12 @@ async fn parse_replication_vector(value: &Value) -> crate::BuiltinResult<Vec<usi
             "repmat: replication vector must contain at least one element",
         ));
     }
-    if let Some(storage) = tensor.integer_storage() {
-        let mut factors = Vec::with_capacity(storage.len());
-        for (idx, value) in storage.exact_values().iter().enumerate() {
-            factors.push(coerce_integer_rep_factor(value, idx + 1)?);
-        }
-        return Ok(factors);
-    }
-    let mut factors = Vec::with_capacity(tensor.data.len());
-    for (idx, &raw) in tensor.data.iter().enumerate() {
-        factors.push(coerce_rep_factor(raw, idx + 1)?);
+    let mut factors = Vec::with_capacity(tensor.len());
+    for idx in 0..tensor.len() {
+        let value = tensor.numeric_value_at(idx).ok_or_else(|| {
+            repmat_invalid_factors("repmat: replication vector storage length mismatch")
+        })?;
+        factors.push(coerce_numeric_rep_factor(value, idx + 1)?);
     }
     Ok(factors)
 }
@@ -457,22 +453,15 @@ async fn parse_replication_scalar(value: &Value) -> crate::BuiltinResult<usize> 
     match value {
         Value::Int(value) => return coerce_integer_rep_factor(value, 1),
         Value::Tensor(t) => {
-            if let Some(storage) = t.integer_storage() {
-                if storage.len() != 1 {
-                    return Err(repmat_invalid_factors(
-                        "repmat: size arguments must be scalars",
-                    ));
-                }
-                let value = storage.value_at(0).ok_or_else(|| {
-                    repmat_invalid_factors("repmat: integer scalar storage length mismatch")
-                })?;
-                return coerce_integer_rep_factor(&value, 1);
-            }
-            if t.data.len() != 1 {
+            if t.len() != 1 {
                 return Err(repmat_invalid_factors(
                     "repmat: size arguments must be scalars",
                 ));
             }
+            let value = t.numeric_value_at(0).ok_or_else(|| {
+                repmat_invalid_factors("repmat: numeric scalar storage length mismatch")
+            })?;
+            return coerce_numeric_rep_factor(value, 1);
         }
         Value::LogicalArray(la) => {
             if la.data.len() != 1 {
@@ -493,23 +482,15 @@ async fn parse_replication_scalar(value: &Value) -> crate::BuiltinResult<usize> 
 
     let tensor =
         tensor::value_into_tensor_for("repmat", value.clone()).map_err(repmat_invalid_factors)?;
-    if let Some(storage) = tensor.integer_storage() {
-        if storage.len() != 1 {
-            return Err(repmat_invalid_factors(
-                "repmat: size arguments must be scalars",
-            ));
-        }
-        let value = storage.value_at(0).ok_or_else(|| {
-            repmat_invalid_factors("repmat: integer scalar storage length mismatch")
-        })?;
-        return coerce_integer_rep_factor(&value, 1);
-    }
     if !tensor::is_scalar_tensor(&tensor) {
         return Err(repmat_invalid_factors(
             "repmat: size arguments must be scalars",
         ));
     }
-    coerce_rep_factor(tensor::tensor_value_f64(&tensor, 0), 1)
+    let value = tensor
+        .numeric_value_at(0)
+        .ok_or_else(|| repmat_invalid_factors("repmat: numeric scalar storage length mismatch"))?;
+    coerce_numeric_rep_factor(value, 1)
 }
 
 fn coerce_integer_rep_factor(value: &IntValue, position: usize) -> crate::BuiltinResult<usize> {
@@ -518,6 +499,17 @@ fn coerce_integer_rep_factor(value: &IntValue, position: usize) -> crate::Builti
             "repmat: replication factor {position} must be a non-negative platform integer"
         ))
     })
+}
+
+fn coerce_numeric_rep_factor(value: NumericScalar, position: usize) -> crate::BuiltinResult<usize> {
+    match value {
+        NumericScalar::F64(value) => coerce_rep_factor(value, position),
+        NumericScalar::F32(value) => coerce_rep_factor(f64::from(value), position),
+        value => value
+            .into_int_value()
+            .ok_or_else(|| repmat_invalid_factors("repmat: invalid integer storage"))
+            .and_then(|value| coerce_integer_rep_factor(&value, position)),
+    }
 }
 
 fn coerce_rep_factor(value: f64, position: usize) -> crate::BuiltinResult<usize> {
@@ -547,19 +539,17 @@ fn coerce_rep_factor(value: f64, position: usize) -> crate::BuiltinResult<usize>
 }
 
 fn tensor_element_len(tensor: &Tensor) -> usize {
-    tensor
-        .integer_storage()
-        .map_or(tensor.data.len(), |storage| storage.len())
+    tensor.len()
 }
 
 fn repmat_tensor(tensor: &Tensor, reps: &[usize]) -> crate::BuiltinResult<Tensor> {
-    if let Some(storage) = tensor.integer_storage() {
-        let (storage, shape) = repmat_integer_storage(storage, &tensor.shape, reps)?;
-        return Tensor::new_integer(storage, shape)
-            .map_err(|e| repmat_internal(format!("repmat: {e}")));
-    }
-    let (data, shape) = repmat_column_major(&tensor.data, &tensor.shape, reps, "repmat")?;
-    Tensor::new(data, shape).map_err(|e| repmat_internal(format!("repmat: {e}")))
+    let storage = tensor
+        .clone()
+        .into_numeric_storage()
+        .map_err(|e| repmat_internal(format!("repmat: {e}")))?;
+    let (storage, shape) = repmat_numeric_storage(&storage, &tensor.shape, reps)?;
+    Tensor::from_numeric_storage(storage, shape)
+        .map_err(|e| repmat_internal(format!("repmat: {e}")))
 }
 
 fn repmat_logical(logical: &LogicalArray, reps: &[usize]) -> crate::BuiltinResult<LogicalArray> {
@@ -604,6 +594,32 @@ fn repmat_integer_storage(
         IntegerStorage::U16(values) => tile_storage!(values, U16),
         IntegerStorage::U32(values) => tile_storage!(values, U32),
         IntegerStorage::U64(values) => tile_storage!(values, U64),
+    }
+}
+
+fn repmat_numeric_storage(
+    storage: &NumericStorage,
+    shape: &[usize],
+    reps: &[usize],
+) -> crate::BuiltinResult<(NumericStorage, Vec<usize>)> {
+    macro_rules! tile_storage {
+        ($values:expr, $variant:ident) => {{
+            let (values, shape) = repmat_column_major($values, shape, reps, "repmat")?;
+            Ok((NumericStorage::$variant(values), shape))
+        }};
+    }
+
+    match storage {
+        NumericStorage::F64(values) => tile_storage!(values, F64),
+        NumericStorage::F32(values) => tile_storage!(values, F32),
+        NumericStorage::I8(values) => tile_storage!(values, I8),
+        NumericStorage::I16(values) => tile_storage!(values, I16),
+        NumericStorage::I32(values) => tile_storage!(values, I32),
+        NumericStorage::I64(values) => tile_storage!(values, I64),
+        NumericStorage::U8(values) => tile_storage!(values, U8),
+        NumericStorage::U16(values) => tile_storage!(values, U16),
+        NumericStorage::U32(values) => tile_storage!(values, U32),
+        NumericStorage::U64(values) => tile_storage!(values, U64),
     }
 }
 
@@ -817,7 +833,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::{
         HostIntegerDataView, HostIntegerTensorView, HostTensorView, IntegerElementType,
     };
-    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
+    use runmat_builtins::{IntValue, IntegerStorage, NumericStorage, Tensor};
 
     #[test]
     fn repmat_type_preserves_logical_kind() {
@@ -853,6 +869,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![4, 6]);
                 let rows = t.shape[0];
+                let values = t.as_f64_slice().expect("double output");
                 for col in 0..t.shape[1] {
                     let expected = if col % 2 == 0 {
                         vec![1.0, 3.0, 1.0, 3.0]
@@ -861,7 +878,7 @@ pub(crate) mod tests {
                     };
                     let start = col * rows;
                     let end = start + rows;
-                    assert_eq!(&t.data[start..end], expected.as_slice());
+                    assert_eq!(&values[start..end], expected.as_slice());
                 }
             }
             other => panic!("expected tensor output, got {other:?}"),
@@ -947,6 +964,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 3, 6]);
+                let values = out.as_f64_slice().expect("double output");
                 let rows = out.shape[0];
                 let cols = out.shape[1];
                 let depth = out.shape[2];
@@ -957,7 +975,7 @@ pub(crate) mod tests {
                             let base_col = j % 3;
                             let base_depth = k % 2;
                             let base_idx = base_col + 3 * base_depth;
-                            assert_eq!(out.data[idx], base_data[base_idx]);
+                            assert_eq!(values[idx], base_data[base_idx]);
                         }
                     }
                 }
@@ -1044,7 +1062,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 2]);
-                assert!(t.data.is_empty());
+                assert!(t.is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
         }
@@ -1246,6 +1264,25 @@ pub(crate) mod tests {
         assert_eq!(
             empty.integer_storage(),
             Some(&IntegerStorage::U64(Vec::new()))
+        );
+    }
+
+    #[test]
+    fn repmat_preserves_native_single_storage() {
+        let tensor =
+            Tensor::from_numeric_storage(NumericStorage::F32(vec![1.25, -2.5]), vec![1, 2])
+                .expect("single tensor");
+        let Value::Tensor(output) = repmat_builtin(
+            Value::Tensor(tensor),
+            vec![Value::Int(IntValue::I32(2)), Value::Int(IntValue::I32(2))],
+        )
+        .expect("repmat") else {
+            panic!("expected single tensor");
+        };
+        assert_eq!(output.shape, vec![2, 4]);
+        assert_eq!(
+            output.into_numeric_storage().expect("single storage"),
+            NumericStorage::F32(vec![1.25, 1.25, -2.5, -2.5, 1.25, 1.25, -2.5, -2.5])
         );
     }
 
