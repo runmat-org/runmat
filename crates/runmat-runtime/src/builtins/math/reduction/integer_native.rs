@@ -50,18 +50,24 @@ pub(crate) fn elementwise_extrema(
     right: &IntegerStorage,
     right_shape: &[usize],
     direction: ExtremaDirection,
+    comparison: ExtremaComparison,
 ) -> Result<IntegerExtrema, String> {
     let plan = BroadcastPlan::new(left_shape, right_shape)?;
     let shape = plan.output_shape().to_vec();
 
     macro_rules! select {
-        ($left:expr, $right:expr, $variant:ident, $choose:expr) => {{
+        ($left:expr, $right:expr, $variant:ident) => {{
             let mut values = Vec::with_capacity(plan.len());
             let mut indices = Vec::with_capacity(plan.len());
             for (_, left_index, right_index) in plan.iter() {
                 let a = $left[left_index];
                 let b = $right[right_index];
-                if $choose(a, b) {
+                if !should_replace(
+                    &IntValue::$variant(a),
+                    &IntValue::$variant(b),
+                    direction,
+                    comparison,
+                ) {
                     values.push(a);
                     indices.push(1.0);
                 } else {
@@ -73,55 +79,15 @@ pub(crate) fn elementwise_extrema(
         }};
     }
 
-    let (storage, indices) = match (left, right, direction) {
-        (IntegerStorage::I8(a), IntegerStorage::I8(b), ExtremaDirection::Min) => {
-            select!(a, b, I8, |a, b| a <= b)
-        }
-        (IntegerStorage::I16(a), IntegerStorage::I16(b), ExtremaDirection::Min) => {
-            select!(a, b, I16, |a, b| a <= b)
-        }
-        (IntegerStorage::I32(a), IntegerStorage::I32(b), ExtremaDirection::Min) => {
-            select!(a, b, I32, |a, b| a <= b)
-        }
-        (IntegerStorage::I64(a), IntegerStorage::I64(b), ExtremaDirection::Min) => {
-            select!(a, b, I64, |a, b| a <= b)
-        }
-        (IntegerStorage::U8(a), IntegerStorage::U8(b), ExtremaDirection::Min) => {
-            select!(a, b, U8, |a, b| a <= b)
-        }
-        (IntegerStorage::U16(a), IntegerStorage::U16(b), ExtremaDirection::Min) => {
-            select!(a, b, U16, |a, b| a <= b)
-        }
-        (IntegerStorage::U32(a), IntegerStorage::U32(b), ExtremaDirection::Min) => {
-            select!(a, b, U32, |a, b| a <= b)
-        }
-        (IntegerStorage::U64(a), IntegerStorage::U64(b), ExtremaDirection::Min) => {
-            select!(a, b, U64, |a, b| a <= b)
-        }
-        (IntegerStorage::I8(a), IntegerStorage::I8(b), ExtremaDirection::Max) => {
-            select!(a, b, I8, |a, b| a >= b)
-        }
-        (IntegerStorage::I16(a), IntegerStorage::I16(b), ExtremaDirection::Max) => {
-            select!(a, b, I16, |a, b| a >= b)
-        }
-        (IntegerStorage::I32(a), IntegerStorage::I32(b), ExtremaDirection::Max) => {
-            select!(a, b, I32, |a, b| a >= b)
-        }
-        (IntegerStorage::I64(a), IntegerStorage::I64(b), ExtremaDirection::Max) => {
-            select!(a, b, I64, |a, b| a >= b)
-        }
-        (IntegerStorage::U8(a), IntegerStorage::U8(b), ExtremaDirection::Max) => {
-            select!(a, b, U8, |a, b| a >= b)
-        }
-        (IntegerStorage::U16(a), IntegerStorage::U16(b), ExtremaDirection::Max) => {
-            select!(a, b, U16, |a, b| a >= b)
-        }
-        (IntegerStorage::U32(a), IntegerStorage::U32(b), ExtremaDirection::Max) => {
-            select!(a, b, U32, |a, b| a >= b)
-        }
-        (IntegerStorage::U64(a), IntegerStorage::U64(b), ExtremaDirection::Max) => {
-            select!(a, b, U64, |a, b| a >= b)
-        }
+    let (storage, indices) = match (left, right) {
+        (IntegerStorage::I8(a), IntegerStorage::I8(b)) => select!(a, b, I8),
+        (IntegerStorage::I16(a), IntegerStorage::I16(b)) => select!(a, b, I16),
+        (IntegerStorage::I32(a), IntegerStorage::I32(b)) => select!(a, b, I32),
+        (IntegerStorage::I64(a), IntegerStorage::I64(b)) => select!(a, b, I64),
+        (IntegerStorage::U8(a), IntegerStorage::U8(b)) => select!(a, b, U8),
+        (IntegerStorage::U16(a), IntegerStorage::U16(b)) => select!(a, b, U16),
+        (IntegerStorage::U32(a), IntegerStorage::U32(b)) => select!(a, b, U32),
+        (IntegerStorage::U64(a), IntegerStorage::U64(b)) => select!(a, b, U64),
         _ => {
             return Err("elementwise integer extrema require matching integer classes".to_string())
         }
@@ -139,6 +105,7 @@ pub(crate) fn elementwise_value_extrema(
     left: &Value,
     right: &Value,
     direction: ExtremaDirection,
+    comparison: ExtremaComparison,
 ) -> Result<Option<IntegerExtrema>, String> {
     let Some((left_storage, left_shape)) = integer_storage_and_shape(left) else {
         return Ok(None);
@@ -155,6 +122,7 @@ pub(crate) fn elementwise_value_extrema(
         &right_storage,
         &right_shape,
         direction,
+        comparison,
     )
     .map(Some)
 }
