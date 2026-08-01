@@ -15,17 +15,17 @@ fn test_matrix_arithmetic() {
 
     // Test addition
     let c = matrix_add(&a, &b).unwrap();
-    assert_eq!(c.data, vec![3.0, 4.0, 3.0, 6.0]);
+    assert_eq!(c.materialize_f64(), vec![3.0, 4.0, 3.0, 6.0]);
 
     // Test subtraction
     let d = matrix_sub(&a, &b).unwrap();
-    assert_eq!(d.data, vec![-1.0, 2.0, 1.0, 2.0]);
+    assert_eq!(d.materialize_f64(), vec![-1.0, 2.0, 1.0, 2.0]);
 
     // Test matrix multiplication
     let e = matrix_mul(&a, &b).unwrap();
     // [1 2] * [2 1] = [4 5]
     // [3 4]   [1 2]   [10 11]
-    assert_eq!(e.data, vec![4.0, 10.0, 5.0, 11.0]);
+    assert_eq!(e.materialize_f64(), vec![4.0, 10.0, 5.0, 11.0]);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -35,7 +35,7 @@ fn test_scalar_operations() {
 
     // Test scalar multiplication
     let b = matrix_scalar_mul(&a, 2.0);
-    assert_eq!(b.data, vec![2.0, 6.0, 4.0, 8.0]);
+    assert_eq!(b.materialize_f64(), vec![2.0, 6.0, 4.0, 8.0]);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -51,7 +51,7 @@ fn test_matrix_transpose() {
     assert_eq!(b.rows(), 2);
     assert_eq!(b.cols(), 3);
     // Transpose should yield [[1,3,5],[2,4,6]] with col-major data [1,2,3,4,5,6]
-    assert_eq!(b.data, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+    assert_eq!(b.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -60,7 +60,10 @@ fn test_matrix_eye() {
     let eye3 = matrix_eye(3);
     assert_eq!(eye3.rows(), 3);
     assert_eq!(eye3.cols(), 3);
-    assert_eq!(eye3.data, vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
+    assert_eq!(
+        eye3.materialize_f64(),
+        vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+    );
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -71,37 +74,82 @@ fn test_comparison_operations() {
 
     // Test greater than
     let gt_result = matrix_gt(&a, &b).unwrap();
-    assert_eq!(gt_result.data, vec![0.0, 1.0, 0.0, 1.0]);
+    assert_eq!(gt_result.materialize_f64(), vec![0.0, 1.0, 0.0, 1.0]);
 
     // Test less than
     let lt_result = matrix_lt(&a, &b).unwrap();
-    assert_eq!(lt_result.data, vec![1.0, 0.0, 0.0, 0.0]);
+    assert_eq!(lt_result.materialize_f64(), vec![1.0, 0.0, 0.0, 0.0]);
 
     // Test equality
     let eq_result = matrix_eq(&a, &b).unwrap();
-    assert_eq!(eq_result.data, vec![0.0, 0.0, 1.0, 0.0]);
+    assert_eq!(eq_result.materialize_f64(), vec![0.0, 0.0, 1.0, 0.0]);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn floating_matrix_equality_is_exact_for_double_and_single() {
+    let double_left = Matrix::new_2d(vec![f64::INFINITY, 0.0, f64::NAN], 3, 1).unwrap();
+    let double_right =
+        Matrix::new_2d(vec![f64::INFINITY, f64::MIN_POSITIVE, f64::NAN], 3, 1).unwrap();
+    assert_eq!(
+        matrix_eq(&double_left, &double_right)
+            .unwrap()
+            .materialize_f64(),
+        vec![1.0, 0.0, 0.0]
+    );
+    assert_eq!(
+        matrix_ne(&double_left, &double_right)
+            .unwrap()
+            .materialize_f64(),
+        vec![0.0, 1.0, 1.0]
+    );
+
+    let single_left = Matrix::from_f32(vec![f32::INFINITY, 0.0, f32::NAN], vec![3, 1]).unwrap();
+    let single_right =
+        Matrix::from_f32(vec![f32::INFINITY, f32::MIN_POSITIVE, f32::NAN], vec![3, 1]).unwrap();
+    assert_eq!(
+        matrix_eq(&single_left, &single_right)
+            .unwrap()
+            .materialize_f64(),
+        vec![1.0, 0.0, 0.0]
+    );
+    assert_eq!(
+        matrix_ne(&single_left, &single_right)
+            .unwrap()
+            .materialize_f64(),
+        vec![0.0, 1.0, 1.0]
+    );
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn matrix_comparisons_read_typed_integer_storage_exactly() {
-    let mut a = Matrix::new_integer(
+    let a = Matrix::new_integer(
         IntegerStorage::U64(vec![9_007_199_254_740_993, 9_007_199_254_740_992, 4, 5]),
         vec![2, 2],
     )
     .unwrap();
-    let mut b = Matrix::new_integer(
+    let b = Matrix::new_integer(
         IntegerStorage::U64(vec![9_007_199_254_740_992, 9_007_199_254_740_992, 5, 4]),
         vec![2, 2],
     )
     .unwrap();
-    a.data.fill(f64::NAN);
-    b.data.fill(f64::NAN);
-
-    assert_eq!(matrix_eq(&a, &b).unwrap().data, vec![0.0, 1.0, 0.0, 0.0]);
-    assert_eq!(matrix_ne(&a, &b).unwrap().data, vec![1.0, 0.0, 1.0, 1.0]);
-    assert_eq!(matrix_gt(&a, &b).unwrap().data, vec![1.0, 0.0, 0.0, 1.0]);
-    assert_eq!(matrix_lt(&a, &b).unwrap().data, vec![0.0, 0.0, 1.0, 0.0]);
+    assert_eq!(
+        matrix_eq(&a, &b).unwrap().materialize_f64(),
+        vec![0.0, 1.0, 0.0, 0.0]
+    );
+    assert_eq!(
+        matrix_ne(&a, &b).unwrap().materialize_f64(),
+        vec![1.0, 0.0, 1.0, 1.0]
+    );
+    assert_eq!(
+        matrix_gt(&a, &b).unwrap().materialize_f64(),
+        vec![1.0, 0.0, 0.0, 1.0]
+    );
+    assert_eq!(
+        matrix_lt(&a, &b).unwrap().materialize_f64(),
+        vec![0.0, 0.0, 1.0, 0.0]
+    );
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -129,21 +177,21 @@ fn test_row_column_access() {
 
     // Test getting row
     let row1 = matrix_get_row(&matrix, 1).unwrap();
-    assert_eq!(row1.data, vec![1.0, 2.0, 3.0]);
+    assert_eq!(row1.materialize_f64(), vec![1.0, 2.0, 3.0]);
     assert_eq!(row1.rows(), 1);
     assert_eq!(row1.cols(), 3);
 
     let row2 = matrix_get_row(&matrix, 2).unwrap();
-    assert_eq!(row2.data, vec![4.0, 5.0, 6.0]);
+    assert_eq!(row2.materialize_f64(), vec![4.0, 5.0, 6.0]);
 
     // Test getting column
     let col1 = matrix_get_col(&matrix, 1).unwrap();
-    assert_eq!(col1.data, vec![1.0, 4.0]);
+    assert_eq!(col1.materialize_f64(), vec![1.0, 4.0]);
     assert_eq!(col1.rows(), 2);
     assert_eq!(col1.cols(), 1);
 
     let col3 = matrix_get_col(&matrix, 3).unwrap();
-    assert_eq!(col3.data, vec![3.0, 6.0]);
+    assert_eq!(col3.materialize_f64(), vec![3.0, 6.0]);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -176,7 +224,7 @@ fn test_builtin_dispatch() {
     if let Value::Tensor(m) = result {
         assert_eq!(m.rows(), 2);
         assert_eq!(m.cols(), 3);
-        assert_eq!(m.data, vec![0.0; 6]);
+        assert_eq!(m.materialize_f64(), vec![0.0; 6]);
     } else {
         panic!("Expected matrix result");
     }
@@ -184,7 +232,7 @@ fn test_builtin_dispatch() {
     // Test eye function
     let result = call_builtin("eye", &[Value::Int(runmat_builtins::IntValue::I32(2))]).unwrap();
     if let Value::Tensor(m) = result {
-        assert_eq!(m.data, vec![1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(m.materialize_f64(), vec![1.0, 0.0, 0.0, 1.0]);
     } else {
         panic!("Expected matrix result");
     }

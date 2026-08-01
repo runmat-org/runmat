@@ -6,6 +6,7 @@ use std::cmp::Ordering;
 
 use runmat_builtins::Tensor;
 
+use crate::builtins::common::tensor::tensor_values_f64_cow;
 use crate::builtins::logical::rel::integer_comparison::{
     compare_integer_values, integer_f64_order, matches_optional_relation, matches_relation,
     storage_value, IntegerComparisonOp,
@@ -33,16 +34,12 @@ pub fn matrix_le(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
 
 /// Element-wise equality comparison
 pub fn matrix_eq(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
-    matrix_compare(a, b, "==", IntegerComparisonOp::Eq, |x, y| {
-        (x - y).abs() < f64::EPSILON
-    })
+    matrix_compare(a, b, "==", IntegerComparisonOp::Eq, |x, y| x == y)
 }
 
 /// Element-wise inequality comparison
 pub fn matrix_ne(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
-    matrix_compare(a, b, "!=", IntegerComparisonOp::Ne, |x, y| {
-        (x - y).abs() >= f64::EPSILON
-    })
+    matrix_compare(a, b, "!=", IntegerComparisonOp::Ne, |x, y| x != y)
 }
 
 fn matrix_compare(
@@ -71,27 +68,35 @@ fn matrix_compare(
                 logical_f64(matches_relation(ordering, operation))
             })
             .collect(),
-        (Some(left), None) => (0..left.len())
-            .map(|index| {
-                logical_f64(matches_optional_relation(
-                    integer_f64_order(storage_value(left, index), b.data[index]),
-                    operation,
-                ))
-            })
-            .collect(),
-        (None, Some(right)) => (0..right.len())
-            .map(|index| {
-                let ordering = integer_f64_order(storage_value(right, index), a.data[index])
-                    .map(Ordering::reverse);
-                logical_f64(matches_optional_relation(ordering, operation))
-            })
-            .collect(),
-        (None, None) => a
-            .data
-            .iter()
-            .zip(b.data.iter())
-            .map(|(x, y)| logical_f64(float_compare(*x, *y)))
-            .collect(),
+        (Some(left), None) => {
+            let right = tensor_values_f64_cow(b);
+            (0..left.len())
+                .map(|index| {
+                    logical_f64(matches_optional_relation(
+                        integer_f64_order(storage_value(left, index), right[index]),
+                        operation,
+                    ))
+                })
+                .collect()
+        }
+        (None, Some(right)) => {
+            let left = tensor_values_f64_cow(a);
+            (0..right.len())
+                .map(|index| {
+                    let ordering = integer_f64_order(storage_value(right, index), left[index])
+                        .map(Ordering::reverse);
+                    logical_f64(matches_optional_relation(ordering, operation))
+                })
+                .collect()
+        }
+        (None, None) => {
+            let left = tensor_values_f64_cow(a);
+            let right = tensor_values_f64_cow(b);
+            left.iter()
+                .zip(right.iter())
+                .map(|(x, y)| logical_f64(float_compare(*x, *y)))
+                .collect()
+        }
     };
 
     Tensor::new_2d(data, a.rows(), a.cols())
