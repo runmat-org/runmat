@@ -3,8 +3,8 @@
 use std::cmp::Ordering;
 
 use runmat_accelerate_api::{
-    GpuTensorHandle, GpuTensorStorage, HostTensorView, ProviderMovingWindowEndpoints,
-    ProviderMovingWindowOp, ProviderMovingWindowRequest, ProviderNanMode, ProviderStdNormalization,
+    GpuTensorHandle, GpuTensorStorage, ProviderMovingWindowEndpoints, ProviderMovingWindowOp,
+    ProviderMovingWindowRequest, ProviderNanMode, ProviderStdNormalization,
 };
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
@@ -652,12 +652,7 @@ async fn moving_gpu(
     let Some(provider) = runmat_accelerate_api::provider() else {
         return Ok(tensor::tensor_into_value(result));
     };
-    let view = HostTensorView {
-        data: &result.data,
-        shape: &result.shape,
-    };
-    let uploaded = provider
-        .upload(&view)
+    let uploaded = gpu_helpers::upload_tensor(provider, &result)
         .map_err(|err| internal(name, format!("{name}: failed to upload GPU result: {err}")))?;
     Ok(Value::GpuTensor(uploaded))
 }
@@ -763,6 +758,11 @@ fn moving_real(
     let stride_before = checked_product(name, &input_shape[..dim_index])?;
     let stride_after = checked_product(name, &input_shape[dim..])?;
     let out_axis = shape[dim_index];
+    let dtype = tensor.numeric_dtype();
+    let input = tensor
+        .into_numeric_storage()
+        .map_err(|error| internal(name, error))?
+        .materialize_f64();
     let mut output = vec![0.0; count];
 
     for after in 0..stride_after {
@@ -787,7 +787,7 @@ fn moving_real(
                 if let Some(positions) = sample_positions.as_ref() {
                     for &pos in positions {
                         let idx = before + pos * stride_before + after * stride_before * axis_len;
-                        let value = tensor.data[idx];
+                        let value = input[idx];
                         if value.is_nan() {
                             if parsed.nan_mode == NanMode::Include {
                                 saw_nan = true;
@@ -805,7 +805,7 @@ fn moving_real(
                 let window = count_window.expect("count window computed");
                 for pos in window.start..window.end {
                     let idx = before + pos * stride_before + after * stride_before * axis_len;
-                    let value = tensor.data[idx];
+                    let value = input[idx];
                     if value.is_nan() {
                         if parsed.nan_mode == NanMode::Include {
                             saw_nan = true;
@@ -827,7 +827,7 @@ fn moving_real(
         }
     }
 
-    Tensor::new_with_dtype(output, shape, tensor.dtype).map_err(|err| internal(name, err))
+    Tensor::new_with_dtype(output, shape, dtype).map_err(|err| internal(name, err))
 }
 
 fn moving_complex(
@@ -1961,9 +1961,7 @@ fn scalar_f64(value: &Value) -> Option<f64> {
 }
 
 fn tensor_len(tensor: &Tensor) -> usize {
-    tensor
-        .integer_storage()
-        .map_or(tensor.data.len(), |storage| storage.len())
+    tensor.len()
 }
 
 fn positive_integer(name: &'static str, raw: f64, what: &str) -> BuiltinResult<usize> {
@@ -2128,7 +2126,8 @@ fn identifier_suffix(descriptor: &'static BuiltinErrorDescriptor) -> &'static st
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerComplexStorage, IntegerStorage};
+    use runmat_accelerate_api::HostTensorView;
+    use runmat_builtins::{IntegerComplexStorage, IntegerStorage, NumericStorage};
 
     fn call(name: &'static str, op: MovingOp, args: Vec<Value>) -> BuiltinResult<Value> {
         block_on(moving_builtin(name, op, args))
@@ -2267,6 +2266,22 @@ mod tests {
         let out = expect_tensor(result);
         assert_eq!(out.shape, vec![1, 4]);
         assert_eq!(out.data, vec![3.0, 6.0, 9.0, 7.0]);
+    }
+
+    #[test]
+    fn moving_real_preserves_native_single_output_class() {
+        let input = Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![1, 4]).expect("input");
+        let result = call(
+            "movmean",
+            MovingOp::Mean,
+            vec![Value::Tensor(input), Value::Num(3.0)],
+        )
+        .expect("movmean");
+        let output = expect_tensor(result);
+        assert_eq!(
+            output.into_numeric_storage().expect("native storage"),
+            NumericStorage::F32(vec![1.5, 2.0, 3.0, 3.5])
+        );
     }
 
     #[test]
