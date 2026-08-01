@@ -9,6 +9,7 @@ pub mod layout;
 pub mod lease;
 pub mod materialize;
 pub mod object;
+pub mod publication;
 pub mod source;
 pub mod state;
 
@@ -29,6 +30,11 @@ pub use materialize::{MaterializationRecord, MaterializationState, MountDescript
 pub use object::{
     BlobMetadata, CacheObject, CacheObjectKind, Pin, PinId, SourceIndexMetadata, TreeEntry,
     TreeEntryKind, TreeManifest,
+};
+pub use publication::{
+    ArtifactEntryRole, PublicationEntry, PublicationEntryContent, PublicationPolicy,
+    ReleaseArtifactBuilder, ReleaseArtifactBundle, ReleaseInventory, ReleaseInventoryEntry,
+    ReleaseManifest, RELEASE_INVENTORY_SCHEMA_VERSION, RELEASE_MANIFEST_SCHEMA_VERSION,
 };
 pub use source::{
     cache_git_snapshot, cache_registry_snapshot, cache_server_project_snapshot,
