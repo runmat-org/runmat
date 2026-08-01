@@ -479,10 +479,11 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
 
 fn reduce_all(tensor: Tensor, output_class: OutputClass) -> BuiltinResult<ModeEvaluation> {
     let output_shape = vec![1usize, 1];
-    if tensor.data.is_empty() {
+    let values = tensor::tensor_into_values_f64(tensor);
+    if values.is_empty() {
         return ModeEvaluation::empty(output_shape, output_class);
     }
-    let scalar = scalar_mode(&tensor.data);
+    let scalar = scalar_mode(&values);
     finalize_single_slice(scalar, output_shape, output_class)
 }
 
@@ -513,9 +514,11 @@ fn reduce_along_dim(
     if dim == 0 {
         return Err(mode_error(&MODE_ERROR_INVALID_DIMENSION));
     }
+    let shape = tensor.shape.clone();
+    let data = tensor::tensor_into_values_f64(tensor);
 
-    if tensor.shape.is_empty() {
-        let scalar_value = tensor.data.first().copied().unwrap_or(f64::NAN);
+    if shape.is_empty() {
+        let scalar_value = data.first().copied().unwrap_or(f64::NAN);
         let output_shape = vec![1usize, 1];
         if scalar_value.is_nan() {
             return ModeEvaluation::empty(output_shape, output_class);
@@ -528,14 +531,14 @@ fn reduce_along_dim(
         return finalize_single_slice(scalar, output_shape, output_class);
     }
 
-    if dim > tensor.shape.len() {
+    if dim > shape.len() {
         // Reducing along a trailing singleton: every slice has one element.
-        let output_shape = tensor.shape.clone();
+        let output_shape = shape.clone();
         let len = tensor::element_count(&output_shape);
         let mut values = Vec::with_capacity(len);
         let mut freq = Vec::with_capacity(len);
         let mut ties = Vec::with_capacity(len);
-        for &v in &tensor.data {
+        for &v in &data {
             if v.is_nan() {
                 values.push(f64::NAN);
                 freq.push(0.0);
@@ -560,16 +563,16 @@ fn reduce_along_dim(
     }
 
     let dim_index = dim - 1;
-    let reduce_len = tensor.shape[dim_index];
-    let mut output_shape = tensor.shape.clone();
+    let reduce_len = shape[dim_index];
+    let mut output_shape = shape.clone();
     output_shape[dim_index] = 1;
 
-    if reduce_len == 0 || tensor.data.is_empty() {
+    if reduce_len == 0 || data.is_empty() {
         return ModeEvaluation::empty(output_shape, output_class);
     }
 
-    let stride_before = dim_product(&tensor.shape[..dim_index])?;
-    let stride_after = dim_product(&tensor.shape[dim_index + 1..])?;
+    let stride_before = dim_product(&shape[..dim_index])?;
+    let stride_after = dim_product(&shape[dim_index + 1..])?;
     let output_len = stride_before
         .checked_mul(stride_after)
         .ok_or_else(|| mode_internal_error("mode: output size overflow"))?;
@@ -584,7 +587,7 @@ fn reduce_along_dim(
             slice.clear();
             for k in 0..reduce_len {
                 let idx = before + k * stride_before + after * stride_before * reduce_len;
-                slice.push(tensor.data[idx]);
+                slice.push(data[idx]);
             }
             let scalar = scalar_mode(&slice);
             let out_idx = before + after * stride_before;
@@ -807,7 +810,7 @@ enum IntKind {
 impl OutputClass {
     fn from_value(value: &Value) -> Self {
         match value {
-            Value::Tensor(tensor) => match tensor.dtype {
+            Value::Tensor(tensor) => match tensor.numeric_dtype() {
                 NumericDType::F64 => OutputClass::Double,
                 NumericDType::F32 => OutputClass::Single,
                 NumericDType::I8 => OutputClass::Int(IntKind::I8),
@@ -1005,16 +1008,24 @@ impl IntKind {
     }
 }
 
-fn tensor_into_class_value(mut tensor: Tensor, class: OutputClass) -> BuiltinResult<Value> {
-    let contains_nan = tensor.data.iter().any(|value| value.is_nan());
+fn tensor_into_class_value(tensor: Tensor, class: OutputClass) -> BuiltinResult<Value> {
+    if matches!(class, OutputClass::Double) {
+        return Ok(tensor::tensor_into_value(tensor));
+    }
+    let contains_nan = tensor::tensor_values_f64_cow(&tensor)
+        .iter()
+        .any(|value| value.is_nan());
     match class {
-        OutputClass::Double => Ok(tensor::tensor_into_value(tensor)),
+        OutputClass::Double => unreachable!("double handled above"),
         OutputClass::Single => {
-            for value in &mut tensor.data {
-                *value = (*value as f32) as f64;
-            }
-            tensor.dtype = NumericDType::F32;
-            Ok(Value::Tensor(tensor))
+            let shape = tensor.shape.clone();
+            let values = tensor::tensor_into_values_f64(tensor)
+                .into_iter()
+                .map(|value| value as f32)
+                .collect();
+            Tensor::from_f32(values, shape)
+                .map(Value::Tensor)
+                .map_err(mode_internal_error)
         }
         OutputClass::UInt8 => {
             if contains_nan {
@@ -1038,15 +1049,15 @@ fn tensor_into_class_value(mut tensor: Tensor, class: OutputClass) -> BuiltinRes
             if contains_nan {
                 return Ok(tensor::tensor_into_value(tensor));
             }
-            let data: Vec<u8> = tensor
-                .data
-                .iter()
-                .map(|value| if *value != 0.0 { 1 } else { 0 })
+            let shape = tensor.shape.clone();
+            let data: Vec<u8> = tensor::tensor_into_values_f64(tensor)
+                .into_iter()
+                .map(|value| if value != 0.0 { 1 } else { 0 })
                 .collect();
             if data.len() == 1 {
                 Ok(Value::Bool(data[0] != 0))
             } else {
-                LogicalArray::new(data, tensor.shape)
+                LogicalArray::new(data, shape)
                     .map(Value::LogicalArray)
                     .map_err(mode_internal_error)
             }
@@ -1060,16 +1071,24 @@ fn tensor_into_class_value(mut tensor: Tensor, class: OutputClass) -> BuiltinRes
     }
 }
 
-fn tensor_into_class_array_value(mut tensor: Tensor, class: OutputClass) -> BuiltinResult<Value> {
-    let contains_nan = tensor.data.iter().any(|value| value.is_nan());
+fn tensor_into_class_array_value(tensor: Tensor, class: OutputClass) -> BuiltinResult<Value> {
+    if matches!(class, OutputClass::Double) {
+        return Ok(Value::Tensor(tensor));
+    }
+    let contains_nan = tensor::tensor_values_f64_cow(&tensor)
+        .iter()
+        .any(|value| value.is_nan());
     match class {
-        OutputClass::Double => Ok(Value::Tensor(tensor)),
+        OutputClass::Double => unreachable!("double handled above"),
         OutputClass::Single => {
-            for value in &mut tensor.data {
-                *value = (*value as f32) as f64;
-            }
-            tensor.dtype = NumericDType::F32;
-            Ok(Value::Tensor(tensor))
+            let shape = tensor.shape.clone();
+            let values = tensor::tensor_into_values_f64(tensor)
+                .into_iter()
+                .map(|value| value as f32)
+                .collect();
+            Tensor::from_f32(values, shape)
+                .map(Value::Tensor)
+                .map_err(mode_internal_error)
         }
         OutputClass::UInt8 => {
             if contains_nan {
@@ -1093,12 +1112,12 @@ fn tensor_into_class_array_value(mut tensor: Tensor, class: OutputClass) -> Buil
             if contains_nan {
                 return Ok(Value::Tensor(tensor));
             }
-            let data: Vec<u8> = tensor
-                .data
-                .iter()
-                .map(|value| if *value != 0.0 { 1 } else { 0 })
+            let shape = tensor.shape.clone();
+            let data: Vec<u8> = tensor::tensor_into_values_f64(tensor)
+                .into_iter()
+                .map(|value| if value != 0.0 { 1 } else { 0 })
                 .collect();
-            LogicalArray::new(data, tensor.shape)
+            LogicalArray::new(data, shape)
                 .map(Value::LogicalArray)
                 .map_err(mode_internal_error)
         }
@@ -1129,11 +1148,13 @@ fn tensor_into_integer_class_value(tensor: Tensor, kind: IntKind) -> BuiltinResu
 }
 
 fn tensor_into_integer_class_array_value(tensor: Tensor, kind: IntKind) -> BuiltinResult<Value> {
-    let storage = tensor
-        .integer_storage()
-        .map(|storage| kind.storage_from_int_values(storage.exact_values()))
-        .unwrap_or_else(|| kind.storage_from_f64_values(&tensor.data));
-    Tensor::new_integer(storage, tensor.shape)
+    let shape = tensor.shape.clone();
+    let storage = if let Some(storage) = tensor.integer_storage() {
+        kind.storage_from_int_values(storage.exact_values())
+    } else {
+        kind.storage_from_f64_values(&tensor::tensor_into_values_f64(tensor))
+    };
+    Tensor::new_integer(storage, shape)
         .map(Value::Tensor)
         .map_err(mode_internal_error)
 }
@@ -1252,6 +1273,25 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 3.0, 3.0, 3.0, 4.0], vec![7, 1]).unwrap();
         let result = mode_call(Value::Tensor(tensor), Vec::new()).expect("mode");
         assert_eq!(result, Value::Num(3.0));
+    }
+
+    #[test]
+    fn mode_preserves_native_single_values_and_ties() {
+        let tensor = Tensor::from_f32(vec![1.0, 2.0, 2.0, 3.0], vec![4, 1]).expect("single tensor");
+        let outputs = mode_outputs(Value::Tensor(tensor), Vec::new(), 3).expect("single mode");
+        let values = expect_tensor(&outputs[0]);
+        assert_eq!(values.numeric_dtype(), NumericDType::F32);
+        assert_eq!(
+            values.clone().into_numeric_storage().expect("mode storage"),
+            runmat_builtins::NumericStorage::F32(vec![2.0])
+        );
+        let Value::Cell(ties) = &outputs[2] else {
+            panic!("expected ties cell");
+        };
+        let Value::Tensor(tie_values) = &ties.data[0] else {
+            panic!("expected tie tensor");
+        };
+        assert_eq!(tie_values.numeric_dtype(), NumericDType::F32);
     }
 
     #[test]
