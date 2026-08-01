@@ -551,16 +551,11 @@ fn text_from_value(value: &Value) -> Option<String> {
 fn numeric_tensor(value: Value, name: &str) -> BuiltinResult<Tensor> {
     match value {
         Value::Num(x) => Tensor::new(vec![x], vec![1, 1]).map_err(internal),
-        Value::Tensor(tensor) if matches!(tensor.dtype, NumericDType::F64 | NumericDType::F32) => {
-            Ok(tensor)
-        }
-        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
-            tensor_utils::integer_tensor_to_f64(tensor)
-                .map_err(|err| invalid(format!("{name}: {err}")))
-        }
-        Value::Tensor(_) => Err(invalid(format!(
-            "{name} must be a single, double, or integer array"
-        ))),
+        Value::Tensor(tensor) => match tensor.numeric_dtype() {
+            NumericDType::F64 | NumericDType::F32 => Ok(tensor),
+            _ => tensor_utils::integer_tensor_to_f64(tensor)
+                .map_err(|err| invalid(format!("{name}: {err}"))),
+        },
         other => Err(invalid(format!(
             "{name} must be a real numeric array, got {other:?}"
         ))),
@@ -570,20 +565,10 @@ fn numeric_tensor(value: Value, name: &str) -> BuiltinResult<Tensor> {
 fn numeric_vector(value: Value, name: &str) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Num(x) => Ok(vec![x]),
-        Value::Tensor(tensor)
-            if is_vector_shape(&tensor.shape)
-                && matches!(tensor.dtype, NumericDType::F64 | NumericDType::F32) =>
-        {
-            Ok(tensor.data)
-        }
-        Value::Tensor(tensor)
-            if is_vector_shape(&tensor.shape) && tensor.integer_storage().is_some() =>
-        {
+        Value::Tensor(tensor) if is_vector_shape(&tensor.shape) => {
+            // Grid coordinates are evaluated in the interpolator's f64 domain.
             Ok(tensor_utils::tensor_into_values_f64(tensor))
         }
-        Value::Tensor(tensor) if is_vector_shape(&tensor.shape) => Err(invalid(format!(
-            "{name} must be a single, double, or integer vector"
-        ))),
         Value::Tensor(_) => Err(invalid(format!("{name} must be a vector"))),
         other => Err(invalid(format!(
             "{name} must be a real numeric vector, got {other:?}"
@@ -593,8 +578,8 @@ fn numeric_vector(value: Value, name: &str) -> BuiltinResult<Vec<f64>> {
 
 fn normalize_default_values(values: Tensor) -> BuiltinResult<Tensor> {
     if is_vector_shape(&values.shape) && values.shape.first().copied().unwrap_or(1) == 1 {
-        let len = values.data.len();
-        Tensor::new_with_dtype(values.data, vec![len, 1], values.dtype).map_err(internal)
+        let len = tensor_utils::tensor_element_len(&values);
+        values.reshape(vec![len, 1]).map_err(internal)
     } else {
         Ok(values)
     }
@@ -603,10 +588,11 @@ fn normalize_default_values(values: Tensor) -> BuiltinResult<Tensor> {
 fn normalize_values_for_grid(grid_vectors: &[Vec<f64>], values: Tensor) -> BuiltinResult<Tensor> {
     if grid_vectors.len() == 1
         && is_vector_shape(&values.shape)
-        && values.data.len() == grid_vectors[0].len()
+        && tensor_utils::tensor_element_len(&values) == grid_vectors[0].len()
         && values.shape.first().copied().unwrap_or(1) == 1
     {
-        Tensor::new_with_dtype(values.data, vec![grid_vectors[0].len(), 1], values.dtype)
+        values
+            .reshape(vec![grid_vectors[0].len(), 1])
             .map_err(internal)
     } else {
         Ok(values)
@@ -954,7 +940,7 @@ fn evaluate_interpolant(spec: &InterpolantSpec, args: Vec<Value>) -> BuiltinResu
             ))
         });
     }
-    finish_interpolant_output(out, out_shape, spec.values.dtype)
+    finish_interpolant_output(out, out_shape, spec.values.numeric_dtype())
 }
 
 fn evaluate_piecewise_interpolant(
@@ -994,25 +980,27 @@ fn evaluate_piecewise_interpolant(
             ));
         });
     }
-    finish_interpolant_output(out, out_shape, spec.values.dtype)
+    finish_interpolant_output(out, out_shape, spec.values.numeric_dtype())
 }
 
 fn finish_interpolant_output(
-    mut out: Vec<f64>,
+    out: Vec<f64>,
     out_shape: Vec<usize>,
     dtype: NumericDType,
 ) -> BuiltinResult<Value> {
     if out.len() == 1 && dtype == NumericDType::F64 {
         Ok(Value::Num(out[0]))
     } else {
-        if dtype == NumericDType::F32 {
-            for value in &mut out {
-                *value = *value as f32 as f64;
-            }
+        let tensor = match dtype {
+            NumericDType::F64 => Tensor::new(out, out_shape),
+            NumericDType::F32 => Tensor::from_f32(
+                out.into_iter().map(|value| value as f32).collect(),
+                out_shape,
+            ),
+            _ => Err("interpolant output class must be single or double".to_string()),
         }
-        Tensor::new_with_dtype(out, out_shape, dtype)
-            .map(Value::Tensor)
-            .map_err(internal)
+        .map_err(internal)?;
+        Ok(Value::Tensor(tensor))
     }
 }
 
@@ -1096,8 +1084,14 @@ fn parse_query_plan(grid_vectors: &[Vec<f64>], args: Vec<Value>) -> BuiltinResul
 fn numeric_query_values(value: Value, name: &str) -> BuiltinResult<(Vec<f64>, Vec<usize>)> {
     match value {
         Value::Num(x) => Ok((vec![x], vec![1, 1])),
-        Value::Tensor(tensor) if matches!(tensor.dtype, NumericDType::F64 | NumericDType::F32) => {
-            Ok((tensor.data, tensor.shape))
+        Value::Tensor(tensor)
+            if matches!(
+                tensor.numeric_dtype(),
+                NumericDType::F64 | NumericDType::F32
+            ) =>
+        {
+            let shape = tensor.shape.clone();
+            Ok((tensor_utils::tensor_into_values_f64(tensor), shape))
         }
         Value::Tensor(_) => Err(invalid(format!("{name} must be single or double"))),
         other => Err(invalid(format!("{name} must be numeric, got {other:?}"))),
@@ -1412,7 +1406,7 @@ fn extrap_method_name(method: ExtrapolationMethod) -> &'static str {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_builtins::{IntegerStorage, NumericStorage};
 
     fn row(values: &[f64]) -> Value {
         Value::Tensor(Tensor::new(values.to_vec(), vec![1, values.len()]).unwrap())
@@ -1497,6 +1491,22 @@ mod tests {
         match subsref(obj, vec![row(&[1.2, 2.6])]).unwrap() {
             Value::Tensor(tensor) => assert_eq!(tensor.data, vec![10.0, 40.0]),
             other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn single_values_reshape_and_interpolate_in_native_class() {
+        let values = Tensor::from_f32(vec![0.0, 10.0, 40.0], vec![1, 3]).unwrap();
+        let obj = call(vec![Value::Tensor(values)]).unwrap();
+        match subsref(obj, vec![row(&[1.5, 2.5])]).unwrap() {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
+                assert_eq!(
+                    tensor.into_numeric_storage().unwrap(),
+                    NumericStorage::F32(vec![5.0, 25.0])
+                );
+            }
+            other => panic!("expected single tensor, got {other:?}"),
         }
     }
 
