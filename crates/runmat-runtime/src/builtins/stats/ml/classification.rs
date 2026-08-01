@@ -6,8 +6,8 @@ use nalgebra::{DMatrix, DVector};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, LogicalArray, ResolveContext, StringArray, StructValue, Tensor, Type,
-    Value,
+    CellArray, CharArray, LogicalArray, NumericDType, NumericScalar, NumericStorage,
+    ResolveContext, StringArray, StructValue, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -222,7 +222,7 @@ impl DiscriminantType {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum LabelKind {
-    Numeric,
+    Numeric(NumericDType),
     String,
     Char,
     Cell,
@@ -231,7 +231,7 @@ enum LabelKind {
 
 #[derive(Clone, Debug, PartialEq)]
 enum ClassLabel {
-    Numeric(f64),
+    Numeric(NumericScalar),
     Text(String),
     Logical(bool),
 }
@@ -240,6 +240,13 @@ enum ClassLabel {
 struct LabelVector {
     labels: Vec<ClassLabel>,
     kind: LabelKind,
+}
+
+#[derive(Clone, Debug)]
+struct FloatingMatrix {
+    values: Vec<f64>,
+    rows: usize,
+    cols: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -345,8 +352,8 @@ fn classify_compute(
             "classify: sample and training must be nonempty numeric matrices",
         ));
     }
-    if sample.data.iter().any(|value| !value.is_finite())
-        || training.data.iter().any(|value| !value.is_finite())
+    if sample.values.iter().any(|value| !value.is_finite())
+        || training.values.iter().any(|value| !value.is_finite())
     {
         return Err(invalid_argument(
             "classify: sample and training must contain finite values",
@@ -384,7 +391,7 @@ fn classify_compute(
     Ok(outputs)
 }
 
-fn numeric_matrix(value: Value, name: &str) -> BuiltinResult<Tensor> {
+fn numeric_matrix(value: Value, name: &str) -> BuiltinResult<FloatingMatrix> {
     let tensor = tensor::value_into_tensor_for(CLASSIFY_NAME, value)
         .map_err(|err| invalid_argument(format!("classify: {name}: {err}")))?;
     if tensor.shape.len() > 2 {
@@ -392,7 +399,11 @@ fn numeric_matrix(value: Value, name: &str) -> BuiltinResult<Tensor> {
             "classify: {name} must be a 2-D numeric matrix"
         )));
     }
-    Ok(tensor)
+    Ok(FloatingMatrix {
+        values: tensor.materialize_f64(),
+        rows: tensor.rows,
+        cols: tensor.cols,
+    })
 }
 
 fn parse_type(value: &Value) -> BuiltinResult<DiscriminantType> {
@@ -410,7 +421,7 @@ fn parse_type(value: &Value) -> BuiltinResult<DiscriminantType> {
 }
 
 fn prepare_model(
-    training: &Tensor,
+    training: &FloatingMatrix,
     labels: LabelVector,
     discriminant: DiscriminantType,
     prior_value: Option<&Value>,
@@ -476,11 +487,11 @@ fn prepare_model(
     })
 }
 
-fn class_mean(training: &Tensor, rows: &[usize]) -> Vec<f64> {
+fn class_mean(training: &FloatingMatrix, rows: &[usize]) -> Vec<f64> {
     let mut mean = vec![0.0; training.cols];
     for row in rows {
         for col in 0..training.cols {
-            mean[col] += training.data[row + col * training.rows];
+            mean[col] += training.values[row + col * training.rows];
         }
     }
     for value in &mut mean {
@@ -490,7 +501,7 @@ fn class_mean(training: &Tensor, rows: &[usize]) -> Vec<f64> {
 }
 
 fn class_covariance(
-    training: &Tensor,
+    training: &FloatingMatrix,
     rows: &[usize],
     mean: &[f64],
 ) -> BuiltinResult<DMatrix<f64>> {
@@ -504,9 +515,9 @@ fn class_covariance(
     }
     for row in rows {
         for a in 0..cols {
-            let da = training.data[row + a * training.rows] - mean[a];
+            let da = training.values[row + a * training.rows] - mean[a];
             for b in 0..cols {
-                let db = training.data[row + b * training.rows] - mean[b];
+                let db = training.values[row + b * training.rows] - mean[b];
                 cov[(a, b)] += da * db;
             }
         }
@@ -563,7 +574,7 @@ fn invert_covariance(
     Ok((inverse, det.abs().ln()))
 }
 
-fn predict_rows(model: &PreparedModel, data: &Tensor) -> BuiltinResult<PredictionResult> {
+fn predict_rows(model: &PreparedModel, data: &FloatingMatrix) -> BuiltinResult<PredictionResult> {
     let rows = data.rows;
     let class_count = model.classes.len();
     let mut label_indices = Vec::with_capacity(rows);
@@ -604,10 +615,10 @@ fn predict_rows(model: &PreparedModel, data: &Tensor) -> BuiltinResult<Predictio
     })
 }
 
-fn row_vector(data: &Tensor, row: usize) -> DVector<f64> {
+fn row_vector(data: &FloatingMatrix, row: usize) -> DVector<f64> {
     DVector::from_iterator(
         data.cols,
-        (0..data.cols).map(|col| data.data[row + col * data.rows]),
+        (0..data.cols).map(|col| data.values[row + col * data.rows]),
     )
 }
 
@@ -843,21 +854,27 @@ fn log_prior_ratio(left: f64, right: f64) -> f64 {
 
 fn labels_from_value(value: Value, name: &str) -> BuiltinResult<LabelVector> {
     match value {
-        Value::Tensor(tensor) => Ok(LabelVector {
-            labels: vector_values(&tensor, name)?
-                .into_iter()
-                .map(ClassLabel::Numeric)
-                .collect(),
-            kind: LabelKind::Numeric,
-        }),
+        Value::Tensor(tensor) => {
+            let dtype = tensor.numeric_dtype();
+            Ok(LabelVector {
+                labels: vector_values(&tensor, name)?
+                    .into_iter()
+                    .map(ClassLabel::Numeric)
+                    .collect(),
+                kind: LabelKind::Numeric(dtype),
+            })
+        }
         Value::Num(value) => Ok(LabelVector {
-            labels: vec![ClassLabel::Numeric(value)],
-            kind: LabelKind::Numeric,
+            labels: vec![ClassLabel::Numeric(NumericScalar::F64(value))],
+            kind: LabelKind::Numeric(NumericDType::F64),
         }),
-        Value::Int(value) => Ok(LabelVector {
-            labels: vec![ClassLabel::Numeric(value.to_f64())],
-            kind: LabelKind::Numeric,
-        }),
+        Value::Int(value) => {
+            let value = NumericScalar::from(value);
+            Ok(LabelVector {
+                labels: vec![ClassLabel::Numeric(value)],
+                kind: LabelKind::Numeric(value.numeric_dtype()),
+            })
+        }
         Value::String(text) => Ok(LabelVector {
             labels: vec![ClassLabel::Text(text)],
             kind: LabelKind::String,
@@ -898,18 +915,31 @@ fn labels_from_value(value: Value, name: &str) -> BuiltinResult<LabelVector> {
     }
 }
 
-fn vector_values(tensor: &Tensor, name: &str) -> BuiltinResult<Vec<f64>> {
+fn vector_values(tensor: &Tensor, name: &str) -> BuiltinResult<Vec<NumericScalar>> {
     if tensor.shape.iter().filter(|dim| **dim > 1).count() > 1 {
         return Err(invalid_argument(format!(
             "classify: {name} must be a vector"
         )));
     }
-    Ok(tensor::tensor_values_f64(tensor))
+    (0..tensor.len())
+        .map(|index| {
+            tensor.numeric_value_at(index).ok_or_else(|| {
+                invalid_argument(format!("classify: {name} numeric storage is invalid"))
+            })
+        })
+        .collect()
 }
 
 fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     match value {
-        Value::Tensor(tensor) => vector_values(tensor, name),
+        Value::Tensor(tensor) => {
+            if tensor.shape.iter().filter(|dim| **dim > 1).count() > 1 {
+                return Err(invalid_argument(format!(
+                    "classify: {name} must be a vector"
+                )));
+            }
+            Ok(tensor::tensor_values_f64(tensor))
+        }
         Value::Num(value) => Ok(vec![*value]),
         Value::Int(value) => Ok(vec![value.to_f64()]),
         other => Err(invalid_argument(format!(
@@ -929,9 +959,9 @@ fn unique_labels(labels: &[ClassLabel], kind: LabelKind) -> Vec<ClassLabel> {
         }
     }
     match kind {
-        LabelKind::Numeric => out.sort_by(|left, right| match (left, right) {
+        LabelKind::Numeric(_) => out.sort_by(|left, right| match (left, right) {
             (ClassLabel::Numeric(a), ClassLabel::Numeric(b)) => {
-                a.partial_cmp(b).unwrap_or(Ordering::Equal)
+                numeric_label_cmp(*a, *b).unwrap_or(Ordering::Equal)
             }
             _ => Ordering::Equal,
         }),
@@ -949,9 +979,42 @@ fn unique_labels(labels: &[ClassLabel], kind: LabelKind) -> Vec<ClassLabel> {
     out
 }
 
+fn numeric_label_cmp(left: NumericScalar, right: NumericScalar) -> Option<Ordering> {
+    match (left, right) {
+        (NumericScalar::F64(left), NumericScalar::F64(right)) => left.partial_cmp(&right),
+        (NumericScalar::F32(left), NumericScalar::F32(right)) => left.partial_cmp(&right),
+        (NumericScalar::I8(left), NumericScalar::I8(right)) => Some(left.cmp(&right)),
+        (NumericScalar::I16(left), NumericScalar::I16(right)) => Some(left.cmp(&right)),
+        (NumericScalar::I32(left), NumericScalar::I32(right)) => Some(left.cmp(&right)),
+        (NumericScalar::I64(left), NumericScalar::I64(right)) => Some(left.cmp(&right)),
+        (NumericScalar::U8(left), NumericScalar::U8(right)) => Some(left.cmp(&right)),
+        (NumericScalar::U16(left), NumericScalar::U16(right)) => Some(left.cmp(&right)),
+        (NumericScalar::U32(left), NumericScalar::U32(right)) => Some(left.cmp(&right)),
+        (NumericScalar::U64(left), NumericScalar::U64(right)) => Some(left.cmp(&right)),
+        _ => None,
+    }
+}
+
+fn numeric_label_is_nan(value: NumericScalar) -> bool {
+    match value {
+        NumericScalar::F64(value) => value.is_nan(),
+        NumericScalar::F32(value) => value.is_nan(),
+        NumericScalar::I8(_)
+        | NumericScalar::I16(_)
+        | NumericScalar::I32(_)
+        | NumericScalar::I64(_)
+        | NumericScalar::U8(_)
+        | NumericScalar::U16(_)
+        | NumericScalar::U32(_)
+        | NumericScalar::U64(_) => false,
+    }
+}
+
 fn same_label(left: &ClassLabel, right: &ClassLabel) -> bool {
     match (left, right) {
-        (ClassLabel::Numeric(a), ClassLabel::Numeric(b)) => (a == b) || (a.is_nan() && b.is_nan()),
+        (ClassLabel::Numeric(a), ClassLabel::Numeric(b)) => {
+            (a == b) || (numeric_label_is_nan(*a) && numeric_label_is_nan(*b))
+        }
         (ClassLabel::Text(a), ClassLabel::Text(b)) => a == b,
         (ClassLabel::Logical(a), ClassLabel::Logical(b)) => a == b,
         _ => false,
@@ -960,7 +1023,7 @@ fn same_label(left: &ClassLabel, right: &ClassLabel) -> bool {
 
 fn is_missing_label(label: &ClassLabel) -> bool {
     match label {
-        ClassLabel::Numeric(value) => value.is_nan(),
+        ClassLabel::Numeric(value) => numeric_label_is_nan(*value),
         ClassLabel::Text(value) => value.is_empty() || value == "<missing>",
         ClassLabel::Logical(_) => false,
     }
@@ -992,16 +1055,22 @@ fn labels_from_indices(
     indices: &[usize],
 ) -> BuiltinResult<Value> {
     match kind {
-        LabelKind::Numeric => {
-            let data = indices
+        LabelKind::Numeric(dtype) => {
+            let values = indices
                 .iter()
                 .map(|idx| match labels.get(*idx) {
-                    Some(ClassLabel::Numeric(value)) => *value,
-                    _ => f64::NAN,
+                    Some(ClassLabel::Numeric(value)) => Ok(*value),
+                    _ => Err(internal_error("classify: invalid numeric label index")),
                 })
-                .collect::<Vec<_>>();
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            let mut storage = NumericStorage::zeros(dtype, values.len());
+            for (index, value) in values.into_iter().enumerate() {
+                storage
+                    .set_value(index, value)
+                    .map_err(|err| internal_error(format!("classify: {err}")))?;
+            }
             Ok(Value::Tensor(
-                Tensor::new(data, vec![indices.len(), 1])
+                Tensor::from_numeric_storage(storage, vec![indices.len(), 1])
                     .map_err(|err| internal_error(format!("classify: {err}")))?,
             ))
         }
@@ -1110,7 +1179,7 @@ fn canonical(text: &str) -> String {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_builtins::{IntegerStorage, NumericStorage};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
@@ -1146,14 +1215,15 @@ mod tests {
             let Value::Tensor(labels) = &values[0] else {
                 panic!("labels");
             };
-            assert_eq!(labels.data, vec![1.0, 2.0]);
+            assert_eq!(labels.as_f64_slice(), Some(&[1.0, 2.0][..]));
             assert!(matches!(values[1], Value::Num(err) if err <= EPS));
             let Value::Tensor(posterior) = &values[2] else {
                 panic!("posterior");
             };
             assert_eq!(posterior.shape, vec![2, 2]);
-            assert!(posterior.data[0] > posterior.data[2]);
-            assert!(posterior.data[3] > posterior.data[1]);
+            let posterior = posterior.as_f64_slice().expect("double posterior");
+            assert!(posterior[0] > posterior[2]);
+            assert!(posterior[3] > posterior[1]);
             let Value::Cell(coeff) = &values[4] else {
                 panic!("coeff");
             };
@@ -1177,8 +1247,57 @@ mod tests {
             let Value::Tensor(labels) = &values[0] else {
                 panic!("labels");
             };
-            assert_eq!(labels.data, vec![1.0, 2.0]);
+            assert_eq!(
+                labels.integer_storage(),
+                Some(&IntegerStorage::U8(vec![1, 2]))
+            );
             assert!(matches!(values[1], Value::Num(err) if err <= EPS));
+        });
+    }
+
+    #[test]
+    fn classify_preserves_native_single_and_wide_integer_group_labels() {
+        with_outputs(1, || {
+            let values = classify(
+                tensor(vec![0.0, 3.0], vec![2, 1]),
+                tensor(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]),
+                Value::Tensor(
+                    Tensor::from_numeric_storage(
+                        NumericStorage::F32(vec![1.0, 1.0, 2.0, 2.0]),
+                        vec![4, 1],
+                    )
+                    .expect("single labels"),
+                ),
+                Vec::new(),
+            );
+            let Value::Tensor(labels) = values.into_iter().next().expect("single output") else {
+                panic!("labels");
+            };
+            assert_eq!(
+                labels.into_numeric_storage().expect("single storage"),
+                NumericStorage::F32(vec![1.0, 2.0])
+            );
+        });
+
+        with_outputs(1, || {
+            let lower = u64::MAX - 1;
+            let upper = u64::MAX;
+            let values = classify(
+                tensor(vec![0.0, 3.0], vec![2, 1]),
+                tensor(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]),
+                int_tensor(
+                    IntegerStorage::U64(vec![lower, lower, upper, upper]),
+                    vec![4, 1],
+                ),
+                Vec::new(),
+            );
+            let Value::Tensor(labels) = values.into_iter().next().expect("integer output") else {
+                panic!("labels");
+            };
+            assert_eq!(
+                labels.into_numeric_storage().expect("integer storage"),
+                NumericStorage::U64(vec![lower, upper])
+            );
         });
     }
 
@@ -1226,7 +1345,7 @@ mod tests {
             let Value::Tensor(labels) = &values[0] else {
                 panic!("labels");
             };
-            assert_eq!(labels.data, vec![1.0, 2.0]);
+            assert_eq!(labels.as_f64_slice(), Some(&[1.0, 2.0][..]));
             let Value::Tensor(posterior) = &values[2] else {
                 panic!("posterior");
             };
