@@ -1,12 +1,17 @@
 //! Portable package-domain authority for RunMat.
 
 pub mod error;
+pub mod graph;
 pub mod identity;
 pub mod lock;
 pub mod manifest;
 pub mod policy;
 
-pub use error::{IdentityError, LockError, ManifestError, PackageError};
+pub use error::{GraphError, IdentityError, LockError, ManifestError, PackageError};
+pub use graph::{
+    build_path_graph, build_project_path_graph, build_project_path_graph_async, DependencyPath,
+    GraphEdge, GraphPackage, PackageGraph, PathGraphInput, PathPackageInput, VisibilityResolution,
+};
 pub use identity::{
     CanonicalPackageId, ContentDigest, DigestAlgorithm, GitCommitId, GitObjectAlgorithm,
     GitRepositoryUrl, GitSourceId, NormalizedRelativePath, PackageAlias, PackageInstanceId,

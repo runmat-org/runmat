@@ -30,6 +30,21 @@ pub enum PackageError {
     Manifest(#[from] ManifestError),
     #[error(transparent)]
     Lock(#[from] LockError),
+    #[error(transparent)]
+    Graph(#[from] GraphError),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum GraphError {
+    #[error("invalid package graph: {0}")]
+    Invalid(String),
+    #[error(
+        "package graph requires unavailable capabilities at {dependency_path}: {capabilities}"
+    )]
+    UnavailableCapabilities {
+        dependency_path: String,
+        capabilities: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

@@ -63,6 +63,56 @@ pub struct PackageLock {
 }
 
 impl PackageLock {
+    pub fn from_graph(
+        graph: &crate::PackageGraph,
+        selection: LockSelection,
+    ) -> Result<Self, LockError> {
+        let root = graph.packages.get(&graph.root).ok_or_else(|| {
+            LockError::Invalid("package graph root instance is missing".to_string())
+        })?;
+        let manifest_digest = match &root.instance.source {
+            crate::SourceId::Path(source) => source.manifest_digest.clone(),
+            _ => {
+                return Err(LockError::Invalid(
+                    "root package must currently use a path source".to_string(),
+                ));
+            }
+        };
+        let packages = graph
+            .packages
+            .iter()
+            .filter(|(identity, _)| *identity != &graph.root)
+            .map(|(_, package)| LockedPackage {
+                instance: package.instance.clone(),
+                features: BTreeSet::new(),
+                required_capabilities: package.required_capabilities.clone(),
+                runmat_version: None,
+                singleton: package.singleton,
+            })
+            .collect();
+        let edges = graph
+            .edges
+            .iter()
+            .map(|edge| LockedEdge {
+                from: (edge.from != graph.root).then(|| edge.from.clone()),
+                alias: edge.alias.clone(),
+                to: edge.to.clone(),
+                group: edge.group,
+                optional: edge.optional,
+                target: edge.target.clone(),
+            })
+            .collect();
+        Self::new(
+            RootLock {
+                manifest_digest,
+                package: Some(root.instance.package.clone()),
+            },
+            selection,
+            packages,
+            edges,
+        )
+    }
+
     pub fn new(
         root: RootLock,
         selection: LockSelection,

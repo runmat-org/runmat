@@ -33,6 +33,8 @@ pub struct ProjectManifest {
 pub struct ProjectPackage {
     pub name: String,
     #[serde(default)]
+    pub singleton: bool,
+    #[serde(default)]
     pub organization: Option<String>,
     #[serde(default)]
     pub registry: Option<String>,

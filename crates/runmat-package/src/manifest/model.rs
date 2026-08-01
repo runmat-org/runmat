@@ -31,6 +31,7 @@ pub struct PublicationDeclaration {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PackageManifest {
     pub local_name: String,
+    pub singleton: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub canonical_id: Option<CanonicalPackageId>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -212,6 +213,7 @@ impl TryFrom<&runmat_config::project::ProjectManifest> for PackageManifest {
             .transpose()?;
         Ok(Self {
             local_name: manifest.package.name.clone(),
+            singleton: manifest.package.singleton,
             canonical_id,
             version,
             dependencies,

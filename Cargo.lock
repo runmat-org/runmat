@@ -5816,7 +5816,9 @@ dependencies = [
 name = "runmat-package"
 version = "0.6.1"
 dependencies = [
+ "futures",
  "runmat-config",
+ "runmat-filesystem",
  "semver",
  "serde",
  "serde_json",
