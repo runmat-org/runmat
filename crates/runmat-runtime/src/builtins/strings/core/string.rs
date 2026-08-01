@@ -3,7 +3,8 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, LogicalArray, SparseTensor, StringArray, Tensor, Value,
+    CharArray, ComplexTensor, IntValue, LogicalArray, NumericScalar, SparseTensor, StringArray,
+    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -545,17 +546,10 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
             values: vec![Value::Num(if b { 1.0 } else { 0.0 })],
             shape: vec![1, 1],
         }),
-        Value::Tensor(t) => Ok(ArgumentData {
-            values: t.data.into_iter().map(Value::Num).collect(),
-            shape: t.shape,
-        }),
+        Value::Tensor(tensor) => tensor_into_argument_data(tensor),
         Value::SparseTensor(s) => {
             ensure_sparse_dense_conversion(&s, "format argument")?;
-            let dense = s.to_dense().map_err(string_flow)?;
-            Ok(ArgumentData {
-                values: dense.data.into_iter().map(Value::Num).collect(),
-                shape: dense.shape,
-            })
+            tensor_into_argument_data(s.to_dense().map_err(string_flow)?)
         }
         Value::Complex(re, im) => Ok(ArgumentData {
             values: vec![Value::String(complex_to_string(re, im))],
@@ -757,23 +751,53 @@ fn char_array_to_string_array(
 }
 
 fn tensor_to_string_array(tensor: Tensor) -> BuiltinResult<StringArray> {
-    let strings = if let Some(storage) = tensor.integer_storage() {
-        let mut strings = Vec::with_capacity(storage.len());
-        for idx in 0..storage.len() {
-            let value = storage
-                .value_at(idx)
-                .ok_or_else(|| string_flow("string: integer tensor storage is inconsistent"))?;
-            strings.push(int_value_to_string(&value));
-        }
-        strings
-    } else {
-        let mut strings = Vec::with_capacity(tensor.data.len());
-        for &value in &tensor.data {
-            strings.push(number_to_string(value));
-        }
-        strings
-    };
-    StringArray::new(strings, tensor.shape).map_err(|e| string_flow(format!("string: {e}")))
+    let shape = tensor.shape.clone();
+    let storage = tensor.into_numeric_storage().map_err(string_flow)?;
+    let mut strings = Vec::with_capacity(storage.len());
+    for idx in 0..storage.len() {
+        let value = storage
+            .value_at(idx)
+            .ok_or_else(|| string_flow("string: numeric tensor storage is inconsistent"))?;
+        strings.push(numeric_scalar_to_string(value));
+    }
+    StringArray::new(strings, shape).map_err(|e| string_flow(format!("string: {e}")))
+}
+
+fn tensor_into_argument_data(tensor: Tensor) -> BuiltinResult<ArgumentData> {
+    let shape = tensor.shape.clone();
+    let storage = tensor.into_numeric_storage().map_err(string_flow)?;
+    let mut values = Vec::with_capacity(storage.len());
+    for idx in 0..storage.len() {
+        let value = storage
+            .value_at(idx)
+            .ok_or_else(|| string_flow("string: numeric tensor storage is inconsistent"))?;
+        values.push(numeric_scalar_to_value(value));
+    }
+    Ok(ArgumentData { values, shape })
+}
+
+fn numeric_scalar_to_value(value: NumericScalar) -> Value {
+    match value {
+        NumericScalar::F64(value) => Value::Num(value),
+        NumericScalar::F32(value) => Value::Num(f64::from(value)),
+        integer => Value::Int(
+            integer
+                .into_int_value()
+                .expect("non-floating numeric scalar is integer"),
+        ),
+    }
+}
+
+fn numeric_scalar_to_string(value: NumericScalar) -> String {
+    match value {
+        NumericScalar::F64(value) => number_to_string(value),
+        NumericScalar::F32(value) => number_to_string(f64::from(value)),
+        integer => int_value_to_string(
+            &integer
+                .into_int_value()
+                .expect("non-floating numeric scalar is integer"),
+        ),
+    }
 }
 
 fn complex_tensor_to_string_array(tensor: ComplexTensor) -> BuiltinResult<StringArray> {
@@ -972,6 +996,19 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn string_from_native_single_tensor_uses_authoritative_values() {
+        let tensor = Tensor::from_f32(vec![1.25, -2.5], vec![1, 2]).expect("native single tensor");
+        let out = string_builtin(Value::Tensor(tensor), Vec::new()).expect("string");
+        match out {
+            Value::StringArray(array) => {
+                assert_eq!(array.shape, vec![1, 2]);
+                assert_eq!(array.data, vec!["1.25", "-2.5"]);
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_from_integer_tensor_preserves_exact_storage_values() {
@@ -980,8 +1017,6 @@ pub(crate) mod tests {
             vec![1, 2],
         )
         .expect("integer tensor");
-        let mut tensor = tensor;
-        tensor.data.clear();
         let out = string_builtin(Value::Tensor(tensor), Vec::new()).expect("string");
         match out {
             Value::StringArray(sa) => {
@@ -1000,8 +1035,6 @@ pub(crate) mod tests {
             vec![1, 2],
         )
         .expect("integer tensor");
-        let mut tensor = tensor;
-        tensor.data.clear();
         let out = string_builtin(Value::Tensor(tensor), Vec::new()).expect("string");
         match out {
             Value::StringArray(sa) => {
@@ -1106,8 +1139,6 @@ pub(crate) mod tests {
         let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
                 .expect("integer tensor");
-        let mut tensor = tensor;
-        tensor.data.clear();
         let cell = CellArray::new(vec![Value::Tensor(tensor)], 1, 1)
             .expect("cell with scalar integer tensor");
         let out = string_builtin(Value::Cell(cell), Vec::new()).expect("string");
@@ -1327,6 +1358,26 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn string_format_integer_tensor_preserves_wide_values() {
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+            vec![1, 2],
+        )
+        .expect("integer tensor");
+        let out = string_builtin(Value::from("%u"), vec![Value::Tensor(tensor)]).expect("string");
+        match out {
+            Value::StringArray(array) => {
+                assert_eq!(array.shape, vec![1, 2]);
+                assert_eq!(
+                    array.data,
+                    vec![u64::MAX.to_string(), "9007199254740993".to_string()]
+                );
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_format_string_array_spec_alignment() {
@@ -1372,8 +1423,9 @@ pub(crate) mod tests {
     fn string_gpu_numeric_tensor() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![10.0, 20.0], vec![1, 2]).unwrap();
+            let data = tensor.as_f64_slice().expect("double tensor");
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data,
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1399,8 +1451,9 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![4.0, 5.0, 6.0], vec![1, 3]).unwrap();
         let cpu = string_builtin(Value::Tensor(tensor.clone()), Vec::new())
             .expect("cpu string conversion");
+        let data = tensor.as_f64_slice().expect("double tensor");
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data,
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()
