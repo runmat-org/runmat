@@ -8,6 +8,9 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use super::floating_cumulative_arithmetic::{
+    self, CumulativeDirection, CumulativeNanMode, CumulativeOperation,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "cumsum";
@@ -492,7 +495,7 @@ fn cumsum_host_floating(
     let tensor = tensor::value_into_tensor_for("cumsum", value)
         .map_err(|err| cumsum_error_with_detail(&CUMSUM_ERROR_INVALID_INPUT, err))?;
     let target_dim = dim.unwrap_or_else(|| default_dimension(&tensor));
-    let result = cumsum_tensor(&tensor, target_dim, direction, nan_mode)?;
+    let result = cumsum_tensor(tensor, target_dim, direction, nan_mode)?;
     Ok(tensor::tensor_into_value(result))
 }
 
@@ -562,7 +565,7 @@ async fn cumsum_gpu(
             .await
             .map_err(|err| cumsum_internal_error(err.message()))?;
         let fallback_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&tensor.shape));
-        let result = cumsum_tensor(&tensor, fallback_dim, direction, nan_mode)?;
+        let result = cumsum_tensor(tensor, fallback_dim, direction, nan_mode)?;
         return Ok(tensor::tensor_into_value(result));
     }
 
@@ -611,104 +614,35 @@ async fn cumsum_gpu(
     let tensor = gpu_helpers::gather_tensor_async(&handle)
         .await
         .map_err(|err| cumsum_internal_error(err.message()))?;
-    let result = cumsum_tensor(&tensor, fallback_dim, direction, nan_mode)?;
+    let result = cumsum_tensor(tensor, fallback_dim, direction, nan_mode)?;
     Ok(tensor::tensor_into_value(result))
 }
 
 fn cumsum_tensor(
-    tensor: &Tensor,
+    tensor: Tensor,
     dim: usize,
     direction: CumsumDirection,
     nan_mode: CumsumNanMode,
 ) -> BuiltinResult<Tensor> {
-    if dim == 0 {
-        return Err(cumsum_error_with_detail(
-            &CUMSUM_ERROR_INVALID_ARGUMENT,
-            "dimension must be >= 1",
-        ));
-    }
-    if tensor.data.is_empty() || dim > tensor.shape.len() {
-        return Ok(tensor.clone());
-    }
-
-    let dim_index = dim - 1;
-    let segment_len = tensor.shape[dim_index];
-    if segment_len == 0 {
-        return Ok(tensor.clone());
-    }
-
-    let stride_before = dim_product(&tensor.shape[..dim_index]);
-    let stride_after = dim_product(&tensor.shape[dim..]);
-    let block = stride_before * segment_len;
-    let mut output = vec![0.0f64; tensor.data.len()];
-
-    for after in 0..stride_after {
-        let base = after * block;
-        for before in 0..stride_before {
-            match direction {
-                CumsumDirection::Forward => {
-                    let mut sum = 0.0f64;
-                    let mut sum_is_nan = false;
-                    for k in 0..segment_len {
-                        let idx = base + before + k * stride_before;
-                        let value = tensor.data[idx];
-                        match nan_mode {
-                            CumsumNanMode::Include => {
-                                if sum_is_nan {
-                                    output[idx] = f64::NAN;
-                                    continue;
-                                }
-                                if value.is_nan() {
-                                    sum_is_nan = true;
-                                    output[idx] = f64::NAN;
-                                } else {
-                                    sum += value;
-                                    output[idx] = sum;
-                                }
-                            }
-                            CumsumNanMode::Omit => {
-                                if !value.is_nan() {
-                                    sum += value;
-                                }
-                                output[idx] = sum;
-                            }
-                        }
-                    }
-                }
-                CumsumDirection::Reverse => {
-                    let mut sum = 0.0f64;
-                    let mut sum_is_nan = false;
-                    for offset in (0..segment_len).rev() {
-                        let idx = base + before + offset * stride_before;
-                        let value = tensor.data[idx];
-                        match nan_mode {
-                            CumsumNanMode::Include => {
-                                if sum_is_nan {
-                                    output[idx] = f64::NAN;
-                                    continue;
-                                }
-                                if value.is_nan() {
-                                    sum_is_nan = true;
-                                    output[idx] = f64::NAN;
-                                } else {
-                                    sum += value;
-                                    output[idx] = sum;
-                                }
-                            }
-                            CumsumNanMode::Omit => {
-                                if !value.is_nan() {
-                                    sum += value;
-                                }
-                                output[idx] = sum;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    Tensor::new(output, tensor.shape.clone()).map_err(|e| cumsum_internal_error(&e))
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|error| cumsum_internal_error(&error))?;
+    floating_cumulative_arithmetic::cumulative(
+        storage,
+        shape,
+        dim,
+        match direction {
+            CumsumDirection::Forward => CumulativeDirection::Forward,
+            CumsumDirection::Reverse => CumulativeDirection::Reverse,
+        },
+        match nan_mode {
+            CumsumNanMode::Include => CumulativeNanMode::Include,
+            CumsumNanMode::Omit => CumulativeNanMode::Omit,
+        },
+        CumulativeOperation::Sum,
+    )
+    .map_err(|error| cumsum_error_with_detail(&CUMSUM_ERROR_INVALID_ARGUMENT, error))
 }
 
 fn cumsum_complex_tensor(
@@ -849,7 +783,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{
-        ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, Tensor as BuiltinsTensor,
+        ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericStorage,
+        Tensor as BuiltinsTensor,
     };
 
     #[test]
@@ -931,6 +866,23 @@ pub(crate) mod tests {
     fn cumsum_scalar_num() {
         let result = cumsum_builtin(Value::Num(7.0), Vec::new()).expect("cumsum scalar");
         assert_eq!(result, Value::Num(7.0));
+    }
+
+    #[test]
+    fn cumsum_preserves_native_single_with_reverse_omitnan() {
+        let input = BuiltinsTensor::from_f32(vec![1.0, f32::NAN, 3.0], vec![3, 1]).expect("input");
+        let result = cumsum_builtin(
+            Value::Tensor(input),
+            vec![Value::from("reverse"), Value::from("omitnan")],
+        )
+        .expect("cumsum");
+        let Value::Tensor(result) = result else {
+            panic!("expected tensor result");
+        };
+        assert_eq!(
+            result.into_numeric_storage().expect("native storage"),
+            NumericStorage::F32(vec![4.0, 3.0, 3.0])
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
