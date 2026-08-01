@@ -1,4 +1,5 @@
 use crate::NativeCacheError;
+use runmat_package::ContentDigest;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,4 +29,22 @@ impl CacheLayout {
         }
         Ok(())
     }
+
+    pub fn tree_path(&self, digest: &ContentDigest) -> PathBuf {
+        self.trees.join(storage_digest(digest))
+    }
+
+    pub fn materialization_lock(&self, digest: &ContentDigest) -> PathBuf {
+        self.locks
+            .join(format!("materialize-{}.lock", storage_digest(digest)))
+    }
+}
+
+pub(crate) fn storage_digest(digest: &ContentDigest) -> String {
+    let mut result = String::with_capacity(64);
+    for byte in digest.bytes() {
+        use std::fmt::Write as _;
+        write!(result, "{byte:02x}").expect("writing to a string cannot fail");
+    }
+    result
 }

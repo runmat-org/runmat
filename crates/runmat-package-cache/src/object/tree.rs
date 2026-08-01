@@ -126,6 +126,26 @@ impl TreeManifest {
                 )));
             }
         }
+        for entry in entries
+            .iter()
+            .filter(|entry| entry.kind == TreeEntryKind::Symlink)
+        {
+            let target = entry
+                .link_target
+                .as_ref()
+                .expect("validated symlink has a target");
+            let target_prefix = format!("{}/", target.as_str());
+            let target_is_materialized = entries.iter().any(|candidate| {
+                (candidate.path == *target && candidate.kind != TreeEntryKind::Symlink)
+                    || candidate.path.as_str().starts_with(&target_prefix)
+            });
+            if !target_is_materialized {
+                return Err(CacheError::InvalidObject(format!(
+                    "symlink `{}` target `{target}` is not a materialized file or directory",
+                    entry.path
+                )));
+            }
+        }
         let file_count = entries
             .iter()
             .filter(|entry| entry.kind == TreeEntryKind::File)

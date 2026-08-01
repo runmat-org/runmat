@@ -13,6 +13,8 @@ runmat-package = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+unicode-casefold = "0.2"
+unicode-normalization = "0.1"
 
 [dev-dependencies]
 futures = "0.3"

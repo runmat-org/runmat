@@ -15,6 +15,10 @@ pub enum NativeCacheError {
     Serialization(#[from] serde_json::Error),
     #[error("native cache configuration is invalid: {0}")]
     Config(String),
+    #[error("portable cache operation failed: {0}")]
+    Cache(#[from] runmat_package_cache::CacheError),
+    #[error("materialized tree `{path}` is invalid: {reason}")]
+    CorruptTree { path: PathBuf, reason: String },
 }
 
 impl NativeCacheError {

@@ -1,5 +1,6 @@
 //! Portable transactional package-cache policy for RunMat.
 
+pub mod archive;
 pub mod backend;
 pub mod config;
 pub mod error;
@@ -10,6 +11,10 @@ pub mod materialize;
 pub mod object;
 pub mod state;
 
+pub use archive::{
+    validate_archive, ArchiveEntryHeader, ArchiveEntryKind, ArchiveError, ArchiveLimits,
+    ValidatedArchive, ValidatedArchiveEntry,
+};
 pub use backend::{
     BackendCommit, BackendSnapshot, CacheBackend, CacheClock, CacheTransaction, CommitOutcome,
     ObjectWrite,
