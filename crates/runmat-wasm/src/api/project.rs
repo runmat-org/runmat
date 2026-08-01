@@ -48,3 +48,16 @@ pub fn validate_project_handoff(value: JsValue) -> Result<JsValue, JsValue> {
     serde_wasm_bindgen::to_value(&handoff.revision())
         .map_err(|error| JsValue::from_str(&error.to_string()))
 }
+
+#[wasm_bindgen(js_name = handoffFromFrozenProject)]
+pub fn handoff_from_frozen_project(value: JsValue) -> Result<JsValue, JsValue> {
+    let project: runmat_package::FrozenProject = serde_wasm_bindgen::from_value(value)
+        .map_err(|error| JsValue::from_str(&format!("Frozen project parse failed: {error}")))?;
+    let handoff = runmat_package::FrozenProjectHandoff::new(project);
+    handoff
+        .validate()
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    serde_wasm_bindgen::to_value(&handoff).map_err(|error| {
+        JsValue::from_str(&format!("Project handoff serialization failed: {error}"))
+    })
+}

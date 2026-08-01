@@ -26,6 +26,22 @@ fn default_subdir() -> String {
     ".".to_string()
 }
 
+#[wasm_bindgen(js_name = decodePackageLock)]
+pub fn decode_package_lock(input: &str) -> Result<JsValue, JsValue> {
+    let package_lock = runmat_package::decode_lock(input)
+        .map_err(|error| JsValue::from_str(&format!("package lock decode failed: {error}")))?;
+    serde_wasm_bindgen::to_value(&package_lock)
+        .map_err(|error| JsValue::from_str(&format!("package lock serialization failed: {error}")))
+}
+
+#[wasm_bindgen(js_name = encodePackageLock)]
+pub fn encode_package_lock(value: JsValue) -> Result<String, JsValue> {
+    let package_lock: runmat_package::PackageLock = serde_wasm_bindgen::from_value(value)
+        .map_err(|error| JsValue::from_str(&format!("package lock parse failed: {error}")))?;
+    runmat_package::encode_lock(&package_lock)
+        .map_err(|error| JsValue::from_str(&format!("package lock encode failed: {error}")))
+}
+
 #[wasm_bindgen(js_name = planGitAcquisition)]
 pub fn plan_git_acquisition(value: JsValue) -> Result<JsValue, JsValue> {
     let request: GitPlanRequest = serde_wasm_bindgen::from_value(value)
@@ -160,12 +176,32 @@ pub async fn resolve_project(
     }
     #[derive(serde::Serialize)]
     struct BrowserResolveResult {
-        #[serde(flatten)]
-        resolved: runmat_package::ResolvedProject,
+        frozen: runmat_package::FrozenProject,
+        lock: runmat_package::PackageLock,
+        lock_decision: runmat_package::PathLockDecision,
+        acquired_git_sources: Vec<runmat_package::GitSourceId>,
+        acquired_server_sources: Vec<runmat_package::ServerProjectSourceId>,
+        acquired_registry_sources: Vec<runmat_package::RegistrySourceId>,
+        source_inventories: Vec<runmat_package::SourceInventory>,
         cache_lease: Option<runmat_package_cache::Lease>,
     }
+    let runmat_package::ResolvedProject {
+        frozen,
+        lock,
+        lock_decision,
+        acquired_git_sources,
+        acquired_server_sources,
+        acquired_registry_sources,
+        source_inventories,
+    } = resolved;
     serde_wasm_bindgen::to_value(&BrowserResolveResult {
-        resolved,
+        frozen,
+        lock,
+        lock_decision,
+        acquired_git_sources,
+        acquired_server_sources,
+        acquired_registry_sources,
+        source_inventories,
         cache_lease,
     })
     .map_err(|error| JsValue::from_str(&format!("project result serialization failed: {error}")))

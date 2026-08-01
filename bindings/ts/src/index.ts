@@ -45,8 +45,10 @@ import { createDefaultFsProvider } from "./fs/default.js";
 import { createIndexedDbPackageCache } from "./package-cache/indexeddb.js";
 import { fetchGitTreeInventoryWire } from "./package-cache/git-gateway.js";
 import { BrowserProjectResolver } from "./package-cache/browser-resolver.js";
+import { BrowserProjectSession } from "./package-cache/project-session.js";
 import type {
   BrowserProjectResolverConfig,
+  BrowserProjectSessionConfig,
   IndexedDbPackageCacheOptions,
   PackageCacheSnapshot,
   PackageCacheGcPlan,
@@ -160,13 +162,18 @@ export {
   ImmutableBrowserPackageMount,
   revokeAndRemoveBrowserRecipientKey
 } from "./package-cache/index.js";
-export { BrowserProjectResolver };
+export { BrowserProjectResolver, BrowserProjectSession };
 export type {
   BrowserProjectResolveOptions,
   BrowserProjectResolveRequest,
   BrowserProjectResolverConfig,
   BrowserProjectResolverNative,
   BrowserResolvedProject,
+  BrowserProjectSessionConfig,
+  BrowserProjectSessionHandle,
+  BrowserProjectSessionNative,
+  BrowserProjectSessionResolution,
+  BrowserProjectSessionResolveRequest,
   BrowserRecipientKeyRegistration,
   BrowserPrivatePackageKeyStore,
   GeneratedBrowserRecipientKey,
@@ -942,6 +949,9 @@ export interface RunMatSessionHandle {
   fusionPlanForSource?(source: string): Promise<FusionPlanSnapshot | null>;
   setFsProvider?(provider: RunMatFilesystemProvider): Promise<void>;
   packageCacheSnapshot(): Promise<PackageCacheSnapshot | null>;
+  installProjectHandoff(handoff: unknown): Promise<unknown>;
+  clearProjectHandoff(): Promise<void>;
+  projectRevision(): Promise<unknown | null>;
 }
 
 interface NativeInitOptions {
@@ -1021,6 +1031,9 @@ interface RunMatNativeSession {
   fusionPlanForSource?: (source: string) => FusionPlanSnapshot | null;
   setFsProvider?: (provider: RunMatFilesystemProvider) => void;
   packageCacheSnapshot?: () => Promise<PackageCacheSnapshot | null>;
+  installProjectHandoff?: (handoff: unknown) => unknown;
+  clearProjectHandoff?: () => void;
+  projectRevision?: () => unknown | null;
 }
 
 type WorkspaceMaterializeSelectorWire =
@@ -1133,6 +1146,9 @@ interface RunMatNativeModule {
   ) => GitSnapshotWire;
   planGitAcquisition?: (request: GitAcquisitionPlanRequest) => GitAcquisitionPlan;
   validateGitSnapshot?: (snapshot: GitSnapshotWire) => GitSnapshotWire;
+  decodePackageLock?: (input: string) => unknown;
+  encodePackageLock?: (value: unknown) => string;
+  handoffFromFrozenProject?: (project: unknown) => unknown;
   resolveProject?: BrowserProjectResolverConfig["native"]["resolveProject"];
   packageCacheStatus?: (
     provider: RunMatPackageCacheProvider
@@ -1334,6 +1350,51 @@ export async function createBrowserProjectResolver(
       packageCacheReleaseLease: native.packageCacheReleaseLease
     }
   });
+}
+
+export async function createBrowserProjectSession(
+  config: Omit<BrowserProjectSessionConfig, "native">
+): Promise<BrowserProjectSession> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "resolveProject");
+  requireNativeFunction(native, "packageCacheRenewLease");
+  requireNativeFunction(native, "packageCacheReleaseLease");
+  requireNativeFunction(native, "decodePackageLock");
+  requireNativeFunction(native, "encodePackageLock");
+  requireNativeFunction(native, "handoffFromFrozenProject");
+  requireNativeFunction(native, "packageCacheStatus");
+  requireNativeFunction(native, "packageCacheGc");
+  return new BrowserProjectSession({
+    ...config,
+    native: {
+      resolveProject: native.resolveProject,
+      packageCacheRenewLease: native.packageCacheRenewLease,
+      packageCacheReleaseLease: native.packageCacheReleaseLease,
+      decodePackageLock: native.decodePackageLock,
+      encodePackageLock: native.encodePackageLock,
+      handoffFromFrozenProject: native.handoffFromFrozenProject,
+      packageCacheStatus: native.packageCacheStatus,
+      packageCacheGc: native.packageCacheGc
+    }
+  });
+}
+
+export async function decodePackageLock(input: string): Promise<unknown> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "decodePackageLock");
+  return native.decodePackageLock(input);
+}
+
+export async function encodePackageLock(value: unknown): Promise<string> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "encodePackageLock");
+  return native.encodePackageLock(value);
+}
+
+export async function handoffFromFrozenProject(project: unknown): Promise<unknown> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "handoffFromFrozenProject");
+  return native.handoffFromFrozenProject(project);
 }
 
 export async function browserPackageCacheStatus(
@@ -2112,6 +2173,30 @@ class WebRunMatSession implements RunMatSessionHandle {
       return null;
     }
     return (await this.native.packageCacheSnapshot()) ?? null;
+  }
+
+  async installProjectHandoff(handoff: unknown): Promise<unknown> {
+    this.ensureActive();
+    if (typeof this.native.installProjectHandoff !== "function") {
+      throw new Error("The loaded runmat-wasm module does not expose installProjectHandoff yet.");
+    }
+    return this.native.installProjectHandoff(handoff);
+  }
+
+  async clearProjectHandoff(): Promise<void> {
+    this.ensureActive();
+    if (typeof this.native.clearProjectHandoff !== "function") {
+      throw new Error("The loaded runmat-wasm module does not expose clearProjectHandoff yet.");
+    }
+    this.native.clearProjectHandoff();
+  }
+
+  async projectRevision(): Promise<unknown | null> {
+    this.ensureActive();
+    if (typeof this.native.projectRevision !== "function") {
+      return null;
+    }
+    return this.native.projectRevision() ?? null;
   }
 }
 

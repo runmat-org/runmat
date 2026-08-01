@@ -14,6 +14,14 @@ export type {
   BrowserProjectResolverNative,
   BrowserResolvedProject
 } from "./browser-resolver.js";
+export { BrowserProjectSession } from "./project-session.js";
+export type {
+  BrowserProjectSessionConfig,
+  BrowserProjectSessionHandle,
+  BrowserProjectSessionNative,
+  BrowserProjectSessionResolution,
+  BrowserProjectSessionResolveRequest
+} from "./project-session.js";
 export type {
   GitAcquisitionIntent,
   GitAcquisitionPlan,

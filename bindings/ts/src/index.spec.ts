@@ -12,6 +12,9 @@ import {
   resetPlotState,
   createWorkspaceHoverProvider,
   createFusionPlanAdapter,
+  decodePackageLock,
+  encodePackageLock,
+  handoffFromFrozenProject,
   FEA_ANALYSIS_PROFILES,
   FEA_ANALYSIS_RUN_KINDS,
   FEA_ARTIFACT_MANIFEST_KIND,
@@ -248,6 +251,9 @@ interface NativeSession {
   gpuStatus(): GpuStatus;
   cancelExecution?: () => void;
   setInputHandler?: (handler: ((req: InputRequest) => unknown) | null) => void;
+  installProjectHandoff?: (handoff: unknown) => unknown;
+  clearProjectHandoff?: () => void;
+  projectRevision?: () => unknown | null;
 }
 
 const baseExecuteResult: ExecuteResult = {
@@ -956,6 +962,53 @@ describe("setFusionPlanEnabled", () => {
     const session = await initRunMat({ enableGpu: false });
     session.setFusionPlanEnabled(true);
     expect(spy).toHaveBeenCalledWith(true);
+  });
+});
+
+describe("browser project handoff and lock codecs", () => {
+  afterEach(() => {
+    __internals.setNativeModuleOverride(null);
+  });
+
+  it("keeps lock parsing and handoff construction in portable Rust exports", async () => {
+    const lock = { schema_version: 1 };
+    const handoff = { schema_version: 1, project: { graph: "fixed" } };
+    const native: NativeModule = {
+      default: async () => {},
+      initRunMat: async () => createMockNativeSession(),
+      decodePackageLock: vi.fn(() => lock),
+      encodePackageLock: vi.fn(() => "schema_version = 1\n"),
+      handoffFromFrozenProject: vi.fn(() => handoff)
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    await expect(decodePackageLock("schema_version = 1\n")).resolves.toBe(lock);
+    await expect(encodePackageLock(lock)).resolves.toBe("schema_version = 1\n");
+    await expect(handoffFromFrozenProject({ graph: "fixed" })).resolves.toBe(handoff);
+  });
+
+  it("installs and preserves project revision through the session boundary", async () => {
+    const install = vi.fn(() => ({ graph: "sha256:graph", sources: "sha256:sources" }));
+    const clear = vi.fn();
+    const revision = { graph: "sha256:graph", sources: "sha256:sources" };
+    const native: NativeModule = {
+      default: async () => {},
+      initRunMat: async () =>
+        createMockNativeSession({
+          installProjectHandoff: install,
+          clearProjectHandoff: clear,
+          projectRevision: () => revision
+        })
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    const session = await initRunMat({ enableGpu: false });
+    const handoff = { schema_version: 1, project: {} };
+    await expect(session.installProjectHandoff(handoff)).resolves.toEqual(revision);
+    await expect(session.projectRevision()).resolves.toEqual(revision);
+    await session.clearProjectHandoff();
+    expect(install).toHaveBeenCalledWith(handoff);
+    expect(clear).toHaveBeenCalledOnce();
   });
 });
 
