@@ -11,14 +11,12 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::builtins::math::elementwise::integer_cast::{integer_values, IntegerTarget};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use runmat_accelerate_api::{
-    AccelProvider, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
-};
+use runmat_accelerate_api::AccelProvider;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
-    LogicalArray, NumericStorage, ResolveContext, StringArray, Tensor, Type, Value,
+    CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, LogicalArray,
+    NumericDType, NumericStorage, ResolveContext, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -702,39 +700,8 @@ fn upload_numeric_tensor(
     provider: &dyn AccelProvider,
     tensor: &Tensor,
 ) -> BuiltinResult<runmat_accelerate_api::GpuTensorHandle> {
-    if let Some(storage) = tensor.integer_storage() {
-        let view = integer_storage_view(storage, &tensor.shape);
-        provider.upload_integer(&view).map_err(|err| {
-            cat_err(format!(
-                "cat: failed to upload concatenated integer tensor: {err}"
-            ))
-        })
-    } else {
-        let view = HostTensorView {
-            data: &tensor.data,
-            shape: &tensor.shape,
-        };
-        provider
-            .upload(&view)
-            .map_err(|err| cat_err(format!("cat: failed to upload concatenated tensor: {err}")))
-    }
-}
-
-fn integer_storage_view<'a>(
-    storage: &'a IntegerStorage,
-    shape: &'a [usize],
-) -> HostIntegerTensorView<'a> {
-    let data = match storage {
-        IntegerStorage::I8(values) => HostIntegerDataView::I8(values),
-        IntegerStorage::I16(values) => HostIntegerDataView::I16(values),
-        IntegerStorage::I32(values) => HostIntegerDataView::I32(values),
-        IntegerStorage::I64(values) => HostIntegerDataView::I64(values),
-        IntegerStorage::U8(values) => HostIntegerDataView::U8(values),
-        IntegerStorage::U16(values) => HostIntegerDataView::U16(values),
-        IntegerStorage::U32(values) => HostIntegerDataView::U32(values),
-        IntegerStorage::U64(values) => HostIntegerDataView::U64(values),
-    };
-    HostIntegerTensorView { data, shape }
+    gpu_helpers::upload_tensor(provider, tensor)
+        .map_err(|err| cat_err(format!("cat: failed to upload concatenated tensor: {err}")))
 }
 
 fn cat_numeric_tensors(
@@ -752,11 +719,58 @@ fn cat_numeric_tensors(
         tensors.push(tensor);
     }
 
-    let shapes: Vec<Vec<usize>> = tensors.iter().map(|t| t.shape.clone()).collect();
-    let data_refs: Vec<&[f64]> = tensors.iter().map(|t| t.data.as_slice()).collect();
-    let (data, shape) = concat_column_major(dim_zero, &shapes, &data_refs, "cat")?;
-    let tensor = Tensor::new(data, shape).map_err(|e| cat_err(format!("cat: {e}")))?;
+    let tensor = concat_floating_tensors(dim_zero, tensors)?;
     finalize_numeric_output(tensor, like)
+}
+
+fn concat_floating_tensors(dim_zero: usize, tensors: Vec<Tensor>) -> BuiltinResult<Tensor> {
+    let use_single = tensors
+        .iter()
+        .any(|tensor| tensor.numeric_dtype() == NumericDType::F32);
+    let shapes: Vec<Vec<usize>> = tensors.iter().map(|tensor| tensor.shape.clone()).collect();
+    let storages: Vec<NumericStorage> = tensors
+        .into_iter()
+        .map(|tensor| {
+            tensor
+                .into_numeric_storage()
+                .map_err(|error| cat_err(format!("cat: {error}")))
+        })
+        .collect::<BuiltinResult<_>>()?;
+
+    if use_single {
+        let buffers: Vec<Vec<f32>> = storages
+            .into_iter()
+            .map(|storage| match storage {
+                NumericStorage::F64(values) => {
+                    Ok(values.into_iter().map(|value| value as f32).collect())
+                }
+                NumericStorage::F32(values) => Ok(values),
+                storage => Err(cat_err(format!(
+                    "cat: internal floating concatenation received {} storage",
+                    storage.class_name()
+                ))),
+            })
+            .collect::<BuiltinResult<_>>()?;
+        let data_refs: Vec<&[f32]> = buffers.iter().map(Vec::as_slice).collect();
+        let (data, shape) = concat_column_major(dim_zero, &shapes, &data_refs, "cat")?;
+        Tensor::from_numeric_storage(NumericStorage::F32(data), shape)
+            .map_err(|error| cat_err(format!("cat: {error}")))
+    } else {
+        let buffers: Vec<Vec<f64>> = storages
+            .into_iter()
+            .map(|storage| match storage {
+                NumericStorage::F64(values) => Ok(values),
+                storage => Err(cat_err(format!(
+                    "cat: internal double concatenation received {} storage",
+                    storage.class_name()
+                ))),
+            })
+            .collect::<BuiltinResult<_>>()?;
+        let data_refs: Vec<&[f64]> = buffers.iter().map(Vec::as_slice).collect();
+        let (data, shape) = concat_column_major(dim_zero, &shapes, &data_refs, "cat")?;
+        Tensor::from_numeric_storage(NumericStorage::F64(data), shape)
+            .map_err(|error| cat_err(format!("cat: {error}")))
+    }
 }
 
 /// MATLAB concatenation adopts the class of the leftmost integer operand,
@@ -1308,10 +1322,7 @@ async fn cat_gpu_tensors(
         return finalize_numeric_output_with_provider(tensor, &output_like, Some(provider));
     }
 
-    let shapes: Vec<Vec<usize>> = tensors.iter().map(|t| t.shape.clone()).collect();
-    let data_refs: Vec<&[f64]> = tensors.iter().map(|t| t.data.as_slice()).collect();
-    let (data, shape) = concat_column_major(dim_zero, &shapes, &data_refs, "cat")?;
-    let tensor = Tensor::new(data, shape.clone()).map_err(|e| cat_err(format!("cat: {e}")))?;
+    let tensor = concat_floating_tensors(dim_zero, tensors)?;
     if matches!(output_like.device, LikeDevice::Host) {
         return Ok(tensor::tensor_into_value(tensor));
     }
@@ -1500,8 +1511,26 @@ fn value_into_string_array(value: Value) -> BuiltinResult<StringArray> {
 }
 
 fn tensor_to_complex(tensor: Tensor) -> BuiltinResult<ComplexTensor> {
-    let data = tensor.data.into_iter().map(|re| (re, 0.0)).collect();
-    ComplexTensor::new(data, tensor.shape).map_err(|e| cat_err(format!("cat: {e}")))
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|error| cat_err(format!("cat: {error}")))?;
+    let data = match storage {
+        NumericStorage::F64(values) => values.into_iter().map(|real| (real, 0.0)).collect(),
+        NumericStorage::F32(values) => values
+            .into_iter()
+            .map(|real| (f64::from(real), 0.0))
+            .collect(),
+        storage => integer_values(
+            storage
+                .into_integer_storage()
+                .expect("non-floating numeric storage is integer"),
+        )
+        .into_iter()
+        .map(|real| (real.to_f64(), 0.0))
+        .collect(),
+    };
+    ComplexTensor::new(data, shape).map_err(|e| cat_err(format!("cat: {e}")))
 }
 
 async fn finalize_gpu_value(
@@ -1587,6 +1616,27 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn cat_single_and_double_preserves_single_storage() {
+        let single = Tensor::from_f32(vec![1.25, -2.5], vec![1, 2]).expect("single input tensor");
+        let double = Tensor::new(vec![3.75], vec![1, 1]).expect("double input tensor");
+        let result = cat_builtin(
+            Value::Int(IntValue::I32(2)),
+            vec![Value::Tensor(single), Value::Tensor(double)],
+        )
+        .expect("cat");
+
+        let Value::Tensor(output) = result else {
+            panic!("expected tensor");
+        };
+        assert_eq!(output.shape, vec![1, 3]);
+        assert_eq!(output.numeric_dtype(), NumericDType::F32);
+        assert_eq!(
+            output.into_numeric_storage().expect("single storage"),
+            NumericStorage::F32(vec![1.25, -2.5, 3.75])
+        );
     }
 
     #[test]
