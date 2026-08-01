@@ -7,7 +7,7 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, ReduceDimResult};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, ResolveContext, Tensor, Type, Value,
+    ComplexTensor, NumericDType, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -689,7 +689,7 @@ fn debug_value_kind(value: &Value) -> &'static str {
         Value::Int(_) => "Int",
         Value::Bool(_) => "Bool",
         Value::Tensor(t) => {
-            if t.data.is_empty() {
+            if tensor::tensor_element_len(t) == 0 {
                 "Tensor(empty)"
             } else {
                 "Tensor"
@@ -736,9 +736,7 @@ fn is_empty_placeholder(value: &Value) -> bool {
 }
 
 fn tensor_len(tensor: &Tensor) -> usize {
-    tensor
-        .integer_storage()
-        .map_or(tensor.data.len(), |storage| storage.len())
+    tensor::tensor_element_len(tensor)
 }
 
 async fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> BuiltinResult<()> {
@@ -1152,6 +1150,24 @@ enum InputData {
     Complex(ComplexTensor),
 }
 
+fn real_tensor_from_f64(
+    values: Vec<f64>,
+    shape: Vec<usize>,
+    dtype: NumericDType,
+) -> Result<Tensor, String> {
+    match dtype {
+        NumericDType::F64 => Tensor::new(values, shape),
+        NumericDType::F32 => Tensor::from_f32(
+            values.into_iter().map(|value| value as f32).collect(),
+            shape,
+        ),
+        dtype => Err(format!(
+            "max: unexpected {} storage in floating reduction",
+            dtype.class_name()
+        )),
+    }
+}
+
 fn materialize_for_max(name: &str, value: Value) -> BuiltinResult<InputData> {
     match value {
         Value::Tensor(t) => Ok(InputData::Real(t)),
@@ -1207,9 +1223,14 @@ fn materialize_for_max(name: &str, value: Value) -> BuiltinResult<InputData> {
 
 fn reduce_real_tensor(tensor: Tensor, args: &ReductionArgs) -> BuiltinResult<MaxEvaluation> {
     let shape = tensor.shape.clone();
-    if tensor.data.is_empty() {
+    let dtype = tensor.numeric_dtype();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| max_internal_error(format!("max: {e}")))?;
+    let data = storage.materialize_f64();
+    if data.is_empty() {
         let output_shape = resolve_output_shape(&shape, &args.selection, &[])?;
-        let values = Tensor::new(Vec::new(), output_shape.clone())
+        let values = real_tensor_from_f64(Vec::new(), output_shape.clone(), dtype)
             .map_err(|e| max_internal_error(format!("max: {e}")))?;
         let indices = Tensor::new(Vec::new(), output_shape)
             .map_err(|e| max_internal_error(format!("max: {e}")))?;
@@ -1223,7 +1244,7 @@ fn reduce_real_tensor(tensor: Tensor, args: &ReductionArgs) -> BuiltinResult<Max
     let output_len = tensor::element_count(&output_shape);
 
     if output_len == 0 {
-        let values = Tensor::new(Vec::new(), output_shape.clone())
+        let values = real_tensor_from_f64(Vec::new(), output_shape.clone(), dtype)
             .map_err(|e| max_internal_error(format!("max: {e}")))?;
         let indices = Tensor::new(Vec::new(), output_shape)
             .map_err(|e| max_internal_error(format!("max: {e}")))?;
@@ -1240,7 +1261,7 @@ fn reduce_real_tensor(tensor: Tensor, args: &ReductionArgs) -> BuiltinResult<Max
 
     let mut best = vec![BestReal::new(); output_len];
     let mut coords = vec![0usize; shape.len()];
-    for &value in &tensor.data {
+    for &value in &data {
         let out_idx = map_output_index(&coords, &output_strides, &dims_mask);
         let reduce_idx = map_reduce_index(
             &coords,
@@ -1291,7 +1312,7 @@ fn reduce_real_tensor(tensor: Tensor, args: &ReductionArgs) -> BuiltinResult<Max
         };
     }
 
-    let value_tensor = Tensor::new(values, output_shape.clone())
+    let value_tensor = real_tensor_from_f64(values, output_shape.clone(), dtype)
         .map_err(|e| max_internal_error(format!("max: {e}")))?;
     let index_tensor =
         Tensor::new(indices, output_shape).map_err(|e| max_internal_error(format!("max: {e}")))?;
@@ -2518,6 +2539,21 @@ pub(crate) mod tests {
         let (values, indices) = eval.into_pair();
         assert_eq!(values, Value::Num(5.0));
         assert_eq!(indices, Value::Num(3.0));
+    }
+
+    #[test]
+    fn max_reduction_preserves_native_single_storage() {
+        let tensor = Tensor::from_f32(vec![3.0, 1.0, 4.0, 2.0], vec![2, 2]).unwrap();
+        let (values, _) = evaluate(Value::Tensor(tensor), &[])
+            .expect("max")
+            .into_pair();
+        let Value::Tensor(values) = values else {
+            panic!("expected tensor values");
+        };
+        assert_eq!(
+            values.into_numeric_storage().expect("single storage"),
+            runmat_builtins::NumericStorage::F32(vec![3.0, 4.0])
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
