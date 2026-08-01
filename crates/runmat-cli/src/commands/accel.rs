@@ -1,3 +1,4 @@
+use crate::presentation;
 #[cfg(feature = "wgpu")]
 use anyhow::Context;
 use anyhow::Result;
@@ -98,11 +99,13 @@ pub async fn show_accel_info(json: bool, reset: bool) -> Result<()> {
                 serde_json::to_string_pretty(&serde_json::Value::Object(payload))?
             );
         } else {
-            println!("Acceleration Provider Info");
-            println!("==========================");
+            let styles = presentation::stdout();
+            println!("{}", styles.heading("Acceleration Provider Info"));
+            println!("{}", styles.muted("=========================="));
             println!(
-                "Device: {} ({})",
-                info.name,
+                "{} {} ({})",
+                styles.label("Device:"),
+                styles.identifier(&info.name),
                 info.backend.clone().unwrap_or_default()
             );
             println!(
@@ -123,7 +126,7 @@ pub async fn show_accel_info(json: bool, reset: bool) -> Result<()> {
                 println!("Warmup: last duration ~{} ms", ms);
             }
             let to_ms = |ns: u64| ns as f64 / 1_000_000.0;
-            println!("Telemetry:");
+            println!("{}", styles.heading("Telemetry:"));
             println!(
                 "  uploads: {} bytes, downloads: {} bytes",
                 telemetry.upload_bytes, telemetry.download_bytes
@@ -166,7 +169,7 @@ pub async fn show_accel_info(json: bool, reset: bool) -> Result<()> {
             }
 
             if let Some(report) = runmat_accelerate::auto_offload_report() {
-                println!("Auto-offload:");
+                println!("{}", styles.heading("Auto-offload:"));
                 println!("  source: {}", report.base_source.as_str());
                 println!("  env_overrides_applied: {}", report.env_overrides_applied);
                 if let Some(path) = report.cache_path.as_deref() {
@@ -215,9 +218,10 @@ pub async fn show_accel_info(json: bool, reset: bool) -> Result<()> {
         });
         println!("{}", serde_json::to_string_pretty(&payload)?);
     } else {
-        println!("Acceleration Provider Info");
-        println!("==========================");
-        println!("No acceleration provider registered");
+        let styles = presentation::stdout();
+        println!("{}", styles.heading("Acceleration Provider Info"));
+        println!("{}", styles.muted("=========================="));
+        println!("{}", styles.warning("No acceleration provider registered"));
     }
 
     Ok(())
@@ -233,9 +237,15 @@ pub async fn show_accel_info(json: bool, _reset: bool) -> Result<()> {
         });
         println!("{}", serde_json::to_string_pretty(&payload)?);
     } else {
-        println!("Acceleration Provider Info");
-        println!("==========================");
-        println!("This build was compiled without the 'wgpu' feature. No GPU provider available.");
+        let styles = presentation::stdout();
+        println!("{}", styles.heading("Acceleration Provider Info"));
+        println!("{}", styles.muted("=========================="));
+        println!(
+            "{}",
+            styles.warning(
+                "This build was compiled without the 'wgpu' feature. No GPU provider available."
+            )
+        );
     }
     Ok(())
 }
@@ -255,9 +265,14 @@ pub async fn execute_accel_calibrate(
         return Ok(());
     }
 
-    println!("Auto-offload calibration");
-    println!("========================");
-    println!("Input: {}", input.display());
+    let styles = presentation::stdout();
+    println!("{}", styles.heading("Auto-offload calibration"));
+    println!("{}", styles.muted("========================"));
+    println!(
+        "{} {}",
+        styles.label("Input:"),
+        styles.path(input.display())
+    );
     if let Some(provider) = &outcome.provider {
         println!(
             "Provider: {} ({}) device_id={}",
@@ -267,10 +282,21 @@ pub async fn execute_accel_calibrate(
         );
     }
     println!("Runs considered: {}", outcome.runs);
-    println!("Mode: {}", if commit { "commit" } else { "dry-run" });
+    println!(
+        "{} {}",
+        styles.label("Mode:"),
+        if commit {
+            styles.success("commit")
+        } else {
+            styles.warning("dry-run")
+        }
+    );
 
     if let Some(delta) = &outcome.delta {
-        println!("\nUpdated coefficients (seconds per unit):");
+        println!(
+            "\n{}",
+            styles.heading("Updated coefficients (seconds per unit):")
+        );
         let mut printed = false;
         if let Some(entry) = &delta.cpu_elem_per_elem {
             print_threshold_delta("cpu_elem_per_elem", entry);
@@ -288,10 +314,13 @@ pub async fn execute_accel_calibrate(
             println!("  (no coefficient changes)");
         }
     } else {
-        println!("\nCalibration sample did not yield coefficient adjustments.");
+        println!(
+            "\n{}",
+            styles.warning("Calibration sample did not yield coefficient adjustments.")
+        );
     }
 
-    println!("\nThreshold snapshots:");
+    println!("\n{}", styles.heading("Threshold snapshots:"));
     println!(
         "  unary={} -> {}",
         outcome.before.unary_min_elems, outcome.after.unary_min_elems
@@ -311,12 +340,22 @@ pub async fn execute_accel_calibrate(
 
     if commit {
         if let Some(path) = &outcome.persisted_to {
-            println!("\nPersisted calibration cache: {path}");
+            println!(
+                "\n{} {}",
+                styles.success("Persisted calibration cache:"),
+                styles.path(path)
+            );
         }
-        println!("Restart RunMat sessions to load the updated thresholds.");
+        println!(
+            "{}",
+            styles.help("Restart RunMat sessions to load the updated thresholds.")
+        );
     } else {
         println!(
-            "\nDry-run: thresholds were not persisted. Re-run without --dry-run to commit changes."
+            "\n{}",
+            styles.warning(
+                "Dry-run: thresholds were not persisted. Re-run without --dry-run to commit changes."
+            )
         );
     }
 

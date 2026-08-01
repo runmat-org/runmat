@@ -9,4 +9,4 @@ pub use remote::{
     RemoteCommand,
 };
 pub use root::{Cli, CliOverrideSources, Commands, ConfigCommand, ConfigFormat, GcCommand};
-pub use value_types::{CaptureFiguresMode, FigureSize, GcPreset, LogLevel, OptLevel};
+pub use value_types::{CaptureFiguresMode, ColorMode, FigureSize, GcPreset, LogLevel, OptLevel};

@@ -21,6 +21,7 @@ use crate::commands::fea::execute_fea_path;
 use crate::commands::session::create_session;
 use crate::commands::streams::emit_execution_streams;
 use crate::diagnostics::{format_frontend_error, format_runtime_diagnostic};
+use crate::presentation;
 use crate::telemetry::{capture_provider_snapshot, TelemetryRunKind};
 use crate::AlreadyReportedCliError;
 
@@ -165,7 +166,7 @@ async fn execute_script_request(
             }) {
                 eprintln!("{diag}");
             } else {
-                eprintln!("Execution error: {err}");
+                eprintln!("{}: {err}", presentation::stderr().error("Execution error"));
             }
             return Err(AlreadyReportedCliError.into());
         }
@@ -191,7 +192,10 @@ async fn execute_script_request(
         .await
         {
             warn!("Failed to write run artifacts: {err}");
-            eprintln!("Warning: failed to write run artifacts: {err}");
+            eprintln!(
+                "{}: failed to write run artifacts: {err}",
+                presentation::stderr().warning("Warning")
+            );
         }
     }
 

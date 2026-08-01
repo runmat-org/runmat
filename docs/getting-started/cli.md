@@ -2,7 +2,7 @@
 title: "Command Line Interface"
 category: "Getting Started"
 section: "1.3"
-last_updated: "May 29, 2026"
+last_updated: "July 31, 2026"
 ---
 
 # RunMat Command Line Interface (CLI)
@@ -121,7 +121,7 @@ runmat check --json studies/bracket_static.fea
 
 For `.m` files, check runs the same parser, HIR and MIR lowering, static analysis, source lookup, and compile validation used by editor tooling without executing the script. It reports syntax and semantic errors, proven type or shape incompatibilities, and function calls that cannot be resolved from builtins, the file, or the configured project sources. `--path DIRECTORY` adds an explicit MATLAB lookup root for the check and may be repeated.
 
-Dynamic MATLAB behavior is reported without being rejected by default. For example, a function that is not present in the static source catalog produces a warning, and a call after `addpath` identifies that path mutation as the reason the final target must be selected at runtime. Warnings leave the command successful, while errors return a nonzero exit code. Use `-D warnings` (or `-D warning`) when CI should also return nonzero for any warning.
+Dynamic MATLAB behavior is reported without being rejected by default. For example, a function that is not present in the static source catalog produces a warning, and a call after `addpath` identifies that path mutation as the reason the final target must be selected and loaded at runtime. This warning describes a supported dynamic execution boundary, not an execution failure; use `[sources].roots` or `--path` when the target should participate in static cross-file analysis. Warnings leave the command successful, while errors return a nonzero exit code. Use `-D warnings` (or `-D warning`) when CI should also return nonzero for any warning.
 
 The default output is human-readable and includes diagnostic codes, source locations, related causal locations, notes, and help. For `.m` files, `--json` emits the stable `schema_version: 1` envelope with an explicit `outcome` (`clean`, `warnings`, or `failed`), per-domain analysis completeness, structured diagnostics with byte and line/column spans, and summary counts. A failed check still emits that JSON payload before returning nonzero.
 
@@ -145,6 +145,7 @@ Common options:
 | Option | Use |
 | --- | --- |
 | `--config PATH` | Load a specific `runmat.toml` or `runmat.json`. |
+| `--color MODE` | Control ANSI styling for human output (auto | always | never). |
 | `--debug` | Enable debug logging. |
 | `--log-level LEVEL` | Set log verbosity. |
 | `--verbose` | Print more execution detail. |
@@ -160,6 +161,22 @@ Common options:
 | `--plot-backend BACKEND` | Select plotting backend (auto | wgpu | static | web). |
 
 Configuration is resolved from built-in defaults, project files, environment variables, and CLI flags. CLI flags have the highest precedence. See [Configuration Reference](/docs/runtime/getting-started/config).
+
+## Color and Terminal Output
+
+RunMat uses restrained ANSI styling for human-readable diagnostics, help, headings, status messages, and summaries. The default `--color=auto` mode checks stdout and stderr independently, styles only streams connected to capable interactive terminals, and stays plain when output is redirected, `TERM=dumb`, or a non-empty `NO_COLOR` value is present.
+
+Use the global color option before or after a subcommand:
+
+```bash
+runmat --color=never check analysis.m
+runmat check analysis.m --color=never
+runmat --color=always check analysis.m | less -R
+```
+
+An explicit `--color=always` or `--color=never` overrides the environment. Without an explicit option, a non-empty `NO_COLOR` disables color; `CLICOLOR=0` also disables it; and `CLICOLOR_FORCE` or `FORCE_COLOR` can request color for eligible human output. `NO_COLOR` takes precedence over those environment force variables. An empty `NO_COLOR` value is treated as unset.
+
+Structured and byte-oriented output remains plain even under `--color=always`. This includes JSON, TOML configuration, bytecode, stable tab-separated remote listings, telemetry payloads, and raw remote file contents. RunMat also leaves MATLAB stdout and stderr, displayed MATLAB values, and REPL shell-command output unchanged.
 
 ## Emit Bytecode
 

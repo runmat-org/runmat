@@ -14,7 +14,10 @@ pub(crate) fn emit_execution_streams(streams: &[ExecutionStreamEntry]) {
                     ExecutionStreamKind::ClearScreen => unreachable!(),
                 };
                 if let Err(err) = write_result {
-                    eprintln!("Failed to write execution stream: {err}");
+                    eprintln!(
+                        "{}: {err}",
+                        crate::presentation::stderr().error("Failed to write execution stream")
+                    );
                     break;
                 }
             }

@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use crate::cli::Cli;
 use crate::commands::script::resolve_script_input;
 use crate::diagnostics::parser_compat;
+use crate::presentation::{self, StreamStyles, Tone};
 use crate::AlreadyReportedCliError;
 
 pub async fn execute_check(
@@ -74,8 +75,13 @@ fn parse_denied_levels(levels: &[String]) -> Result<bool> {
 
 async fn check_fea_file(path: PathBuf, config: &RunMatRuntimeConfig, json: bool) -> Result<()> {
     if !json {
-        eprintln!("Checking {}", path.display());
-        eprintln!("  loading study document");
+        let styles = presentation::stderr();
+        eprintln!(
+            "{} {}",
+            styles.heading("Checking"),
+            styles.path(path.display())
+        );
+        eprintln!("  {}", styles.muted("loading study document"));
     }
     let document = load_fea_document_from_path_async(&path)
         .await
@@ -84,16 +90,21 @@ async fn check_fea_file(path: PathBuf, config: &RunMatRuntimeConfig, json: bool)
     match document {
         FeaResolvedDocument::Study(spec) => {
             if !json {
+                let styles = presentation::stderr();
                 eprintln!(
-                    "  study: {} ({:?}, {:?})",
-                    spec.study_id, spec.run_kind, spec.backend
+                    "  {} {} ({:?}, {:?})",
+                    styles.label("study:"),
+                    styles.identifier(&spec.study_id),
+                    spec.run_kind,
+                    spec.backend
                 );
                 eprintln!(
-                    "  geometry: {} regions, {} meshes",
+                    "  {} {} regions, {} meshes",
+                    styles.label("geometry:"),
                     spec.geometry.regions.len(),
                     spec.geometry.meshes.len()
                 );
-                eprintln!("  validating");
+                eprintln!("  {}", styles.info("validating"));
             }
             let validation = analysis_validate_study_op(&spec, context.clone())
                 .map_err(report_operation_error)?;
@@ -106,7 +117,7 @@ async fn check_fea_file(path: PathBuf, config: &RunMatRuntimeConfig, json: bool)
                 return Err(AlreadyReportedCliError.into());
             }
             if !json {
-                eprintln!("  planning");
+                eprintln!("  {}", presentation::stderr().info("planning"));
             }
             let plan = analysis_plan_study_op(&spec, context).map_err(report_operation_error)?;
             if json {
@@ -125,13 +136,15 @@ async fn check_fea_file(path: PathBuf, config: &RunMatRuntimeConfig, json: bool)
         }
         FeaResolvedDocument::Sweep(spec) => {
             if !json {
+                let styles = presentation::stderr();
                 eprintln!(
-                    "  sweep: {} ({} studies, fail_fast: {})",
-                    spec.sweep_id,
+                    "  {} {} ({} studies, fail_fast: {})",
+                    styles.label("sweep:"),
+                    styles.identifier(&spec.sweep_id),
                     spec.studies.len(),
                     spec.fail_fast
                 );
-                eprintln!("  validating");
+                eprintln!("  {}", styles.info("validating"));
             }
             let validation = analysis_validate_study_sweep_op(&spec, context.clone())
                 .map_err(report_operation_error)?;
@@ -144,7 +157,7 @@ async fn check_fea_file(path: PathBuf, config: &RunMatRuntimeConfig, json: bool)
                 return Err(AlreadyReportedCliError.into());
             }
             if !json {
-                eprintln!("  planning");
+                eprintln!("  {}", presentation::stderr().info("planning"));
             }
             let plan =
                 analysis_plan_study_sweep_op(&spec, context).map_err(report_operation_error)?;
@@ -270,18 +283,29 @@ async fn check_m_file(
             serde_json::to_string_pretty(&payload).context("Failed to serialize check result")?
         );
     } else {
+        let styles = presentation::stdout();
         for diagnostic in &analysis.diagnostics {
-            println!("{}", render_check_diagnostic(diagnostic, &path, &content));
+            println!(
+                "{}",
+                render_check_diagnostic_with_styles(diagnostic, &path, &content, &styles)
+            );
         }
         if options.verbose {
             println!("analysis: {}", serde_json::to_string(&analysis.domains)?);
         }
-        println!(
+        let summary = format!(
             "checked {}: {} error(s), {} warning(s)",
             path.display(),
             error_count,
             warning_count
         );
+        if error_count > 0 {
+            println!("{}", styles.error(summary));
+        } else if warning_count > 0 {
+            println!("{}", styles.warning(summary));
+        } else {
+            println!("{}", styles.success(summary));
+        }
     }
     if failed {
         return Err(AlreadyReportedCliError.into());
@@ -420,12 +444,22 @@ fn source_catalog_diagnostic(message: String) -> HirDiagnostic {
     .with_category("source-catalog")
 }
 
+#[cfg(test)]
 fn render_check_diagnostic(diagnostic: &HirDiagnostic, path: &Path, source: &str) -> String {
-    let severity = match diagnostic.severity {
-        HirDiagnosticSeverity::Error => "error",
-        HirDiagnosticSeverity::Warning => "warning",
-        HirDiagnosticSeverity::Information => "info",
-        HirDiagnosticSeverity::Help => "help",
+    render_check_diagnostic_with_styles(diagnostic, path, source, &StreamStyles::plain())
+}
+
+fn render_check_diagnostic_with_styles(
+    diagnostic: &HirDiagnostic,
+    path: &Path,
+    source: &str,
+    styles: &StreamStyles,
+) -> String {
+    let (severity, severity_tone) = match diagnostic.severity {
+        HirDiagnosticSeverity::Error => ("error", Tone::Error),
+        HirDiagnosticSeverity::Warning => ("warning", Tone::Warning),
+        HirDiagnosticSeverity::Information => ("info", Tone::Info),
+        HirDiagnosticSeverity::Help => ("help", Tone::Help),
     };
     let (line, column, line_start, line_text) = source_line(source, diagnostic.primary.span.start);
     let primary_start = diagnostic.primary.span.start.min(source.len());
@@ -451,35 +485,49 @@ fn render_check_diagnostic(diagnostic: &HirDiagnostic, path: &Path, source: &str
                 .max(1),
         );
     let gutter = line.to_string().len();
+    let severity = styles.paint(severity_tone, severity);
+    let code = styles.identifier(&diagnostic.code);
+    let location = styles.path(format!("{}:{line}:{column}", path.display()));
+    let arrow = styles.muted("-->");
+    let separator = styles.muted("|");
+    let carets = styles.paint(severity_tone, "^".repeat(span_len));
     let mut rendered = format!(
-        "{severity}[{}]: {}\n --> {}:{line}:{column}\n{:gutter$} |\n{line:>gutter$} | {line_text}\n{:gutter$} | {}{}",
-        diagnostic.code,
+        "{severity}[{code}]: {}\n {arrow} {location}\n{:gutter$} {separator}\n{line:>gutter$} {separator} {line_text}\n{:gutter$} {separator} {}{carets}",
         diagnostic.message,
-        path.display(),
         "",
         "",
         " ".repeat(prefix_width),
-        "^".repeat(span_len),
     );
     if let Some(label) = &diagnostic.primary.label {
         rendered.push(' ');
-        rendered.push_str(label);
+        rendered.push_str(&styles.paint(severity_tone, label));
     }
     for secondary in &diagnostic.secondary {
         let (secondary_line, secondary_column, _, _) = source_line(source, secondary.span.start);
-        rendered.push_str(&format!(
-            "\n  = related: {}:{secondary_line}:{secondary_column}",
+        let related = styles.info("related:");
+        let location = styles.path(format!(
+            "{}:{secondary_line}:{secondary_column}",
             path.display()
         ));
+        rendered.push_str(&format!("\n  {} {related} {location}", styles.muted("=")));
         if let Some(label) = &secondary.label {
             rendered.push_str(&format!(": {label}"));
         }
     }
     for note in &diagnostic.notes {
-        rendered.push_str(&format!("\n  = note: {}", note.message));
+        rendered.push_str(&format!(
+            "\n  {} {} {}",
+            styles.muted("="),
+            styles.muted("note:"),
+            note.message
+        ));
     }
     if let Some(help) = &diagnostic.help {
-        rendered.push_str(&format!("\n  = help: {help}"));
+        rendered.push_str(&format!(
+            "\n  {} {} {help}",
+            styles.muted("="),
+            styles.help("help:")
+        ));
     }
     rendered
 }
@@ -504,13 +552,36 @@ fn print_study_check_summary(
     plan: &AnalysisStudyPlanData,
     verbose: bool,
 ) {
-    println!("OK {}", plan.study_id);
-    println!("  kind: {:?}", plan.run_kind);
-    println!("  backend: {:?}", plan.backend);
-    println!("  model: {}", plan.model_id);
-    println!("  validation: passed ({} issues)", validation.issues.len());
-    println!("  run op: {} ({})", plan.run_operation, plan.run_op_version);
-    println!("  evidence: {}", plan.evidence_artifact_path);
+    let styles = presentation::stdout();
+    println!(
+        "{} {}",
+        styles.success("OK"),
+        styles.identifier(&plan.study_id)
+    );
+    println!("  {} {:?}", styles.label("kind:"), plan.run_kind);
+    println!("  {} {:?}", styles.label("backend:"), plan.backend);
+    println!(
+        "  {} {}",
+        styles.label("model:"),
+        styles.identifier(&plan.model_id)
+    );
+    println!(
+        "  {} {} ({} issues)",
+        styles.label("validation:"),
+        styles.success("passed"),
+        validation.issues.len()
+    );
+    println!(
+        "  {} {} ({})",
+        styles.label("run op:"),
+        styles.identifier(&plan.run_operation),
+        plan.run_op_version
+    );
+    println!(
+        "  {} {}",
+        styles.label("evidence:"),
+        styles.path(&plan.evidence_artifact_path)
+    );
     if verbose {
         println!("  study fingerprint: {}", plan.study_fingerprint);
         println!("  operations:");
@@ -521,10 +592,15 @@ fn print_study_check_summary(
 }
 
 fn print_study_validation_failure(validation: &AnalysisStudyValidateResult) {
-    println!("FAILED validation");
-    println!("  evidence: {}", validation.evidence_artifact_path);
+    let styles = presentation::stdout();
+    println!("{} validation", styles.error("FAILED"));
+    println!(
+        "  {} {}",
+        styles.label("evidence:"),
+        styles.path(&validation.evidence_artifact_path)
+    );
     for issue in &validation.issues {
-        println!("  {}: {}", issue.code, issue.message);
+        println!("  {}: {}", styles.identifier(&issue.code), issue.message);
     }
 }
 
@@ -532,7 +608,12 @@ fn print_sweep_check_summary(
     validation: &AnalysisStudySweepValidateData,
     plan: &AnalysisStudySweepPlanData,
 ) {
-    println!("OK {}", plan.sweep_id);
+    let styles = presentation::stdout();
+    println!(
+        "{} {}",
+        styles.success("OK"),
+        styles.identifier(&plan.sweep_id)
+    );
     println!("  studies: {}", plan.study_count);
     println!("  planned: {}", plan.planned_count);
     println!("  failed: {}", plan.failed_count);
@@ -550,7 +631,12 @@ fn print_sweep_check_summary(
 }
 
 fn print_sweep_validation_failure(validation: &AnalysisStudySweepValidateData) {
-    println!("FAILED {}", validation.sweep_id);
+    let styles = presentation::stdout();
+    println!(
+        "{} {}",
+        styles.error("FAILED"),
+        styles.identifier(&validation.sweep_id)
+    );
     println!("  evidence: {}", validation.evidence_artifact_path);
     for entry in &validation.study_entries {
         if entry.valid {
@@ -636,6 +722,15 @@ mod script_check_tests {
         assert!(rendered.contains("2 | y = missing(x);"));
         assert!(rendered.contains("^^^^^^^ not defined in this file or project"));
         assert!(rendered.contains("= help: define `missing` in the project source roots"));
+
+        let styled = render_check_diagnostic_with_styles(
+            &diagnostic,
+            Path::new("project/main.m"),
+            source,
+            &StreamStyles::new(crate::presentation::ColorLevel::Basic),
+        );
+        assert!(styled.contains("\u{1b}["));
+        assert_eq!(strip_ansi(&styled), rendered);
     }
 
     #[test]
@@ -644,5 +739,23 @@ mod script_check_tests {
         let offset = source.find("value").unwrap();
         let (line, column, line_start, text) = source_line(source, offset);
         assert_eq!((line, column, line_start, text), (2, 1, 5, "value = 1;"));
+    }
+
+    fn strip_ansi(value: &str) -> String {
+        let mut output = String::new();
+        let mut chars = value.chars().peekable();
+        while let Some(character) = chars.next() {
+            if character == '\u{1b}' && chars.peek() == Some(&'[') {
+                chars.next();
+                for next in chars.by_ref() {
+                    if next.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            } else {
+                output.push(character);
+            }
+        }
+        output
     }
 }

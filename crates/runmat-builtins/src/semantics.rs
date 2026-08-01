@@ -263,7 +263,6 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
         "which" => BuiltinSemantics {
             effects: BuiltinEffects::none().with_environment().with_workspace(),
             workspace_effect: Some(BuiltinWorkspaceEffect::ReadsWorkspace),
-            environment_effect: Some(BuiltinEnvironmentEffect::DynamicLookupInvalidation),
             purity: BuiltinPurity::DeterministicReadOnly,
             semantic_kind: BuiltinSemanticKind::Workspace,
             ..pure(BuiltinSemanticKind::Workspace)

@@ -3,6 +3,7 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use uuid::Uuid;
 
+use crate::presentation;
 use crate::remote::shared::build_http_client;
 
 #[derive(Deserialize)]
@@ -152,7 +153,11 @@ pub async fn restore_snapshot(
         let text = response.text().await.unwrap_or_default();
         anyhow::bail!("Snapshot restore failed ({status}): {text}")
     }
-    println!("Restored snapshot {snapshot_id}");
+    println!(
+        "{} {}",
+        presentation::stdout().success("Restored snapshot"),
+        presentation::stdout().identifier(snapshot_id)
+    );
     Ok(())
 }
 
@@ -177,7 +182,11 @@ pub async fn delete_snapshot(
         let text = response.text().await.unwrap_or_default();
         anyhow::bail!("Snapshot delete failed ({status}): {text}")
     }
-    println!("Deleted snapshot {snapshot_id}");
+    println!(
+        "{} {}",
+        presentation::stdout().success("Deleted snapshot"),
+        presentation::stdout().identifier(snapshot_id)
+    );
     Ok(())
 }
 
@@ -270,6 +279,10 @@ pub async fn delete_snapshot_tag(
         let text = response.text().await.unwrap_or_default();
         anyhow::bail!("Snapshot tag delete failed ({status}): {text}")
     }
-    println!("Deleted snapshot tag {tag}");
+    println!(
+        "{} {}",
+        presentation::stdout().success("Deleted snapshot tag"),
+        presentation::stdout().identifier(tag)
+    );
     Ok(())
 }

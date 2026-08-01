@@ -48,6 +48,12 @@ impl RunMatSession {
             active_source_identity: None,
             function_registry: runmat_vm::FunctionRegistry::default(),
             next_semantic_function_id: 0,
+            search_path: Arc::new(
+                runmat_runtime::builtins::common::path_state::SearchPath::new(
+                    runmat_runtime::builtins::common::path_state::current_path_string(),
+                ),
+            ),
+            dynamic_function_cache: Arc::new(Mutex::new(HashMap::new())),
             source_pool: SourcePool::default(),
             interrupt_flag: Arc::new(AtomicBool::new(false)),
             is_executing: false,

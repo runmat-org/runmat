@@ -51,6 +51,205 @@ fn discover_source_catalog(
         .flatten()
 }
 
+async fn load_dynamic_function(
+    name: String,
+    args: Vec<Value>,
+    requested_outputs: usize,
+    compat: CompatMode,
+    top_level_await_enabled: bool,
+    cache: Arc<Mutex<HashMap<std::path::PathBuf, DynamicFunctionCacheEntry>>>,
+) -> Option<Result<Value, RuntimeError>> {
+    let resolve_span = info_span!(
+        "runtime.callable.resolve",
+        call_kind = "runtime-name",
+        source_kind = "m-file"
+    );
+    let _resolve_guard = resolve_span.enter();
+    let source_search_span = info_span!("runtime.source_search", resolution_purpose = "call");
+    let path_result = {
+        let _source_search_guard = source_search_span.enter();
+        runmat_runtime::builtins::common::path_search::find_file_with_extensions(
+            &name,
+            &[".m"],
+            "function resolution",
+        )
+        .await
+    };
+    let path = match path_result {
+        Ok(Some(path)) => path,
+        Ok(None) => return None,
+        Err(error) => {
+            return Some(Err(build_runtime_error(error)
+                .with_identifier("RunMat:FunctionResolution")
+                .build()))
+        }
+    };
+    Some(
+        async move {
+            let source_text =
+                runmat_runtime::builtins::io::repl_fs::pcode::read_source_text_async(&path)
+                    .await
+                    .map_err(|error| {
+                        build_runtime_error(format!(
+                            "Could not read function source '{}': {error}",
+                            path.display()
+                        ))
+                        .with_identifier("RunMat:FunctionSourceRead")
+                        .build()
+                    })?;
+
+            let cached = cache
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .get(&path)
+                .filter(|entry| entry.source_text == source_text)
+                .cloned();
+            let registry = if let Some(entry) = cached {
+                debug!(
+                    cache = "hit",
+                    "reusing dynamically compiled function source"
+                );
+                entry.registry
+            } else {
+                debug!(
+                    cache = "miss",
+                    "compiling dynamically resolved function source"
+                );
+                let dynamic_compile_span =
+                    info_span!("runtime.dynamic_compile", source_kind = "m-file");
+                let _dynamic_compile_guard = dynamic_compile_span.enter();
+                let mut ast = parse_with_options(&source_text, ParserOptions::new(compat))
+                    .map_err(|error| {
+                        build_runtime_error(format!(
+                            "Could not parse function source '{}': {error}",
+                            path.display()
+                        ))
+                        .with_identifier("RunMat:FunctionParseError")
+                        .build()
+                    })?;
+                let path_name = path.to_string_lossy();
+                let mut companion = super::compile::discover_companion_source_statements_async(
+                    path_name.as_ref(),
+                    compat,
+                )
+                .await
+                .map_err(|error| {
+                    build_runtime_error(format!(
+                        "Could not compose function source '{}': {error}",
+                        path.display()
+                    ))
+                    .with_identifier("RunMat:FunctionCompositionError")
+                    .build()
+                })?;
+                if !companion.statements.is_empty() {
+                    ast.body.append(&mut companion.statements);
+                }
+                let source_catalog = discover_source_catalog(Some(path_name.as_ref()));
+                let known_project_symbols = source_catalog
+                    .as_ref()
+                    .map(|catalog| &catalog.symbols)
+                    .cloned()
+                    .unwrap_or_default();
+                let frontend = runmat_static_analysis::frontend::analyze_program_with_catalog(
+                    &ast,
+                    &LoweringContext::new(&HashMap::new())
+                        .with_known_project_symbols(&known_project_symbols)
+                        .with_private_functions(
+                            &companion.private_function_owners,
+                            &companion.private_function_aliases,
+                        )
+                        .with_runmat_extensions_enabled(compat.allows_runmat_extensions())
+                        .with_top_level_await_enabled(top_level_await_enabled),
+                    source_catalog.as_ref(),
+                );
+                if let Some(error) = frontend.lowering_failure {
+                    return Err(build_runtime_error(format!(
+                        "Could not lower function source '{}': {error}",
+                        path.display()
+                    ))
+                    .with_identifier(
+                        error
+                            .identifier
+                            .as_deref()
+                            .unwrap_or("RunMat:FunctionLoweringError"),
+                    )
+                    .build());
+                }
+                if let Some(error) = frontend.compile_failure {
+                    return Err(error.into());
+                }
+                if frontend.has_errors() {
+                    let diagnostic = frontend
+                        .diagnostics
+                        .iter()
+                        .find(|diagnostic| {
+                            diagnostic.severity == runmat_hir::HirDiagnosticSeverity::Error
+                        })
+                        .map(|diagnostic| diagnostic.message.clone())
+                        .unwrap_or_else(|| "static analysis failed".to_string());
+                    return Err(build_runtime_error(format!(
+                        "Could not compile function source '{}': {diagnostic}",
+                        path.display()
+                    ))
+                    .with_identifier("RunMat:FunctionCompileError")
+                    .build());
+                }
+                let bytecode = frontend.bytecode.ok_or_else(|| {
+                    build_runtime_error(format!(
+                        "Canonical frontend produced no bytecode for '{}'",
+                        path.display()
+                    ))
+                    .with_identifier("RunMat:FunctionCompileError")
+                    .build()
+                })?;
+                let mut compiled_registry = bytecode.function_registry();
+                let leaf_name = name.rsplit('.').next().unwrap_or(name.as_str());
+                if compiled_registry.resolve_name(&name).is_none() {
+                    if let Some(function) = compiled_registry.resolve_name(leaf_name) {
+                        compiled_registry.names.insert(name.clone(), function);
+                    }
+                }
+                let registry = Arc::new(compiled_registry);
+                let publish_span =
+                    info_span!("runtime.function_registry.publish", source_kind = "m-file");
+                let _publish_guard = publish_span.enter();
+                cache
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner())
+                    .insert(
+                        path.clone(),
+                        DynamicFunctionCacheEntry {
+                            source_text,
+                            registry: Arc::clone(&registry),
+                        },
+                    );
+                registry
+            };
+
+            let leaf_name = name.rsplit('.').next().unwrap_or(name.as_str());
+            let function = registry
+                .resolve_name(&name)
+                .or_else(|| registry.resolve_name(leaf_name))
+                .ok_or_else(|| {
+                    build_runtime_error(format!(
+                        "Function source '{}' does not define '{name}'.",
+                        path.display()
+                    ))
+                    .with_identifier("RunMat:FunctionNameMismatch")
+                    .build()
+                })?;
+            runmat_vm::invoke_semantic_function_value(
+                function.0,
+                &args,
+                requested_outputs,
+                registry.as_ref(),
+            )
+            .await
+        }
+        .await,
+    )
+}
+
 #[cfg(test)]
 fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> {
     discover_source_catalog(source_name)
@@ -63,6 +262,27 @@ impl RunMatSession {
         &mut self,
         input: &str,
     ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
+        let dynamic_function_cache = Arc::clone(&self.dynamic_function_cache);
+        let dynamic_function_compat = self.compat_mode;
+        let dynamic_function_top_level_await = self.top_level_await_enabled;
+        let loader: Arc<runmat_runtime::user_functions::DynamicFunctionLoader> =
+            Arc::new(move |name, args, requested_outputs| {
+                let cache = Arc::clone(&dynamic_function_cache);
+                Box::pin(load_dynamic_function(
+                    name,
+                    args,
+                    requested_outputs,
+                    dynamic_function_compat,
+                    dynamic_function_top_level_await,
+                    cache,
+                ))
+            });
+        let runtime_context = Arc::new(
+            runmat_runtime::user_functions::RuntimeContext::new(Arc::clone(&self.search_path))
+                .with_dynamic_function_loader(loader),
+        );
+        let _runtime_context =
+            runmat_runtime::user_functions::install_runtime_context(runtime_context);
         let source_lookup_name = self
             .current_source_fullpath_name()
             .unwrap_or_else(|| self.current_source_name());

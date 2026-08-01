@@ -5,6 +5,7 @@ use std::fs;
 use std::path::PathBuf;
 use uuid::Uuid;
 
+use crate::presentation;
 use crate::remote::shared::build_http_client;
 
 #[derive(Deserialize)]
@@ -91,7 +92,11 @@ pub async fn restore_manifest_version(
         let text = response.text().await.unwrap_or_default();
         anyhow::bail!("Manifest restore failed ({status}): {text}")
     }
-    println!("Restored manifest version {version_id}");
+    println!(
+        "{} {}",
+        presentation::stdout().success("Restored manifest version"),
+        presentation::stdout().identifier(version_id)
+    );
     Ok(())
 }
 
@@ -146,7 +151,11 @@ pub async fn restore_version(
         let text = response.text().await.unwrap_or_default();
         anyhow::bail!("Restore failed ({status}): {text}")
     }
-    println!("Restored version {version_id}");
+    println!(
+        "{} {}",
+        presentation::stdout().success("Restored version"),
+        presentation::stdout().identifier(version_id)
+    );
     Ok(())
 }
 
@@ -171,7 +180,11 @@ pub async fn delete_version(
         let text = response.text().await.unwrap_or_default();
         anyhow::bail!("Delete failed ({status}): {text}")
     }
-    println!("Deleted version {version_id}");
+    println!(
+        "{} {}",
+        presentation::stdout().success("Deleted version"),
+        presentation::stdout().identifier(version_id)
+    );
     Ok(())
 }
 
@@ -204,6 +217,10 @@ pub async fn update_manifest(
         let text = response.text().await.unwrap_or_default();
         anyhow::bail!("Manifest update failed ({status}): {text}")
     }
-    println!("Updated manifest for {path}");
+    println!(
+        "{} {}",
+        presentation::stdout().success("Updated manifest for"),
+        presentation::stdout().path(path)
+    );
     Ok(())
 }

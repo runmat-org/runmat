@@ -72,7 +72,9 @@ addpath("src")
 addpath("lib")
 ```
 
-You can continue to use `addpath` to dynamically add folders to the search path while the project is running in RunMat as well, but is a runtime/environment operation. As such, static analysis tools like the LSP will not be able to see the symbols in the dynamically added folders. It is recommended to add source roots to the project manifest to get the most benefit from RunMat's static analysis capabilities.
+You can also use `addpath` (including `addpath(genpath(...))`) while a RunMat session is running. Eligible `.m` functions become callable immediately through direct calls, `feval`, function handles, and callback builtins, and the added path persists across later REPL inputs in that session. `which` and callable resolution use the same ordered session search path; later `addpath`, `rmpath`, or `path` changes therefore affect subsequent runtime selection.
+
+`addpath` remains a runtime/environment operation. A path computed or mutated while the program runs cannot generally provide the LSP and compiler with a single statically proven target, so those calls retain conservative dynamic facts until execution. Prefer `[sources].roots` for stable project sources: RunMat can index those sources ahead of time and preserve cross-file navigation, diagnostics, output arity, type/shape analysis, and optimized direct-call compilation.
 
 ## Local Dependencies
 

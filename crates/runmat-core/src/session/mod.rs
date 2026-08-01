@@ -17,6 +17,7 @@ use runmat_time::Instant;
 use runmat_turbine::TurbineEngine;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
+use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -72,6 +73,10 @@ pub struct RunMatSession {
     /// Semantic function registry persisted across interactive inputs.
     function_registry: runmat_vm::FunctionRegistry,
     next_semantic_function_id: usize,
+    /// MATLAB-compatible search path persisted by this session.
+    search_path: Arc<runmat_runtime::builtins::common::path_state::SearchPath>,
+    /// Canonically compiled functions discovered through the runtime search path.
+    dynamic_function_cache: Arc<Mutex<HashMap<PathBuf, DynamicFunctionCacheEntry>>>,
     /// Interned source pool for user-defined functions
     source_pool: SourcePool,
     /// Cooperative cancellation flag shared with the runtime.
@@ -137,6 +142,12 @@ pub(crate) struct SessionWorkspaceBinding {
 #[derive(Debug, Clone)]
 struct WorkspaceMaterializeTicket {
     name: String,
+}
+
+#[derive(Clone)]
+struct DynamicFunctionCacheEntry {
+    source_text: String,
+    registry: Arc<runmat_vm::FunctionRegistry>,
 }
 
 struct ActiveExecutionGuard {

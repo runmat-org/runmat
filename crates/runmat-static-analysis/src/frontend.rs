@@ -693,6 +693,24 @@ mod tests {
     }
 
     #[test]
+    fn read_only_which_does_not_replace_the_causal_path_mutation() {
+        let analysis = analyze(
+            "addpath('plugins'); located = which('selected_at_runtime'); value = selected_at_runtime(1);",
+        );
+        let diagnostic = analysis
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == DIAGNOSTIC_RUNTIME_DEPENDENT_RESOLUTION)
+            .expect("runtime-dependent resolution diagnostic");
+        assert!(diagnostic.secondary.iter().any(|secondary| {
+            secondary
+                .label
+                .as_deref()
+                .is_some_and(|label| label.contains("where subsequent functions are loaded"))
+        }));
+    }
+
+    #[test]
     fn a_later_path_mutation_does_not_explain_an_earlier_missing_call() {
         let analysis = analyze("value = still_missing(1); addpath('plugins');");
         assert!(analysis
