@@ -6148,6 +6148,7 @@ version = "0.6.1"
 dependencies = [
  "async-trait",
  "console_error_panic_hook",
+ "futures",
  "getrandom 0.2.17",
  "glam",
  "js-sys",
@@ -6163,6 +6164,7 @@ dependencies = [
  "runmat-hir",
  "runmat-logging",
  "runmat-package",
+ "runmat-package-cache",
  "runmat-plot",
  "runmat-runtime",
  "runmat-telemetry",

@@ -67,6 +67,14 @@
       "types": "./dist/fs/*.d.ts",
       "import": "./dist/fs/*.js"
     },
+    "./package-cache": {
+      "types": "./dist/package-cache/index.d.ts",
+      "import": "./dist/package-cache/index.js"
+    },
+    "./package-cache/*": {
+      "types": "./dist/package-cache/*.d.ts",
+      "import": "./dist/package-cache/*.js"
+    },
     "./pkg/*": "./dist/pkg/*",
     "./pkg-web/*": "./dist/pkg-web/*",
     "./lsp/*": "./dist/lsp/*"

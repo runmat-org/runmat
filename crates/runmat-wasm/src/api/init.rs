@@ -17,6 +17,7 @@ use crate::runtime::gpu::{
     validate_webgpu_runtime, GpuStatus,
 };
 use crate::runtime::logging::{init_logging_once, set_log_filter_override};
+use crate::runtime::package_cache::JsPackageCacheBackend;
 use crate::wire::errors::{init_error, init_error_with_details, js_value_to_string, InitErrorCode};
 
 #[wasm_bindgen(js_name = initRunMat)]
@@ -43,6 +44,13 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
         init_error_with_details(
             InitErrorCode::FilesystemProvider,
             "Failed to install filesystem provider",
+            Some(err),
+        )
+    })?;
+    let package_cache = package_cache_from_options(&options).await.map_err(|err| {
+        init_error_with_details(
+            InitErrorCode::PackageCacheProvider,
+            "Failed to initialize package cache provider",
             Some(err),
         )
     })?;
@@ -164,7 +172,38 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
         session.set_telemetry_sink(telemetry_sink.clone());
     }
 
-    Ok(RunMatWasm::new(session, config, gpu_status, telemetry_sink))
+    Ok(RunMatWasm::new(
+        session,
+        config,
+        gpu_status,
+        telemetry_sink,
+        package_cache,
+    ))
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn package_cache_from_options(
+    options: &JsValue,
+) -> Result<Option<Arc<dyn runmat_package_cache::CacheBackend>>, JsValue> {
+    if options.is_null() || options.is_undefined() || !options.is_object() {
+        return Ok(None);
+    }
+    let value = js_sys::Reflect::get(options, &JsValue::from_str("packageCacheProvider"))?;
+    if value.is_null() || value.is_undefined() {
+        return Ok(None);
+    }
+    let backend = JsPackageCacheBackend::new(&value)?;
+    runmat_package_cache::CacheBackend::snapshot(&backend)
+        .await
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    Ok(Some(Arc::new(backend)))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn package_cache_from_options(
+    _options: &JsValue,
+) -> Result<Option<Arc<dyn runmat_package_cache::CacheBackend>>, JsValue> {
+    Ok(None)
 }
 
 #[cfg(target_arch = "wasm32")]

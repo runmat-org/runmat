@@ -42,6 +42,12 @@ import {
   FEA_RUN_DATASET_SCHEMA_VERSION,
 } from "./fea-contracts.js";
 import { createDefaultFsProvider } from "./fs/default.js";
+import { createIndexedDbPackageCache } from "./package-cache/indexeddb.js";
+import type {
+  IndexedDbPackageCacheOptions,
+  PackageCacheSnapshot,
+  RunMatPackageCacheProvider
+} from "./package-cache/index.js";
 import { __internals as workspaceHoverInternals } from "./workspace-hover.js";
 import { installWebGpuCompatibilityShims } from "./webgpu-shims.js";
 export {
@@ -131,6 +137,23 @@ export type {
   RunMatOpenFileDialogRequest,
   RunMatOpenFileDialogSelection
 } from "./fs/provider-types.js";
+export {
+  createIndexedDbPackageCache,
+  ImmutableBrowserPackageMount
+} from "./package-cache/index.js";
+export type {
+  BrowserMountEntry,
+  BrowserTreeEntry,
+  BrowserTreeManifest,
+  IndexedDbPackageCacheHandle,
+  IndexedDbPackageCacheOptions,
+  PackageCacheCommitOutcome,
+  PackageCacheFaultInjector,
+  PackageCacheRevision,
+  PackageCacheSnapshot,
+  PackageCacheTransaction,
+  RunMatPackageCacheProvider
+} from "./package-cache/index.js";
 export { createWorkspaceHoverProvider } from "./workspace-hover.js";
 export type {
   WorkspaceHoverOptions,
@@ -162,6 +185,9 @@ export interface RunMatInitOptions {
   wgpuForceFallbackAdapter?: boolean;
   wasmModule?: WasmInitInput;
   fsProvider?: RunMatFilesystemProvider;
+  packageCache?: IndexedDbPackageCacheOptions & {
+    provider?: RunMatPackageCacheProvider;
+  };
   plotCanvas?: HTMLCanvasElement;
   scatterTargetPoints?: number;
   surfaceVertexBudget?: number;
@@ -873,6 +899,7 @@ export interface RunMatSessionHandle {
   setLanguageCompat(mode: LanguageCompatMode): void;
   fusionPlanForSource?(source: string): Promise<FusionPlanSnapshot | null>;
   setFsProvider?(provider: RunMatFilesystemProvider): Promise<void>;
+  packageCacheSnapshot(): Promise<PackageCacheSnapshot | null>;
 }
 
 interface NativeInitOptions {
@@ -894,6 +921,7 @@ interface NativeInitOptions {
   errorNamespace?: string;
   languageCompat?: LanguageCompatMode;
   fsProvider?: RunMatFilesystemProvider;
+  packageCacheProvider?: RunMatPackageCacheProvider;
 }
 
 interface RunMatNativeSession {
@@ -950,6 +978,7 @@ interface RunMatNativeSession {
   setLanguageCompat?: (mode: LanguageCompatMode) => void;
   fusionPlanForSource?: (source: string) => FusionPlanSnapshot | null;
   setFsProvider?: (provider: RunMatFilesystemProvider) => void;
+  packageCacheSnapshot?: () => Promise<PackageCacheSnapshot | null>;
 }
 
 type WorkspaceMaterializeSelectorWire =
@@ -1155,6 +1184,7 @@ async function loadNativeModule(wasmModule?: WasmInitInput): Promise<RunMatNativ
 export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMatSessionHandle> {
   const native = await loadNativeModule(options.wasmModule);
   const fsProvider = await resolveFsProvider(options.fsProvider);
+  const packageCache = await resolvePackageCache(options.packageCache);
   if (options.plotCanvas) {
     if (typeof native.createPlotSurface === "function") {
       await native.createPlotSurface(options.plotCanvas);
@@ -1203,9 +1233,10 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
     callstackLimit: options.callstackLimit,
     errorNamespace: options.errorNamespace,
     languageCompat: options.language?.compat,
-    fsProvider
+    fsProvider,
+    packageCacheProvider: packageCache.provider
   });
-  return new WebRunMatSession(session);
+  return new WebRunMatSession(session, packageCache.close);
 }
 
 export async function plotRendererReady(): Promise<boolean> {
@@ -1626,7 +1657,10 @@ export async function importWorkspaceState(state: Uint8Array): Promise<boolean> 
 class WebRunMatSession implements RunMatSessionHandle {
   private disposed = false;
 
-  constructor(private readonly native: RunMatNativeSession) {}
+  constructor(
+    private readonly native: RunMatNativeSession,
+    private readonly closePackageCache: () => void = () => {}
+  ) {}
 
   private ensureActive(): void {
     if (this.disposed) {
@@ -1864,6 +1898,7 @@ class WebRunMatSession implements RunMatSessionHandle {
     if (typeof this.native.dispose === "function") {
       this.native.dispose();
     }
+    this.closePackageCache();
     this.disposed = true;
   }
 
@@ -1954,6 +1989,14 @@ class WebRunMatSession implements RunMatSessionHandle {
       throw new Error("The loaded runmat-wasm module does not expose setFsProvider yet.");
     }
     this.native.setFsProvider(provider);
+  }
+
+  async packageCacheSnapshot(): Promise<PackageCacheSnapshot | null> {
+    this.ensureActive();
+    if (typeof this.native.packageCacheSnapshot !== "function") {
+      return null;
+    }
+    return (await this.native.packageCacheSnapshot()) ?? null;
   }
 }
 
@@ -2138,6 +2181,34 @@ async function resolveFsProvider(
   } catch (error) {
     console.warn("[runmat] Unable to initialize default filesystem provider.", error);
     return undefined;
+  }
+}
+
+async function resolvePackageCache(
+  options?: RunMatInitOptions["packageCache"]
+): Promise<{ provider?: RunMatPackageCacheProvider; close: () => void }> {
+  if (options?.provider) {
+    ensurePackageCacheProvider(options.provider);
+    return { provider: options.provider, close: () => {} };
+  }
+  if (typeof indexedDB === "undefined") {
+    return { close: () => {} };
+  }
+  try {
+    const handle = await createIndexedDbPackageCache(options);
+    ensurePackageCacheProvider(handle.provider);
+    return { provider: handle.provider, close: handle.close };
+  } catch (error) {
+    console.warn("[runmat] Unable to initialize the package cache.", error);
+    return { close: () => {} };
+  }
+}
+
+function ensurePackageCacheProvider(provider: RunMatPackageCacheProvider): void {
+  for (const method of ["snapshot", "initialize", "commit", "readObjectBytes"] as const) {
+    if (typeof provider[method] !== "function") {
+      throw new Error(`packageCache.provider.${method} must be a function`);
+    }
   }
 }
 

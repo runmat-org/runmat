@@ -3,4 +3,5 @@ pub(crate) mod config;
 pub(crate) mod filesystem;
 pub(crate) mod gpu;
 pub(crate) mod logging;
+pub(crate) mod package_cache;
 pub(crate) mod state;

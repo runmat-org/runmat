@@ -76,6 +76,7 @@ pub struct RunMatWasm {
     disposed: Cell<bool>,
     active_interrupt: RefCell<Option<Arc<AtomicBool>>>,
     telemetry_sink: Option<Arc<dyn TelemetrySink>>,
+    package_cache: Option<Arc<dyn runmat_package_cache::CacheBackend>>,
 }
 
 struct WasmInterruptGuard<'a> {
@@ -130,6 +131,7 @@ impl RunMatWasm {
         config: SessionConfig,
         gpu_status: GpuStatus,
         telemetry_sink: Option<Arc<dyn TelemetrySink>>,
+        package_cache: Option<Arc<dyn runmat_package_cache::CacheBackend>>,
     ) -> Self {
         Self {
             session: RefCell::new(session),
@@ -138,6 +140,7 @@ impl RunMatWasm {
             disposed: Cell::new(false),
             active_interrupt: RefCell::new(None),
             telemetry_sink,
+            package_cache,
         }
     }
 
@@ -810,6 +813,23 @@ struct ExecuteRequestPayload {
 
 #[wasm_bindgen]
 impl RunMatWasm {
+    #[wasm_bindgen(js_name = packageCacheSnapshot)]
+    pub async fn package_cache_snapshot_js(&self) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let Some(cache) = self.package_cache.as_ref() else {
+            return Ok(JsValue::NULL);
+        };
+        let snapshot = cache
+            .snapshot()
+            .await
+            .map_err(|error| js_error(&format!("Package cache snapshot failed: {error}")))?;
+        serde_wasm_bindgen::to_value(&snapshot).map_err(|error| {
+            js_error(&format!(
+                "Package cache snapshot serialization failed: {error}"
+            ))
+        })
+    }
+
     #[wasm_bindgen(js_name = executeRequest)]
     pub async fn execute_request_js(&self, request_value: JsValue) -> Result<JsValue, JsValue> {
         let request_payload: ExecuteRequestPayload = serde_wasm_bindgen::from_value(request_value)

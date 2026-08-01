@@ -12,7 +12,8 @@ pub struct BackendSnapshot {
     pub state: CacheState,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ObjectWrite {
     pub object: CacheObject,
     pub bytes: Option<Vec<u8>>,
@@ -44,7 +45,8 @@ impl ObjectWrite {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CacheTransaction {
     pub expected_revision: u64,
     pub next_state: CacheState,
@@ -122,12 +124,14 @@ impl CacheTransaction {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BackendCommit {
     pub revision: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "outcome", rename_all = "kebab-case")]
 pub enum CommitOutcome {
     Committed(BackendCommit),
     Conflict { actual_revision: u64 },
