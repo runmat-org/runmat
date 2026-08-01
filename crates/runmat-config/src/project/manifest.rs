@@ -1,0 +1,657 @@
+use serde::de::IgnoredAny;
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashSet};
+use std::fmt::{Display, Formatter};
+use std::fs;
+use std::path::{Component, Path, PathBuf};
+use thiserror::Error;
+
+pub const PROJECT_MANIFEST_FILENAME: &str = "runmat.toml";
+pub const PROJECT_MANIFEST_FILENAMES: &[&str] = &["runmat.toml", "runmat.json"];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectManifest {
+    pub package: ProjectPackage,
+    pub sources: ProjectSources,
+    pub dependencies: BTreeMap<String, ProjectDependency>,
+    pub entrypoints: Vec<ProjectEntrypoint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectPackage {
+    pub name: String,
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default, rename = "runmat-version")]
+    pub runmat_version: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectSources {
+    #[serde(default)]
+    pub roots: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectDependency {
+    pub path: Option<PathBuf>,
+    #[serde(default)]
+    pub version: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectEntrypoint {
+    pub name: String,
+    #[serde(default)]
+    pub path: Option<PathBuf>,
+    #[serde(default)]
+    pub module: Option<String>,
+    #[serde(default)]
+    pub function: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawProjectManifest {
+    package: ProjectPackage,
+    sources: ProjectSources,
+    #[serde(default)]
+    dependencies: BTreeMap<String, ProjectDependency>,
+    #[serde(default)]
+    entrypoints: BTreeMap<String, RawProjectEntrypoint>,
+    #[serde(default, rename = "runtime")]
+    _runtime: Option<IgnoredAny>,
+    #[serde(default, rename = "test")]
+    _test: Option<IgnoredAny>,
+    #[serde(default, rename = "desktop")]
+    _desktop: Option<IgnoredAny>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawProjectEntrypoint {
+    #[serde(default)]
+    path: Option<PathBuf>,
+    #[serde(default)]
+    module: Option<String>,
+    #[serde(default)]
+    function: Option<String>,
+}
+
+impl From<RawProjectManifest> for ProjectManifest {
+    fn from(value: RawProjectManifest) -> Self {
+        let entrypoints = value
+            .entrypoints
+            .into_iter()
+            .map(|(name, raw)| ProjectEntrypoint {
+                name,
+                path: raw.path,
+                module: raw.module,
+                function: raw.function,
+            })
+            .collect();
+        Self {
+            package: value.package,
+            sources: value.sources,
+            dependencies: value.dependencies,
+            entrypoints,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ProjectManifest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        RawProjectManifest::deserialize(deserializer).map(ProjectManifest::from)
+    }
+}
+
+impl Serialize for ProjectManifest {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        #[derive(Serialize)]
+        struct CanonicalManifest<'a> {
+            package: &'a ProjectPackage,
+            sources: &'a ProjectSources,
+            dependencies: &'a BTreeMap<String, ProjectDependency>,
+            entrypoints: BTreeMap<&'a str, CanonicalEntrypoint<'a>>,
+        }
+
+        #[derive(Serialize)]
+        struct CanonicalEntrypoint<'a> {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            path: Option<&'a Path>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            module: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            function: Option<&'a str>,
+        }
+
+        let entrypoints = self
+            .entrypoints
+            .iter()
+            .map(|entrypoint| {
+                (
+                    entrypoint.name.as_str(),
+                    CanonicalEntrypoint {
+                        path: entrypoint.path.as_deref(),
+                        module: entrypoint.module.as_deref(),
+                        function: entrypoint.function.as_deref(),
+                    },
+                )
+            })
+            .collect();
+        CanonicalManifest {
+            package: &self.package,
+            sources: &self.sources,
+            dependencies: &self.dependencies,
+            entrypoints,
+        }
+        .serialize(serializer)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectManifestValidationError {
+    pub messages: Vec<String>,
+}
+
+impl Display for ProjectManifestValidationError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "project manifest validation failed:\n- {}",
+            self.messages.join("\n- ")
+        )
+    }
+}
+
+impl std::error::Error for ProjectManifestValidationError {}
+
+#[derive(Debug, Error)]
+pub enum ProjectManifestLoadError {
+    #[error("failed to read project manifest {path}: {source}")]
+    Read {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to parse TOML project manifest {path}: {source}")]
+    ParseToml {
+        path: PathBuf,
+        #[source]
+        source: Box<toml::de::Error>,
+    },
+    #[error("failed to parse JSON project manifest {path}: {source}")]
+    ParseJson {
+        path: PathBuf,
+        #[source]
+        source: Box<serde_json::Error>,
+    },
+    #[error("invalid project manifest {path}: {source}")]
+    Validation {
+        path: PathBuf,
+        #[source]
+        source: ProjectManifestValidationError,
+    },
+}
+
+enum PathRequirement {
+    Directory {
+        path: PathBuf,
+        missing_message: String,
+    },
+    Entrypoint {
+        project_root: PathBuf,
+        path: PathBuf,
+        missing_message: String,
+    },
+}
+
+impl ProjectManifest {
+    fn validation_plan(&self, project_root: &Path) -> (Vec<String>, Vec<PathRequirement>) {
+        let mut messages = Vec::new();
+        let mut path_requirements = Vec::new();
+        let package_name = self.package.name.trim();
+        if package_name.is_empty() {
+            messages.push("[package].name is required and must be non-empty".to_string());
+        }
+        if let Some(requirement) = self.package.runmat_version.as_deref() {
+            if let Some(message) = validate_runmat_version_requirement(requirement) {
+                messages.push(message);
+            }
+        }
+
+        if self.sources.roots.is_empty() {
+            messages.push("[sources].roots is required and must be non-empty".to_string());
+        }
+        for root in &self.sources.roots {
+            if !is_relative_without_parent(root) {
+                messages.push(format!(
+                    "source root `{}` must be project-relative without `..` segments",
+                    root.display()
+                ));
+            } else {
+                path_requirements.push(PathRequirement::Directory {
+                    path: project_root.join(root),
+                    missing_message: format!(
+                        "source root `{}` does not exist as a directory under project root",
+                        root.display()
+                    ),
+                });
+            }
+        }
+
+        for (name, dependency) in &self.dependencies {
+            if name.trim().is_empty() {
+                messages.push("dependency names must be non-empty".to_string());
+            }
+            let has_path = dependency.path.is_some();
+            let has_version = dependency
+                .version
+                .as_ref()
+                .is_some_and(|version| !version.trim().is_empty());
+            if !has_path && !has_version {
+                messages.push(format!(
+                    "dependency `{name}` must set at least one of `path` or `version`"
+                ));
+                continue;
+            }
+            let Some(path) = dependency.path.as_ref() else {
+                messages.push(format!(
+                    "dependency `{name}` must set `path` for local composition support"
+                ));
+                continue;
+            };
+            if !is_relative_without_parent(path) {
+                messages.push(format!(
+                    "dependency `{name}` path `{}` must be project-relative without `..` segments",
+                    path.display()
+                ));
+            } else {
+                path_requirements.push(PathRequirement::Directory {
+                    path: project_root.join(path),
+                    missing_message: format!(
+                        "dependency `{name}` path `{}` does not exist as a directory",
+                        path.display()
+                    ),
+                });
+            }
+        }
+
+        let mut entrypoint_names = HashSet::new();
+        for entrypoint in &self.entrypoints {
+            let name = entrypoint.name.trim();
+            if name.is_empty() {
+                messages.push("entrypoint name must be non-empty".to_string());
+                continue;
+            }
+            if !entrypoint_names.insert(name.to_string()) {
+                messages.push(format!("duplicate entrypoint name `{name}`"));
+            }
+
+            let has_path = entrypoint.path.is_some();
+            let has_module_function = entrypoint
+                .module
+                .as_ref()
+                .is_some_and(|module| !module.trim().is_empty())
+                && entrypoint
+                    .function
+                    .as_ref()
+                    .is_some_and(|function| !function.trim().is_empty());
+            if has_path == has_module_function {
+                messages.push(format!(
+                    "entrypoint `{name}` must use exactly one target form: either `path` or (`module` + `function`)"
+                ));
+                continue;
+            }
+
+            if let Some(path) = &entrypoint.path {
+                if !is_relative_without_parent(path) {
+                    messages.push(format!(
+                        "entrypoint `{name}` path `{}` must be project-relative without `..` segments",
+                        path.display()
+                    ));
+                } else {
+                    path_requirements.push(PathRequirement::Entrypoint {
+                        project_root: project_root.to_path_buf(),
+                        path: path.clone(),
+                        missing_message: format!(
+                            "entrypoint `{name}` path `{}` does not resolve to an existing file (with optional `.m` inference)",
+                            path.display()
+                        ),
+                    });
+                }
+            } else {
+                if entrypoint
+                    .module
+                    .as_ref()
+                    .is_some_and(|module| module.trim().is_empty())
+                {
+                    messages.push(format!("entrypoint `{name}` has an empty `module`"));
+                }
+                if entrypoint
+                    .function
+                    .as_ref()
+                    .is_some_and(|function| function.trim().is_empty())
+                {
+                    messages.push(format!("entrypoint `{name}` has an empty `function`"));
+                }
+            }
+        }
+        (messages, path_requirements)
+    }
+
+    pub fn validate(&self, project_root: &Path) -> Result<(), ProjectManifestValidationError> {
+        let (mut messages, path_requirements) = self.validation_plan(project_root);
+        for requirement in path_requirements {
+            match requirement {
+                PathRequirement::Directory {
+                    path,
+                    missing_message,
+                } if !path.is_dir() => messages.push(missing_message),
+                PathRequirement::Entrypoint {
+                    project_root,
+                    path,
+                    missing_message,
+                } if resolve_entrypoint_path(&project_root, &path).is_none() => {
+                    messages.push(missing_message);
+                }
+                _ => {}
+            }
+        }
+        validation_result(messages)
+    }
+
+    pub async fn validate_async(
+        &self,
+        project_root: &Path,
+    ) -> Result<(), ProjectManifestValidationError> {
+        let (mut messages, path_requirements) = self.validation_plan(project_root);
+        for requirement in path_requirements {
+            match requirement {
+                PathRequirement::Directory {
+                    path,
+                    missing_message,
+                } if !path_is_dir_async(&path).await => messages.push(missing_message),
+                PathRequirement::Entrypoint {
+                    project_root,
+                    path,
+                    missing_message,
+                } if resolve_entrypoint_path_async(&project_root, &path)
+                    .await
+                    .is_none() =>
+                {
+                    messages.push(missing_message);
+                }
+                _ => {}
+            }
+        }
+        validation_result(messages)
+    }
+}
+
+fn validation_result(messages: Vec<String>) -> Result<(), ProjectManifestValidationError> {
+    if messages.is_empty() {
+        Ok(())
+    } else {
+        Err(ProjectManifestValidationError { messages })
+    }
+}
+
+pub fn parse_project_manifest_toml(input: &str) -> Result<ProjectManifest, toml::de::Error> {
+    toml::from_str::<RawProjectManifest>(input).map(ProjectManifest::from)
+}
+
+pub fn parse_project_manifest_json(input: &str) -> Result<ProjectManifest, serde_json::Error> {
+    serde_json::from_str::<RawProjectManifest>(input).map(ProjectManifest::from)
+}
+
+fn parse_project_manifest(
+    path: &Path,
+    content: &str,
+) -> Result<ProjectManifest, ProjectManifestLoadError> {
+    if path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+    {
+        parse_project_manifest_json(content).map_err(|source| ProjectManifestLoadError::ParseJson {
+            path: path.to_path_buf(),
+            source: Box::new(source),
+        })
+    } else {
+        parse_project_manifest_toml(content).map_err(|source| ProjectManifestLoadError::ParseToml {
+            path: path.to_path_buf(),
+            source: Box::new(source),
+        })
+    }
+}
+
+pub fn load_project_manifest(path: &Path) -> Result<ProjectManifest, ProjectManifestLoadError> {
+    let content = fs::read_to_string(path).map_err(|source| ProjectManifestLoadError::Read {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let manifest = parse_project_manifest(path, &content)?;
+    let project_root = path.parent().unwrap_or_else(|| Path::new("."));
+    manifest
+        .validate(project_root)
+        .map_err(|source| ProjectManifestLoadError::Validation {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    Ok(manifest)
+}
+
+pub async fn load_project_manifest_async(
+    path: &Path,
+) -> Result<ProjectManifest, ProjectManifestLoadError> {
+    let content = runmat_filesystem::read_to_string_async(path)
+        .await
+        .map_err(|source| ProjectManifestLoadError::Read {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let manifest = parse_project_manifest(path, &content)?;
+    let project_root = path.parent().unwrap_or_else(|| Path::new("."));
+    manifest
+        .validate_async(project_root)
+        .await
+        .map_err(|source| ProjectManifestLoadError::Validation {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    Ok(manifest)
+}
+
+pub fn discover_project_manifest_from(start: &Path) -> Option<PathBuf> {
+    let mut current = if start.is_dir() {
+        start.to_path_buf()
+    } else {
+        start.parent()?.to_path_buf()
+    };
+    loop {
+        for filename in PROJECT_MANIFEST_FILENAMES {
+            let candidate = current.join(filename);
+            if candidate.is_file() && file_declares_project_manifest(&candidate) {
+                return Some(candidate);
+            }
+        }
+        if !current.pop() {
+            return None;
+        }
+    }
+}
+
+pub async fn discover_project_manifest_from_async(start: &Path) -> Option<PathBuf> {
+    let mut current = if path_is_dir_async(start).await {
+        start.to_path_buf()
+    } else {
+        start.parent()?.to_path_buf()
+    };
+    loop {
+        for filename in PROJECT_MANIFEST_FILENAMES {
+            let candidate = current.join(filename);
+            if path_is_file_async(&candidate).await
+                && file_declares_project_manifest_async(&candidate).await
+            {
+                return Some(candidate);
+            }
+        }
+        if !current.pop() {
+            return None;
+        }
+    }
+}
+
+fn file_declares_project_manifest(path: &Path) -> bool {
+    fs::read_to_string(path)
+        .map(|content| content_declares_project_manifest(path, &content))
+        .unwrap_or(true)
+}
+
+async fn file_declares_project_manifest_async(path: &Path) -> bool {
+    runmat_filesystem::read_to_string_async(path)
+        .await
+        .map(|content| content_declares_project_manifest(path, &content))
+        .unwrap_or(true)
+}
+
+fn content_declares_project_manifest(path: &Path, content: &str) -> bool {
+    if path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+    {
+        return serde_json::from_str::<serde_json::Value>(content)
+            .ok()
+            .and_then(|value| value.as_object().cloned())
+            .map(|object| object.contains_key("package") || object.contains_key("sources"))
+            .unwrap_or(true);
+    }
+    toml::from_str::<toml::Value>(content)
+        .ok()
+        .and_then(|value| value.as_table().cloned())
+        .map(|table| table.contains_key("package") || table.contains_key("sources"))
+        .unwrap_or(true)
+}
+
+pub(super) fn is_relative_without_parent(path: &Path) -> bool {
+    !path.is_absolute()
+        && path
+            .components()
+            .all(|component| !matches!(component, Component::ParentDir | Component::RootDir))
+}
+
+pub(super) fn resolve_entrypoint_path(project_root: &Path, path: &Path) -> Option<PathBuf> {
+    let direct = project_root.join(path);
+    if direct.is_file() {
+        return Some(direct);
+    }
+    if path.extension().is_none() {
+        let inferred = direct.with_extension("m");
+        if inferred.is_file() {
+            return Some(inferred);
+        }
+    }
+    None
+}
+
+pub(super) async fn resolve_entrypoint_path_async(
+    project_root: &Path,
+    path: &Path,
+) -> Option<PathBuf> {
+    let direct = project_root.join(path);
+    if path_is_file_async(&direct).await {
+        return Some(direct);
+    }
+    if path.extension().is_none() {
+        let inferred = direct.with_extension("m");
+        if path_is_file_async(&inferred).await {
+            return Some(inferred);
+        }
+    }
+    None
+}
+
+fn validate_runmat_version_requirement(requirement: &str) -> Option<String> {
+    let trimmed = requirement.trim();
+    if trimmed.is_empty() {
+        return Some("[package].runmat-version must be non-empty when set".to_string());
+    }
+    let target = trimmed.strip_prefix(">=").unwrap_or(trimmed).trim();
+    let required = match parse_semver_triplet(target) {
+        Ok(version) => version,
+        Err(reason) => {
+            return Some(format!(
+                "[package].runmat-version `{trimmed}` is invalid: {reason}"
+            ));
+        }
+    };
+    let current = match parse_semver_triplet(env!("CARGO_PKG_VERSION")) {
+        Ok(version) => version,
+        Err(_) => return None,
+    };
+    if current < required {
+        return Some(format!(
+            "[package].runmat-version requires {trimmed}, but current runtime is {}",
+            env!("CARGO_PKG_VERSION")
+        ));
+    }
+    None
+}
+
+fn parse_semver_triplet(input: &str) -> Result<(u64, u64, u64), String> {
+    let base = input.split(['-', '+']).next().unwrap_or(input);
+    let mut parts = base.split('.');
+    let major = parts
+        .next()
+        .ok_or_else(|| "missing major".to_string())?
+        .parse::<u64>()
+        .map_err(|_| "invalid major".to_string())?;
+    let minor = parts
+        .next()
+        .ok_or_else(|| "missing minor".to_string())?
+        .parse::<u64>()
+        .map_err(|_| "invalid minor".to_string())?;
+    let patch = parts
+        .next()
+        .ok_or_else(|| "missing patch".to_string())?
+        .parse::<u64>()
+        .map_err(|_| "invalid patch".to_string())?;
+    Ok((major, minor, patch))
+}
+
+pub(super) async fn path_exists_async(path: &Path) -> bool {
+    runmat_filesystem::metadata_async(path).await.is_ok()
+}
+
+pub(super) async fn first_existing_manifest_path_async(dir: &Path) -> Option<PathBuf> {
+    for filename in PROJECT_MANIFEST_FILENAMES {
+        let candidate = dir.join(filename);
+        if path_is_file_async(&candidate).await {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+pub(super) async fn path_is_file_async(path: &Path) -> bool {
+    runmat_filesystem::metadata_async(path)
+        .await
+        .map(|metadata| metadata.is_file())
+        .unwrap_or(false)
+}
+
+pub(super) async fn path_is_dir_async(path: &Path) -> bool {
+    runmat_filesystem::metadata_async(path)
+        .await
+        .map(|metadata| metadata.is_dir())
+        .unwrap_or(false)
+}

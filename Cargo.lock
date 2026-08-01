@@ -5489,6 +5489,7 @@ dependencies = [
  "anyhow",
  "clap",
  "dirs 5.0.1",
+ "futures",
  "log",
  "once_cell",
  "runmat-accelerate",

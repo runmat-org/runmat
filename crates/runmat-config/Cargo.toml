@@ -23,5 +23,6 @@ thiserror = { workspace = true }
 toml = "0.8"
 
 [dev-dependencies]
+futures = "0.3"
 once_cell = "1"
 tempfile = "3.12"

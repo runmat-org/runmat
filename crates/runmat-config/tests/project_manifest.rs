@@ -2,11 +2,11 @@ use runmat_config::project::{
     build_loose_source_index, build_project_composition_graph, build_project_source_index,
     discover_known_project_symbols_from_source_name, discover_project_manifest_from,
     discover_project_symbols_from, discover_project_symbols_from_source_name,
-    discover_source_symbols_from_source_name, load_project_manifest, parse_project_manifest_toml,
-    resolve_named_entrypoint_from, resolve_project_entrypoint, resolve_project_source_input_from,
-    ProjectCompositionError, ProjectEntrypointResolveError, ProjectManifestLoadError,
-    ProjectSourceIndexError, ResolveProjectSourceInputError, ResolvedEntrypointTarget,
-    PROJECT_MANIFEST_FILENAME,
+    discover_source_symbols_from_source_name, load_project_manifest, parse_project_manifest_json,
+    parse_project_manifest_toml, resolve_named_entrypoint_from, resolve_project_entrypoint,
+    resolve_project_source_input_from, ProjectCompositionError, ProjectEntrypointResolveError,
+    ProjectManifestLoadError, ProjectSourceIndexError, ResolveProjectSourceInputError,
+    ResolvedEntrypointTarget, PROJECT_MANIFEST_FILENAME,
 };
 use std::fs;
 use tempfile::TempDir;
@@ -88,6 +88,97 @@ notebook_run_mode = "stop_on_error"
 
     assert_eq!(parsed.package.name, "demo");
     assert_eq!(parsed.sources.roots, vec![std::path::PathBuf::from("src")]);
+}
+
+#[test]
+fn parses_manifest_with_test_section() {
+    let parsed = parse_project_manifest_toml(
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+
+[sources]
+roots = ["src"]
+
+[test]
+roots = ["tests", "integration"]
+jobs = 4
+isolation = "process"
+"#,
+    )
+    .expect("manifest with test section should parse");
+
+    assert_eq!(parsed.package.name, "demo");
+    assert_eq!(parsed.sources.roots, vec![std::path::PathBuf::from("src")]);
+}
+
+#[test]
+fn parses_json_manifest_with_runtime_test_and_desktop_sections() {
+    let parsed = runmat_config::project::parse_project_manifest_json(
+        r#"{
+            "package": { "name": "demo", "version": "0.1.0" },
+            "sources": { "roots": ["src"] },
+            "runtime": { "verbose": true },
+            "test": {
+                "roots": ["tests"],
+                "reports": { "junit": "artifacts/junit.xml" }
+            },
+            "desktop": { "artifact_root": ".artifacts" }
+        }"#,
+    )
+    .expect("JSON manifest with product-owned sections should parse");
+
+    assert_eq!(parsed.package.name, "demo");
+    assert_eq!(parsed.sources.roots, vec![std::path::PathBuf::from("src")]);
+}
+
+#[test]
+fn project_manifest_round_trips_through_canonical_toml_and_json_shapes() {
+    let manifest = parse_project_manifest_toml(
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+
+[sources]
+roots = ["src"]
+
+[dependencies]
+helper = { path = "deps/helper", version = "0.2.0" }
+
+[entrypoints.main]
+path = "src/main"
+
+[entrypoints.serve]
+module = "app.server"
+function = "start"
+
+[runtime]
+verbose = true
+
+[test]
+roots = ["tests"]
+
+[desktop]
+artifact_root = ".artifacts"
+"#,
+    )
+    .expect("mixed manifest parses");
+
+    let toml = toml::to_string(&manifest).expect("serialize canonical TOML");
+    let from_toml = parse_project_manifest_toml(&toml).expect("reparse canonical TOML");
+    assert_eq!(from_toml, manifest);
+    assert!(toml.contains("[entrypoints.main]"));
+    assert!(toml.contains("[entrypoints.serve]"));
+
+    let json = serde_json::to_string(&manifest).expect("serialize canonical JSON");
+    let from_json = parse_project_manifest_json(&json).expect("reparse canonical JSON");
+    assert_eq!(from_json, manifest);
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&json).unwrap()["entrypoints"]["main"]["path"],
+        "src/main"
+    );
 }
 
 #[test]

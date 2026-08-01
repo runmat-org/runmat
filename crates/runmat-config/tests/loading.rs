@@ -58,6 +58,36 @@ callstack_limit = 64
 }
 
 #[test]
+fn runtime_loader_ignores_package_test_and_desktop_sections() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_path = temp_dir.path().join("runmat.toml");
+    std::fs::write(
+        &config_path,
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[test]
+roots = ["tests"]
+jobs = 4
+
+[desktop]
+artifact_root = ".artifacts"
+
+[runtime]
+callstack_limit = 96
+"#,
+    )
+    .unwrap();
+
+    let runtime = ConfigLoader::load_from_file(&config_path).unwrap();
+    assert_eq!(runtime.runtime.callstack_limit, 96);
+}
+
+#[test]
 fn runtime_fea_section_loads_artifact_and_prep_config() {
     let temp_dir = TempDir::new().unwrap();
     let config_path = temp_dir.path().join("runmat.toml");
