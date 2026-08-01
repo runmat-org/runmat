@@ -367,25 +367,7 @@ impl PageInput {
     }
 
     fn from_tensor(tensor: Tensor) -> BuiltinResult<Self> {
-        let dtype = tensor.dtype;
-        if !matches!(
-            dtype,
-            NumericDType::F64
-                | NumericDType::F32
-                | NumericDType::I8
-                | NumericDType::I16
-                | NumericDType::I32
-                | NumericDType::I64
-                | NumericDType::U8
-                | NumericDType::U16
-                | NumericDType::U32
-                | NumericDType::U64
-        ) {
-            return Err(pagemtimes_invalid_input(format!(
-                "pagemtimes: numeric class {} is not supported",
-                tensor.dtype.class_name()
-            )));
-        }
+        let dtype = tensor.numeric_dtype();
         let output_dtype = if matches!(dtype, NumericDType::F32) {
             NumericDType::F32
         } else {
@@ -508,8 +490,10 @@ impl PageOutput {
             Self::Real(tensor) => {
                 if wants_gpu {
                     if let Some(provider) = provider {
+                        let dtype = tensor.numeric_dtype();
+                        let values = tensor::tensor_values_f64_cow(&tensor);
                         let view = HostTensorView {
-                            data: &tensor.data,
+                            data: values.as_ref(),
                             shape: &tensor.shape,
                         };
                         let handle = provider.upload(&view).map_err(|err| {
@@ -517,7 +501,7 @@ impl PageOutput {
                         })?;
                         runmat_accelerate_api::set_handle_precision(
                             &handle,
-                            precision_for_dtype(tensor.dtype),
+                            precision_for_dtype(dtype),
                         );
                         return Ok(gpu_helpers::resident_gpu_value(handle));
                     }
@@ -919,14 +903,14 @@ mod tests {
         let out = expect_tensor(call(lhs, vec![rhs]).unwrap());
         assert_eq!(out.shape, vec![2, 2, 2]);
         assert_eq!(
-            out.data,
+            out.materialize_f64(),
             vec![70.0, 100.0, 150.0, 220.0, 670.0, 780.0, 910.0, 1060.0]
         );
     }
 
     #[test]
     fn typed_integer_pages_read_exact_storage_and_return_double() {
-        let mut lhs = Tensor::new_integer(
+        let lhs = Tensor::new_integer(
             IntegerStorage::I16(vec![
                 1, 2, 3, 4, // page 1
                 5, 6, 7, 8, // page 2
@@ -934,7 +918,7 @@ mod tests {
             vec![2, 2, 2],
         )
         .unwrap();
-        let mut rhs = Tensor::new_integer(
+        let rhs = Tensor::new_integer(
             IntegerStorage::U16(vec![
                 10, 20, 30, 40, // page 1
                 50, 60, 70, 80, // page 2
@@ -942,15 +926,12 @@ mod tests {
             vec![2, 2, 2],
         )
         .unwrap();
-        lhs.data.fill(f64::NAN);
-        rhs.data.fill(f64::NAN);
-
         let out = expect_tensor(call(Value::Tensor(lhs), vec![Value::Tensor(rhs)]).unwrap());
         assert_eq!(out.shape, vec![2, 2, 2]);
-        assert_eq!(out.dtype, NumericDType::F64);
+        assert_eq!(out.numeric_dtype(), NumericDType::F64);
         assert!(out.integer_storage().is_none());
         assert_eq!(
-            out.data,
+            out.materialize_f64(),
             vec![70.0, 100.0, 150.0, 220.0, 670.0, 780.0, 910.0, 1060.0]
         );
     }
@@ -959,14 +940,12 @@ mod tests {
     fn mixed_single_and_integer_pages_return_double_from_exact_storage() {
         let lhs = Tensor::new_with_dtype(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], NumericDType::F32)
             .unwrap();
-        let mut rhs =
-            Tensor::new_integer(IntegerStorage::U16(vec![5, 7, 6, 8]), vec![2, 2]).unwrap();
-        rhs.data.fill(f64::NAN);
+        let rhs = Tensor::new_integer(IntegerStorage::U16(vec![5, 7, 6, 8]), vec![2, 2]).unwrap();
 
         let out = expect_tensor(call(Value::Tensor(lhs), vec![Value::Tensor(rhs)]).unwrap());
         assert_eq!(out.shape, vec![2, 2]);
-        assert_eq!(out.dtype, NumericDType::F64);
-        assert_eq!(out.data, vec![26.0, 38.0, 30.0, 44.0]);
+        assert_eq!(out.numeric_dtype(), NumericDType::F64);
+        assert_eq!(out.materialize_f64(), vec![26.0, 38.0, 30.0, 44.0]);
     }
 
     #[test]
@@ -979,7 +958,7 @@ mod tests {
         let out = expect_tensor(call(lhs, vec![rhs]).unwrap());
         assert_eq!(out.shape, vec![2, 2, 2]);
         assert_eq!(
-            out.data,
+            out.materialize_f64(),
             vec![70.0, 100.0, 150.0, 220.0, 230.0, 340.0, 310.0, 460.0]
         );
     }
@@ -994,9 +973,10 @@ mod tests {
         );
         let out = expect_tensor(call(lhs, vec![rhs]).unwrap());
         assert_eq!(out.shape, vec![2, 2, 4, 3]);
-        assert_eq!(out.data.len(), 2 * 2 * 4 * 3);
-        assert_eq!(&out.data[0..4], &[7.0, 10.0, 15.0, 22.0]);
-        assert_eq!(&out.data[44..48], &[271.0, 298.0, 311.0, 342.0]);
+        let values = out.materialize_f64();
+        assert_eq!(values.len(), 2 * 2 * 4 * 3);
+        assert_eq!(&values[0..4], &[7.0, 10.0, 15.0, 22.0]);
+        assert_eq!(&values[44..48], &[271.0, 298.0, 311.0, 342.0]);
     }
 
     #[test]
@@ -1004,7 +984,10 @@ mod tests {
         let rhs = tensor(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], vec![2, 2, 2]);
         let out = expect_tensor(call(Value::Num(2.5), vec![rhs]).unwrap());
         assert_eq!(out.shape, vec![2, 2, 2]);
-        assert_eq!(out.data, vec![2.5, 5.0, 7.5, 10.0, 12.5, 15.0, 17.5, 20.0]);
+        assert_eq!(
+            out.materialize_f64(),
+            vec![2.5, 5.0, 7.5, 10.0, 12.5, 15.0, 17.5, 20.0]
+        );
     }
 
     #[test]
@@ -1013,7 +996,7 @@ mod tests {
         let out = expect_tensor(call(lhs, vec![Value::Num(-2.0)]).unwrap());
         assert_eq!(out.shape, vec![2, 2, 2]);
         assert_eq!(
-            out.data,
+            out.materialize_f64(),
             vec![-2.0, -4.0, -6.0, -8.0, -10.0, -12.0, -14.0, -16.0]
         );
     }
@@ -1035,7 +1018,7 @@ mod tests {
         );
         assert_eq!(out.shape, vec![3, 3]);
         assert_eq!(
-            out.data,
+            out.materialize_f64(),
             vec![23.0, 53.0, 83.0, 29.0, 67.0, 105.0, 35.0, 81.0, 127.0]
         );
     }
@@ -1105,7 +1088,7 @@ mod tests {
         let singleton_pages = tensor(vec![1.0; 4], vec![2, 2, 1]);
         let out = expect_tensor(call(empty_pages.clone(), vec![singleton_pages]).unwrap());
         assert_eq!(out.shape, vec![2, 2, 0]);
-        assert!(out.data.is_empty());
+        assert!(out.is_empty());
 
         let three_pages = tensor(vec![1.0; 12], vec![2, 2, 3]);
         let err = call(empty_pages, vec![three_pages]).unwrap_err();
@@ -1143,16 +1126,17 @@ mod tests {
                 .unwrap(),
         );
         let out = expect_tensor(call(lhs, vec![rhs]).unwrap());
-        assert_eq!(out.dtype, NumericDType::F32);
-        assert_eq!(out.data, vec![1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(out.numeric_dtype(), NumericDType::F32);
+        assert_eq!(out.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]);
     }
 
     #[test]
     fn gpu_input_roundtrips_to_gpu_result() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+            let data = tensor.as_f64_slice().expect("double tensor");
             let view = HostTensorView {
-                data: &tensor.data,
+                data,
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).unwrap();
@@ -1160,7 +1144,7 @@ mod tests {
             assert!(matches!(out, Value::GpuTensor(_)));
             let gathered = test_support::gather(out).unwrap();
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![2.0, 4.0, 6.0, 8.0]);
+            assert_eq!(gathered.materialize_f64(), vec![2.0, 4.0, 6.0, 8.0]);
         });
     }
 
@@ -1170,8 +1154,9 @@ mod tests {
             let lhs =
                 Tensor::new_with_dtype(vec![1.25, 2.5, 3.75, 4.5], vec![2, 2], NumericDType::F32)
                     .unwrap();
+            let upload_values = lhs.materialize_f64();
             let view = HostTensorView {
-                data: &lhs.data,
+                data: &upload_values,
                 shape: &lhs.shape,
             };
             let handle = provider.upload(&view).unwrap();
@@ -1189,8 +1174,8 @@ mod tests {
                 other => panic!("expected gpu tensor, got {other:?}"),
             }
             let gathered = test_support::gather(out).unwrap();
-            assert_eq!(gathered.dtype, NumericDType::F32);
-            assert_eq!(gathered.data, lhs.data);
+            assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
+            assert_eq!(gathered.materialize_f64(), lhs.materialize_f64());
         });
     }
 
