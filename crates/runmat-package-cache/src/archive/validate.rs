@@ -132,6 +132,22 @@ pub fn validate_archive(
     })
 }
 
+pub fn normalize_link_for_entry(
+    entry: &NormalizedRelativePath,
+    target: &str,
+    limits: ArchiveLimits,
+) -> Result<NormalizedRelativePath, ArchiveError> {
+    limits
+        .validate()
+        .map_err(|error| ArchiveError::InvalidLimits(error.to_string()))?;
+    normalize_link_target(
+        entry,
+        target,
+        limits.max_path_bytes,
+        limits.max_component_bytes,
+    )
+}
+
 fn validate_kind_metadata(header: &ArchiveEntryHeader) -> Result<(), ArchiveError> {
     let valid = match header.kind {
         ArchiveEntryKind::File => header.link_target.is_none(),

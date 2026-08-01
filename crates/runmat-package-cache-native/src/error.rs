@@ -19,6 +19,8 @@ pub enum NativeCacheError {
     Cache(#[from] runmat_package_cache::CacheError),
     #[error("materialized tree `{path}` is invalid: {reason}")]
     CorruptTree { path: PathBuf, reason: String },
+    #[error("Git acquisition failed: {0}")]
+    Git(String),
 }
 
 impl NativeCacheError {

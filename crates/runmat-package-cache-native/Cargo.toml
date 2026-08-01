@@ -11,6 +11,7 @@ repository = "https://github.com/runmat-org/runmat"
 dirs = "5"
 fs2 = "0.4"
 futures = "0.3"
+git2 = { version = "0.20", default-features = false, features = ["https", "ssh", "vendored-libgit2", "vendored-openssl"] }
 runmat-package = { workspace = true }
 runmat-package-cache = { workspace = true }
 rusqlite = { version = "0.32", features = ["bundled"] }

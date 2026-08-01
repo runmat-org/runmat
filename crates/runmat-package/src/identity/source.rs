@@ -271,6 +271,7 @@ impl SourceId {
                     });
                 }
                 GitRepositoryUrl::new(source.repository.as_str())?;
+                NormalizedRelativePath::new(source.subdir.as_str())?;
                 Ok(())
             }
             Self::ServerProject(source) => {

@@ -9,11 +9,12 @@ pub mod layout;
 pub mod lease;
 pub mod materialize;
 pub mod object;
+pub mod source;
 pub mod state;
 
 pub use archive::{
-    validate_archive, ArchiveEntryHeader, ArchiveEntryKind, ArchiveError, ArchiveLimits,
-    ValidatedArchive, ValidatedArchiveEntry,
+    normalize_link_for_entry, validate_archive, ArchiveEntryHeader, ArchiveEntryKind, ArchiveError,
+    ArchiveLimits, ValidatedArchive, ValidatedArchiveEntry,
 };
 pub use backend::{
     BackendCommit, BackendSnapshot, CacheBackend, CacheClock, CacheTransaction, CommitOutcome,
@@ -28,6 +29,10 @@ pub use materialize::{MaterializationRecord, MaterializationState, MountDescript
 pub use object::{
     BlobMetadata, CacheObject, CacheObjectKind, Pin, PinId, SourceIndexMetadata, TreeEntry,
     TreeEntryKind, TreeManifest,
+};
+pub use source::{
+    cache_git_snapshot, load_git_snapshot, GitInventoryEntry, GitInventoryEntryKind, GitSnapshot,
+    GitTreeInventory, SnapshotBlob,
 };
 pub use state::{
     AccessRecord, CacheState, CorruptionRecord, QuotaPressure, QuotaRecord, CACHE_SCHEMA_VERSION,

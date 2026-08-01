@@ -43,11 +43,18 @@ import {
 } from "./fea-contracts.js";
 import { createDefaultFsProvider } from "./fs/default.js";
 import { createIndexedDbPackageCache } from "./package-cache/indexeddb.js";
+import { fetchGitTreeInventoryWire } from "./package-cache/git-gateway.js";
 import type {
   IndexedDbPackageCacheOptions,
   PackageCacheSnapshot,
   RunMatPackageCacheProvider
 } from "./package-cache/index.js";
+import type {
+  GitGatewayRequest,
+  GitSnapshotWire,
+  GitTreeInventoryWire,
+  ServerGitGatewayOptions
+} from "./package-cache/git-gateway.js";
 import { __internals as workspaceHoverInternals } from "./workspace-hover.js";
 import { installWebGpuCompatibilityShims } from "./webgpu-shims.js";
 export {
@@ -152,7 +159,12 @@ export type {
   PackageCacheRevision,
   PackageCacheSnapshot,
   PackageCacheTransaction,
-  RunMatPackageCacheProvider
+  RunMatPackageCacheProvider,
+  GitGatewayRequest,
+  GitGatewaySelector,
+  GitSnapshotWire,
+  GitTreeInventoryWire,
+  ServerGitGatewayOptions
 } from "./package-cache/index.js";
 export { createWorkspaceHoverProvider } from "./workspace-hover.js";
 export type {
@@ -1084,6 +1096,12 @@ export interface GeometryScenePickResult {
 interface RunMatNativeModule {
   default: (module?: WasmInitInput | Promise<WasmInitInput>) => Promise<unknown>;
   initRunMat(options: NativeInitOptions): Promise<RunMatNativeSession>;
+  buildGitSnapshot?: (
+    repository: string,
+    subdir: string,
+    inventory: GitTreeInventoryWire
+  ) => GitSnapshotWire;
+  validateGitSnapshot?: (snapshot: GitSnapshotWire) => GitSnapshotWire;
   plotRendererReady?: () => boolean;
   renderCurrentFigureScene?: (handle: number) => void;
   exportFigureScene?: (handle: number) => Uint8Array | null | Promise<Uint8Array | null>;
@@ -1237,6 +1255,18 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
     packageCacheProvider: packageCache.provider
   });
   return new WebRunMatSession(session, packageCache.close);
+}
+
+export async function fetchGitSnapshot(
+  request: GitGatewayRequest,
+  options: ServerGitGatewayOptions
+): Promise<GitSnapshotWire> {
+  const [inventory, native] = await Promise.all([
+    fetchGitTreeInventoryWire(request, options),
+    loadNativeModule()
+  ]);
+  requireNativeFunction(native, "buildGitSnapshot");
+  return native.buildGitSnapshot(request.repository, request.subdir ?? ".", inventory);
 }
 
 export async function plotRendererReady(): Promise<boolean> {

@@ -6,6 +6,7 @@ pub mod config;
 pub mod error;
 pub mod filesystem;
 pub mod gc;
+pub mod git;
 pub mod materialize;
 
 pub use backend::SqliteCacheBackend;

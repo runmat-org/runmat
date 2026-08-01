@@ -6,6 +6,7 @@ mod runtime;
 mod wire;
 
 pub use api::init::init_runmat;
+pub use api::package::{build_git_snapshot, validate_git_snapshot};
 // Plotting and figure APIs.
 pub use api::plot::{
     bind_surface_to_figure, create_plot_surface, destroy_plot_surface, fit_plot_surface_extents,
