@@ -10,8 +10,8 @@ use super::training::*;
 use futures::executor::block_on;
 use runmat_accelerate_api::{handle_precision, handle_storage, GpuTensorStorage, HostTensorView};
 use runmat_builtins::{
-    CellArray, IntValue, IntegerStorage, LogicalArray, NumericDType, ObjectInstance, StringArray,
-    StructValue, Tensor, Value,
+    CellArray, IntValue, IntegerStorage, LogicalArray, NumericDType, NumericStorage,
+    ObjectInstance, StringArray, StructValue, Tensor, Value,
 };
 
 #[runmat_macros::runtime_builtin(
@@ -970,6 +970,47 @@ fn dlfeval_dlgradient_differentiates_dlarray_elementwise_loss() {
     assert_eq!(
         grad.properties.get("Format"),
         Some(&Value::String("CB".into()))
+    );
+}
+
+#[test]
+fn dlfeval_dlgradient_preserves_native_single_storage() {
+    let x = block_on(dlarray_builtin(
+        Value::Tensor(Tensor::from_f32(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap()),
+        vec![Value::String("CB".into())],
+    ))
+    .expect("dlarray");
+    let _guard = crate::output_count::push_output_count(Some(2));
+    let out = block_on(dlfeval_builtin(vec![
+        Value::FunctionHandle("__deep_learning_square_grad".into()),
+        x,
+    ]))
+    .expect("dlfeval square grad");
+    let Value::OutputList(values) = out else {
+        panic!("expected output list");
+    };
+    let Value::Object(loss) = &values[0] else {
+        panic!("expected traced loss dlarray");
+    };
+    let Value::Tensor(loss) = loss.properties.get("Data").unwrap() else {
+        panic!("expected loss tensor");
+    };
+    assert_eq!(
+        loss.clone().into_numeric_storage().expect("loss storage"),
+        NumericStorage::F32(vec![14.0])
+    );
+    let Value::Object(gradient) = &values[1] else {
+        panic!("expected gradient dlarray");
+    };
+    let Value::Tensor(gradient) = gradient.properties.get("Data").unwrap() else {
+        panic!("expected gradient tensor");
+    };
+    assert_eq!(
+        gradient
+            .clone()
+            .into_numeric_storage()
+            .expect("gradient storage"),
+        NumericStorage::F32(vec![2.0, 4.0, 6.0])
     );
 }
 
