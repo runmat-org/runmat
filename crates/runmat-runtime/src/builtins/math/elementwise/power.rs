@@ -1,10 +1,10 @@
 //! MATLAB-compatible `power` builtin (element-wise exponentiation) with GPU-aware semantics.
 
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
+    CharArray, ComplexTensor, IntegerStorage, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -334,26 +334,32 @@ fn power_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
         return Ok(result);
     }
     match (classify_operand(lhs)?, classify_operand(rhs)?) {
-        (PowerOperand::Real(a), PowerOperand::Real(b)) => power_real_real(&a, &b),
+        (PowerOperand::Real(a), PowerOperand::Real(b)) => power_real_real(a, b),
         (PowerOperand::Complex(a), PowerOperand::Complex(b)) => power_complex_complex(&a, &b),
         (PowerOperand::Complex(a), PowerOperand::Real(b)) => power_complex_real(&a, &b),
         (PowerOperand::Real(a), PowerOperand::Complex(b)) => power_real_complex(&a, &b),
     }
 }
 
-fn power_real_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Value> {
+fn power_real_real(lhs: Tensor, rhs: Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
         .map_err(|err| power_error_with_detail(&POWER_ERROR_SIZE_MISMATCH, &err))?;
-    if plan.is_empty() {
-        let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| builtin_error(format!("power: {e}")))?;
-        return Ok(tensor::tensor_into_value(tensor));
-    }
+    let output_shape = plan.output_shape().to_vec();
+    let lhs = lhs
+        .into_numeric_storage()
+        .map_err(|e| builtin_error(format!("power: {e}")))?;
+    let rhs = rhs
+        .into_numeric_storage()
+        .map_err(|e| builtin_error(format!("power: {e}")))?;
+    let output_single =
+        matches!(&lhs, NumericStorage::F32(_)) || matches!(&rhs, NumericStorage::F32(_));
+    let lhs = floating_power_values(lhs)?;
+    let rhs = floating_power_values(rhs)?;
     let mut out = Vec::with_capacity(plan.len());
     let mut all_im_zero = true;
     for (_, idx_lhs, idx_rhs) in plan.iter() {
-        let base = lhs.data[idx_lhs];
-        let exponent = rhs.data[idx_rhs];
+        let base = lhs[idx_lhs];
+        let exponent = rhs[idx_rhs];
         let pow = base.powf(exponent);
         if pow.is_nan() {
             let (re, im) = complex_pow_scalar(base, 0.0, exponent, 0.0);
@@ -367,13 +373,29 @@ fn power_real_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Value> {
     }
     if all_im_zero {
         let real_data: Vec<f64> = out.into_iter().map(|(re, _)| re).collect();
-        let tensor = Tensor::new(real_data, plan.output_shape().to_vec())
+        let storage = if output_single {
+            NumericStorage::F32(real_data.into_iter().map(|value| value as f32).collect())
+        } else {
+            NumericStorage::F64(real_data)
+        };
+        let tensor = Tensor::from_numeric_storage(storage, output_shape)
             .map_err(|e| builtin_error(format!("power: {e}")))?;
         Ok(tensor::tensor_into_value(tensor))
     } else {
-        let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
+        let tensor = ComplexTensor::new(out, output_shape)
             .map_err(|e| builtin_error(format!("power: {e}")))?;
         Ok(complex_tensor_into_value(tensor))
+    }
+}
+
+fn floating_power_values(storage: NumericStorage) -> BuiltinResult<Vec<f64>> {
+    match storage {
+        NumericStorage::F64(values) => Ok(values),
+        NumericStorage::F32(values) => Ok(values.into_iter().map(f64::from).collect()),
+        storage => Err(builtin_error(format!(
+            "power: integer {} storage did not use the exact integer arithmetic path",
+            storage.class_name()
+        ))),
     }
 }
 
@@ -404,10 +426,11 @@ fn power_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value>
             .map_err(|e| builtin_error(format!("power: {e}")))?;
         return Ok(complex_tensor_into_value(tensor));
     }
+    let rhs_values = rhs.materialize_f64();
     let mut out = vec![(0.0f64, 0.0f64); plan.len()];
     for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
         let (ar, ai) = lhs.data[idx_lhs];
-        let exponent = rhs.data[idx_rhs];
+        let exponent = rhs_values[idx_rhs];
         out[out_idx] = complex_pow_scalar(ar, ai, exponent, 0.0);
     }
     let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
@@ -423,9 +446,10 @@ fn power_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> BuiltinResult<Value>
             .map_err(|e| builtin_error(format!("power: {e}")))?;
         return Ok(complex_tensor_into_value(tensor));
     }
+    let lhs_values = lhs.materialize_f64();
     let mut out = vec![(0.0f64, 0.0f64); plan.len()];
     for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
-        let base = lhs.data[idx_lhs];
+        let base = lhs_values[idx_lhs];
         let (br, bi) = rhs.data[idx_rhs];
         out[out_idx] = complex_pow_scalar(base, 0.0, br, bi);
     }
@@ -571,6 +595,12 @@ async fn power_gpu_host_left(lhs: GpuTensorHandle, rhs: Value) -> BuiltinResult<
             .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
         return power_host(Value::Tensor(host_lhs), host_rhs);
     }
+    if runmat_accelerate_api::handle_integer_type(&lhs).is_some() || is_integer_value(&rhs) {
+        let host_lhs = gpu_helpers::gather_tensor_async(&lhs)
+            .await
+            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+        return power_host(Value::Tensor(host_lhs), rhs);
+    }
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(scalar) = extract_scalar_f64(&rhs)? {
             if let Some(uploaded) =
@@ -591,12 +621,7 @@ async fn power_gpu_host_left(lhs: GpuTensorHandle, rhs: Value) -> BuiltinResult<
             }
         } else if let Some(tensor_rhs) = value_to_real_tensor_for_gpu(&rhs).await? {
             if tensor_rhs.shape == lhs.shape {
-                let data = tensor::tensor_values_f64_cow(&tensor_rhs);
-                let view = HostTensorView {
-                    data: &data,
-                    shape: &tensor_rhs.shape,
-                };
-                if let Ok(uploaded) = provider.upload(&view) {
+                if let Ok(uploaded) = gpu_helpers::upload_tensor(provider, &tensor_rhs) {
                     let result = provider.elem_pow(&lhs, &uploaded).await;
                     let _ = provider.free(&uploaded);
                     if let Ok(handle) = result {
@@ -621,6 +646,12 @@ async fn power_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> BuiltinResult
             .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
         return power_host(host_lhs, Value::Tensor(host_rhs));
     }
+    if is_integer_value(&lhs) || runmat_accelerate_api::handle_integer_type(&rhs).is_some() {
+        let host_rhs = gpu_helpers::gather_tensor_async(&rhs)
+            .await
+            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+        return power_host(lhs, Value::Tensor(host_rhs));
+    }
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(scalar) = extract_scalar_f64(&lhs)? {
             if let Some(uploaded) =
@@ -641,12 +672,7 @@ async fn power_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> BuiltinResult
             }
         } else if let Some(tensor_lhs) = value_to_real_tensor_for_gpu(&lhs).await? {
             if tensor_lhs.shape == rhs.shape {
-                let data = tensor::tensor_values_f64_cow(&tensor_lhs);
-                let view = HostTensorView {
-                    data: &data,
-                    shape: &tensor_lhs.shape,
-                };
-                if let Ok(uploaded) = provider.upload(&view) {
+                if let Ok(uploaded) = gpu_helpers::upload_tensor(provider, &tensor_lhs) {
                     let result = provider.elem_pow(&uploaded, &rhs).await;
                     let _ = provider.free(&uploaded);
                     if let Ok(handle) = result {
@@ -723,6 +749,11 @@ fn is_complex_value(value: &Value) -> bool {
     matches!(value, Value::Complex(_, _) | Value::ComplexTensor(_))
 }
 
+fn is_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+}
+
 fn complex_pow_scalar(base_re: f64, base_im: f64, exp_re: f64, exp_im: f64) -> (f64, f64) {
     if base_re == 0.0 && base_im == 0.0 {
         if exp_re == 0.0 && exp_im == 0.0 {
@@ -791,7 +822,7 @@ async fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<
                     .map_err(|e| builtin_error(format!("power: {e}")))?,
             ),
             Value::Int(i) => upload_tensor(
-                Tensor::new(vec![i.to_f64()], vec![1, 1])
+                Tensor::new_integer(IntegerStorage::from_scalar(i), vec![1, 1])
                     .map_err(|e| builtin_error(format!("power: {e}")))?,
             ),
             Value::Bool(b) => upload_tensor(
@@ -818,13 +849,7 @@ fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
             "no acceleration provider available to honour GPU output",
         ));
     };
-    let data = tensor::tensor_values_f64_cow(&tensor);
-    let view = HostTensorView {
-        data: &data,
-        shape: &tensor.shape,
-    };
-    let handle = provider
-        .upload(&view)
+    let handle = gpu_helpers::upload_tensor(provider, &tensor)
         .map_err(|e| power_error_with_detail(&POWER_ERROR_INTERNAL, e.to_string()))?;
     Ok(Value::GpuTensor(handle))
 }
@@ -834,9 +859,10 @@ fn real_to_complex(value: Value) -> BuiltinResult<Value> {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(t) => {
-            let data: Vec<(f64, f64)> = tensor::tensor_values_f64_cow(&t)
-                .iter()
-                .map(|&v| (v, 0.0))
+            let data: Vec<(f64, f64)> = t
+                .materialize_f64()
+                .into_iter()
+                .map(|value| (value, 0.0))
                 .collect();
             let tensor = ComplexTensor::new(data, t.shape.clone())
                 .map_err(|e| builtin_error(format!("power: {e}")))?;
@@ -921,10 +947,9 @@ pub(crate) mod tests {
 
     #[test]
     fn scalar_extractors_read_typed_integer_tensor_storage_exactly() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
                 .expect("integer tensor");
-        tensor.data.clear();
         let value = Value::Tensor(tensor);
 
         assert_eq!(
@@ -1019,9 +1044,23 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn power_float_arrays_preserve_native_single_class() {
+        let base = Tensor::from_f32(vec![2.0, 4.0], vec![1, 2]).unwrap();
+        let exponent = Tensor::new(vec![3.0, 0.5], vec![1, 2]).unwrap();
+        let Value::Tensor(result) =
+            power_builtin(Value::Tensor(base), Value::Tensor(exponent), Vec::new()).unwrap()
+        else {
+            panic!("expected single tensor");
+        };
+        assert_eq!(
+            result.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![8.0, 2.0])
+        );
+    }
+
+    #[test]
     fn power_like_complex_conversion_reads_typed_integer_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::I64(vec![-4, 5]), vec![1, 2]).unwrap();
-        tensor.data.fill(0.0);
+        let tensor = Tensor::new_integer(IntegerStorage::I64(vec![-4, 5]), vec![1, 2]).unwrap();
 
         let result = super::real_to_complex(Value::Tensor(tensor)).expect("complex conversion");
 
@@ -1051,70 +1090,60 @@ pub(crate) mod tests {
     #[test]
     fn power_like_gpu_upload_reads_typed_integer_storage_exactly() {
         test_support::with_test_provider(|_| {
-            let mut tensor =
+            let tensor =
                 Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 2]), vec![1, 2]).unwrap();
-            tensor.data.fill(0.0);
 
             let uploaded = super::upload_tensor(tensor).expect("gpu upload");
             let gathered = test_support::gather(uploaded).expect("gather");
 
             assert_eq!(gathered.shape, vec![1, 2]);
-            assert_eq!(gathered.data, vec![u64::MAX as f64, 2.0]);
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![u64::MAX, 2]))
+            );
         });
     }
 
     #[test]
-    fn power_gpu_left_host_integer_rhs_upload_reads_typed_storage_exactly() {
+    fn power_gpu_left_rejects_nonscalar_host_integer_rhs() {
         test_support::with_test_provider(|provider| {
             let base = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
-            let base_view = HostTensorView {
-                data: &base.data,
-                shape: &base.shape,
-            };
-            let base_handle = provider.upload(&base_view).expect("upload base");
+            let base_handle = gpu_helpers::upload_tensor(provider, &base).expect("upload base");
 
-            let mut exponent =
+            let exponent =
                 Tensor::new_integer(IntegerStorage::U16(vec![3, 2]), vec![1, 2]).unwrap();
-            exponent.data.fill(0.0);
 
-            let result = power_builtin(
+            let error = power_builtin(
                 Value::GpuTensor(base_handle.clone()),
                 Value::Tensor(exponent),
                 Vec::new(),
             )
-            .expect("power");
-            let gathered = test_support::gather(result).expect("gather");
-
-            assert_eq!(gathered.shape, vec![1, 2]);
-            assert_eq!(gathered.data, vec![8.0, 9.0]);
+            .expect_err("mixed nonscalar integer and double arrays must reject");
+            assert!(error
+                .message()
+                .contains("integer arrays can only be combined with scalar double"));
             let _ = provider.free(&base_handle);
         });
     }
 
     #[test]
-    fn power_host_integer_lhs_gpu_right_upload_reads_typed_storage_exactly() {
+    fn power_gpu_right_rejects_nonscalar_host_integer_lhs() {
         test_support::with_test_provider(|provider| {
             let exponent = Tensor::new(vec![3.0, 2.0], vec![1, 2]).unwrap();
-            let exponent_view = HostTensorView {
-                data: &exponent.data,
-                shape: &exponent.shape,
-            };
-            let exponent_handle = provider.upload(&exponent_view).expect("upload exponent");
+            let exponent_handle =
+                gpu_helpers::upload_tensor(provider, &exponent).expect("upload exponent");
 
-            let mut base =
-                Tensor::new_integer(IntegerStorage::U16(vec![2, 3]), vec![1, 2]).unwrap();
-            base.data.fill(0.0);
+            let base = Tensor::new_integer(IntegerStorage::U16(vec![2, 3]), vec![1, 2]).unwrap();
 
-            let result = power_builtin(
+            let error = power_builtin(
                 Value::Tensor(base),
                 Value::GpuTensor(exponent_handle.clone()),
                 Vec::new(),
             )
-            .expect("power");
-            let gathered = test_support::gather(result).expect("gather");
-
-            assert_eq!(gathered.shape, vec![1, 2]);
-            assert_eq!(gathered.data, vec![8.0, 9.0]);
+            .expect_err("mixed nonscalar integer and double arrays must reject");
+            assert!(error
+                .message()
+                .contains("integer arrays can only be combined with scalar double"));
             let _ = provider.free(&exponent_handle);
         });
     }
@@ -1130,7 +1159,12 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
                 let expected = [1.0, 2.0, 3.0, 1.0, 4.0, 9.0, 1.0, 8.0, 27.0];
-                for (got, exp) in t.data.iter().zip(expected.iter()) {
+                for (got, exp) in t
+                    .as_f64_slice()
+                    .expect("double result")
+                    .iter()
+                    .zip(expected.iter())
+                {
                     assert!((got - exp).abs() < 1e-12);
                 }
             }
@@ -1166,7 +1200,12 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
                 let expected = [4225.0, 8100.0];
-                for (got, exp) in t.data.iter().zip(expected.iter()) {
+                for (got, exp) in t
+                    .as_f64_slice()
+                    .expect("double result")
+                    .iter()
+                    .zip(expected.iter())
+                {
                     assert!((got - exp).abs() < 1e-9);
                 }
             }
@@ -1199,11 +1238,8 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let base = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
             let exp = Tensor::new(vec![2.0, 3.0, 4.0], vec![1, 3]).unwrap();
-            let proto_view = HostTensorView {
-                data: &[0.0],
-                shape: &[1, 1],
-            };
-            let proto = provider.upload(&proto_view).expect("upload");
+            let proto_tensor = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
+            let proto = gpu_helpers::upload_tensor(provider, &proto_tensor).expect("upload");
             let result = power_builtin(
                 Value::Tensor(base.clone()),
                 Value::Tensor(exp.clone()),
@@ -1214,7 +1250,12 @@ pub(crate) mod tests {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
                     let expected = [1.0, 8.0, 81.0];
-                    for (got, exp) in gathered.data.iter().zip(expected.iter()) {
+                    for (got, exp) in gathered
+                        .as_f64_slice()
+                        .expect("double result")
+                        .iter()
+                        .zip(expected.iter())
+                    {
                         assert!((got - exp).abs() < 1e-9);
                     }
                 }
@@ -1230,21 +1271,18 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let base = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
             let exp = Tensor::new(vec![2.0, 3.0, 4.0], vec![1, 3]).unwrap();
-            let base_view = HostTensorView {
-                data: &base.data,
-                shape: &base.shape,
-            };
-            let exp_view = HostTensorView {
-                data: &exp.data,
-                shape: &exp.shape,
-            };
-            let hb = provider.upload(&base_view).expect("upload");
-            let he = provider.upload(&exp_view).expect("upload");
+            let hb = gpu_helpers::upload_tensor(provider, &base).expect("upload");
+            let he = gpu_helpers::upload_tensor(provider, &exp).expect("upload");
             let result = power_builtin(Value::GpuTensor(hb), Value::GpuTensor(he), Vec::new())
                 .expect("power");
             let gathered = test_support::gather(result).expect("gather");
             let expected = [1.0, 8.0, 81.0];
-            for (got, exp) in gathered.data.iter().zip(expected.iter()) {
+            for (got, exp) in gathered
+                .as_f64_slice()
+                .expect("double result")
+                .iter()
+                .zip(expected.iter())
+            {
                 assert!((got - exp).abs() < 1e-9);
             }
         });
@@ -1261,16 +1299,8 @@ pub(crate) mod tests {
         let exp = Tensor::new(vec![2.0, 0.5, -1.0], vec![1, 3]).unwrap();
         let cpu = power_host(Value::Tensor(base.clone()), Value::Tensor(exp.clone())).unwrap();
         let provider = runmat_accelerate_api::provider().unwrap();
-        let base_view = HostTensorView {
-            data: &base.data,
-            shape: &base.shape,
-        };
-        let exp_view = HostTensorView {
-            data: &exp.data,
-            shape: &exp.shape,
-        };
-        let hb = provider.upload(&base_view).unwrap();
-        let he = provider.upload(&exp_view).unwrap();
+        let hb = gpu_helpers::upload_tensor(provider, &base).unwrap();
+        let he = gpu_helpers::upload_tensor(provider, &exp).unwrap();
         let gpu = block_on(power_gpu_pair(hb.clone(), he.clone())).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         let cpu_tensor = match cpu {
@@ -1282,7 +1312,12 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-9,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (a, b) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (a, b) in gathered
+            .as_f64_slice()
+            .expect("gathered double")
+            .iter()
+            .zip(cpu_tensor.as_f64_slice().expect("CPU double"))
+        {
             assert!((a - b).abs() < tol);
         }
         let _ = provider.free(&hb);
