@@ -28,6 +28,7 @@ members = [
     "crates/runmat-thread-local",
     "crates/runmat-filesystem",
     "crates/runmat-config",
+    "crates/runmat-package",
     "crates/runmat-static-analysis",
     "crates/runmat-geometry/core",
     "crates/runmat-geometry/io",
@@ -73,6 +74,9 @@ cranelift-native = "0.115"
 target-lexicon = "0.12"
 tower-lsp = "0.20"
 once_cell = "1"
+semver = { version = "1", features = ["serde"] }
+sha2 = "0.10"
+url = { version = "2", features = ["serde"] }
 
 # Internal workspace crates
 runmat-lexer = { version = "=0.6.1", path = "crates/runmat-lexer" }
@@ -92,6 +96,7 @@ runmat-turbine = { version = "=0.6.1", path = "crates/runmat-turbine" }
 runmat-gc = { version = "=0.6.1", path = "crates/runmat-gc" }
 runmat-filesystem = { version = "=0.6.1", path = "crates/runmat-filesystem" }
 runmat-config = { version = "=0.6.1", path = "crates/runmat-config" }
+runmat-package = { version = "=0.6.1", path = "crates/runmat-package" }
 runmat-static-analysis = { version = "=0.6.1", path = "crates/runmat-static-analysis" }
 runmat-server-client = { version = "=0.6.1", path = "crates/runmat-server-client" }
 runmat-accelerate = { version = "=0.6.1", path = "crates/runmat-accelerate" }

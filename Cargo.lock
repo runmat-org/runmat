@@ -5813,6 +5813,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-package"
+version = "0.6.1"
+dependencies = [
+ "runmat-config",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 1.0.69",
+ "toml 0.8.23",
+ "url",
+]
+
+[[package]]
 name = "runmat-parser"
 version = "0.6.1"
 dependencies = [

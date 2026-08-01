@@ -259,7 +259,7 @@ path = "src/main"
 }
 
 #[test]
-fn validation_rejects_unsupported_dependency_fields() {
+fn validation_rejects_multiple_dependency_locators() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join("src")).unwrap();
     fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
@@ -279,8 +279,30 @@ dep_a = { path = "dep_a", git = "https://example.com/repo.git" }
 path = "src/main"
 "#,
     );
-    let err = load_project_manifest(&manifest_path).expect_err("unsupported fields should fail");
-    assert!(matches!(err, ProjectManifestLoadError::ParseToml { .. }));
+    let err = load_project_manifest(&manifest_path).expect_err("multiple locators should fail");
+    let ProjectManifestLoadError::Validation { source, .. } = err else {
+        panic!("expected validation error");
+    };
+    assert!(source.messages.iter().any(|message| {
+        message.contains("dependency `dep_a`")
+            && message.contains("must select exactly one locator")
+    }));
+}
+
+#[test]
+fn parsing_rejects_unknown_dependency_fields() {
+    let manifest = r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[dependencies]
+    dep_a = { path = "dep_a", unsupported = true }
+"#;
+    let err = parse_project_manifest_toml(manifest).expect_err("unknown fields should fail");
+    assert!(err.to_string().contains("unknown field"));
 }
 
 #[test]

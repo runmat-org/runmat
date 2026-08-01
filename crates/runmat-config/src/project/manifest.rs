@@ -1,3 +1,7 @@
+use super::dependency::{
+    ProjectCapabilities, ProjectDependency, ProjectDependencyLocator, ProjectPublication,
+    ProjectRegistry, ProjectSourceReplacement, ProjectTargetDependencies,
+};
 use serde::de::IgnoredAny;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
@@ -14,12 +18,24 @@ pub struct ProjectManifest {
     pub package: ProjectPackage,
     pub sources: ProjectSources,
     pub dependencies: BTreeMap<String, ProjectDependency>,
+    pub dev_dependencies: BTreeMap<String, ProjectDependency>,
+    pub test_dependencies: BTreeMap<String, ProjectDependency>,
+    pub features: BTreeMap<String, Vec<String>>,
+    pub capabilities: ProjectCapabilities,
+    pub targets: BTreeMap<String, ProjectTargetDependencies>,
+    pub registries: BTreeMap<String, ProjectRegistry>,
+    pub source_replacements: BTreeMap<String, ProjectSourceReplacement>,
+    pub publish: Option<ProjectPublication>,
     pub entrypoints: Vec<ProjectEntrypoint>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectPackage {
     pub name: String,
+    #[serde(default)]
+    pub organization: Option<String>,
+    #[serde(default)]
+    pub registry: Option<String>,
     #[serde(default)]
     pub version: Option<String>,
     #[serde(default, rename = "runmat-version")]
@@ -30,14 +46,6 @@ pub struct ProjectPackage {
 pub struct ProjectSources {
     #[serde(default)]
     pub roots: Vec<PathBuf>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ProjectDependency {
-    pub path: Option<PathBuf>,
-    #[serde(default)]
-    pub version: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,6 +66,22 @@ struct RawProjectManifest {
     sources: ProjectSources,
     #[serde(default)]
     dependencies: BTreeMap<String, ProjectDependency>,
+    #[serde(default, rename = "dev-dependencies")]
+    dev_dependencies: BTreeMap<String, ProjectDependency>,
+    #[serde(default, rename = "test-dependencies")]
+    test_dependencies: BTreeMap<String, ProjectDependency>,
+    #[serde(default)]
+    features: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
+    capabilities: ProjectCapabilities,
+    #[serde(default, rename = "target")]
+    targets: BTreeMap<String, ProjectTargetDependencies>,
+    #[serde(default)]
+    registries: BTreeMap<String, ProjectRegistry>,
+    #[serde(default, rename = "source-replacements")]
+    source_replacements: BTreeMap<String, ProjectSourceReplacement>,
+    #[serde(default)]
+    publish: Option<ProjectPublication>,
     #[serde(default)]
     entrypoints: BTreeMap<String, RawProjectEntrypoint>,
     #[serde(default, rename = "runtime")]
@@ -95,6 +119,14 @@ impl From<RawProjectManifest> for ProjectManifest {
             package: value.package,
             sources: value.sources,
             dependencies: value.dependencies,
+            dev_dependencies: value.dev_dependencies,
+            test_dependencies: value.test_dependencies,
+            features: value.features,
+            capabilities: value.capabilities,
+            targets: value.targets,
+            registries: value.registries,
+            source_replacements: value.source_replacements,
+            publish: value.publish,
             entrypoints,
         }
     }
@@ -119,6 +151,19 @@ impl Serialize for ProjectManifest {
             package: &'a ProjectPackage,
             sources: &'a ProjectSources,
             dependencies: &'a BTreeMap<String, ProjectDependency>,
+            #[serde(rename = "dev-dependencies")]
+            dev_dependencies: &'a BTreeMap<String, ProjectDependency>,
+            #[serde(rename = "test-dependencies")]
+            test_dependencies: &'a BTreeMap<String, ProjectDependency>,
+            features: &'a BTreeMap<String, Vec<String>>,
+            capabilities: &'a ProjectCapabilities,
+            #[serde(rename = "target")]
+            targets: &'a BTreeMap<String, ProjectTargetDependencies>,
+            registries: &'a BTreeMap<String, ProjectRegistry>,
+            #[serde(rename = "source-replacements")]
+            source_replacements: &'a BTreeMap<String, ProjectSourceReplacement>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            publish: &'a Option<ProjectPublication>,
             entrypoints: BTreeMap<&'a str, CanonicalEntrypoint<'a>>,
         }
 
@@ -150,6 +195,14 @@ impl Serialize for ProjectManifest {
             package: &self.package,
             sources: &self.sources,
             dependencies: &self.dependencies,
+            dev_dependencies: &self.dev_dependencies,
+            test_dependencies: &self.test_dependencies,
+            features: &self.features,
+            capabilities: &self.capabilities,
+            targets: &self.targets,
+            registries: &self.registries,
+            source_replacements: &self.source_replacements,
+            publish: &self.publish,
             entrypoints,
         }
         .serialize(serializer)
@@ -247,40 +300,74 @@ impl ProjectManifest {
             }
         }
 
-        for (name, dependency) in &self.dependencies {
-            if name.trim().is_empty() {
-                messages.push("dependency names must be non-empty".to_string());
+        extend_dependency_validation(
+            "dependencies",
+            &self.dependencies,
+            project_root,
+            &mut messages,
+            &mut path_requirements,
+        );
+        extend_dependency_validation(
+            "dev-dependencies",
+            &self.dev_dependencies,
+            project_root,
+            &mut messages,
+            &mut path_requirements,
+        );
+        extend_dependency_validation(
+            "test-dependencies",
+            &self.test_dependencies,
+            project_root,
+            &mut messages,
+            &mut path_requirements,
+        );
+        for (target, dependencies) in &self.targets {
+            if target.trim().is_empty() {
+                messages.push("target predicate names must be non-empty".to_string());
             }
-            let has_path = dependency.path.is_some();
-            let has_version = dependency
-                .version
-                .as_ref()
-                .is_some_and(|version| !version.trim().is_empty());
-            if !has_path && !has_version {
-                messages.push(format!(
-                    "dependency `{name}` must set at least one of `path` or `version`"
-                ));
-                continue;
+            for (group, table) in [
+                ("dependencies", &dependencies.dependencies),
+                ("dev-dependencies", &dependencies.dev_dependencies),
+                ("test-dependencies", &dependencies.test_dependencies),
+            ] {
+                extend_dependency_validation(
+                    &format!("target.{target}.{group}"),
+                    table,
+                    project_root,
+                    &mut messages,
+                    &mut path_requirements,
+                );
             }
-            let Some(path) = dependency.path.as_ref() else {
-                messages.push(format!(
-                    "dependency `{name}` must set `path` for local composition support"
-                ));
-                continue;
-            };
-            if !is_relative_without_parent(path) {
-                messages.push(format!(
-                    "dependency `{name}` path `{}` must be project-relative without `..` segments",
-                    path.display()
-                ));
-            } else {
-                path_requirements.push(PathRequirement::Directory {
-                    path: project_root.join(path),
-                    missing_message: format!(
-                        "dependency `{name}` path `{}` does not exist as a directory",
-                        path.display()
-                    ),
-                });
+        }
+
+        for (feature, requests) in &self.features {
+            if feature.trim().is_empty() {
+                messages.push("feature names must be non-empty".to_string());
+            }
+            if requests.iter().any(|request| request.trim().is_empty()) {
+                messages.push(format!("feature `{feature}` contains an empty request"));
+            }
+        }
+        if self
+            .capabilities
+            .required
+            .iter()
+            .chain(&self.capabilities.optional)
+            .any(|capability| capability.trim().is_empty())
+        {
+            messages.push("capability names must be non-empty".to_string());
+        }
+        for (name, registry) in &self.registries {
+            if name.trim().is_empty() || registry.index.trim().is_empty() {
+                messages.push("registry names and index locations must be non-empty".to_string());
+            }
+        }
+        for (source, replacement) in &self.source_replacements {
+            if source.trim().is_empty() || replacement.replace_with.trim().is_empty() {
+                messages.push(
+                    "source replacement names and `replace-with` targets must be non-empty"
+                        .to_string(),
+                );
             }
         }
 
@@ -393,6 +480,49 @@ impl ProjectManifest {
             }
         }
         validation_result(messages)
+    }
+}
+
+fn extend_dependency_validation(
+    table_name: &str,
+    dependencies: &BTreeMap<String, ProjectDependency>,
+    project_root: &Path,
+    messages: &mut Vec<String>,
+    path_requirements: &mut Vec<PathRequirement>,
+) {
+    for (name, dependency) in dependencies {
+        if name.trim().is_empty() {
+            messages.push(format!("[{table_name}] dependency names must be non-empty"));
+            continue;
+        }
+        let locator = match dependency.locator() {
+            Ok(locator) => locator,
+            Err(reason) => {
+                messages.push(format!("dependency `{name}` in [{table_name}] {reason}"));
+                continue;
+            }
+        };
+        if locator != ProjectDependencyLocator::Path {
+            continue;
+        }
+        let path = dependency
+            .path
+            .as_ref()
+            .expect("path locator has a path after validation");
+        if !is_relative_without_parent(path) {
+            messages.push(format!(
+                "dependency `{name}` path `{}` must be project-relative without `..` segments",
+                path.display()
+            ));
+        } else {
+            path_requirements.push(PathRequirement::Directory {
+                path: project_root.join(path),
+                missing_message: format!(
+                    "dependency `{name}` path `{}` does not exist as a directory",
+                    path.display()
+                ),
+            });
+        }
     }
 }
 
