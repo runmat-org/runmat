@@ -5,9 +5,9 @@ mod parser;
 mod span;
 
 pub use ast::{
-    Attr, BinOp, ClassMember, Expr, FunctionArgDim, FunctionArgSizeSpec, FunctionArgValidationDecl,
-    FunctionArgValidatorDecl, FunctionArgumentsBlockKind, LValue, MultiAssignTarget, Program, Stmt,
-    UnOp,
+    Attr, BinOp, ClassMember, ClassNamedDecl, ClassPropertyDecl, Expr, FunctionArgDim,
+    FunctionArgSizeSpec, FunctionArgValidationDecl, FunctionArgValidatorDecl,
+    FunctionArgumentsBlockKind, LValue, MultiAssignTarget, Program, ScriptSection, Stmt, UnOp,
 };
 pub use error::SyntaxError;
 pub use options::{CompatMode, ParserOptions};

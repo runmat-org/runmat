@@ -282,12 +282,20 @@ pub enum LValue {
 pub struct Attr {
     pub name: String,
     pub value: Option<String>,
+    pub span: Span,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct ClassPropertyDecl {
     pub name: String,
     pub default: Option<Expr>,
+    pub span: Span,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct ClassNamedDecl {
+    pub name: String,
+    pub span: Span,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -331,26 +339,40 @@ pub enum ClassMember {
     Properties {
         attributes: Vec<Attr>,
         names: Vec<ClassPropertyDecl>,
+        span: Span,
     },
     Methods {
         attributes: Vec<Attr>,
         body: Vec<Stmt>,
+        span: Span,
     },
     Events {
         attributes: Vec<Attr>,
-        names: Vec<String>,
+        names: Vec<ClassNamedDecl>,
+        span: Span,
     },
     Enumeration {
         attributes: Vec<Attr>,
-        names: Vec<String>,
+        names: Vec<ClassNamedDecl>,
+        span: Span,
     },
     Arguments {
         attributes: Vec<Attr>,
-        names: Vec<String>,
+        names: Vec<ClassNamedDecl>,
+        span: Span,
     },
 }
 
 #[derive(Debug, PartialEq)]
 pub struct Program {
     pub body: Vec<Stmt>,
+    pub sections: Vec<ScriptSection>,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct ScriptSection {
+    pub ordinal: u32,
+    pub title: String,
+    pub marker_span: Span,
+    pub body_span: Span,
 }

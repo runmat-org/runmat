@@ -7,7 +7,7 @@ mod stmt;
 
 use runmat_lexer::Token;
 
-use crate::{ParserOptions, Program, Stmt, SyntaxError};
+use crate::{ParserOptions, Program, ScriptSection, Span, Stmt, SyntaxError};
 
 #[derive(Clone)]
 struct TokenInfo {
@@ -24,6 +24,7 @@ struct Parser {
     options: ParserOptions,
     in_matrix_expr: bool,
     current_classdef_name: Option<String>,
+    sections: Vec<ScriptSection>,
 }
 
 pub fn parse(input: &str) -> Result<Program, SyntaxError> {
@@ -34,6 +35,7 @@ pub fn parse_with_options(input: &str, options: ParserOptions) -> Result<Program
     use runmat_lexer::tokenize_detailed;
 
     let toks = tokenize_detailed(input);
+    let sections = script_sections(&toks, input.len());
     let mut tokens = Vec::new();
     let mut skip_newlines = false;
 
@@ -76,6 +78,7 @@ pub fn parse_with_options(input: &str, options: ParserOptions) -> Result<Program
         options,
         in_matrix_expr: false,
         current_classdef_name: None,
+        sections,
     };
     parser.parse_program()
 }
@@ -92,7 +95,10 @@ impl Parser {
             }
             body.push(self.parse_stmt_with_semicolon()?);
         }
-        Ok(Program { body })
+        Ok(Program {
+            body,
+            sections: std::mem::take(&mut self.sections),
+        })
     }
 
     fn finalize_stmt(&self, stmt: Stmt, is_semicolon_terminated: bool) -> Stmt {
@@ -110,4 +116,34 @@ impl Parser {
             other => other,
         }
     }
+}
+
+fn script_sections(tokens: &[runmat_lexer::SpannedToken], source_len: usize) -> Vec<ScriptSection> {
+    let markers: Vec<_> = tokens
+        .iter()
+        .filter(|token| matches!(token.token, Token::Section))
+        .collect();
+    markers
+        .iter()
+        .enumerate()
+        .map(|(index, marker)| {
+            let marker_text = marker.lexeme.trim_end_matches(['\r', '\n']);
+            ScriptSection {
+                ordinal: index as u32 + 1,
+                title: marker_text
+                    .strip_prefix("%%")
+                    .unwrap_or(marker_text)
+                    .trim()
+                    .to_owned(),
+                marker_span: Span {
+                    start: marker.start,
+                    end: marker.start + marker_text.len(),
+                },
+                body_span: Span {
+                    start: marker.end,
+                    end: markers.get(index + 1).map_or(source_len, |next| next.start),
+                },
+            }
+        })
+        .collect()
 }

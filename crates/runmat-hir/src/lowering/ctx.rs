@@ -253,6 +253,16 @@ impl LoweringCtx {
             top_level_functions: Vec::new(),
             classes: Vec::new(),
             synthetic_entry_function: None,
+            script_sections: prog
+                .sections
+                .iter()
+                .map(|section| crate::HirScriptSection {
+                    ordinal: section.ordinal,
+                    title: section.title.clone(),
+                    marker_span: section.marker_span,
+                    body_span: section.body_span,
+                })
+                .collect(),
         });
 
         for stmt in &prog.body {
@@ -1180,7 +1190,10 @@ impl LoweringCtx {
 
         for member in members {
             match member {
-                runmat_parser::ClassMember::Properties { attributes, names } => {
+                runmat_parser::ClassMember::Properties {
+                    attributes, names, ..
+                } => {
+                    let declared_attributes = semantic_attributes(attributes);
                     let attributes = property_attributes(name, attributes)?;
                     for property_decl in names {
                         let prop_name = &property_decl.name;
@@ -1204,12 +1217,16 @@ impl LoweringCtx {
                         properties.push(ClassProperty {
                             name: crate::MemberName(prop_name.clone()),
                             attributes: attributes.clone(),
+                            declared_attributes: declared_attributes.clone(),
                             default,
-                            span,
+                            span: property_decl.span,
                         });
                     }
                 }
-                runmat_parser::ClassMember::Methods { attributes, body } => {
+                runmat_parser::ClassMember::Methods {
+                    attributes, body, ..
+                } => {
+                    let declared_attributes = semantic_attributes(attributes);
                     let is_static = attributes
                         .iter()
                         .any(|attr| attr.name.eq_ignore_ascii_case("Static"));
@@ -1299,6 +1316,7 @@ impl LoweringCtx {
                                 name: crate::MethodName(method_name.clone()),
                                 is_static,
                                 attributes: method_attributes.clone(),
+                                declared_attributes: declared_attributes.clone(),
                                 span: *span,
                             });
                         } else if method_attributes.is_abstract {
@@ -1343,56 +1361,77 @@ impl LoweringCtx {
                                 name: crate::MethodName(method_name),
                                 is_static,
                                 attributes: method_attributes.clone(),
+                                declared_attributes: declared_attributes.clone(),
                                 span: method_span,
                             });
                         }
                     }
                 }
-                runmat_parser::ClassMember::Events { names, .. } => {
+                runmat_parser::ClassMember::Events {
+                    attributes, names, ..
+                } => {
+                    let declared_attributes = semantic_attributes(attributes);
                     let mut seen = HashSet::new();
-                    for event_name in names {
-                        if !seen.insert(event_name) {
+                    for event in names {
+                        if !seen.insert(&event.name) {
                             return Err(HirError::new(format!(
-                                "Duplicate event '{event_name}' in class {name}"
+                                "Duplicate event '{}' in class {name}",
+                                event.name
                             ))
                             .with_identifier(IDENT_CLASS_MEMBER_DUPLICATE));
                         }
-                        if property_names.contains(event_name) || method_names.contains(event_name)
+                        if property_names.contains(&event.name)
+                            || method_names.contains(&event.name)
                         {
                             return Err(HirError::new(format!(
-                                "Name '{event_name}' used for event conflicts with existing member in class {name}"
+                                "Name '{}' used for event conflicts with existing member in class {name}",
+                                event.name
                             ))
                             .with_identifier(IDENT_CLASS_MEMBER_NAME_CONFLICT));
                         }
                         events.push(ClassEvent {
-                            name: SymbolName(event_name.clone()),
-                            span,
+                            name: SymbolName(event.name.clone()),
+                            declared_attributes: declared_attributes.clone(),
+                            span: event.span,
                         });
                     }
                 }
-                runmat_parser::ClassMember::Enumeration { names, .. } => {
+                runmat_parser::ClassMember::Enumeration {
+                    attributes, names, ..
+                } => {
+                    let declared_attributes = semantic_attributes(attributes);
                     let mut seen = HashSet::new();
-                    for enum_name in names {
-                        if !seen.insert(enum_name) {
+                    for enumeration in names {
+                        if !seen.insert(&enumeration.name) {
                             return Err(HirError::new(format!(
-                                "Duplicate enumeration '{enum_name}' in class {name}"
+                                "Duplicate enumeration '{}' in class {name}",
+                                enumeration.name
                             ))
                             .with_identifier(IDENT_CLASS_MEMBER_DUPLICATE));
                         }
-                        if property_names.contains(enum_name) || method_names.contains(enum_name) {
+                        if property_names.contains(&enumeration.name)
+                            || method_names.contains(&enumeration.name)
+                        {
                             return Err(HirError::new(format!(
-                                "Name '{enum_name}' used for enumeration conflicts with existing member in class {name}"
+                                "Name '{}' used for enumeration conflicts with existing member in class {name}",
+                                enumeration.name
                             ))
                             .with_identifier(IDENT_CLASS_MEMBER_NAME_CONFLICT));
                         }
                         enumerations.push(ClassEnumeration {
-                            name: SymbolName(enum_name.clone()),
-                            span,
+                            name: SymbolName(enumeration.name.clone()),
+                            declared_attributes: declared_attributes.clone(),
+                            span: enumeration.span,
                         });
                     }
                 }
-                runmat_parser::ClassMember::Arguments { .. } => {
-                    arguments.push(ClassArgumentBlock { span });
+                runmat_parser::ClassMember::Arguments {
+                    attributes, span, ..
+                } => {
+                    arguments.push(ClassArgumentBlock {
+                        declared_attributes: semantic_attributes(attributes),
+                        span: *span,
+                    });
                 }
             }
         }
@@ -1404,15 +1443,9 @@ impl LoweringCtx {
             span,
         });
 
-        let builtin_super_class = super_class.and_then(|super_name| {
-            if super_name.eq_ignore_ascii_case("handle") {
-                Some("handle".to_string())
-            } else if super_name.eq_ignore_ascii_case("dynamicprops") {
-                Some("dynamicprops".to_string())
-            } else {
-                None
-            }
-        });
+        let builtin_super_class = super_class
+            .filter(|super_name| runmat_builtins::get_class(super_name).is_some())
+            .map(ToOwned::to_owned);
 
         let resolved_super = super_class.and_then(|super_name| {
             if builtin_super_class.is_some() {
@@ -1431,10 +1464,7 @@ impl LoweringCtx {
         });
 
         let kind = if super_class
-            .map(|name| {
-                name.eq_ignore_ascii_case("handle") || name.eq_ignore_ascii_case("dynamicprops")
-            })
-            .unwrap_or(false)
+            .is_some_and(|name| runmat_builtins::is_class_or_subclass(name, "handle"))
             || resolved_super
                 .and_then(|id| self.assembly.classes.iter().find(|class| class.id == id))
                 .is_some_and(|class| matches!(class.kind, ClassKind::Handle))
@@ -1453,6 +1483,7 @@ impl LoweringCtx {
             kind,
             is_sealed,
             is_abstract,
+            declared_attributes: semantic_attributes(class_attributes),
             properties,
             methods,
             events,
@@ -3659,6 +3690,17 @@ fn parse_member_access_value(
         ))
         .with_identifier(IDENT_CLASS_ACCESS_VALUE_INVALID)),
     }
+}
+
+fn semantic_attributes(attributes: &[runmat_parser::Attr]) -> Vec<crate::SemanticAttribute> {
+    attributes
+        .iter()
+        .map(|attribute| crate::SemanticAttribute {
+            name: attribute.name.clone(),
+            value: attribute.value.clone(),
+            span: attribute.span,
+        })
+        .collect()
 }
 
 fn property_attributes(

@@ -33,6 +33,15 @@ pub struct HirModule {
     pub top_level_functions: Vec<FunctionId>,
     pub classes: Vec<ClassId>,
     pub synthetic_entry_function: Option<FunctionId>,
+    pub script_sections: Vec<HirScriptSection>,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct HirScriptSection {
+    pub ordinal: u32,
+    pub title: String,
+    pub marker_span: Span,
+    pub body_span: Span,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -699,6 +708,7 @@ pub struct HirClass {
     pub kind: ClassKind,
     pub is_sealed: bool,
     pub is_abstract: bool,
+    pub declared_attributes: Vec<SemanticAttribute>,
     pub properties: Vec<ClassProperty>,
     pub methods: Vec<ClassMethod>,
     pub events: Vec<ClassEvent>,
@@ -717,6 +727,7 @@ pub enum ClassKind {
 pub struct ClassProperty {
     pub name: MemberName,
     pub attributes: PropertyAttributes,
+    pub declared_attributes: Vec<SemanticAttribute>,
     pub default: Option<HirExpr>,
     pub span: Span,
 }
@@ -727,23 +738,34 @@ pub struct ClassMethod {
     pub name: MethodName,
     pub is_static: bool,
     pub attributes: MethodAttributes,
+    pub declared_attributes: Vec<SemanticAttribute>,
     pub span: Span,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct ClassEvent {
     pub name: SymbolName,
+    pub declared_attributes: Vec<SemanticAttribute>,
     pub span: Span,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct ClassEnumeration {
     pub name: SymbolName,
+    pub declared_attributes: Vec<SemanticAttribute>,
     pub span: Span,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct ClassArgumentBlock {
+    pub declared_attributes: Vec<SemanticAttribute>,
+    pub span: Span,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct SemanticAttribute {
+    pub name: String,
+    pub value: Option<String>,
     pub span: Span,
 }
 
@@ -1210,12 +1232,24 @@ impl DefPath {
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub enum DefPathSegment {
     Function(SymbolName),
+    Class(SymbolName),
+    Method(SymbolName),
+    ScriptSection { ordinal: u32, title: String },
 }
 
 impl DefPathSegment {
     pub fn display_name(&self) -> String {
         match self {
             DefPathSegment::Function(name) => name.0.clone(),
+            DefPathSegment::Class(name) => name.0.clone(),
+            DefPathSegment::Method(name) => name.0.clone(),
+            DefPathSegment::ScriptSection { ordinal, title } => {
+                if title.is_empty() {
+                    format!("section-{ordinal}")
+                } else {
+                    format!("section-{ordinal}:{title}")
+                }
+            }
         }
     }
 }
@@ -1300,6 +1334,7 @@ mod tests {
                 top_level_functions: vec![],
                 classes: vec![],
                 synthetic_entry_function: Some(function),
+                script_sections: vec![],
             }],
             functions: vec![HirFunction {
                 id: function,
