@@ -4,7 +4,7 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexTensor, IntValue, IntegerComplexStorage, LogicalArray, NumericDType,
-    ResolveContext, Tensor, Type, Value,
+    NumericStorage, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -218,7 +218,7 @@ fn scalar_coefficient_mode(value: &Value) -> Option<CoefficientMode> {
             parse_nonnegative_integer_f64(tensor::tensor_value_f64(tensor, 0)).map(|n| {
                 CoefficientMode {
                     n,
-                    class: tensor_class(tensor.dtype),
+                    class: tensor_class(tensor.numeric_dtype()),
                 }
             })
         }
@@ -255,7 +255,7 @@ fn coefficient_value(n: usize, k: usize, class: CoefficientClass) -> BuiltinResu
         CoefficientClass::Double => Ok(Value::Num(binomial_f64(n, k))),
         CoefficientClass::Single => {
             let value = binomial_f64(n, k);
-            Tensor::new_with_dtype(vec![value], vec![1, 1], NumericDType::F32)
+            Tensor::from_f32(vec![value as f32], vec![1, 1])
                 .map(Value::Tensor)
                 .map_err(|e| nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {e}")))
         }
@@ -361,18 +361,37 @@ fn combinations_value(value: Value, k: usize) -> BuiltinResult<Value> {
 fn combinations_tensor(tensor: Tensor, k: usize) -> BuiltinResult<Value> {
     let n = vector_len(&tensor.shape)?;
     let rows = checked_rows(n, k)?;
-    if let Some(storage) = tensor.integer_data {
-        let storage = storage
-            .from_exact_values_like(combination_columns(&storage.exact_values(), rows, k)?)
-            .map_err(|error| nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {error}")))?;
-        return Tensor::new_integer(storage, vec![rows, k])
-            .map(Value::Tensor)
-            .map_err(|error| nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {error}")));
-    }
-    let data = combination_columns(&tensor.data, rows, k)?;
-    Tensor::new_with_dtype(data, vec![rows, k], tensor.dtype)
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|error| nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {error}")))?;
+    let storage = combination_storage(storage, rows, k)?;
+    Tensor::from_numeric_storage(storage, vec![rows, k])
         .map(Value::Tensor)
         .map_err(|e| nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {e}")))
+}
+
+fn combination_storage(
+    storage: NumericStorage,
+    rows: usize,
+    k: usize,
+) -> BuiltinResult<NumericStorage> {
+    macro_rules! combinations {
+        ($values:expr, $variant:ident) => {
+            NumericStorage::$variant(combination_columns(&$values, rows, k)?)
+        };
+    }
+    Ok(match storage {
+        NumericStorage::F64(values) => combinations!(values, F64),
+        NumericStorage::F32(values) => combinations!(values, F32),
+        NumericStorage::I8(values) => combinations!(values, I8),
+        NumericStorage::I16(values) => combinations!(values, I16),
+        NumericStorage::I32(values) => combinations!(values, I32),
+        NumericStorage::I64(values) => combinations!(values, I64),
+        NumericStorage::U8(values) => combinations!(values, U8),
+        NumericStorage::U16(values) => combinations!(values, U16),
+        NumericStorage::U32(values) => combinations!(values, U32),
+        NumericStorage::U64(values) => combinations!(values, U64),
+    })
 }
 
 fn combinations_complex_tensor(tensor: ComplexTensor, k: usize) -> BuiltinResult<Value> {
@@ -540,7 +559,7 @@ fn parse_k(value: &Value) -> BuiltinResult<ParsedK> {
             parse_nonnegative_integer_f64(tensor::tensor_value_f64(tensor, 0))
                 .map(|value| ParsedK {
                     value,
-                    class: tensor_class(tensor.dtype),
+                    class: tensor_class(tensor.numeric_dtype()),
                 })
                 .ok_or_else(invalid_k)
         }
@@ -549,9 +568,7 @@ fn parse_k(value: &Value) -> BuiltinResult<ParsedK> {
 }
 
 fn tensor_element_len(tensor: &Tensor) -> usize {
-    tensor
-        .integer_storage()
-        .map_or(tensor.data.len(), |storage| storage.len())
+    tensor::tensor_element_len(tensor)
 }
 
 fn invalid_k() -> RuntimeError {
@@ -700,7 +717,10 @@ mod tests {
         };
         assert_eq!(single_out.dtype, NumericDType::F32);
         assert_eq!(single_out.shape, vec![1, 1]);
-        assert_eq!(single_out.data, vec![10.0]);
+        assert_eq!(
+            single_out.into_numeric_storage().expect("single storage"),
+            NumericStorage::F32(vec![10.0])
+        );
         let err = call(Value::Int(IntValue::U8(5)), Value::Int(IntValue::U16(2))).unwrap_err();
         assert_eq!(
             err.identifier.as_deref(),
@@ -740,6 +760,19 @@ mod tests {
                 6.0, 6.0, 8.0, 8.0, 8.0, // col 3
                 8.0, 10.0, 10.0, 10.0, 10.0,
             ]
+        );
+    }
+
+    #[test]
+    fn single_vector_combinations_preserve_native_storage() {
+        let vector = Tensor::from_f32(vec![2.0, 4.0, 6.0], vec![1, 3]).unwrap();
+        let Value::Tensor(out) = call(Value::Tensor(vector), Value::Num(2.0)).unwrap() else {
+            panic!("expected tensor");
+        };
+        assert_eq!(out.shape, vec![3, 2]);
+        assert_eq!(
+            out.into_numeric_storage().expect("single storage"),
+            NumericStorage::F32(vec![2.0, 2.0, 4.0, 4.0, 6.0, 6.0])
         );
     }
 

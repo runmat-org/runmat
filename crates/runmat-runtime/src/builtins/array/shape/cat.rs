@@ -18,7 +18,7 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
-    LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+    LogicalArray, NumericStorage, ResolveContext, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -818,18 +818,29 @@ fn integer_concat_input(
 ) -> BuiltinResult<(Vec<usize>, Vec<runmat_builtins::IntValue>)> {
     match value {
         Value::Tensor(tensor) => {
-            let values = match tensor.integer_data {
-                Some(storage) => integer_values(storage)
-                    .iter()
-                    .map(|value| target.cast_int(value))
+            let shape = tensor.shape.clone();
+            let values = match tensor
+                .into_numeric_storage()
+                .map_err(|error| cat_err(format!("cat: {error}")))?
+            {
+                NumericStorage::F64(values) => values
+                    .into_iter()
+                    .map(|value| target.cast_scalar(value))
                     .collect(),
-                None => tensor
-                    .data
-                    .iter()
-                    .map(|&value| target.cast_scalar(value))
+                NumericStorage::F32(values) => values
+                    .into_iter()
+                    .map(|value| target.cast_scalar(f64::from(value)))
                     .collect(),
+                storage => integer_values(
+                    storage
+                        .into_integer_storage()
+                        .expect("non-floating numeric storage is integer"),
+                )
+                .iter()
+                .map(|value| target.cast_int(value))
+                .collect(),
             };
-            Ok((tensor.shape, values))
+            Ok((shape, values))
         }
         Value::Int(value) => Ok((vec![1, 1], vec![target.cast_int(&value)])),
         Value::Num(value) => Ok((vec![1, 1], vec![target.cast_scalar(value)])),
@@ -1001,19 +1012,30 @@ fn typed_complex_integer_concat_input(
             vec![target.cast_scalar(imag)],
         )),
         Value::Tensor(tensor) => {
-            let real: Vec<runmat_builtins::IntValue> = match tensor.integer_data {
-                Some(storage) => integer_values(storage)
-                    .iter()
-                    .map(|value| target.cast_int(value))
+            let shape = tensor.shape.clone();
+            let real: Vec<runmat_builtins::IntValue> = match tensor
+                .into_numeric_storage()
+                .map_err(|error| cat_err(format!("cat: {error}")))?
+            {
+                NumericStorage::F64(values) => values
+                    .into_iter()
+                    .map(|value| target.cast_scalar(value))
                     .collect(),
-                None => tensor
-                    .data
-                    .iter()
-                    .map(|&value| target.cast_scalar(value))
+                NumericStorage::F32(values) => values
+                    .into_iter()
+                    .map(|value| target.cast_scalar(f64::from(value)))
                     .collect(),
+                storage => integer_values(
+                    storage
+                        .into_integer_storage()
+                        .expect("non-floating numeric storage is integer"),
+                )
+                .iter()
+                .map(|value| target.cast_int(value))
+                .collect(),
             };
             let imag = vec![zero(); real.len()];
-            Ok((tensor.shape, real, imag))
+            Ok((shape, real, imag))
         }
         Value::Int(value) => Ok((vec![1, 1], vec![target.cast_int(&value)], vec![zero()])),
         Value::Num(value) => Ok((vec![1, 1], vec![target.cast_scalar(value)], vec![zero()])),
@@ -1663,12 +1685,13 @@ pub(crate) mod tests {
     #[test]
     fn cat_uses_leftmost_integer_class_and_conversion_rules() {
         let left = Tensor::new_integer(IntegerStorage::I8(vec![12]), vec![1, 1]).expect("left");
+        let single = Tensor::from_f32(vec![3.5], vec![1, 1]).expect("single");
         let result = cat_builtin(
             Value::Int(IntValue::I32(2)),
             vec![
                 Value::Tensor(left),
                 Value::Int(IntValue::U64(u64::MAX)),
-                Value::Num(3.5),
+                Value::Tensor(single),
                 Value::Bool(true),
             ],
         )
