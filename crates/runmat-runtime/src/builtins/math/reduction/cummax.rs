@@ -12,6 +12,9 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use super::floating_cumulative_extrema::{
+    self, CumulativeDirection, CumulativeExtrema, CumulativeNanMode,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "cummax";
@@ -633,7 +636,7 @@ fn cummax_host_floating(
     let tensor = tensor::value_into_tensor_for("cummax", value)
         .map_err(|err| cummax_error_with_detail(&CUMMAX_ERROR_INVALID_INPUT, err))?;
     let target_dim = dim.unwrap_or_else(|| default_dimension(&tensor));
-    let (values, indices) = cummax_tensor(&tensor, target_dim, direction, nan_mode)?;
+    let (values, indices) = cummax_tensor(tensor, target_dim, direction, nan_mode)?;
     Ok(CummaxEvaluation {
         values: tensor::tensor_into_value(values),
         indices: tensor::tensor_into_value(indices),
@@ -754,7 +757,7 @@ async fn cummax_gpu(
     let tensor = gpu_helpers::gather_tensor_async(&handle)
         .await
         .map_err(|err| cummax_internal_error(err.message()))?;
-    let (values, indices) = cummax_tensor(&tensor, target_dim, direction, nan_mode)?;
+    let (values, indices) = cummax_tensor(tensor, target_dim, direction, nan_mode)?;
     Ok(CummaxEvaluation {
         values: tensor::tensor_into_value(values),
         indices: tensor::tensor_into_value(indices),
@@ -762,162 +765,30 @@ async fn cummax_gpu(
 }
 
 fn cummax_tensor(
-    tensor: &Tensor,
+    tensor: Tensor,
     dim: usize,
     direction: CummaxDirection,
     nan_mode: CummaxNanMode,
 ) -> BuiltinResult<(Tensor, Tensor)> {
-    if dim == 0 {
-        return Err(cummax_error_with_detail(
-            &CUMMAX_ERROR_INVALID_ARGUMENT,
-            "dimension must be >= 1",
-        ));
-    }
-    if tensor.data.is_empty() {
-        let indices =
-            Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| cummax_internal_error(&e))?;
-        return Ok((tensor.clone(), indices));
-    }
-    if dim > tensor.shape.len() {
-        let indices = ones_indices(&tensor.shape)?;
-        return Ok((tensor.clone(), indices));
-    }
-
-    let dim_index = dim - 1;
-    let segment_len = tensor.shape[dim_index];
-    if segment_len == 0 {
-        let indices =
-            Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| cummax_internal_error(&e))?;
-        return Ok((tensor.clone(), indices));
-    }
-
-    let stride_before = dim_product(&tensor.shape[..dim_index]);
-    let stride_after = dim_product(&tensor.shape[dim..]);
-    let block = stride_before * segment_len;
-    let mut values_out = vec![0.0f64; tensor.data.len()];
-    let mut indices_out = vec![0.0f64; tensor.data.len()];
-
-    for after in 0..stride_after {
-        let base = after * block;
-        for before in 0..stride_before {
-            match direction {
-                CummaxDirection::Forward => {
-                    let mut current = 0.0f64;
-                    let mut current_index = 0usize;
-                    let mut has_value = false;
-                    let mut nan_fixed = false;
-                    let mut nan_index = 0usize;
-                    for k in 0..segment_len {
-                        let idx = base + before + k * stride_before;
-                        let value = tensor.data[idx];
-                        let position = k + 1;
-                        match nan_mode {
-                            CummaxNanMode::Include => {
-                                if nan_fixed {
-                                    values_out[idx] = f64::NAN;
-                                    indices_out[idx] = nan_index as f64;
-                                    continue;
-                                }
-                                if value.is_nan() {
-                                    nan_fixed = true;
-                                    nan_index = position;
-                                    values_out[idx] = f64::NAN;
-                                    indices_out[idx] = position as f64;
-                                    continue;
-                                }
-                                if !has_value || value > current {
-                                    has_value = true;
-                                    current = value;
-                                    current_index = position;
-                                }
-                                values_out[idx] = current;
-                                indices_out[idx] = current_index as f64;
-                            }
-                            CummaxNanMode::Omit => {
-                                if value.is_nan() {
-                                    if has_value {
-                                        values_out[idx] = current;
-                                        indices_out[idx] = current_index as f64;
-                                    } else {
-                                        values_out[idx] = f64::NAN;
-                                        indices_out[idx] = f64::NAN;
-                                    }
-                                    continue;
-                                }
-                                if !has_value || value > current {
-                                    has_value = true;
-                                    current = value;
-                                    current_index = position;
-                                }
-                                values_out[idx] = current;
-                                indices_out[idx] = current_index as f64;
-                            }
-                        }
-                    }
-                }
-                CummaxDirection::Reverse => {
-                    let mut current = 0.0f64;
-                    let mut current_index = 0usize;
-                    let mut has_value = false;
-                    let mut nan_fixed = false;
-                    let mut nan_index = 0usize;
-                    for offset in (0..segment_len).rev() {
-                        let idx = base + before + offset * stride_before;
-                        let value = tensor.data[idx];
-                        let position = offset + 1;
-                        match nan_mode {
-                            CummaxNanMode::Include => {
-                                if nan_fixed {
-                                    values_out[idx] = f64::NAN;
-                                    indices_out[idx] = nan_index as f64;
-                                    continue;
-                                }
-                                if value.is_nan() {
-                                    nan_fixed = true;
-                                    nan_index = position;
-                                    values_out[idx] = f64::NAN;
-                                    indices_out[idx] = position as f64;
-                                    continue;
-                                }
-                                if !has_value || value > current {
-                                    has_value = true;
-                                    current = value;
-                                    current_index = position;
-                                }
-                                values_out[idx] = current;
-                                indices_out[idx] = current_index as f64;
-                            }
-                            CummaxNanMode::Omit => {
-                                if value.is_nan() {
-                                    if has_value {
-                                        values_out[idx] = current;
-                                        indices_out[idx] = current_index as f64;
-                                    } else {
-                                        values_out[idx] = f64::NAN;
-                                        indices_out[idx] = f64::NAN;
-                                    }
-                                    continue;
-                                }
-                                if !has_value || value > current {
-                                    has_value = true;
-                                    current = value;
-                                    current_index = position;
-                                }
-                                values_out[idx] = current;
-                                indices_out[idx] = current_index as f64;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    let values_tensor =
-        Tensor::new(values_out, tensor.shape.clone()).map_err(|e| cummax_internal_error(&e))?;
-    let indices_tensor =
-        Tensor::new(indices_out, tensor.shape.clone()).map_err(|e| cummax_internal_error(&e))?;
-    Ok((values_tensor, indices_tensor))
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|error| cummax_internal_error(&error))?;
+    floating_cumulative_extrema::cumulative_extrema(
+        storage,
+        shape,
+        dim,
+        match direction {
+            CummaxDirection::Forward => CumulativeDirection::Forward,
+            CummaxDirection::Reverse => CumulativeDirection::Reverse,
+        },
+        match nan_mode {
+            CummaxNanMode::Include => CumulativeNanMode::Include,
+            CummaxNanMode::Omit => CumulativeNanMode::Omit,
+        },
+        CumulativeExtrema::Max,
+    )
+    .map_err(|error| cummax_error_with_detail(&CUMMAX_ERROR_INVALID_ARGUMENT, error))
 }
 
 fn cummax_complex_tensor(
@@ -1162,7 +1033,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage};
+    use runmat_builtins::{IntValue, IntegerStorage, NumericStorage};
 
     #[test]
     fn cummax_type_keeps_shape() {
@@ -1226,6 +1097,28 @@ pub(crate) mod tests {
         let (values, indices) = eval.into_pair();
         assert_eq!(values, Value::Num(7.0));
         assert_eq!(indices, Value::Num(1.0));
+    }
+
+    #[test]
+    fn cummax_preserves_native_single_in_reverse() {
+        let input = Tensor::from_f32(vec![1.0, 5.0, f32::NAN, 3.0], vec![4, 1]).expect("input");
+        let (values, indices) = evaluate(
+            Value::Tensor(input),
+            &[Value::from("reverse"), Value::from("omitnan")],
+        )
+        .expect("cummax")
+        .into_pair();
+        let Value::Tensor(values) = values else {
+            panic!("expected values tensor");
+        };
+        assert_eq!(
+            values.into_numeric_storage().expect("native storage"),
+            NumericStorage::F32(vec![5.0, 5.0, 3.0, 3.0])
+        );
+        let Value::Tensor(indices) = indices else {
+            panic!("expected indices tensor");
+        };
+        assert_eq!(indices.data, vec![2.0, 2.0, 4.0, 4.0]);
     }
 
     #[test]

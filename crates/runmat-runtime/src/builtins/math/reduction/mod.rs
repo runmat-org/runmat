@@ -8,6 +8,7 @@ pub(crate) mod cumprod;
 pub(crate) mod cumsum;
 pub(crate) mod cumtrapz;
 pub(crate) mod diff;
+pub(crate) mod floating_cumulative_extrema;
 pub(crate) mod gradient;
 pub(crate) mod integer_native;
 pub(crate) mod integration_common;
