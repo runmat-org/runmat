@@ -1017,6 +1017,313 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/packages/registry/{packageId}/publications:
+    get:
+      tags:
+      - packages::registry::management::publications::review
+      operationId: list_publications
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: packageId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicationListResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+    post:
+      tags:
+      - packages::registry::management::publications::stage
+      operationId: stage_publication
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: packageId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StagePublicationRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StagePublicationResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/packages/registry/{packageId}/publications/{publicationId}/approve:
+    post:
+      tags:
+      - packages::registry::management::publications::review
+      operationId: approve_publication
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: packageId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: publicationId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovePublicationRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicationResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/packages/registry/{packageId}/publications/{publicationId}/finalize:
+    post:
+      tags:
+      - packages::registry::management::publications::review
+      operationId: finalize_publication
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: packageId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: publicationId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FinalizePublicationResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/packages/registry/{packageId}/publications/{publicationId}/reject:
+    post:
+      tags:
+      - packages::registry::management::publications::review
+      operationId: reject_publication
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: packageId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: publicationId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RejectPublicationRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicationResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/packages/registry/{packageId}/publications/{publicationId}/verify:
+    post:
+      tags:
+      - packages::registry::management::publications::verify
+      operationId: verify_publication
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: packageId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: publicationId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicationResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
   /v1/packages/registry/releases/{releaseId}:
     get:
       tags:
@@ -4308,6 +4615,440 @@ components:
         visibility:
           $ref: '#/components/schemas/PackageVisibilityRequest'
       additionalProperties: false
+    ApprovePublicationRequest:
+      type: object
+      properties:
+        approve:
+          type: boolean
+      additionalProperties: false
+    FinalizePublicationResponse:
+      type: object
+      required:
+      - publicationId
+      - releaseId
+      - releaseDigest
+      - version
+      properties:
+        publicationId:
+          type: string
+        releaseDigest:
+          type: string
+        releaseId:
+          type: string
+        version:
+          type: string
+    PublicationListResponse:
+      type: object
+      required:
+      - publications
+      properties:
+        publications:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublicationResponse'
+    PublicationResponse:
+      type: object
+      required:
+      - id
+      - packageId
+      - version
+      - artifact
+      - metadata
+      - idempotencyKey
+      - payloadDigest
+      - status
+      - createdBy
+      - createdAt
+      - updatedAt
+      properties:
+        approvedAt:
+          type: string
+          format: date-time
+          nullable: true
+        approvedBy:
+          type: string
+          nullable: true
+        artifact:
+          type: object
+          required:
+          - id
+          - digest
+          - treeDigest
+          - byteLen
+          - mediaType
+          properties:
+            byteLen:
+              type: integer
+              format: int64
+              minimum: 0
+            digest:
+              type: string
+            id:
+              type: string
+            mediaType:
+              type: string
+            treeDigest:
+              type: string
+        createdAt:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+        id:
+          type: string
+        idempotencyKey:
+          type: string
+        metadata:
+          type: object
+          required:
+          - singleton
+          - dependencies
+          - features
+          - requiredCapabilities
+          - optionalCapabilities
+          properties:
+            dependencies:
+              type: array
+              items:
+                type: object
+                required:
+                - alias
+                - registry
+                - namespace
+                - name
+                - requirement
+                - group
+                - optional
+                - defaultFeatures
+                - features
+                properties:
+                  alias:
+                    type: string
+                  defaultFeatures:
+                    type: boolean
+                  features:
+                    type: array
+                    items:
+                      type: string
+                  group:
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                  optional:
+                    type: boolean
+                  registry:
+                    type: string
+                  requirement:
+                    type: string
+                  target:
+                    type: string
+                    nullable: true
+            features:
+              type: object
+              additionalProperties:
+                type: array
+                items:
+                  type: string
+            license:
+              type: string
+              nullable: true
+            optionalCapabilities:
+              type: array
+              items:
+                type: string
+            readmeDigest:
+              type: string
+              nullable: true
+            requiredCapabilities:
+              type: array
+              items:
+                type: string
+            runmatRequirement:
+              type: string
+              nullable: true
+            singleton:
+              type: boolean
+        packageId:
+          type: string
+        payloadDigest:
+          type: string
+        rejectionReason:
+          type: string
+          nullable: true
+        status:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+        verifiedAt:
+          type: string
+          format: date-time
+          nullable: true
+        version:
+          type: string
+    RejectPublicationRequest:
+      type: object
+      required:
+      - reason
+      properties:
+        reason:
+          type: string
+      additionalProperties: false
+    StagePublicationRequest:
+      type: object
+      required:
+      - version
+      - artifact
+      - metadata
+      - idempotencyKey
+      properties:
+        artifact:
+          type: object
+          required:
+          - digest
+          - treeDigest
+          - byteLen
+          - mediaType
+          properties:
+            byteLen:
+              type: integer
+              format: int64
+              minimum: 0
+            digest:
+              type: string
+            mediaType:
+              type: string
+            treeDigest:
+              type: string
+          additionalProperties: false
+        idempotencyKey:
+          type: string
+        metadata:
+          type: object
+          properties:
+            dependencies:
+              type: array
+              items:
+                type: object
+                required:
+                - alias
+                - registry
+                - namespace
+                - name
+                - requirement
+                - group
+                properties:
+                  alias:
+                    type: string
+                  defaultFeatures:
+                    type: boolean
+                  features:
+                    type: array
+                    items:
+                      type: string
+                  group:
+                    type: string
+                    enum:
+                    - runtime
+                    - development
+                    - test
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                  optional:
+                    type: boolean
+                  registry:
+                    type: string
+                  requirement:
+                    type: string
+                  target:
+                    type: string
+                    nullable: true
+                additionalProperties: false
+            features:
+              type: object
+              additionalProperties:
+                type: array
+                items:
+                  type: string
+            license:
+              type: string
+              nullable: true
+            optionalCapabilities:
+              type: array
+              items:
+                type: string
+            readmeDigest:
+              type: string
+              nullable: true
+            requiredCapabilities:
+              type: array
+              items:
+                type: string
+            runmatRequirement:
+              type: string
+              nullable: true
+            singleton:
+              type: boolean
+          additionalProperties: false
+        version:
+          type: string
+      additionalProperties: false
+    StagePublicationResponse:
+      allOf:
+      - type: object
+        required:
+        - id
+        - packageId
+        - version
+        - artifact
+        - metadata
+        - idempotencyKey
+        - payloadDigest
+        - status
+        - createdBy
+        - createdAt
+        - updatedAt
+        properties:
+          approvedAt:
+            type: string
+            format: date-time
+            nullable: true
+          approvedBy:
+            type: string
+            nullable: true
+          artifact:
+            type: object
+            required:
+            - id
+            - digest
+            - treeDigest
+            - byteLen
+            - mediaType
+            properties:
+              byteLen:
+                type: integer
+                format: int64
+                minimum: 0
+              digest:
+                type: string
+              id:
+                type: string
+              mediaType:
+                type: string
+              treeDigest:
+                type: string
+          createdAt:
+            type: string
+            format: date-time
+          createdBy:
+            type: string
+          id:
+            type: string
+          idempotencyKey:
+            type: string
+          metadata:
+            type: object
+            required:
+            - singleton
+            - dependencies
+            - features
+            - requiredCapabilities
+            - optionalCapabilities
+            properties:
+              dependencies:
+                type: array
+                items:
+                  type: object
+                  required:
+                  - alias
+                  - registry
+                  - namespace
+                  - name
+                  - requirement
+                  - group
+                  - optional
+                  - defaultFeatures
+                  - features
+                  properties:
+                    alias:
+                      type: string
+                    defaultFeatures:
+                      type: boolean
+                    features:
+                      type: array
+                      items:
+                        type: string
+                    group:
+                      type: string
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                    optional:
+                      type: boolean
+                    registry:
+                      type: string
+                    requirement:
+                      type: string
+                    target:
+                      type: string
+                      nullable: true
+              features:
+                type: object
+                additionalProperties:
+                  type: array
+                  items:
+                    type: string
+              license:
+                type: string
+                nullable: true
+              optionalCapabilities:
+                type: array
+                items:
+                  type: string
+              readmeDigest:
+                type: string
+                nullable: true
+              requiredCapabilities:
+                type: array
+                items:
+                  type: string
+              runmatRequirement:
+                type: string
+                nullable: true
+              singleton:
+                type: boolean
+          packageId:
+            type: string
+          payloadDigest:
+            type: string
+          rejectionReason:
+            type: string
+            nullable: true
+          status:
+            type: string
+          updatedAt:
+            type: string
+            format: date-time
+          verifiedAt:
+            type: string
+            format: date-time
+            nullable: true
+          version:
+            type: string
+      - type: object
+        properties:
+          uploadExpiresAt:
+            type: string
+            format: date-time
+            nullable: true
+          uploadUrl:
+            type: string
+            nullable: true
     RegistryAdvisoryResponse:
       type: object
       required:
