@@ -1,6 +1,6 @@
 use super::loader::{Loader, PackageOrigin};
 use super::source::{canonical_path, is_file};
-use super::{GitPackageProvider, ProjectResolveError, ProjectResolveOptions, ResolvedProject};
+use super::{PackageSourceProvider, ProjectResolveError, ProjectResolveOptions, ResolvedProject};
 use crate::source::catalog::{assemble_frozen_project, FrozenPackageInput, FrozenSourceInput};
 use crate::{
     build_resolved_graph, reconcile_path_lock, PackageLock, PathLockMode, ResolvedDependencyInput,
@@ -13,7 +13,7 @@ pub async fn resolve_project_async(
     root_manifest: &Path,
     existing_lock: Option<&PackageLock>,
     options: ProjectResolveOptions,
-    git: &dyn GitPackageProvider,
+    sources: &dyn PackageSourceProvider,
 ) -> Result<ResolvedProject, ProjectResolveError> {
     if let Some(lock) = existing_lock {
         lock.validate()?;
@@ -24,14 +24,15 @@ pub async fn resolve_project_async(
         .unwrap_or_else(|| Path::new("."))
         .to_path_buf();
     let vendor =
-        load_vendor_manifest(&workspace_root, existing_lock, options.git_policy.frozen).await?;
+        load_vendor_manifest(&workspace_root, existing_lock, options.source_policy.frozen).await?;
     let mut loader = Loader {
         workspace_root: workspace_root.clone(),
         existing_lock,
         options: &options,
-        git,
+        sources,
         packages: BTreeMap::new(),
         acquired_git_sources: BTreeSet::new(),
+        acquired_server_sources: BTreeSet::new(),
         vendor: vendor.as_ref(),
     };
     let mut root_features = options.root_features.clone();
@@ -80,7 +81,7 @@ pub async fn resolve_project_async(
         host_capabilities: options.host_capabilities.clone(),
     })?;
     let lock = PackageLock::from_graph_with_features(&graph, options.lock_selection(), &features)?;
-    let lock_mode = if options.git_policy.locked || options.git_policy.frozen {
+    let lock_mode = if options.source_policy.locked || options.source_policy.frozen {
         PathLockMode::Locked
     } else {
         PathLockMode::Live
@@ -119,6 +120,7 @@ pub async fn resolve_project_async(
         lock,
         lock_decision,
         acquired_git_sources: loader.acquired_git_sources.into_iter().collect(),
+        acquired_server_sources: loader.acquired_server_sources.into_iter().collect(),
         source_inventories,
     })
 }

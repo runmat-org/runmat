@@ -1,4 +1,4 @@
-use crate::{GitPolicyError, GraphError, LockError};
+use crate::{GitPolicyError, GraphError, LockError, ServerPolicyError};
 use std::path::PathBuf;
 use thiserror::Error;
 
@@ -24,6 +24,14 @@ pub enum ProjectResolveError {
         dependency: String,
         reason: String,
     },
+    #[error(
+        "Server snapshot acquisition failed for dependency `{dependency}` of `{package}`: {reason}"
+    )]
+    ServerAcquire {
+        package: String,
+        dependency: String,
+        reason: String,
+    },
     #[error("dependency source `{kind}` is not implemented by this resolver")]
     UnsupportedSource { kind: &'static str },
     #[error("dependency `{dependency}` of `{package}` requires {requirement}, but package `{target}` {actual}")]
@@ -38,6 +46,8 @@ pub enum ProjectResolveError {
     Invalid(String),
     #[error(transparent)]
     GitPolicy(#[from] GitPolicyError),
+    #[error(transparent)]
+    ServerPolicy(#[from] ServerPolicyError),
     #[error(transparent)]
     Graph(#[from] GraphError),
     #[error(transparent)]

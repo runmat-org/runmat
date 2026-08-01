@@ -1,5 +1,5 @@
 use crate::{BlobMetadata, CacheError, TreeManifest};
-use runmat_package::{ContentDigest, GitSourceId, SourceId};
+use runmat_package::{ContentDigest, GitSourceId, ServerProjectSourceId, SourceId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -53,46 +53,98 @@ impl GitSnapshot {
     }
 
     pub fn validate(&self) -> Result<(), CacheError> {
-        SourceId::Git(self.source.clone())
-            .validate()
-            .map_err(|error| CacheError::InvalidObject(error.to_string()))?;
-        self.tree.validate()?;
-        if self.source.tree_digest != self.tree.digest {
-            return Err(CacheError::InvalidObject(
-                "Git source tree digest does not match its tree manifest".to_string(),
-            ));
-        }
-        if self
-            .blobs
-            .windows(2)
-            .any(|pair| pair[0].digest >= pair[1].digest)
-        {
-            return Err(CacheError::InvalidObject(
-                "Git snapshot blobs must be strictly digest-sorted".to_string(),
-            ));
-        }
-        let mut available = BTreeMap::new();
-        for blob in &self.blobs {
-            blob.validate()?;
-            available.insert(blob.digest.clone(), blob.bytes.len() as u64);
-        }
-        let referenced: BTreeSet<_> = self.tree.referenced_blobs();
-        let supplied: BTreeSet<_> = available.keys().cloned().collect();
-        if supplied != referenced {
-            return Err(CacheError::InvalidObject(
-                "Git snapshot blob closure does not exactly match the tree".to_string(),
-            ));
-        }
-        for entry in &self.tree.entries {
-            if let Some(digest) = &entry.digest {
-                if available.get(digest) != Some(&entry.byte_len) {
-                    return Err(CacheError::InvalidObject(format!(
-                        "Git snapshot file `{}` size differs from its blob",
-                        entry.path
-                    )));
-                }
+        validate_snapshot(
+            SourceId::Git(self.source.clone()),
+            &self.tree,
+            &self.blobs,
+            "Git",
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServerProjectSnapshot {
+    pub source: ServerProjectSourceId,
+    pub tree: TreeManifest,
+    pub blobs: Vec<SnapshotBlob>,
+}
+
+impl ServerProjectSnapshot {
+    pub fn new(
+        source: ServerProjectSourceId,
+        tree: TreeManifest,
+        mut blobs: Vec<SnapshotBlob>,
+    ) -> Result<Self, CacheError> {
+        blobs.sort_by(|left, right| left.digest.cmp(&right.digest));
+        let snapshot = Self {
+            source,
+            tree,
+            blobs,
+        };
+        validate_snapshot(
+            SourceId::ServerProject(snapshot.source.clone()),
+            &snapshot.tree,
+            &snapshot.blobs,
+            "Server project",
+        )?;
+        Ok(snapshot)
+    }
+
+    pub fn validate(&self) -> Result<(), CacheError> {
+        validate_snapshot(
+            SourceId::ServerProject(self.source.clone()),
+            &self.tree,
+            &self.blobs,
+            "Server project",
+        )
+    }
+}
+
+fn validate_snapshot(
+    source: SourceId,
+    tree: &TreeManifest,
+    blobs: &[SnapshotBlob],
+    kind: &str,
+) -> Result<(), CacheError> {
+    source
+        .validate()
+        .map_err(|error| CacheError::InvalidObject(error.to_string()))?;
+    tree.validate()?;
+    if source.tree_digest() != &tree.digest {
+        return Err(CacheError::InvalidObject(format!(
+            "{kind} source tree digest does not match its tree manifest"
+        )));
+    }
+    if blobs
+        .windows(2)
+        .any(|pair| pair[0].digest >= pair[1].digest)
+    {
+        return Err(CacheError::InvalidObject(format!(
+            "{kind} snapshot blobs must be strictly digest-sorted"
+        )));
+    }
+    let mut available = BTreeMap::new();
+    for blob in blobs {
+        blob.validate()?;
+        available.insert(blob.digest.clone(), blob.bytes.len() as u64);
+    }
+    let referenced: BTreeSet<_> = tree.referenced_blobs();
+    let supplied: BTreeSet<_> = available.keys().cloned().collect();
+    if supplied != referenced {
+        return Err(CacheError::InvalidObject(format!(
+            "{kind} snapshot blob closure does not exactly match the tree"
+        )));
+    }
+    for entry in &tree.entries {
+        if let Some(digest) = &entry.digest {
+            if available.get(digest) != Some(&entry.byte_len) {
+                return Err(CacheError::InvalidObject(format!(
+                    "{kind} snapshot file `{}` size differs from its blob",
+                    entry.path
+                )));
             }
         }
-        Ok(())
     }
+    Ok(())
 }

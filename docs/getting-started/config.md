@@ -79,10 +79,18 @@ utils = { path = "../utils", version = "0.1.0" }
 ```
 
 
-| Field     | Type   | Default | Notes                                                        |
-| --------- | ------ | ------- | ------------------------------------------------------------ |
-| `path`    | string | unset   | Local dependency path. Required for local composition today. |
-| `version` | string | unset   | Version metadata for dependency declaration.                 |
+| Field      | Type   | Default | Notes                                                                  |
+| ---------- | ------ | ------- | ---------------------------------------------------------------------- |
+| `path`     | string | unset   | Local dependency path; mutually exclusive with remote source fields.   |
+| `git`      | string | unset   | Credential-free HTTPS or SSH Git repository URL.                       |
+| `rev`      | string | unset   | Exact Git commit selector.                                             |
+| `tag`      | string | unset   | Mutable Git tag selector; mutually exclusive with `rev` and `branch`.  |
+| `branch`   | string | unset   | Mutable Git branch selector.                                           |
+| `subdir`   | string | `""`    | Package subdirectory inside a Git repository.                          |
+| `project`  | string | unset   | RunMat Server project ID.                                              |
+| `service`  | string | active Server | Credential-free HTTPS Server origin.                             |
+| `snapshot` | string | `main`  | Server snapshot tag or exact `snap_...` ID.                             |
+| `version`  | string | unset   | Version requirement or metadata for the dependency declaration.        |
 
 
 ### `[entrypoints.<name>]`

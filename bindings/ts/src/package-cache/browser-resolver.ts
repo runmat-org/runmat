@@ -7,8 +7,13 @@ import type {
   ServerGitGatewayOptions
 } from "./git-gateway.js";
 import { fetchGitTreeInventoryWire } from "./git-gateway.js";
+import type {
+  ServerProjectAcquisitionPlan,
+  ServerProjectSnapshotOptions
+} from "./server-project.js";
+import { fetchServerProjectSnapshot } from "./server-project.js";
 import { BrowserPackageMountFilesystem } from "./mount.js";
-import type { GitSnapshotMountInput } from "./mount.js";
+import type { PackageSnapshotMountInput } from "./mount.js";
 import type { RunMatPackageCacheProvider } from "./provider-types.js";
 import type { PackageCacheLease } from "./provider-types.js";
 
@@ -18,11 +23,12 @@ let nextResolverOwner = 1;
 
 export interface BrowserProjectResolveOptions {
   target: string;
+  default_server_origin: string;
   groups: Array<"runtime" | "development" | "test">;
   root_features: string[];
   host_capabilities: string[];
-  git_intent: GitAcquisitionIntent;
-  git_policy: GitAcquisitionPolicy;
+  source_intent: GitAcquisitionIntent;
+  source_policy: GitAcquisitionPolicy;
 }
 
 export interface BrowserProjectResolveRequest {
@@ -36,6 +42,7 @@ export interface BrowserResolvedProject {
   lock: unknown;
   lock_decision: "use-existing" | "write-generated";
   acquired_git_sources: unknown[];
+  acquired_server_sources: unknown[];
   source_inventories: unknown[];
 }
 
@@ -50,7 +57,8 @@ export interface BrowserProjectResolverNative {
       packageCache: RunMatPackageCacheProvider;
       leaseOwner: string;
       fetchGitInventory(plan: GitAcquisitionPlan): Promise<unknown>;
-      mountGitSnapshot(snapshot: GitSnapshotWire): string;
+      fetchServerSnapshot(plan: ServerProjectAcquisitionPlan): Promise<unknown>;
+      mountPackageSnapshot(snapshot: GitSnapshotWire): string;
     },
     filesystem: RunMatFilesystemProvider
   ): Promise<BrowserResolveWireResult>;
@@ -70,6 +78,7 @@ export interface BrowserProjectResolverConfig {
   filesystem: RunMatFilesystemProvider;
   packageCache: RunMatPackageCacheProvider;
   gitGateway: ServerGitGatewayOptions;
+  serverSnapshots?: ServerProjectSnapshotOptions;
 }
 
 /**
@@ -117,9 +126,11 @@ export class BrowserProjectResolver {
                 },
                 this.config.gitGateway
               ),
-            mountGitSnapshot: (snapshot) =>
+            fetchServerSnapshot: (plan) =>
+              fetchServerProjectSnapshot(plan, this.config.serverSnapshots),
+            mountPackageSnapshot: (snapshot) =>
               this.filesystem.register(
-                snapshot as unknown as GitSnapshotMountInput,
+                snapshot as unknown as PackageSnapshotMountInput,
                 this.config.packageCache
               )
           },

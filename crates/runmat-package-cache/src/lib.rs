@@ -31,9 +31,10 @@ pub use object::{
     TreeEntryKind, TreeManifest,
 };
 pub use source::{
-    cache_git_snapshot, cache_source_inventory, load_git_snapshot, load_source_inventory,
-    publish_source_inventory, GitInventoryEntry, GitInventoryEntryKind, GitSnapshot,
-    GitTreeInventory, SnapshotBlob,
+    cache_git_snapshot, cache_server_project_snapshot, cache_source_inventory, load_git_snapshot,
+    load_server_project_snapshot, load_source_inventory, publish_source_inventory,
+    GitInventoryEntry, GitInventoryEntryKind, GitSnapshot, GitTreeInventory, ServerProjectSnapshot,
+    ServerProjectTreeInventory, SnapshotBlob, TreeInventoryEntry, TreeInventoryEntryKind,
 };
 pub use state::{
     AccessRecord, CacheState, CacheStatus, CorruptionRecord, QuotaPressure, QuotaRecord,

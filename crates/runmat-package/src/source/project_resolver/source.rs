@@ -52,6 +52,9 @@ pub(super) fn source_identity(
     if let PackageOrigin::Git(source) = origin {
         return Ok(SourceId::Git(source.clone()));
     }
+    if let PackageOrigin::ServerProject(source) = origin {
+        return Ok(SourceId::ServerProject(source.clone()));
+    }
     if let PackageOrigin::Vendor(expected) = origin {
         let SourceId::Path(expected_path) = expected else {
             return Err(ProjectResolveError::Invalid(

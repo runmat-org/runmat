@@ -2,7 +2,7 @@ use super::loader::LoadedPackage;
 use super::ProjectResolveError;
 use crate::{
     DependencySpec, GitSourceId, LockedPackage, NormalizedRelativePath, PackageInstanceId,
-    PackageLock, PackageManifest, SourceId,
+    PackageLock, PackageManifest, ServerProjectSourceId, SourceId,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -73,6 +73,20 @@ pub(super) fn locked_git_source<'a>(
     locked_dependency(lock, from_root, from, dependency).and_then(|package| {
         match &package.instance.source {
             SourceId::Git(source) => Some(source),
+            _ => None,
+        }
+    })
+}
+
+pub(super) fn locked_server_source<'a>(
+    lock: Option<&'a PackageLock>,
+    from_root: bool,
+    from: &PackageInstanceId,
+    dependency: &DependencySpec,
+) -> Option<&'a ServerProjectSourceId> {
+    locked_dependency(lock, from_root, from, dependency).and_then(|package| {
+        match &package.instance.source {
+            SourceId::ServerProject(source) => Some(source),
             _ => None,
         }
     })

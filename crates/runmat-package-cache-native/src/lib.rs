@@ -8,9 +8,11 @@ pub mod filesystem;
 pub mod gc;
 pub mod git;
 pub mod materialize;
+mod provider;
+pub mod server;
 
 pub use backend::SqliteCacheBackend;
 pub use concurrency::NativeCacheLease;
 pub use config::NativeCacheConfig;
 pub use error::NativeCacheError;
-pub use git::NativeGitPackageProvider;
+pub use provider::{NativeGitPackageProvider, NativePackageSourceProvider};

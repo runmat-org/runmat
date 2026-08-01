@@ -206,6 +206,10 @@ pub struct ServerProjectSourceId {
 }
 
 impl ServerProjectSourceId {
+    pub fn normalize_service(service: &str) -> Result<String, IdentityError> {
+        normalize_service_origin(service)
+    }
+
     pub fn new(
         service: &str,
         project: impl Into<String>,

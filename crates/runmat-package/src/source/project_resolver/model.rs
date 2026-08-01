@@ -1,6 +1,7 @@
 use crate::{
-    DependencyGroup, FrozenProject, GitAcquisitionIntent, GitAcquisitionPlan, GitAcquisitionPolicy,
-    GitSourceId, HostCapability, LockSelection, PackageLock, PathLockDecision,
+    DependencyGroup, FrozenProject, GitAcquisitionPlan, GitSourceId, HostCapability, LockSelection,
+    PackageLock, PathLockDecision, ServerProjectAcquisitionPlan, ServerProjectSourceId,
+    SourceAcquisitionIntent, SourceAcquisitionPolicy,
 };
 use std::collections::BTreeSet;
 use std::future::Future;
@@ -14,22 +15,39 @@ pub struct GitPackageMount {
     pub root: PathBuf,
 }
 
-pub trait GitPackageProvider {
-    fn acquire<'a>(
+pub trait PackageSourceProvider {
+    fn acquire_git<'a>(
         &'a self,
         plan: &'a GitAcquisitionPlan,
     ) -> Pin<Box<dyn Future<Output = Result<GitPackageMount, String>> + 'a>>;
+
+    fn acquire_server_project<'a>(
+        &'a self,
+        _plan: &'a ServerProjectAcquisitionPlan,
+    ) -> Pin<Box<dyn Future<Output = Result<ServerProjectPackageMount, String>> + 'a>> {
+        Box::pin(async { Err("Server project snapshot acquisition is not configured".to_string()) })
+    }
+}
+
+pub use PackageSourceProvider as GitPackageProvider;
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServerProjectPackageMount {
+    pub source: ServerProjectSourceId,
+    pub root: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectResolveOptions {
     pub target: String,
+    pub default_server_origin: String,
     pub groups: BTreeSet<DependencyGroup>,
     pub root_features: BTreeSet<String>,
     pub host_capabilities: BTreeSet<HostCapability>,
-    pub git_intent: GitAcquisitionIntent,
-    pub git_policy: GitAcquisitionPolicy,
+    pub source_intent: SourceAcquisitionIntent,
+    pub source_policy: SourceAcquisitionPolicy,
 }
 
 impl ProjectResolveOptions {
@@ -50,5 +68,6 @@ pub struct ResolvedProject {
     pub lock: PackageLock,
     pub lock_decision: PathLockDecision,
     pub acquired_git_sources: Vec<GitSourceId>,
+    pub acquired_server_sources: Vec<ServerProjectSourceId>,
     pub source_inventories: Vec<crate::SourceInventory>,
 }

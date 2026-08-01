@@ -1,5 +1,6 @@
 mod cache;
 mod resolve;
+mod server_transport;
 mod tree;
 mod vendor;
 

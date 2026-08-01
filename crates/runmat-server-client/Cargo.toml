@@ -21,6 +21,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = "0.10"
+thiserror = { workspace = true }
 tokio = { workspace = true, features = ["net", "time"] }
 url = "2.5"
 uuid = { workspace = true, features = ["serde"] }

@@ -389,6 +389,75 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/packages/projects/{projectId}/snapshots/{selector}:
+    get:
+      tags:
+      - packages::project_snapshot
+      operationId: project_snapshot
+      parameters:
+      - name: projectId
+        in: path
+        description: RunMat project ID
+        required: true
+        schema:
+          type: string
+      - name: selector
+        in: path
+        description: Exact snapshot ID or mutable snapshot tag
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectSnapshotInventoryResponse'
+        '206':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectSnapshotInventoryResponse'
+        '304':
+          description: Exact tree is unchanged
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '413':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '416':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
   /v1/projects/{projectId}/data/chunks/upload-targets:
     post:
       tags:
@@ -3159,6 +3228,45 @@ components:
       properties:
         role:
           $ref: '#/components/schemas/server_org.ProjectRole'
+    ProjectSnapshotEntryKindResponse:
+      type: string
+      enum:
+      - file
+      - directory
+    ProjectSnapshotEntryResponse:
+      type: object
+      required:
+      - path
+      - kind
+      - executable
+      properties:
+        bytes:
+          type: string
+          nullable: true
+        executable:
+          type: boolean
+        kind:
+          $ref: '#/components/schemas/ProjectSnapshotEntryKindResponse'
+        path:
+          type: string
+    ProjectSnapshotInventoryResponse:
+      type: object
+      required:
+      - project
+      - snapshot
+      - treeDigest
+      - entries
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectSnapshotEntryResponse'
+        project:
+          type: string
+        snapshot:
+          type: string
+        treeDigest:
+          type: string
     TelemetryIngestRequest:
       type: object
       required:

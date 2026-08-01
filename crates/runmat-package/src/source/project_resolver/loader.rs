@@ -1,11 +1,13 @@
 use super::selection::{
-    feature_activation, join_relative, locked_dependency, locked_git_source, validate_version,
+    feature_activation, join_relative, locked_dependency, locked_git_source, locked_server_source,
+    validate_version,
 };
 use super::source::{canonical_path, find_manifest, is_file, load_sources, source_identity};
-use super::{GitPackageProvider, ProjectResolveError, ProjectResolveOptions};
+use super::{PackageSourceProvider, ProjectResolveError, ProjectResolveOptions};
 use crate::{
-    plan_git_acquisition, CanonicalPackageId, DependencyLocator, DependencySpec, GitSourceId,
-    PackageInstanceId, PackageLock, PackageManifest, RegistryId, SourceId, TargetEnvironment,
+    plan_git_acquisition, plan_server_project_acquisition, CanonicalPackageId, DependencyLocator,
+    DependencySpec, GitSourceId, PackageInstanceId, PackageLock, PackageManifest, RegistryId,
+    ServerProjectSourceId, ServerSnapshotSelector, SourceId, TargetEnvironment,
 };
 use runmat_config::project::{
     load_project_manifest_async_with_options, ProjectManifestValidationOptions, ProjectSourceFile,
@@ -20,9 +22,10 @@ pub(super) struct Loader<'a> {
     pub(super) workspace_root: PathBuf,
     pub(super) existing_lock: Option<&'a PackageLock>,
     pub(super) options: &'a ProjectResolveOptions,
-    pub(super) git: &'a dyn GitPackageProvider,
+    pub(super) sources: &'a dyn PackageSourceProvider,
     pub(super) packages: BTreeMap<String, LoadedPackage>,
     pub(super) acquired_git_sources: BTreeSet<GitSourceId>,
+    pub(super) acquired_server_sources: BTreeSet<ServerProjectSourceId>,
     pub(super) vendor: Option<&'a crate::VendorManifest>,
 }
 
@@ -30,6 +33,7 @@ pub(super) struct Loader<'a> {
 pub(super) enum PackageOrigin {
     Workspace,
     Git(GitSourceId),
+    ServerProject(ServerProjectSourceId),
     Vendor(SourceId),
 }
 
@@ -98,7 +102,7 @@ impl Loader<'_> {
             let config = load_project_manifest_async_with_options(
                 &manifest_path,
                 ProjectManifestValidationOptions {
-                    check_dependency_paths: !self.options.git_policy.frozen,
+                    check_dependency_paths: !self.options.source_policy.frozen,
                 },
             )
             .await
@@ -132,7 +136,10 @@ impl Loader<'_> {
             let tree_digest = match &source {
                 SourceId::Path(source) => source.tree_digest.clone(),
                 SourceId::Git(source) => source.tree_digest.clone(),
-                _ => unreachable!("project resolver only constructs path and Git sources"),
+                SourceId::ServerProject(source) => source.tree_digest.clone(),
+                SourceId::Registry(_) => {
+                    unreachable!("registry sources are not constructed before Phase 7")
+                }
             };
             let inventory =
                 crate::SourceInventory::from_project_index(tree_digest.clone(), source_index)
@@ -219,16 +226,17 @@ impl Loader<'_> {
                                     &instance,
                                     &dependency,
                                 ),
-                                self.options.git_intent,
-                                self.options.git_policy,
+                                self.options.source_intent,
+                                self.options.source_policy,
                             )?;
-                            let mount = self.git.acquire(&plan).await.map_err(|reason| {
-                                ProjectResolveError::GitAcquire {
-                                    package: domain.local_name.clone(),
-                                    dependency: dependency.alias.to_string(),
-                                    reason,
-                                }
-                            })?;
+                            let mount =
+                                self.sources.acquire_git(&plan).await.map_err(|reason| {
+                                    ProjectResolveError::GitAcquire {
+                                        package: domain.local_name.clone(),
+                                        dependency: dependency.alias.to_string(),
+                                        reason,
+                                    }
+                                })?;
                             crate::validate_git_acquisition(&plan, &mount.source)?;
                             self.acquired_git_sources.insert(mount.source.clone());
                             let child_manifest = find_manifest(&mount.root)
@@ -242,7 +250,7 @@ impl Loader<'_> {
                                 });
                             }
                             (child_manifest, PackageOrigin::Git(mount.source))
-                        } else if self.options.git_policy.frozen {
+                        } else if self.options.source_policy.frozen {
                             let locked = locked_dependency(
                                 self.existing_lock,
                                 is_root,
@@ -324,10 +332,10 @@ impl Loader<'_> {
                             selector.clone(),
                             subdir.clone(),
                             locked,
-                            self.options.git_intent,
-                            self.options.git_policy,
+                            self.options.source_intent,
+                            self.options.source_policy,
                         )?;
-                        let mount = self.git.acquire(&plan).await.map_err(|reason| {
+                        let mount = self.sources.acquire_git(&plan).await.map_err(|reason| {
                             ProjectResolveError::GitAcquire {
                                 package: domain.local_name.clone(),
                                 dependency: dependency.alias.to_string(),
@@ -351,10 +359,50 @@ impl Loader<'_> {
                     DependencyLocator::Registry { .. } => {
                         return Err(ProjectResolveError::UnsupportedSource { kind: "registry" });
                     }
-                    DependencyLocator::ServerProject { .. } => {
-                        return Err(ProjectResolveError::UnsupportedSource {
-                            kind: "server-project",
-                        });
+                    DependencyLocator::ServerProject {
+                        project,
+                        service,
+                        snapshot,
+                    } => {
+                        let locked = locked_server_source(
+                            self.existing_lock,
+                            is_root,
+                            &instance,
+                            &dependency,
+                        );
+                        let selector = ServerSnapshotSelector::from_manifest(snapshot.as_deref())?;
+                        let plan = plan_server_project_acquisition(
+                            service
+                                .as_deref()
+                                .unwrap_or(&self.options.default_server_origin),
+                            project,
+                            selector,
+                            locked,
+                            self.options.source_intent,
+                            self.options.source_policy,
+                        )?;
+                        let mount =
+                            self.sources
+                                .acquire_server_project(&plan)
+                                .await
+                                .map_err(|reason| ProjectResolveError::ServerAcquire {
+                                    package: domain.local_name.clone(),
+                                    dependency: dependency.alias.to_string(),
+                                    reason,
+                                })?;
+                        crate::validate_server_project_acquisition(&plan, &mount.source)?;
+                        self.acquired_server_sources.insert(mount.source.clone());
+                        let child_manifest = find_manifest(&mount.root)
+                            .await
+                            .unwrap_or_else(|| mount.root.join(PROJECT_MANIFEST_FILENAME));
+                        if !is_file(&child_manifest).await {
+                            return Err(ProjectResolveError::MissingManifest {
+                                package: domain.local_name.clone(),
+                                dependency: dependency.alias.to_string(),
+                                path: child_manifest,
+                            });
+                        }
+                        (child_manifest, PackageOrigin::ServerProject(mount.source))
                     }
                 };
                 let child = self
@@ -388,6 +436,9 @@ fn package_key(manifest: &Path, origin: &PackageOrigin) -> String {
     match origin {
         PackageOrigin::Workspace => format!("path:{}", manifest.display()),
         PackageOrigin::Git(source) => format!("git:{}:{}", source.tree_digest, manifest.display()),
+        PackageOrigin::ServerProject(source) => {
+            format!("server:{}:{}", source.tree_digest, manifest.display())
+        }
         PackageOrigin::Vendor(source) => format!("vendor:{source:?}:{}", manifest.display()),
     }
 }

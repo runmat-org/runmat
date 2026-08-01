@@ -33,7 +33,7 @@ describe("BrowserProjectResolver", () => {
             lock_action: "write"
           });
           expect(inventory).toMatchObject({ commit: expect.any(String) });
-          mountedRoot = provider.mountGitSnapshot({
+          mountedRoot = provider.mountPackageSnapshot({
             source: {
               repository: "https://example.com/acme/helper.git",
               commit: {
@@ -70,6 +70,7 @@ describe("BrowserProjectResolver", () => {
             lock: {},
             lock_decision: "write-generated",
             acquired_git_sources: [],
+            acquired_server_sources: [],
             source_inventories: [],
             cache_lease: {
               id: "browser-test-graph",
@@ -97,11 +98,12 @@ describe("BrowserProjectResolver", () => {
       manifestPath: "/workspace/runmat.toml",
       options: {
         target: "wasm32-unknown-unknown",
+        default_server_origin: "https://api.runmat.com",
         groups: ["runtime"],
         root_features: [],
         host_capabilities: ["browser-filesystem", "worker"],
-        git_intent: "execute",
-        git_policy: {}
+        source_intent: "execute",
+        source_policy: {}
       }
     });
     expect(result.lock_decision).toBe("write-generated");

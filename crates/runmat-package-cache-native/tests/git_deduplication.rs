@@ -103,7 +103,7 @@ fn exact_snapshot_replays_from_transactional_cache_without_git_storage() {
         expected: None,
         lock_action: GitLockAction::Write,
     };
-    let first = block_on(provider.acquire(&initial)).unwrap();
+    let first = block_on(provider.acquire_git(&initial)).unwrap();
     let unavailable = directory.path().join("detached-git-storage");
     std::fs::rename(layout.git_repository_path(&repository), &unavailable).unwrap();
     let replay = GitAcquisitionPlan {
@@ -111,7 +111,7 @@ fn exact_snapshot_replays_from_transactional_cache_without_git_storage() {
         lock_action: GitLockAction::Preserve,
         ..initial
     };
-    let second = block_on(provider.acquire(&replay)).unwrap();
+    let second = block_on(provider.acquire_git(&replay)).unwrap();
     assert_eq!(second.source, first.source);
     assert_eq!(second.root, first.root);
 }

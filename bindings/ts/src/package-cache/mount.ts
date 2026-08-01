@@ -157,7 +157,7 @@ export class BrowserPackageMountFilesystem implements RunMatFilesystemProvider {
     this.mounts.clear();
   }
 
-  register(snapshot: GitSnapshotMountInput, cache: RunMatPackageCacheProvider): string {
+  register(snapshot: PackageSnapshotMountInput, cache: RunMatPackageCacheProvider): string {
     const digest = snapshot.source.tree_digest;
     const key = digest.replace(":", "_");
     const root = `/__runmat/packages/${key}`;
@@ -322,12 +322,14 @@ export class BrowserPackageMountFilesystem implements RunMatFilesystemProvider {
   }
 }
 
-export interface GitSnapshotMountInput {
+export interface PackageSnapshotMountInput {
   source: {
     tree_digest: string;
   };
   tree: BrowserTreeManifest;
 }
+
+export type GitSnapshotMountInput = PackageSnapshotMountInput;
 
 async function verifyDigest(digest: string, bytes: Uint8Array): Promise<void> {
   const [algorithm, expected] = digest.split(":", 2);

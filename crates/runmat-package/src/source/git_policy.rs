@@ -2,29 +2,9 @@ use crate::{GitRepositoryUrl, GitSelector, GitSourceId, NormalizedRelativePath};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum GitAcquisitionIntent {
-    Execute,
-    Fetch,
-    Update,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct GitAcquisitionPolicy {
-    pub locked: bool,
-    pub frozen: bool,
-    pub offline: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum GitLockAction {
-    Preserve,
-    Write,
-    Replace,
-}
+pub type GitAcquisitionIntent = super::SourceAcquisitionIntent;
+pub type GitAcquisitionPolicy = super::SourceAcquisitionPolicy;
+pub type GitLockAction = super::SourceLockAction;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

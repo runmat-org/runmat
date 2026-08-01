@@ -18,7 +18,7 @@ struct FixtureGit {
 }
 
 impl GitPackageProvider for FixtureGit {
-    fn acquire<'a>(
+    fn acquire_git<'a>(
         &'a self,
         plan: &'a GitAcquisitionPlan,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<GitPackageMount, String>> + 'a>>
@@ -49,11 +49,12 @@ impl GitPackageProvider for FixtureGit {
 fn options() -> ProjectResolveOptions {
     ProjectResolveOptions {
         target: "x86_64-unknown-linux-gnu".to_string(),
+        default_server_origin: "https://api.runmat.com".to_string(),
         groups: [DependencyGroup::Runtime].into_iter().collect(),
         root_features: BTreeSet::new(),
         host_capabilities: BTreeSet::new(),
-        git_intent: GitAcquisitionIntent::Execute,
-        git_policy: GitAcquisitionPolicy::default(),
+        source_intent: GitAcquisitionIntent::Execute,
+        source_policy: GitAcquisitionPolicy::default(),
     }
 }
 
@@ -249,7 +250,7 @@ fn git_resolution_locks_exact_identity_and_frozen_replay_uses_it_offline() {
 
     git.plans.lock().unwrap().clear();
     let mut frozen = options();
-    frozen.git_policy.frozen = true;
+    frozen.source_policy.frozen = true;
     let replay = block_on(resolve_project_async(
         &manifest,
         Some(&first.lock),

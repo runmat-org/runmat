@@ -26,11 +26,18 @@ export type {
   GitTreeInventoryWire,
   ServerGitGatewayOptions
 } from "./git-gateway.js";
+export { fetchServerProjectSnapshot } from "./server-project.js";
+export type {
+  ServerProjectAcquisitionPlan,
+  ServerProjectSnapshotOptions,
+  ServerProjectTreeInventoryWire
+} from "./server-project.js";
 export type {
   BrowserMountEntry,
   BrowserTreeEntry,
   BrowserTreeManifest,
-  GitSnapshotMountInput
+  GitSnapshotMountInput,
+  PackageSnapshotMountInput
 } from "./mount.js";
 export type {
   PackageCacheCommitOutcome,

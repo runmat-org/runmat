@@ -1,11 +1,12 @@
+use super::server_transport::RunMatServerSnapshotTransport;
 use crate::cli::{Cli, PackageProjectArgs};
 use anyhow::{Context, Result};
 use runmat_package::{
-    decode_lock, encode_lock, DependencyGroup, GitAcquisitionIntent, GitAcquisitionPolicy,
-    HostCapability, PackageLock, PathLockDecision, ProjectResolveOptions, ResolvedProject,
+    decode_lock, encode_lock, DependencyGroup, HostCapability, PackageLock, PathLockDecision,
+    ProjectResolveOptions, ResolvedProject, SourceAcquisitionIntent, SourceAcquisitionPolicy,
 };
 use runmat_package_cache_native::{
-    git::NativeGitClient, NativeCacheConfig, NativeCacheLease, NativeGitPackageProvider,
+    git::NativeGitClient, NativeCacheConfig, NativeCacheLease, NativePackageSourceProvider,
     SqliteCacheBackend,
 };
 use std::collections::BTreeSet;
@@ -22,7 +23,7 @@ pub(crate) struct NativeResolvedProject {
 pub(super) async fn resolve(
     args: &PackageProjectArgs,
     cli: &Cli,
-    intent: GitAcquisitionIntent,
+    intent: SourceAcquisitionIntent,
 ) -> Result<NativeResolvedProject> {
     let manifest = canonical_manifest(&args.manifest_path)?;
     let lock_path = manifest
@@ -37,21 +38,25 @@ pub(super) async fn resolve(
         SqliteCacheBackend::open(&cache_config)
             .context("failed to open the shared package cache")?,
     );
-    let provider = NativeGitPackageProvider::new(
+    let provider = NativePackageSourceProvider::new(
         NativeGitClient::new(layout.clone()),
         backend.clone(),
         layout,
     );
+    let server_transport = Arc::new(RunMatServerSnapshotTransport);
+    let default_server_origin = server_transport.default_origin();
+    let provider = provider.with_server_transport(server_transport);
     let resolved = runmat_package::resolve_project_async(
         &manifest,
         existing.as_ref(),
         ProjectResolveOptions {
             target: target_lexicon::HOST.to_string(),
+            default_server_origin,
             groups: [DependencyGroup::Runtime].into_iter().collect(),
             root_features: BTreeSet::new(),
             host_capabilities: native_capabilities(),
-            git_intent: intent,
-            git_policy: GitAcquisitionPolicy {
+            source_intent: intent,
+            source_policy: SourceAcquisitionPolicy {
                 locked: cli.locked,
                 frozen: cli.frozen,
                 offline: cli.offline || cli.frozen,
@@ -61,13 +66,19 @@ pub(super) async fn resolve(
     )
     .await
     .map_err(|error| anyhow::anyhow!("package resolution failed: {error}"))?;
-    let git_trees = resolved
+    let cached_trees = resolved
         .acquired_git_sources
         .iter()
         .map(|source| &source.tree_digest)
+        .chain(
+            resolved
+                .acquired_server_sources
+                .iter()
+                .map(|source| &source.tree_digest),
+        )
         .collect::<BTreeSet<_>>();
     for inventory in &resolved.source_inventories {
-        if git_trees.contains(&inventory.tree_digest) {
+        if cached_trees.contains(&inventory.tree_digest) {
             runmat_package_cache::publish_source_inventory(&backend, inventory, now_ms(), 16)
                 .await
                 .context("failed to cache package source inventory")?;
@@ -82,6 +93,12 @@ pub(super) async fn resolve(
             .acquired_git_sources
             .iter()
             .map(|source| source.tree_digest.clone())
+            .chain(
+                resolved
+                    .acquired_server_sources
+                    .iter()
+                    .map(|source| source.tree_digest.clone()),
+            )
             .collect(),
     )
     .await
@@ -168,7 +185,7 @@ pub(crate) async fn resolve_for_source(
     resolve(
         &PackageProjectArgs { manifest_path },
         cli,
-        GitAcquisitionIntent::Execute,
+        SourceAcquisitionIntent::Execute,
     )
     .await
     .map(Some)

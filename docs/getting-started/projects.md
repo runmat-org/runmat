@@ -142,6 +142,19 @@ runmat --frozen run src/main.m
 
 Git credentials come from the host credential provider and are never written to the manifest, lockfile, cache identity, or diagnostics. Native RunMat stores normalized shared Git object databases separately from verified content-addressed snapshots. Browser RunMat uses the authenticated Server Git snapshot gateway, validates the returned inventory in portable Rust, publishes the same canonical blobs/tree to IndexedDB transactionally, and mounts the verified tree read-only through the configured virtual filesystem.
 
+## RunMat Server Project Dependencies
+
+A project hosted by RunMat Server can be used directly as an immutable package source:
+
+```toml
+[dependencies]
+tools = { project = "proj_0123456789abcdef0123456789abcdef", service = "https://api.runmat.com", snapshot = "stable", version = "^1.4" }
+```
+
+`service` is a credential-free HTTPS origin; when omitted, RunMat uses the active configured Server origin. `snapshot` accepts either a mutable tag such as `stable` (and defaults to `main`) or an exact `snap_...` ID. Resolution and explicit update may resolve a tag. RunMat then records the exact Server origin, project ID, snapshot ID, and canonical tree digest in `runmat.lock`; normal locked execution requests that exact identity and never live-mounts the remote project. Server identity is part of source identity, so equal project or snapshot strings from different Servers cannot alias.
+
+Native, browser, and WASM clients validate the Server inventory with the same portable tree algorithm and publish it transactionally into the shared immutable cache described below. Authentication is sent only to the explicitly configured matching Server origin. An acquisition denied by current permissions, a deleted snapshot, corrupt content, or an interrupted transfer cannot publish a cache entry. Previously authorized plaintext already copied into the local cache remains usable by exact locked identity during offline execution after later permission loss or remote deletion: revoking Server access cannot revoke bytes already delivered to a client. Mutable tags still require online resolution and cannot be used to bypass a frozen or locked graph.
+
 ## Shared Package Cache
 
 Inspect and collect the shared package cache with:
@@ -165,7 +178,7 @@ runmat package vendor
 runmat package vendor --output third_party/runmat
 ```
 
-Frozen execution requires this verified vendor manifest for every live path dependency. RunMat resolves those dependencies from their vendored copies, preserves their locked source identities, and rejects a stale graph, missing copy, source mismatch, or content/manifest tampering. Immutable Git dependencies may instead replay from their exact cached snapshots; `--frozen` still performs no network or lockfile mutation.
+Frozen execution requires this verified vendor manifest for every live path dependency. RunMat resolves those dependencies from their vendored copies, preserves their locked source identities, and rejects a stale graph, missing copy, source mismatch, or content/manifest tampering. Immutable Git and RunMat Server project dependencies may instead replay from their exact cached snapshots; `--frozen` still performs no network or lockfile mutation.
 
 ## Complete Project Example
 
