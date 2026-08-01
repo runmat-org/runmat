@@ -344,15 +344,23 @@ pub async fn histogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         .map_err(|e| histogram_invalid_argument(format!("cannot convert counts tensor: {e}")))?;
     let edges = Tensor::try_from(&edges_value)
         .map_err(|e| histogram_invalid_argument(format!("cannot convert edge tensor: {e}")))?;
+    let counts = counts
+        .as_f64_slice()
+        .ok_or_else(|| histogram_internal("histcounts returned non-double counts"))?
+        .to_vec();
+    let edges = edges
+        .as_f64_slice()
+        .ok_or_else(|| histogram_internal("histcounts returned non-double edges"))?
+        .to_vec();
 
     let defaults = BarStyleDefaults::new(HIST_DEFAULT_COLOR, HIST_BAR_WIDTH);
     let style = parse_bar_style_args(BUILTIN_NAME, &style_args, defaults)
         .map_err(map_histogram_invalid_argument)?;
     let explicit_display_name = style.label.clone();
-    let labels = histogram_labels_from_edges(&edges.data);
-    let mut chart = BarChart::new(labels, counts.data.clone())
+    let labels = histogram_labels_from_edges(&edges);
+    let mut chart = BarChart::new(labels, counts.clone())
         .map_err(|e| histogram_internal(format!("chart construction failed: {e}")))?;
-    chart.set_histogram_bin_edges(edges.data.clone());
+    chart.set_histogram_bin_edges(edges.clone());
     apply_bar_style(&mut chart, &style, HIST_DEFAULT_LABEL);
 
     let normalization = infer_normalization(&histcounts_args);
@@ -395,10 +403,10 @@ pub async fn histogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         figure_handle,
         axes,
         plot_index,
-        edges.data.clone(),
-        counts.data.clone(),
+        edges.clone(),
+        counts.clone(),
         normalization.clone(),
-        histogram_metadata(&edges.data, &style, None, false, "bar"),
+        histogram_metadata(&edges, &style, None, false, "bar"),
     );
     if let Some(display_name) = explicit_display_name {
         crate::builtins::plotting::state::set_histogram_handle_display_name(
@@ -554,6 +562,7 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
+    use runmat_builtins::IntegerStorage;
     use runmat_plot::plots::PlotElement;
 
     fn tensor_from(data: &[f64]) -> Tensor {
@@ -575,9 +584,29 @@ mod tests {
             &get_builtin(vec![Value::Num(out), Value::String("BinCounts".into())]).unwrap(),
         )
         .unwrap();
-        assert_eq!(counts.data, vec![3.0, 1.0]);
+        assert_eq!(counts.as_f64_slice(), Some(&[3.0, 1.0][..]));
         let fig = clone_figure(current_figure_handle()).unwrap();
         assert!(matches!(fig.plots().next().unwrap(), PlotElement::Bar(_)));
+    }
+
+    #[test]
+    fn histogram_accepts_typed_integer_samples_at_the_histcounts_boundary() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        let samples =
+            Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 1, 2]), vec![4, 1]).unwrap();
+        let out = futures::executor::block_on(histogram_builtin(vec![
+            Value::Tensor(samples),
+            Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]).unwrap()),
+        ]))
+        .unwrap();
+        let counts = Tensor::try_from(
+            &get_builtin(vec![Value::Num(out), Value::String("BinCounts".into())]).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(counts.as_f64_slice(), Some(&[1.0, 2.0, 1.0][..]));
     }
 
     #[test]
@@ -598,7 +627,14 @@ mod tests {
             &get_builtin(vec![Value::Num(out), Value::String("BinCounts".into())]).unwrap(),
         )
         .unwrap();
-        assert_eq!(counts.data.last().copied().unwrap_or_default(), 1.0);
+        assert_eq!(
+            counts
+                .as_f64_slice()
+                .and_then(|values| values.last())
+                .copied()
+                .unwrap_or_default(),
+            1.0
+        );
     }
 
     #[test]
@@ -632,7 +668,7 @@ mod tests {
             &get_builtin(vec![Value::Num(out), Value::String("BinCounts".into())]).unwrap(),
         )
         .unwrap();
-        assert_eq!(counts.data, vec![1.0, 1.0, 1.0]);
+        assert_eq!(counts.as_f64_slice(), Some(&[1.0, 1.0, 1.0][..]));
         let fig = clone_figure(current_figure_handle()).unwrap();
         assert_eq!(fig.plot_axes_indices()[0], 1);
     }
@@ -663,7 +699,7 @@ mod tests {
             &get_builtin(vec![Value::Num(handle), Value::String("BinCounts".into())]).unwrap(),
         )
         .unwrap();
-        assert_eq!(counts.data, vec![2.0, 1.0, 1.0]);
+        assert_eq!(counts.as_f64_slice(), Some(&[2.0, 1.0, 1.0][..]));
     }
 
     #[test]
@@ -684,8 +720,9 @@ mod tests {
             &get_builtin(vec![Value::Num(out), Value::String("BinCounts".into())]).unwrap(),
         )
         .unwrap();
-        assert!(!counts.data.is_empty());
-        assert!(counts.data.iter().all(|v| v.is_finite()));
+        let counts = counts.as_f64_slice().expect("double counts");
+        assert!(!counts.is_empty());
+        assert!(counts.iter().all(|v| v.is_finite()));
     }
 
     #[test]
