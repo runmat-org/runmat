@@ -4,7 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, Tensor, Value,
+    CharArray, ComplexTensor, IntValue, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -163,23 +163,29 @@ fn angle_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn angle_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let Tensor {
-        data,
-        integer_data,
-        shape,
-        ..
-    } = tensor;
-    if let Some(storage) = integer_data {
-        let mapped: Vec<f64> = storage
-            .exact_values()
-            .into_iter()
-            .map(angle_exact_integer_scalar)
-            .collect();
-        return Tensor::new(mapped, shape)
-            .map_err(|e| builtin_error_with_detail(&ANGLE_ERROR_INTERNAL, e));
-    }
-    let mapped: Vec<f64> = data.into_iter().map(|re| angle_scalar(re, 0.0)).collect();
-    Tensor::new(mapped, shape).map_err(|e| builtin_error_with_detail(&ANGLE_ERROR_INTERNAL, e))
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|error| builtin_error_with_detail(&ANGLE_ERROR_INTERNAL, error))?;
+    let mapped = match storage {
+        NumericStorage::F64(values) => {
+            NumericStorage::F64(values.into_iter().map(|re| angle_scalar(re, 0.0)).collect())
+        }
+        NumericStorage::F32(values) => {
+            NumericStorage::F32(values.into_iter().map(|re| 0.0_f32.atan2(re)).collect())
+        }
+        storage => NumericStorage::F64(
+            storage
+                .into_integer_storage()
+                .expect("integer numeric storage")
+                .exact_values()
+                .into_iter()
+                .map(angle_exact_integer_scalar)
+                .collect(),
+        ),
+    };
+    Tensor::from_numeric_storage(mapped, shape)
+        .map_err(|e| builtin_error_with_detail(&ANGLE_ERROR_INTERNAL, e))
 }
 
 fn angle_exact_integer_scalar(value: IntValue) -> f64 {
@@ -319,6 +325,23 @@ pub(crate) mod tests {
                 assert_eq!(out.data[2], 0.0);
                 assert_eq!(out.data[3], 0.0);
             }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn angle_preserves_native_single_storage() {
+        let tensor = Tensor::from_f32(vec![1.0, -1.0, 0.0], vec![1, 3]).unwrap();
+        let result = angle_builtin(Value::Tensor(tensor)).expect("angle");
+        match result {
+            Value::Tensor(out) => match out.into_numeric_storage().expect("single storage") {
+                NumericStorage::F32(values) => {
+                    assert_eq!(values[0], 0.0);
+                    assert!((values[1] - std::f32::consts::PI).abs() <= 2.0 * f32::EPSILON);
+                    assert_eq!(values[2], 0.0);
+                }
+                storage => panic!("expected single storage, got {storage:?}"),
+            },
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
