@@ -8,6 +8,140 @@ info:
 servers:
 - url: https://api.runmat.com
 paths:
+  /v1/admin/analytics/project:
+    post:
+      tags:
+      - admin::analytics_projection
+      operationId: project_analytics_profiles
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalyticsProjectionRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyticsProjectionResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '500':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/admin/marcom/backfill:
+    post:
+      tags:
+      - admin::marcom_backfill
+      operationId: run_marcom_backfill
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MarcomBackfillRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarcomBackfillResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '500':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/auth/desktop/link:
+    post:
+      tags:
+      - auth::desktop_link
+      operationId: create_desktop_link
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthDesktopLinkCreateRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthDesktopLinkCreateResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security:
+      - {}
+  /v1/auth/desktop/link/consume:
+    post:
+      tags:
+      - auth::desktop_link
+      operationId: consume_desktop_link
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthDesktopLinkConsumeRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthDesktopLinkConsumeResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
   /v1/auth/me:
     get:
       tags:
@@ -78,10 +212,24 @@ paths:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
       security:
       - {}
+  /v1/billing/pricing:
+    get:
+      tags:
+      - billing::pricing
+      operationId: pricing
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicPricingResponse'
+      security:
+      - {}
   /v1/lifecycle/intake:
     post:
       tags:
-      - intake
+      - lifecycle::intake
       operationId: submit_web_intake
       requestBody:
         content:
@@ -160,230 +308,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/server_org.Org'
         '400':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/crate.errors.ErrorResponse'
-  /v1/orgs/{orgId}/policy:
-    get:
-      tags:
-      - orgs::usage
-      operationId: get_policy
-      parameters:
-      - name: orgId
-        in: path
-        required: true
-        schema:
-          type: string
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PolicyResponse'
-  /v1/orgs/{orgId}/projects:
-    get:
-      tags:
-      - orgs::projects
-      operationId: list_projects
-      parameters:
-      - name: limit
-        in: query
-        required: false
-        schema:
-          type: integer
-          nullable: true
-          minimum: 0
-      - name: cursor
-        in: query
-        required: false
-        schema:
-          type: string
-          nullable: true
-      - name: orgId
-        in: path
-        required: true
-        schema:
-          type: string
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ProjectListResponse'
-        '403':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/crate.errors.ErrorResponse'
-    post:
-      tags:
-      - orgs::projects
-      operationId: create_project
-      parameters:
-      - name: orgId
-        in: path
-        required: true
-        schema:
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ProjectCreateRequest'
-        required: true
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/server_org.Project'
-        '403':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/crate.errors.ErrorResponse'
-  /v1/orgs/{orgId}/projects/import-git:
-    post:
-      tags:
-      - orgs::projects
-      operationId: create_project_import
-      parameters:
-      - name: orgId
-        in: path
-        required: true
-        schema:
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ProjectImportGitRequest'
-        required: true
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ProjectImportGitResponse'
-        '400':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/crate.errors.ErrorResponse'
-        '403':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/crate.errors.ErrorResponse'
-  /v1/orgs/{orgId}/upgrade-request:
-    post:
-      tags:
-      - orgs::usage
-      operationId: create_upgrade_request
-      parameters:
-      - name: orgId
-        in: path
-        required: true
-        schema:
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UpgradeRequestCreateRequest'
-        required: true
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UpgradeRequestCreateResponse'
-  /v1/orgs/{orgId}/usage:
-    get:
-      tags:
-      - orgs::usage
-      operationId: get_usage
-      parameters:
-      - name: start
-        in: query
-        required: false
-        schema:
-          type: string
-          nullable: true
-      - name: end
-        in: query
-        required: false
-        schema:
-          type: string
-          nullable: true
-      - name: orgId
-        in: path
-        required: true
-        schema:
-          type: string
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UsagePeriodResponse'
-  /v1/orgs/{orgId}/usage/notices:
-    get:
-      tags:
-      - orgs::usage
-      operationId: list_usage_notices
-      parameters:
-      - name: orgId
-        in: path
-        required: true
-        schema:
-          type: string
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/UsageNoticeResponse'
-  /v1/orgs/{orgId}/usage/rollup:
-    post:
-      tags:
-      - orgs::usage
-      operationId: usage_rollup_event
-      parameters:
-      - name: orgId
-        in: path
-        required: true
-        schema:
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UsageRollupRequest'
-        required: true
-      responses:
-        '200':
-          description: ''
-          content:
-            text/plain:
-              schema:
-                type: boolean
-        '403':
           description: ''
           content:
             application/json:
@@ -965,58 +889,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
-  /v1/orgs/{orgId}/packages/registry/{packageId}/releases/{releaseId}/status:
-    patch:
-      tags:
-      - packages::registry::management::releases
-      operationId: set_package_release_status
-      parameters:
-      - name: orgId
-        in: path
-        required: true
-        schema:
-          type: string
-      - name: packageId
-        in: path
-        required: true
-        schema:
-          type: string
-      - name: releaseId
-        in: path
-        required: true
-        schema:
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SetReleaseStatusRequest'
-        required: true
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ReleaseStatusResponse'
-        '400':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/crate.errors.ErrorResponse'
-        '403':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/crate.errors.ErrorResponse'
-        '404':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/crate.errors.ErrorResponse'
   /v1/orgs/{orgId}/packages/registry/{packageId}/publications:
     get:
       tags:
@@ -1162,6 +1034,64 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/packages/registry/{packageId}/publications/{publicationId}/attestation:
+    post:
+      tags:
+      - packages::registry::management::supply_chain
+      operationId: attach_publication_attestation
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: packageId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: publicationId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttachAttestationRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttestationResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
   /v1/orgs/{orgId}/packages/registry/{packageId}/publications/{publicationId}/finalize:
     post:
       tags:
@@ -1190,6 +1120,64 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FinalizePublicationResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/packages/registry/{packageId}/publications/{publicationId}/key-envelopes:
+    post:
+      tags:
+      - packages::registry::management::encryption
+      operationId: attach_publication_key_envelopes
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: packageId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: publicationId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttachKeyEnvelopesRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KeyEnvelopeListResponse'
         '400':
           description: ''
           content:
@@ -1324,11 +1312,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
-  /v1/orgs/{orgId}/packages/registry/{packageId}/publications/{publicationId}/attestation:
-    post:
+  /v1/orgs/{orgId}/packages/registry/{packageId}/recipient-keys:
+    get:
       tags:
-      - packages::registry::management::supply_chain
-      operationId: attach_publication_attestation
+      - packages::registry::management::encryption
+      operationId: list_publication_recipient_keys
       parameters:
       - name: orgId
         in: path
@@ -1340,7 +1328,42 @@ paths:
         required: true
         schema:
           type: string
-      - name: publicationId
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecipientKeyListResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/packages/registry/{packageId}/releases/{releaseId}/status:
+    patch:
+      tags:
+      - packages::registry::management::releases
+      operationId: set_package_release_status
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: packageId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: releaseId
         in: path
         required: true
         schema:
@@ -1349,7 +1372,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AttachAttestationRequest'
+              $ref: '#/components/schemas/SetReleaseStatusRequest'
         required: true
       responses:
         '200':
@@ -1357,7 +1380,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AttestationResponse'
+                $ref: '#/components/schemas/ReleaseStatusResponse'
         '400':
           description: ''
           content:
@@ -1371,12 +1394,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
         '404':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/crate.errors.ErrorResponse'
-        '409':
           description: ''
           content:
             application/json:
@@ -1596,10 +1613,404 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/policy:
+    get:
+      tags:
+      - orgs::usage
+      operationId: get_policy
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PolicyResponse'
+  /v1/orgs/{orgId}/projects:
+    get:
+      tags:
+      - orgs::projects
+      operationId: list_projects
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          nullable: true
+          minimum: 0
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectListResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+    post:
+      tags:
+      - orgs::projects
+      operationId: create_project
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectCreateRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/server_org.Project'
+        '402':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/projects/handle-suggestion:
+    get:
+      tags:
+      - orgs::projects
+      operationId: suggest_project_handle
+      parameters:
+      - name: name
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectHandleSuggestionResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/projects/import-git:
+    post:
+      tags:
+      - orgs::projects
+      operationId: create_project_import
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectImportGitRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectImportGitResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/upgrade-request:
+    post:
+      tags:
+      - orgs::usage
+      operationId: create_upgrade_request
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpgradeRequestCreateRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpgradeRequestCreateResponse'
+  /v1/orgs/{orgId}/usage:
+    get:
+      tags:
+      - orgs::usage
+      operationId: get_usage
+      parameters:
+      - name: start
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: end
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsagePeriodResponse'
+  /v1/orgs/{orgId}/usage/notices:
+    get:
+      tags:
+      - orgs::usage
+      operationId: list_usage_notices
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UsageNoticeResponse'
+  /v1/orgs/{orgId}/usage/rollup:
+    post:
+      tags:
+      - orgs::usage
+      operationId: usage_rollup_event
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UsageRollupRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            text/plain:
+              schema:
+                type: boolean
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/packages/git/snapshot:
+    post:
+      tags:
+      - packages
+      operationId: git_snapshot
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GitSnapshotRequestBody'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitTreeInventoryResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '413':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '502':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/packages/projects/{projectId}/snapshots/{selector}:
+    get:
+      tags:
+      - packages::project_snapshot
+      operationId: project_snapshot
+      parameters:
+      - name: projectId
+        in: path
+        description: RunMat project ID
+        required: true
+        schema:
+          type: string
+      - name: selector
+        in: path
+        description: Exact snapshot ID or mutable snapshot tag
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectSnapshotInventoryResponse'
+        '206':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectSnapshotInventoryResponse'
+        '304':
+          description: Exact tree is unchanged
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '413':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '416':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
   /v1/packages/registry/releases/{releaseId}:
     get:
       tags:
-      - packages::registry
+      - packages::registry::distribution
       operationId: resolve_exact_release
       parameters:
       - name: releaseId
@@ -1644,7 +2055,7 @@ paths:
   /v1/packages/registry/releases/{releaseId}/artifact:
     get:
       tags:
-      - packages::registry
+      - packages::registry::distribution
       operationId: download_artifact
       parameters:
       - name: releaseId
@@ -1687,10 +2098,84 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/packages/registry/search:
+    get:
+      tags:
+      - packages::registry::discovery
+      operationId: search_registry_packages
+      parameters:
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          nullable: true
+          minimum: 0
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistryDiscoverySearchResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/packages/registry/{namespace}/{name}:
+    get:
+      tags:
+      - packages::registry::discovery
+      operationId: get_registry_package
+      parameters:
+      - name: namespace
+        in: path
+        description: Package namespace
+        required: true
+        schema:
+          type: string
+      - name: name
+        in: path
+        description: Package name
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistryPackageDetailResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
   /v1/packages/registry/{namespace}/{name}/candidates:
     get:
       tags:
-      - packages::registry
+      - packages::registry::distribution
       operationId: list_candidates
       parameters:
       - name: namespace
@@ -1738,10 +2223,155 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/packages/registry/{namespace}/{name}/recipient-keys:
+    get:
+      tags:
+      - packages::registry::management::encryption
+      operationId: list_recipient_keys
+      parameters:
+      - name: namespace
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecipientKeyListResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+    post:
+      tags:
+      - packages::registry::management::encryption
+      operationId: register_recipient_key
+      parameters:
+      - name: namespace
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRecipientKeyRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecipientKeyResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/packages/registry/{namespace}/{name}/recipient-keys/{keyId}/revoke:
+    post:
+      tags:
+      - packages::registry::management::encryption
+      operationId: revoke_recipient_key
+      parameters:
+      - name: namespace
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: keyId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecipientKeyResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
   /v1/packages/registry/{namespace}/{name}/resolve:
     get:
       tags:
-      - packages::registry
+      - packages::registry::distribution
       operationId: resolve_release
       parameters:
       - name: namespace
@@ -2278,10 +2908,7 @@ paths:
     get:
       tags:
       - filesystem::io
-      summary: Reads file bytes from the project filesystem. This endpoint also accepts
-      description: |-
-        readonly reference paths like `reference:runmat/docs/search.md`, resolving
-        them through the bound RunMat reference variant.
+      summary: Reads file bytes from the project filesystem.
       operationId: read
       parameters:
       - name: path
@@ -2304,6 +2931,12 @@ paths:
           format: int64
           nullable: true
           minimum: 0
+      - name: versionId
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
       - name: projectId
         in: path
         required: true
@@ -3265,12 +3898,338 @@ paths:
       - {}
 components:
   schemas:
+    AdvisoryRequest:
+      type: object
+      required:
+      - affectedRequirement
+      - severity
+      - title
+      properties:
+        affectedRequirement:
+          type: string
+        severity:
+          $ref: '#/components/schemas/AdvisorySeverityRequest'
+        title:
+          type: string
+        url:
+          type: string
+          nullable: true
+        withdrawnAt:
+          type: string
+          format: date-time
+          nullable: true
+      additionalProperties: false
+    AdvisorySeverityRequest:
+      type: string
+      enum:
+      - low
+      - moderate
+      - high
+      - critical
+    AnalyticsProjectionFailure:
+      type: object
+      required:
+      - userId
+      - message
+      properties:
+        message:
+          type: string
+        userId:
+          type: string
+    AnalyticsProjectionRequest:
+      type: object
+      properties:
+        afterUserId:
+          type: string
+          nullable: true
+        confirmToken:
+          type: string
+          nullable: true
+        dryRun:
+          type: boolean
+          nullable: true
+        limit:
+          type: integer
+          format: int64
+          nullable: true
+        userId:
+          type: string
+          nullable: true
+    AnalyticsProjectionResponse:
+      type: object
+      required:
+      - dryRun
+      - scanned
+      - projected
+      - failed
+      - failures
+      properties:
+        dryRun:
+          type: boolean
+        failed:
+          type: integer
+          minimum: 0
+        failures:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnalyticsProjectionFailure'
+        nextCursor:
+          type: string
+          nullable: true
+        projected:
+          type: integer
+          minimum: 0
+        scanned:
+          type: integer
+          minimum: 0
+    ApprovePublicationRequest:
+      type: object
+      properties:
+        approve:
+          type: boolean
+      additionalProperties: false
+    AttachAttestationRequest:
+      type: object
+      required:
+      - schemaVersion
+      - publisherId
+      - payloadDigest
+      - sequence
+      - issuedAt
+      - provenance
+      - signature
+      properties:
+        issuedAt:
+          type: string
+          format: date-time
+        payloadDigest:
+          type: string
+        provenance:
+          type: object
+          required:
+          - sourceRepository
+          - sourceCommit
+          - builderId
+          - invocationId
+          - inventoryDigest
+          - releaseManifestDigest
+          properties:
+            builderId:
+              type: string
+            inventoryDigest:
+              type: string
+            invocationId:
+              type: string
+            license:
+              type: string
+              nullable: true
+            releaseManifestDigest:
+              type: string
+            sbom:
+              allOf:
+              - type: object
+                required:
+                - format
+                - digest
+                - mediaType
+                properties:
+                  digest:
+                    type: string
+                  format:
+                    type: string
+                  mediaType:
+                    type: string
+                additionalProperties: false
+              nullable: true
+            sourceCommit:
+              type: string
+            sourceRepository:
+              type: string
+            workflowRef:
+              type: string
+              nullable: true
+            wrapper:
+              allOf:
+              - type: object
+                required:
+                - upstreamRepository
+                - upstreamVersion
+                - upstreamDigest
+                properties:
+                  upstreamDigest:
+                    type: string
+                  upstreamRepository:
+                    type: string
+                  upstreamVersion:
+                    type: string
+                additionalProperties: false
+              nullable: true
+          additionalProperties: false
+        publisherId:
+          type: string
+        schemaVersion:
+          type: integer
+          format: int32
+          minimum: 0
+        sequence:
+          type: integer
+          format: int64
+          minimum: 0
+        signature:
+          type: string
+      additionalProperties: false
+    AttachKeyEnvelopesRequest:
+      type: object
+      required:
+      - envelopes
+      properties:
+        envelopes:
+          type: array
+          items:
+            $ref: '#/components/schemas/KeyEnvelopeRequest'
+      additionalProperties: false
+    AttestationResponse:
+      type: object
+      required:
+      - publicationId
+      - packageId
+      - publisherId
+      - payloadDigest
+      - sequence
+      - issuedAt
+      - provenance
+      - signature
+      properties:
+        issuedAt:
+          type: string
+          format: date-time
+        packageId:
+          type: string
+        payloadDigest:
+          type: string
+        provenance:
+          type: object
+          required:
+          - sourceRepository
+          - sourceCommit
+          - builderId
+          - invocationId
+          - inventoryDigest
+          - releaseManifestDigest
+          properties:
+            builderId:
+              type: string
+            inventoryDigest:
+              type: string
+            invocationId:
+              type: string
+            license:
+              type: string
+              nullable: true
+            releaseManifestDigest:
+              type: string
+            sbom:
+              allOf:
+              - type: object
+                required:
+                - format
+                - digest
+                - mediaType
+                properties:
+                  digest:
+                    type: string
+                  format:
+                    type: string
+                  mediaType:
+                    type: string
+                additionalProperties: false
+              nullable: true
+            sourceCommit:
+              type: string
+            sourceRepository:
+              type: string
+            workflowRef:
+              type: string
+              nullable: true
+            wrapper:
+              allOf:
+              - type: object
+                required:
+                - upstreamRepository
+                - upstreamVersion
+                - upstreamDigest
+                properties:
+                  upstreamDigest:
+                    type: string
+                  upstreamRepository:
+                    type: string
+                  upstreamVersion:
+                    type: string
+                additionalProperties: false
+              nullable: true
+          additionalProperties: false
+        publicationId:
+          type: string
+        publisherId:
+          type: string
+        sequence:
+          type: integer
+          format: int64
+          minimum: 0
+        signature:
+          type: string
+    AuthDesktopLinkConsumeRequest:
+      type: object
+      required:
+      - link_id
+      properties:
+        link_id:
+          type: string
+    AuthDesktopLinkConsumeResponse:
+      type: object
+      required:
+      - consumed
+      properties:
+        consumed:
+          type: boolean
+    AuthDesktopLinkCreateRequest:
+      type: object
+      required:
+      - link_id
+      - website_distinct_id
+      properties:
+        link_id:
+          type: string
+        website_distinct_id:
+          type: string
+    AuthDesktopLinkCreateResponse:
+      type: object
+      required:
+      - accepted
+      properties:
+        accepted:
+          type: boolean
+    AuthMeOrgMembership:
+      type: object
+      required:
+      - orgId
+      - role
+      properties:
+        orgId:
+          type: string
+        role:
+          $ref: '#/components/schemas/server_org.OrgRole'
     AuthMeResponse:
       type: object
       required:
       - user
       - orgs
+      - orgMemberships
       properties:
+        orgMemberships:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuthMeOrgMembership'
         orgs:
           type: array
           items:
@@ -3312,6 +4271,9 @@ components:
         client_id:
           type: string
           nullable: true
+        desktop_auth_bridge_url:
+          type: string
+          nullable: true
         mode:
           type: string
         org_id:
@@ -3322,6 +4284,75 @@ components:
         scope:
           type: string
           nullable: true
+    CreateGroupRequest:
+      type: object
+      required:
+      - name
+      properties:
+        name:
+          type: string
+      additionalProperties: false
+    CreatePackageRequest:
+      type: object
+      required:
+      - namespace
+      - name
+      - visibility
+      properties:
+        description:
+          type: string
+          nullable: true
+        name:
+          type: string
+        namespace:
+          type: string
+        visibility:
+          $ref: '#/components/schemas/PackageVisibilityRequest'
+      additionalProperties: false
+    CreateTrustedPublisherRequest:
+      type: object
+      required:
+      - name
+      - identity
+      - publicKey
+      properties:
+        identity:
+          oneOf:
+          - type: object
+            required:
+            - principalId
+            - kind
+            properties:
+              kind:
+                type: string
+                enum:
+                - principal
+              principalId:
+                type: string
+          - type: object
+            required:
+            - issuer
+            - subject
+            - kind
+            properties:
+              issuer:
+                type: string
+              kind:
+                type: string
+                enum:
+                - oidc
+              subject:
+                type: string
+          discriminator:
+            propertyName: kind
+        name:
+          type: string
+        publicKey:
+          type: string
+        sourceRepository:
+          type: string
+          nullable: true
+      additionalProperties: false
     DataChunkDescriptor:
       type: object
       required:
@@ -3428,6 +4459,22 @@ components:
         traceId:
           type: string
           nullable: true
+    FinalizePublicationResponse:
+      type: object
+      required:
+      - publicationId
+      - releaseId
+      - releaseDigest
+      - version
+      properties:
+        publicationId:
+          type: string
+        releaseDigest:
+          type: string
+        releaseId:
+          type: string
+        version:
+          type: string
     FsCommitRequest:
       type: object
       required:
@@ -4378,6 +5425,213 @@ components:
           format: int64
         sessionId:
           type: string
+    GitInventoryEntryKindResponse:
+      type: string
+      enum:
+      - file
+      - directory
+      - symlink
+    GitInventoryEntryResponse:
+      type: object
+      required:
+      - path
+      - kind
+      - executable
+      properties:
+        bytes:
+          type: string
+          nullable: true
+        executable:
+          type: boolean
+        kind:
+          $ref: '#/components/schemas/GitInventoryEntryKindResponse'
+        linkTarget:
+          type: string
+          nullable: true
+        path:
+          type: string
+    GitSelectorBody:
+      oneOf:
+      - type: object
+        required:
+        - value
+        - kind
+        properties:
+          kind:
+            type: string
+            enum:
+            - rev
+          value:
+            type: string
+      - type: object
+        required:
+        - value
+        - kind
+        properties:
+          kind:
+            type: string
+            enum:
+            - branch
+          value:
+            type: string
+      - type: object
+        required:
+        - value
+        - kind
+        properties:
+          kind:
+            type: string
+            enum:
+            - tag
+          value:
+            type: string
+      discriminator:
+        propertyName: kind
+    GitSnapshotRequestBody:
+      type: object
+      required:
+      - repository
+      - selector
+      properties:
+        repository:
+          type: string
+        selector:
+          $ref: '#/components/schemas/GitSelectorBody'
+        subdir:
+          type: string
+      additionalProperties: false
+    GitTreeInventoryResponse:
+      type: object
+      required:
+      - commit
+      - entries
+      properties:
+        commit:
+          type: string
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/GitInventoryEntryResponse'
+    KeyEnvelopeListResponse:
+      type: object
+      required:
+      - envelopes
+      properties:
+        envelopes:
+          type: array
+          items:
+            $ref: '#/components/schemas/KeyEnvelopeResponse'
+    KeyEnvelopeRequest:
+      type: object
+      required:
+      - recipientKeyId
+      - recipientKeyFingerprint
+      - ephemeralPublicKey
+      - nonce
+      - wrappedKey
+      - contextDigest
+      properties:
+        contextDigest:
+          type: string
+        ephemeralPublicKey:
+          type: string
+        nonce:
+          type: string
+        recipientKeyFingerprint:
+          type: string
+        recipientKeyId:
+          type: string
+        wrappedKey:
+          type: string
+      additionalProperties: false
+    KeyEnvelopeResponse:
+      type: object
+      required:
+      - id
+      - publicationId
+      - packageId
+      - schemaVersion
+      - algorithm
+      - recipientKeyId
+      - recipientKeyFingerprint
+      - ephemeralPublicKey
+      - nonce
+      - wrappedKey
+      - contextDigest
+      - createdAt
+      properties:
+        algorithm:
+          type: string
+        contextDigest:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        ephemeralPublicKey:
+          type: string
+        id:
+          type: string
+        nonce:
+          type: string
+        packageId:
+          type: string
+        publicationId:
+          type: string
+        recipientKeyFingerprint:
+          type: string
+        recipientKeyId:
+          type: string
+        schemaVersion:
+          type: integer
+          format: int32
+          minimum: 0
+        wrappedKey:
+          type: string
+    MarcomBackfillRequest:
+      type: object
+      properties:
+        confirmToken:
+          type: string
+          nullable: true
+        dryRun:
+          type: boolean
+          nullable: true
+        limit:
+          type: integer
+          format: int64
+          nullable: true
+        onceKey:
+          type: string
+          nullable: true
+        orgId:
+          type: string
+          nullable: true
+    MarcomBackfillResponse:
+      type: object
+      required:
+      - dryRun
+      - orgCount
+      - membershipCount
+      - hubspotFailures
+      - posthogFailures
+      - skippedOnceKey
+      properties:
+        dryRun:
+          type: boolean
+        hubspotFailures:
+          type: integer
+          minimum: 0
+        membershipCount:
+          type: integer
+          minimum: 0
+        orgCount:
+          type: integer
+          minimum: 0
+        posthogFailures:
+          type: integer
+          minimum: 0
+        skippedOnceKey:
+          type: boolean
     OrgCreateRequest:
       type: object
       required:
@@ -4397,226 +5651,6 @@ components:
         nextCursor:
           type: string
           nullable: true
-    PolicyResponse:
-      type: object
-      required:
-      - orgId
-      - planTier
-      - source
-      - updatedAt
-      properties:
-        allowlist:
-          nullable: true
-        featureFlags:
-          nullable: true
-        llmSpendCapAmount:
-          type: number
-          format: double
-          nullable: true
-        llmSpendCapCurrency:
-          type: string
-          nullable: true
-        orgId:
-          type: string
-        planTier:
-          type: string
-        seatLimit:
-          type: integer
-          format: int32
-          nullable: true
-        source:
-          type: string
-        storagePolicyCapGb:
-          type: number
-          format: double
-          nullable: true
-        updatedAt:
-          type: string
-          format: date-time
-    ProjectCreateRequest:
-      type: object
-      required:
-      - name
-      properties:
-        name:
-          type: string
-    ProjectImportGitRequest:
-      type: object
-      required:
-      - url
-      properties:
-        name:
-          type: string
-          nullable: true
-        url:
-          type: string
-    ProjectImportGitResponse:
-      type: object
-      required:
-      - project
-      - import
-      properties:
-        import:
-          $ref: '#/components/schemas/ProjectImportStatusResponse'
-        project:
-          $ref: '#/components/schemas/server_org.Project'
-    ProjectImportStatusResponse:
-      type: object
-      required:
-      - project_id
-      - status
-      - phase
-      - source_url
-      - repo_host
-      - repo_owner
-      - repo_name
-      - files_written
-      - bytes_written
-      - error_details
-      - updated_at
-      properties:
-        bytes_written:
-          type: integer
-          format: int64
-        default_branch:
-          type: string
-          nullable: true
-        error_code:
-          type: string
-          nullable: true
-        error_details:
-          type: object
-        error_message:
-          type: string
-          nullable: true
-        estimated_total_bytes:
-          type: integer
-          format: int64
-          nullable: true
-        estimated_total_files:
-          type: integer
-          format: int64
-          nullable: true
-        files_written:
-          type: integer
-          format: int64
-        message:
-          type: string
-          nullable: true
-        phase:
-          type: string
-        project_id:
-          type: string
-        repo_host:
-          type: string
-        repo_name:
-          type: string
-        repo_owner:
-          type: string
-        resolved_commit_sha:
-          type: string
-          nullable: true
-        source_url:
-          type: string
-        status:
-          type: string
-        updated_at:
-          type: string
-          format: date-time
-    ProjectListResponse:
-      type: object
-      required:
-      - items
-      properties:
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/server_org.Project'
-        nextCursor:
-          type: string
-          nullable: true
-    ProjectMembershipCreateRequest:
-      type: object
-      required:
-      - user_id
-      - role
-      properties:
-        role:
-          $ref: '#/components/schemas/server_org.ProjectRole'
-        user_id:
-          type: string
-    ProjectMembershipListResponse:
-      type: object
-      required:
-      - items
-      properties:
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/server_org.ProjectMembership'
-        nextCursor:
-          type: string
-          nullable: true
-    ProjectMembershipUpdateRequest:
-      type: object
-      required:
-      - role
-      properties:
-        role:
-          $ref: '#/components/schemas/server_org.ProjectRole'
-    AdvisoryRequest:
-      type: object
-      required:
-      - affectedRequirement
-      - severity
-      - title
-      properties:
-        affectedRequirement:
-          type: string
-        severity:
-          $ref: '#/components/schemas/AdvisorySeverityRequest'
-        title:
-          type: string
-        url:
-          type: string
-          nullable: true
-        withdrawnAt:
-          type: string
-          format: date-time
-          nullable: true
-      additionalProperties: false
-    AdvisorySeverityRequest:
-      type: string
-      enum:
-      - low
-      - moderate
-      - high
-      - critical
-    CreateGroupRequest:
-      type: object
-      required:
-      - name
-      properties:
-        name:
-          type: string
-      additionalProperties: false
-    CreatePackageRequest:
-      type: object
-      required:
-      - namespace
-      - name
-      - visibility
-      properties:
-        description:
-          type: string
-          nullable: true
-        name:
-          type: string
-        namespace:
-          type: string
-        visibility:
-          $ref: '#/components/schemas/PackageVisibilityRequest'
-      additionalProperties: false
     PackageAdvisoryListResponse:
       type: object
       required:
@@ -4820,95 +5854,390 @@ components:
       enum:
       - public
       - private
-    ReleaseStatusRequest:
-      type: string
-      enum:
-      - active
-      - yanked
-      - quarantined
-      - revoked
-    ReleaseStatusResponse:
+    PlanEntitlementsResponse:
       type: object
       required:
-      - releaseId
-      - packageId
-      - version
-      - status
-      - changedAt
+      - canEditPersistentProjects
+      - canOpenLocalFolders
+      - canUseProjectAgents
+      - canConfigureOnDemandCreditLimit
+      - canConfigureStorageAddons
+      - canManageIdentity
+      - canPublishPublicPackages
+      - canPublishPrivatePackages
       properties:
-        changedAt:
+        canConfigureOnDemandCreditLimit:
+          type: boolean
+        canConfigureStorageAddons:
+          type: boolean
+        canEditPersistentProjects:
+          type: boolean
+        canManageIdentity:
+          type: boolean
+        canOpenLocalFolders:
+          type: boolean
+        canPublishPrivatePackages:
+          type: boolean
+        canPublishPublicPackages:
+          type: boolean
+        canUseProjectAgents:
+          type: boolean
+    PlanLifecycleResponse:
+      oneOf:
+      - type: object
+        required:
+        - kind
+        properties:
+          kind:
+            type: string
+            enum:
+            - free
+      - type: object
+        required:
+        - trialPlanKey
+        - endsAt
+        - kind
+        properties:
+          endsAt:
+            type: string
+            format: date-time
+          kind:
+            type: string
+            enum:
+            - trial
+          trialPlanKey:
+            type: string
+      - type: object
+        required:
+        - trialPlanKey
+        - endsAt
+        - kind
+        properties:
+          endsAt:
+            type: string
+            format: date-time
+          kind:
+            type: string
+            enum:
+            - lapsedTrial
+          trialPlanKey:
+            type: string
+      - type: object
+        required:
+        - kind
+        properties:
+          kind:
+            type: string
+            enum:
+            - paid
+      discriminator:
+        propertyName: kind
+    PolicyResponse:
+      type: object
+      required:
+      - orgId
+      - planTier
+      - basePlanKey
+      - effectivePlanKey
+      - lifecycle
+      - entitlements
+      - source
+      - updatedAt
+      properties:
+        allowlist:
+          nullable: true
+        basePlanKey:
+          type: string
+        effectivePlanKey:
+          type: string
+        entitlements:
+          $ref: '#/components/schemas/PlanEntitlementsResponse'
+        featureFlags:
+          nullable: true
+        lifecycle:
+          $ref: '#/components/schemas/PlanLifecycleResponse'
+        llmSpendCapAmount:
+          type: number
+          format: double
+          nullable: true
+        llmSpendCapCurrency:
+          type: string
+          nullable: true
+        orgId:
+          type: string
+        planTier:
+          type: string
+        seatLimit:
+          type: integer
+          format: int32
+          nullable: true
+        source:
+          type: string
+        storagePolicyCapGb:
+          type: number
+          format: double
+          nullable: true
+        updatedAt:
           type: string
           format: date-time
-        packageId:
-          type: string
-        reason:
-          type: string
-          nullable: true
-        releaseId:
-          type: string
-        status:
-          type: string
-        version:
-          type: string
-    SetReleaseStatusRequest:
+    ProjectCreateRequest:
       type: object
       required:
-      - status
+      - name
       properties:
-        reason:
+        handle:
           type: string
           nullable: true
-        status:
-          $ref: '#/components/schemas/ReleaseStatusRequest'
-      additionalProperties: false
-    UpdateGrantRequest:
+        name:
+          type: string
+        visibility:
+          allOf:
+          - $ref: '#/components/schemas/server_org.ProjectVisibility'
+          nullable: true
+    ProjectHandleSuggestionResponse:
       type: object
       required:
-      - subject
+      - handle
+      properties:
+        handle:
+          type: string
+    ProjectImportGitRequest:
+      type: object
+      required:
+      - url
+      properties:
+        name:
+          type: string
+          nullable: true
+        url:
+          type: string
+    ProjectImportGitResponse:
+      type: object
+      required:
+      - project
+      - import
+      properties:
+        import:
+          $ref: '#/components/schemas/ProjectImportStatusResponse'
+        project:
+          $ref: '#/components/schemas/server_org.Project'
+    ProjectImportStatusResponse:
+      type: object
+      required:
+      - project_id
+      - status
+      - phase
+      - source_url
+      - repo_host
+      - repo_owner
+      - repo_name
+      - files_written
+      - bytes_written
+      - error_details
+      - updated_at
+      properties:
+        bytes_written:
+          type: integer
+          format: int64
+        default_branch:
+          type: string
+          nullable: true
+        error_code:
+          type: string
+          nullable: true
+        error_details:
+          type: object
+        error_message:
+          type: string
+          nullable: true
+        estimated_total_bytes:
+          type: integer
+          format: int64
+          nullable: true
+        estimated_total_files:
+          type: integer
+          format: int64
+          nullable: true
+        files_written:
+          type: integer
+          format: int64
+        message:
+          type: string
+          nullable: true
+        phase:
+          type: string
+        project_id:
+          type: string
+        repo_host:
+          type: string
+        repo_name:
+          type: string
+        repo_owner:
+          type: string
+        resolved_commit_sha:
+          type: string
+          nullable: true
+        source_url:
+          type: string
+        status:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+    ProjectListResponse:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/server_org.Project'
+        nextCursor:
+          type: string
+          nullable: true
+    ProjectMembershipCreateRequest:
+      type: object
+      required:
+      - user_id
       - role
       properties:
-        expiresAt:
-          type: string
-          format: date-time
-          nullable: true
         role:
-          $ref: '#/components/schemas/PackageGrantRoleRequest'
-        subject:
-          $ref: '#/components/schemas/PackageGrantSubjectRequest'
-      additionalProperties: false
-    UpdatePackageRequest:
+          $ref: '#/components/schemas/server_org.ProjectRole'
+        user_id:
+          type: string
+    ProjectMembershipListResponse:
       type: object
       required:
-      - visibility
+      - items
       properties:
-        description:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/server_org.ProjectMembership'
+        nextCursor:
           type: string
           nullable: true
-        visibility:
-          $ref: '#/components/schemas/PackageVisibilityRequest'
-      additionalProperties: false
-    ApprovePublicationRequest:
-      type: object
-      properties:
-        approve:
-          type: boolean
-      additionalProperties: false
-    FinalizePublicationResponse:
+    ProjectMembershipUpdateRequest:
       type: object
       required:
-      - publicationId
-      - releaseId
-      - releaseDigest
-      - version
+      - role
       properties:
-        publicationId:
+        role:
+          $ref: '#/components/schemas/server_org.ProjectRole'
+    ProjectSnapshotEntryKindResponse:
+      type: string
+      enum:
+      - file
+      - directory
+    ProjectSnapshotEntryResponse:
+      type: object
+      required:
+      - path
+      - kind
+      - executable
+      properties:
+        bytes:
           type: string
-        releaseDigest:
+          nullable: true
+        executable:
+          type: boolean
+        kind:
+          $ref: '#/components/schemas/ProjectSnapshotEntryKindResponse'
+        path:
           type: string
-        releaseId:
+    ProjectSnapshotInventoryResponse:
+      type: object
+      required:
+      - project
+      - snapshot
+      - treeDigest
+      - entries
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectSnapshotEntryResponse'
+        project:
           type: string
-        version:
+        snapshot:
           type: string
+        treeDigest:
+          type: string
+    PublicPricingPlanResponse:
+      type: object
+      required:
+      - planKey
+      - displayName
+      - features
+      properties:
+        billingUnit:
+          type: string
+          nullable: true
+        ctaHref:
+          type: string
+          nullable: true
+        ctaLabel:
+          type: string
+          nullable: true
+        ctaType:
+          type: string
+          nullable: true
+        defaultCurrency:
+          type: string
+          nullable: true
+        displayName:
+          type: string
+        features:
+          type: array
+          items:
+            type: string
+        includedLlmCredits:
+          type: number
+          format: double
+          nullable: true
+        includedStorageGb:
+          type: number
+          format: double
+          nullable: true
+        llmCreditUnitPriceAmount:
+          type: number
+          format: double
+          nullable: true
+        llmCreditUnitPriceCurrency:
+          type: string
+          nullable: true
+        planKey:
+          type: string
+        priceLabel:
+          type: string
+          nullable: true
+        storageLimitAddonAmountPerGb:
+          type: number
+          format: double
+          nullable: true
+        trialDays:
+          type: integer
+          format: int32
+          nullable: true
+    PublicPricingResponse:
+      type: object
+      required:
+      - free
+      - enterprise
+      properties:
+        enterprise:
+          $ref: '#/components/schemas/PublicPricingPlanResponse'
+        free:
+          $ref: '#/components/schemas/PublicPricingPlanResponse'
+        pro:
+          allOf:
+          - $ref: '#/components/schemas/PublicPricingPlanResponse'
+          nullable: true
+    PublicationContentCipherRequest:
+      type: string
+      enum:
+      - aes256-gcm
     PublicationListResponse:
       type: object
       required:
@@ -4955,6 +6284,40 @@ components:
               minimum: 0
             digest:
               type: string
+            encryption:
+              allOf:
+              - type: object
+                required:
+                - schemaVersion
+                - contentCipher
+                - keyVersion
+                - plaintextDigest
+                - plaintextByteLen
+                - nonce
+                - aadDigest
+                properties:
+                  aadDigest:
+                    type: string
+                  contentCipher:
+                    $ref: '#/components/schemas/PublicationContentCipherRequest'
+                  keyVersion:
+                    type: integer
+                    format: int64
+                    minimum: 0
+                  nonce:
+                    type: string
+                  plaintextByteLen:
+                    type: integer
+                    format: int64
+                    minimum: 0
+                  plaintextDigest:
+                    type: string
+                  schemaVersion:
+                    type: integer
+                    format: int32
+                    minimum: 0
+                additionalProperties: false
+              nullable: true
             id:
               type: string
             mediaType:
@@ -5060,632 +6423,38 @@ components:
           nullable: true
         version:
           type: string
-    RejectPublicationRequest:
+    RecipientKeyListResponse:
       type: object
       required:
-      - reason
+      - keys
       properties:
-        reason:
-          type: string
-      additionalProperties: false
-    StagePublicationRequest:
-      type: object
-      required:
-      - version
-      - artifact
-      - metadata
-      - idempotencyKey
-      properties:
-        artifact:
-          type: object
-          required:
-          - digest
-          - treeDigest
-          - byteLen
-          - mediaType
-          properties:
-            byteLen:
-              type: integer
-              format: int64
-              minimum: 0
-            digest:
-              type: string
-            mediaType:
-              type: string
-            treeDigest:
-              type: string
-          additionalProperties: false
-        idempotencyKey:
-          type: string
-        metadata:
-          type: object
-          properties:
-            dependencies:
-              type: array
-              items:
-                type: object
-                required:
-                - alias
-                - registry
-                - namespace
-                - name
-                - requirement
-                - group
-                properties:
-                  alias:
-                    type: string
-                  defaultFeatures:
-                    type: boolean
-                  features:
-                    type: array
-                    items:
-                      type: string
-                  group:
-                    type: string
-                    enum:
-                    - runtime
-                    - development
-                    - test
-                  name:
-                    type: string
-                  namespace:
-                    type: string
-                  optional:
-                    type: boolean
-                  registry:
-                    type: string
-                  requirement:
-                    type: string
-                  target:
-                    type: string
-                    nullable: true
-                additionalProperties: false
-            features:
-              type: object
-              additionalProperties:
-                type: array
-                items:
-                  type: string
-            license:
-              type: string
-              nullable: true
-            optionalCapabilities:
-              type: array
-              items:
-                type: string
-            readmeDigest:
-              type: string
-              nullable: true
-            requiredCapabilities:
-              type: array
-              items:
-                type: string
-            runmatRequirement:
-              type: string
-              nullable: true
-            singleton:
-              type: boolean
-          additionalProperties: false
-        version:
-          type: string
-      additionalProperties: false
-    StagePublicationResponse:
-      allOf:
-      - type: object
-        required:
-        - id
-        - packageId
-        - version
-        - artifact
-        - metadata
-        - idempotencyKey
-        - payloadDigest
-        - status
-        - createdBy
-        - createdAt
-        - updatedAt
-        properties:
-          approvedAt:
-            type: string
-            format: date-time
-            nullable: true
-          approvedBy:
-            type: string
-            nullable: true
-          artifact:
-            type: object
-            required:
-            - id
-            - digest
-            - treeDigest
-            - byteLen
-            - mediaType
-            properties:
-              byteLen:
-                type: integer
-                format: int64
-                minimum: 0
-              digest:
-                type: string
-              id:
-                type: string
-              mediaType:
-                type: string
-              treeDigest:
-                type: string
-          createdAt:
-            type: string
-            format: date-time
-          createdBy:
-            type: string
-          id:
-            type: string
-          idempotencyKey:
-            type: string
-          metadata:
-            type: object
-            required:
-            - singleton
-            - dependencies
-            - features
-            - requiredCapabilities
-            - optionalCapabilities
-            properties:
-              dependencies:
-                type: array
-                items:
-                  type: object
-                  required:
-                  - alias
-                  - registry
-                  - namespace
-                  - name
-                  - requirement
-                  - group
-                  - optional
-                  - defaultFeatures
-                  - features
-                  properties:
-                    alias:
-                      type: string
-                    defaultFeatures:
-                      type: boolean
-                    features:
-                      type: array
-                      items:
-                        type: string
-                    group:
-                      type: string
-                    name:
-                      type: string
-                    namespace:
-                      type: string
-                    optional:
-                      type: boolean
-                    registry:
-                      type: string
-                    requirement:
-                      type: string
-                    target:
-                      type: string
-                      nullable: true
-              features:
-                type: object
-                additionalProperties:
-                  type: array
-                  items:
-                    type: string
-              license:
-                type: string
-                nullable: true
-              optionalCapabilities:
-                type: array
-                items:
-                  type: string
-              readmeDigest:
-                type: string
-                nullable: true
-              requiredCapabilities:
-                type: array
-                items:
-                  type: string
-              runmatRequirement:
-                type: string
-                nullable: true
-              singleton:
-                type: boolean
-          packageId:
-            type: string
-          payloadDigest:
-            type: string
-          rejectionReason:
-            type: string
-            nullable: true
-          status:
-            type: string
-          updatedAt:
-            type: string
-            format: date-time
-          verifiedAt:
-            type: string
-            format: date-time
-            nullable: true
-          version:
-            type: string
-      - type: object
-        properties:
-          uploadExpiresAt:
-            type: string
-            format: date-time
-            nullable: true
-          uploadUrl:
-            type: string
-            nullable: true
-    AttachAttestationRequest:
-      type: object
-      required:
-      - schemaVersion
-      - publisherId
-      - payloadDigest
-      - sequence
-      - issuedAt
-      - provenance
-      - signature
-      properties:
-        issuedAt:
-          type: string
-          format: date-time
-        payloadDigest:
-          type: string
-        provenance:
-          type: object
-          required:
-          - sourceRepository
-          - sourceCommit
-          - builderId
-          - invocationId
-          - inventoryDigest
-          - releaseManifestDigest
-          properties:
-            builderId:
-              type: string
-            inventoryDigest:
-              type: string
-            invocationId:
-              type: string
-            license:
-              type: string
-              nullable: true
-            releaseManifestDigest:
-              type: string
-            sbom:
-              allOf:
-              - type: object
-                required:
-                - format
-                - digest
-                - mediaType
-                properties:
-                  digest:
-                    type: string
-                  format:
-                    type: string
-                  mediaType:
-                    type: string
-                additionalProperties: false
-              nullable: true
-            sourceCommit:
-              type: string
-            sourceRepository:
-              type: string
-            workflowRef:
-              type: string
-              nullable: true
-            wrapper:
-              allOf:
-              - type: object
-                required:
-                - upstreamRepository
-                - upstreamVersion
-                - upstreamDigest
-                properties:
-                  upstreamDigest:
-                    type: string
-                  upstreamRepository:
-                    type: string
-                  upstreamVersion:
-                    type: string
-                additionalProperties: false
-              nullable: true
-          additionalProperties: false
-        publisherId:
-          type: string
-        schemaVersion:
-          type: integer
-          format: int32
-          minimum: 0
-        sequence:
-          type: integer
-          format: int64
-          minimum: 0
-        signature:
-          type: string
-      additionalProperties: false
-    AttestationResponse:
-      type: object
-      required:
-      - publicationId
-      - packageId
-      - publisherId
-      - payloadDigest
-      - sequence
-      - issuedAt
-      - provenance
-      - signature
-      properties:
-        issuedAt:
-          type: string
-          format: date-time
-        packageId:
-          type: string
-        payloadDigest:
-          type: string
-        provenance:
-          type: object
-          required:
-          - sourceRepository
-          - sourceCommit
-          - builderId
-          - invocationId
-          - inventoryDigest
-          - releaseManifestDigest
-          properties:
-            builderId:
-              type: string
-            inventoryDigest:
-              type: string
-            invocationId:
-              type: string
-            license:
-              type: string
-              nullable: true
-            releaseManifestDigest:
-              type: string
-            sbom:
-              allOf:
-              - type: object
-                required:
-                - format
-                - digest
-                - mediaType
-                properties:
-                  digest:
-                    type: string
-                  format:
-                    type: string
-                  mediaType:
-                    type: string
-                additionalProperties: false
-              nullable: true
-            sourceCommit:
-              type: string
-            sourceRepository:
-              type: string
-            workflowRef:
-              type: string
-              nullable: true
-            wrapper:
-              allOf:
-              - type: object
-                required:
-                - upstreamRepository
-                - upstreamVersion
-                - upstreamDigest
-                properties:
-                  upstreamDigest:
-                    type: string
-                  upstreamRepository:
-                    type: string
-                  upstreamVersion:
-                    type: string
-                additionalProperties: false
-              nullable: true
-          additionalProperties: false
-        publicationId:
-          type: string
-        publisherId:
-          type: string
-        sequence:
-          type: integer
-          format: int64
-          minimum: 0
-        signature:
-          type: string
-    CreateTrustedPublisherRequest:
-      type: object
-      required:
-      - name
-      - identity
-      - publicKey
-      properties:
-        identity:
-          oneOf:
-          - type: object
-            required:
-            - principalId
-            - kind
-            properties:
-              kind:
-                type: string
-                enum:
-                - principal
-              principalId:
-                type: string
-          - type: object
-            required:
-            - issuer
-            - subject
-            - kind
-            properties:
-              issuer:
-                type: string
-              kind:
-                type: string
-                enum:
-                - oidc
-              subject:
-                type: string
-          discriminator:
-            propertyName: kind
-        name:
-          type: string
-        publicKey:
-          type: string
-        sourceRepository:
-          type: string
-          nullable: true
-      additionalProperties: false
-    RevokeTrustedPublisherRequest:
-      type: object
-      properties:
-        compromiseEffectiveAt:
-          type: string
-          format: date-time
-          nullable: true
-      additionalProperties: false
-    SecurityPolicyRequest:
-      type: object
-      required:
-      - trustTier
-      - requireSignature
-      - requireProvenance
-      - requireSbom
-      - requireLicense
-      - requireManualApproval
-      - frozen
-      properties:
-        frozen:
-          type: boolean
-        requireLicense:
-          type: boolean
-        requireManualApproval:
-          type: boolean
-        requireProvenance:
-          type: boolean
-        requireSbom:
-          type: boolean
-        requireSignature:
-          type: boolean
-        trustTier:
-          $ref: '#/components/schemas/TrustTierBody'
-      additionalProperties: false
-    SecurityPolicyResponse:
-      type: object
-      required:
-      - packageId
-      - trustTier
-      - requireSignature
-      - requireProvenance
-      - requireSbom
-      - requireLicense
-      - requireManualApproval
-      - frozen
-      - updatedBy
-      - updatedAt
-      properties:
-        frozen:
-          type: boolean
-        packageId:
-          type: string
-        requireLicense:
-          type: boolean
-        requireManualApproval:
-          type: boolean
-        requireProvenance:
-          type: boolean
-        requireSbom:
-          type: boolean
-        requireSignature:
-          type: boolean
-        trustTier:
-          $ref: '#/components/schemas/TrustTierBody'
-        updatedAt:
-          type: string
-          format: date-time
-        updatedBy:
-          type: string
-    TrustTierBody:
-      type: string
-      enum:
-      - official
-      - verified-wrapper
-      - community
-    TrustedPublisherListResponse:
-      type: object
-      required:
-      - publishers
-      properties:
-        publishers:
+        keys:
           type: array
           items:
-            $ref: '#/components/schemas/TrustedPublisherResponse'
-    TrustedPublisherResponse:
+            $ref: '#/components/schemas/RecipientKeyResponse'
+    RecipientKeyResponse:
       type: object
       required:
       - id
       - packageId
-      - name
-      - identity
+      - principalId
+      - algorithm
       - publicKey
-      - keyFingerprint
-      - createdBy
+      - fingerprint
       - createdAt
       properties:
-        compromiseEffectiveAt:
+        algorithm:
           type: string
-          format: date-time
-          nullable: true
         createdAt:
           type: string
           format: date-time
-        createdBy:
+        fingerprint:
           type: string
         id:
           type: string
-        identity:
-          oneOf:
-          - type: object
-            required:
-            - principalId
-            - kind
-            properties:
-              kind:
-                type: string
-                enum:
-                - principal
-              principalId:
-                type: string
-          - type: object
-            required:
-            - issuer
-            - subject
-            - kind
-            properties:
-              issuer:
-                type: string
-              kind:
-                type: string
-                enum:
-                - oidc
-              subject:
-                type: string
-          discriminator:
-            propertyName: kind
-        keyFingerprint:
-          type: string
-        name:
-          type: string
         packageId:
+          type: string
+        principalId:
           type: string
         publicKey:
           type: string
@@ -5693,9 +6462,14 @@ components:
           type: string
           format: date-time
           nullable: true
-        sourceRepository:
+    RegisterRecipientKeyRequest:
+      type: object
+      required:
+      - publicKey
+      properties:
+        publicKey:
           type: string
-          nullable: true
+      additionalProperties: false
     RegistryAdvisoryResponse:
       type: object
       required:
@@ -5725,6 +6499,7 @@ components:
       - mediaType
       - downloadUrl
       - expiresAt
+      - keyEnvelopes
       properties:
         byteLen:
           type: integer
@@ -5739,6 +6514,10 @@ components:
           format: int64
         id:
           type: string
+        keyEnvelopes:
+          type: array
+          items:
+            $ref: '#/components/schemas/RegistryKeyEnvelopeResponse'
         mediaType:
           type: string
         treeDigest:
@@ -5821,6 +6600,371 @@ components:
         target:
           type: string
           nullable: true
+    RegistryDiscoveryAdvisoryResponse:
+      type: object
+      required:
+      - id
+      - affectedRequirement
+      - severity
+      - title
+      - createdAt
+      properties:
+        affectedRequirement:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        id:
+          type: string
+        severity:
+          type: string
+        title:
+          type: string
+        url:
+          type: string
+          nullable: true
+    RegistryDiscoverySearchResponse:
+      type: object
+      required:
+      - packages
+      properties:
+        nextCursor:
+          type: string
+          nullable: true
+        packages:
+          type: array
+          items:
+            $ref: '#/components/schemas/RegistryPackageSummaryResponse'
+    RegistryKeyEnvelopeResponse:
+      type: object
+      required:
+      - schemaVersion
+      - algorithm
+      - recipientKeyId
+      - recipientKeyFingerprint
+      - ephemeralPublicKey
+      - nonce
+      - wrappedKey
+      - contextDigest
+      properties:
+        algorithm:
+          type: string
+        contextDigest:
+          type: string
+        ephemeralPublicKey:
+          type: string
+        nonce:
+          type: string
+        recipientKeyFingerprint:
+          type: string
+        recipientKeyId:
+          type: string
+        schemaVersion:
+          type: integer
+          format: int32
+          minimum: 0
+        wrappedKey:
+          type: string
+    RegistryPackageDetailResponse:
+      type: object
+      required:
+      - registry
+      - namespace
+      - name
+      - createdAt
+      - updatedAt
+      - releases
+      - advisories
+      properties:
+        advisories:
+          type: array
+          items:
+            $ref: '#/components/schemas/RegistryDiscoveryAdvisoryResponse'
+        createdAt:
+          type: string
+          format: date-time
+        description:
+          type: string
+          nullable: true
+        name:
+          type: string
+        namespace:
+          type: string
+        registry:
+          type: string
+        releases:
+          type: array
+          items:
+            $ref: '#/components/schemas/RegistryPackageReleaseResponse'
+        updatedAt:
+          type: string
+          format: date-time
+    RegistryPackageReleaseResponse:
+      allOf:
+      - type: object
+        required:
+        - packageId
+        - releaseId
+        - registry
+        - namespace
+        - name
+        - version
+        - releaseDigest
+        - singleton
+        - features
+        - requiredCapabilities
+        - optionalCapabilities
+        - dependencies
+        - advisories
+        properties:
+          advisories:
+            type: array
+            items:
+              $ref: '#/components/schemas/RegistryAdvisoryResponse'
+          dependencies:
+            type: array
+            items:
+              $ref: '#/components/schemas/RegistryDependencyResponse'
+          encryption:
+            allOf:
+            - type: object
+              required:
+              - schemaVersion
+              - contentCipher
+              - keyVersion
+              - plaintextDigest
+              - plaintextByteLen
+              - nonce
+              - aadDigest
+              properties:
+                aadDigest:
+                  type: string
+                contentCipher:
+                  type: string
+                keyVersion:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                nonce:
+                  type: string
+                plaintextByteLen:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                plaintextDigest:
+                  type: string
+                schemaVersion:
+                  type: integer
+                  format: int32
+                  minimum: 0
+            nullable: true
+          features:
+            type: object
+            additionalProperties:
+              type: array
+              items:
+                type: string
+          license:
+            type: string
+            nullable: true
+          name:
+            type: string
+          namespace:
+            type: string
+          optionalCapabilities:
+            type: array
+            items:
+              type: string
+          packageId:
+            type: string
+          readmeDigest:
+            type: string
+            nullable: true
+          registry:
+            type: string
+          releaseDigest:
+            type: string
+          releaseId:
+            type: string
+          requiredCapabilities:
+            type: array
+            items:
+              type: string
+          runmatRequirement:
+            type: string
+            nullable: true
+          singleton:
+            type: boolean
+          supplyChain:
+            allOf:
+            - type: object
+              required:
+              - schemaVersion
+              - publicationId
+              - publisherId
+              - publisherName
+              - publicKey
+              - keyFingerprint
+              - payloadDigest
+              - sequence
+              - signedAt
+              - trustTier
+              - provenance
+              - signature
+              properties:
+                keyFingerprint:
+                  type: string
+                payloadDigest:
+                  type: string
+                provenance:
+                  type: object
+                  required:
+                  - sourceRepository
+                  - sourceCommit
+                  - builderId
+                  - invocationId
+                  - inventoryDigest
+                  - releaseManifestDigest
+                  properties:
+                    builderId:
+                      type: string
+                    inventoryDigest:
+                      type: string
+                    invocationId:
+                      type: string
+                    license:
+                      type: string
+                      nullable: true
+                    releaseManifestDigest:
+                      type: string
+                    sbom:
+                      allOf:
+                      - type: object
+                        required:
+                        - format
+                        - digest
+                        - mediaType
+                        properties:
+                          digest:
+                            type: string
+                          format:
+                            type: string
+                          mediaType:
+                            type: string
+                        additionalProperties: false
+                      nullable: true
+                    sourceCommit:
+                      type: string
+                    sourceRepository:
+                      type: string
+                    workflowRef:
+                      type: string
+                      nullable: true
+                    wrapper:
+                      allOf:
+                      - type: object
+                        required:
+                        - upstreamRepository
+                        - upstreamVersion
+                        - upstreamDigest
+                        properties:
+                          upstreamDigest:
+                            type: string
+                          upstreamRepository:
+                            type: string
+                          upstreamVersion:
+                            type: string
+                        additionalProperties: false
+                      nullable: true
+                  additionalProperties: false
+                publicKey:
+                  type: string
+                publicationId:
+                  type: string
+                publisherId:
+                  type: string
+                publisherName:
+                  type: string
+                schemaVersion:
+                  type: integer
+                  format: int32
+                  minimum: 0
+                sequence:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                signature:
+                  type: string
+                signedAt:
+                  type: string
+                  format: date-time
+                trustTier:
+                  type: string
+            nullable: true
+          version:
+            type: string
+      - type: object
+        required:
+        - status
+        - publishedAt
+        - statusChangedAt
+        properties:
+          publishedAt:
+            type: string
+            format: date-time
+          status:
+            type: string
+          statusChangedAt:
+            type: string
+            format: date-time
+          statusReason:
+            type: string
+            nullable: true
+    RegistryPackageSummaryResponse:
+      type: object
+      required:
+      - registry
+      - namespace
+      - name
+      - trustTier
+      - releaseCount
+      - yankedCount
+      - unavailableCount
+      - advisoryCount
+      - updatedAt
+      properties:
+        advisoryCount:
+          type: integer
+          minimum: 0
+        description:
+          type: string
+          nullable: true
+        latestVersion:
+          type: string
+          nullable: true
+        license:
+          type: string
+          nullable: true
+        name:
+          type: string
+        namespace:
+          type: string
+        registry:
+          type: string
+        releaseCount:
+          type: integer
+          minimum: 0
+        trustTier:
+          type: string
+        unavailableCount:
+          type: integer
+          minimum: 0
+        updatedAt:
+          type: string
+          format: date-time
+        yankedCount:
+          type: integer
+          minimum: 0
     RegistryReleaseMetadataResponse:
       type: object
       required:
@@ -5846,6 +6990,39 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/RegistryDependencyResponse'
+        encryption:
+          allOf:
+          - type: object
+            required:
+            - schemaVersion
+            - contentCipher
+            - keyVersion
+            - plaintextDigest
+            - plaintextByteLen
+            - nonce
+            - aadDigest
+            properties:
+              aadDigest:
+                type: string
+              contentCipher:
+                type: string
+              keyVersion:
+                type: integer
+                format: int64
+                minimum: 0
+              nonce:
+                type: string
+              plaintextByteLen:
+                type: integer
+                format: int64
+                minimum: 0
+              plaintextDigest:
+                type: string
+              schemaVersion:
+                type: integer
+                format: int32
+                minimum: 0
+          nullable: true
         features:
           type: object
           additionalProperties:
@@ -6000,6 +7177,445 @@ components:
         properties:
           artifact:
             $ref: '#/components/schemas/RegistryArtifactResponse'
+    RejectPublicationRequest:
+      type: object
+      required:
+      - reason
+      properties:
+        reason:
+          type: string
+      additionalProperties: false
+    ReleaseStatusRequest:
+      type: string
+      enum:
+      - active
+      - yanked
+      - quarantined
+      - revoked
+    ReleaseStatusResponse:
+      type: object
+      required:
+      - releaseId
+      - packageId
+      - version
+      - status
+      - changedAt
+      properties:
+        changedAt:
+          type: string
+          format: date-time
+        packageId:
+          type: string
+        reason:
+          type: string
+          nullable: true
+        releaseId:
+          type: string
+        status:
+          type: string
+        version:
+          type: string
+    RevokeTrustedPublisherRequest:
+      type: object
+      properties:
+        compromiseEffectiveAt:
+          type: string
+          format: date-time
+          nullable: true
+      additionalProperties: false
+    SecurityPolicyRequest:
+      type: object
+      required:
+      - trustTier
+      - requireSignature
+      - requireProvenance
+      - requireSbom
+      - requireLicense
+      - requireManualApproval
+      - frozen
+      properties:
+        frozen:
+          type: boolean
+        requireLicense:
+          type: boolean
+        requireManualApproval:
+          type: boolean
+        requireProvenance:
+          type: boolean
+        requireSbom:
+          type: boolean
+        requireSignature:
+          type: boolean
+        trustTier:
+          $ref: '#/components/schemas/TrustTierBody'
+      additionalProperties: false
+    SecurityPolicyResponse:
+      type: object
+      required:
+      - packageId
+      - trustTier
+      - requireSignature
+      - requireProvenance
+      - requireSbom
+      - requireLicense
+      - requireManualApproval
+      - frozen
+      - updatedBy
+      - updatedAt
+      properties:
+        frozen:
+          type: boolean
+        packageId:
+          type: string
+        requireLicense:
+          type: boolean
+        requireManualApproval:
+          type: boolean
+        requireProvenance:
+          type: boolean
+        requireSbom:
+          type: boolean
+        requireSignature:
+          type: boolean
+        trustTier:
+          $ref: '#/components/schemas/TrustTierBody'
+        updatedAt:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+    SetReleaseStatusRequest:
+      type: object
+      required:
+      - status
+      properties:
+        reason:
+          type: string
+          nullable: true
+        status:
+          $ref: '#/components/schemas/ReleaseStatusRequest'
+      additionalProperties: false
+    StagePublicationRequest:
+      type: object
+      required:
+      - version
+      - artifact
+      - metadata
+      - idempotencyKey
+      properties:
+        artifact:
+          type: object
+          required:
+          - digest
+          - treeDigest
+          - byteLen
+          - mediaType
+          properties:
+            byteLen:
+              type: integer
+              format: int64
+              minimum: 0
+            digest:
+              type: string
+            encryption:
+              allOf:
+              - type: object
+                required:
+                - schemaVersion
+                - contentCipher
+                - keyVersion
+                - plaintextDigest
+                - plaintextByteLen
+                - nonce
+                - aadDigest
+                properties:
+                  aadDigest:
+                    type: string
+                  contentCipher:
+                    $ref: '#/components/schemas/PublicationContentCipherRequest'
+                  keyVersion:
+                    type: integer
+                    format: int64
+                    minimum: 0
+                  nonce:
+                    type: string
+                  plaintextByteLen:
+                    type: integer
+                    format: int64
+                    minimum: 0
+                  plaintextDigest:
+                    type: string
+                  schemaVersion:
+                    type: integer
+                    format: int32
+                    minimum: 0
+                additionalProperties: false
+              nullable: true
+            mediaType:
+              type: string
+            treeDigest:
+              type: string
+          additionalProperties: false
+        idempotencyKey:
+          type: string
+        metadata:
+          type: object
+          properties:
+            dependencies:
+              type: array
+              items:
+                type: object
+                required:
+                - alias
+                - registry
+                - namespace
+                - name
+                - requirement
+                - group
+                properties:
+                  alias:
+                    type: string
+                  defaultFeatures:
+                    type: boolean
+                  features:
+                    type: array
+                    items:
+                      type: string
+                  group:
+                    type: string
+                    enum:
+                    - runtime
+                    - development
+                    - test
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                  optional:
+                    type: boolean
+                  registry:
+                    type: string
+                  requirement:
+                    type: string
+                  target:
+                    type: string
+                    nullable: true
+                additionalProperties: false
+            features:
+              type: object
+              additionalProperties:
+                type: array
+                items:
+                  type: string
+            license:
+              type: string
+              nullable: true
+            optionalCapabilities:
+              type: array
+              items:
+                type: string
+            readmeDigest:
+              type: string
+              nullable: true
+            requiredCapabilities:
+              type: array
+              items:
+                type: string
+            runmatRequirement:
+              type: string
+              nullable: true
+            singleton:
+              type: boolean
+          additionalProperties: false
+        version:
+          type: string
+      additionalProperties: false
+    StagePublicationResponse:
+      allOf:
+      - type: object
+        required:
+        - id
+        - packageId
+        - version
+        - artifact
+        - metadata
+        - idempotencyKey
+        - payloadDigest
+        - status
+        - createdBy
+        - createdAt
+        - updatedAt
+        properties:
+          approvedAt:
+            type: string
+            format: date-time
+            nullable: true
+          approvedBy:
+            type: string
+            nullable: true
+          artifact:
+            type: object
+            required:
+            - id
+            - digest
+            - treeDigest
+            - byteLen
+            - mediaType
+            properties:
+              byteLen:
+                type: integer
+                format: int64
+                minimum: 0
+              digest:
+                type: string
+              encryption:
+                allOf:
+                - type: object
+                  required:
+                  - schemaVersion
+                  - contentCipher
+                  - keyVersion
+                  - plaintextDigest
+                  - plaintextByteLen
+                  - nonce
+                  - aadDigest
+                  properties:
+                    aadDigest:
+                      type: string
+                    contentCipher:
+                      $ref: '#/components/schemas/PublicationContentCipherRequest'
+                    keyVersion:
+                      type: integer
+                      format: int64
+                      minimum: 0
+                    nonce:
+                      type: string
+                    plaintextByteLen:
+                      type: integer
+                      format: int64
+                      minimum: 0
+                    plaintextDigest:
+                      type: string
+                    schemaVersion:
+                      type: integer
+                      format: int32
+                      minimum: 0
+                  additionalProperties: false
+                nullable: true
+              id:
+                type: string
+              mediaType:
+                type: string
+              treeDigest:
+                type: string
+          createdAt:
+            type: string
+            format: date-time
+          createdBy:
+            type: string
+          id:
+            type: string
+          idempotencyKey:
+            type: string
+          metadata:
+            type: object
+            required:
+            - singleton
+            - dependencies
+            - features
+            - requiredCapabilities
+            - optionalCapabilities
+            properties:
+              dependencies:
+                type: array
+                items:
+                  type: object
+                  required:
+                  - alias
+                  - registry
+                  - namespace
+                  - name
+                  - requirement
+                  - group
+                  - optional
+                  - defaultFeatures
+                  - features
+                  properties:
+                    alias:
+                      type: string
+                    defaultFeatures:
+                      type: boolean
+                    features:
+                      type: array
+                      items:
+                        type: string
+                    group:
+                      type: string
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                    optional:
+                      type: boolean
+                    registry:
+                      type: string
+                    requirement:
+                      type: string
+                    target:
+                      type: string
+                      nullable: true
+              features:
+                type: object
+                additionalProperties:
+                  type: array
+                  items:
+                    type: string
+              license:
+                type: string
+                nullable: true
+              optionalCapabilities:
+                type: array
+                items:
+                  type: string
+              readmeDigest:
+                type: string
+                nullable: true
+              requiredCapabilities:
+                type: array
+                items:
+                  type: string
+              runmatRequirement:
+                type: string
+                nullable: true
+              singleton:
+                type: boolean
+          packageId:
+            type: string
+          payloadDigest:
+            type: string
+          rejectionReason:
+            type: string
+            nullable: true
+          status:
+            type: string
+          updatedAt:
+            type: string
+            format: date-time
+          verifiedAt:
+            type: string
+            format: date-time
+            nullable: true
+          version:
+            type: string
+      - type: object
+        properties:
+          uploadExpiresAt:
+            type: string
+            format: date-time
+            nullable: true
+          uploadUrl:
+            type: string
+            nullable: true
     TelemetryIngestRequest:
       type: object
       required:
@@ -6066,6 +7682,114 @@ components:
           type: boolean
         event:
           type: string
+    TrustTierBody:
+      type: string
+      enum:
+      - official
+      - verified-wrapper
+      - community
+    TrustedPublisherListResponse:
+      type: object
+      required:
+      - publishers
+      properties:
+        publishers:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrustedPublisherResponse'
+    TrustedPublisherResponse:
+      type: object
+      required:
+      - id
+      - packageId
+      - name
+      - identity
+      - publicKey
+      - keyFingerprint
+      - createdBy
+      - createdAt
+      properties:
+        compromiseEffectiveAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+        id:
+          type: string
+        identity:
+          oneOf:
+          - type: object
+            required:
+            - principalId
+            - kind
+            properties:
+              kind:
+                type: string
+                enum:
+                - principal
+              principalId:
+                type: string
+          - type: object
+            required:
+            - issuer
+            - subject
+            - kind
+            properties:
+              issuer:
+                type: string
+              kind:
+                type: string
+                enum:
+                - oidc
+              subject:
+                type: string
+          discriminator:
+            propertyName: kind
+        keyFingerprint:
+          type: string
+        name:
+          type: string
+        packageId:
+          type: string
+        publicKey:
+          type: string
+        revokedAt:
+          type: string
+          format: date-time
+          nullable: true
+        sourceRepository:
+          type: string
+          nullable: true
+    UpdateGrantRequest:
+      type: object
+      required:
+      - subject
+      - role
+      properties:
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        role:
+          $ref: '#/components/schemas/PackageGrantRoleRequest'
+        subject:
+          $ref: '#/components/schemas/PackageGrantSubjectRequest'
+      additionalProperties: false
+    UpdatePackageRequest:
+      type: object
+      required:
+      - visibility
+      properties:
+        description:
+          type: string
+          nullable: true
+        visibility:
+          $ref: '#/components/schemas/PackageVisibilityRequest'
+      additionalProperties: false
     UpgradeRequestCreateRequest:
       type: object
       required:
@@ -6204,14 +7928,6 @@ components:
           type: integer
           format: int32
           nullable: true
-        tokensIn:
-          type: integer
-          format: int64
-          nullable: true
-        tokensOut:
-          type: integer
-          format: int64
-          nullable: true
         updatedAt:
           type: string
           format: date-time
@@ -6252,6 +7968,12 @@ components:
           type: string
           nullable: true
         gclid:
+          type: string
+          nullable: true
+        initialLandingPageUrl:
+          type: string
+          nullable: true
+        initialPageReferrer:
           type: string
           nullable: true
         landingPageUrl:
@@ -6488,6 +8210,13 @@ components:
           type: string
           format: uuid
           nullable: true
+    server_org.OrgRole:
+      type: string
+      enum:
+      - owner
+      - admin
+      - member
+      - viewer
     server_org.Project:
       type: object
       required:
@@ -6508,6 +8237,9 @@ components:
           type: string
           format: date-time
           nullable: true
+        handle:
+          type: string
+          nullable: true
         id:
           type: string
         name:
@@ -6521,6 +8253,8 @@ components:
           type: string
           format: uuid
           nullable: true
+        visibility:
+          $ref: '#/components/schemas/server_org.ProjectVisibility'
     server_org.ProjectMembership:
       type: object
       required:
@@ -6565,6 +8299,11 @@ components:
       enum:
       - read
       - write
+    server_org.ProjectVisibility:
+      type: string
+      enum:
+      - private
+      - public
   securitySchemes:
     bearerAuth:
       type: http
