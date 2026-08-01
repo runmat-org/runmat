@@ -124,12 +124,9 @@ pub(in crate::builtins::table) fn compare_table_cells(
         }
         Value::Object(obj) if obj.is_class("datetime") => {
             let tensor = crate::builtins::datetime::serials_from_datetime_value(value)?;
-            Ok(tensor
-                .data
-                .get(a)
-                .copied()
+            Ok(double_value_at(&tensor, a)
                 .unwrap_or(f64::NAN)
-                .partial_cmp(&tensor.data.get(b).copied().unwrap_or(f64::NAN))
+                .partial_cmp(&double_value_at(&tensor, b).unwrap_or(f64::NAN))
                 .unwrap_or(Ordering::Greater))
         }
         other => Ok(cell_key_string(other, a).cmp(&cell_key_string(other, b))),
@@ -240,7 +237,7 @@ pub(in crate::builtins::table) fn cell_group_atom(value: &Value, row: usize) -> 
         Value::Object(obj) if obj.is_class("datetime") => {
             crate::builtins::datetime::serials_from_datetime_value(value)
                 .ok()
-                .and_then(|tensor| tensor.data.get(row).copied())
+                .and_then(|tensor| double_value_at(&tensor, row))
                 .map(GroupAtom::Number)
                 .unwrap_or(GroupAtom::Missing)
         }
@@ -405,8 +402,7 @@ mod tests {
     #[test]
     fn cell_key_string_reads_typed_integer_storage_exactly() {
         let large = 9_007_199_254_740_993_u64;
-        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).unwrap();
-        tensor.data[0] = 1.0;
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).unwrap();
 
         assert_eq!(
             cell_key_string(&Value::Tensor(tensor), 0),
@@ -590,14 +586,14 @@ pub(in crate::builtins::table) fn cell_key_string(value: &Value, row: usize) -> 
         Value::Object(obj) if obj.is_class("datetime") => {
             crate::builtins::datetime::serials_from_datetime_value(value)
                 .ok()
-                .and_then(|tensor| tensor.data.get(row).copied())
+                .and_then(|tensor| double_value_at(&tensor, row))
                 .map(format_key_number)
                 .unwrap_or_default()
         }
         Value::Object(obj) if obj.is_class("duration") => {
             crate::builtins::duration::duration_tensor_from_duration_value(value)
                 .ok()
-                .and_then(|tensor| tensor.data.get(row).copied())
+                .and_then(|tensor| double_value_at(&tensor, row))
                 .map(format_key_number)
                 .unwrap_or_default()
         }
@@ -610,4 +606,8 @@ pub(in crate::builtins::table) fn cell_key_string(value: &Value, row: usize) -> 
             .unwrap_or_default(),
         other => format!("{other}"),
     }
+}
+
+fn double_value_at(tensor: &Tensor, index: usize) -> Option<f64> {
+    tensor.as_f64_slice()?.get(index).copied()
 }
