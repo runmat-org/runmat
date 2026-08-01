@@ -1422,9 +1422,10 @@ fn datevec_components_from_serial(serial: f64) -> BuiltinResult<[f64; 6]> {
 }
 
 fn datevec_matrix_from_serial_tensor(serials: &Tensor) -> BuiltinResult<Tensor> {
-    let rows = serials.data.len();
+    let values = tensor::tensor_values_f64_cow(serials);
+    let rows = values.len();
     let mut data = vec![0.0; rows.saturating_mul(6)];
-    for (row, serial) in serials.data.iter().enumerate() {
+    for (row, serial) in values.iter().enumerate() {
         let components = datevec_components_from_serial(*serial)?;
         for col in 0..6 {
             data[col * rows + row] = components[col];
@@ -1498,9 +1499,10 @@ fn datenum_from_datevec_tensor(tensor: &Tensor, context: &str) -> BuiltinResult<
             "{context}: date vectors must have six columns"
         )));
     }
+    let values = tensor::tensor_values_f64_cow(tensor);
     let mut out = Vec::with_capacity(rows);
     for row in 0..rows {
-        let component = |col: usize| tensor.data[col * rows + row];
+        let component = |col: usize| values[col * rows + row];
         let naive = naive_from_components(
             component(0),
             component(1),
@@ -1698,8 +1700,8 @@ fn holiday_set_from_optional_or_default(
 ) -> BuiltinResult<HashSet<i64>> {
     if let Some(value) = value {
         let serials = numeric_or_datetime_serial_tensor(value, context)?;
-        return serials
-            .data
+        let values = tensor::tensor_values_f64_cow(&serials);
+        return values
             .iter()
             .map(|serial| serial_date_key(*serial))
             .collect::<BuiltinResult<HashSet<_>>>();
@@ -1712,7 +1714,8 @@ fn date_key_range(tensors: &[&Tensor]) -> BuiltinResult<(i64, i64)> {
     let mut max_key = i64::MIN;
     let mut found = false;
     for tensor in tensors {
-        for serial in &tensor.data {
+        let values = tensor::tensor_values_f64_cow(tensor);
+        for serial in values.iter() {
             let key = serial_date_key(*serial)?;
             min_key = min_key.min(key);
             max_key = max_key.max(key);
@@ -2109,10 +2112,11 @@ async fn datevec_builtin(value: Value) -> crate::BuiltinResult<Value> {
             return Ok(Value::OutputList(Vec::new()));
         }
         let mut outputs = Vec::with_capacity(out_count.min(6));
+        let matrix_values = tensor::tensor_values_f64_cow(&matrix);
         for col in 0..6.min(out_count) {
             let mut data = Vec::with_capacity(matrix.rows);
             for row in 0..matrix.rows {
-                data.push(matrix.data[col * matrix.rows + row]);
+                data.push(matrix_values[col * matrix.rows + row]);
             }
             outputs.push(if data.len() == 1 {
                 Value::Num(data[0])
@@ -2162,8 +2166,9 @@ async fn datestr_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult
         }
         _ => numeric_or_datetime_serial_tensor(value, "datestr")?,
     };
-    let mut rows = Vec::with_capacity(serials.data.len());
-    for serial in &serials.data {
+    let serial_values = tensor::tensor_values_f64_cow(&serials);
+    let mut rows = Vec::with_capacity(serial_values.len());
+    for serial in serial_values.iter() {
         rows.push(format_serial(*serial, &format)?);
     }
     Ok(Value::CharArray(char_array_from_rows(&rows, "datestr")?))
@@ -2181,9 +2186,10 @@ async fn weekday_builtin(value: Value) -> crate::BuiltinResult<Value> {
         .await
         .map_err(|err| datetime_error(format!("weekday: {}", err.message())))?;
     let serials = numeric_or_datetime_serial_tensor(value, "weekday")?;
-    let mut nums = Vec::with_capacity(serials.data.len());
-    let mut names = Vec::with_capacity(serials.data.len());
-    for serial in &serials.data {
+    let serial_values = tensor::tensor_values_f64_cow(&serials);
+    let mut nums = Vec::with_capacity(serial_values.len());
+    let mut names = Vec::with_capacity(serial_values.len());
+    for serial in serial_values.iter() {
         let weekday = naive_from_datenum(*serial)?.weekday();
         nums.push(f64::from(weekday.num_days_from_sunday()) + 1.0);
         names.push(
@@ -2199,7 +2205,7 @@ async fn weekday_builtin(value: Value) -> crate::BuiltinResult<Value> {
             .to_string(),
         );
     }
-    let shape = tensor::default_shape_for(&serials.shape, serials.data.len());
+    let shape = tensor::default_shape_for(&serials.shape, serial_values.len());
     let num_value = tensor_or_scalar(nums, shape.clone())?;
     let name_value = Value::StringArray(
         StringArray::new(names, shape).map_err(|err| datetime_error(format!("weekday: {err}")))?,
@@ -2326,10 +2332,11 @@ async fn calendar_duration_builtin(args: Vec<Value>) -> crate::BuiltinResult<Val
     let positional = match args.len() {
         1 => {
             let days = component_tensor(args[0].clone(), "calendarDuration")?;
-            let shape = tensor::default_shape_for(&days.shape, days.data.len());
+            let shape = tensor::default_shape_for(&days.shape, tensor::tensor_element_len(&days));
+            let day_values = tensor::tensor_into_values_f64(days);
             return calendar_duration_object_from_components(
-                vec![0.0; days.data.len()],
-                days.data,
+                vec![0.0; day_values.len()],
+                day_values,
                 shape,
             );
         }
@@ -2475,8 +2482,9 @@ async fn isbusday_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
         start_key,
         end_key,
     )?;
-    let mut out = Vec::with_capacity(serials.data.len());
-    for serial in &serials.data {
+    let serial_values = tensor::tensor_values_f64_cow(&serials);
+    let mut out = Vec::with_capacity(serial_values.len());
+    for serial in serial_values.iter() {
         out.push(
             if is_business_day_key(serial_date_key(*serial)?, &holidays)? {
                 1.0
@@ -2487,7 +2495,7 @@ async fn isbusday_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
     }
     tensor_or_scalar(
         out,
-        tensor::default_shape_for(&serials.shape, serials.data.len()),
+        tensor::default_shape_for(&serials.shape, serial_values.len()),
     )
 }
 
@@ -2960,10 +2968,11 @@ fn compare_datetime(
     cmp: impl Fn(f64, f64) -> bool,
 ) -> BuiltinResult<Value> {
     let (left, right, shape, _) = datetime_binary_serials(lhs, rhs, op)?;
-    let out = left
-        .data
+    let left_values = tensor::tensor_values_f64_cow(&left);
+    let right_values = tensor::tensor_values_f64_cow(&right);
+    let out = left_values
         .iter()
-        .zip(right.data.iter())
+        .zip(right_values.iter())
         .map(|(a, b)| if cmp(*a, *b) { 1.0 } else { 0.0 })
         .collect::<Vec<_>>();
     tensor_or_scalar(out, shape)
@@ -3111,11 +3120,13 @@ fn combine_calendar_durations(
     let (rhs_months, rhs_days) = calendar_duration_tensors_from_value(rhs)?;
     let (left_months, right_months, shape) =
         tensor::binary_numeric_tensors(&lhs_months, &rhs_months, context, BUILTIN_NAME)?;
-    let lhs_days_shape = tensor::default_shape_for(&lhs_days.shape, lhs_days.data.len());
-    let rhs_days_shape = tensor::default_shape_for(&rhs_days.shape, rhs_days.data.len());
-    let lhs_day_tensor = Tensor::new(lhs_days.data, lhs_days_shape)
+    let lhs_days_shape =
+        tensor::default_shape_for(&lhs_days.shape, tensor::tensor_element_len(&lhs_days));
+    let rhs_days_shape =
+        tensor::default_shape_for(&rhs_days.shape, tensor::tensor_element_len(&rhs_days));
+    let lhs_day_tensor = Tensor::new(tensor::tensor_into_values_f64(lhs_days), lhs_days_shape)
         .map_err(|err| datetime_error(format!("{context}: {err}")))?;
-    let rhs_day_tensor = Tensor::new(rhs_days.data, rhs_days_shape)
+    let rhs_day_tensor = Tensor::new(tensor::tensor_into_values_f64(rhs_days), rhs_days_shape)
         .map_err(|err| datetime_error(format!("{context}: {err}")))?;
     let (left_days, right_days, day_shape) =
         tensor::binary_numeric_tensors(&lhs_day_tensor, &rhs_day_tensor, context, BUILTIN_NAME)?;
@@ -3199,17 +3210,20 @@ async fn calendar_duration_ne(lhs: Value, rhs: Value) -> crate::BuiltinResult<Va
     let eq = calendar_duration_eq(lhs, rhs).await?;
     match eq {
         Value::Num(value) => Ok(Value::Num(if value == 0.0 { 1.0 } else { 0.0 })),
-        Value::Tensor(tensor) => Ok(Value::Tensor(
-            Tensor::new(
-                tensor
-                    .data
-                    .into_iter()
-                    .map(|value| if value == 0.0 { 1.0 } else { 0.0 })
-                    .collect(),
-                tensor.shape,
-            )
-            .map_err(|err| datetime_error(format!("ne: {err}")))?,
-        )),
+        Value::Tensor(tensor) => {
+            let shape = tensor.shape.clone();
+            let values = tensor::tensor_into_values_f64(tensor);
+            Ok(Value::Tensor(
+                Tensor::new(
+                    values
+                        .into_iter()
+                        .map(|value| if value == 0.0 { 1.0 } else { 0.0 })
+                        .collect(),
+                    shape,
+                )
+                .map_err(|err| datetime_error(format!("ne: {err}")))?,
+            ))
+        }
         other => Ok(other),
     }
 }
@@ -3429,7 +3443,8 @@ async fn dateshift_builtin(
     let format = datetime_format_from_value(&value);
     let boundary = DateShiftBoundary::parse(&boundary)?;
 
-    let mut out = Vec::with_capacity(serials.data.len());
+    let serial_values = tensor::tensor_values_f64_cow(&serials);
+    let mut out = Vec::with_capacity(serial_values.len());
     if boundary == DateShiftBoundary::DayOfWeek {
         if !rest.is_empty() {
             return Err(datetime_error(
@@ -3437,7 +3452,7 @@ async fn dateshift_builtin(
             ));
         }
         let weekday = parse_weekday(&unit)?;
-        for serial in &serials.data {
+        for serial in serial_values.iter() {
             out.push(datenum_from_naive(shift_to_dayofweek(
                 naive_from_datenum(*serial)?,
                 weekday,
@@ -3463,7 +3478,7 @@ async fn dateshift_builtin(
             }
             Weekday::Mon
         };
-        for serial in &serials.data {
+        for serial in serial_values.iter() {
             out.push(datenum_from_naive(shift_naive_datetime(
                 naive_from_datenum(*serial)?,
                 boundary,
@@ -3473,7 +3488,7 @@ async fn dateshift_builtin(
         }
     }
 
-    let shape = tensor::default_shape_for(&serials.shape, serials.data.len());
+    let shape = tensor::default_shape_for(&serials.shape, serial_values.len());
     datetime_object_from_serials(out, shape, format)
 }
 
