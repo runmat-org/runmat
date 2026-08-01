@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, IntegerStorage, LogicalArray, ResolveContext, SparseTensor, Tensor,
-    Type, Value,
+    ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericDType, ResolveContext,
+    SparseTensor, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -439,7 +439,7 @@ fn parse_speye_shape(args: &[Value]) -> BuiltinResult<(usize, usize)> {
                 let dense = sparse
                     .to_dense()
                     .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("speye: {err}")))?;
-                if dense.data.len() != 2 {
+                if dense.len() != 2 {
                     return Err(sparse_error(
                         &SPARSE_ERROR_INVALID_INPUT,
                         "speye: size vector must have two elements",
@@ -474,8 +474,7 @@ fn parse_speye_shape_tensor(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
             .map(|(value, name)| parse_speye_integer_size(value, name))
             .collect();
     }
-    tensor
-        .data
+    tensor_utils::tensor_values_f64_cow(tensor)
         .iter()
         .copied()
         .zip(["m", "n"])
@@ -568,15 +567,7 @@ fn nonzeros_value(value: &Value) -> BuiltinResult<Value> {
             Some(storage) => integer_tensor_column(storage.clone(), "nonzeros"),
             None => tensor_column(sparse.values.clone(), "nonzeros"),
         },
-        Value::Tensor(tensor) => {
-            let data = tensor
-                .data
-                .iter()
-                .copied()
-                .filter(|value| is_stored_value(*value))
-                .collect();
-            tensor_column(data, "nonzeros")
-        }
+        Value::Tensor(tensor) => nonzeros_dense_tensor(tensor),
         Value::ComplexTensor(tensor) => {
             let data: Vec<(f64, f64)> = tensor
                 .data
@@ -631,6 +622,36 @@ fn integer_tensor_column(storage: IntegerStorage, label: &str) -> BuiltinResult<
     Tensor::new_integer(storage, vec![len, 1])
         .map(Value::Tensor)
         .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("{label}: {err}")))
+}
+
+fn nonzeros_dense_tensor(tensor: &Tensor) -> BuiltinResult<Value> {
+    if let Some(storage) = tensor.integer_storage() {
+        let values = storage
+            .exact_values()
+            .into_iter()
+            .filter(|value| !value.is_zero())
+            .collect();
+        let storage = storage
+            .from_same_class_values(values)
+            .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("nonzeros: {err}")))?;
+        return integer_tensor_column(storage, "nonzeros");
+    }
+    let values = tensor_utils::tensor_values_f64_cow(tensor)
+        .iter()
+        .copied()
+        .filter(|value| is_stored_value(*value))
+        .collect::<Vec<_>>();
+    if tensor.numeric_dtype() == NumericDType::F32 {
+        let values = values
+            .into_iter()
+            .map(|value| value as f32)
+            .collect::<Vec<_>>();
+        let len = values.len();
+        return Tensor::from_f32(values, vec![len, 1])
+            .map(Value::Tensor)
+            .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("nonzeros: {err}")));
+    }
+    tensor_column(values, "nonzeros")
 }
 
 fn sparse_pattern_from_value(value: Value) -> BuiltinResult<SparseTensor> {
@@ -1186,7 +1207,7 @@ fn dense_matrix_from_value(value: &Value, label: &str) -> BuiltinResult<DenseMat
             Ok(DenseMatrix {
                 rows: dense.rows(),
                 cols: dense.cols(),
-                data: dense.data,
+                data: tensor_utils::tensor_into_values_f64(dense),
             })
         }
         Value::LogicalArray(logical) => {
@@ -1537,10 +1558,11 @@ fn sparse_from_dense_tensor(tensor: &Tensor) -> BuiltinResult<SparseTensor> {
     let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
     let mut row_indices = Vec::new();
     let mut values = Vec::new();
+    let dense_values = tensor_utils::tensor_values_f64_cow(tensor);
     col_ptrs.push(0);
     for col in 0..cols {
         for row in 0..rows {
-            let value = tensor.data[row + col * rows];
+            let value = dense_values[row + col * rows];
             if is_stored_value(value) {
                 row_indices.push(row);
                 values.push(value);
@@ -1880,7 +1902,7 @@ fn numeric_triplet_array(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
             }
             sparse
                 .to_dense()
-                .map(|dense| dense.data)
+                .map(tensor_utils::tensor_into_values_f64)
                 .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))
         }
         Value::LogicalArray(logical) => Ok(logical
@@ -2002,7 +2024,7 @@ fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
             }
             sparse
                 .to_dense()
-                .map(|dense| dense.data)
+                .map(tensor_utils::tensor_into_values_f64)
                 .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))
         }
         Value::LogicalArray(logical) => {
@@ -2055,7 +2077,7 @@ fn numeric_vector_for_label(value: &Value, name: &str, label: &str) -> BuiltinRe
             }
             sparse
                 .to_dense()
-                .map(|dense| dense.data)
+                .map(tensor_utils::tensor_into_values_f64)
                 .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("{label}: {err}")))
         }
         Value::LogicalArray(logical) => {
@@ -2222,10 +2244,8 @@ pub(crate) mod tests {
         }
     }
 
-    fn poisoned_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.clear();
-        tensor
+    fn exact_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        Tensor::new_integer(storage, shape).expect("integer tensor")
     }
 
     fn integer_storage_in_same_class(storage: &IntegerStorage, value: i64) -> IntegerStorage {
@@ -2250,7 +2270,8 @@ pub(crate) mod tests {
 
     fn dense_matrix_for_svd(sparse: &SparseTensor) -> DMatrix<f64> {
         let dense = sparse.to_dense().expect("dense sparse test matrix");
-        DMatrix::from_column_slice(sparse.rows, sparse.cols, &dense.data)
+        let values = tensor_utils::tensor_values_f64_cow(&dense);
+        DMatrix::from_column_slice(sparse.rows, sparse.cols, &values)
     }
 
     #[test]
@@ -2270,8 +2291,8 @@ pub(crate) mod tests {
     #[test]
     fn sparse_size_args_accept_typed_integer_scalar_tensors_exactly() {
         let large = 9_007_199_254_740_993_u64;
-        let rows = poisoned_integer_tensor(IntegerStorage::U64(vec![large]), vec![1, 1]);
-        let cols = poisoned_integer_tensor(IntegerStorage::U16(vec![1]), vec![1, 1]);
+        let rows = exact_integer_tensor(IntegerStorage::U64(vec![large]), vec![1, 1]);
+        let cols = exact_integer_tensor(IntegerStorage::U16(vec![1]), vec![1, 1]);
 
         let sparse = expect_sparse(
             sparse_builtin(vec![Value::Tensor(rows), Value::Tensor(cols)]).expect("sparse"),
@@ -2298,12 +2319,12 @@ pub(crate) mod tests {
             let count = integer_storage_in_same_class(&index, 0);
             let sparse = expect_sparse(
                 sparse_builtin(vec![
-                    Value::Tensor(poisoned_integer_tensor(index.clone(), vec![1, 1])),
-                    Value::Tensor(poisoned_integer_tensor(index, vec![1, 1])),
+                    Value::Tensor(exact_integer_tensor(index.clone(), vec![1, 1])),
+                    Value::Tensor(exact_integer_tensor(index, vec![1, 1])),
                     Value::Num(0.0),
-                    Value::Tensor(poisoned_integer_tensor(dimension.clone(), vec![1, 1])),
-                    Value::Tensor(poisoned_integer_tensor(dimension, vec![1, 1])),
-                    Value::Tensor(poisoned_integer_tensor(count, vec![1, 1])),
+                    Value::Tensor(exact_integer_tensor(dimension.clone(), vec![1, 1])),
+                    Value::Tensor(exact_integer_tensor(dimension, vec![1, 1])),
+                    Value::Tensor(exact_integer_tensor(count, vec![1, 1])),
                 ])
                 .expect("sparse typed structural arguments"),
             );
@@ -2315,18 +2336,12 @@ pub(crate) mod tests {
     #[test]
     fn sparse_triplet_integer_subscripts_do_not_round_through_double() {
         let large = 9_007_199_254_740_993_u64;
-        let mut row =
+        let row =
             Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).expect("row index");
-        row.data.clear();
-        let mut col =
-            Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("col index");
-        col.data.clear();
+        let col = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("col index");
         let value = Tensor::new(vec![0.0], vec![1, 1]).expect("zero value");
-        let mut rows =
-            Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).expect("rows");
-        rows.data.clear();
-        let mut cols = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("cols");
-        cols.data.clear();
+        let rows = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).expect("rows");
+        let cols = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("cols");
 
         let sparse = expect_sparse(
             sparse_builtin(vec![
@@ -2341,9 +2356,8 @@ pub(crate) mod tests {
         assert_eq!(sparse.shape(), vec![large as usize, 1]);
         assert_eq!(sparse.nnz(), 0);
 
-        let mut smaller_rows =
+        let smaller_rows =
             Tensor::new_integer(IntegerStorage::U64(vec![large - 1]), vec![1, 1]).expect("rows");
-        smaller_rows.data.clear();
         let err = sparse_builtin(vec![
             Value::Tensor(row),
             Value::Tensor(col),
@@ -2361,9 +2375,8 @@ pub(crate) mod tests {
     #[test]
     fn speye_shape_parsing_accepts_typed_integer_tensors_exactly() {
         let large = 9_007_199_254_740_993_u64;
-        let mut shape =
+        let shape =
             Tensor::new_integer(IntegerStorage::U64(vec![large, 1]), vec![1, 2]).expect("shape");
-        shape.data.clear();
         let sparse =
             expect_sparse(super::speye_builtin(vec![Value::Tensor(shape)]).expect("speye"));
         assert_eq!(sparse.shape(), vec![large as usize, 1]);
@@ -2393,9 +2406,7 @@ pub(crate) mod tests {
 
         for storage in cases {
             let expected_class = storage.class_name();
-            let mut tensor =
-                Tensor::new_integer(storage.clone(), vec![2, 2]).expect("integer tensor");
-            tensor.data.clear();
+            let tensor = Tensor::new_integer(storage.clone(), vec![2, 2]).expect("integer tensor");
             let sparse = expect_sparse(
                 sparse_builtin(vec![Value::Tensor(tensor)]).expect("sparse integer tensor"),
             );
@@ -2421,10 +2432,8 @@ pub(crate) mod tests {
 
     #[test]
     fn nonzeros_of_uint64_sparse_preserves_exact_values() {
-        let mut source =
-            Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX, 7, 0]), vec![2, 2])
-                .expect("uint64 tensor");
-        source.data.clear();
+        let source = Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX, 7, 0]), vec![2, 2])
+            .expect("uint64 tensor");
         let sparse = expect_sparse(
             sparse_builtin(vec![Value::Tensor(source)]).expect("sparse uint64 tensor"),
         );
@@ -2436,6 +2445,36 @@ pub(crate) mod tests {
             values.integer_storage(),
             Some(&IntegerStorage::U64(vec![u64::MAX, 7]))
         );
+    }
+
+    #[test]
+    fn nonzeros_of_dense_tensors_preserves_native_numeric_class() {
+        let integer = Tensor::new_integer(
+            IntegerStorage::U64(vec![0, (1_u64 << 53) + 1, u64::MAX]),
+            vec![1, 3],
+        )
+        .expect("uint64 tensor");
+        let integer =
+            expect_tensor(nonzeros_builtin(Value::Tensor(integer)).expect("dense uint64 nonzeros"));
+        assert_eq!(
+            integer.integer_storage(),
+            Some(&IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]))
+        );
+
+        let single =
+            Tensor::from_f32(vec![0.0, -2.5, f32::NAN], vec![1, 3]).expect("single tensor");
+        let single =
+            expect_tensor(nonzeros_builtin(Value::Tensor(single)).expect("dense single nonzeros"));
+        assert_eq!(single.numeric_dtype(), NumericDType::F32);
+        assert_eq!(single.len(), 2);
+        assert_eq!(
+            single.numeric_value_at(0),
+            Some(runmat_builtins::NumericScalar::F32(-2.5))
+        );
+        assert!(matches!(
+            single.numeric_value_at(1),
+            Some(runmat_builtins::NumericScalar::F32(value)) if value.is_nan()
+        ));
     }
 
     #[test]
@@ -2461,7 +2500,7 @@ pub(crate) mod tests {
 
     #[test]
     fn sparse_numeric_helpers_read_typed_integer_storage_before_float_boundary() {
-        let vector = Value::Tensor(poisoned_integer_tensor(
+        let vector = Value::Tensor(exact_integer_tensor(
             IntegerStorage::I16(vec![1, -2, 3]),
             vec![3, 1],
         ));
@@ -2474,7 +2513,7 @@ pub(crate) mod tests {
             vec![1.0, -2.0, 3.0]
         );
 
-        let matrix = Value::Tensor(poisoned_integer_tensor(
+        let matrix = Value::Tensor(exact_integer_tensor(
             IntegerStorage::I16(vec![10, 20, 0, 1, 2, 0]),
             vec![3, 2],
         ));
@@ -2532,9 +2571,10 @@ pub(crate) mod tests {
     fn sparse_gathers_gpu_input() {
         test_support::with_test_provider(|provider| {
             let dense = Tensor::new(vec![0.0, 8.0, 0.0, 3.0], vec![2, 2]).unwrap();
+            let dense_values = dense.as_f64_slice().expect("double test tensor");
             let handle = provider
                 .upload(&HostTensorView {
-                    data: &dense.data,
+                    data: dense_values,
                     shape: &dense.shape,
                 })
                 .expect("upload");
@@ -2608,17 +2648,20 @@ pub(crate) mod tests {
         let dense = Tensor::new(vec![0.0, 4.0, 5.0, 0.0], vec![2, 2]).unwrap();
         let out = expect_tensor(nonzeros_builtin(Value::Tensor(dense)).expect("nonzeros"));
         assert_eq!(out.shape, vec![2, 1]);
-        assert_eq!(out.data, vec![4.0, 5.0]);
+        assert_eq!(out.as_f64_slice().expect("double nonzeros"), &[4.0, 5.0]);
 
         let sparse =
             SparseTensor::new(3, 2, vec![0, 2, 3], vec![0, 2, 1], vec![10.0, 30.0, 20.0]).unwrap();
         let out = expect_tensor(nonzeros_builtin(Value::SparseTensor(sparse)).expect("nonzeros"));
         assert_eq!(out.shape, vec![3, 1]);
-        assert_eq!(out.data, vec![10.0, 30.0, 20.0]);
+        assert_eq!(
+            out.as_f64_slice().expect("double nonzeros"),
+            &[10.0, 30.0, 20.0]
+        );
 
         let logical = LogicalArray::new(vec![1, 0, 1, 0], vec![2, 2]).unwrap();
         let out = expect_tensor(nonzeros_builtin(Value::LogicalArray(logical)).expect("nonzeros"));
-        assert_eq!(out.data, vec![1.0, 1.0]);
+        assert_eq!(out.as_f64_slice().expect("double nonzeros"), &[1.0, 1.0]);
 
         let complex =
             ComplexTensor::new(vec![(0.0, 0.0), (1.0, 2.0), (0.0, 3.0)], vec![3, 1]).unwrap();
@@ -2649,9 +2692,10 @@ pub(crate) mod tests {
 
         test_support::with_test_provider(|provider| {
             let dense = Tensor::new(vec![0.0, 2.0, 3.0, 0.0], vec![2, 2]).unwrap();
+            let dense_values = dense.as_f64_slice().expect("double test tensor");
             let handle = provider
                 .upload(&HostTensorView {
-                    data: &dense.data,
+                    data: dense_values,
                     shape: &dense.shape,
                 })
                 .expect("upload");
@@ -2819,8 +2863,8 @@ pub(crate) mod tests {
         );
         assert_eq!(bout.shape, vec![3, 3]);
         assert_eq!(
-            bout.data,
-            vec![
+            bout.as_f64_slice().expect("double spdiags output"),
+            &[
                 2.0, 6.0, 0.0, // -1 diagonal
                 1.0, 0.0, 9.0, // 0 diagonal
                 0.0, 4.0, 0.0, // +1 diagonal, padded at top
@@ -2833,7 +2877,10 @@ pub(crate) mod tests {
             Value::OutputList(values) => {
                 assert_eq!(values.len(), 2);
                 let ids = expect_tensor(values[1].clone());
-                assert_eq!(ids.data, vec![-1.0, 0.0, 1.0, 2.0]);
+                assert_eq!(
+                    ids.as_f64_slice().expect("double diagonal ids"),
+                    &[-1.0, 0.0, 1.0, 2.0]
+                );
             }
             other => panic!("expected output list, got {other:?}"),
         }
@@ -2855,7 +2902,7 @@ pub(crate) mod tests {
                 .expect("spdiags"),
         );
         assert_eq!(bout.shape, vec![1, 1]);
-        assert_eq!(bout.data, vec![42.0]);
+        assert_eq!(bout.as_f64_slice().expect("double spdiags output"), &[42.0]);
     }
 
     #[test]
@@ -2908,14 +2955,14 @@ pub(crate) mod tests {
 
     #[test]
     fn spdiags_reads_typed_integer_bin_and_offsets_exactly_at_float_boundary() {
-        let bin = poisoned_integer_tensor(
+        let bin = exact_integer_tensor(
             IntegerStorage::I16(vec![
                 10, 20, 0, // -1 source column
                 0, 1, 2, // +1 source column
             ]),
             vec![3, 2],
         );
-        let offsets = poisoned_integer_tensor(IntegerStorage::I16(vec![-1, 1]), vec![1, 2]);
+        let offsets = exact_integer_tensor(IntegerStorage::I16(vec![-1, 1]), vec![1, 2]);
         let sparse = expect_sparse(
             spdiags_builtin(vec![
                 Value::Tensor(bin),
@@ -2946,7 +2993,7 @@ pub(crate) mod tests {
         ];
 
         for (storage, expected) in cases {
-            let tensor = poisoned_integer_tensor(storage, vec![1, 2]);
+            let tensor = exact_integer_tensor(storage, vec![1, 2]);
             assert_eq!(
                 parse_diag_offsets(&Value::Tensor(tensor), "spdiags").expect("typed offsets"),
                 expected
