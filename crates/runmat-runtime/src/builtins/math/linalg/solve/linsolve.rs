@@ -8,7 +8,7 @@ use runmat_accelerate_api::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, Tensor, Value,
+    ComplexTensor, IntValue, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -690,15 +690,11 @@ fn upload_tensor(
     provider: &'static dyn AccelProvider,
     tensor: &Tensor,
 ) -> BuiltinResult<GpuTensorHandle> {
-    let values;
-    let data = if tensor.integer_storage().is_some() {
-        values = tensor::tensor_values_f64(tensor);
-        values.as_slice()
-    } else {
-        tensor.data.as_slice()
-    };
+    // The current provider view is floating; materialize that transfer
+    // boundary from authoritative host storage without consulting a mirror.
+    let values = tensor::tensor_values_f64_cow(tensor);
     let view = HostTensorView {
-        data,
+        data: values.as_ref(),
         shape: &tensor.shape,
     };
     provider
@@ -793,14 +789,15 @@ fn solve_complex(
 
 fn forward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tensor, f64)> {
     let n = lhs.rows();
-    let nrhs = rhs.data.len() / n;
-    let mut solution = rhs.data.clone();
+    let lhs_values = tensor::tensor_values_f64_cow(lhs);
+    let mut solution = tensor::tensor_values_f64(rhs);
+    let nrhs = solution.len() / n;
     let mut min_diag = f64::INFINITY;
     let mut max_diag = 0.0_f64;
 
     for col in 0..nrhs {
         for i in 0..n {
-            let diag = lhs.data[i + i * n];
+            let diag = lhs_values[i + i * n];
             let diag_abs = diag.abs();
             min_diag = min_diag.min(diag_abs);
             max_diag = max_diag.max(diag_abs);
@@ -811,7 +808,7 @@ fn forward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tenso
             }
             let mut accum = 0.0;
             for j in 0..i {
-                accum += lhs.data[i + j * n] * solution[j + col * n];
+                accum += lhs_values[i + j * n] * solution[j + col * n];
             }
             let rhs_value = solution[i + col * n] - accum;
             solution[i + col * n] = rhs_value / diag;
@@ -819,22 +816,22 @@ fn forward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tenso
     }
 
     let rcond = diagonal_rcond(min_diag, max_diag);
-    let tensor = Tensor::new(solution, rhs.shape.clone())
-        .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
+    let tensor = real_solution_tensor(solution, rhs.shape.clone(), real_solution_dtype(lhs, rhs))?;
     Ok((tensor, rcond))
 }
 
 fn backward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tensor, f64)> {
     let n = lhs.rows();
-    let nrhs = rhs.data.len() / n;
-    let mut solution = rhs.data.clone();
+    let lhs_values = tensor::tensor_values_f64_cow(lhs);
+    let mut solution = tensor::tensor_values_f64(rhs);
+    let nrhs = solution.len() / n;
     let mut min_diag = f64::INFINITY;
     let mut max_diag = 0.0_f64;
 
     for col in 0..nrhs {
         for row_rev in 0..n {
             let i = n - 1 - row_rev;
-            let diag = lhs.data[i + i * n];
+            let diag = lhs_values[i + i * n];
             let diag_abs = diag.abs();
             min_diag = min_diag.min(diag_abs);
             max_diag = max_diag.max(diag_abs);
@@ -845,7 +842,7 @@ fn backward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tens
             }
             let mut accum = 0.0;
             for j in (i + 1)..n {
-                accum += lhs.data[i + j * n] * solution[j + col * n];
+                accum += lhs_values[i + j * n] * solution[j + col * n];
             }
             let rhs_value = solution[i + col * n] - accum;
             solution[i + col * n] = rhs_value / diag;
@@ -853,8 +850,7 @@ fn backward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tens
     }
 
     let rcond = diagonal_rcond(min_diag, max_diag);
-    let tensor = Tensor::new(solution, rhs.shape.clone())
-        .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
+    let tensor = real_solution_tensor(solution, rhs.shape.clone(), real_solution_dtype(lhs, rhs))?;
     Ok((tensor, rcond))
 }
 
@@ -966,7 +962,7 @@ fn solve_general_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tensor, f64)
     let solution = svd
         .solve(&b, tol)
         .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
-    let tensor = matrix_real_to_tensor(solution)?;
+    let tensor = matrix_real_to_tensor(solution, real_solution_dtype(lhs, rhs))?;
     Ok((tensor, rcond))
 }
 
@@ -1001,10 +997,11 @@ fn normalize_rhs_tensor(rhs: Tensor, expected_rows: usize) -> BuiltinResult<Tens
         return Ok(rhs);
     }
     if rhs.shape.len() == 1 && rhs.shape[0] == expected_rows {
-        return Tensor::new(rhs.data, vec![expected_rows, 1])
+        return rhs
+            .reshape(vec![expected_rows, 1])
             .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
-    if rhs.data.is_empty() && expected_rows == 0 {
+    if tensor::tensor_element_len(&rhs) == 0 && expected_rows == 0 {
         return Ok(rhs);
     }
     Err(builtin_error("Matrix dimensions must agree."))
@@ -1044,11 +1041,37 @@ fn compute_svd_tolerance(singular_values: &[f64], rows: usize, cols: usize) -> f
     f64::EPSILON * max_dim * max_sv.max(1.0)
 }
 
-fn matrix_real_to_tensor(matrix: DMatrix<f64>) -> BuiltinResult<Tensor> {
+fn matrix_real_to_tensor(matrix: DMatrix<f64>, dtype: NumericDType) -> BuiltinResult<Tensor> {
     let rows = matrix.nrows();
     let cols = matrix.ncols();
-    Tensor::new(matrix.as_slice().to_vec(), vec![rows, cols])
-        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
+    real_solution_tensor(matrix.as_slice().to_vec(), vec![rows, cols], dtype)
+}
+
+fn real_solution_dtype(lhs: &Tensor, rhs: &Tensor) -> NumericDType {
+    if lhs.numeric_dtype() == NumericDType::F32 && rhs.numeric_dtype() == NumericDType::F32 {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
+    }
+}
+
+fn real_solution_tensor(
+    values: Vec<f64>,
+    shape: Vec<usize>,
+    dtype: NumericDType,
+) -> BuiltinResult<Tensor> {
+    let tensor = match dtype {
+        NumericDType::F32 => Tensor::from_f32(
+            values.into_iter().map(|value| value as f32).collect(),
+            shape,
+        ),
+        NumericDType::F64 => Tensor::new(values, shape),
+        _ => Err(format!(
+            "linsolve: unsupported real solution class {}",
+            dtype.class_name()
+        )),
+    };
+    tensor.map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
 
 fn matrix_complex_to_tensor(matrix: DMatrix<Complex64>) -> BuiltinResult<ComplexTensor> {
@@ -1095,14 +1118,23 @@ fn ensure_square(rows: usize, cols: usize) -> BuiltinResult<()> {
 fn transpose_tensor(tensor: &Tensor) -> Tensor {
     let rows = tensor.rows();
     let cols = tensor.cols();
-    let values = tensor::tensor_values_f64_cow(tensor);
-    let mut data = vec![0.0; values.len()];
+    let mut indices = vec![0usize; tensor::tensor_element_len(tensor)];
     for r in 0..rows {
         for c in 0..cols {
-            data[c + r * cols] = values[r + c * rows];
+            indices[c + r * cols] = r + c * rows;
         }
     }
-    Tensor::new(data, vec![cols, rows]).expect("transpose_tensor valid")
+    let storage = tensor
+        .clone()
+        .into_numeric_storage()
+        .expect("validated tensor storage");
+    Tensor::from_numeric_storage(
+        storage
+            .gather(&indices)
+            .expect("transpose indices in bounds"),
+        vec![cols, rows],
+    )
+    .expect("transpose tensor shape matches storage")
 }
 
 fn transpose_complex(tensor: &ComplexTensor) -> ComplexTensor {
@@ -1132,7 +1164,9 @@ pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CharArray, IntegerStorage, ResolveContext, StructValue, Type};
+    use runmat_builtins::{
+        CharArray, IntegerStorage, NumericStorage, ResolveContext, StructValue, Type,
+    };
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -1246,6 +1280,38 @@ pub(crate) mod tests {
         assert_eq!(t.shape, vec![2, 1]);
         approx_eq(t.data[0], 1.0);
         approx_eq(t.data[1], 2.0);
+    }
+
+    #[test]
+    fn linsolve_cpu_preserves_native_single_for_general_and_triangular_solutions() {
+        let _accel_guard = test_support::accel_test_lock();
+        clear_accel_provider_state();
+
+        let a = Tensor::from_f32(vec![2.0, 1.0, 1.0, 2.0], vec![2, 2]).unwrap();
+        let b = Tensor::from_f32(vec![4.0, 5.0], vec![2, 1]).unwrap();
+        let result =
+            linsolve_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new()).expect("linsolve");
+        let tensor = test_support::gather(result).expect("gather");
+        assert_eq!(
+            tensor.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![1.0, 2.0])
+        );
+
+        let lower = Tensor::from_f32(vec![2.0, 1.0, 0.0, 3.0], vec![2, 2]).unwrap();
+        let rhs = Tensor::from_f32(vec![2.0, 7.0], vec![2, 1]).unwrap();
+        let mut options = StructValue::new();
+        options.fields.insert("LT".to_string(), Value::Bool(true));
+        let result = linsolve_builtin(
+            Value::Tensor(lower),
+            Value::Tensor(rhs),
+            vec![Value::Struct(options)],
+        )
+        .expect("lower triangular linsolve");
+        let tensor = test_support::gather(result).expect("gather");
+        assert_eq!(
+            tensor.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![1.0, 2.0])
+        );
     }
 
     #[test]
