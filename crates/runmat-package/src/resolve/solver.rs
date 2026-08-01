@@ -255,6 +255,9 @@ fn feature_activation(
     let mut activation = BTreeMap::<String, BTreeSet<String>>::new();
     for feature in &package.enabled_features {
         let Some(requests) = package.candidate.features.get(feature) else {
+            if feature == "default" {
+                continue;
+            }
             return Err(Incompatibility {
                 package: Box::new(package.candidate.instance.package.clone()),
                 requirement: Box::new(semver::VersionReq::STAR),

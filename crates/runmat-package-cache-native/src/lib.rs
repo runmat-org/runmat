@@ -9,6 +9,7 @@ pub mod gc;
 pub mod git;
 pub mod materialize;
 mod provider;
+pub mod registry;
 pub mod server;
 
 pub use backend::SqliteCacheBackend;

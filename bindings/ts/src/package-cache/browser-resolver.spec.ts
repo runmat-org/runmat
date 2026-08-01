@@ -71,6 +71,7 @@ describe("BrowserProjectResolver", () => {
             lock_decision: "write-generated",
             acquired_git_sources: [],
             acquired_server_sources: [],
+            acquired_registry_sources: [],
             source_inventories: [],
             cache_lease: {
               id: "browser-test-graph",
@@ -99,6 +100,7 @@ describe("BrowserProjectResolver", () => {
       options: {
         target: "wasm32-unknown-unknown",
         default_server_origin: "https://api.runmat.com",
+        default_registry_index: "https://api.runmat.com",
         groups: ["runtime"],
         root_features: [],
         host_capabilities: ["browser-filesystem", "worker"],

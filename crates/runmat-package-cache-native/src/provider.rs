@@ -1,17 +1,19 @@
 use crate::filesystem::CacheLayout;
 use crate::git::NativeGitClient;
 use crate::materialize::materialize_tree;
+use crate::registry::RegistryTransport;
 use crate::server::ServerSnapshotTransport;
 use crate::{NativeCacheError, NativeCacheLease, SqliteCacheBackend};
 use futures::FutureExt;
 use runmat_package::{
-    GitAcquisitionPlan, GitPackageMount, PackageSourceProvider, ServerProjectAcquisitionPlan,
-    ServerProjectPackageMount,
+    GitAcquisitionPlan, GitPackageMount, PackageSourceProvider, RegistryAcquisitionPlan,
+    RegistryCandidatePlan, RegistryCandidateRecord, RegistryPackageMount,
+    ServerProjectAcquisitionPlan, ServerProjectPackageMount,
 };
 use runmat_package_cache::{
-    cache_git_snapshot, cache_server_project_snapshot, load_git_snapshot,
-    load_server_project_snapshot, ArchiveLimits, CacheBackend, CacheError, CommitOutcome,
-    GitSnapshot, ServerProjectSnapshot,
+    cache_git_snapshot, cache_registry_snapshot, cache_server_project_snapshot, load_git_snapshot,
+    load_registry_snapshot, load_server_project_snapshot, ArchiveLimits, CacheBackend, CacheError,
+    CommitOutcome, GitSnapshot, RegistryArtifactInventory, RegistrySnapshot, ServerProjectSnapshot,
 };
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -23,6 +25,7 @@ pub struct NativePackageSourceProvider {
     layout: CacheLayout,
     leases: Mutex<Vec<NativeCacheLease>>,
     server: Option<Arc<dyn ServerSnapshotTransport>>,
+    registry: Option<Arc<dyn RegistryTransport>>,
 }
 
 impl std::fmt::Debug for NativePackageSourceProvider {
@@ -47,11 +50,17 @@ impl NativePackageSourceProvider {
             layout,
             leases: Mutex::new(Vec::new()),
             server: None,
+            registry: None,
         }
     }
 
     pub fn with_server_transport(mut self, server: Arc<dyn ServerSnapshotTransport>) -> Self {
         self.server = Some(server);
+        self
+    }
+
+    pub fn with_registry_transport(mut self, registry: Arc<dyn RegistryTransport>) -> Self {
+        self.registry = Some(registry);
         self
     }
 
@@ -176,6 +185,88 @@ impl NativePackageSourceProvider {
             }
         }
     }
+
+    async fn acquire_registry_snapshot(
+        &self,
+        plan: &RegistryAcquisitionPlan,
+    ) -> Result<
+        (
+            RegistrySnapshot,
+            NativeCacheLease,
+            Option<runmat_package::RegistryReleaseMetadata>,
+        ),
+        String,
+    > {
+        if let Some(expected) = &plan.expected {
+            match NativeCacheLease::acquire(
+                self.backend.clone(),
+                [expected.tree_digest.clone()].into_iter().collect(),
+            )
+            .await
+            {
+                Ok(Some(lease)) => {
+                    match load_registry_snapshot(&self.backend, expected.clone()).await {
+                        Ok(snapshot) => return Ok((snapshot, lease, None)),
+                        Err(CacheError::Miss(_)) => drop(lease),
+                        Err(error) => return Err(error.to_string()),
+                    }
+                }
+                Ok(None) => unreachable!("expected registry tree is a lease root"),
+                Err(NativeCacheError::Cache(CacheError::Miss(_))) => {}
+                Err(error) => return Err(error.to_string()),
+            }
+        }
+        if !plan.allow_network {
+            return Err("registry release is not available in the offline cache".to_string());
+        }
+        let transfer = self
+            .registry
+            .as_ref()
+            .ok_or_else(|| "registry package acquisition is not configured".to_string())?
+            .fetch(plan)
+            .await?;
+        transfer
+            .metadata
+            .validate_source(&transfer.source)
+            .map_err(|error| format!("registry metadata is invalid: {error}"))?;
+        let metadata = transfer.metadata;
+        let snapshot = RegistryArtifactInventory::decode_snapshot(
+            &transfer.artifact_bytes,
+            transfer.source,
+            ArchiveLimits::default(),
+        )
+        .map_err(|error| error.to_string())?;
+        runmat_package::validate_registry_acquisition(plan, &snapshot.source)
+            .map_err(|error| error.to_string())?;
+        loop {
+            let current = self
+                .backend
+                .snapshot()
+                .await
+                .map_err(|error| error.to_string())?;
+            let transaction =
+                cache_registry_snapshot(current.revision, current.state, &snapshot, now_ms())
+                    .map_err(|error| error.to_string())?;
+            match self
+                .backend
+                .commit(transaction)
+                .await
+                .map_err(|error| error.to_string())?
+            {
+                CommitOutcome::Committed(_) => {
+                    let lease = NativeCacheLease::acquire(
+                        self.backend.clone(),
+                        [snapshot.tree.digest.clone()].into_iter().collect(),
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?
+                    .expect("registry snapshot tree is a lease root");
+                    return Ok((snapshot, lease, Some(metadata)));
+                }
+                CommitOutcome::Conflict { .. } => continue,
+            }
+        }
+    }
 }
 
 impl PackageSourceProvider for NativePackageSourceProvider {
@@ -220,6 +311,51 @@ impl PackageSourceProvider for NativePackageSourceProvider {
                 source: snapshot.source,
                 root,
             })
+        }
+        .boxed_local()
+    }
+
+    fn acquire_registry<'a>(
+        &'a self,
+        plan: &'a RegistryAcquisitionPlan,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<RegistryPackageMount, String>> + 'a>,
+    > {
+        async move {
+            let (snapshot, lease, metadata) = self.acquire_registry_snapshot(plan).await?;
+            let root = materialize_tree(&self.backend, &self.layout, &snapshot.tree)
+                .await
+                .map_err(|error| error.to_string())?;
+            self.leases
+                .lock()
+                .map_err(|_| "native package lease lock was poisoned".to_string())?
+                .push(lease);
+            Ok(RegistryPackageMount {
+                source: snapshot.source,
+                root,
+                metadata,
+            })
+        }
+        .boxed_local()
+    }
+
+    fn registry_candidates<'a>(
+        &'a self,
+        plan: &'a RegistryCandidatePlan,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Vec<RegistryCandidateRecord>, String>> + 'a>,
+    > {
+        async move {
+            if !plan.allow_network {
+                return Err(
+                    "registry candidates are not available without network access".to_string(),
+                );
+            }
+            self.registry
+                .as_ref()
+                .ok_or_else(|| "registry package acquisition is not configured".to_string())?
+                .candidates(plan)
+                .await
         }
         .boxed_local()
     }

@@ -1,9 +1,12 @@
-use super::{GitSnapshot, ServerProjectSnapshot, SnapshotBlob};
+use super::{GitSnapshot, RegistrySnapshot, ServerProjectSnapshot, SnapshotBlob};
 use crate::{
     validate_archive, ArchiveEntryHeader, ArchiveEntryKind, ArchiveLimits, CacheError, TreeEntry,
     TreeManifest,
 };
-use runmat_package::{GitCommitId, GitSourceId, NormalizedRelativePath, ServerProjectSourceId};
+use runmat_package::{
+    ContentDigest, GitCommitId, GitSourceId, NormalizedRelativePath, RegistrySourceId,
+    ServerProjectSourceId,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -118,6 +121,69 @@ impl ServerProjectTreeInventory {
             ServerProjectSourceId::new(service, self.project, self.snapshot, tree.digest.clone())
                 .map_err(|error| CacheError::InvalidObject(error.to_string()))?;
         ServerProjectSnapshot::new(source, tree, blobs)
+    }
+}
+
+pub const REGISTRY_ARTIFACT_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RegistryArtifactInventory {
+    pub schema_version: u32,
+    pub entries: Vec<TreeInventoryEntry>,
+}
+
+impl RegistryArtifactInventory {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, CacheError> {
+        if self.schema_version != REGISTRY_ARTIFACT_SCHEMA_VERSION {
+            return Err(CacheError::InvalidObject(format!(
+                "unsupported registry artifact schema version {}",
+                self.schema_version
+            )));
+        }
+        inventory_tree(self.entries.clone(), ArchiveLimits::default())?;
+        let mut entries = self.entries.clone();
+        for entry in &entries {
+            let normalized = NormalizedRelativePath::new(&entry.path)
+                .map_err(|error| CacheError::InvalidObject(error.to_string()))?;
+            if normalized.as_str() != entry.path {
+                return Err(CacheError::InvalidObject(format!(
+                    "registry artifact path `{}` is not canonical",
+                    entry.path
+                )));
+            }
+        }
+        entries.sort_by(|left, right| left.path.cmp(&right.path));
+        serde_json::to_vec(&Self {
+            schema_version: self.schema_version,
+            entries,
+        })
+        .map_err(|error| CacheError::InvalidObject(error.to_string()))
+    }
+
+    pub fn decode_snapshot(
+        artifact_bytes: &[u8],
+        source: RegistrySourceId,
+        limits: ArchiveLimits,
+    ) -> Result<RegistrySnapshot, CacheError> {
+        if ContentDigest::sha256(artifact_bytes) != source.artifact_digest {
+            return Err(CacheError::DigestMismatch(source.artifact_digest));
+        }
+        let inventory: Self = serde_json::from_slice(artifact_bytes)
+            .map_err(|error| CacheError::InvalidObject(error.to_string()))?;
+        if inventory.schema_version != REGISTRY_ARTIFACT_SCHEMA_VERSION {
+            return Err(CacheError::InvalidObject(format!(
+                "unsupported registry artifact schema version {}",
+                inventory.schema_version
+            )));
+        }
+        let (tree, blobs) = inventory_tree(inventory.entries, limits)?;
+        if tree.digest != source.tree_digest {
+            return Err(CacheError::InvalidObject(
+                "registry artifact tree digest differs from locked metadata".to_string(),
+            ));
+        }
+        RegistrySnapshot::new(source, tree, blobs)
     }
 }
 

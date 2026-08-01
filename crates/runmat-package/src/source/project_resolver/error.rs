@@ -1,4 +1,4 @@
-use crate::{GitPolicyError, GraphError, LockError, ServerPolicyError};
+use crate::{GitPolicyError, GraphError, LockError, RegistryPolicyError, ServerPolicyError};
 use std::path::PathBuf;
 use thiserror::Error;
 
@@ -32,6 +32,8 @@ pub enum ProjectResolveError {
         dependency: String,
         reason: String,
     },
+    #[error("registry acquisition failed for package `{package}`: {reason}")]
+    RegistryAcquire { package: String, reason: String },
     #[error("dependency source `{kind}` is not implemented by this resolver")]
     UnsupportedSource { kind: &'static str },
     #[error("dependency `{dependency}` of `{package}` requires {requirement}, but package `{target}` {actual}")]
@@ -48,6 +50,8 @@ pub enum ProjectResolveError {
     GitPolicy(#[from] GitPolicyError),
     #[error(transparent)]
     ServerPolicy(#[from] ServerPolicyError),
+    #[error(transparent)]
+    RegistryPolicy(#[from] RegistryPolicyError),
     #[error(transparent)]
     Graph(#[from] GraphError),
     #[error(transparent)]

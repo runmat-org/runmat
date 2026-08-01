@@ -66,6 +66,15 @@ pub enum TargetPredicate {
     Capability(HostCapability),
 }
 
+impl Display for TargetPredicate {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Triple(triple) => formatter.write_str(triple),
+            Self::Capability(capability) => write!(formatter, "capability:{capability}"),
+        }
+    }
+}
+
 impl FromStr for TargetPredicate {
     type Err = ManifestError;
 

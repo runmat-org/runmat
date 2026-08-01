@@ -1,4 +1,4 @@
-use super::{CanonicalPackageId, ContentDigest, PackageVersion, RegistryId};
+use super::{CanonicalPackageId, ContentDigest, PackageVersion, RegistryOrigin, RegistryReleaseId};
 use crate::IdentityError;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
@@ -236,12 +236,21 @@ impl ServerProjectSourceId {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct RegistrySourceId {
-    pub registry: RegistryId,
+    pub registry_origin: RegistryOrigin,
     pub package: CanonicalPackageId,
+    pub release: RegistryReleaseId,
     pub version: PackageVersion,
     pub release_digest: ContentDigest,
     pub artifact_digest: ContentDigest,
     pub tree_digest: ContentDigest,
+}
+
+impl RegistrySourceId {
+    pub fn validate(&self) -> Result<(), IdentityError> {
+        RegistryOrigin::new(self.registry_origin.as_str())?;
+        RegistryReleaseId::new(self.release.as_str())?;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -287,16 +296,7 @@ impl SourceId {
                 )?;
                 Ok(())
             }
-            Self::Registry(source) => {
-                if source.registry != *source.package.registry() {
-                    return Err(IdentityError::InvalidName {
-                        kind: "registry source",
-                        value: source.package.to_string(),
-                        reason: "source registry and package registry disagree",
-                    });
-                }
-                Ok(())
-            }
+            Self::Registry(source) => source.validate(),
         }
     }
 }
@@ -321,8 +321,12 @@ impl Display for SourceId {
             ),
             Self::Registry(source) => write!(
                 formatter,
-                "registry:{}@{}#{}",
-                source.package, source.version, source.tree_digest
+                "registry:{}:{}@{}:{}#{}",
+                source.registry_origin,
+                source.package,
+                source.version,
+                source.release,
+                source.tree_digest
             ),
         }
     }

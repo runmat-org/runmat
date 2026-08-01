@@ -8,7 +8,7 @@ mod version;
 pub use digest::{ContentDigest, DigestAlgorithm};
 pub use instance::PackageInstanceId;
 pub use package::{CanonicalPackageId, PackageAlias};
-pub use registry::RegistryId;
+pub use registry::{RegistryId, RegistryOrigin, RegistryReleaseId};
 pub use source::{
     GitCommitId, GitObjectAlgorithm, GitRepositoryUrl, GitSourceId, NormalizedRelativePath,
     PathSourceId, RegistrySourceId, ServerProjectSourceId, SourceId,

@@ -33,6 +33,8 @@ pub async fn resolve_project_async(
         packages: BTreeMap::new(),
         acquired_git_sources: BTreeSet::new(),
         acquired_server_sources: BTreeSet::new(),
+        acquired_registry_sources: BTreeSet::new(),
+        pending_registry: Vec::new(),
         vendor: vendor.as_ref(),
     };
     let mut root_features = options.root_features.clone();
@@ -46,6 +48,7 @@ pub async fn resolve_project_async(
             &mut Vec::new(),
         )
         .await?;
+    super::registry::resolve_dependencies(&mut loader, &root).await?;
 
     let mut graph_packages = BTreeMap::new();
     let mut features = BTreeMap::new();
@@ -121,6 +124,7 @@ pub async fn resolve_project_async(
         lock_decision,
         acquired_git_sources: loader.acquired_git_sources.into_iter().collect(),
         acquired_server_sources: loader.acquired_server_sources.into_iter().collect(),
+        acquired_registry_sources: loader.acquired_registry_sources.into_iter().collect(),
         source_inventories,
     })
 }

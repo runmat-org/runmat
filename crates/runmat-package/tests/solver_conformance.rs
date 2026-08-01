@@ -51,6 +51,7 @@ fn candidate(
         yanked: false,
         available_offline: true,
         target_artifacts: BTreeSet::new(),
+        registry_metadata: None,
     }
 }
 

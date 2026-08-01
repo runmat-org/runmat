@@ -28,6 +28,7 @@ fn corpus_digest() -> String {
         yanked: false,
         available_offline: true,
         target_artifacts: BTreeSet::new(),
+        registry_metadata: None,
     };
     let mut index = CandidateIndex::default();
     index.insert(candidate);

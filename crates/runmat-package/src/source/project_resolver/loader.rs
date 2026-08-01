@@ -26,6 +26,8 @@ pub(super) struct Loader<'a> {
     pub(super) packages: BTreeMap<String, LoadedPackage>,
     pub(super) acquired_git_sources: BTreeSet<GitSourceId>,
     pub(super) acquired_server_sources: BTreeSet<ServerProjectSourceId>,
+    pub(super) acquired_registry_sources: BTreeSet<crate::RegistrySourceId>,
+    pub(super) pending_registry: Vec<PendingRegistryDependency>,
     pub(super) vendor: Option<&'a crate::VendorManifest>,
 }
 
@@ -34,6 +36,7 @@ pub(super) enum PackageOrigin {
     Workspace,
     Git(GitSourceId),
     ServerProject(ServerProjectSourceId),
+    Registry(crate::RegistrySourceId),
     Vendor(SourceId),
 }
 
@@ -55,6 +58,13 @@ pub(super) struct LoadedSource {
 pub(super) struct LoadedDependency {
     pub(super) spec: DependencySpec,
     pub(super) target: String,
+}
+
+#[derive(Clone)]
+pub(super) struct PendingRegistryDependency {
+    pub(super) owner: String,
+    pub(super) dependency: DependencySpec,
+    pub(super) features: BTreeSet<String>,
 }
 
 type LoadFuture<'a> = Pin<Box<dyn Future<Output = Result<String, ProjectResolveError>> + 'a>>;
@@ -137,9 +147,7 @@ impl Loader<'_> {
                 SourceId::Path(source) => source.tree_digest.clone(),
                 SourceId::Git(source) => source.tree_digest.clone(),
                 SourceId::ServerProject(source) => source.tree_digest.clone(),
-                SourceId::Registry(_) => {
-                    unreachable!("registry sources are not constructed before Phase 7")
-                }
+                SourceId::Registry(source) => source.tree_digest.clone(),
             };
             let inventory =
                 crate::SourceInventory::from_project_index(tree_digest.clone(), source_index)
@@ -210,6 +218,22 @@ impl Loader<'_> {
                 }
                 if let Some(activated) = activation.get(dependency.alias.as_str()) {
                     child_features.extend(activated.iter().cloned());
+                }
+                if matches!(dependency.locator, DependencyLocator::Registry { .. }) {
+                    if !matches!(origin, PackageOrigin::Registry(_)) {
+                        self.pending_registry.push(PendingRegistryDependency {
+                            owner: key.clone(),
+                            dependency,
+                            features: child_features,
+                        });
+                    }
+                    continue;
+                }
+                if matches!(origin, PackageOrigin::Registry(_)) {
+                    return Err(ProjectResolveError::Invalid(format!(
+                        "published registry package `{}` contains a non-registry dependency `{}`",
+                        domain.local_name, dependency.alias
+                    )));
                 }
                 let (child_manifest, child_origin) = match &dependency.locator {
                     DependencyLocator::Path { path } => {
@@ -356,9 +380,7 @@ impl Loader<'_> {
                         }
                         (child_manifest, PackageOrigin::Git(mount.source))
                     }
-                    DependencyLocator::Registry { .. } => {
-                        return Err(ProjectResolveError::UnsupportedSource { kind: "registry" });
-                    }
+                    DependencyLocator::Registry { .. } => unreachable!("handled above"),
                     DependencyLocator::ServerProject {
                         project,
                         service,
@@ -438,6 +460,9 @@ fn package_key(manifest: &Path, origin: &PackageOrigin) -> String {
         PackageOrigin::Git(source) => format!("git:{}:{}", source.tree_digest, manifest.display()),
         PackageOrigin::ServerProject(source) => {
             format!("server:{}:{}", source.tree_digest, manifest.display())
+        }
+        PackageOrigin::Registry(source) => {
+            format!("registry:{}:{}", source.tree_digest, manifest.display())
         }
         PackageOrigin::Vendor(source) => format!("vendor:{source:?}:{}", manifest.display()),
     }

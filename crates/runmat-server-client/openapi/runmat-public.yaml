@@ -458,6 +458,204 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/packages/registry/releases/{releaseId}:
+    get:
+      tags:
+      - packages::registry
+      operationId: resolve_exact_release
+      parameters:
+      - name: releaseId
+        in: path
+        description: Exact immutable package release ID
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistryResolveResponse'
+        '304':
+          description: Release metadata is unchanged
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/packages/registry/releases/{releaseId}/artifact:
+    get:
+      tags:
+      - packages::registry
+      operationId: download_artifact
+      parameters:
+      - name: releaseId
+        in: path
+        description: Exact immutable package release ID
+        required: true
+        schema:
+          type: string
+      - name: expires
+        in: query
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: signature
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Immutable package artifact
+        '206':
+          description: Immutable package artifact byte range
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '416':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/packages/registry/{namespace}/{name}/candidates:
+    get:
+      tags:
+      - packages::registry
+      operationId: list_candidates
+      parameters:
+      - name: namespace
+        in: path
+        description: Organization package namespace
+        required: true
+        schema:
+          type: string
+      - name: name
+        in: path
+        description: Package name
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistryCandidateListResponse'
+        '304':
+          description: Candidate metadata is unchanged
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/packages/registry/{namespace}/{name}/resolve:
+    get:
+      tags:
+      - packages::registry
+      operationId: resolve_release
+      parameters:
+      - name: namespace
+        in: path
+        description: Organization package namespace
+        required: true
+        schema:
+          type: string
+      - name: name
+        in: path
+        description: Package name
+        required: true
+        schema:
+          type: string
+      - name: requirement
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistryResolveResponse'
+        '304':
+          description: Resolved release is unchanged
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
   /v1/projects/{projectId}/data/chunks/upload-targets:
     post:
       tags:
@@ -3267,6 +3465,204 @@ components:
           type: string
         treeDigest:
           type: string
+    RegistryAdvisoryResponse:
+      type: object
+      required:
+      - id
+      - affectedRequirement
+      - severity
+      - title
+      properties:
+        affectedRequirement:
+          type: string
+        id:
+          type: string
+        severity:
+          type: string
+        title:
+          type: string
+        url:
+          type: string
+          nullable: true
+    RegistryArtifactResponse:
+      type: object
+      required:
+      - id
+      - digest
+      - treeDigest
+      - byteLen
+      - mediaType
+      - downloadUrl
+      - expiresAt
+      properties:
+        byteLen:
+          type: integer
+          format: int64
+          minimum: 0
+        digest:
+          type: string
+        downloadUrl:
+          type: string
+        expiresAt:
+          type: integer
+          format: int64
+        id:
+          type: string
+        mediaType:
+          type: string
+        treeDigest:
+          type: string
+    RegistryCandidateArtifactResponse:
+      type: object
+      required:
+      - id
+      - digest
+      - treeDigest
+      - byteLen
+      - mediaType
+      properties:
+        byteLen:
+          type: integer
+          format: int64
+          minimum: 0
+        digest:
+          type: string
+        id:
+          type: string
+        mediaType:
+          type: string
+        treeDigest:
+          type: string
+    RegistryCandidateListResponse:
+      type: object
+      required:
+      - candidates
+      properties:
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/RegistryCandidateResponse'
+    RegistryCandidateResponse:
+      allOf:
+      - $ref: '#/components/schemas/RegistryReleaseMetadataResponse'
+      - type: object
+        required:
+        - artifact
+        - yanked
+        properties:
+          artifact:
+            $ref: '#/components/schemas/RegistryCandidateArtifactResponse'
+          yanked:
+            type: boolean
+    RegistryDependencyResponse:
+      type: object
+      required:
+      - alias
+      - registry
+      - namespace
+      - name
+      - requirement
+      - group
+      - optional
+      - defaultFeatures
+      - features
+      properties:
+        alias:
+          type: string
+        defaultFeatures:
+          type: boolean
+        features:
+          type: array
+          items:
+            type: string
+        group:
+          type: string
+        name:
+          type: string
+        namespace:
+          type: string
+        optional:
+          type: boolean
+        registry:
+          type: string
+        requirement:
+          type: string
+        target:
+          type: string
+          nullable: true
+    RegistryReleaseMetadataResponse:
+      type: object
+      required:
+      - packageId
+      - releaseId
+      - registry
+      - namespace
+      - name
+      - version
+      - releaseDigest
+      - singleton
+      - features
+      - requiredCapabilities
+      - optionalCapabilities
+      - dependencies
+      - advisories
+      properties:
+        advisories:
+          type: array
+          items:
+            $ref: '#/components/schemas/RegistryAdvisoryResponse'
+        dependencies:
+          type: array
+          items:
+            $ref: '#/components/schemas/RegistryDependencyResponse'
+        features:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+        license:
+          type: string
+          nullable: true
+        name:
+          type: string
+        namespace:
+          type: string
+        optionalCapabilities:
+          type: array
+          items:
+            type: string
+        packageId:
+          type: string
+        readmeDigest:
+          type: string
+          nullable: true
+        registry:
+          type: string
+        releaseDigest:
+          type: string
+        releaseId:
+          type: string
+        requiredCapabilities:
+          type: array
+          items:
+            type: string
+        runmatRequirement:
+          type: string
+          nullable: true
+        singleton:
+          type: boolean
+        version:
+          type: string
+    RegistryResolveResponse:
+      allOf:
+      - $ref: '#/components/schemas/RegistryReleaseMetadataResponse'
+      - type: object
+        required:
+        - artifact
+        properties:
+          artifact:
+            $ref: '#/components/schemas/RegistryArtifactResponse'
     TelemetryIngestRequest:
       type: object
       required:

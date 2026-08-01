@@ -131,6 +131,7 @@ fn options(policy: SourceAcquisitionPolicy) -> ProjectResolveOptions {
     ProjectResolveOptions {
         target: "x86_64-unknown-linux-gnu".to_string(),
         default_server_origin: "https://api.runmat.com".to_string(),
+        default_registry_index: "https://api.runmat.com".to_string(),
         groups: [DependencyGroup::Runtime].into_iter().collect(),
         root_features: BTreeSet::new(),
         host_capabilities: BTreeSet::new(),

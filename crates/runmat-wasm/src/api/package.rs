@@ -124,6 +124,12 @@ pub async fn resolve_project(
                 .iter()
                 .map(|source| source.tree_digest.clone()),
         )
+        .chain(
+            resolved
+                .acquired_registry_sources
+                .iter()
+                .map(|source| source.tree_digest.clone()),
+        )
         .collect::<std::collections::BTreeSet<_>>();
     for inventory in &resolved.source_inventories {
         if cached_trees.contains(&inventory.tree_digest) {

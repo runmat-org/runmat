@@ -1,3 +1,4 @@
+use super::registry_transport::RunMatRegistryTransport;
 use super::server_transport::RunMatServerSnapshotTransport;
 use crate::cli::{Cli, PackageProjectArgs};
 use anyhow::{Context, Result};
@@ -45,13 +46,17 @@ pub(super) async fn resolve(
     );
     let server_transport = Arc::new(RunMatServerSnapshotTransport);
     let default_server_origin = server_transport.default_origin();
-    let provider = provider.with_server_transport(server_transport);
+    let default_registry_index = default_server_origin.clone();
+    let provider = provider
+        .with_server_transport(server_transport)
+        .with_registry_transport(Arc::new(RunMatRegistryTransport));
     let resolved = runmat_package::resolve_project_async(
         &manifest,
         existing.as_ref(),
         ProjectResolveOptions {
             target: target_lexicon::HOST.to_string(),
             default_server_origin,
+            default_registry_index,
             groups: [DependencyGroup::Runtime].into_iter().collect(),
             root_features: BTreeSet::new(),
             host_capabilities: native_capabilities(),
@@ -76,6 +81,12 @@ pub(super) async fn resolve(
                 .iter()
                 .map(|source| &source.tree_digest),
         )
+        .chain(
+            resolved
+                .acquired_registry_sources
+                .iter()
+                .map(|source| &source.tree_digest),
+        )
         .collect::<BTreeSet<_>>();
     for inventory in &resolved.source_inventories {
         if cached_trees.contains(&inventory.tree_digest) {
@@ -96,6 +107,12 @@ pub(super) async fn resolve(
             .chain(
                 resolved
                     .acquired_server_sources
+                    .iter()
+                    .map(|source| source.tree_digest.clone()),
+            )
+            .chain(
+                resolved
+                    .acquired_registry_sources
                     .iter()
                     .map(|source| source.tree_digest.clone()),
             )

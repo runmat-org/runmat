@@ -1,4 +1,5 @@
 mod cache;
+mod registry_transport;
 mod resolve;
 mod server_transport;
 mod tree;

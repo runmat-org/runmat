@@ -21,6 +21,8 @@ pub struct CandidateMetadata {
     pub yanked: bool,
     pub available_offline: bool,
     pub target_artifacts: BTreeSet<TargetPredicate>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registry_metadata: Option<crate::RegistryReleaseMetadata>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

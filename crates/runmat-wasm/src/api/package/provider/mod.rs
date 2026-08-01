@@ -1,4 +1,5 @@
 mod git;
+mod registry;
 mod server;
 pub(super) mod shared;
 
@@ -54,5 +55,30 @@ impl runmat_package::PackageSourceProvider for JsPackageSourceProvider {
         >,
     > {
         Box::pin(server::acquire(self, plan))
+    }
+
+    fn acquire_registry<'a>(
+        &'a self,
+        plan: &'a runmat_package::RegistryAcquisitionPlan,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<runmat_package::RegistryPackageMount, String>>
+                + 'a,
+        >,
+    > {
+        Box::pin(registry::acquire(self, plan))
+    }
+
+    fn registry_candidates<'a>(
+        &'a self,
+        plan: &'a runmat_package::RegistryCandidatePlan,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = Result<Vec<runmat_package::RegistryCandidateRecord>, String>,
+                > + 'a,
+        >,
+    > {
+        Box::pin(registry::candidates(self, plan))
     }
 }

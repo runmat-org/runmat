@@ -27,6 +27,16 @@ export type {
   ServerGitGatewayOptions
 } from "./git-gateway.js";
 export { fetchServerProjectSnapshot } from "./server-project.js";
+export {
+  fetchRegistryCandidates,
+  fetchRegistryRelease
+} from "./registry.js";
+export type {
+  BrowserRegistryOptions,
+  RegistryAcquisitionPlan,
+  RegistryCandidatePlan,
+  RegistryReleaseTransfer
+} from "./registry.js";
 export type {
   ServerProjectAcquisitionPlan,
   ServerProjectSnapshotOptions,

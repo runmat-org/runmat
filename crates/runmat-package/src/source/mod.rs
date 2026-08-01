@@ -5,6 +5,8 @@ mod handoff;
 mod inventory;
 mod path_project;
 mod project_resolver;
+mod registry_policy;
+mod registry_release;
 mod server_policy;
 mod symbols;
 mod vendor;
@@ -28,7 +30,17 @@ pub use path_project::{
 };
 pub use project_resolver::{
     resolve_project_async, GitPackageMount, GitPackageProvider, PackageSourceProvider,
-    ProjectResolveError, ProjectResolveOptions, ResolvedProject, ServerProjectPackageMount,
+    ProjectResolveError, ProjectResolveOptions, RegistryPackageMount, ResolvedProject,
+    ServerProjectPackageMount,
+};
+pub use registry_policy::{
+    plan_registry_acquisition, plan_registry_candidates, plan_selected_registry_acquisition,
+    validate_registry_acquisition, RegistryAcquisitionPlan, RegistryCandidatePlan,
+    RegistryPolicyError,
+};
+pub use registry_release::{
+    RegistryCandidateRecord, RegistryPackageReference, RegistryReleaseDependency,
+    RegistryReleaseMetadata,
 };
 pub use server_policy::{
     plan_server_project_acquisition, validate_server_project_acquisition, ServerPolicyError,

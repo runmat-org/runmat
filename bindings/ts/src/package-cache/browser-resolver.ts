@@ -12,6 +12,15 @@ import type {
   ServerProjectSnapshotOptions
 } from "./server-project.js";
 import { fetchServerProjectSnapshot } from "./server-project.js";
+import type {
+  BrowserRegistryOptions,
+  RegistryAcquisitionPlan,
+  RegistryCandidatePlan
+} from "./registry.js";
+import {
+  fetchRegistryCandidates,
+  fetchRegistryRelease
+} from "./registry.js";
 import { BrowserPackageMountFilesystem } from "./mount.js";
 import type { PackageSnapshotMountInput } from "./mount.js";
 import type { RunMatPackageCacheProvider } from "./provider-types.js";
@@ -24,6 +33,7 @@ let nextResolverOwner = 1;
 export interface BrowserProjectResolveOptions {
   target: string;
   default_server_origin: string;
+  default_registry_index: string;
   groups: Array<"runtime" | "development" | "test">;
   root_features: string[];
   host_capabilities: string[];
@@ -43,6 +53,7 @@ export interface BrowserResolvedProject {
   lock_decision: "use-existing" | "write-generated";
   acquired_git_sources: unknown[];
   acquired_server_sources: unknown[];
+  acquired_registry_sources: unknown[];
   source_inventories: unknown[];
 }
 
@@ -58,6 +69,8 @@ export interface BrowserProjectResolverNative {
       leaseOwner: string;
       fetchGitInventory(plan: GitAcquisitionPlan): Promise<unknown>;
       fetchServerSnapshot(plan: ServerProjectAcquisitionPlan): Promise<unknown>;
+      fetchRegistryCandidates(plan: RegistryCandidatePlan): Promise<unknown>;
+      fetchRegistryRelease(plan: RegistryAcquisitionPlan): Promise<unknown>;
       mountPackageSnapshot(snapshot: GitSnapshotWire): string;
     },
     filesystem: RunMatFilesystemProvider
@@ -79,6 +92,7 @@ export interface BrowserProjectResolverConfig {
   packageCache: RunMatPackageCacheProvider;
   gitGateway: ServerGitGatewayOptions;
   serverSnapshots?: ServerProjectSnapshotOptions;
+  registry?: BrowserRegistryOptions;
 }
 
 /**
@@ -128,6 +142,10 @@ export class BrowserProjectResolver {
               ),
             fetchServerSnapshot: (plan) =>
               fetchServerProjectSnapshot(plan, this.config.serverSnapshots),
+            fetchRegistryCandidates: (plan) =>
+              fetchRegistryCandidates(plan, this.config.registry),
+            fetchRegistryRelease: (plan) =>
+              fetchRegistryRelease(plan, this.config.registry),
             mountPackageSnapshot: (snapshot) =>
               this.filesystem.register(
                 snapshot as unknown as PackageSnapshotMountInput,

@@ -36,6 +36,8 @@ pub struct PackageManifest {
     pub canonical_id: Option<CanonicalPackageId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<PackageVersion>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runmat_requirement: Option<semver::VersionReq>,
     pub dependencies: Vec<DependencySpec>,
     pub features: BTreeMap<String, BTreeSet<String>>,
     pub required_capabilities: BTreeSet<HostCapability>,
@@ -77,6 +79,13 @@ impl TryFrom<&runmat_config::project::ProjectManifest> for PackageManifest {
             .version
             .as_deref()
             .map(str::parse::<PackageVersion>)
+            .transpose()
+            .map_err(|error| ManifestError::InvalidPackage(error.to_string()))?;
+        let runmat_requirement = manifest
+            .package
+            .runmat_version
+            .as_deref()
+            .map(semver::VersionReq::parse)
             .transpose()
             .map_err(|error| ManifestError::InvalidPackage(error.to_string()))?;
 
@@ -216,6 +225,7 @@ impl TryFrom<&runmat_config::project::ProjectManifest> for PackageManifest {
             singleton: manifest.package.singleton,
             canonical_id,
             version,
+            runmat_requirement,
             dependencies,
             features,
             required_capabilities,

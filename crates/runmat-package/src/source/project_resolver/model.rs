@@ -1,6 +1,7 @@
 use crate::{
     DependencyGroup, FrozenProject, GitAcquisitionPlan, GitSourceId, HostCapability, LockSelection,
-    PackageLock, PathLockDecision, ServerProjectAcquisitionPlan, ServerProjectSourceId,
+    PackageLock, PathLockDecision, RegistryAcquisitionPlan, RegistryCandidatePlan,
+    RegistryCandidateRecord, RegistrySourceId, ServerProjectAcquisitionPlan, ServerProjectSourceId,
     SourceAcquisitionIntent, SourceAcquisitionPolicy,
 };
 use std::collections::BTreeSet;
@@ -27,6 +28,20 @@ pub trait PackageSourceProvider {
     ) -> Pin<Box<dyn Future<Output = Result<ServerProjectPackageMount, String>> + 'a>> {
         Box::pin(async { Err("Server project snapshot acquisition is not configured".to_string()) })
     }
+
+    fn acquire_registry<'a>(
+        &'a self,
+        _plan: &'a RegistryAcquisitionPlan,
+    ) -> Pin<Box<dyn Future<Output = Result<RegistryPackageMount, String>> + 'a>> {
+        Box::pin(async { Err("registry package acquisition is not configured".to_string()) })
+    }
+
+    fn registry_candidates<'a>(
+        &'a self,
+        _plan: &'a RegistryCandidatePlan,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<RegistryCandidateRecord>, String>> + 'a>> {
+        Box::pin(async { Err("registry candidate acquisition is not configured".to_string()) })
+    }
 }
 
 pub use PackageSourceProvider as GitPackageProvider;
@@ -40,9 +55,18 @@ pub struct ServerProjectPackageMount {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct RegistryPackageMount {
+    pub source: RegistrySourceId,
+    pub root: PathBuf,
+    pub metadata: Option<crate::RegistryReleaseMetadata>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProjectResolveOptions {
     pub target: String,
     pub default_server_origin: String,
+    pub default_registry_index: String,
     pub groups: BTreeSet<DependencyGroup>,
     pub root_features: BTreeSet<String>,
     pub host_capabilities: BTreeSet<HostCapability>,
@@ -69,5 +93,6 @@ pub struct ResolvedProject {
     pub lock_decision: PathLockDecision,
     pub acquired_git_sources: Vec<GitSourceId>,
     pub acquired_server_sources: Vec<ServerProjectSourceId>,
+    pub acquired_registry_sources: Vec<RegistrySourceId>,
     pub source_inventories: Vec<crate::SourceInventory>,
 }

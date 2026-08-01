@@ -20,6 +20,8 @@ pub enum IdentityError {
     InvalidGitObjectId { value: String, reason: &'static str },
     #[error("invalid Server project source `{value}`: {reason}")]
     InvalidServerProjectSource { value: String, reason: &'static str },
+    #[error("invalid registry source `{value}`: {reason}")]
+    InvalidRegistrySource { value: String, reason: &'static str },
 }
 
 #[derive(Debug, Error)]

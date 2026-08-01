@@ -1,6 +1,7 @@
 mod error;
 mod loader;
 mod model;
+mod registry;
 mod resolver;
 mod selection;
 mod source;
@@ -8,6 +9,6 @@ mod source;
 pub use error::ProjectResolveError;
 pub use model::{
     GitPackageMount, GitPackageProvider, PackageSourceProvider, ProjectResolveOptions,
-    ResolvedProject, ServerProjectPackageMount,
+    RegistryPackageMount, ResolvedProject, ServerProjectPackageMount,
 };
 pub use resolver::resolve_project_async;

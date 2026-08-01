@@ -1,5 +1,7 @@
 use crate::{BlobMetadata, CacheError, TreeManifest};
-use runmat_package::{ContentDigest, GitSourceId, ServerProjectSourceId, SourceId};
+use runmat_package::{
+    ContentDigest, GitSourceId, RegistrySourceId, ServerProjectSourceId, SourceId,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -97,6 +99,40 @@ impl ServerProjectSnapshot {
             &self.tree,
             &self.blobs,
             "Server project",
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RegistrySnapshot {
+    pub source: RegistrySourceId,
+    pub tree: TreeManifest,
+    pub blobs: Vec<SnapshotBlob>,
+}
+
+impl RegistrySnapshot {
+    pub fn new(
+        source: RegistrySourceId,
+        tree: TreeManifest,
+        mut blobs: Vec<SnapshotBlob>,
+    ) -> Result<Self, CacheError> {
+        blobs.sort_by(|left, right| left.digest.cmp(&right.digest));
+        let snapshot = Self {
+            source,
+            tree,
+            blobs,
+        };
+        snapshot.validate()?;
+        Ok(snapshot)
+    }
+
+    pub fn validate(&self) -> Result<(), CacheError> {
+        validate_snapshot(
+            SourceId::Registry(self.source.clone()),
+            &self.tree,
+            &self.blobs,
+            "Registry",
         )
     }
 }
