@@ -750,8 +750,7 @@ async fn compute_subset(request: Request) -> BuiltinResult<SubsetEval> {
 
 fn eigenvalue_list(value: &Value) -> BuiltinResult<Vec<Complex64>> {
     match value {
-        Value::Tensor(tensor) => Ok(tensor
-            .data
+        Value::Tensor(tensor) => Ok(tensor::tensor_values_f64_cow(tensor)
             .iter()
             .map(|&re| Complex64::new(re, 0.0))
             .collect()),
@@ -849,7 +848,7 @@ fn select_columns(matrix: &Value, selected: &[usize]) -> BuiltinResult<Value> {
     match matrix {
         Value::Tensor(tensor) => {
             let rows = tensor.rows();
-            let mut data = Vec::with_capacity(rows * selected.len());
+            let mut indices = Vec::with_capacity(rows * selected.len());
             for &col in selected {
                 if col >= tensor.cols() {
                     return Err(error_with_detail(
@@ -858,10 +857,16 @@ fn select_columns(matrix: &Value, selected: &[usize]) -> BuiltinResult<Value> {
                     ));
                 }
                 for row in 0..rows {
-                    data.push(tensor.data[row + col * rows]);
+                    indices.push(row + col * rows);
                 }
             }
-            Tensor::new_2d(data, rows, selected.len())
+            let storage = tensor
+                .clone()
+                .into_numeric_storage()
+                .map_err(|err| error_with_detail(format!("eigs: {err}"), &ERROR_INTERNAL))?
+                .gather(&indices)
+                .map_err(|err| error_with_detail(format!("eigs: {err}"), &ERROR_INTERNAL))?;
+            Tensor::from_numeric_storage(storage, vec![rows, selected.len()])
                 .map(Value::Tensor)
                 .map_err(|err| error_with_detail(format!("eigs: {err}"), &ERROR_INTERNAL))
         }
@@ -1232,19 +1237,11 @@ fn exact_integer_scalar(value: &Value) -> Option<IntValue> {
 }
 
 fn scalar_tensor_f64(tensor: &Tensor) -> f64 {
-    if let Some(storage) = tensor.integer_storage() {
-        return storage
-            .value_at(0)
-            .expect("one-element integer storage")
-            .to_f64();
-    }
-    tensor.data[0]
+    tensor::tensor_value_f64(tensor, 0)
 }
 
 fn tensor_element_len(tensor: &Tensor) -> usize {
-    tensor
-        .integer_storage()
-        .map_or(tensor.data.len(), |storage| storage.len())
+    tensor.len()
 }
 
 fn complex_tensor_element_len(tensor: &ComplexTensor) -> usize {
@@ -1308,6 +1305,17 @@ mod tests {
         }
     }
 
+    #[test]
+    fn eigs_selected_real_columns_preserve_native_single_storage() {
+        let matrix = Value::Tensor(
+            Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("single vectors"),
+        );
+        let selected = tensor(select_columns(&matrix, &[1]).expect("selected column"));
+        assert_eq!(selected.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(selected.shape, vec![2, 1]);
+        assert_eq!(selected.materialize_f64(), vec![3.0, 4.0]);
+    }
+
     fn call(a: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(eigs_builtin(a, rest))
     }
@@ -1317,7 +1325,7 @@ mod tests {
         let a = real_matrix(vec![1.0, 0.0, 0.0, 4.0], 2, 2);
         let out = tensor(call(a, Vec::new()).unwrap());
         assert_eq!(out.shape, vec![2, 1]);
-        assert_eq!(out.data, vec![4.0, 1.0]);
+        assert_eq!(out.materialize_f64(), vec![4.0, 1.0]);
     }
 
     #[test]
@@ -1335,7 +1343,7 @@ mod tests {
             )
             .unwrap(),
         );
-        assert_eq!(out.data, vec![2.0, -4.0]);
+        assert_eq!(out.materialize_f64(), vec![2.0, -4.0]);
     }
 
     #[test]
@@ -1348,7 +1356,7 @@ mod tests {
         assert_eq!(tensor(out[0].clone()).shape, vec![2, 1]);
         let d = tensor(out[1].clone());
         assert_eq!(d.shape, vec![1, 1]);
-        assert_eq!(d.data, vec![5.0]);
+        assert_eq!(d.materialize_f64(), vec![5.0]);
         assert_eq!(out[2], Value::Num(0.0));
     }
 
@@ -1356,40 +1364,34 @@ mod tests {
     fn eigs_numeric_sigma_selects_nearest() {
         let a = real_matrix(vec![1.0, 0.0, 0.0, 8.0], 2, 2);
         let out = tensor(call(a, vec![Value::Num(1.0), Value::Num(7.25)]).unwrap());
-        assert_eq!(out.data, vec![8.0]);
+        assert_eq!(out.materialize_f64(), vec![8.0]);
     }
 
     #[test]
     fn eigs_reads_integer_tensor_k_and_sigma_storage() {
         let a = real_matrix(vec![1.0, 0.0, 0.0, 8.0], 2, 2);
-        let mut k = Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).unwrap();
-        k.data.clear();
-        let mut sigma = Tensor::new_integer(IntegerStorage::I16(vec![7]), vec![1, 1]).unwrap();
-        sigma.data.clear();
+        let k = Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).unwrap();
+        let sigma = Tensor::new_integer(IntegerStorage::I16(vec![7]), vec![1, 1]).unwrap();
         let out = tensor(call(a, vec![Value::Tensor(k), Value::Tensor(sigma)]).unwrap());
-        assert_eq!(out.data, vec![8.0]);
+        assert_eq!(out.materialize_f64(), vec![8.0]);
     }
 
     #[test]
     fn eigs_reads_integer_tensor_vector_options_exactly() {
-        let mut permutation =
+        let permutation =
             Tensor::new_integer(IntegerStorage::U16(vec![2, 1, 3]), vec![1, 3]).unwrap();
-        permutation.data.fill(f64::NAN);
         assert_eq!(
             parse_permutation(&Value::Tensor(permutation), 3).unwrap(),
             vec![2, 1, 3]
         );
 
-        let mut initial =
-            Tensor::new_integer(IntegerStorage::I16(vec![3, 2, 1]), vec![3, 1]).unwrap();
-        initial.data.fill(f64::NAN);
+        let initial = Tensor::new_integer(IntegerStorage::I16(vec![3, 2, 1]), vec![3, 1]).unwrap();
         assert_eq!(
             numeric_vector_values(&Value::Tensor(initial), "InitialVector").unwrap(),
             vec![3.0, 2.0, 1.0]
         );
 
-        let mut fail = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
-        fail.data.clear();
+        let fail = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
         assert!(parse_bool(&Value::Tensor(fail), "Fail").unwrap());
     }
 
@@ -1408,26 +1410,23 @@ mod tests {
             )
             .unwrap(),
         );
-        assert_eq!(out.data, vec![2.0]);
+        assert_eq!(out.materialize_f64(), vec![2.0]);
     }
 
     #[test]
     fn eigs_validates_options_without_affecting_exact_fallback() {
         let mut opts = StructValue::new();
         opts.insert("tol", Value::Num(1e-9));
-        let mut maxit = Tensor::new_integer(IntegerStorage::U16(vec![100]), vec![1, 1]).unwrap();
-        maxit.data.clear();
+        let maxit = Tensor::new_integer(IntegerStorage::U16(vec![100]), vec![1, 1]).unwrap();
         opts.insert("maxit", Value::Tensor(maxit));
-        let mut p = Tensor::new_integer(IntegerStorage::U16(vec![4]), vec![1, 1]).unwrap();
-        p.data.clear();
+        let p = Tensor::new_integer(IntegerStorage::U16(vec![4]), vec![1, 1]).unwrap();
         opts.insert("p", Value::Tensor(p));
         opts.insert(
             "v0",
             Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![2, 1]).unwrap()),
         );
         opts.insert("fail", Value::CharArray(CharArray::new_row("keep")));
-        let mut disp = Tensor::new_integer(IntegerStorage::U8(vec![0]), vec![1, 1]).unwrap();
-        disp.data.clear();
+        let disp = Tensor::new_integer(IntegerStorage::U8(vec![0]), vec![1, 1]).unwrap();
         opts.insert("disp", Value::Tensor(disp));
         let a = real_matrix(vec![1.0, 0.0, 0.0, 3.0], 2, 2);
         let out = tensor(
@@ -1441,7 +1440,7 @@ mod tests {
             )
             .unwrap(),
         );
-        assert_eq!(out.data, vec![3.0]);
+        assert_eq!(out.materialize_f64(), vec![3.0]);
     }
 
     #[test]
@@ -1498,9 +1497,8 @@ mod tests {
         } else {
             u32::MAX as u64
         };
-        let mut typed =
+        let typed =
             Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("typed option");
-        typed.data.clear();
 
         assert_eq!(
             positive_integer_option(&Value::Tensor(typed), "MaxIterations").expect("typed option"),
@@ -1534,14 +1532,13 @@ mod tests {
             )
             .unwrap(),
         );
-        assert_eq!(out.data, vec![2.0]);
+        assert_eq!(out.materialize_f64(), vec![2.0]);
     }
 
     #[test]
     fn eigs_cholesky_factor_reads_typed_integer_storage_exactly() {
         let a = real_matrix(vec![2.0, 0.0, 0.0, 9.0], 2, 2);
-        let mut r = Tensor::new_integer(IntegerStorage::U16(vec![1, 0, 0, 2]), vec![2, 2]).unwrap();
-        r.data.fill(f64::NAN);
+        let r = Tensor::new_integer(IntegerStorage::U16(vec![1, 0, 0, 2]), vec![2, 2]).unwrap();
         let mut opts = StructValue::new();
         opts.insert("IsCholesky", Value::Bool(true));
 
@@ -1558,21 +1555,20 @@ mod tests {
             .unwrap(),
         );
 
-        assert_eq!(out.data, vec![2.0]);
+        assert_eq!(out.materialize_f64(), vec![2.0]);
     }
 
     #[test]
     fn eigs_start_vector_length_reads_typed_integer_storage_exactly() {
         let a = real_matrix(vec![1.0, 0.0, 0.0, 3.0], 2, 2);
-        let mut start = Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![2, 1]).unwrap();
-        start.data.clear();
+        let start = Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![2, 1]).unwrap();
         let mut opts = StructValue::new();
         opts.insert("StartVector", Value::Tensor(start));
 
         let out = tensor(call(a, vec![Value::Num(1.0), Value::Struct(opts)]).unwrap());
 
         assert_eq!(out.shape, vec![1, 1]);
-        assert_eq!(out.data, vec![3.0]);
+        assert_eq!(out.materialize_f64(), vec![3.0]);
     }
 
     #[test]
