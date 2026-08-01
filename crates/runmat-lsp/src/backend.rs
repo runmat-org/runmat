@@ -64,6 +64,8 @@ struct CachedProjectDoc {
 #[derive(Clone)]
 struct ProjectCache {
     manifest_path: PathBuf,
+    graph_digest: runmat_package::ContentDigest,
+    source_revision: runmat_package::ContentDigest,
     compat_mode: CompatMode,
     files: HashMap<PathBuf, CachedProjectDoc>,
 }
@@ -283,6 +285,8 @@ impl RunMatLanguageServer {
 
         let context = ProjectContext::discover_from_source_name(start_hint.as_deref())?;
         let manifest_path = context.manifest_path().to_path_buf();
+        let graph_digest = context.graph_digest().clone();
+        let source_revision = context.source_revision().clone();
 
         let existing = {
             let state = self.state.read().await;
@@ -290,7 +294,11 @@ impl RunMatLanguageServer {
         };
 
         if let Some(cache) = existing {
-            if cache.manifest_path == manifest_path && cache.compat_mode == compat_mode {
+            if cache.manifest_path == manifest_path
+                && cache.graph_digest == graph_digest
+                && cache.source_revision == source_revision
+                && cache.compat_mode == compat_mode
+            {
                 let mut updated = cache;
                 for (uri, text, analysis) in open_docs {
                     if let Ok(path) = uri.to_file_path() {
@@ -332,16 +340,12 @@ impl RunMatLanguageServer {
                 );
                 continue;
             }
-            let Ok(text) =
+            let text =
                 futures::executor::block_on(runmat_filesystem::read_to_string_async(source_file))
-            else {
-                continue;
-            };
+                    .ok()?;
             let source_name = source_file.to_str();
             let analysis = analyze_document_with_compat_and_source(&text, compat_mode, source_name);
-            let Ok(uri) = Url::from_file_path(source_file) else {
-                continue;
-            };
+            let uri = Url::from_file_path(source_file).ok()?;
             files.insert(
                 source_file.clone(),
                 CachedProjectDoc {
@@ -354,6 +358,8 @@ impl RunMatLanguageServer {
 
         let cache = ProjectCache {
             manifest_path,
+            graph_digest,
+            source_revision,
             compat_mode,
             files,
         };

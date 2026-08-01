@@ -1,13 +1,10 @@
-use runmat_config::project::{
-    build_project_composition_graph_async, discover_project_manifest_from_async,
-    ProjectCompositionGraph,
-};
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug)]
 pub struct ProjectContext {
     manifest_path: PathBuf,
     all_source_files: Vec<PathBuf>,
+    frozen: runmat_package::FrozenProject,
 }
 
 impl ProjectContext {
@@ -32,11 +29,10 @@ impl ProjectContext {
             }
             _ => runmat_filesystem::current_dir().ok()?,
         };
-        let manifest_path = discover_project_manifest_from_async(&start).await?;
-        let graph = build_project_composition_graph_async(&manifest_path)
+        let frozen = runmat_package::discover_frozen_project_from_async(&start, Default::default())
             .await
             .ok()?;
-        Some(Self::from_graph(manifest_path, graph))
+        frozen.map(Self::from_frozen)
     }
 
     pub fn all_source_files(&self) -> &[PathBuf] {
@@ -47,23 +43,26 @@ impl ProjectContext {
         &self.manifest_path
     }
 
-    fn from_graph(manifest_path: PathBuf, graph: ProjectCompositionGraph) -> Self {
-        let mut all_source_files = Vec::new();
+    pub fn graph_digest(&self) -> &runmat_package::ContentDigest {
+        self.frozen.graph_digest()
+    }
 
-        for package in graph.packages.values() {
-            for source in &package.source_index.files {
-                let source_file = package
-                    .project_root
-                    .join(&source.source_root)
-                    .join(&source.relative_path);
-                all_source_files.push(source_file.clone());
-            }
-        }
+    pub fn source_revision(&self) -> &runmat_package::ContentDigest {
+        self.frozen.source_revision()
+    }
+
+    fn from_frozen(frozen: runmat_package::FrozenProject) -> Self {
+        let manifest_path = frozen.manifest_path.clone();
+        let mut all_source_files = frozen
+            .all_sources()
+            .map(|(_, path)| path.clone())
+            .collect::<Vec<_>>();
         all_source_files.sort();
         all_source_files.dedup();
         Self {
             manifest_path,
             all_source_files,
+            frozen,
         }
     }
 }
@@ -73,4 +72,37 @@ async fn is_file_async(path: &Path) -> bool {
         .await
         .map(|meta| meta.is_file())
         .unwrap_or(false)
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::ProjectContext;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn project_context_revision_tracks_graph_declared_source_content() {
+        let temp = TempDir::new().unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        let source = temp.path().join("src/main.m");
+        fs::write(&source, "x = 1;\n").unwrap();
+        fs::write(
+            temp.path().join("runmat.toml"),
+            r#"
+[package]
+name = "revision-fixture"
+
+[sources]
+roots = ["src"]
+"#,
+        )
+        .unwrap();
+        let before =
+            ProjectContext::discover_from_source_name(source.to_str()).expect("project context");
+        fs::write(&source, "x = 2;\n").unwrap();
+        let after =
+            ProjectContext::discover_from_source_name(source.to_str()).expect("project context");
+        assert_ne!(before.graph_digest(), after.graph_digest());
+        assert_ne!(before.source_revision(), after.source_revision());
+    }
 }

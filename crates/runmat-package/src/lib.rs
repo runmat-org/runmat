@@ -7,6 +7,7 @@ pub mod lock;
 pub mod manifest;
 pub mod policy;
 pub mod resolve;
+pub mod source;
 
 pub use error::{GraphError, IdentityError, LockError, ManifestError, PackageError, ResolveError};
 pub use graph::{
@@ -33,4 +34,9 @@ pub use resolve::{
     CandidateIndex, CandidateMetadata, CandidateProvider, CandidateQuery, Incompatibility,
     RequirementPath, Resolution, ResolutionEdge, ResolutionPackage, ResolutionRequest,
     ResolutionRequirement, SourceSelectionPolicy, UpdatePlan, UpdatePolicy,
+};
+pub use source::{
+    build_frozen_project, build_frozen_project_async, discover_frozen_project_from,
+    discover_frozen_project_from_async, FrozenProject, FrozenProjectError, FrozenSourceDescriptor,
+    PackageMount, PackageSourceCatalog, SourceCatalog, StableSourceId,
 };

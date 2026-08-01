@@ -154,13 +154,13 @@ fn qualify_companion_functions(stmts: &mut [runmat_parser::Stmt], qualified_name
 }
 
 fn source_index_qualified_function_name(
-    source: &runmat_config::project::ProjectSourceFile,
+    source: &runmat_package::FrozenSourceDescriptor,
 ) -> Option<&str> {
     source.function_qualified_name()
 }
 
 fn source_index_qualified_class_name(
-    source: &runmat_config::project::ProjectSourceFile,
+    source: &runmat_package::FrozenSourceDescriptor,
 ) -> Option<&str> {
     source.class_definition_qualified_name()
 }
@@ -421,90 +421,85 @@ impl CompanionSourceDiscovery {
 }
 
 async fn discover_companion_from_composition_graph_async(
-    source_name: &str,
+    _source_name: &str,
     cwd: &Path,
     primary_source_path: &Path,
     compat_mode: runmat_parser::CompatMode,
 ) -> Result<Option<CompanionSourceDiscovery>, String> {
-    use runmat_config::project::{
-        build_project_composition_graph_async, discover_project_symbols_from_source_name_async,
-    };
     let options = ParserOptions::new(compat_mode);
-    let Some(discovered_symbols) =
-        discover_project_symbols_from_source_name_async(source_name, cwd)
+    let Some(frozen) =
+        runmat_package::discover_frozen_project_from_async(primary_source_path, Default::default())
             .await
             .map_err(|error| error.to_string())?
     else {
         return Ok(None);
     };
-    let composition = build_project_composition_graph_async(&discovered_symbols.manifest_path)
-        .await
-        .map_err(|error| error.to_string())?;
     let mut out = CompanionSourceDiscovery::default();
-    for package in composition.packages.values() {
-        for source in &package.source_index.files {
-            let file_path = package
-                .project_root
-                .join(&source.source_root)
-                .join(&source.relative_path);
-            let file_path =
-                runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(&file_path)
-                    .await;
-            if source_paths_equivalent(&file_path, primary_source_path) {
-                continue;
-            }
-            let Ok(contents) =
-                runmat_runtime::builtins::io::repl_fs::pcode::read_source_text_async(&file_path)
-                    .await
-            else {
-                continue;
-            };
-            if !contents.contains("classdef") && !contents.contains("function") {
-                continue;
-            }
-            let Ok(program) = parse_with_options(&contents, options) else {
-                continue;
-            };
-            let is_class_source = is_class_source_body(&program.body);
-            let is_function_source = is_function_source_body(&program.body);
-            if !is_class_source && !is_function_source {
-                continue;
-            }
-            let mut body = program.body;
-            let private_owner_scope = source
-                .is_private
-                .then(|| function_owner_scope_from_qualified_name(&source.qualified_name));
-            let primary_visible_private =
-                source.is_private && private_source_visible_to(primary_source_path, &file_path);
-            let private_aliases = if let Some(owner_scope) = private_owner_scope.as_deref() {
-                qualify_private_companion_functions(&mut body, owner_scope, primary_visible_private)
-            } else {
-                HashMap::new()
-            };
-            if is_class_source {
-                if let Some(qualified) = source_index_qualified_class_name(source) {
-                    qualify_companion_classdefs(&mut body, qualified);
-                } else if let Some(qualified) = package_class_name_from_path(&file_path, cwd) {
-                    qualify_companion_classdefs(&mut body, &qualified);
-                }
-            } else if private_owner_scope.is_none() {
-                if let Some(qualified) = source_index_qualified_function_name(source) {
-                    qualify_companion_functions(&mut body, qualified);
-                } else if let Some(qualified) = package_class_name_from_path(&file_path, cwd) {
-                    qualify_companion_functions(&mut body, &qualified);
-                }
-            }
-            out.extend_body(
-                body,
-                private_owner_scope.as_deref(),
-                private_aliases,
-                Some(SourceContextData {
-                    display_name: crate::diagnostic_path::display_path_from_base(&file_path, cwd),
-                    fullpath_name: Some(path_to_source_name(&file_path)),
-                    text: contents,
-                }),
-            );
+    for (source, access_path) in frozen.all_sources() {
+        let file_path = access_path.clone();
+        let file_path =
+            runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(&file_path)
+                .await;
+        if source_paths_equivalent(&file_path, primary_source_path) {
+            continue;
         }
+        let contents =
+            runmat_runtime::builtins::io::repl_fs::pcode::read_source_text_async(&file_path)
+                .await
+                .map_err(|error| {
+                    format!(
+                        "failed to read graph-declared source {}: {error}",
+                        file_path.display()
+                    )
+                })?;
+        if !contents.contains("classdef") && !contents.contains("function") {
+            continue;
+        }
+        let program = parse_with_options(&contents, options).map_err(|error| {
+            format!(
+                "failed to parse graph-declared source {}: {error}",
+                file_path.display()
+            )
+        })?;
+        let is_class_source = is_class_source_body(&program.body);
+        let is_function_source = is_function_source_body(&program.body);
+        if !is_class_source && !is_function_source {
+            continue;
+        }
+        let mut body = program.body;
+        let private_owner_scope = source
+            .is_private
+            .then(|| function_owner_scope_from_qualified_name(&source.qualified_name));
+        let primary_visible_private =
+            source.is_private && private_source_visible_to(primary_source_path, &file_path);
+        let private_aliases = if let Some(owner_scope) = private_owner_scope.as_deref() {
+            qualify_private_companion_functions(&mut body, owner_scope, primary_visible_private)
+        } else {
+            HashMap::new()
+        };
+        if is_class_source {
+            if let Some(qualified) = source_index_qualified_class_name(source) {
+                qualify_companion_classdefs(&mut body, qualified);
+            } else if let Some(qualified) = package_class_name_from_path(&file_path, cwd) {
+                qualify_companion_classdefs(&mut body, &qualified);
+            }
+        } else if private_owner_scope.is_none() {
+            if let Some(qualified) = source_index_qualified_function_name(source) {
+                qualify_companion_functions(&mut body, qualified);
+            } else if let Some(qualified) = package_class_name_from_path(&file_path, cwd) {
+                qualify_companion_functions(&mut body, &qualified);
+            }
+        }
+        out.extend_body(
+            body,
+            private_owner_scope.as_deref(),
+            private_aliases,
+            Some(SourceContextData {
+                display_name: crate::diagnostic_path::display_path_from_base(&file_path, cwd),
+                fullpath_name: Some(path_to_source_name(&file_path)),
+                text: contents,
+            }),
+        );
     }
     Ok(Some(out))
 }

@@ -3,8 +3,8 @@ use runmat_config::project::{
     build_project_composition_graph, build_project_composition_graph_async,
 };
 use runmat_package::{
-    build_project_path_graph, build_project_path_graph_async, encode_lock, DependencyGroup,
-    LockSelection, PackageLock,
+    build_frozen_project, build_frozen_project_async, build_project_path_graph,
+    build_project_path_graph_async, encode_lock, DependencyGroup, LockSelection, PackageLock,
 };
 use std::collections::BTreeSet;
 use std::fs;
@@ -102,4 +102,27 @@ fn path_dependency_version_assertions_are_enforced() {
     let composition = build_project_composition_graph(&manifest).unwrap();
     let error = build_project_path_graph(&composition, temp.path(), BTreeSet::new()).unwrap_err();
     assert!(error.to_string().contains("requires >=2.0.0"));
+}
+
+#[test]
+fn frozen_source_catalogs_are_complete_and_checkout_independent() {
+    let (_first_temp, first_manifest) = fixture();
+    let (_second_temp, second_manifest) = fixture();
+    let first = build_frozen_project(&first_manifest, BTreeSet::new()).unwrap();
+    let second = build_frozen_project(&second_manifest, BTreeSet::new()).unwrap();
+    assert_eq!(first.graph, second.graph);
+    assert_eq!(first.sources, second.sources);
+    assert_eq!(first.source_revision(), second.source_revision());
+    assert_ne!(first.access_paths, second.access_paths);
+    assert_eq!(first.all_sources().count(), 2);
+}
+
+#[test]
+fn async_frozen_handoff_matches_native_stable_state() {
+    let (_temp, manifest) = fixture();
+    let sync = build_frozen_project(&manifest, BTreeSet::new()).unwrap();
+    let async_project = block_on(build_frozen_project_async(&manifest, BTreeSet::new())).unwrap();
+    assert_eq!(sync.graph_digest(), async_project.graph_digest());
+    assert_eq!(sync.sources, async_project.sources);
+    assert_eq!(sync.access_paths, async_project.access_paths);
 }
