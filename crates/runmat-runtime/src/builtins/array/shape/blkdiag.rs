@@ -8,7 +8,7 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
-    NumericDType, ResolveContext, SparseTensor, Tensor, Type, Value,
+    NumericDType, NumericScalar, NumericStorage, ResolveContext, SparseTensor, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -581,7 +581,8 @@ impl Block {
             Value::Tensor(tensor) => {
                 validate_matrix_shape(&tensor.shape)?;
                 if tensor.shape.is_empty() {
-                    return Tensor::new_with_dtype(tensor.data, vec![1, 1], tensor.dtype)
+                    return tensor
+                        .reshape(vec![1, 1])
                         .map(Self::Real)
                         .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail));
                 }
@@ -590,9 +591,11 @@ impl Block {
             Value::Num(value) => Tensor::new(vec![value], vec![1, 1])
                 .map(Self::Real)
                 .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail)),
-            Value::Int(value) => Tensor::new(vec![value.to_f64()], vec![1, 1])
-                .map(Self::Real)
-                .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail)),
+            Value::Int(value) => {
+                Tensor::new_integer(IntegerStorage::from_scalar(value), vec![1, 1])
+                    .map(Self::Real)
+                    .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail))
+            }
             Value::Bool(flag) => LogicalArray::new(vec![if flag { 1 } else { 0 }], vec![1, 1])
                 .map(Self::Logical)
                 .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail)),
@@ -711,8 +714,8 @@ fn promoted_dense_dtype(blocks: &[Block]) -> NumericDType {
     for block in blocks {
         match block {
             Block::Real(tensor) => match dtype {
-                None => dtype = Some(tensor.dtype),
-                Some(existing) if existing == tensor.dtype => {}
+                None => dtype = Some(tensor.numeric_dtype()),
+                Some(existing) if existing == tensor.numeric_dtype() => {}
                 Some(_) => return NumericDType::F64,
             },
             Block::Logical(_) => {}
@@ -765,17 +768,21 @@ fn checked_len(rows: usize, cols: usize) -> BuiltinResult<usize> {
 fn assemble_real(blocks: Vec<Block>, dtype: NumericDType) -> BuiltinResult<Value> {
     let (rows, cols) = output_dims(&blocks)?;
     let len = checked_len(rows, cols)?;
-    let mut data = filled_vec(0.0, len)?;
+    let mut output =
+        Tensor::from_numeric_storage(NumericStorage::zeros(dtype, len), vec![rows, cols])
+            .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail))?;
     let mut row_offset = 0usize;
     let mut col_offset = 0usize;
     for block in &blocks {
         match block {
-            Block::Real(tensor) => copy_real_block(&mut data, rows, row_offset, col_offset, tensor),
+            Block::Real(tensor) => {
+                copy_real_block(&mut output, rows, row_offset, col_offset, tensor)?
+            }
             Block::Logical(array) => {
-                copy_logical_to_real_block(&mut data, rows, row_offset, col_offset, array)?
+                copy_logical_to_real_block(&mut output, rows, row_offset, col_offset, array)?
             }
             Block::Sparse(sparse) => {
-                copy_sparse_to_real_block(&mut data, rows, row_offset, col_offset, sparse)
+                copy_sparse_to_real_block(&mut output, rows, row_offset, col_offset, sparse)?
             }
             Block::Complex(_) | Block::Char(_) => {
                 return Err(error_with_detail(
@@ -787,10 +794,7 @@ fn assemble_real(blocks: Vec<Block>, dtype: NumericDType) -> BuiltinResult<Value
         row_offset += block.rows();
         col_offset += block.cols();
     }
-    let tensor = Tensor::new_with_dtype(data, vec![rows, cols], dtype)
-        .map(|tensor| tensor::coerce_tensor_dtype(tensor, dtype))
-        .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail))?;
-    Ok(tensor_into_blkdiag_value(tensor))
+    Ok(tensor_into_blkdiag_value(output))
 }
 
 fn assemble_logical(blocks: Vec<Block>) -> BuiltinResult<Value> {
@@ -847,11 +851,14 @@ fn assemble_complex(blocks: Vec<Block>) -> BuiltinResult<Value> {
                 }
             }
             Block::Real(tensor) => {
+                // Floating complex storage is currently double-only, so real
+                // blocks enter this explicit component materialization.
+                let values = tensor::tensor_values_f64_cow(tensor);
                 for col in 0..tensor.cols {
                     for row in 0..tensor.rows {
                         let src = row + col * tensor.rows;
                         let dst = (row_offset + row) + (col_offset + col) * rows;
-                        data[dst] = (tensor.data[src], 0.0);
+                        data[dst] = (values[src], 0.0);
                     }
                 }
             }
@@ -964,7 +971,12 @@ fn assemble_char(blocks: Vec<Block>) -> BuiltinResult<Value> {
 fn block_into_sparse(block: Block) -> BuiltinResult<SparseTensor> {
     match block {
         Block::Sparse(sparse) => Ok(sparse),
-        Block::Real(tensor) => dense_to_sparse(&tensor.data, tensor.rows, tensor.cols),
+        Block::Real(tensor) => {
+            // Core sparse output is currently floating; expose the dense
+            // conversion boundary instead of consulting a mirror.
+            let values = tensor::tensor_values_f64_cow(&tensor);
+            dense_to_sparse(values.as_ref(), tensor.rows, tensor.cols)
+        }
         Block::Logical(array) => {
             let (rows, cols) = matrix_dims_from_shape(&array.shape)
                 .ok_or_else(|| error_with_detail(&ERROR_INVALID_INPUT, "invalid logical shape"))?;
@@ -1044,23 +1056,29 @@ fn complex_to_real_sparse(tensor: &ComplexTensor) -> BuiltinResult<SparseTensor>
 }
 
 fn copy_real_block(
-    output: &mut [f64],
+    output: &mut Tensor,
     output_rows: usize,
     row_offset: usize,
     col_offset: usize,
     tensor: &Tensor,
-) {
+) -> BuiltinResult<()> {
     for col in 0..tensor.cols {
         for row in 0..tensor.rows {
             let src = row + col * tensor.rows;
             let dst = (row_offset + row) + (col_offset + col) * output_rows;
-            output[dst] = tensor.data[src];
+            let value = tensor
+                .numeric_value_at(src)
+                .expect("validated block tensor index");
+            output
+                .set_numeric_assignment_at(dst, value)
+                .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail))?;
         }
     }
+    Ok(())
 }
 
 fn copy_logical_to_real_block(
-    output: &mut [f64],
+    output: &mut Tensor,
     output_rows: usize,
     row_offset: usize,
     col_offset: usize,
@@ -1072,30 +1090,35 @@ fn copy_logical_to_real_block(
         for row in 0..rows {
             let src = row + col * rows;
             let dst = (row_offset + row) + (col_offset + col) * output_rows;
-            output[dst] = f64::from(array.data[src]);
+            output
+                .set_numeric_assignment_at(dst, NumericScalar::F64(f64::from(array.data[src])))
+                .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail))?;
         }
     }
     Ok(())
 }
 
 fn copy_sparse_to_real_block(
-    output: &mut [f64],
+    output: &mut Tensor,
     output_rows: usize,
     row_offset: usize,
     col_offset: usize,
     sparse: &SparseTensor,
-) {
+) -> BuiltinResult<()> {
     for col in 0..sparse.cols {
         for idx in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
             let row = sparse.row_indices[idx];
             let dst = (row_offset + row) + (col_offset + col) * output_rows;
-            output[dst] = sparse.values[idx];
+            output
+                .set_numeric_assignment_at(dst, NumericScalar::F64(sparse.values[idx]))
+                .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail))?;
         }
     }
+    Ok(())
 }
 
 fn tensor_into_blkdiag_value(tensor: Tensor) -> Value {
-    if tensor.dtype == NumericDType::F64 {
+    if tensor.numeric_dtype() == NumericDType::F64 {
         tensor::tensor_into_value(tensor)
     } else {
         Value::Tensor(tensor)
@@ -1124,7 +1147,10 @@ fn upload_gpu_result(
                 &handle,
                 runmat_accelerate_api::GpuTensorStorage::Real,
             );
-            runmat_accelerate_api::set_handle_precision(&handle, tensor_precision(tensor.dtype));
+            runmat_accelerate_api::set_handle_precision(
+                &handle,
+                tensor_precision(tensor.numeric_dtype()),
+            );
             Ok(gpu_helpers::resident_gpu_value(handle))
         }
         Value::Num(value) => {
@@ -1301,6 +1327,24 @@ mod tests {
                 )
             );
         }
+    }
+
+    #[test]
+    fn blkdiag_integer_and_logical_blocks_preserve_exact_integer_storage() {
+        let wide = 9_007_199_254_740_993_u64;
+        let mut integer = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).unwrap();
+        integer.data.clear();
+        let logical = LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap();
+
+        let Value::Tensor(output) =
+            call(vec![Value::LogicalArray(logical), Value::Tensor(integer)]).expect("blkdiag")
+        else {
+            panic!("expected integer tensor");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(vec![1, 0, 0, 0, 0, wide]))
+        );
     }
 
     #[test]
