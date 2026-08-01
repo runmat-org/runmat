@@ -16,7 +16,7 @@ use crate::builtins::math::linalg::ops::transpose_real_sparse_tensor;
 use crate::builtins::math::linalg::type_resolvers::transpose_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use log::warn;
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -198,12 +198,11 @@ async fn transpose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
 
 fn transpose_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let rank = tensor.shape.len();
-    if rank <= 2 {
-        transpose_tensor_matrix(&tensor)
-    } else {
-        let order = transpose_order(rank);
-        permute_tensor(NAME, tensor, &order)
+    if rank == 0 {
+        return Ok(tensor);
     }
+    let order = transpose_order(rank);
+    permute_tensor(NAME, tensor, &order)
 }
 
 fn transpose_complex_tensor(ct: ComplexTensor) -> BuiltinResult<ComplexTensor> {
@@ -381,11 +380,7 @@ async fn transpose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         .map_err(map_control_flow)?;
     let transposed = transpose_tensor(host)?;
     if let Some(provider) = runmat_accelerate_api::provider() {
-        let view = HostTensorView {
-            data: &transposed.data,
-            shape: &transposed.shape,
-        };
-        match provider.upload(&view) {
+        match gpu_helpers::upload_tensor(provider, &transposed) {
             Ok(uploaded) => return Ok(Value::GpuTensor(uploaded)),
             Err(upload_err) => warn!(
                 "transpose: re-upload after host fallback failed; returning host tensor ({upload_err})"
@@ -404,33 +399,6 @@ fn transpose_order(rank: usize) -> Vec<usize> {
         order.truncate(rank.max(2));
     }
     order
-}
-
-fn transpose_tensor_matrix(tensor: &Tensor) -> BuiltinResult<Tensor> {
-    let rows = tensor.rows();
-    let cols = tensor.cols();
-    if let Some(storage) = tensor.integer_storage() {
-        return Tensor::new_integer(
-            transpose_integer_storage(storage.clone(), rows, cols),
-            vec![cols, rows],
-        )
-        .map_err(|e| internal_error(format!("{NAME}: {e}")));
-    }
-    if tensor.data.is_empty() {
-        return Tensor::new(Vec::new(), vec![cols, rows])
-            .map_err(|e| internal_error(format!("{NAME}: {e}")));
-    }
-    let mut out = vec![0.0; tensor.data.len()];
-    for r in 0..rows {
-        for c in 0..cols {
-            let src = r + c * rows;
-            let dst = c + r * cols;
-            if src < tensor.data.len() && dst < out.len() {
-                out[dst] = tensor.data[src];
-            }
-        }
-    }
-    Tensor::new(out, vec![cols, rows]).map_err(|e| internal_error(format!("{NAME}: {e}")))
 }
 
 fn transpose_complex_matrix(ct: &ComplexTensor) -> Vec<(f64, f64)> {
@@ -535,6 +503,20 @@ pub(crate) mod tests {
         assert_eq!(
             result.integer_storage(),
             Some(&IntegerStorage::I64(Vec::new()))
+        );
+    }
+
+    #[test]
+    fn transpose_preserves_native_single_storage() {
+        let input = Tensor::from_f32(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3])
+            .expect("single tensor");
+        let Value::Tensor(result) = call_transpose(Value::Tensor(input)).expect("transpose") else {
+            panic!("expected tensor");
+        };
+        assert_eq!(result.shape, vec![3, 2]);
+        assert_eq!(
+            result.into_numeric_storage().unwrap(),
+            runmat_builtins::NumericStorage::F32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
         );
     }
 
