@@ -1,14 +1,11 @@
 use futures::executor::block_on;
-use runmat_config::project::{
-    build_project_composition_graph, build_project_composition_graph_async,
-};
 use runmat_package::{
-    build_frozen_project, build_frozen_project_async, build_project_path_graph,
-    build_project_path_graph_async, encode_lock, DependencyGroup, LockSelection, PackageLock,
+    build_frozen_project, build_frozen_project_async, encode_lock, DependencyGroup,
+    FrozenProjectError, LockSelection, PackageLock,
 };
 use std::collections::BTreeSet;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tempfile::TempDir;
 
 fn fixture() -> (TempDir, PathBuf) {
@@ -52,33 +49,29 @@ roots = ["src"]
     (temp, manifest)
 }
 
-fn graph(root: &Path, manifest: &Path) -> runmat_package::PackageGraph {
-    let composition = build_project_composition_graph(manifest).unwrap();
-    build_project_path_graph(&composition, root, BTreeSet::new()).unwrap()
+fn graph(manifest: &std::path::Path) -> runmat_package::PackageGraph {
+    build_frozen_project(manifest, BTreeSet::new())
+        .unwrap()
+        .graph
 }
 
 #[test]
 fn current_path_projects_produce_checkout_independent_graphs() {
-    let (first_temp, first_manifest) = fixture();
-    let (second_temp, second_manifest) = fixture();
-    let first = graph(first_temp.path(), &first_manifest);
-    let second = graph(second_temp.path(), &second_manifest);
+    let (_first_temp, first_manifest) = fixture();
+    let (_second_temp, second_manifest) = fixture();
+    let first = graph(&first_manifest);
+    let second = graph(&second_manifest);
     assert_eq!(first, second);
     assert_eq!(first.packages.len(), 2);
 }
 
 #[test]
 fn async_virtual_filesystem_boundary_produces_the_same_graph() {
-    let (temp, manifest) = fixture();
-    let sync = graph(temp.path(), &manifest);
-    let async_graph = block_on(async {
-        let composition = build_project_composition_graph_async(&manifest)
-            .await
-            .unwrap();
-        build_project_path_graph_async(&composition, temp.path(), BTreeSet::new())
-            .await
-            .unwrap()
-    });
+    let (_temp, manifest) = fixture();
+    let sync = graph(&manifest);
+    let async_graph = block_on(build_frozen_project_async(&manifest, BTreeSet::new()))
+        .unwrap()
+        .graph;
     assert_eq!(async_graph, sync);
     let selection = LockSelection {
         target: "wasm32-unknown-unknown".to_string(),
@@ -94,13 +87,12 @@ fn async_virtual_filesystem_boundary_produces_the_same_graph() {
 
 #[test]
 fn path_dependency_version_assertions_are_enforced() {
-    let (temp, manifest) = fixture();
+    let (_temp, manifest) = fixture();
     let root_manifest = fs::read_to_string(&manifest)
         .unwrap()
         .replace(r#"version = "1.0.0" }"#, r#"version = ">=2.0.0" }"#);
     fs::write(&manifest, root_manifest).unwrap();
-    let composition = build_project_composition_graph(&manifest).unwrap();
-    let error = build_project_path_graph(&composition, temp.path(), BTreeSet::new()).unwrap_err();
+    let error = build_frozen_project(&manifest, BTreeSet::new()).unwrap_err();
     assert!(error.to_string().contains("requires >=2.0.0"));
 }
 
@@ -125,4 +117,84 @@ fn async_frozen_handoff_matches_native_stable_state() {
     assert_eq!(sync.graph_digest(), async_project.graph_digest());
     assert_eq!(sync.sources, async_project.sources);
     assert_eq!(sync.access_paths, async_project.access_paths);
+}
+
+#[test]
+fn missing_dependency_manifest_is_a_package_loader_error() {
+    let temp = TempDir::new().unwrap();
+    fs::create_dir_all(temp.path().join("src")).unwrap();
+    fs::create_dir_all(temp.path().join("deps/missing")).unwrap();
+    fs::write(temp.path().join("src/main.m"), "x = 1;\n").unwrap();
+    fs::write(
+        temp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "application"
+
+[sources]
+roots = ["src"]
+
+[dependencies]
+missing = { path = "deps/missing" }
+"#,
+    )
+    .unwrap();
+    let error =
+        build_frozen_project(&temp.path().join("runmat.toml"), BTreeSet::new()).unwrap_err();
+    assert!(matches!(
+        error,
+        FrozenProjectError::MissingDependencyManifest { dependency, .. }
+            if dependency == "missing"
+    ));
+}
+
+#[test]
+fn equal_declared_names_remain_distinct_path_instances() {
+    let temp = TempDir::new().unwrap();
+    for directory in ["src", "deps/other/src"] {
+        fs::create_dir_all(temp.path().join(directory)).unwrap();
+    }
+    fs::write(temp.path().join("src/main.m"), "x = other.helper();\n").unwrap();
+    fs::write(
+        temp.path().join("deps/other/src/helper.m"),
+        "function y = helper(); y = 1; end\n",
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "shared-name"
+version = "1.0.0"
+
+[sources]
+roots = ["src"]
+
+[dependencies]
+other = { path = "deps/other", version = "2.0.0" }
+"#,
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("deps/other/runmat.toml"),
+        r#"
+[package]
+name = "shared-name"
+version = "2.0.0"
+
+[sources]
+roots = ["src"]
+"#,
+    )
+    .unwrap();
+
+    let frozen = build_frozen_project(&temp.path().join("runmat.toml"), BTreeSet::new()).unwrap();
+    assert_eq!(frozen.graph.packages.len(), 2);
+    let instances = frozen
+        .graph
+        .packages
+        .values()
+        .map(|package| package.instance.identity_digest.clone())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(instances.len(), 2);
 }

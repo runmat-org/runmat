@@ -1,10 +1,7 @@
 use runmat_config::project::{
-    build_loose_source_index, build_project_composition_graph, build_project_source_index,
-    discover_known_project_symbols_from_source_name, discover_project_manifest_from,
-    discover_project_symbols_from, discover_project_symbols_from_source_name,
-    discover_source_symbols_from_source_name, load_project_manifest, parse_project_manifest_json,
-    parse_project_manifest_toml, resolve_named_entrypoint_from, resolve_project_entrypoint,
-    resolve_project_source_input_from, ProjectCompositionError, ProjectEntrypointResolveError,
+    build_project_source_index, discover_project_manifest_from, load_project_manifest,
+    parse_project_manifest_json, parse_project_manifest_toml, resolve_named_entrypoint_from,
+    resolve_project_entrypoint, resolve_project_source_input_from, ProjectEntrypointResolveError,
     ProjectManifestLoadError, ProjectSourceIndexError, ResolveProjectSourceInputError,
     ResolvedEntrypointTarget, PROJECT_MANIFEST_FILENAME,
 };
@@ -420,226 +417,6 @@ name = "demo"
 }
 
 #[test]
-fn discover_project_symbols_includes_dependency_alias_qualified_names() {
-    let tmp = TempDir::new().unwrap();
-    let dep_root = tmp.path().join("deps/statslib");
-    fs::create_dir_all(&dep_root).unwrap();
-    fs::write(
-        tmp.path().join(PROJECT_MANIFEST_FILENAME),
-        r#"
-[package]
-name = "demo"
-
-[sources]
-roots = ["."]
-
-[dependencies]
-statsdep = { path = "deps/statslib" }
-"#,
-    )
-    .unwrap();
-    fs::write(
-        dep_root.join(PROJECT_MANIFEST_FILENAME),
-        r#"
-[package]
-name = "statslib"
-
-[sources]
-roots = ["."]
-"#,
-    )
-    .unwrap();
-    fs::write(
-        dep_root.join("summarize.m"),
-        "function y = summarize(x); y = x; end",
-    )
-    .unwrap();
-
-    let discovered = discover_project_symbols_from(&tmp.path().join("main.m"))
-        .expect("discover symbols")
-        .expect("symbols should be discovered");
-
-    assert!(discovered.symbols.contains("summarize"));
-    assert!(discovered.symbols.contains("statslib.summarize"));
-    assert!(discovered.symbols.contains("statsdep.summarize"));
-}
-
-#[test]
-fn discover_project_symbols_from_source_name_uses_cwd_for_plain_name() {
-    let tmp = TempDir::new().unwrap();
-    fs::write(
-        tmp.path().join(PROJECT_MANIFEST_FILENAME),
-        r#"
-[package]
-name = "demo"
-
-[sources]
-roots = ["."]
-"#,
-    )
-    .unwrap();
-    fs::write(tmp.path().join("main.m"), "x = 1;").unwrap();
-
-    let discovered = discover_project_symbols_from_source_name("main.m", tmp.path())
-        .expect("discover symbols")
-        .expect("symbols should be discovered");
-
-    assert_eq!(discovered.root_package, "demo");
-    assert!(discovered.symbols.contains("main"));
-}
-
-#[test]
-fn discover_project_symbols_from_source_name_rejects_nonexistent_path_like_name() {
-    let tmp = TempDir::new().unwrap();
-    fs::write(
-        tmp.path().join(PROJECT_MANIFEST_FILENAME),
-        r#"
-[package]
-name = "demo"
-
-[sources]
-roots = ["."]
-"#,
-    )
-    .unwrap();
-
-    let discovered = discover_project_symbols_from_source_name("scripts/main.m", tmp.path())
-        .expect("discover symbols");
-    assert!(
-        discovered.is_none(),
-        "nonexistent path-like names should not trigger local project symbol discovery"
-    );
-}
-
-#[test]
-fn discover_project_symbols_from_source_name_rejects_colon_remote_name() {
-    let tmp = TempDir::new().unwrap();
-    fs::write(
-        tmp.path().join(PROJECT_MANIFEST_FILENAME),
-        r#"
-[package]
-name = "demo"
-
-[sources]
-roots = ["."]
-"#,
-    )
-    .unwrap();
-    fs::write(tmp.path().join("main.m"), "x = 1;").unwrap();
-
-    let discovered = discover_project_symbols_from_source_name("remote:main.m", tmp.path())
-        .expect("discover symbols");
-    assert!(
-        discovered.is_none(),
-        "colon-style remote names should not trigger local project symbol discovery"
-    );
-}
-
-#[test]
-fn discover_known_project_symbols_from_source_name_returns_symbols_or_empty() {
-    let tmp = TempDir::new().unwrap();
-    fs::write(
-        tmp.path().join(PROJECT_MANIFEST_FILENAME),
-        r#"
-[package]
-name = "demo"
-
-[sources]
-roots = ["."]
-"#,
-    )
-    .unwrap();
-    fs::write(tmp.path().join("main.m"), "x = 1;").unwrap();
-
-    let symbols = discover_known_project_symbols_from_source_name(Some("main.m"), tmp.path());
-    assert!(
-        symbols.contains("main"),
-        "known symbols should include local entry source symbol"
-    );
-
-    let empty = discover_known_project_symbols_from_source_name(None, tmp.path());
-    assert!(
-        empty.is_empty(),
-        "missing source name should return empty symbols"
-    );
-
-    let remote = discover_known_project_symbols_from_source_name(Some("remote:main.m"), tmp.path());
-    assert!(
-        remote.is_empty(),
-        "remote-style source names should return empty known symbols"
-    );
-}
-
-#[test]
-fn loose_source_discovery_matches_matlab_lookup_boundaries() {
-    let tmp = TempDir::new().unwrap();
-    fs::create_dir_all(tmp.path().join("+signal")).unwrap();
-    fs::create_dir_all(tmp.path().join("@Point")).unwrap();
-    fs::create_dir_all(tmp.path().join("private")).unwrap();
-    fs::create_dir_all(tmp.path().join("not_on_path")).unwrap();
-    fs::write(tmp.path().join("main.m"), "result = helper();").unwrap();
-    fs::write(tmp.path().join("helper.m"), "function y=helper(); y=1; end").unwrap();
-    fs::write(
-        tmp.path().join("+signal/filter.m"),
-        "function y=filter(); y=1; end",
-    )
-    .unwrap();
-    fs::write(tmp.path().join("@Point/Point.m"), "classdef Point; end").unwrap();
-    fs::write(
-        tmp.path().join("private/secret.m"),
-        "function y=secret(); y=1; end",
-    )
-    .unwrap();
-    fs::write(
-        tmp.path().join("not_on_path/hidden.m"),
-        "function y=hidden(); y=1; end",
-    )
-    .unwrap();
-
-    let discovered = discover_source_symbols_from_source_name("main.m", tmp.path())
-        .expect("loose source discovery")
-        .expect("local source context");
-    assert_eq!(discovered.manifest_path, None);
-    assert!(discovered.symbols.contains("helper"));
-    assert!(discovered.symbols.contains("signal.filter"));
-    assert!(discovered.symbols.contains("Point"));
-    assert!(discovered.symbols.contains("secret"));
-    assert!(!discovered.symbols.contains("hidden"));
-    assert!(discovered
-        .definitions
-        .iter()
-        .any(|definition| definition.name == "secret" && definition.is_private));
-}
-
-#[test]
-fn loose_private_functions_are_visible_only_to_their_owner_folder() {
-    let tmp = TempDir::new().unwrap();
-    fs::create_dir_all(tmp.path().join("private")).unwrap();
-    fs::write(tmp.path().join("main.m"), "secret();").unwrap();
-    fs::write(
-        tmp.path().join("private/secret.m"),
-        "function y=secret(); y=1; end",
-    )
-    .unwrap();
-    let outside = TempDir::new().unwrap();
-    fs::write(outside.path().join("other.m"), "secret();").unwrap();
-
-    let owner = discover_source_symbols_from_source_name("main.m", tmp.path())
-        .unwrap()
-        .unwrap();
-    assert!(owner.symbols.contains("secret"));
-
-    let index = build_loose_source_index(tmp.path()).unwrap();
-    let external = runmat_config::project::source_symbols_from_index(
-        &index,
-        tmp.path(),
-        &outside.path().join("other.m"),
-        None,
-    );
-    assert!(!external.symbols.contains("secret"));
-}
-
-#[test]
 fn resolve_project_source_input_from_infers_m_extension() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join("src")).unwrap();
@@ -675,6 +452,39 @@ path = "src/main"
     assert_eq!(
         resolved.canonicalize().unwrap(),
         tmp.path().join("src/main.m").canonicalize().unwrap()
+    );
+}
+
+#[test]
+fn root_entrypoint_resolution_does_not_traverse_dependencies() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::create_dir_all(tmp.path().join("deps/unavailable")).unwrap();
+    fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
+    fs::write(
+        tmp.path().join(PROJECT_MANIFEST_FILENAME),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[dependencies]
+unavailable = { path = "deps/unavailable" }
+
+[entrypoints.main]
+path = "src/main"
+"#,
+    )
+    .unwrap();
+
+    let resolved = resolve_named_entrypoint_from(tmp.path(), "main")
+        .expect("entrypoint syntax is root-local")
+        .expect("entrypoint exists");
+    assert_eq!(
+        resolved.entrypoint.source_file,
+        tmp.path().join("src/main.m")
     );
 }
 
@@ -1044,136 +854,6 @@ function = "main"
         source,
         ProjectSourceIndexError::InvalidSourceRoot { .. }
     ));
-}
-
-#[test]
-fn composition_graph_loads_root_and_local_path_dependency() {
-    let tmp = TempDir::new().unwrap();
-    fs::create_dir_all(tmp.path().join("src")).unwrap();
-    fs::create_dir_all(tmp.path().join("dep_a/src")).unwrap();
-    fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
-    fs::write(
-        tmp.path().join("dep_a/src/fn_a.m"),
-        "function y = fn_a(); y = 1; end",
-    )
-    .unwrap();
-    write_manifest(
-        tmp.path(),
-        r#"
-[package]
-name = "root_pkg"
-
-[sources]
-roots = ["src"]
-
-[dependencies]
-dep_a = { path = "dep_a" }
-"#,
-    );
-    write_manifest(
-        &tmp.path().join("dep_a"),
-        r#"
-[package]
-name = "dep_pkg"
-
-[sources]
-roots = ["src"]
-"#,
-    );
-
-    let graph = build_project_composition_graph(&tmp.path().join("runmat.toml"))
-        .expect("composition graph should load");
-    assert_eq!(graph.root_package, "root_pkg");
-    assert_eq!(graph.packages.len(), 2);
-    let root = graph
-        .packages
-        .get("root_pkg")
-        .expect("root package should be present");
-    assert_eq!(root.dependencies.get("dep_a"), Some(&"dep_pkg".to_string()));
-    let dep = graph
-        .packages
-        .get("dep_pkg")
-        .expect("dependency package should be present");
-    assert!(dep
-        .source_index
-        .files
-        .iter()
-        .any(|file| file.qualified_name == "fn_a"));
-}
-
-#[test]
-fn composition_graph_reports_missing_dependency_manifest() {
-    let tmp = TempDir::new().unwrap();
-    fs::create_dir_all(tmp.path().join("src")).unwrap();
-    fs::create_dir_all(tmp.path().join("dep_missing")).unwrap();
-    fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
-    write_manifest(
-        tmp.path(),
-        r#"
-[package]
-name = "root_pkg"
-
-[sources]
-roots = ["src"]
-
-[dependencies]
-dep_missing = { path = "dep_missing" }
-"#,
-    );
-
-    let err = build_project_composition_graph(&tmp.path().join("runmat.toml"))
-        .expect_err("missing dependency manifest should fail");
-    let ProjectCompositionError::MissingDependencyManifest {
-        dependency, path, ..
-    } = err
-    else {
-        panic!("expected missing dependency manifest error");
-    };
-    assert_eq!(dependency, "dep_missing");
-    assert!(path.ends_with(std::path::Path::new("dep_missing").join(PROJECT_MANIFEST_FILENAME)));
-}
-
-#[test]
-fn composition_graph_reports_duplicate_package_names() {
-    let tmp = TempDir::new().unwrap();
-    fs::create_dir_all(tmp.path().join("src")).unwrap();
-    fs::create_dir_all(tmp.path().join("dep_a/src")).unwrap();
-    fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
-    fs::write(
-        tmp.path().join("dep_a/src/fn_a.m"),
-        "function y = fn_a(); y = 1; end",
-    )
-    .unwrap();
-    write_manifest(
-        tmp.path(),
-        r#"
-[package]
-name = "dup_pkg"
-
-[sources]
-roots = ["src"]
-
-[dependencies]
-dep_a = { path = "dep_a" }
-"#,
-    );
-    write_manifest(
-        &tmp.path().join("dep_a"),
-        r#"
-[package]
-name = "dup_pkg"
-
-[sources]
-roots = ["src"]
-"#,
-    );
-
-    let err = build_project_composition_graph(&tmp.path().join("runmat.toml"))
-        .expect_err("duplicate package names should fail");
-    let ProjectCompositionError::DuplicatePackageName { package, .. } = err else {
-        panic!("expected duplicate package name error");
-    };
-    assert_eq!(package, "dup_pkg");
 }
 
 #[test]

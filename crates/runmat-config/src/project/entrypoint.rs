@@ -1,9 +1,7 @@
-use super::composition::{
-    discover_project_composition_from, discover_project_composition_from_async,
-    DiscoverProjectCompositionError, DiscoveredProjectComposition, ProjectCompositionError,
-};
 use super::manifest::{
-    path_is_file_async, resolve_entrypoint_path, resolve_entrypoint_path_async, ProjectManifest,
+    discover_project_manifest_from, discover_project_manifest_from_async, load_project_manifest,
+    load_project_manifest_async, path_is_file_async, resolve_entrypoint_path,
+    resolve_entrypoint_path_async, ProjectManifest, ProjectManifestLoadError,
 };
 use super::source_index::{
     build_project_source_index, build_project_source_index_async, ProjectSourceIndexError,
@@ -54,18 +52,11 @@ pub struct DiscoveredProjectEntrypoint {
 
 #[derive(Debug, Error)]
 pub enum DiscoverProjectEntrypointError {
-    #[error(
-        "failed to build project composition from discovered manifest {manifest_path}: {source}"
-    )]
-    Composition {
+    #[error("failed to load discovered project manifest {manifest_path}: {source}")]
+    ManifestLoad {
         manifest_path: PathBuf,
         #[source]
-        source: Box<ProjectCompositionError>,
-    },
-    #[error("project composition for {manifest_path} is missing root package `{package}`")]
-    MissingRootPackage {
-        manifest_path: PathBuf,
-        package: String,
+        source: Box<ProjectManifestLoadError>,
     },
     #[error("failed to resolve project entrypoint `{entrypoint}` from {manifest_path}: {source}")]
     Resolve {
@@ -181,30 +172,43 @@ pub fn resolve_named_entrypoint_from(
     start: &Path,
     entrypoint_name: &str,
 ) -> Result<Option<DiscoveredProjectEntrypoint>, DiscoverProjectEntrypointError> {
-    let discovered =
-        discover_project_composition_from(start).map_err(map_composition_discovery_error)?;
-    finish_discovered_entrypoint(discovered, entrypoint_name, resolve_project_entrypoint)
+    let Some(manifest_path) = discover_project_manifest_from(start) else {
+        return Ok(None);
+    };
+    let manifest = load_project_manifest(&manifest_path).map_err(|source| {
+        DiscoverProjectEntrypointError::ManifestLoad {
+            manifest_path: manifest_path.clone(),
+            source: Box::new(source),
+        }
+    })?;
+    finish_discovered_entrypoint(
+        manifest_path,
+        manifest,
+        entrypoint_name,
+        resolve_project_entrypoint,
+    )
 }
 
 pub async fn resolve_named_entrypoint_from_async(
     start: &Path,
     entrypoint_name: &str,
 ) -> Result<Option<DiscoveredProjectEntrypoint>, DiscoverProjectEntrypointError> {
-    let Some(discovered) = discover_project_composition_from_async(start)
-        .await
-        .map_err(map_composition_discovery_error)?
-    else {
+    let Some(manifest_path) = discover_project_manifest_from_async(start).await else {
         return Ok(None);
     };
-    let manifest_path = discovered.manifest_path.clone();
-    let root_package = discovered.root_package.clone();
-    let root = discovered
-        .composition
-        .packages
-        .get(&root_package)
-        .expect("root package should be present");
+    let manifest = load_project_manifest_async(&manifest_path)
+        .await
+        .map_err(|source| DiscoverProjectEntrypointError::ManifestLoad {
+            manifest_path: manifest_path.clone(),
+            source: Box::new(source),
+        })?;
+    let project_root = manifest_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf();
+    let root_package = manifest.package.name.clone();
     let Some(entrypoint) =
-        resolve_project_entrypoint_async(&root.project_root, &root.manifest, entrypoint_name)
+        resolve_project_entrypoint_async(&project_root, &manifest, entrypoint_name)
             .await
             .map_err(|source| DiscoverProjectEntrypointError::Resolve {
                 manifest_path: manifest_path.clone(),
@@ -217,7 +221,7 @@ pub async fn resolve_named_entrypoint_from_async(
     Ok(Some(DiscoveredProjectEntrypoint {
         manifest_path,
         root_package,
-        project_root: root.project_root.clone(),
+        project_root,
         entrypoint,
     }))
 }
@@ -302,7 +306,8 @@ fn absolute_or_join(cwd: &Path, path: &Path) -> PathBuf {
 }
 
 fn finish_discovered_entrypoint(
-    discovered: Option<DiscoveredProjectComposition>,
+    manifest_path: PathBuf,
+    manifest: ProjectManifest,
     entrypoint_name: &str,
     resolver: impl Fn(
         &Path,
@@ -310,18 +315,13 @@ fn finish_discovered_entrypoint(
         &str,
     ) -> Result<Option<ResolvedProjectEntrypoint>, ProjectEntrypointResolveError>,
 ) -> Result<Option<DiscoveredProjectEntrypoint>, DiscoverProjectEntrypointError> {
-    let Some(discovered) = discovered else {
-        return Ok(None);
-    };
-    let manifest_path = discovered.manifest_path.clone();
-    let root_package = discovered.root_package.clone();
-    let root = discovered
-        .composition
-        .packages
-        .get(&root_package)
-        .expect("root package should be present");
+    let project_root = manifest_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf();
+    let root_package = manifest.package.name.clone();
     let Some(entrypoint) =
-        resolver(&root.project_root, &root.manifest, entrypoint_name).map_err(|source| {
+        resolver(&project_root, &manifest, entrypoint_name).map_err(|source| {
             DiscoverProjectEntrypointError::Resolve {
                 manifest_path: manifest_path.clone(),
                 entrypoint: entrypoint_name.to_string(),
@@ -334,30 +334,9 @@ fn finish_discovered_entrypoint(
     Ok(Some(DiscoveredProjectEntrypoint {
         manifest_path,
         root_package,
-        project_root: root.project_root.clone(),
+        project_root,
         entrypoint,
     }))
-}
-
-fn map_composition_discovery_error(
-    error: DiscoverProjectCompositionError,
-) -> DiscoverProjectEntrypointError {
-    match error {
-        DiscoverProjectCompositionError::Composition {
-            manifest_path,
-            source,
-        } => DiscoverProjectEntrypointError::Composition {
-            manifest_path,
-            source,
-        },
-        DiscoverProjectCompositionError::MissingRootPackage {
-            manifest_path,
-            package,
-        } => DiscoverProjectEntrypointError::MissingRootPackage {
-            manifest_path,
-            package,
-        },
-    }
 }
 
 fn resolved_path_entrypoint(name: &str, source_file: PathBuf) -> ResolvedProjectEntrypoint {

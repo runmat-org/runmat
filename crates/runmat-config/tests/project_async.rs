@@ -1,9 +1,8 @@
 use futures::executor::block_on;
 use runmat_config::project::{
-    build_project_composition_graph_async, build_project_source_index_async,
-    discover_project_manifest_from_async, load_project_manifest_async,
-    resolve_named_entrypoint_from_async, resolve_project_source_input_from_async,
-    ResolvedEntrypointTarget,
+    build_project_source_index_async, discover_project_manifest_from_async,
+    load_project_manifest_async, resolve_named_entrypoint_from_async,
+    resolve_project_source_input_from_async, ResolvedEntrypointTarget,
 };
 use runmat_filesystem::{provider_override_lock, replace_provider, MemoryFsProvider};
 use std::path::{Path, PathBuf};
@@ -83,13 +82,6 @@ roots = ["src"]
             .expect("index virtual source roots");
         assert_eq!(index.files.len(), 1);
         assert_eq!(index.files[0].qualified_name, "main");
-
-        let graph = build_project_composition_graph_async(&manifest_path)
-            .await
-            .expect("compose virtual path dependency");
-        assert_eq!(graph.root_package, "app");
-        assert_eq!(graph.packages.len(), 2);
-        assert_eq!(graph.packages["app"].dependencies["helper"], "helper");
 
         let entrypoint = resolve_named_entrypoint_from_async(source, "main")
             .await

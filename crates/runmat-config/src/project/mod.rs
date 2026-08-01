@@ -1,14 +1,7 @@
-mod composition;
 mod dependency;
 mod entrypoint;
 mod manifest;
 mod source_index;
-mod symbols;
-
-pub use composition::{
-    build_project_composition_graph, build_project_composition_graph_async,
-    ProjectCompositionError, ProjectCompositionGraph, ProjectCompositionPackage,
-};
 pub use dependency::{
     ProjectCapabilities, ProjectDependency, ProjectDependencyLocator, ProjectPublication,
     ProjectRegistry, ProjectSourceReplacement, ProjectTargetDependencies,
@@ -30,13 +23,4 @@ pub use source_index::{
     build_loose_source_index, build_loose_source_index_async, build_project_source_index,
     build_project_source_index_async, project_source_file_from_path, ProjectSourceFile,
     ProjectSourceIndex, ProjectSourceIndexError,
-};
-pub use symbols::{
-    discover_known_project_symbols_from_source_name,
-    discover_known_project_symbols_from_source_name_async, discover_project_symbols_from,
-    discover_project_symbols_from_async, discover_project_symbols_from_source_name,
-    discover_project_symbols_from_source_name_async, discover_source_symbols_from_source_name,
-    discover_source_symbols_from_source_name_async, source_symbols_from_index,
-    DiscoverProjectSymbolsError, DiscoverSourceSymbolsError, DiscoveredProjectSymbols,
-    DiscoveredSourceSymbols, ProjectSymbolDefinition,
 };

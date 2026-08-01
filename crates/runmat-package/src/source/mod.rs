@@ -1,14 +1,14 @@
 mod catalog;
-mod project;
+mod path_project;
 mod symbols;
 
 pub use catalog::{
     FrozenProject, FrozenSourceDescriptor, PackageMount, PackageSourceCatalog, ProjectRevision,
     SourceCatalog, StableSourceId,
 };
-pub use project::{
+pub use path_project::{
     build_frozen_project, build_frozen_project_async, discover_frozen_project_from,
-    discover_frozen_project_from_async, FrozenProjectError,
+    discover_frozen_project_from_async, FrozenProjectError, PathProjectError,
 };
 pub use symbols::{
     discover_known_project_symbols_from_source_name,

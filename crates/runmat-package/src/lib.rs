@@ -11,8 +11,8 @@ pub mod source;
 
 pub use error::{GraphError, IdentityError, LockError, ManifestError, PackageError, ResolveError};
 pub use graph::{
-    build_path_graph, build_project_path_graph, build_project_path_graph_async, DependencyPath,
-    GraphEdge, GraphPackage, PackageGraph, PathGraphInput, PathPackageInput, VisibilityResolution,
+    build_path_graph, DependencyPath, GraphEdge, GraphPackage, PackageGraph, PathGraphInput,
+    PathPackageInput, VisibilityResolution,
 };
 pub use identity::{
     CanonicalPackageId, ContentDigest, DigestAlgorithm, GitCommitId, GitObjectAlgorithm,

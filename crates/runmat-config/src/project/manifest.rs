@@ -760,20 +760,6 @@ fn parse_semver_triplet(input: &str) -> Result<(u64, u64, u64), String> {
     Ok((major, minor, patch))
 }
 
-pub(super) async fn path_exists_async(path: &Path) -> bool {
-    runmat_filesystem::metadata_async(path).await.is_ok()
-}
-
-pub(super) async fn first_existing_manifest_path_async(dir: &Path) -> Option<PathBuf> {
-    for filename in PROJECT_MANIFEST_FILENAMES {
-        let candidate = dir.join(filename);
-        if path_is_file_async(&candidate).await {
-            return Some(candidate);
-        }
-    }
-    None
-}
-
 pub(super) async fn path_is_file_async(path: &Path) -> bool {
     runmat_filesystem::metadata_async(path)
         .await
