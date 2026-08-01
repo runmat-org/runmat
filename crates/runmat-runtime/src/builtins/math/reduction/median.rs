@@ -509,20 +509,20 @@ fn median_tensor(
     match axes {
         MedianAxes::Default => {
             let dim = default_dimension(&tensor);
-            reduce_tensor_median_dim(&tensor, dim, nan_mode)
+            reduce_tensor_median_dim(tensor, dim, nan_mode)
         }
-        MedianAxes::Dim(dim) => reduce_tensor_median_dim(&tensor, dim, nan_mode),
+        MedianAxes::Dim(dim) => reduce_tensor_median_dim(tensor, dim, nan_mode),
         MedianAxes::Vec(mut dims) => {
             let mut current = tensor;
             dims.sort_unstable();
             dims.dedup();
             if dims.is_empty() {
                 let dim = default_dimension(&current);
-                current = reduce_tensor_median_dim(&current, dim, nan_mode)?;
+                current = reduce_tensor_median_dim(current, dim, nan_mode)?;
                 return Ok(current);
             }
             for dim in dims {
-                current = reduce_tensor_median_dim(&current, dim, nan_mode)?;
+                current = reduce_tensor_median_dim(current, dim, nan_mode)?;
             }
             Ok(current)
         }
@@ -533,7 +533,7 @@ fn median_tensor(
                 let mut current = tensor;
                 let rank = current.shape.len();
                 for dim in 1..=rank {
-                    current = reduce_tensor_median_dim(&current, dim, nan_mode)?;
+                    current = reduce_tensor_median_dim(current, dim, nan_mode)?;
                 }
                 Ok(current)
             }
@@ -633,9 +633,7 @@ fn map_dims_error(message: String, scalar: bool) -> RuntimeError {
 }
 
 fn tensor_len(tensor: &Tensor) -> usize {
-    tensor
-        .integer_storage()
-        .map_or(tensor.data.len(), |storage| storage.len())
+    tensor.len()
 }
 
 fn value_as_str(value: &Value) -> Option<String> {
@@ -648,7 +646,7 @@ fn value_as_str(value: &Value) -> Option<String> {
 }
 
 fn reduce_tensor_median_dim(
-    tensor: &Tensor,
+    tensor: Tensor,
     dim: usize,
     nan_mode: ReductionNaN,
 ) -> BuiltinResult<Tensor> {
@@ -657,40 +655,100 @@ fn reduce_tensor_median_dim(
     }
 
     if tensor.shape.is_empty() {
-        let value = tensor.data.first().copied().unwrap_or(f64::NAN);
-        return Tensor::new(vec![value], vec![1, 1])
+        return tensor
+            .reshape(vec![1, 1])
             .map_err(|e| median_internal_error(format!("median: {e}")));
     }
 
     if dim > tensor.shape.len() {
-        return Ok(tensor.clone());
+        return Ok(tensor);
     }
 
     let dim_index = dim - 1;
     let reduce_len = tensor.shape[dim_index];
     let Some(output_shape) = reduction_shape(&tensor.shape, dim) else {
-        return Ok(tensor.clone());
+        return Ok(tensor);
     };
 
-    if reduce_len == 0 || tensor_len(tensor) == 0 {
+    if reduce_len == 0 || tensor.is_empty() {
         let fill = vec![f64::NAN; tensor::element_count(&output_shape)];
         return Tensor::new(fill, output_shape)
             .map_err(|e| median_internal_error(format!("median: {e}")));
     }
 
-    if let Some(storage) = tensor.integer_storage() {
-        return reduce_integer_tensor_median_dim(tensor, storage, dim, output_shape, reduce_len);
+    if tensor.integer_storage().is_some() {
+        let input_shape = tensor.shape.clone();
+        let storage = tensor
+            .into_numeric_storage()
+            .map_err(median_internal_error)?
+            .into_integer_storage()
+            .expect("checked integer storage");
+        return reduce_integer_tensor_median_dim(
+            storage,
+            input_shape,
+            dim,
+            output_shape,
+            reduce_len,
+        );
     }
 
     if reduce_len == 1 {
-        return Tensor::new(tensor.data.clone(), tensor.shape.clone())
-            .map_err(|e| median_internal_error(format!("median: {e}")));
+        return Ok(tensor);
     }
 
-    let stride_before = dim_product(&tensor.shape[..dim_index]);
-    let stride_after = dim_product(&tensor.shape[dim..]);
-    let mut output = vec![0.0f64; tensor::element_count(&output_shape)];
+    let input_shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(median_internal_error)?;
+    match storage {
+        runmat_builtins::NumericStorage::F64(values) => reduce_floating_tensor_median_dim(
+            values,
+            input_shape,
+            dim,
+            output_shape,
+            reduce_len,
+            nan_mode,
+            f64::NAN,
+            f64::is_nan,
+            2.0,
+            runmat_builtins::NumericStorage::F64,
+        ),
+        runmat_builtins::NumericStorage::F32(values) => reduce_floating_tensor_median_dim(
+            values,
+            input_shape,
+            dim,
+            output_shape,
+            reduce_len,
+            nan_mode,
+            f32::NAN,
+            f32::is_nan,
+            2.0,
+            runmat_builtins::NumericStorage::F32,
+        ),
+        _ => unreachable!("integer storage handled before floating median"),
+    }
+}
 
+#[allow(clippy::too_many_arguments)]
+fn reduce_floating_tensor_median_dim<T>(
+    values: Vec<T>,
+    input_shape: Vec<usize>,
+    dim: usize,
+    output_shape: Vec<usize>,
+    reduce_len: usize,
+    nan_mode: ReductionNaN,
+    nan: T,
+    is_nan: fn(T) -> bool,
+    two: T,
+    wrap: fn(Vec<T>) -> runmat_builtins::NumericStorage,
+) -> BuiltinResult<Tensor>
+where
+    T: Copy + PartialOrd + std::ops::Add<Output = T> + std::ops::Div<Output = T>,
+{
+    let dim_index = dim - 1;
+    let stride_before = dim_product(&input_shape[..dim_index]);
+    let stride_after = dim_product(&input_shape[dim..]);
+    let mut output = vec![nan; tensor::element_count(&output_shape)];
     for after in 0..stride_after {
         for before in 0..stride_before {
             let mut slice = Vec::with_capacity(reduce_len);
@@ -698,17 +756,17 @@ fn reduce_tensor_median_dim(
 
             for k in 0..reduce_len {
                 let idx = before + k * stride_before + after * stride_before * reduce_len;
-                let value = tensor.data[idx];
+                let value = values[idx];
                 match nan_mode {
                     ReductionNaN::Include => {
-                        if value.is_nan() {
+                        if is_nan(value) {
                             saw_nan = true;
                             break;
                         }
                         slice.push(value);
                     }
                     ReductionNaN::Omit => {
-                        if value.is_nan() {
+                        if is_nan(value) {
                             continue;
                         }
                         slice.push(value);
@@ -717,40 +775,37 @@ fn reduce_tensor_median_dim(
             }
 
             let out_idx = after * stride_before + before;
-
-            if saw_nan {
-                output[out_idx] = f64::NAN;
+            if saw_nan || slice.is_empty() {
                 continue;
             }
-
-            if slice.is_empty() {
-                output[out_idx] = f64::NAN;
-                continue;
-            }
-
-            let median = compute_median_inplace(&mut slice);
-            output[out_idx] = median;
+            slice.sort_by(|left, right| left.partial_cmp(right).unwrap_or(Ordering::Equal));
+            let middle = slice.len() / 2;
+            output[out_idx] = if slice.len() % 2 == 1 {
+                slice[middle]
+            } else {
+                (slice[middle - 1] + slice[middle]) / two
+            };
         }
     }
-
-    Tensor::new(output, output_shape).map_err(|e| median_internal_error(format!("median: {e}")))
+    Tensor::from_numeric_storage(wrap(output), output_shape)
+        .map_err(|e| median_internal_error(format!("median: {e}")))
 }
 
 fn reduce_integer_tensor_median_dim(
-    tensor: &Tensor,
-    storage: &IntegerStorage,
+    storage: IntegerStorage,
+    input_shape: Vec<usize>,
     dim: usize,
     output_shape: Vec<usize>,
     reduce_len: usize,
 ) -> BuiltinResult<Tensor> {
     if reduce_len == 1 {
-        return Tensor::new_integer(storage.clone(), tensor.shape.clone())
+        return Tensor::new_integer(storage, input_shape)
             .map_err(|e| median_internal_error(format!("median: {e}")));
     }
 
     let dim_index = dim - 1;
-    let stride_before = dim_product(&tensor.shape[..dim_index]);
-    let stride_after = dim_product(&tensor.shape[dim..]);
+    let stride_before = dim_product(&input_shape[..dim_index]);
+    let stride_after = dim_product(&input_shape[dim..]);
     let exact = storage.exact_values();
     let mut output = Vec::with_capacity(tensor::element_count(&output_shape));
 
@@ -891,7 +946,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage};
+    use runmat_builtins::{IntValue, IntegerStorage, NumericStorage};
 
     #[test]
     fn median_type_reduces_first_dim() {
@@ -962,6 +1017,19 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 4.0, 9.0, 10.0], vec![4, 1]).unwrap();
         let result = median_builtin(Value::Tensor(tensor), Vec::new()).expect("median");
         assert_eq!(result, Value::Num(6.5));
+    }
+
+    #[test]
+    fn median_preserves_native_single_storage_and_arithmetic() {
+        let tensor = Tensor::from_f32(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).expect("input");
+        let result = median_builtin(Value::Tensor(tensor), Vec::new()).expect("median");
+        let Value::Tensor(result) = result else {
+            panic!("expected native single tensor");
+        };
+        assert_eq!(
+            result.into_numeric_storage().expect("native storage"),
+            NumericStorage::F32(vec![2.0, 3.0])
+        );
     }
 
     #[test]
