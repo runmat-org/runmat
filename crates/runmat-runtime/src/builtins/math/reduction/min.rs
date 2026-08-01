@@ -1668,6 +1668,7 @@ async fn elementwise_min(value: Value, args: ElementwiseArgs) -> BuiltinResult<M
         &other,
         crate::builtins::math::reduction::integer_native::ExtremaDirection::Min,
         integer_comparison,
+        false,
     )
     .map_err(|error| min_size_mismatch(format!("min: {error}")))?
     {
@@ -1675,6 +1676,13 @@ async fn elementwise_min(value: Value, args: ElementwiseArgs) -> BuiltinResult<M
             values: eval.values,
             indices: eval.indices,
         });
+    }
+    if crate::builtins::math::reduction::integer_native::value_has_integer_storage(&value)
+        || crate::builtins::math::reduction::integer_native::value_has_integer_storage(&other)
+    {
+        return Err(min_invalid_input(
+            "min: integer pairwise inputs require the same integer class or a scalar double",
+        ));
     }
     match (value, other) {
         (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {
@@ -2542,6 +2550,70 @@ pub(crate) mod tests {
             .into_pair();
         assert_eq!(values, Value::Int(IntValue::U64(9_007_199_254_740_992)));
         assert_eq!(indices, Value::Num(2.0));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn min_integer_scalar_double_compares_before_integer_conversion() {
+        let lhs = Tensor::new_integer(IntegerStorage::U8(vec![2, 4]), vec![1, 2]).expect("lhs");
+        let (values, indices) = evaluate(Value::Tensor(lhs), &[Value::Num(2.5)])
+            .expect("evaluate")
+            .into_pair();
+        assert_eq!(
+            values,
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U8(vec![2, 3]), vec![1, 2]).expect("values")
+            )
+        );
+        assert_eq!(
+            indices,
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("indices"))
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn min_integer_scalar_double_is_exact_above_flintmax() {
+        let lhs = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("lhs");
+        let values = evaluate(Value::Tensor(lhs), &[Value::Num(9_007_199_254_740_992.0)])
+            .expect("evaluate")
+            .into_value();
+        assert_eq!(
+            values,
+            Value::Tensor(
+                Tensor::new_integer(
+                    IntegerStorage::U64(vec![9_007_199_254_740_992, 9_007_199_254_740_992]),
+                    vec![1, 2],
+                )
+                .expect("values")
+            )
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn min_integer_pairwise_rejects_incompatible_classes_and_float_shapes() {
+        let integer =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![1, 2]).expect("integer");
+        let mixed =
+            Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![1, 2]).expect("mixed");
+        let error = evaluate(Value::Tensor(integer.clone()), &[Value::Tensor(mixed)])
+            .expect_err("mixed integer classes reject");
+        assert_eq!(error.identifier(), MIN_ERROR_INVALID_INPUT.identifier);
+
+        let single = Tensor::from_f32(vec![1.0], vec![1, 1]).expect("single");
+        let error = evaluate(Value::Tensor(integer.clone()), &[Value::Tensor(single)])
+            .expect_err("scalar single rejects");
+        assert_eq!(error.identifier(), MIN_ERROR_INVALID_INPUT.identifier);
+
+        let doubles = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("doubles");
+        let error = evaluate(Value::Tensor(integer), &[Value::Tensor(doubles)])
+            .expect_err("nonscalar double rejects");
+        assert_eq!(error.identifier(), MIN_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -1868,6 +1868,7 @@ async fn elementwise_max(value: Value, args: ElementwiseArgs) -> BuiltinResult<M
         &other,
         crate::builtins::math::reduction::integer_native::ExtremaDirection::Max,
         integer_comparison,
+        nan_mode == ReductionNaN::Omit,
     )
     .map_err(|error| max_size_mismatch(format!("max: {error}")))?
     {
@@ -1875,6 +1876,13 @@ async fn elementwise_max(value: Value, args: ElementwiseArgs) -> BuiltinResult<M
             values: eval.values,
             indices: eval.indices,
         });
+    }
+    if crate::builtins::math::reduction::integer_native::value_has_integer_storage(&value)
+        || crate::builtins::math::reduction::integer_native::value_has_integer_storage(&other)
+    {
+        return Err(max_invalid_input(
+            "max: integer pairwise inputs require the same integer class or a scalar double",
+        ));
     }
     match (value, other) {
         (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {
@@ -2945,6 +2953,80 @@ pub(crate) mod tests {
             .into_pair();
         assert_eq!(values, Value::Int(IntValue::U64(9_007_199_254_740_993)));
         assert_eq!(indices, Value::Num(1.0));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn max_scalar_double_and_integer_compare_exactly_in_either_order() {
+        let rhs = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, 4]),
+            vec![1, 2],
+        )
+        .expect("rhs");
+        let (values, indices) =
+            evaluate(Value::Num(9_007_199_254_740_992.0), &[Value::Tensor(rhs)])
+                .expect("evaluate")
+                .into_pair();
+        assert_eq!(
+            values,
+            Value::Tensor(
+                Tensor::new_integer(
+                    IntegerStorage::U64(vec![9_007_199_254_740_993, 9_007_199_254_740_992]),
+                    vec![1, 2],
+                )
+                .expect("values")
+            )
+        );
+        assert_eq!(
+            indices,
+            Value::Tensor(Tensor::new(vec![2.0, 1.0], vec![1, 2]).expect("indices"))
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn max_integer_scalar_nan_obeys_include_and_omit_modes() {
+        let integer =
+            Tensor::new_integer(IntegerStorage::I16(vec![7, -3]), vec![1, 2]).expect("integer");
+        let included = evaluate(Value::Tensor(integer.clone()), &[Value::Num(f64::NAN)])
+            .expect("include")
+            .into_value();
+        assert_eq!(
+            included,
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::I16(vec![0, 0]), vec![1, 2]).expect("included")
+            )
+        );
+
+        let omitted = evaluate(
+            Value::Tensor(integer.clone()),
+            &[Value::Num(f64::NAN), Value::from("omitnan")],
+        )
+        .expect("omit")
+        .into_value();
+        assert_eq!(omitted, Value::Tensor(integer));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn max_integer_pairwise_rejects_incompatible_classes_and_float_shapes() {
+        let integer =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![1, 2]).expect("integer");
+        let mixed =
+            Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![1, 2]).expect("mixed");
+        let error = evaluate(Value::Tensor(integer.clone()), &[Value::Tensor(mixed)])
+            .expect_err("mixed integer classes reject");
+        assert_eq!(error.identifier(), MAX_ERROR_INVALID_INPUT.identifier);
+
+        let single = Tensor::from_f32(vec![1.0], vec![1, 1]).expect("single");
+        let error = evaluate(Value::Tensor(integer.clone()), &[Value::Tensor(single)])
+            .expect_err("scalar single rejects");
+        assert_eq!(error.identifier(), MAX_ERROR_INVALID_INPUT.identifier);
+
+        let doubles = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("doubles");
+        let error = evaluate(Value::Tensor(integer), &[Value::Tensor(doubles)])
+            .expect_err("nonscalar double rejects");
+        assert_eq!(error.identifier(), MAX_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

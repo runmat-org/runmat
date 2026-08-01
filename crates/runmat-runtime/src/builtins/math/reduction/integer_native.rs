@@ -1,8 +1,12 @@
 //! Exact native integer reductions shared by MATLAB reduction builtins.
 
+use std::cmp::Ordering;
+
 use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
 
 use crate::builtins::common::broadcast::BroadcastPlan;
+use crate::builtins::common::tensor;
+use crate::builtins::math::elementwise::extended_precision::Extended;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ExtremaDirection {
@@ -98,33 +102,54 @@ pub(crate) fn elementwise_extrema(
     })
 }
 
-/// Dispatches elementwise extrema only when both operands retain exact typed
-/// integer storage. All other operand combinations use their caller's normal
-/// MATLAB promotion path.
+/// Dispatches the MATLAB-supported pairwise integer forms: matching exact
+/// integer classes or one exact integer operand with a scalar double. Other
+/// combinations remain visible to the caller so it can report the public
+/// invalid-input category.
 pub(crate) fn elementwise_value_extrema(
     left: &Value,
     right: &Value,
     direction: ExtremaDirection,
     comparison: ExtremaComparison,
+    omit_nan: bool,
 ) -> Result<Option<IntegerExtrema>, String> {
-    let Some((left_storage, left_shape)) = integer_storage_and_shape(left) else {
-        return Ok(None);
-    };
-    let Some((right_storage, right_shape)) = integer_storage_and_shape(right) else {
-        return Ok(None);
-    };
-    if left_storage.class_name() != right_storage.class_name() {
-        return Ok(None);
+    let left_integer = integer_storage_and_shape(left);
+    let right_integer = integer_storage_and_shape(right);
+    match (left_integer, right_integer) {
+        (Some((left_storage, left_shape)), Some((right_storage, right_shape))) => {
+            if left_storage.class_name() != right_storage.class_name() {
+                return Ok(None);
+            }
+            elementwise_extrema(
+                &left_storage,
+                &left_shape,
+                &right_storage,
+                &right_shape,
+                direction,
+                comparison,
+            )
+            .map(Some)
+        }
+        (Some((storage, shape)), None) => {
+            let Some(scalar) = scalar_double_value(right) else {
+                return Ok(None);
+            };
+            integer_scalar_extrema(
+                &storage, shape, scalar, true, direction, comparison, omit_nan,
+            )
+            .map(Some)
+        }
+        (None, Some((storage, shape))) => {
+            let Some(scalar) = scalar_double_value(left) else {
+                return Ok(None);
+            };
+            integer_scalar_extrema(
+                &storage, shape, scalar, false, direction, comparison, omit_nan,
+            )
+            .map(Some)
+        }
+        (None, None) => Ok(None),
     }
-    elementwise_extrema(
-        &left_storage,
-        &left_shape,
-        &right_storage,
-        &right_shape,
-        direction,
-        comparison,
-    )
-    .map(Some)
 }
 
 fn integer_storage_and_shape(value: &Value) -> Option<(IntegerStorage, Vec<usize>)> {
@@ -135,6 +160,136 @@ fn integer_storage_and_shape(value: &Value) -> Option<(IntegerStorage, Vec<usize
             .cloned()
             .map(|storage| (storage, tensor.shape.clone())),
         _ => None,
+    }
+}
+
+pub(crate) fn value_has_integer_storage(value: &Value) -> bool {
+    match value {
+        Value::Int(_) => true,
+        Value::Tensor(tensor) => tensor.integer_storage().is_some(),
+        _ => false,
+    }
+}
+
+fn scalar_double_value(value: &Value) -> Option<f64> {
+    match value {
+        Value::Num(value) => Some(*value),
+        Value::Tensor(tensor)
+            if tensor.numeric_dtype() == runmat_builtins::NumericDType::F64
+                && tensor::is_scalar_tensor(tensor) =>
+        {
+            tensor.numeric_value_at(0).and_then(|value| match value {
+                runmat_builtins::NumericScalar::F64(value) => Some(value),
+                _ => None,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn integer_scalar_extrema(
+    storage: &IntegerStorage,
+    shape: Vec<usize>,
+    scalar: f64,
+    integer_is_left: bool,
+    direction: ExtremaDirection,
+    comparison: ExtremaComparison,
+    omit_nan: bool,
+) -> Result<IntegerExtrema, String> {
+    let scalar_value = storage.cast_f64_assignment(scalar);
+    let mut values = Vec::with_capacity(storage.len());
+    let mut indices = Vec::with_capacity(storage.len());
+    for index in 0..storage.len() {
+        let integer = storage_value(storage, index);
+        let choose_integer = choose_integer_over_scalar(
+            &integer,
+            scalar,
+            integer_is_left,
+            direction,
+            comparison,
+            omit_nan,
+        );
+        if choose_integer {
+            values.push(integer);
+            indices.push(if integer_is_left { 1.0 } else { 2.0 });
+        } else {
+            values.push(scalar_value.clone());
+            indices.push(if integer_is_left { 2.0 } else { 1.0 });
+        }
+    }
+    Ok(IntegerExtrema {
+        values: integer_storage_into_value(storage.from_same_class_values(values)?, shape.clone())?,
+        indices: numeric_tensor_into_value(indices, shape)?,
+    })
+}
+
+fn choose_integer_over_scalar(
+    integer: &IntValue,
+    scalar: f64,
+    integer_is_left: bool,
+    direction: ExtremaDirection,
+    comparison: ExtremaComparison,
+    omit_nan: bool,
+) -> bool {
+    if scalar.is_nan() {
+        return omit_nan;
+    }
+    let ordering = compare_integer_to_scalar(integer, scalar, comparison);
+    match (direction, integer_is_left) {
+        (ExtremaDirection::Min, true) => ordering != Ordering::Greater,
+        (ExtremaDirection::Max, true) => ordering != Ordering::Less,
+        (ExtremaDirection::Min, false) => ordering == Ordering::Less,
+        (ExtremaDirection::Max, false) => ordering == Ordering::Greater,
+    }
+}
+
+fn compare_integer_to_scalar(
+    integer: &IntValue,
+    scalar: f64,
+    comparison: ExtremaComparison,
+) -> Ordering {
+    let natural = || compare_extended(&extended_from_integer(integer), scalar);
+    match comparison {
+        ExtremaComparison::Natural => natural(),
+        ExtremaComparison::Absolute => compare_extended(
+            &Extended::from_u64(
+                u64::try_from(absolute_value(integer))
+                    .expect("absolute 64-bit integer magnitude fits u64"),
+            ),
+            scalar.abs(),
+        )
+        .then_with(natural),
+    }
+}
+
+fn compare_extended(integer: &Extended, scalar: f64) -> Ordering {
+    if scalar == f64::INFINITY {
+        return Ordering::Less;
+    }
+    if scalar == f64::NEG_INFINITY {
+        return Ordering::Greater;
+    }
+    let scalar = Extended::from_f64(scalar).expect("non-NaN finite scalar");
+    let difference = integer.subtract(&scalar);
+    if difference.is_zero() {
+        Ordering::Equal
+    } else if difference.is_negative() {
+        Ordering::Less
+    } else {
+        Ordering::Greater
+    }
+}
+
+fn extended_from_integer(value: &IntValue) -> Extended {
+    match value {
+        IntValue::I8(value) => Extended::from_i128(i128::from(*value)),
+        IntValue::I16(value) => Extended::from_i128(i128::from(*value)),
+        IntValue::I32(value) => Extended::from_i128(i128::from(*value)),
+        IntValue::I64(value) => Extended::from_i128(i128::from(*value)),
+        IntValue::U8(value) => Extended::from_u64(u64::from(*value)),
+        IntValue::U16(value) => Extended::from_u64(u64::from(*value)),
+        IntValue::U32(value) => Extended::from_u64(u64::from(*value)),
+        IntValue::U64(value) => Extended::from_u64(*value),
     }
 }
 
