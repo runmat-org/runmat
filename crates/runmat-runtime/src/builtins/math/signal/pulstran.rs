@@ -264,7 +264,7 @@ async fn real_tensor_arg(
 }
 
 fn parse_delays(tensor: Tensor) -> BuiltinResult<Vec<PulseInstance>> {
-    if tensor.data.is_empty() {
+    if tensor.is_empty() {
         return Ok(Vec::new());
     }
     let values = tensor::tensor_values_f64(&tensor);
@@ -554,16 +554,17 @@ fn shifted_time_value(t: &Tensor, delay: f64) -> BuiltinResult<Value> {
 
 async fn callback_samples(value: Value, expected_len: usize) -> BuiltinResult<Vec<f64>> {
     let tensor = real_tensor_arg(value, &PULSTRAN_ERROR_INVALID_PULSE).await?;
-    if tensor.data.len() == expected_len {
+    let actual_len = tensor.len();
+    if actual_len == expected_len {
         Ok(tensor::tensor_into_values_f64(tensor))
-    } else if tensor.data.len() == 1 {
+    } else if actual_len == 1 {
         Ok(vec![tensor::tensor_value_f64(&tensor, 0); expected_len])
     } else {
         Err(pulstran_error_with_detail(
             &PULSTRAN_ERROR_INVALID_PULSE,
             format!(
                 "pulse function returned {} samples for {expected_len} input samples",
-                tensor.data.len()
+                actual_len
             ),
         ))
     }
@@ -609,10 +610,7 @@ mod tests {
     }
 
     fn integer_tensor(values: Vec<i16>, shape: Vec<usize>) -> Tensor {
-        let mut tensor =
-            Tensor::new_integer(IntegerStorage::I16(values), shape).expect("typed integer tensor");
-        tensor.data.fill(f64::NAN);
-        tensor
+        Tensor::new_integer(IntegerStorage::I16(values), shape).expect("typed integer tensor")
     }
 
     #[test]
@@ -630,7 +628,7 @@ mod tests {
             .expect("pulstran"),
         );
         assert_eq!(out.shape, vec![1, 4]);
-        assert_eq!(out.data, vec![0.0, 1.0, 0.0, 1.0]);
+        assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 0.0, 1.0]);
     }
 
     #[test]
@@ -648,7 +646,7 @@ mod tests {
             )
             .expect("pulstran"),
         );
-        assert_eq!(out.data, vec![2.0, 3.0]);
+        assert_eq!(out.materialize_f64(), vec![2.0, 3.0]);
     }
 
     #[test]
@@ -666,7 +664,26 @@ mod tests {
             )
             .expect("pulstran"),
         );
-        assert_eq!(out.data, vec![2.0, 3.0]);
+        assert_eq!(out.materialize_f64(), vec![2.0, 3.0]);
+    }
+
+    #[test]
+    fn pulstran_reads_native_single_times_and_delays_authoritatively() {
+        let t = Tensor::from_f32(vec![0.0, 1.0], vec![1, 2]).expect("single times");
+        let d = Tensor::from_f32(vec![0.0, 1.0, 2.0, 3.0], vec![2, 2])
+            .expect("single delay amplitudes");
+        let pulse =
+            Value::StringArray(StringArray::new(vec!["rectpuls".to_string()], vec![1, 1]).unwrap());
+        let out = expect_tensor(
+            call(
+                Value::Tensor(t),
+                Value::Tensor(d),
+                pulse,
+                vec![Value::Num(0.25)],
+            )
+            .expect("pulstran"),
+        );
+        assert_eq!(out.materialize_f64(), vec![2.0, 3.0]);
     }
 
     #[test]
@@ -683,7 +700,7 @@ mod tests {
             )
             .expect("pulstran"),
         );
-        assert_eq!(out.data, vec![0.0, 1.0, 0.0, 1.0, 0.0]);
+        assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 0.0, 1.0, 0.0]);
     }
 
     #[test]
@@ -700,7 +717,7 @@ mod tests {
             )
             .expect("pulstran"),
         );
-        assert_eq!(out.data, vec![0.0, 1.0, 0.0, 1.0, 0.0]);
+        assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 0.0, 1.0, 0.0]);
     }
 
     #[test]
