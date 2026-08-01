@@ -26,23 +26,6 @@ fn mir_local_fact_count_for_entrypoint(
         .count()
 }
 
-fn discover_source_catalog(source_name: &str) -> Option<runmat_package::DiscoveredSourceSymbols> {
-    use runmat_package::discover_source_symbols_from_source_name;
-
-    let source_path = PathBuf::from(source_name);
-    let cwd = if source_path.is_absolute() {
-        source_path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."))
-    } else {
-        runmat_filesystem::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-    };
-    discover_source_symbols_from_source_name(source_name, &cwd)
-        .ok()
-        .flatten()
-}
-
 fn function_output_arities(
     registry: &runmat_vm::FunctionRegistry,
 ) -> HashMap<runmat_hir::FunctionId, runmat_hir::FunctionOutputArity> {
@@ -267,11 +250,21 @@ fn qualify_private_companion_functions(
 #[derive(Default)]
 pub(super) struct CompanionSourceDiscovery {
     pub statements: Vec<runmat_parser::Stmt>,
+    pub source_catalog: Option<runmat_package::DiscoveredSourceSymbols>,
+    pub project_symbol_aliases: HashMap<String, String>,
     pub private_function_names: HashSet<String>,
     pub private_function_owners: HashMap<String, String>,
     pub private_function_aliases: HashMap<String, HashMap<String, String>>,
     pub function_source_contexts: HashMap<String, SourceContextData>,
     private_statement_flags: Vec<bool>,
+}
+
+pub(super) struct ProjectCompilationContext {
+    cwd: PathBuf,
+    primary_source_path: PathBuf,
+    frozen: Option<runmat_package::FrozenProject>,
+    loose_index: Option<runmat_config::project::ProjectSourceIndex>,
+    pub source_catalog: Option<runmat_package::DiscoveredSourceSymbols>,
 }
 
 #[derive(Clone)]
@@ -284,6 +277,16 @@ pub(super) struct SourceContextData {
 fn function_names_in_statements(stmts: &[runmat_parser::Stmt]) -> impl Iterator<Item = &str> {
     stmts.iter().filter_map(|stmt| {
         if let runmat_parser::Stmt::Function { name, .. } = stmt {
+            Some(name.as_str())
+        } else {
+            None
+        }
+    })
+}
+
+fn class_name_in_statements(stmts: &[runmat_parser::Stmt]) -> Option<&str> {
+    stmts.iter().find_map(|stmt| {
+        if let runmat_parser::Stmt::ClassDef { name, .. } = stmt {
             Some(name.as_str())
         } else {
             None
@@ -418,29 +421,125 @@ impl CompanionSourceDiscovery {
     }
 }
 
-async fn discover_companion_from_composition_graph_async(
-    _source_name: &str,
-    cwd: &Path,
-    primary_source_path: &Path,
-    compat_mode: runmat_parser::CompatMode,
-) -> Result<Option<CompanionSourceDiscovery>, String> {
-    let options = ParserOptions::new(compat_mode);
-    let Some(frozen) =
-        runmat_package::discover_frozen_project_from_async(primary_source_path, Default::default())
-            .await
-            .map_err(|error| error.to_string())?
-    else {
+fn project_symbol_aliases(
+    catalog: Option<&runmat_package::DiscoveredSourceSymbols>,
+) -> HashMap<String, String> {
+    let Some(catalog) = catalog else {
+        return HashMap::new();
+    };
+    catalog
+        .definitions
+        .iter()
+        .filter_map(|definition| {
+            let alias = definition.dependency_alias.as_deref()?;
+            let original = definition.name.strip_prefix(&format!("{alias}."))?;
+            let has_unique_bare_name = catalog.definitions.iter().any(|candidate| {
+                candidate.name == original
+                    && candidate.dependency_alias.as_deref() == Some(alias)
+                    && candidate.source_id == definition.source_id
+            });
+            Some((
+                definition.name.clone(),
+                if has_unique_bare_name {
+                    original.to_string()
+                } else {
+                    definition.name.clone()
+                },
+            ))
+        })
+        .collect()
+}
+
+fn dependency_composed_name(
+    catalog: Option<&runmat_package::DiscoveredSourceSymbols>,
+    alias: Option<&runmat_package::PackageAlias>,
+    source_id: &runmat_package::StableSourceId,
+    original: String,
+) -> String {
+    let Some(alias) = alias else {
+        return original;
+    };
+    let has_unique_bare_name = catalog.is_some_and(|catalog| {
+        catalog.definitions.iter().any(|definition| {
+            definition.name == original
+                && definition.dependency_alias.as_deref() == Some(alias.as_str())
+                && definition.source_id.as_ref() == Some(source_id)
+        })
+    });
+    if has_unique_bare_name {
+        original
+    } else {
+        format!("{alias}.{original}")
+    }
+}
+
+pub(super) async fn discover_project_compilation_context_async(
+    source_name: &str,
+) -> Result<Option<ProjectCompilationContext>, String> {
+    let Some(cwd) = source_lookup_cwd(source_name) else {
         return Ok(None);
     };
+    let primary_source_path = resolved_source_path(source_name, &cwd);
+    let primary_is_local_file = runmat_filesystem::metadata_async(&primary_source_path)
+        .await
+        .map(|metadata| metadata.is_file())
+        .unwrap_or(false);
+    if !primary_is_local_file {
+        return Ok(None);
+    }
+    let Some(parent) = primary_source_path.parent() else {
+        return Ok(None);
+    };
+    let frozen = runmat_package::discover_frozen_project_from_async(
+        &primary_source_path,
+        Default::default(),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    let (loose_index, source_catalog) = if let Some(frozen) = frozen.as_ref() {
+        (
+            None,
+            Some(runmat_package::source_symbols_from_frozen(
+                frozen,
+                &primary_source_path,
+            )),
+        )
+    } else {
+        let index = runmat_config::project::build_loose_source_index_async(parent)
+            .await
+            .map_err(|error| error.to_string())?;
+        let catalog =
+            runmat_package::source_symbols_from_index(&index, parent, &primary_source_path, None);
+        (Some(index), Some(catalog))
+    };
+    Ok(Some(ProjectCompilationContext {
+        cwd,
+        primary_source_path,
+        frozen,
+        loose_index,
+        source_catalog,
+    }))
+}
+
+async fn compose_frozen_project_async(
+    context: &ProjectCompilationContext,
+    frozen: &runmat_package::FrozenProject,
+    compat_mode: runmat_parser::CompatMode,
+) -> Result<CompanionSourceDiscovery, String> {
+    let options = ParserOptions::new(compat_mode);
     let mut out = CompanionSourceDiscovery::default();
-    for (source, access_path) in frozen.all_sources() {
-        let file_path = access_path.clone();
+    out.source_catalog = context.source_catalog.clone();
+    out.project_symbol_aliases = project_symbol_aliases(out.source_catalog.as_ref());
+    for visible in frozen.visible_sources(&context.primary_source_path) {
+        let source = visible.source;
+        let access_path = visible.access_path;
+        if source_paths_equivalent(access_path, &context.primary_source_path) {
+            continue;
+        }
+        let file_path = access_path.to_path_buf();
         let file_path =
             runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(&file_path)
                 .await;
-        if source_paths_equivalent(&file_path, primary_source_path) {
-            continue;
-        }
         let contents =
             runmat_runtime::builtins::io::repl_fs::pcode::read_source_text_async(&file_path)
                 .await
@@ -468,79 +567,86 @@ async fn discover_companion_from_composition_graph_async(
         let private_owner_scope = source
             .is_private
             .then(|| function_owner_scope_from_qualified_name(&source.qualified_name));
-        let primary_visible_private =
-            source.is_private && private_source_visible_to(primary_source_path, &file_path);
+        let primary_visible_private = source.is_private && visible.directly_visible;
         let private_aliases = if let Some(owner_scope) = private_owner_scope.as_deref() {
             qualify_private_companion_functions(&mut body, owner_scope, primary_visible_private)
         } else {
             HashMap::new()
         };
         if is_class_source {
-            if let Some(qualified) = source_index_qualified_class_name(source) {
-                qualify_companion_classdefs(&mut body, qualified);
-            } else if let Some(qualified) = package_class_name_from_path(&file_path, cwd) {
+            let qualified = source_index_qualified_class_name(source)
+                .map(ToOwned::to_owned)
+                .or_else(|| package_class_name_from_path(&file_path, &context.cwd))
+                .or_else(|| {
+                    visible
+                        .dependency_alias
+                        .and_then(|_| class_name_in_statements(&body).map(ToOwned::to_owned))
+                });
+            if let Some(qualified) = qualified {
+                let qualified = dependency_composed_name(
+                    context.source_catalog.as_ref(),
+                    visible.dependency_alias,
+                    &source.id,
+                    qualified,
+                );
                 qualify_companion_classdefs(&mut body, &qualified);
             }
         } else if private_owner_scope.is_none() {
-            if let Some(qualified) = source_index_qualified_function_name(source) {
-                qualify_companion_functions(&mut body, qualified);
-            } else if let Some(qualified) = package_class_name_from_path(&file_path, cwd) {
+            let qualified = source_index_qualified_function_name(source)
+                .map(ToOwned::to_owned)
+                .or_else(|| package_class_name_from_path(&file_path, &context.cwd))
+                .or_else(|| {
+                    visible.dependency_alias.and_then(|_| {
+                        function_names_in_statements(&body)
+                            .next()
+                            .map(ToOwned::to_owned)
+                    })
+                });
+            if let Some(qualified) = qualified {
+                let qualified = dependency_composed_name(
+                    context.source_catalog.as_ref(),
+                    visible.dependency_alias,
+                    &source.id,
+                    qualified,
+                );
                 qualify_companion_functions(&mut body, &qualified);
             }
         }
+        let source_context_path = access_path;
         out.extend_body(
             body,
             private_owner_scope.as_deref(),
             private_aliases,
             Some(SourceContextData {
-                display_name: crate::diagnostic_path::display_path_from_base(&file_path, cwd),
-                fullpath_name: Some(path_to_source_name(&file_path)),
+                display_name: crate::diagnostic_path::display_path_from_base(
+                    source_context_path,
+                    &context.cwd,
+                ),
+                fullpath_name: Some(path_to_source_name(source_context_path)),
                 text: contents,
             }),
         );
     }
-    Ok(Some(out))
+    Ok(out)
 }
 
-pub(super) async fn discover_companion_source_statements_async(
-    source_name: &str,
+async fn compose_loose_project_async(
+    context: &ProjectCompilationContext,
+    source_index: &runmat_config::project::ProjectSourceIndex,
     compat_mode: runmat_parser::CompatMode,
 ) -> Result<CompanionSourceDiscovery, String> {
-    let Some(cwd) = source_lookup_cwd(source_name) else {
-        return Ok(CompanionSourceDiscovery::default());
+    let mut out = CompanionSourceDiscovery {
+        source_catalog: context.source_catalog.clone(),
+        project_symbol_aliases: project_symbol_aliases(context.source_catalog.as_ref()),
+        ..Default::default()
     };
-    let primary_source_path = resolved_source_path(source_name, &cwd);
-    let primary_is_local_file = runmat_filesystem::metadata_async(&primary_source_path)
-        .await
-        .map(|metadata| metadata.is_file())
-        .unwrap_or(false);
-    if !primary_is_local_file {
-        // Text/REPL source labels are not paths and must not inherit whatever
-        // manifest happens to be visible through the process-global cwd. Path
-        // executions resolve to a real primary file before reaching here.
-        return Ok(CompanionSourceDiscovery::default());
-    }
-    let Some(parent) = primary_source_path.parent() else {
-        return Ok(CompanionSourceDiscovery::default());
-    };
-    if let Some(out) = discover_companion_from_composition_graph_async(
-        source_name,
-        &cwd,
-        &primary_source_path,
-        compat_mode,
-    )
-    .await?
-    {
-        return Ok(out);
-    }
-    let mut out = CompanionSourceDiscovery::default();
     let options = ParserOptions::new(compat_mode);
-    let source_index = runmat_config::project::build_loose_source_index_async(parent)
-        .await
-        .map_err(|error| error.to_string())?;
-    for source in source_index.files {
+    let Some(parent) = context.primary_source_path.parent() else {
+        return Ok(out);
+    };
+    for source in &source_index.files {
         let path = parent.join(&source.source_root).join(&source.relative_path);
-        if source_paths_equivalent(&path, &primary_source_path) {
+        if source_paths_equivalent(&path, &context.primary_source_path) {
             continue;
         }
         let Ok(contents) = runmat_filesystem::read_to_string_async(&path).await else {
@@ -561,8 +667,8 @@ pub(super) async fn discover_companion_source_statements_async(
         let private_owner_scope = source
             .is_private
             .then(|| function_owner_scope_from_qualified_name(&source.qualified_name));
-        let primary_visible_private =
-            private_owner_scope.is_some() && private_source_visible_to(&primary_source_path, &path);
+        let primary_visible_private = private_owner_scope.is_some()
+            && private_source_visible_to(&context.primary_source_path, &path);
         let private_aliases = if let Some(owner_scope) = private_owner_scope.as_deref() {
             qualify_private_companion_functions(&mut body, owner_scope, primary_visible_private)
         } else {
@@ -582,13 +688,36 @@ pub(super) async fn discover_companion_source_statements_async(
             private_owner_scope.as_deref(),
             private_aliases,
             Some(SourceContextData {
-                display_name: crate::diagnostic_path::display_path_from_base(&path, &cwd),
+                display_name: crate::diagnostic_path::display_path_from_base(&path, &context.cwd),
                 fullpath_name: Some(path_to_source_name(&path)),
                 text: contents,
             }),
         );
     }
     Ok(out)
+}
+
+pub(super) async fn compose_project_compilation_context_async(
+    context: &ProjectCompilationContext,
+    compat_mode: runmat_parser::CompatMode,
+) -> Result<CompanionSourceDiscovery, String> {
+    if let Some(frozen) = context.frozen.as_ref() {
+        compose_frozen_project_async(context, frozen, compat_mode).await
+    } else if let Some(loose_index) = context.loose_index.as_ref() {
+        compose_loose_project_async(context, loose_index, compat_mode).await
+    } else {
+        Ok(CompanionSourceDiscovery::default())
+    }
+}
+
+pub(super) async fn discover_companion_source_statements_async(
+    source_name: &str,
+    compat_mode: runmat_parser::CompatMode,
+) -> Result<CompanionSourceDiscovery, String> {
+    let Some(context) = discover_project_compilation_context_async(source_name).await? else {
+        return Ok(CompanionSourceDiscovery::default());
+    };
+    compose_project_compilation_context_async(&context, compat_mode).await
 }
 
 impl RunMatSession {
@@ -602,6 +731,19 @@ impl RunMatSession {
         let previous_source_fullpath_name = self.active_source_fullpath_name.clone();
         self.active_source_name = source_name.to_string();
         self.active_source_fullpath_name = None;
+        self.pending_companion_source_discovery = Some(
+            futures::executor::block_on(discover_companion_source_statements_async(
+                source_name,
+                self.compat_mode,
+            ))
+            .map_err(|error| {
+                RunError::Runtime(
+                    build_runtime_error(format!("project composition failed: {error}"))
+                        .with_identifier("RunMat:ProjectComposition")
+                        .build(),
+                )
+            })?,
+        );
         let result = self.compile_input(input);
         self.active_source_name = previous_source_name;
         self.active_source_fullpath_name = previous_source_fullpath_name;
@@ -625,6 +767,8 @@ impl RunMatSession {
             private_companion_function_owners,
             private_companion_function_aliases,
             companion_function_source_ids,
+            source_catalog,
+            project_symbol_aliases,
         ) = {
             let _span = info_span!("runtime.parse").entered();
             let mut ast = parse_with_options(input, ParserOptions::new(self.compat_mode))?;
@@ -642,6 +786,8 @@ impl RunMatSession {
                 std::mem::take(&mut companion.private_function_owners);
             let private_companion_function_aliases =
                 std::mem::take(&mut companion.private_function_aliases);
+            let source_catalog = companion.source_catalog.take();
+            let project_symbol_aliases = std::mem::take(&mut companion.project_symbol_aliases);
             let companion_function_source_ids =
                 std::mem::take(&mut companion.function_source_contexts)
                     .into_iter()
@@ -665,6 +811,8 @@ impl RunMatSession {
                 private_companion_function_owners,
                 private_companion_function_aliases,
                 companion_function_source_ids,
+                source_catalog,
+                project_symbol_aliases,
             )
         };
         let (lowering, analysis, mut bytecode) = {
@@ -672,8 +820,6 @@ impl RunMatSession {
             let function_names = self.function_registry.names.clone();
             let function_output_arities = function_output_arities(&self.function_registry);
             let workspace_bindings = self.lowering_workspace_bindings();
-            let source_lookup_name = source_fullpath_name.as_deref().unwrap_or(&source_name);
-            let source_catalog = discover_source_catalog(source_lookup_name);
             let known_project_symbols = source_catalog
                 .as_ref()
                 .map(|catalog| &catalog.symbols)
@@ -685,6 +831,7 @@ impl RunMatSession {
                     .with_bound_functions(&function_names)
                     .with_function_output_arities(&function_output_arities)
                     .with_known_project_symbols(&known_project_symbols)
+                    .with_project_symbol_aliases(&project_symbol_aliases)
                     .with_private_functions(
                         &private_companion_function_owners,
                         &private_companion_function_aliases,
@@ -1289,5 +1436,84 @@ mod source_discovery_tests {
         assert!(names.contains("pkg.tool"));
         assert!(names.contains("secret"));
         assert!(!names.iter().any(|name| name.ends_with("hidden")));
+    }
+
+    #[test]
+    fn frozen_runtime_companions_enforce_alias_transitive_and_private_visibility() {
+        let _provider_guard = runmat_filesystem::provider_override_lock();
+        let temp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("runmat.toml"),
+            r#"
+[package]
+name = "root"
+
+[sources]
+roots = ["src"]
+
+[dependencies]
+middle = { path = "deps/middle" }
+"#,
+        )
+        .unwrap();
+        let main = temp.path().join("src/main.m");
+        fs::write(&main, "value = middle.api();").unwrap();
+        fs::create_dir_all(temp.path().join("deps/middle/src/private")).unwrap();
+        fs::write(
+            temp.path().join("deps/middle/runmat.toml"),
+            r#"
+[package]
+name = "middle"
+
+[sources]
+roots = ["src"]
+
+[dependencies]
+leaf = { path = "deps/leaf" }
+"#,
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("deps/middle/src/api.m"),
+            "function y = api(); y = 1; end",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("deps/middle/src/private/secret.m"),
+            "function y = secret(); y = 2; end",
+        )
+        .unwrap();
+        fs::create_dir_all(temp.path().join("deps/middle/deps/leaf/src")).unwrap();
+        fs::write(
+            temp.path().join("deps/middle/deps/leaf/runmat.toml"),
+            r#"
+[package]
+name = "leaf"
+
+[sources]
+roots = ["src"]
+"#,
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("deps/middle/deps/leaf/src/transitive.m"),
+            "function y = transitive(); y = 3; end",
+        )
+        .unwrap();
+
+        let discovery = futures::executor::block_on(discover_companion_source_statements_async(
+            main.to_str().unwrap(),
+            runmat_parser::CompatMode::RunMat,
+        ))
+        .expect("discover frozen companion sources");
+        let names = discovered_function_names(&discovery);
+        assert!(names.contains("api"));
+        assert!(!names.iter().any(|name| name.ends_with("secret")));
+        assert!(!names.iter().any(|name| name.ends_with("transitive")));
+        assert_eq!(
+            discovery.project_symbol_aliases.get("middle.api"),
+            Some(&"api".to_string())
+        );
     }
 }

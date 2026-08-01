@@ -36,6 +36,7 @@ pub struct LoweringContext<'a> {
     pub bound_functions: &'a HashMap<String, FunctionId>,
     pub function_output_arities: &'a HashMap<FunctionId, FunctionOutputArity>,
     pub known_project_symbols: &'a HashSet<String>,
+    pub project_symbol_aliases: &'a HashMap<String, String>,
     pub private_function_owners: &'a HashMap<String, String>,
     pub private_function_aliases: &'a HashMap<String, HashMap<String, String>>,
     pub runmat_extensions_enabled: bool,
@@ -49,6 +50,7 @@ impl<'a> LoweringContext<'a> {
             bound_functions: empty_bound_functions(),
             function_output_arities: empty_function_output_arities(),
             known_project_symbols: empty_project_symbols(),
+            project_symbol_aliases: empty_project_symbol_aliases(),
             private_function_owners: empty_private_function_owners(),
             private_function_aliases: empty_private_function_aliases(),
             runmat_extensions_enabled: true,
@@ -74,6 +76,11 @@ impl<'a> LoweringContext<'a> {
 
     pub fn with_known_project_symbols(mut self, symbols: &'a HashSet<String>) -> Self {
         self.known_project_symbols = symbols;
+        self
+    }
+
+    pub fn with_project_symbol_aliases(mut self, aliases: &'a HashMap<String, String>) -> Self {
+        self.project_symbol_aliases = aliases;
         self
     }
 
@@ -104,6 +111,7 @@ impl<'a> LoweringContext<'a> {
             bound_functions: empty_bound_functions(),
             function_output_arities: empty_function_output_arities(),
             known_project_symbols: empty_project_symbols(),
+            project_symbol_aliases: empty_project_symbol_aliases(),
             private_function_owners: empty_private_function_owners(),
             private_function_aliases: empty_private_function_aliases(),
             runmat_extensions_enabled: true,
@@ -126,6 +134,11 @@ fn empty_function_output_arities() -> &'static HashMap<FunctionId, FunctionOutpu
 fn empty_project_symbols() -> &'static HashSet<String> {
     static EMPTY_PROJECT_SYMBOLS: OnceLock<HashSet<String>> = OnceLock::new();
     EMPTY_PROJECT_SYMBOLS.get_or_init(HashSet::new)
+}
+
+fn empty_project_symbol_aliases() -> &'static HashMap<String, String> {
+    static EMPTY_PROJECT_SYMBOL_ALIASES: OnceLock<HashMap<String, String>> = OnceLock::new();
+    EMPTY_PROJECT_SYMBOL_ALIASES.get_or_init(HashMap::new)
 }
 
 fn empty_private_function_owners() -> &'static HashMap<String, String> {

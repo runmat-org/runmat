@@ -7824,6 +7824,70 @@ roots = ["."]
 }
 
 #[test]
+fn execute_path_request_uses_dependency_aliases_to_disambiguate_same_named_functions() {
+    let _guard = cwd_lock();
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    for dependency in ["left", "right"] {
+        let dependency_root = tmp.path().join("deps").join(dependency);
+        std::fs::create_dir_all(&dependency_root).expect("create dependency dir");
+        std::fs::write(
+            dependency_root.join("runmat.toml"),
+            format!(
+                r#"
+[package]
+name = "{dependency}"
+
+[sources]
+roots = ["."]
+"#
+            ),
+        )
+        .expect("write dependency manifest");
+    }
+    std::fs::write(
+        tmp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+
+[dependencies]
+left = { path = "deps/left" }
+right = { path = "deps/right" }
+"#,
+    )
+    .expect("write root manifest");
+    std::fs::write(
+        tmp.path().join("deps/left/shared.m"),
+        "function y = shared(x); y = x + 10; end",
+    )
+    .expect("write left function");
+    std::fs::write(
+        tmp.path().join("deps/right/shared.m"),
+        "function y = shared(x); y = x + 20; end",
+    )
+    .expect("write right function");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "r = left.shared(1) + right.shared(1);",
+    )
+    .expect("write main source");
+
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let _cwd = push_cwd(tmp.path());
+    let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
+
+    assert!(
+        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(32.0)),
+        "dependency aliases should select distinct same-named functions; upserts={:?}, diagnostics={:?}",
+        outcome.workspace_delta.upserts,
+        outcome.diagnostics
+    );
+}
+
+#[test]
 fn execute_path_request_resolves_package_private_function_for_active_package_source() {
     let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");
@@ -8385,7 +8449,7 @@ roots = ["."]
 }
 
 #[test]
-fn execute_outcome_ignores_invalid_project_source_without_warning() {
+fn execute_outcome_reports_invalid_graph_declared_source() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("helpers")).expect("create helper dir");
     std::fs::write(
@@ -8405,14 +8469,18 @@ roots = ["."]
 
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
-    let outcome = execute_text_request_named_source(&mut session, &source_name, "v = 1;")
-        .expect("exec succeeds");
-
-    assert!(
-        outcome.diagnostics.is_empty(),
-        "invalid unrelated project sources should not emit preload warnings; diagnostics={:?}",
-        outcome.diagnostics
+    let error = execute_text_request_named_source(&mut session, &source_name, "v = 1;")
+        .expect_err("invalid graph-declared source must fail composition");
+    let RunError::Runtime(error) = error else {
+        panic!("expected project composition runtime error");
+    };
+    assert_eq!(
+        error.identifier.as_deref(),
+        Some("RunMat:ProjectComposition")
     );
+    assert!(error
+        .message
+        .contains("failed to parse graph-declared source"));
 }
 
 #[test]

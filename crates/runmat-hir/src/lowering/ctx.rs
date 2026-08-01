@@ -267,6 +267,19 @@ impl LoweringCtx {
             }
         }
 
+        for (alias, target) in context.project_symbol_aliases {
+            if !ctx.function_names.contains_key(alias) {
+                if let Some(target_id) = ctx.function_names.get(target).copied() {
+                    ctx.function_names.insert(alias.clone(), target_id);
+                }
+            }
+            if !ctx.class_names.contains_key(alias) {
+                if let Some(target_id) = ctx.class_names.get(target).copied() {
+                    ctx.class_names.insert(alias.clone(), target_id);
+                }
+            }
+        }
+
         for stmt in &prog.body {
             if let AstStmt::Import { path, wildcard, .. } = stmt {
                 let import = HirImport {

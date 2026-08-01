@@ -328,7 +328,7 @@ impl RunMatLanguageServer {
             })
             .collect::<HashMap<_, _>>();
 
-        for source_file in context.all_source_files() {
+        for source_file in context.visible_source_files() {
             if let Some((uri, text, analysis)) = open_doc_by_path.get(source_file) {
                 files.insert(
                     source_file.clone(),

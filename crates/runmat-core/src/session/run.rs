@@ -25,6 +25,7 @@ fn mir_local_fact_count_for_entrypoint(
         .count()
 }
 
+#[cfg(test)]
 fn discover_source_catalog(
     source_name: Option<&str>,
 ) -> Option<runmat_package::DiscoveredSourceSymbols> {
@@ -98,23 +99,20 @@ async fn load_dynamic_function(
                         .build()
                     })?;
             let path_name = path.to_string_lossy();
-            let source_cwd = path
-                .parent()
-                .map(std::path::Path::to_path_buf)
-                .unwrap_or_else(|| std::path::PathBuf::from("."));
-            let source_catalog = runmat_package::discover_source_symbols_from_source_name_async(
-                path_name.as_ref(),
-                &source_cwd,
-            )
-            .await
-            .map_err(|error| {
-                build_runtime_error(format!(
-                    "Could not construct source catalog for '{}': {error}",
-                    path.display()
-                ))
-                .with_identifier("RunMat:ProjectComposition")
-                .build()
-            })?;
+            let project_context =
+                super::compile::discover_project_compilation_context_async(path_name.as_ref())
+                    .await
+                    .map_err(|error| {
+                        build_runtime_error(format!(
+                            "Could not construct project context for '{}': {error}",
+                            path.display()
+                        ))
+                        .with_identifier("RunMat:ProjectComposition")
+                        .build()
+                    })?;
+            let source_catalog = project_context
+                .as_ref()
+                .and_then(|context| context.source_catalog.clone());
             let project_revision = source_catalog
                 .as_ref()
                 .and_then(|catalog| catalog.project_revision());
@@ -150,19 +148,20 @@ async fn load_dynamic_function(
                         .with_identifier("RunMat:FunctionParseError")
                         .build()
                     })?;
-                let mut companion = super::compile::discover_companion_source_statements_async(
-                    path_name.as_ref(),
-                    compat,
-                )
-                .await
-                .map_err(|error| {
-                    build_runtime_error(format!(
-                        "Could not compose function source '{}': {error}",
-                        path.display()
-                    ))
-                    .with_identifier("RunMat:FunctionCompositionError")
-                    .build()
-                })?;
+                let mut companion = if let Some(context) = project_context.as_ref() {
+                    super::compile::compose_project_compilation_context_async(context, compat)
+                        .await
+                        .map_err(|error| {
+                            build_runtime_error(format!(
+                                "Could not compose function source '{}': {error}",
+                                path.display()
+                            ))
+                            .with_identifier("RunMat:FunctionCompositionError")
+                            .build()
+                        })?
+                } else {
+                    super::compile::CompanionSourceDiscovery::default()
+                };
                 if !companion.statements.is_empty() {
                     ast.body.append(&mut companion.statements);
                 }
@@ -175,6 +174,7 @@ async fn load_dynamic_function(
                     &ast,
                     &LoweringContext::new(&HashMap::new())
                         .with_known_project_symbols(&known_project_symbols)
+                        .with_project_symbol_aliases(&companion.project_symbol_aliases)
                         .with_private_functions(
                             &companion.private_function_owners,
                             &companion.private_function_aliases,
@@ -549,10 +549,11 @@ impl RunMatSession {
         let dynamic_eval_enabled = self.dynamic_eval_enabled;
         #[cfg(target_arch = "wasm32")]
         let top_level_await_enabled = self.top_level_await_enabled;
-        let source_name_for_eval_hook = self.current_source_name().to_string();
-        let source_catalog_for_eval_hook = Arc::new(discover_source_catalog(Some(
-            source_name_for_eval_hook.as_str(),
-        )));
+        let source_catalog_for_eval_hook = Arc::new(
+            self.pending_companion_source_discovery
+                .as_ref()
+                .and_then(|companion| companion.source_catalog.clone()),
+        );
         let _eval_hook_guard =
             runmat_runtime::interaction::replace_eval_hook(Some(std::sync::Arc::new(
                 move |expr: String| -> runmat_runtime::interaction::EvalHookFuture {
@@ -2116,8 +2117,8 @@ roots = ["."]
             "expected base dependency symbol in known-project discovery"
         );
         assert!(
-            symbols.contains("statslib.summarize"),
-            "expected package-qualified dependency symbol in known-project discovery"
+            !symbols.contains("statslib.summarize"),
+            "dependency package identity must not become a MATLAB namespace"
         );
         assert!(
             symbols.contains("statsdep.summarize"),

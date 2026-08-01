@@ -4,7 +4,7 @@ mod symbols;
 
 pub use catalog::{
     FrozenProject, FrozenSourceDescriptor, PackageMount, PackageSourceCatalog, ProjectRevision,
-    SourceCatalog, StableSourceId,
+    SourceCatalog, StableSourceId, VisibleProjectSource,
 };
 pub use path_project::{
     build_frozen_project, build_frozen_project_async, discover_frozen_project_from,
@@ -14,6 +14,6 @@ pub use symbols::{
     discover_known_project_symbols_from_source_name,
     discover_known_project_symbols_from_source_name_async,
     discover_source_symbols_from_source_name, discover_source_symbols_from_source_name_async,
-    source_symbols_from_index, DiscoverSourceSymbolsError, DiscoveredSourceSymbols,
-    ProjectSymbolDefinition,
+    source_symbols_from_frozen, source_symbols_from_index, DiscoverSourceSymbolsError,
+    DiscoveredSourceSymbols, ProjectSymbolDefinition,
 };

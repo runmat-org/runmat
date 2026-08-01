@@ -66,6 +66,16 @@ tools = { path = "deps/tools", version = "1.0.0" }"#,
         .iter()
         .find(|definition| definition.name == "helper")
         .unwrap();
+    assert_eq!(definition.dependency_alias.as_deref(), Some("tools"));
+    let qualified_definition = discovered
+        .definitions
+        .iter()
+        .find(|definition| definition.name == "tools.helper")
+        .unwrap();
+    assert_eq!(
+        qualified_definition.dependency_alias.as_deref(),
+        Some("tools")
+    );
     assert_eq!(definition.package_name, "tools-package");
     assert!(definition.package_instance.is_some());
     let source_id = definition.source_id.as_ref().unwrap();

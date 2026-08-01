@@ -16,6 +16,8 @@ pub struct ProjectSymbolDefinition {
     pub source_path: PathBuf,
     pub package_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub dependency_alias: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub package_instance: Option<ContentDigest>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_id: Option<StableSourceId>,
@@ -61,7 +63,7 @@ pub fn discover_source_symbols_from_source_name(
         return Ok(None);
     };
     if let Some(frozen) = discover_frozen_project_from(&source_path, BTreeSet::new())? {
-        return Ok(Some(source_symbols_from_frozen(frozen, &source_path)));
+        return Ok(Some(source_symbols_from_frozen(&frozen, &source_path)));
     }
     let index = build_loose_source_index(&root).map_err(|source| {
         DiscoverSourceSymbolsError::LooseSourceIndex {
@@ -85,7 +87,7 @@ pub async fn discover_source_symbols_from_source_name_async(
         return Ok(None);
     };
     if let Some(frozen) = discover_frozen_project_from_async(&source_path, BTreeSet::new()).await? {
-        return Ok(Some(source_symbols_from_frozen(frozen, &source_path)));
+        return Ok(Some(source_symbols_from_frozen(&frozen, &source_path)));
     }
     let index = build_loose_source_index_async(&root)
         .await
@@ -152,73 +154,54 @@ pub async fn discover_known_project_symbols_from_source_name_async(
         .unwrap_or_default()
 }
 
-fn source_symbols_from_frozen(
-    frozen: FrozenProject,
+pub fn source_symbols_from_frozen(
+    frozen: &FrozenProject,
     primary_source: &Path,
 ) -> DiscoveredSourceSymbols {
-    let owner = frozen
-        .all_sources()
-        .find(|(_, path)| paths_equivalent(path, primary_source))
-        .map(|(source, _)| source.id.package_instance.clone())
-        .unwrap_or_else(|| frozen.graph.root.clone());
-    let visible_edges = frozen
-        .graph
-        .edges
-        .iter()
-        .filter(|edge| edge.from == owner)
-        .map(|edge| (edge.to.clone(), edge.alias.to_string()))
-        .collect::<BTreeMap<_, _>>();
     let mut symbols = HashSet::new();
     let mut definitions = Vec::new();
     let mut unqualified_candidates =
         BTreeMap::<String, BTreeMap<ContentDigest, ProjectSymbolDefinition>>::new();
-    for (instance, package) in &frozen.sources.packages {
-        let is_owner = instance == &owner;
-        let alias = visible_edges.get(instance);
-        if !is_owner && alias.is_none() {
+    for visible in frozen.visible_sources(primary_source) {
+        if !visible.directly_visible {
             continue;
         }
-        for source in &package.sources {
-            let source_path = frozen.access_paths[&source.id].clone();
-            let names = source_names(
-                &source.qualified_name,
-                source.class_definition_qualified_name(),
-            );
-            for name in names {
-                if is_owner {
-                    push_definition(
-                        &mut definitions,
-                        name.clone(),
-                        source,
-                        &source_path,
-                        &package.local_name,
-                    );
-                    if !source.is_private {
-                        symbols.insert(name.clone());
-                    }
-                }
-                if let Some(alias) = alias {
-                    let exposed = format!("{alias}.{name}");
-                    push_definition(
-                        &mut definitions,
-                        exposed.clone(),
-                        source,
-                        &source_path,
-                        &package.local_name,
-                    );
-                    if !source.is_private {
-                        symbols.insert(exposed);
-                        unqualified_candidates.entry(name).or_default().insert(
-                            instance.clone(),
-                            project_definition(
-                                source.qualified_name.clone(),
-                                source,
-                                &source_path,
-                                &package.local_name,
-                            ),
-                        );
-                    }
-                }
+        let alias = visible.dependency_alias.map(ToString::to_string);
+        for name in source_names(
+            &visible.source.qualified_name,
+            visible.source.class_definition_qualified_name(),
+        ) {
+            if let Some(alias) = &alias {
+                let exposed = format!("{alias}.{name}");
+                push_definition(
+                    &mut definitions,
+                    exposed.clone(),
+                    visible.source,
+                    visible.access_path,
+                    &visible.package.local_name,
+                    Some(alias),
+                );
+                symbols.insert(exposed);
+                unqualified_candidates.entry(name).or_default().insert(
+                    visible.source.id.package_instance.clone(),
+                    project_definition(
+                        visible.source.qualified_name.clone(),
+                        visible.source,
+                        visible.access_path,
+                        &visible.package.local_name,
+                        Some(alias),
+                    ),
+                );
+            } else {
+                push_definition(
+                    &mut definitions,
+                    name.clone(),
+                    visible.source,
+                    visible.access_path,
+                    &visible.package.local_name,
+                    None,
+                );
+                symbols.insert(name);
             }
         }
     }
@@ -233,12 +216,11 @@ fn source_symbols_from_frozen(
             symbols.insert(name);
         }
     }
-    add_visible_private_symbols(&mut symbols, &definitions, primary_source);
     DiscoveredSourceSymbols {
-        manifest_path: Some(frozen.manifest_path),
-        project_root: frozen.workspace_root,
-        graph_digest: Some(frozen.graph.graph_digest),
-        source_revision: Some(frozen.sources.revision),
+        manifest_path: Some(frozen.manifest_path.clone()),
+        project_root: frozen.workspace_root.clone(),
+        graph_digest: Some(frozen.graph.graph_digest.clone()),
+        source_revision: Some(frozen.sources.revision.clone()),
         symbols,
         definitions,
     }
@@ -250,6 +232,7 @@ fn push_definition(
     source: &crate::FrozenSourceDescriptor,
     source_path: &Path,
     package_name: &str,
+    dependency_alias: Option<&str>,
 ) {
     if definitions
         .iter()
@@ -257,7 +240,13 @@ fn push_definition(
     {
         return;
     }
-    definitions.push(project_definition(name, source, source_path, package_name));
+    definitions.push(project_definition(
+        name,
+        source,
+        source_path,
+        package_name,
+        dependency_alias,
+    ));
 }
 
 fn project_definition(
@@ -265,12 +254,14 @@ fn project_definition(
     source: &crate::FrozenSourceDescriptor,
     source_path: &Path,
     package_name: &str,
+    dependency_alias: Option<&str>,
 ) -> ProjectSymbolDefinition {
     ProjectSymbolDefinition {
         name,
         qualified_name: source.qualified_name.clone(),
         source_path: source_path.to_path_buf(),
         package_name: package_name.to_string(),
+        dependency_alias: dependency_alias.map(ToOwned::to_owned),
         package_instance: Some(source.id.package_instance.clone()),
         source_id: Some(source.id.clone()),
         is_private: source.is_private,
@@ -293,6 +284,7 @@ fn extend_loose_source(
             qualified_name: source.qualified_name.clone(),
             source_path: source_path.clone(),
             package_name: String::new(),
+            dependency_alias: None,
             package_instance: None,
             source_id: None,
             is_private: source.is_private,
@@ -360,20 +352,5 @@ fn absolute_or_join(cwd: &Path, path: &Path) -> PathBuf {
         path.to_path_buf()
     } else {
         cwd.join(path)
-    }
-}
-
-fn paths_equivalent(left: &Path, right: &Path) -> bool {
-    if left == right {
-        return true;
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        false
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    match (std::fs::canonicalize(left), std::fs::canonicalize(right)) {
-        (Ok(left), Ok(right)) => left == right,
-        _ => false,
     }
 }

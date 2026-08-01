@@ -40,7 +40,8 @@ pub use source::{
     discover_frozen_project_from_async, discover_known_project_symbols_from_source_name,
     discover_known_project_symbols_from_source_name_async,
     discover_source_symbols_from_source_name, discover_source_symbols_from_source_name_async,
-    source_symbols_from_index, DiscoverSourceSymbolsError, DiscoveredSourceSymbols, FrozenProject,
-    FrozenProjectError, FrozenSourceDescriptor, PackageMount, PackageSourceCatalog,
-    ProjectRevision, ProjectSymbolDefinition, SourceCatalog, StableSourceId,
+    source_symbols_from_frozen, source_symbols_from_index, DiscoverSourceSymbolsError,
+    DiscoveredSourceSymbols, FrozenProject, FrozenProjectError, FrozenSourceDescriptor,
+    PackageMount, PackageSourceCatalog, ProjectRevision, ProjectSymbolDefinition, SourceCatalog,
+    StableSourceId, VisibleProjectSource,
 };

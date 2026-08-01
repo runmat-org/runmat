@@ -656,6 +656,7 @@ mod tests {
             qualified_name: "helper".to_string(),
             source_path: PathBuf::from("src/helper.m"),
             package_name: "demo".to_string(),
+            dependency_alias: None,
             package_instance: Some(package_instance),
             source_id: Some(source_id),
             is_private: false,

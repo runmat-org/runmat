@@ -1030,7 +1030,7 @@ fn project_function_definitions(
     compat: CompatMode,
 ) -> Vec<Location> {
     let mut locations = Vec::new();
-    for source_file in project.all_source_files() {
+    for source_file in project.visible_source_files() {
         let Some(text) = read_file_text(source_file) else {
             continue;
         };
@@ -1038,9 +1038,11 @@ fn project_function_definitions(
             continue;
         };
         let analysis = analyze_document_with_compat_and_source(&text, compat, Some(source_name));
-        for range in function_definitions_in_document(&text, &analysis, symbol_name) {
-            if let Some(uri) = file_path_to_url(source_file) {
-                locations.push(Location { uri, range });
+        for lookup_name in project.definition_lookup_names(source_file, symbol_name) {
+            for range in function_definitions_in_document(&text, &analysis, lookup_name) {
+                if let Some(uri) = file_path_to_url(source_file) {
+                    locations.push(Location { uri, range });
+                }
             }
         }
     }
@@ -1053,7 +1055,7 @@ fn project_function_references(
     compat: CompatMode,
 ) -> Vec<Location> {
     let mut locations = Vec::new();
-    for source_file in project.all_source_files() {
+    for source_file in project.visible_source_files() {
         let Some(text) = read_file_text(source_file) else {
             continue;
         };
@@ -1076,7 +1078,7 @@ async fn project_function_definitions_async(
     compat: CompatMode,
 ) -> Vec<Location> {
     let mut locations = Vec::new();
-    for source_file in project.all_source_files() {
+    for source_file in project.visible_source_files() {
         let Ok(text) = runmat_filesystem::read_to_string_async(source_file).await else {
             continue;
         };
@@ -1085,9 +1087,11 @@ async fn project_function_definitions_async(
         };
         let analysis =
             analyze_document_with_compat_and_source_async(&text, compat, Some(source_name)).await;
-        for range in function_definitions_in_document(&text, &analysis, symbol_name) {
-            if let Some(uri) = file_path_to_url(source_file) {
-                locations.push(Location { uri, range });
+        for lookup_name in project.definition_lookup_names(source_file, symbol_name) {
+            for range in function_definitions_in_document(&text, &analysis, lookup_name) {
+                if let Some(uri) = file_path_to_url(source_file) {
+                    locations.push(Location { uri, range });
+                }
             }
         }
     }
@@ -1100,7 +1104,7 @@ async fn project_function_references_async(
     compat: CompatMode,
 ) -> Vec<Location> {
     let mut locations = Vec::new();
-    for source_file in project.all_source_files() {
+    for source_file in project.visible_source_files() {
         let Ok(text) = runmat_filesystem::read_to_string_async(source_file).await else {
             continue;
         };
