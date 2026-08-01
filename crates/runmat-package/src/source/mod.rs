@@ -5,6 +5,7 @@ mod inventory;
 mod path_project;
 mod project_resolver;
 mod symbols;
+mod vendor;
 
 pub use catalog::{
     FrozenProject, FrozenSourceDescriptor, PackageMount, PackageSourceCatalog, ProjectRevision,
@@ -32,4 +33,7 @@ pub use symbols::{
     discover_source_symbols_from_source_name, discover_source_symbols_from_source_name_async,
     source_symbols_from_frozen, source_symbols_from_index, DiscoverSourceSymbolsError,
     DiscoveredSourceSymbols, ProjectSymbolDefinition,
+};
+pub use vendor::{
+    VendorManifest, VendoredPackage, VENDOR_MANIFEST_FILENAME, VENDOR_SCHEMA_VERSION,
 };

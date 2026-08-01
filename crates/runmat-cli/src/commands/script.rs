@@ -140,7 +140,7 @@ async fn execute_script_request(
         config,
         "Failed to create execution engine",
     )?;
-    install_project_for_source(&mut engine, &script, cli).await?;
+    let _project_lease = install_project_for_source(&mut engine, &script, cli).await?;
     let mut script_run = engine.telemetry_run(TelemetryRunConfig {
         kind: TelemetryRunKind::Script,
         jit_enabled: config.jit.enabled,

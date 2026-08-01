@@ -1,4 +1,6 @@
-use super::selection::{feature_activation, join_relative, locked_git_source, validate_version};
+use super::selection::{
+    feature_activation, join_relative, locked_dependency, locked_git_source, validate_version,
+};
 use super::source::{canonical_path, find_manifest, is_file, load_sources, source_identity};
 use super::{GitPackageProvider, ProjectResolveError, ProjectResolveOptions};
 use crate::{
@@ -6,7 +8,8 @@ use crate::{
     PackageInstanceId, PackageLock, PackageManifest, RegistryId, SourceId, TargetEnvironment,
 };
 use runmat_config::project::{
-    load_project_manifest_async, ProjectSourceFile, PROJECT_MANIFEST_FILENAME,
+    load_project_manifest_async_with_options, ProjectManifestValidationOptions, ProjectSourceFile,
+    PROJECT_MANIFEST_FILENAME,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
@@ -20,12 +23,14 @@ pub(super) struct Loader<'a> {
     pub(super) git: &'a dyn GitPackageProvider,
     pub(super) packages: BTreeMap<String, LoadedPackage>,
     pub(super) acquired_git_sources: BTreeSet<GitSourceId>,
+    pub(super) vendor: Option<&'a crate::VendorManifest>,
 }
 
 #[derive(Clone)]
 pub(super) enum PackageOrigin {
     Workspace,
     Git(GitSourceId),
+    Vendor(SourceId),
 }
 
 pub(super) struct LoadedPackage {
@@ -90,12 +95,17 @@ impl Loader<'_> {
                 return Ok(key);
             }
 
-            let config = load_project_manifest_async(&manifest_path)
-                .await
-                .map_err(|error| ProjectResolveError::Manifest {
-                    path: manifest_path.clone(),
-                    reason: error.to_string(),
-                })?;
+            let config = load_project_manifest_async_with_options(
+                &manifest_path,
+                ProjectManifestValidationOptions {
+                    check_dependency_paths: !self.options.git_policy.frozen,
+                },
+            )
+            .await
+            .map_err(|error| ProjectResolveError::Manifest {
+                path: manifest_path.clone(),
+                reason: error.to_string(),
+            })?;
             let domain = PackageManifest::try_from(&config)
                 .map_err(|error| ProjectResolveError::Invalid(error.to_string()))?;
             let root = manifest_path
@@ -232,6 +242,61 @@ impl Loader<'_> {
                                 });
                             }
                             (child_manifest, PackageOrigin::Git(mount.source))
+                        } else if self.options.git_policy.frozen {
+                            let locked = locked_dependency(
+                                self.existing_lock,
+                                is_root,
+                                &instance,
+                                &dependency,
+                            )
+                            .ok_or_else(|| {
+                                ProjectResolveError::Invalid(format!(
+                                    "frozen path dependency `{}` in package `{}` requires an exact lock entry",
+                                    dependency.alias, domain.local_name
+                                ))
+                            })?;
+                            if !matches!(locked.instance.source, SourceId::Path(_)) {
+                                return Err(ProjectResolveError::Invalid(format!(
+                                    "frozen path dependency `{}` in package `{}` does not resolve to a locked path source",
+                                    dependency.alias, domain.local_name
+                                )));
+                            }
+                            let vendor = self.vendor.ok_or_else(|| {
+                                ProjectResolveError::Invalid(format!(
+                                    "frozen path dependency `{}` requires {} at the workspace root; run `runmat package vendor` first",
+                                    dependency.alias,
+                                    crate::VENDOR_MANIFEST_FILENAME
+                                ))
+                            })?;
+                            let vendored = vendor
+                                .package(&locked.instance.identity_digest)
+                                .ok_or_else(|| {
+                                    ProjectResolveError::Invalid(format!(
+                                        "vendor manifest does not contain locked path package {}",
+                                        locked.instance.identity_digest
+                                    ))
+                                })?;
+                            if vendored.source != locked.instance.source {
+                                return Err(ProjectResolveError::Invalid(format!(
+                                    "vendored source for package {} does not match runmat.lock",
+                                    locked.instance.identity_digest
+                                )));
+                            }
+                            let dependency_root = self.workspace_root.join(vendored.path.as_str());
+                            let child_manifest = find_manifest(&dependency_root)
+                                .await
+                                .unwrap_or_else(|| dependency_root.join(PROJECT_MANIFEST_FILENAME));
+                            if !is_file(&child_manifest).await {
+                                return Err(ProjectResolveError::MissingManifest {
+                                    package: domain.local_name.clone(),
+                                    dependency: dependency.alias.to_string(),
+                                    path: child_manifest,
+                                });
+                            }
+                            (
+                                child_manifest,
+                                PackageOrigin::Vendor(vendored.source.clone()),
+                            )
                         } else {
                             let dependency_root = root.join(path.as_str());
                             let child_manifest = find_manifest(&dependency_root)
@@ -323,5 +388,6 @@ fn package_key(manifest: &Path, origin: &PackageOrigin) -> String {
     match origin {
         PackageOrigin::Workspace => format!("path:{}", manifest.display()),
         PackageOrigin::Git(source) => format!("git:{}:{}", source.tree_digest, manifest.display()),
+        PackageOrigin::Vendor(source) => format!("vendor:{source:?}:{}", manifest.display()),
     }
 }

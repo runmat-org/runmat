@@ -1,8 +1,8 @@
 use super::loader::LoadedPackage;
 use super::ProjectResolveError;
 use crate::{
-    DependencySpec, GitSourceId, NormalizedRelativePath, PackageInstanceId, PackageLock,
-    PackageManifest, SourceId,
+    DependencySpec, GitSourceId, LockedPackage, NormalizedRelativePath, PackageInstanceId,
+    PackageLock, PackageManifest, SourceId,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -70,6 +70,20 @@ pub(super) fn locked_git_source<'a>(
     from: &PackageInstanceId,
     dependency: &DependencySpec,
 ) -> Option<&'a GitSourceId> {
+    locked_dependency(lock, from_root, from, dependency).and_then(|package| {
+        match &package.instance.source {
+            SourceId::Git(source) => Some(source),
+            _ => None,
+        }
+    })
+}
+
+pub(super) fn locked_dependency<'a>(
+    lock: Option<&'a PackageLock>,
+    from_root: bool,
+    from: &PackageInstanceId,
+    dependency: &DependencySpec,
+) -> Option<&'a LockedPackage> {
     let lock = lock?;
     let edge = lock.edges.iter().find(|edge| {
         edge.from.as_ref()
@@ -85,10 +99,6 @@ pub(super) fn locked_git_source<'a>(
     lock.packages
         .iter()
         .find(|package| package.instance.identity_digest == edge.to)
-        .and_then(|package| match &package.instance.source {
-            SourceId::Git(source) => Some(source),
-            _ => None,
-        })
 }
 
 pub(super) fn validate_version(

@@ -1,4 +1,12 @@
+mod cache;
+
+pub use cache::{
+    package_cache_acquire_lease, package_cache_gc, package_cache_release_lease,
+    package_cache_renew_lease, package_cache_status,
+};
+
 use runmat_package_cache::{CacheBackend, CacheError, CommitOutcome};
+use std::cell::{Cell, RefCell};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
@@ -82,6 +90,30 @@ struct ProjectResolveRequest {
 
 struct JsGitPackageProvider {
     bindings: JsValue,
+    lease_owner: String,
+    temporary_leases: RefCell<Vec<runmat_package_cache::Lease>>,
+    next_lease: Cell<u32>,
+}
+
+impl JsGitPackageProvider {
+    fn new(bindings: JsValue) -> Result<Self, JsValue> {
+        let lease_owner = js_sys::Reflect::get(&bindings, &JsValue::from_str("leaseOwner"))?
+            .as_string()
+            .ok_or_else(|| JsValue::from_str("package provider leaseOwner must be a string"))?;
+        runmat_package_cache::LeaseOwner::new(lease_owner.clone()).map_err(JsValue::from_str)?;
+        Ok(Self {
+            bindings,
+            lease_owner,
+            temporary_leases: RefCell::new(Vec::new()),
+            next_lease: Cell::new(0),
+        })
+    }
+
+    fn temporary_lease_id(&self) -> String {
+        let next = self.next_lease.get();
+        self.next_lease.set(next.saturating_add(1));
+        format!("{}-acquire-{next}", self.lease_owner)
+    }
 }
 
 impl runmat_package::GitPackageProvider for JsGitPackageProvider {
@@ -97,15 +129,37 @@ impl runmat_package::GitPackageProvider for JsGitPackageProvider {
                     .map_err(js_error)?;
             let cache = crate::runtime::package_cache::JsPackageCacheBackend::new(&cache_bindings)
                 .map_err(js_error)?;
-            let mut snapshot = if let Some(expected) = &plan.expected {
-                match runmat_package_cache::load_git_snapshot(&cache, expected.clone()).await {
-                    Ok(snapshot) => Some(snapshot),
-                    Err(CacheError::Miss(_)) => None,
+            let mut snapshot = None;
+            if let Some(expected) = &plan.expected {
+                match cache::acquire_for_objects(
+                    &cache,
+                    self.temporary_lease_id(),
+                    self.lease_owner.clone(),
+                    [expected.tree_digest.clone()].into_iter().collect(),
+                    60_000,
+                )
+                .await
+                {
+                    Ok(Some(lease)) => {
+                        match runmat_package_cache::load_git_snapshot(&cache, expected.clone())
+                            .await
+                        {
+                            Ok(cached) => {
+                                self.temporary_leases.borrow_mut().push(lease);
+                                snapshot = Some(cached);
+                            }
+                            Err(CacheError::Miss(_)) => {
+                                let _ =
+                                    runmat_package_cache::release_lease(&cache, &lease, 16).await;
+                            }
+                            Err(error) => return Err(error.to_string()),
+                        }
+                    }
+                    Ok(None) => unreachable!("expected Git tree is a lease root"),
+                    Err(CacheError::Miss(_)) => {}
                     Err(error) => return Err(error.to_string()),
                 }
-            } else {
-                None
-            };
+            }
             if snapshot.is_none() {
                 if !plan.allow_network {
                     return Err(format!(
@@ -153,6 +207,24 @@ impl runmat_package::GitPackageProvider for JsGitPackageProvider {
             let snapshot = snapshot.expect("cache hit or fetched snapshot");
             runmat_package::validate_git_acquisition(plan, &snapshot.source)
                 .map_err(|error| error.to_string())?;
+            if !self
+                .temporary_leases
+                .borrow()
+                .iter()
+                .any(|lease| lease.objects.contains(&snapshot.tree.digest))
+            {
+                let temporary = cache::acquire_for_objects(
+                    &cache,
+                    self.temporary_lease_id(),
+                    self.lease_owner.clone(),
+                    [snapshot.tree.digest.clone()].into_iter().collect(),
+                    60_000,
+                )
+                .await
+                .map_err(|error| error.to_string())?
+                .expect("Git snapshot has one tree lease root");
+                self.temporary_leases.borrow_mut().push(temporary);
+            }
             let snapshot_value = serde_wasm_bindgen::to_value(&snapshot)
                 .map_err(|error| format!("Git snapshot serialization failed: {error}"))?;
             let root = call_provider(&self.bindings, "mountGitSnapshot", &snapshot_value)
@@ -179,7 +251,7 @@ pub async fn resolve_project(
         serde_wasm_bindgen::from_value(request).map_err(|error| {
             JsValue::from_str(&format!("project resolve request parse failed: {error}"))
         })?;
-    let provider = JsGitPackageProvider { bindings: provider };
+    let provider = JsGitPackageProvider::new(provider)?;
     crate::runtime::filesystem::install_js_fs_provider(&filesystem).map_err(|error| {
         JsValue::from_str(&format!(
             "filesystem provider installation failed: {}",
@@ -214,9 +286,32 @@ pub async fn resolve_project(
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
         }
     }
-    serde_wasm_bindgen::to_value(&resolved).map_err(|error| {
-        JsValue::from_str(&format!("project result serialization failed: {error}"))
+    let cache_lease = cache::acquire_for_objects(
+        &cache,
+        format!("{}-graph", provider.lease_owner),
+        provider.lease_owner.clone(),
+        git_trees,
+        120_000,
+    )
+    .await
+    .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let temporary_leases = provider.temporary_leases.take();
+    for temporary in temporary_leases {
+        runmat_package_cache::release_lease(&cache, &temporary, 16)
+            .await
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    }
+    #[derive(serde::Serialize)]
+    struct BrowserResolveResult {
+        #[serde(flatten)]
+        resolved: runmat_package::ResolvedProject,
+        cache_lease: Option<runmat_package_cache::Lease>,
+    }
+    serde_wasm_bindgen::to_value(&BrowserResolveResult {
+        resolved,
+        cache_lease,
     })
+    .map_err(|error| JsValue::from_str(&format!("project result serialization failed: {error}")))
 }
 
 fn js_error(value: JsValue) -> String {
@@ -228,40 +323,6 @@ fn js_error(value: JsValue) -> String {
                 .and_then(|message| message.as_string())
         })
         .unwrap_or_else(|| "JavaScript package provider failed".to_string())
-}
-
-#[wasm_bindgen(js_name = packageCacheStatus)]
-pub async fn package_cache_status(provider: JsValue) -> Result<JsValue, JsValue> {
-    let backend = crate::runtime::package_cache::JsPackageCacheBackend::new(&provider)?;
-    let snapshot = backend
-        .snapshot()
-        .await
-        .map_err(|error| JsValue::from_str(&error.to_string()))?;
-    serde_wasm_bindgen::to_value(&runmat_package_cache::CacheStatus::from_state(
-        &snapshot.state,
-    ))
-    .map_err(|error| JsValue::from_str(&error.to_string()))
-}
-
-#[wasm_bindgen(js_name = packageCacheGc)]
-pub async fn package_cache_gc(
-    provider: JsValue,
-    target_bytes: u64,
-    retain_recent_ms: u64,
-) -> Result<JsValue, JsValue> {
-    let backend = crate::runtime::package_cache::JsPackageCacheBackend::new(&provider)?;
-    let plan = runmat_package_cache::execute_gc(
-        &backend,
-        runmat_package_cache::GcPolicy {
-            now_ms: js_sys::Date::now().max(0.0) as u64,
-            retain_recent_ms,
-            target_bytes,
-        },
-        16,
-    )
-    .await
-    .map_err(|error| JsValue::from_str(&error.to_string()))?;
-    serde_wasm_bindgen::to_value(&plan).map_err(|error| JsValue::from_str(&error.to_string()))
 }
 
 async fn call_provider(provider: &JsValue, name: &str, input: &JsValue) -> Result<JsValue, String> {

@@ -153,6 +153,10 @@ export class BrowserPackageMountFilesystem implements RunMatFilesystemProvider {
 
   constructor(private readonly workspace: RunMatFilesystemProvider) {}
 
+  clear(): void {
+    this.mounts.clear();
+  }
+
   register(snapshot: GitSnapshotMountInput, cache: RunMatPackageCacheProvider): string {
     const digest = snapshot.source.tree_digest;
     const key = digest.replace(":", "_");

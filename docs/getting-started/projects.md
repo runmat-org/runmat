@@ -154,16 +154,18 @@ runmat package cache gc --target-bytes 1073741824
 runmat package cache prune
 ```
 
-GC and prune never delete objects protected by a pin or active lease. Cache writes publish metadata and payloads together through revision compare-and-swap; interrupted staging is discarded, incomplete dependency closures are not exposed, digest mismatches become explicit corruption records, and cache eviction is reported as a recoverable miss. Native processes coordinate immutable materialization with narrow process locks. Browser tabs and workers use IndexedDB transactions and retry stale revisions rather than overwriting newer state.
+GC and prune never delete objects protected by a pin or active lease. Native sessions and browser project resolvers acquire renewable graph leases, release them on clean disposal, and rely on expiry after a process, tab, or worker disappears. Cache writes publish metadata and payloads together through revision compare-and-swap; interrupted staging is discarded, incomplete dependency closures are not exposed, digest mismatches become explicit corruption records, and cache eviction is reported as a recoverable miss. Native processes coordinate immutable materialization and physical-tree collection with narrow process locks. Browser tabs and workers use IndexedDB transactions and retry stale revisions rather than overwriting newer state.
 
 The native cache location follows the platform cache directory. `RUNMAT_PACKAGE_CACHE_DIR` can select an explicit cache root for hermetic CI or embedding; do not place credentials in that path or variable.
 
-`runmat package vendor` copies the resolved dependency closure into a project-local `vendor` directory by default and records `runmat-vendor.json` with the graph and source identities:
+`runmat package vendor` copies the resolved dependency closure into a project-local `vendor` directory by default and atomically records `runmat-vendor.json` at the workspace root with the exact graph, source identities, and project-relative copy locations:
 
 ```bash
 runmat package vendor
 runmat package vendor --output third_party/runmat
 ```
+
+Frozen execution requires this verified vendor manifest for every live path dependency. RunMat resolves those dependencies from their vendored copies, preserves their locked source identities, and rejects a stale graph, missing copy, source mismatch, or content/manifest tampering. Immutable Git dependencies may instead replay from their exact cached snapshots; `--frozen` still performs no network or lockfile mutation.
 
 ## Complete Project Example
 

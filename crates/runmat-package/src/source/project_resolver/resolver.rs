@@ -1,5 +1,5 @@
 use super::loader::{Loader, PackageOrigin};
-use super::source::canonical_path;
+use super::source::{canonical_path, is_file};
 use super::{GitPackageProvider, ProjectResolveError, ProjectResolveOptions, ResolvedProject};
 use crate::source::catalog::{assemble_frozen_project, FrozenPackageInput, FrozenSourceInput};
 use crate::{
@@ -23,6 +23,8 @@ pub async fn resolve_project_async(
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .to_path_buf();
+    let vendor =
+        load_vendor_manifest(&workspace_root, existing_lock, options.git_policy.frozen).await?;
     let mut loader = Loader {
         workspace_root: workspace_root.clone(),
         existing_lock,
@@ -30,6 +32,7 @@ pub async fn resolve_project_async(
         git,
         packages: BTreeMap::new(),
         acquired_git_sources: BTreeSet::new(),
+        vendor: vendor.as_ref(),
     };
     let mut root_features = options.root_features.clone();
     root_features.insert("default".to_string());
@@ -118,4 +121,43 @@ pub async fn resolve_project_async(
         acquired_git_sources: loader.acquired_git_sources.into_iter().collect(),
         source_inventories,
     })
+}
+
+async fn load_vendor_manifest(
+    workspace_root: &Path,
+    existing_lock: Option<&PackageLock>,
+    frozen: bool,
+) -> Result<Option<crate::VendorManifest>, ProjectResolveError> {
+    if !frozen {
+        return Ok(None);
+    }
+    let path = workspace_root.join(crate::VENDOR_MANIFEST_FILENAME);
+    if !is_file(&path).await {
+        return Ok(None);
+    }
+    let bytes = runmat_filesystem::read_async(&path)
+        .await
+        .map_err(|error| {
+            ProjectResolveError::Invalid(format!("cannot read {}: {error}", path.display()))
+        })?;
+    let manifest: crate::VendorManifest = serde_json::from_slice(&bytes).map_err(|error| {
+        ProjectResolveError::Invalid(format!("cannot decode {}: {error}", path.display()))
+    })?;
+    manifest.validate().map_err(|error| {
+        ProjectResolveError::Invalid(format!("invalid {}: {error}", path.display()))
+    })?;
+    let lock = existing_lock.ok_or_else(|| {
+        ProjectResolveError::Invalid(
+            "frozen vendoring requires an existing runmat.lock".to_string(),
+        )
+    })?;
+    if manifest.lock_digest != lock.graph_digest {
+        return Err(ProjectResolveError::Invalid(format!(
+            "{} records lock digest {}, but runmat.lock has {}",
+            path.display(),
+            manifest.lock_digest,
+            lock.graph_digest
+        )));
+    }
+    Ok(Some(manifest))
 }

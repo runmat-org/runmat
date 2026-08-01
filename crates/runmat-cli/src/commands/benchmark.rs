@@ -32,7 +32,7 @@ pub async fn execute_benchmark(
         .with_context(|| format!("Failed to read script file: {file:?}"))?;
 
     let mut engine = create_session(jit, false, config, "Failed to create execution engine")?;
-    install_project_for_source(&mut engine, &file, cli).await?;
+    let _project_lease = install_project_for_source(&mut engine, &file, cli).await?;
     let mut bench_run = engine.telemetry_run(TelemetryRunConfig {
         kind: TelemetryRunKind::Benchmark,
         jit_enabled: jit,

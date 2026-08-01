@@ -1,7 +1,10 @@
 use runmat_package::ContentDigest;
+use runmat_package_cache::backend::conformance::MemoryBackend;
 use runmat_package_cache::lease;
 use runmat_package_cache::{
-    BlobMetadata, CacheObject, CacheState, GcPlan, GcPolicy, LeaseId, LeaseOwner, Pin, PinId,
+    acquire_lease, execute_gc, release_lease, renew_lease, BlobMetadata, CacheBackend, CacheObject,
+    CacheState, CacheTransaction, CommitOutcome, GcPlan, GcPolicy, LeaseId, LeaseOwner,
+    ObjectWrite, Pin, PinId,
 };
 use std::collections::BTreeSet;
 
@@ -68,4 +71,83 @@ fn renewal_is_owner_and_generation_checked_and_expiry_releases_roots() {
         GcPlan::build(&state, GcPolicy::reclaim_to(21, u64::MAX)).delete,
         BTreeSet::from([digest])
     );
+}
+
+#[test]
+fn transactional_lease_lifecycle_is_backend_neutral_and_generation_checked() {
+    futures::executor::block_on(async {
+        let backend = MemoryBackend::new();
+        let bytes = b"leased".to_vec();
+        let metadata = BlobMetadata::from_bytes(&bytes);
+        let digest = metadata.digest.clone();
+        let mut state = CacheState::default();
+        state
+            .objects
+            .insert(digest.clone(), CacheObject::Blob(metadata.clone()));
+        let mut publish = CacheTransaction::metadata_only(0, state);
+        publish.writes.insert(
+            digest.clone(),
+            ObjectWrite::new(CacheObject::Blob(metadata), Some(bytes)).unwrap(),
+        );
+        assert!(matches!(
+            backend.commit(publish).await.unwrap(),
+            CommitOutcome::Committed(_)
+        ));
+
+        let lease = acquire_lease(
+            &backend,
+            LeaseId::new("session").unwrap(),
+            LeaseOwner::new("worker").unwrap(),
+            BTreeSet::from([digest]),
+            10,
+            100,
+            4,
+        )
+        .await
+        .unwrap();
+        let renewed = renew_lease(&backend, &lease, 20, 100, 4).await.unwrap();
+        assert_eq!(renewed.expires_at_ms, 120);
+        let mut stale = lease;
+        stale.generation += 1;
+        assert!(release_lease(&backend, &stale, 4).await.is_err());
+        release_lease(&backend, &renewed, 4).await.unwrap();
+        assert!(backend.snapshot().await.unwrap().state.leases.is_empty());
+    });
+}
+
+#[test]
+fn gc_atomically_expires_stale_leases_before_collecting_their_closure() {
+    futures::executor::block_on(async {
+        let backend = MemoryBackend::new();
+        let bytes = b"expired".to_vec();
+        let metadata = BlobMetadata::from_bytes(&bytes);
+        let digest = metadata.digest.clone();
+        let mut state = CacheState::default();
+        state
+            .objects
+            .insert(digest.clone(), CacheObject::Blob(metadata.clone()));
+        lease::acquire(
+            &mut state,
+            LeaseId::new("expired").unwrap(),
+            LeaseOwner::new("worker").unwrap(),
+            BTreeSet::from([digest.clone()]),
+            10,
+            10,
+        )
+        .unwrap();
+        let mut publish = CacheTransaction::metadata_only(0, state);
+        publish.writes.insert(
+            digest.clone(),
+            ObjectWrite::new(CacheObject::Blob(metadata), Some(bytes)).unwrap(),
+        );
+        backend.commit(publish).await.unwrap();
+
+        let plan = execute_gc(&backend, GcPolicy::reclaim_to(21, u64::MAX), 4)
+            .await
+            .unwrap();
+        assert!(plan.delete.contains(&digest));
+        let state = backend.snapshot().await.unwrap().state;
+        assert!(state.leases.is_empty());
+        assert!(state.objects.is_empty());
+    });
 }

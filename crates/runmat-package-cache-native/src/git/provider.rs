@@ -1,19 +1,21 @@
 use super::NativeGitClient;
 use crate::filesystem::CacheLayout;
 use crate::materialize::materialize_tree;
-use crate::SqliteCacheBackend;
+use crate::{NativeCacheError, NativeCacheLease, SqliteCacheBackend};
 use futures::FutureExt;
 use runmat_package::{GitAcquisitionPlan, GitPackageMount, GitPackageProvider};
 use runmat_package_cache::{
     cache_git_snapshot, load_git_snapshot, CacheBackend, CacheError, CommitOutcome, GitSnapshot,
 };
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct NativeGitPackageProvider {
     client: NativeGitClient,
     backend: Arc<SqliteCacheBackend>,
     layout: CacheLayout,
+    leases: Mutex<Vec<NativeCacheLease>>,
 }
 
 impl std::fmt::Debug for NativeGitPackageProvider {
@@ -36,14 +38,28 @@ impl NativeGitPackageProvider {
             client,
             backend,
             layout,
+            leases: Mutex::new(Vec::new()),
         }
     }
 
-    async fn acquire_snapshot(&self, plan: &GitAcquisitionPlan) -> Result<GitSnapshot, String> {
+    async fn acquire_snapshot(
+        &self,
+        plan: &GitAcquisitionPlan,
+    ) -> Result<(GitSnapshot, NativeCacheLease), String> {
         if let Some(expected) = &plan.expected {
-            match load_git_snapshot(&self.backend, expected.clone()).await {
-                Ok(snapshot) => return Ok(snapshot),
-                Err(CacheError::Miss(_)) => {}
+            match NativeCacheLease::acquire(
+                self.backend.clone(),
+                [expected.tree_digest.clone()].into_iter().collect(),
+            )
+            .await
+            {
+                Ok(Some(lease)) => match load_git_snapshot(&self.backend, expected.clone()).await {
+                    Ok(snapshot) => return Ok((snapshot, lease)),
+                    Err(CacheError::Miss(_)) => drop(lease),
+                    Err(error) => return Err(error.to_string()),
+                },
+                Ok(None) => unreachable!("expected Git tree is a lease root"),
+                Err(NativeCacheError::Cache(CacheError::Miss(_))) => {}
                 Err(error) => return Err(error.to_string()),
             }
         }
@@ -66,7 +82,16 @@ impl NativeGitPackageProvider {
                 .await
                 .map_err(|error| error.to_string())?
             {
-                CommitOutcome::Committed(_) => return Ok(snapshot),
+                CommitOutcome::Committed(_) => {
+                    let lease = NativeCacheLease::acquire(
+                        self.backend.clone(),
+                        [snapshot.tree.digest.clone()].into_iter().collect(),
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?
+                    .expect("Git snapshot tree is a lease root");
+                    return Ok((snapshot, lease));
+                }
                 CommitOutcome::Conflict { .. } => continue,
             }
         }
@@ -80,10 +105,14 @@ impl GitPackageProvider for NativeGitPackageProvider {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<GitPackageMount, String>> + 'a>>
     {
         async move {
-            let snapshot = self.acquire_snapshot(plan).await?;
+            let (snapshot, lease) = self.acquire_snapshot(plan).await?;
             let root = materialize_tree(&self.backend, &self.layout, &snapshot.tree)
                 .await
                 .map_err(|error| error.to_string())?;
+            self.leases
+                .lock()
+                .map_err(|_| "native package lease lock was poisoned".to_string())?
+                .push(lease);
             Ok(GitPackageMount {
                 source: snapshot.source,
                 root,

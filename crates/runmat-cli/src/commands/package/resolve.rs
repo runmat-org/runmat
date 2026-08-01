@@ -5,7 +5,8 @@ use runmat_package::{
     HostCapability, PackageLock, PathLockDecision, ProjectResolveOptions, ResolvedProject,
 };
 use runmat_package_cache_native::{
-    git::NativeGitClient, NativeCacheConfig, NativeGitPackageProvider, SqliteCacheBackend,
+    git::NativeGitClient, NativeCacheConfig, NativeCacheLease, NativeGitPackageProvider,
+    SqliteCacheBackend,
 };
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -15,6 +16,7 @@ pub(crate) struct NativeResolvedProject {
     pub resolved: ResolvedProject,
     pub backend: Arc<SqliteCacheBackend>,
     pub cache_config: NativeCacheConfig,
+    _cache_lease: Option<NativeCacheLease>,
 }
 
 pub(super) async fn resolve(
@@ -58,7 +60,7 @@ pub(super) async fn resolve(
         &provider,
     )
     .await
-    .context("package resolution failed")?;
+    .map_err(|error| anyhow::anyhow!("package resolution failed: {error}"))?;
     let git_trees = resolved
         .acquired_git_sources
         .iter()
@@ -74,10 +76,21 @@ pub(super) async fn resolve(
     if resolved.lock_decision == PathLockDecision::WriteGenerated {
         write_lock(&lock_path, &resolved.lock)?;
     }
+    let cache_lease = NativeCacheLease::acquire(
+        backend.clone(),
+        resolved
+            .acquired_git_sources
+            .iter()
+            .map(|source| source.tree_digest.clone())
+            .collect(),
+    )
+    .await
+    .context("failed to lease the resolved package graph")?;
     Ok(NativeResolvedProject {
         resolved,
         backend,
         cache_config,
+        _cache_lease: cache_lease,
     })
 }
 
@@ -165,14 +178,14 @@ pub(crate) async fn install_project_for_source(
     session: &mut runmat_core::RunMatSession,
     source: &Path,
     cli: &Cli,
-) -> Result<()> {
+) -> Result<Option<NativeResolvedProject>> {
     let Some(project) = resolve_for_source(source, cli).await? else {
-        return Ok(());
+        return Ok(None);
     };
     session
         .install_project_handoff(runmat_package::FrozenProjectHandoff::new(
-            project.resolved.frozen,
+            project.resolved.frozen.clone(),
         ))
         .context("failed to install resolved project graph")?;
-    Ok(())
+    Ok(Some(project))
 }

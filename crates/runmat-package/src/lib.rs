@@ -48,6 +48,7 @@ pub use source::{
     GitAcquisitionPolicy, GitLockAction, GitPackageMount, GitPackageProvider, GitPolicyError,
     PackageMount, PackageSourceCatalog, ProjectResolveError, ProjectResolveOptions,
     ProjectRevision, ProjectSymbolDefinition, ResolvedProject, SourceCatalog, SourceInventory,
-    SourceInventoryEntry, StableSourceId, VisibleProjectSource,
+    SourceInventoryEntry, StableSourceId, VendorManifest, VendoredPackage, VisibleProjectSource,
     FROZEN_PROJECT_HANDOFF_SCHEMA_VERSION, SOURCE_INVENTORY_SCHEMA_VERSION,
+    VENDOR_MANIFEST_FILENAME, VENDOR_SCHEMA_VERSION,
 };

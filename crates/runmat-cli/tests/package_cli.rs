@@ -59,6 +59,85 @@ helper = {{ git = "https://example.com/acme/helper.git", rev = "{commit}", versi
     assert!(executed.status.success(), "{executed:?}");
 }
 
+#[test]
+fn frozen_path_project_executes_from_verified_vendor_copy_and_rejects_tampering() {
+    let temp = TempDir::new().unwrap();
+    let project = temp.path().join("project");
+    let cache = temp.path().join("cache");
+    fs::create_dir_all(project.join("src")).unwrap();
+    fs::create_dir_all(project.join("deps/helper/src")).unwrap();
+    fs::write(project.join("src/main.m"), "answer = helper();\n").unwrap();
+    fs::write(
+        project.join("runmat.toml"),
+        r#"
+[package]
+name = "application"
+version = "1.0.0"
+[sources]
+roots = ["src"]
+[dependencies]
+helper = { path = "deps/helper", version = "2.0.0" }
+"#,
+    )
+    .unwrap();
+    fs::write(
+        project.join("deps/helper/runmat.toml"),
+        r#"
+[package]
+name = "helper"
+version = "2.0.0"
+[sources]
+roots = ["src"]
+"#,
+    )
+    .unwrap();
+    fs::write(
+        project.join("deps/helper/src/helper.m"),
+        "function value = helper(); value = 42; end\n",
+    )
+    .unwrap();
+
+    let resolved = runmat(&project, &cache, &["package", "resolve"]);
+    assert!(resolved.status.success(), "{resolved:?}");
+    let unvendored = runmat(&project, &cache, &["--frozen", "run", "src/main.m"]);
+    assert!(!unvendored.status.success(), "{unvendored:?}");
+    assert!(
+        String::from_utf8_lossy(&unvendored.stderr)
+            .contains(runmat_package::VENDOR_MANIFEST_FILENAME),
+        "{unvendored:?}"
+    );
+    let vendored = runmat(&project, &cache, &["package", "vendor"]);
+    assert!(vendored.status.success(), "{vendored:?}");
+    let vendor_manifest: runmat_package::VendorManifest = serde_json::from_slice(
+        &fs::read(project.join(runmat_package::VENDOR_MANIFEST_FILENAME)).unwrap(),
+    )
+    .unwrap();
+    let helper = vendor_manifest
+        .packages
+        .iter()
+        .find(|package| matches!(package.source, runmat_package::SourceId::Path(_)))
+        .unwrap();
+    let vendored_helper = project.join(helper.path.as_str()).join("src/helper.m");
+    assert!(vendored_helper.is_file());
+
+    fs::remove_dir_all(project.join("deps")).unwrap();
+    let frozen = runmat(&project, &cache, &["--frozen", "run", "src/main.m"]);
+    assert!(frozen.status.success(), "{frozen:?}");
+
+    fs::write(
+        &vendored_helper,
+        "function value = helper(); value = 7; end\n",
+    )
+    .unwrap();
+    let tampered = runmat(&project, &cache, &["--frozen", "run", "src/main.m"]);
+    assert!(!tampered.status.success(), "{tampered:?}");
+    assert!(
+        String::from_utf8_lossy(&tampered.stderr)
+            .contains("does not match its locked manifest and tree digests"),
+        "{tampered:?}"
+    );
+}
+
 fn runmat(project: &std::path::Path, cache: &std::path::Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_runmat"))
         .current_dir(project)

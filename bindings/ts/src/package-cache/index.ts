@@ -35,6 +35,7 @@ export type {
 export type {
   PackageCacheCommitOutcome,
   PackageCacheGcPlan,
+  PackageCacheLease,
   PackageCacheObjectWrite,
   PackageCacheRevision,
   PackageCacheSnapshot,

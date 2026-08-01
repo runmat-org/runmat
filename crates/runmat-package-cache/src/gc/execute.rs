@@ -8,12 +8,13 @@ pub async fn execute_gc<B: CacheBackend>(
 ) -> Result<GcPlan, CacheError> {
     for _ in 0..retries {
         let snapshot = backend.snapshot().await?;
-        let plan = GcPlan::build(&snapshot.state, policy);
-        if plan.delete.is_empty() {
+        let mut next = snapshot.state.clone();
+        crate::lease::expire(&mut next, policy.now_ms);
+        let plan = GcPlan::build(&next, policy);
+        apply_plan(&mut next, &plan);
+        if next == snapshot.state {
             return Ok(plan);
         }
-        let mut next = snapshot.state;
-        apply_plan(&mut next, &plan);
         let mut transaction = CacheTransaction::metadata_only(snapshot.revision, next);
         transaction.deletes.clone_from(&plan.delete);
         match backend.commit(transaction).await? {

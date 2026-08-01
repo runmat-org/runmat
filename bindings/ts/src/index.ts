@@ -1132,6 +1132,8 @@ interface RunMatNativeModule {
     targetBytes: bigint,
     retainRecentMs: bigint
   ) => Promise<PackageCacheGcPlan>;
+  packageCacheRenewLease?: BrowserProjectResolverConfig["native"]["packageCacheRenewLease"];
+  packageCacheReleaseLease?: BrowserProjectResolverConfig["native"]["packageCacheReleaseLease"];
   plotRendererReady?: () => boolean;
   renderCurrentFigureScene?: (handle: number) => void;
   exportFigureScene?: (handle: number) => Uint8Array | null | Promise<Uint8Array | null>;
@@ -1312,10 +1314,14 @@ export async function createBrowserProjectResolver(
 ): Promise<BrowserProjectResolver> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "resolveProject");
+  requireNativeFunction(native, "packageCacheRenewLease");
+  requireNativeFunction(native, "packageCacheReleaseLease");
   return new BrowserProjectResolver({
     ...config,
     native: {
-      resolveProject: native.resolveProject
+      resolveProject: native.resolveProject,
+      packageCacheRenewLease: native.packageCacheRenewLease,
+      packageCacheReleaseLease: native.packageCacheReleaseLease
     }
   });
 }

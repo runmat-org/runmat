@@ -10,6 +10,11 @@ import { fetchGitTreeInventoryWire } from "./git-gateway.js";
 import { BrowserPackageMountFilesystem } from "./mount.js";
 import type { GitSnapshotMountInput } from "./mount.js";
 import type { RunMatPackageCacheProvider } from "./provider-types.js";
+import type { PackageCacheLease } from "./provider-types.js";
+
+const LEASE_TTL_MS = 120_000n;
+const LEASE_RENEW_MS = 40_000;
+let nextResolverOwner = 1;
 
 export interface BrowserProjectResolveOptions {
   target: string;
@@ -34,16 +39,30 @@ export interface BrowserResolvedProject {
   source_inventories: unknown[];
 }
 
+interface BrowserResolveWireResult extends BrowserResolvedProject {
+  cache_lease?: PackageCacheLease | null;
+}
+
 export interface BrowserProjectResolverNative {
   resolveProject(
     request: BrowserProjectResolveRequest,
     provider: {
       packageCache: RunMatPackageCacheProvider;
+      leaseOwner: string;
       fetchGitInventory(plan: GitAcquisitionPlan): Promise<unknown>;
       mountGitSnapshot(snapshot: GitSnapshotWire): string;
     },
     filesystem: RunMatFilesystemProvider
-  ): Promise<BrowserResolvedProject>;
+  ): Promise<BrowserResolveWireResult>;
+  packageCacheRenewLease(
+    provider: RunMatPackageCacheProvider,
+    lease: PackageCacheLease,
+    ttlMs: bigint
+  ): Promise<PackageCacheLease>;
+  packageCacheReleaseLease(
+    provider: RunMatPackageCacheProvider,
+    lease: PackageCacheLease
+  ): Promise<void>;
 }
 
 export interface BrowserProjectResolverConfig {
@@ -62,32 +81,116 @@ export interface BrowserProjectResolverConfig {
  */
 export class BrowserProjectResolver {
   public readonly filesystem: BrowserPackageMountFilesystem;
+  private readonly leaseOwner = createLeaseOwner();
+  private cacheLease: PackageCacheLease | null = null;
+  private renewalTimer: ReturnType<typeof setInterval> | null = null;
+  private renewalInFlight: Promise<void> | null = null;
+  private resolving = false;
+  private disposed = false;
+  private leaseFailure: unknown = null;
 
   constructor(private readonly config: BrowserProjectResolverConfig) {
     this.filesystem = new BrowserPackageMountFilesystem(config.filesystem);
   }
 
-  resolve(request: BrowserProjectResolveRequest): Promise<BrowserResolvedProject> {
-    return this.config.native.resolveProject(
-      request,
-      {
-        packageCache: this.config.packageCache,
-        fetchGitInventory: (plan) =>
-          fetchGitTreeInventoryWire(
-            {
-              repository: plan.repository,
-              selector: plan.selector,
-              subdir: plan.subdir
-            },
-            this.config.gitGateway
-          ),
-        mountGitSnapshot: (snapshot) =>
-          this.filesystem.register(
-            snapshot as unknown as GitSnapshotMountInput,
-            this.config.packageCache
-          )
-      },
-      this.filesystem
-    );
+  async resolve(request: BrowserProjectResolveRequest): Promise<BrowserResolvedProject> {
+    if (this.disposed) {
+      throw new Error("Browser project resolver has been disposed");
+    }
+    if (this.resolving || this.cacheLease) {
+      throw new Error("Dispose the active browser project before resolving another project");
+    }
+    this.resolving = true;
+    try {
+      const { cache_lease: cacheLease, ...resolved } =
+        await this.config.native.resolveProject(
+          request,
+          {
+            packageCache: this.config.packageCache,
+            leaseOwner: this.leaseOwner,
+            fetchGitInventory: (plan) =>
+              fetchGitTreeInventoryWire(
+                {
+                  repository: plan.repository,
+                  selector: plan.selector,
+                  subdir: plan.subdir
+                },
+                this.config.gitGateway
+              ),
+            mountGitSnapshot: (snapshot) =>
+              this.filesystem.register(
+                snapshot as unknown as GitSnapshotMountInput,
+                this.config.packageCache
+              )
+          },
+          this.filesystem
+        );
+      this.cacheLease = cacheLease ?? null;
+      if (this.cacheLease) {
+        this.startRenewal();
+      }
+      return resolved;
+    } catch (error) {
+      this.filesystem.clear();
+      throw error;
+    } finally {
+      this.resolving = false;
+    }
   }
+
+  get cacheLeaseError(): unknown {
+    return this.leaseFailure;
+  }
+
+  async dispose(): Promise<void> {
+    if (this.disposed) {
+      return;
+    }
+    this.disposed = true;
+    if (this.renewalTimer) {
+      clearInterval(this.renewalTimer);
+      this.renewalTimer = null;
+    }
+    await this.renewalInFlight;
+    const lease = this.cacheLease;
+    this.cacheLease = null;
+    this.filesystem.clear();
+    if (lease) {
+      await this.config.native.packageCacheReleaseLease(this.config.packageCache, lease);
+    }
+  }
+
+  private startRenewal(): void {
+    this.renewalTimer = setInterval(() => {
+      if (!this.renewalInFlight) {
+        this.renewalInFlight = this.renewLease().finally(() => {
+          this.renewalInFlight = null;
+        });
+      }
+    }, LEASE_RENEW_MS);
+  }
+
+  private async renewLease(): Promise<void> {
+    const lease = this.cacheLease;
+    if (!lease || this.disposed) {
+      return;
+    }
+    try {
+      this.cacheLease = await this.config.native.packageCacheRenewLease(
+        this.config.packageCache,
+        lease,
+        LEASE_TTL_MS
+      );
+      this.leaseFailure = null;
+    } catch (error) {
+      this.leaseFailure = error;
+    }
+  }
+}
+
+function createLeaseOwner(): string {
+  const random = globalThis.crypto?.randomUUID?.();
+  return random
+    ? `browser-${random}`
+    : `browser-${Date.now()}-${nextResolverOwner++}`;
 }

@@ -8,6 +8,7 @@ pub(super) async fn execute(command: PackageCacheCommand) -> Result<()> {
     let config = NativeCacheConfig::platform_default()
         .context("failed to locate the platform package cache")?;
     let backend = SqliteCacheBackend::open(&config).context("failed to open the package cache")?;
+    let layout = config.layout();
     match command {
         PackageCacheCommand::Status { json } => {
             let snapshot = backend.snapshot().await?;
@@ -19,7 +20,7 @@ pub(super) async fn execute(command: PackageCacheCommand) -> Result<()> {
                 println!("Stored payload bytes: {}", status.stored_payload_bytes);
                 println!("Logical bytes: {}", status.logical_bytes);
                 println!("Pins: {}", status.pin_count);
-                println!("Active leases: {}", status.lease_count);
+                println!("Recorded leases: {}", status.lease_count);
                 println!("Corruption records: {}", status.corruption_count);
             }
         }
@@ -30,7 +31,13 @@ pub(super) async fn execute(command: PackageCacheCommand) -> Result<()> {
             } else {
                 target_bytes
             };
-            let plan = gc::execute(&backend, GcPolicy::reclaim_to(now_ms(), target), 16).await?;
+            let plan = gc::execute(
+                &backend,
+                &layout,
+                GcPolicy::reclaim_to(now_ms(), target),
+                16,
+            )
+            .await?;
             println!(
                 "Reclaimed {} bytes across {} cache objects",
                 plan.reclaim_bytes,
@@ -38,7 +45,13 @@ pub(super) async fn execute(command: PackageCacheCommand) -> Result<()> {
             );
         }
         PackageCacheCommand::Prune => {
-            let plan = gc::execute(&backend, GcPolicy::reclaim_to(now_ms(), u64::MAX), 16).await?;
+            let plan = gc::execute(
+                &backend,
+                &layout,
+                GcPolicy::reclaim_to(now_ms(), u64::MAX),
+                16,
+            )
+            .await?;
             println!(
                 "Pruned {} bytes across {} unprotected cache objects",
                 plan.reclaim_bytes,

@@ -50,3 +50,12 @@ export interface PackageCacheGcPlan {
   delete: string[];
   reclaim_bytes: number | bigint;
 }
+
+export interface PackageCacheLease {
+  id: string;
+  owner: string;
+  objects: string[];
+  acquired_at_ms: number | bigint;
+  expires_at_ms: number | bigint;
+  generation: number | bigint;
+}

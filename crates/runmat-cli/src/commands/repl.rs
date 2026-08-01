@@ -39,7 +39,7 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig, cli: &Cli) -> Result<()>
         "Failed to create REPL engine",
     )?;
     let cwd = std::env::current_dir().context("Failed to resolve current directory")?;
-    install_project_for_source(&mut engine, &cwd, cli).await?;
+    let _project_lease = install_project_for_source(&mut engine, &cwd, cli).await?;
     let repl_run = engine.telemetry_run(TelemetryRunConfig {
         kind: TelemetryRunKind::Repl,
         jit_enabled: config.jit.enabled,

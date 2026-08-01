@@ -181,7 +181,7 @@ runmat package cache gc
 runmat package cache prune
 ```
 
-`resolve` creates or refreshes `runmat.lock`; `fetch` fills missing immutable cache content without selecting a newer locked commit; and `update` is the explicit operation that may advance a branch or tag. `tree` and `why` project the same resolved graph used by execution and static analysis. See [Projects](/docs/runtime/getting-started/projects) for Git syntax, lock modes, browser behavior, cache recovery, and vendoring.
+`resolve` creates or refreshes `runmat.lock`; `fetch` fills missing immutable cache content without selecting a newer locked commit; and `update` is the explicit operation that may advance a branch or tag. `tree` and `why` project the same resolved graph used by execution and static analysis. `vendor` writes project-local dependency copies plus a workspace-root `runmat-vendor.json`; frozen execution requires and verifies that record for live path dependencies. See [Projects](/docs/runtime/getting-started/projects) for Git syntax, lock modes, browser behavior, cache recovery, and vendoring.
 
 ## Color and Terminal Output
 

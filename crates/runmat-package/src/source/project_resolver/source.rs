@@ -52,6 +52,30 @@ pub(super) fn source_identity(
     if let PackageOrigin::Git(source) = origin {
         return Ok(SourceId::Git(source.clone()));
     }
+    if let PackageOrigin::Vendor(expected) = origin {
+        let SourceId::Path(expected_path) = expected else {
+            return Err(ProjectResolveError::Invalid(
+                "vendor override currently requires a locked path source".to_string(),
+            ));
+        };
+        let canonical_manifest = toml::to_string(manifest).map_err(|error| {
+            ProjectResolveError::Invalid(format!(
+                "cannot encode manifest {}: {error}",
+                manifest_path.display()
+            ))
+        })?;
+        let manifest_digest = ContentDigest::sha256(canonical_manifest);
+        let tree_digest = path_tree_digest(sources)?;
+        if manifest_digest != expected_path.manifest_digest
+            || tree_digest != expected_path.tree_digest
+        {
+            return Err(ProjectResolveError::Invalid(format!(
+                "vendored package at {} does not match its locked manifest and tree digests",
+                root.display()
+            )));
+        }
+        return Ok(expected.clone());
+    }
     let relative = root.strip_prefix(workspace_root).map_err(|_| {
         ProjectResolveError::Invalid(format!(
             "path package {} is outside workspace {}",

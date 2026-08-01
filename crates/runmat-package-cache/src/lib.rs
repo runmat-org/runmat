@@ -24,7 +24,7 @@ pub use config::CacheConfig;
 pub use error::{BackendError, CacheError};
 pub use gc::{execute_gc, GcPlan, GcPolicy};
 pub use layout::{CacheNamespace, StorageKey};
-pub use lease::{Lease, LeaseId, LeaseOwner};
+pub use lease::{acquire_lease, release_lease, renew_lease, Lease, LeaseId, LeaseOwner};
 pub use materialize::{MaterializationRecord, MaterializationState, MountDescriptor};
 pub use object::{
     BlobMetadata, CacheObject, CacheObjectKind, Pin, PinId, SourceIndexMetadata, TreeEntry,

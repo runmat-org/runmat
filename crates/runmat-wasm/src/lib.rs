@@ -7,8 +7,9 @@ mod wire;
 
 pub use api::init::init_runmat;
 pub use api::package::{
-    build_git_snapshot, package_cache_gc, package_cache_status, plan_git_acquisition,
-    resolve_project, validate_git_snapshot,
+    build_git_snapshot, package_cache_acquire_lease, package_cache_gc, package_cache_release_lease,
+    package_cache_renew_lease, package_cache_status, plan_git_acquisition, resolve_project,
+    validate_git_snapshot,
 };
 // Plotting and figure APIs.
 pub use api::plot::{

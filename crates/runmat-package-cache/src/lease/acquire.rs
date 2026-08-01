@@ -15,13 +15,11 @@ pub fn acquire(
     if ttl_ms == 0 {
         return Err(CacheError::Lease("lease TTL must be nonzero".to_string()));
     }
-    if objects
+    if let Some(missing) = objects
         .iter()
-        .any(|digest| !state.objects.contains_key(digest))
+        .find(|digest| !state.objects.contains_key(*digest))
     {
-        return Err(CacheError::Lease(
-            "lease references an unavailable object".to_string(),
-        ));
+        return Err(CacheError::Miss(missing.clone()));
     }
     if state
         .leases

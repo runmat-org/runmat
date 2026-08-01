@@ -5,6 +5,7 @@ import type { RunMatPackageCacheProvider } from "./provider-types.js";
 
 describe("BrowserProjectResolver", () => {
   it("composes authenticated transport, cache, and immutable filesystem mounts", async () => {
+    vi.useFakeTimers();
     const cache = cacheProvider();
     const fetcher = vi.fn(async () =>
       new Response(
@@ -16,6 +17,11 @@ describe("BrowserProjectResolver", () => {
       )
     );
     let mountedRoot = "";
+    const releaseLease = vi.fn(async () => {});
+    const renewLease = vi.fn(async (_provider, lease) => ({
+      ...lease,
+      expires_at_ms: 240_001
+    }));
     const resolver = new BrowserProjectResolver({
       native: {
         async resolveProject(request, provider, filesystem) {
@@ -64,9 +70,19 @@ describe("BrowserProjectResolver", () => {
             lock: {},
             lock_decision: "write-generated",
             acquired_git_sources: [],
-            source_inventories: []
+            source_inventories: [],
+            cache_lease: {
+              id: "browser-test-graph",
+              owner: "browser-test",
+              objects: [`sha256:${"a".repeat(64)}`],
+              acquired_at_ms: 1,
+              expires_at_ms: 120_001,
+              generation: 0
+            }
           };
-        }
+        },
+        packageCacheRenewLease: renewLease,
+        packageCacheReleaseLease: releaseLease
       },
       filesystem: createInMemoryFsProvider(),
       packageCache: cache,
@@ -93,6 +109,11 @@ describe("BrowserProjectResolver", () => {
     expect(fetcher).toHaveBeenCalledOnce();
     const request = fetcher.mock.calls[0][1] as RequestInit;
     expect(request.headers).toMatchObject({ authorization: "Bearer secret" });
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(renewLease).toHaveBeenCalledOnce();
+    await resolver.dispose();
+    expect(releaseLease).toHaveBeenCalledOnce();
+    vi.useRealTimers();
   });
 });
 

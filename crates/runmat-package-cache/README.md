@@ -1,6 +1,6 @@
 # runmat-package-cache
 
-`runmat-package-cache` is the portable cache policy authority for RunMat packages. It owns canonical cache metadata, optimistic transaction semantics, object verification, materialization transitions, leases, pins, quota/corruption records, recovery, and garbage-collection planning.
+`runmat-package-cache` is the portable cache policy authority for RunMat packages. It owns canonical cache metadata, optimistic transaction semantics, object verification, materialization transitions, transactional lease acquisition/renewal/release, pins, quota/corruption records, recovery, and garbage-collection planning.
 
 ```text
 runmat-package ──► runmat-package-cache ◄── native/browser composition roots

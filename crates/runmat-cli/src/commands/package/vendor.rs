@@ -1,33 +1,52 @@
 use super::resolve::NativeResolvedProject;
 use anyhow::{Context, Result};
-use runmat_package::SourceId;
+use runmat_package::{
+    NormalizedRelativePath, SourceId, VendorManifest, VendoredPackage, VENDOR_MANIFEST_FILENAME,
+};
 use runmat_package_cache::load_git_snapshot;
 use runmat_package_cache_native::materialize::materialize_tree;
-use serde::Serialize;
 use std::path::Path;
 
-#[derive(Serialize)]
-struct VendorManifest {
-    schema_version: u32,
-    graph_digest: String,
-    packages: Vec<VendoredPackage>,
-}
-
-#[derive(Serialize)]
-struct VendoredPackage {
-    identity: String,
-    source: SourceId,
-    path: String,
-}
-
 pub(super) async fn vendor(project: &NativeResolvedProject, output: &Path) -> Result<()> {
-    let output = if output.is_absolute() {
+    let requested_output = if output.is_absolute() {
         output.to_path_buf()
     } else {
         project.resolved.frozen.workspace_root.join(output)
     };
+    let lexical_relative = requested_output
+        .strip_prefix(&project.resolved.frozen.workspace_root)
+        .with_context(|| {
+            format!(
+                "vendor directory {} must remain inside workspace {}",
+                requested_output.display(),
+                project.resolved.frozen.workspace_root.display()
+            )
+        })?;
+    let lexical_relative = NormalizedRelativePath::new(lexical_relative)
+        .context("vendor output must be a portable project-relative path")?;
+    let output = project
+        .resolved
+        .frozen
+        .workspace_root
+        .join(lexical_relative.as_str());
+    ensure_existing_ancestor_is_inside(&output, &project.resolved.frozen.workspace_root)?;
     std::fs::create_dir_all(&output)
         .with_context(|| format!("failed to create vendor directory {}", output.display()))?;
+    let output = std::fs::canonicalize(&output).with_context(|| {
+        format!(
+            "failed to canonicalize vendor directory {}",
+            output.display()
+        )
+    })?;
+    let relative_output = output
+        .strip_prefix(&project.resolved.frozen.workspace_root)
+        .with_context(|| {
+            format!(
+                "vendor directory {} must remain inside workspace {}",
+                output.display(),
+                project.resolved.frozen.workspace_root.display()
+            )
+        })?;
     let layout = project.cache_config.layout();
     let mut packages = Vec::new();
     for (identity, package) in &project.resolved.frozen.graph.packages {
@@ -62,7 +81,14 @@ pub(super) async fn vendor(project: &NativeResolvedProject, output: &Path) -> Re
                 source_root.display()
             )
         })?;
-        if std::fs::symlink_metadata(&destination).is_ok() {
+        if std::fs::symlink_metadata(&destination)
+            .is_ok_and(|metadata| metadata.file_type().is_symlink())
+        {
+            anyhow::bail!(
+                "refusing to use symlinked vendor destination {}",
+                destination.display()
+            );
+        } else if std::fs::symlink_metadata(&destination).is_ok() {
             if !trees_equal(&source_root, &destination)? {
                 anyhow::bail!(
                     "vendor destination {} already exists with different content",
@@ -73,19 +99,21 @@ pub(super) async fn vendor(project: &NativeResolvedProject, output: &Path) -> Re
             copy_tree(&source_root, &destination, &canonical_root)?;
         }
         packages.push(VendoredPackage {
-            identity: identity.to_string(),
+            identity: identity.clone(),
             source: package.instance.source.clone(),
-            path: directory,
+            path: NormalizedRelativePath::new(relative_output.join(directory))
+                .context("vendor package path is not portable")?,
         });
     }
-    packages.sort_by(|left, right| left.identity.cmp(&right.identity));
-    let manifest = VendorManifest {
-        schema_version: 1,
-        graph_digest: project.resolved.frozen.graph.graph_digest.to_string(),
-        packages,
-    };
-    let bytes = serde_json::to_vec_pretty(&manifest)?;
-    let manifest_path = output.join("runmat-vendor.json");
+    let manifest = VendorManifest::new(project.resolved.lock.graph_digest.clone(), packages)
+        .map_err(anyhow::Error::msg)?;
+    let mut bytes = serde_json::to_vec_pretty(&manifest)?;
+    bytes.push(b'\n');
+    let manifest_path = project
+        .resolved
+        .frozen
+        .workspace_root
+        .join(VENDOR_MANIFEST_FILENAME);
     if std::fs::symlink_metadata(&manifest_path)
         .is_ok_and(|metadata| metadata.file_type().is_symlink())
     {
@@ -94,8 +122,49 @@ pub(super) async fn vendor(project: &NativeResolvedProject, output: &Path) -> Re
             manifest_path.display()
         );
     }
-    std::fs::write(&manifest_path, bytes).context("failed to write vendor manifest")?;
-    println!("Vendored package closure to {}", output.display());
+    let parent = manifest_path.parent().unwrap_or_else(|| Path::new("."));
+    let mut temporary =
+        tempfile::NamedTempFile::new_in(parent).context("failed to stage vendor manifest")?;
+    use std::io::Write as _;
+    temporary
+        .write_all(&bytes)
+        .context("failed to write staged vendor manifest")?;
+    temporary
+        .as_file()
+        .sync_all()
+        .context("failed to sync staged vendor manifest")?;
+    temporary
+        .persist(&manifest_path)
+        .map_err(|error| error.error)
+        .context("failed to atomically publish vendor manifest")?;
+    println!(
+        "Vendored package closure to {} and wrote {}",
+        output.display(),
+        manifest_path.display()
+    );
+    Ok(())
+}
+
+fn ensure_existing_ancestor_is_inside(path: &Path, workspace: &Path) -> Result<()> {
+    let mut ancestor = path;
+    while std::fs::symlink_metadata(ancestor).is_err() {
+        ancestor = ancestor.parent().ok_or_else(|| {
+            anyhow::anyhow!("vendor output {} has no existing ancestor", path.display())
+        })?;
+    }
+    let canonical = std::fs::canonicalize(ancestor).with_context(|| {
+        format!(
+            "failed to canonicalize vendor output ancestor {}",
+            ancestor.display()
+        )
+    })?;
+    if !canonical.starts_with(workspace) {
+        anyhow::bail!(
+            "vendor output ancestor {} resolves outside workspace {}",
+            ancestor.display(),
+            workspace.display()
+        );
+    }
     Ok(())
 }
 

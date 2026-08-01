@@ -2,6 +2,7 @@ use futures::executor::block_on;
 use runmat_package_cache::{
     BackendError, BlobMetadata, CacheBackend, CacheObject, CacheTransaction, GcPolicy, ObjectWrite,
 };
+use runmat_package_cache_native::filesystem::CacheLayout;
 use runmat_package_cache_native::{gc, SqliteCacheBackend};
 
 fn blob_transaction(
@@ -40,11 +41,14 @@ fn sqlite_quota_failure_rolls_back_state_and_payload() {
 #[test]
 fn native_gc_executes_portable_plan_atomically() {
     block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let layout = CacheLayout::new(directory.path().join("cache"));
+        layout.create().unwrap();
         let backend = SqliteCacheBackend::open_in_memory(None).unwrap();
         let (digest, transaction) =
             blob_transaction(0, backend.snapshot().await.unwrap().state, b"garbage");
         backend.commit(transaction).await.unwrap();
-        let plan = gc::execute(&backend, GcPolicy::reclaim_to(10, 1), 3)
+        let plan = gc::execute(&backend, &layout, GcPolicy::reclaim_to(10, 1), 3)
             .await
             .unwrap();
         assert!(plan.delete.contains(&digest));

@@ -15,7 +15,18 @@ pub(crate) fn protected_closure(state: &CacheState, now_ms: u64) -> BTreeSet<Con
                 .values()
                 .flat_map(|pin| pin.objects.iter().cloned()),
         )
-        .chain(state.materializations.keys().cloned())
+        .chain(
+            state
+                .materializations
+                .iter()
+                .filter(|(_, materialization)| {
+                    state
+                        .leases
+                        .get(&materialization.lease)
+                        .is_some_and(|lease| lease.is_active_at(now_ms))
+                })
+                .map(|(digest, _)| digest.clone()),
+        )
         .collect();
     while let Some(digest) = pending.pop() {
         if !marked.insert(digest.clone()) {

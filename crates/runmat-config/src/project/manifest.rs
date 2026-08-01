@@ -268,8 +268,25 @@ enum PathRequirement {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProjectManifestValidationOptions {
+    pub check_dependency_paths: bool,
+}
+
+impl Default for ProjectManifestValidationOptions {
+    fn default() -> Self {
+        Self {
+            check_dependency_paths: true,
+        }
+    }
+}
+
 impl ProjectManifest {
-    fn validation_plan(&self, project_root: &Path) -> (Vec<String>, Vec<PathRequirement>) {
+    fn validation_plan(
+        &self,
+        project_root: &Path,
+        options: ProjectManifestValidationOptions,
+    ) -> (Vec<String>, Vec<PathRequirement>) {
         let mut messages = Vec::new();
         let mut path_requirements = Vec::new();
         let package_name = self.package.name.trim();
@@ -306,6 +323,7 @@ impl ProjectManifest {
             "dependencies",
             &self.dependencies,
             project_root,
+            options.check_dependency_paths,
             &mut messages,
             &mut path_requirements,
         );
@@ -313,6 +331,7 @@ impl ProjectManifest {
             "dev-dependencies",
             &self.dev_dependencies,
             project_root,
+            options.check_dependency_paths,
             &mut messages,
             &mut path_requirements,
         );
@@ -320,6 +339,7 @@ impl ProjectManifest {
             "test-dependencies",
             &self.test_dependencies,
             project_root,
+            options.check_dependency_paths,
             &mut messages,
             &mut path_requirements,
         );
@@ -336,6 +356,7 @@ impl ProjectManifest {
                     &format!("target.{target}.{group}"),
                     table,
                     project_root,
+                    options.check_dependency_paths,
                     &mut messages,
                     &mut path_requirements,
                 );
@@ -437,7 +458,8 @@ impl ProjectManifest {
     }
 
     pub fn validate(&self, project_root: &Path) -> Result<(), ProjectManifestValidationError> {
-        let (mut messages, path_requirements) = self.validation_plan(project_root);
+        let (mut messages, path_requirements) =
+            self.validation_plan(project_root, ProjectManifestValidationOptions::default());
         for requirement in path_requirements {
             match requirement {
                 PathRequirement::Directory {
@@ -461,7 +483,16 @@ impl ProjectManifest {
         &self,
         project_root: &Path,
     ) -> Result<(), ProjectManifestValidationError> {
-        let (mut messages, path_requirements) = self.validation_plan(project_root);
+        self.validate_async_with_options(project_root, ProjectManifestValidationOptions::default())
+            .await
+    }
+
+    pub async fn validate_async_with_options(
+        &self,
+        project_root: &Path,
+        options: ProjectManifestValidationOptions,
+    ) -> Result<(), ProjectManifestValidationError> {
+        let (mut messages, path_requirements) = self.validation_plan(project_root, options);
         for requirement in path_requirements {
             match requirement {
                 PathRequirement::Directory {
@@ -489,6 +520,7 @@ fn extend_dependency_validation(
     table_name: &str,
     dependencies: &BTreeMap<String, ProjectDependency>,
     project_root: &Path,
+    check_dependency_paths: bool,
     messages: &mut Vec<String>,
     path_requirements: &mut Vec<PathRequirement>,
 ) {
@@ -516,7 +548,7 @@ fn extend_dependency_validation(
                 "dependency `{name}` path `{}` must be project-relative without `..` segments",
                 path.display()
             ));
-        } else {
+        } else if check_dependency_paths {
             path_requirements.push(PathRequirement::Directory {
                 path: project_root.join(path),
                 missing_message: format!(
@@ -594,6 +626,28 @@ pub async fn load_project_manifest_async(
     let project_root = path.parent().unwrap_or_else(|| Path::new("."));
     manifest
         .validate_async(project_root)
+        .await
+        .map_err(|source| ProjectManifestLoadError::Validation {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    Ok(manifest)
+}
+
+pub async fn load_project_manifest_async_with_options(
+    path: &Path,
+    options: ProjectManifestValidationOptions,
+) -> Result<ProjectManifest, ProjectManifestLoadError> {
+    let content = runmat_filesystem::read_to_string_async(path)
+        .await
+        .map_err(|source| ProjectManifestLoadError::Read {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let manifest = parse_project_manifest(path, &content)?;
+    let project_root = path.parent().unwrap_or_else(|| Path::new("."));
+    manifest
+        .validate_async_with_options(project_root, options)
         .await
         .map_err(|source| ProjectManifestLoadError::Validation {
             path: path.to_path_buf(),

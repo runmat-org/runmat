@@ -1,8 +1,9 @@
 use futures::executor::block_on;
 use runmat_config::project::{
     build_project_source_index_async, discover_project_manifest_from_async,
-    load_project_manifest_async, resolve_named_entrypoint_from_async,
-    resolve_project_source_input_from_async, ResolvedEntrypointTarget,
+    load_project_manifest_async, load_project_manifest_async_with_options,
+    resolve_named_entrypoint_from_async, resolve_project_source_input_from_async,
+    ProjectManifestValidationOptions, ResolvedEntrypointTarget,
 };
 use runmat_filesystem::{provider_override_lock, replace_provider, MemoryFsProvider};
 use std::path::{Path, PathBuf};
@@ -125,5 +126,39 @@ fn async_manifest_validation_does_not_consult_the_native_filesystem() {
             .await
             .expect("virtual-only paths must validate");
         assert_eq!(manifest.package.name, "browser-app");
+    });
+}
+
+#[test]
+fn frozen_loader_option_skips_only_dependency_existence_checks() {
+    let _provider_lock = provider_override_lock();
+    let provider = MemoryFsProvider::with_current_dir("/workspace");
+    write(
+        &provider,
+        "/workspace/runmat.toml",
+        r#"
+[package]
+name = "app"
+[sources]
+roots = ["src"]
+[dependencies]
+helper = { path = "missing/helper" }
+"#,
+    );
+    write(&provider, "/workspace/src/main.m", "answer = helper();");
+    let _provider = replace_provider(Arc::new(provider));
+
+    block_on(async {
+        let path = Path::new("/workspace/runmat.toml");
+        assert!(load_project_manifest_async(path).await.is_err());
+        let manifest = load_project_manifest_async_with_options(
+            path,
+            ProjectManifestValidationOptions {
+                check_dependency_paths: false,
+            },
+        )
+        .await
+        .expect("frozen resolver validates dependency availability against vendor state");
+        assert_eq!(manifest.package.name, "app");
     });
 }
