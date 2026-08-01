@@ -18,8 +18,9 @@ pub use identity::{
     PackageVersion, PathSourceId, RegistryId, RegistrySourceId, ServerProjectSourceId, SourceId,
 };
 pub use lock::{
-    decode_lock, diff_locks, encode_lock, LockCompatibility, LockDiff, LockSelection, LockedEdge,
-    LockedPackage, PackageLock, RootLock, LOCK_SCHEMA_VERSION, RESOLVER_FORMAT_VERSION,
+    decode_lock, diff_locks, encode_lock, reconcile_path_lock, LockCompatibility, LockDiff,
+    LockSelection, LockedEdge, LockedPackage, PackageLock, PathLockDecision, PathLockMode,
+    RootLock, LOCK_SCHEMA_VERSION, RESOLVER_FORMAT_VERSION,
 };
 pub use manifest::{
     DependencyGroup, DependencyLocator, DependencySpec, GitSelector, HostCapability,

@@ -1,7 +1,8 @@
 use runmat_package::{
-    decode_lock, diff_locks, encode_lock, CanonicalPackageId, ContentDigest, DependencyGroup,
-    HostCapability, LockCompatibility, LockSelection, LockedEdge, LockedPackage, PackageAlias,
-    PackageInstanceId, PackageLock, PathSourceId, RootLock, ServerProjectSourceId, SourceId,
+    decode_lock, diff_locks, encode_lock, reconcile_path_lock, CanonicalPackageId, ContentDigest,
+    DependencyGroup, HostCapability, LockCompatibility, LockSelection, LockedEdge, LockedPackage,
+    PackageAlias, PackageInstanceId, PackageLock, PathLockDecision, PathLockMode, PathSourceId,
+    RootLock, ServerProjectSourceId, SourceId,
 };
 use semver::Version;
 use std::collections::BTreeSet;
@@ -179,4 +180,30 @@ fn lock_construction_rejects_secret_bearing_sources_and_unavailable_capabilities
         Vec::new(),
     );
     assert!(result.is_err());
+}
+
+#[test]
+fn path_lock_modes_never_silently_weaken_locked_execution() {
+    let generated = fixture_lock();
+    assert_eq!(
+        reconcile_path_lock(&generated, None, PathLockMode::Live).unwrap(),
+        PathLockDecision::WriteGenerated
+    );
+    assert!(reconcile_path_lock(&generated, None, PathLockMode::Locked).is_err());
+    assert_eq!(
+        reconcile_path_lock(&generated, Some(&generated), PathLockMode::Locked).unwrap(),
+        PathLockDecision::UseExisting
+    );
+
+    let mut stale = fixture_lock();
+    stale
+        .selection
+        .root_features
+        .insert("new-feature".to_string());
+    stale = PackageLock::new(stale.root, stale.selection, stale.packages, stale.edges).unwrap();
+    assert_eq!(
+        reconcile_path_lock(&generated, Some(&stale), PathLockMode::Live).unwrap(),
+        PathLockDecision::WriteGenerated
+    );
+    assert!(reconcile_path_lock(&generated, Some(&stale), PathLockMode::Locked).is_err());
 }
