@@ -1,3 +1,8 @@
+import {
+  decryptRegistryPrivateArtifact,
+  type BrowserPrivatePackageKeyProvider
+} from "./private-artifact.js";
+
 const METADATA_LIMIT_BYTES = 4 * 1024 * 1024;
 const DEFAULT_ARTIFACT_LIMIT_BYTES = 512 * 1024 * 1024;
 
@@ -22,11 +27,13 @@ export interface BrowserRegistryOptions {
   fetch?: typeof globalThis.fetch;
   signal?: AbortSignal;
   maxArtifactBytes?: number;
+  privatePackageKeys?: BrowserPrivatePackageKeyProvider;
 }
 
 export interface RegistryReleaseTransfer {
   release: unknown;
   artifactBytes: Uint8Array;
+  privateArtifact?: boolean;
 }
 
 export async function fetchRegistryCandidates(
@@ -99,7 +106,28 @@ export async function fetchRegistryRelease(
     throw new Error(`registry artifact request failed with HTTP ${response.status}`);
   }
   const bytes = await readBounded(response, limit, artifact.byteLen);
+  if (releaseEncryption(release)) {
+    if (!options.privatePackageKeys) {
+      bytes.fill(0);
+      throw new Error("private registry package key access is not configured");
+    }
+    try {
+      const plaintext = await decryptRegistryPrivateArtifact(
+        release,
+        bytes,
+        options.privatePackageKeys
+      );
+      return { release, artifactBytes: plaintext, privateArtifact: true };
+    } finally {
+      bytes.fill(0);
+    }
+  }
   return { release, artifactBytes: bytes };
+}
+
+function releaseEncryption(value: unknown): unknown {
+  if (!value || typeof value !== "object") return null;
+  return (value as { encryption?: unknown }).encryption ?? null;
 }
 
 async function fetchJson(

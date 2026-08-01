@@ -6,6 +6,48 @@ use std::process::{Command, Output};
 use tempfile::TempDir;
 
 #[test]
+fn package_inspect_emits_the_deterministic_release_contract() {
+    let temp = TempDir::new().unwrap();
+    let project = temp.path().join("project");
+    let cache = temp.path().join("cache");
+    fs::create_dir_all(project.join("src")).unwrap();
+    fs::write(
+        project.join("runmat.toml"),
+        r#"
+[package]
+name = "tools"
+organization = "acme"
+version = "1.2.3"
+
+[sources]
+roots = ["src"]
+
+[publish]
+license = "MIT"
+"#,
+    )
+    .unwrap();
+    fs::write(
+        project.join("src/tool.m"),
+        "function value = tool(); value = 42; end\n",
+    )
+    .unwrap();
+
+    let first = runmat(&project, &cache, &["package", "inspect", "--json"]);
+    let second = runmat(&project, &cache, &["package", "inspect", "--json"]);
+    assert!(first.status.success(), "{first:?}");
+    assert_eq!(first.stdout, second.stdout);
+    let output: serde_json::Value = serde_json::from_slice(&first.stdout).unwrap();
+    assert_eq!(output["manifest"]["version"], "1.2.3");
+    assert_eq!(output["manifest"]["license"], "MIT");
+    assert_eq!(output["inventory"]["fileCount"], 2);
+    assert!(output["manifest"]["artifactDigest"]
+        .as_str()
+        .unwrap()
+        .starts_with("sha256:"));
+}
+
+#[test]
 fn offline_git_project_resolves_locks_checks_and_executes_from_shared_cache() {
     let temp = TempDir::new().unwrap();
     let cache = temp.path().join("cache");

@@ -25,6 +25,7 @@ import { BrowserPackageMountFilesystem } from "./mount.js";
 import type { PackageSnapshotMountInput } from "./mount.js";
 import type { RunMatPackageCacheProvider } from "./provider-types.js";
 import type { PackageCacheLease } from "./provider-types.js";
+import { subscribePrivateArtifactInvalidation } from "./private-artifact-lifecycle.js";
 
 const LEASE_TTL_MS = 120_000n;
 const LEASE_RENEW_MS = 40_000;
@@ -72,6 +73,7 @@ export interface BrowserProjectResolverNative {
       fetchRegistryCandidates(plan: RegistryCandidatePlan): Promise<unknown>;
       fetchRegistryRelease(plan: RegistryAcquisitionPlan): Promise<unknown>;
       mountPackageSnapshot(snapshot: GitSnapshotWire): string;
+      mountPrivatePackageSnapshot(snapshot: GitSnapshotWire): string;
     },
     filesystem: RunMatFilesystemProvider
   ): Promise<BrowserResolveWireResult>;
@@ -111,9 +113,12 @@ export class BrowserProjectResolver {
   private resolving = false;
   private disposed = false;
   private leaseFailure: unknown = null;
+  private readonly unsubscribePrivateArtifactInvalidation: () => void;
 
   constructor(private readonly config: BrowserProjectResolverConfig) {
     this.filesystem = new BrowserPackageMountFilesystem(config.filesystem);
+    this.unsubscribePrivateArtifactInvalidation =
+      subscribePrivateArtifactInvalidation(() => this.filesystem.clear());
   }
 
   async resolve(request: BrowserProjectResolveRequest): Promise<BrowserResolvedProject> {
@@ -150,6 +155,10 @@ export class BrowserProjectResolver {
               this.filesystem.register(
                 snapshot as unknown as PackageSnapshotMountInput,
                 this.config.packageCache
+              ),
+            mountPrivatePackageSnapshot: (snapshot) =>
+              this.filesystem.registerVolatile(
+                snapshot as unknown as PackageSnapshotMountInput
               )
           },
           this.filesystem
@@ -176,6 +185,7 @@ export class BrowserProjectResolver {
       return;
     }
     this.disposed = true;
+    this.unsubscribePrivateArtifactInvalidation();
     if (this.renewalTimer) {
       clearInterval(this.renewalTimer);
       this.renewalTimer = null;

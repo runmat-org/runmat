@@ -8,6 +8,9 @@ use runmat_package_cache::{
     CacheBackend, GitTreeInventory, RegistryArtifactInventory, TreeInventoryEntry,
     REGISTRY_ARTIFACT_SCHEMA_VERSION,
 };
+use runmat_package_cache_native::registry::{
+    encrypt_private_artifact, InMemoryRecipientKeyRing, RecipientKeyPair,
+};
 use runmat_package_cache_native::registry::{RegistryArtifactTransfer, RegistryTransport};
 use runmat_package_cache_native::{
     git::NativeGitClient, NativeCacheConfig, NativePackageSourceProvider, SqliteCacheBackend,
@@ -21,6 +24,7 @@ use tempfile::TempDir;
 struct FixtureRegistryTransport {
     record: RegistryCandidateRecord,
     artifact: Vec<u8>,
+    key_envelopes: Vec<runmat_package::PackageKeyEnvelope>,
     corrupt: AtomicBool,
     unavailable: AtomicBool,
     candidate_calls: AtomicUsize,
@@ -60,6 +64,7 @@ impl RegistryTransport for FixtureRegistryTransport {
                 source: self.record.source.clone(),
                 metadata: self.record.metadata.clone(),
                 artifact_bytes,
+                key_envelopes: self.key_envelopes.clone(),
             })
         })
     }
@@ -89,6 +94,7 @@ tools = { package = "acme/tools", version = "^1" }
     let transport = Arc::new(FixtureRegistryTransport {
         record,
         artifact,
+        key_envelopes: Vec::new(),
         corrupt: AtomicBool::new(true),
         unavailable: AtomicBool::new(false),
         candidate_calls: AtomicUsize::new(0),
@@ -156,6 +162,89 @@ tools = { package = "acme/tools", version = "^1" }
     assert_eq!(transport.fetch_calls.load(Ordering::SeqCst), 2);
 }
 
+#[test]
+fn encrypted_registry_resolution_decrypts_without_persisting_plaintext_in_the_cache() {
+    let temp = TempDir::new().unwrap();
+    let project = temp.path().join("project");
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::write(project.join("src/main.m"), "answer = tools();\n").unwrap();
+    std::fs::write(
+        project.join("runmat.toml"),
+        r#"
+[package]
+name = "application"
+version = "1.0.0"
+[sources]
+roots = ["src"]
+[dependencies]
+tools = { package = "acme/tools", version = "^1" }
+"#,
+    )
+    .unwrap();
+
+    let (mut record, plaintext) = release();
+    let recipient = RecipientKeyPair::from_secret_bytes("pkr_test", [17; 32]).unwrap();
+    let bundle = encrypt_private_artifact(
+        &record.source,
+        &plaintext,
+        1,
+        &[recipient.public_key().unwrap()],
+    )
+    .unwrap();
+    record.source.artifact_digest = ContentDigest::sha256(&bundle.ciphertext);
+    record.metadata.encryption = Some(bundle.metadata);
+    record.source.release_digest = record.metadata.compute_digest(&record.source).unwrap();
+    let transport = Arc::new(FixtureRegistryTransport {
+        record,
+        artifact: bundle.ciphertext,
+        key_envelopes: bundle.envelopes,
+        corrupt: AtomicBool::new(false),
+        unavailable: AtomicBool::new(false),
+        candidate_calls: AtomicUsize::new(0),
+        fetch_calls: AtomicUsize::new(0),
+    });
+    let cache_config = NativeCacheConfig {
+        root: temp.path().join("cache"),
+        quota_bytes: None,
+    };
+    let layout = cache_config.layout();
+    let backend = Arc::new(SqliteCacheBackend::open(&cache_config).unwrap());
+    let provider = NativePackageSourceProvider::new(
+        NativeGitClient::new(layout.clone()),
+        backend.clone(),
+        layout,
+    )
+    .with_registry_transport(transport)
+    .with_private_artifact_decryptor(Arc::new(InMemoryRecipientKeyRing::new(vec![recipient])));
+
+    let resolved = block_on(resolve_project_async(
+        &project.join("runmat.toml"),
+        None,
+        options(SourceAcquisitionPolicy::default()),
+        &provider,
+    ))
+    .unwrap();
+    assert_eq!(resolved.acquired_registry_sources.len(), 1);
+    let state = block_on(backend.snapshot()).unwrap().state;
+    assert!(
+        state.objects.is_empty() && state.materializations.is_empty(),
+        "decrypted private package data must not enter the durable cache"
+    );
+    let private_source_path = resolved
+        .frozen
+        .access_paths
+        .values()
+        .find(|path| path.to_string_lossy().contains("runmat-private-package-"))
+        .expect("private source path is mounted in the ephemeral tree")
+        .clone();
+    assert!(private_source_path.exists());
+    drop(provider);
+    assert!(
+        !private_source_path.exists(),
+        "dropping the provider must remove ephemeral plaintext mounts"
+    );
+}
+
 fn options(policy: SourceAcquisitionPolicy) -> ProjectResolveOptions {
     ProjectResolveOptions {
         target: "x86_64-unknown-linux-gnu".to_string(),
@@ -209,6 +298,7 @@ roots = ["src"]
         optional_capabilities: Vec::new(),
         readme_digest: None,
         license: Some("MIT".to_string()),
+        encryption: None,
         supply_chain: None,
     };
     let mut source = RegistrySourceId {

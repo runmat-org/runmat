@@ -54,6 +54,8 @@ struct ReleaseCoreWire {
     dependencies: Vec<DependencyWire>,
     advisories: Vec<serde_json::Value>,
     #[serde(default)]
+    encryption: Option<runmat_package::EncryptedArtifactMetadata>,
+    #[serde(default)]
     supply_chain: Option<runmat_package::RegistryReleaseSupplyChain>,
 }
 
@@ -99,6 +101,8 @@ struct ArtifactWire {
     _download_url: String,
     #[serde(rename = "expiresAt")]
     _expires_at: i64,
+    #[serde(default)]
+    key_envelopes: Vec<runmat_package::PackageKeyEnvelope>,
 }
 
 pub(super) async fn candidates(
@@ -142,6 +146,7 @@ pub(super) async fn acquire(
     let cache = shared::cache(provider)?;
     let mut snapshot = None;
     let mut release_metadata = None;
+    let mut private_snapshot = false;
     if let Some(expected) = &plan.expected {
         match shared::lease_expected(provider, &cache, &expected.tree_digest).await {
             Ok(Some(lease)) => {
@@ -181,10 +186,14 @@ pub(super) async fn acquire(
         if !bytes_value.is_instance_of::<js_sys::Uint8Array>() {
             return Err("registry artifactBytes must be a Uint8Array".to_string());
         }
-        let artifact_bytes = js_sys::Uint8Array::new(&bytes_value).to_vec();
-        if artifact_bytes.len() as u64 != release.artifact.byte_len {
-            return Err("registry artifact length differs from signed metadata".to_string());
-        }
+        let artifact_array = js_sys::Uint8Array::new(&bytes_value);
+        let artifact_bytes = zeroize::Zeroizing::new(artifact_array.to_vec());
+        artifact_array.fill(0, 0, artifact_array.length());
+        let transfer_is_private =
+            js_sys::Reflect::get(&transfer, &JsValue::from_str("privateArtifact"))
+                .map_err(shared::js_error)?
+                .as_bool()
+                .unwrap_or(false);
         let acquired_source = source(
             &plan.package,
             &release.release,
@@ -194,40 +203,73 @@ pub(super) async fn acquire(
         let package_id = release.release.package_id.clone();
         let acquired_metadata = metadata(release.release)?;
         acquired_metadata.verify_supply_chain(&package_id, &acquired_source)?;
-        let acquired = runmat_package_cache::RegistryArtifactInventory::decode_snapshot(
-            &artifact_bytes,
-            acquired_source,
-            runmat_package_cache::ArchiveLimits::default(),
-        )
+        let acquired = if let Some(encryption) = acquired_metadata.encryption.as_ref() {
+            if !transfer_is_private || release.artifact.key_envelopes.is_empty() {
+                return Err(
+                    "encrypted registry release was not decrypted by the browser key adapter"
+                        .to_string(),
+                );
+            }
+            runmat_package_cache::RegistryArtifactInventory::decode_decrypted_snapshot(
+                &artifact_bytes,
+                acquired_source,
+                encryption.plaintext_digest.clone(),
+                runmat_package_cache::ArchiveLimits::default(),
+            )
+        } else {
+            if transfer_is_private || !release.artifact.key_envelopes.is_empty() {
+                return Err("unencrypted registry release has private key material".to_string());
+            }
+            if artifact_bytes.len() as u64 != release.artifact.byte_len {
+                return Err("registry artifact length differs from signed metadata".to_string());
+            }
+            runmat_package_cache::RegistryArtifactInventory::decode_snapshot(
+                &artifact_bytes,
+                acquired_source,
+                runmat_package_cache::ArchiveLimits::default(),
+            )
+        }
         .map_err(|error| error.to_string())?;
         runmat_package::validate_registry_acquisition(plan, &acquired.source)
             .map_err(|error| error.to_string())?;
-        loop {
-            let current = cache.snapshot().await.map_err(|error| error.to_string())?;
-            let transaction = runmat_package_cache::cache_registry_snapshot(
-                current.revision,
-                current.state,
-                &acquired,
-                js_sys::Date::now().max(0.0) as u64,
-            )
-            .map_err(|error| error.to_string())?;
-            match cache
-                .commit(transaction)
-                .await
-                .map_err(|error| error.to_string())?
-            {
-                CommitOutcome::Committed(_) => break,
-                CommitOutcome::Conflict { .. } => continue,
+        if acquired_metadata.encryption.is_none() {
+            loop {
+                let current = cache.snapshot().await.map_err(|error| error.to_string())?;
+                let transaction = runmat_package_cache::cache_registry_snapshot(
+                    current.revision,
+                    current.state,
+                    &acquired,
+                    js_sys::Date::now().max(0.0) as u64,
+                )
+                .map_err(|error| error.to_string())?;
+                match cache
+                    .commit(transaction)
+                    .await
+                    .map_err(|error| error.to_string())?
+                {
+                    CommitOutcome::Committed(_) => break,
+                    CommitOutcome::Conflict { .. } => continue,
+                }
             }
+        } else {
+            private_snapshot = true;
         }
         release_metadata = Some(acquired_metadata);
         snapshot = Some(acquired);
     }
-    let snapshot = snapshot.expect("cache hit or fetched registry snapshot");
+    let mut snapshot = snapshot.expect("cache hit or fetched registry snapshot");
     runmat_package::validate_registry_acquisition(plan, &snapshot.source)
         .map_err(|error| error.to_string())?;
-    shared::retain_tree(provider, &cache, &snapshot.tree.digest).await?;
-    let root = shared::mount(provider, &snapshot).await?;
+    let root = if private_snapshot {
+        let mounted = shared::mount_private(provider, &snapshot).await;
+        for blob in &mut snapshot.blobs {
+            blob.bytes.fill(0);
+        }
+        mounted?
+    } else {
+        shared::retain_tree(provider, &cache, &snapshot.tree.digest).await?;
+        shared::mount(provider, &snapshot).await?
+    };
     Ok(RegistryPackageMount {
         source: snapshot.source,
         root,
@@ -295,6 +337,7 @@ fn metadata(release: ReleaseCoreWire) -> Result<RegistryReleaseMetadata, String>
         optional_capabilities: release.optional_capabilities,
         readme_digest: release.readme_digest,
         license: release.license,
+        encryption: release.encryption,
         supply_chain: release.supply_chain,
     })
 }

@@ -31,6 +31,25 @@ export {
   fetchRegistryCandidates,
   fetchRegistryRelease
 } from "./registry.js";
+export {
+  decryptRegistryPrivateArtifact,
+  type BrowserPrivatePackageKeyProvider,
+  type PrivatePackageEnvelopeContext
+} from "./private-artifact.js";
+export {
+  createAndRegisterBrowserRecipientKey,
+  createBrowserPrivatePackageKeyStore,
+  generateBrowserRecipientKey,
+  revokeAndRemoveBrowserRecipientKey
+} from "./browser-private-keys.js";
+export type {
+  BrowserRecipientKeyRegistration,
+  BrowserPrivatePackageKeyStore,
+  GeneratedBrowserRecipientKey,
+  RegisterBrowserRecipientKey,
+  RevokeBrowserRecipientKey
+} from "./browser-private-keys.js";
+export { invalidateBrowserPrivatePackageArtifacts } from "./private-artifact-lifecycle.js";
 export type {
   BrowserRegistryOptions,
   RegistryAcquisitionPlan,

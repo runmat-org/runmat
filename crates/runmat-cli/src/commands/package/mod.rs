@@ -1,4 +1,11 @@
 mod cache;
+mod private_keys;
+mod publication;
+mod publication_artifact;
+mod publication_manifest;
+mod publication_retry;
+#[cfg(test)]
+mod publication_tests;
 mod registry_transport;
 mod resolve;
 mod server_transport;
@@ -35,6 +42,9 @@ pub async fn execute(command: PackageCommand, cli: &Cli) -> Result<()> {
             vendor::vendor(&project, &output).await?;
         }
         PackageCommand::Cache { command } => cache::execute(command).await?,
+        PackageCommand::Keys { command } => private_keys::execute(command).await?,
+        PackageCommand::Publish(args) => publication::publish(&args).await?,
+        PackageCommand::Inspect(args) => publication::inspect(&args)?,
     }
     Ok(())
 }

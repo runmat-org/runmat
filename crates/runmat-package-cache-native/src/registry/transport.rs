@@ -10,6 +10,7 @@ pub struct RegistryArtifactTransfer {
     pub source: RegistrySourceId,
     pub metadata: RegistryReleaseMetadata,
     pub artifact_bytes: Vec<u8>,
+    pub key_envelopes: Vec<runmat_package::PackageKeyEnvelope>,
 }
 
 pub trait RegistryTransport: Send + Sync {

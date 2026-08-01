@@ -85,12 +85,13 @@ impl RegistryTransport for RunMatRegistryTransport {
                 source,
                 metadata,
                 artifact_bytes,
+                key_envelopes: response.metadata.artifact.key_envelopes,
             })
         })
     }
 }
 
-async fn registry_client(index: &str) -> Result<RegistryClient, String> {
+pub(super) async fn registry_client(index: &str) -> Result<RegistryClient, String> {
     let mut config = RemoteConfig::load().map_err(|error| error.to_string())?;
     let configured = resolve_server_url(&config, None).map_err(|error| error.to_string())?;
     let token = if configured.trim_end_matches('/') == index {
@@ -155,6 +156,7 @@ fn release_metadata(metadata: &RegistryReleaseCore) -> Result<RegistryReleaseMet
         optional_capabilities: metadata.optional_capabilities.clone(),
         readme_digest: metadata.readme_digest.clone(),
         license: metadata.license.clone(),
+        encryption: metadata.encryption.clone(),
         supply_chain: metadata.supply_chain.clone(),
     })
 }
@@ -232,6 +234,7 @@ mod tests {
                 license: None,
                 dependencies: Vec::new(),
                 advisories: Vec::new(),
+                encryption: None,
                 supply_chain: None,
             },
             artifact: runmat_server_client::packages::RegistryArtifact {
@@ -242,6 +245,7 @@ mod tests {
                 media_type: "application/vnd.runmat.package+json".to_string(),
                 download_url: "/artifact".to_string(),
                 expires_at: 1,
+                key_envelopes: Vec::new(),
             },
         };
         assert!(source_from_metadata(&plan, &metadata).is_err());

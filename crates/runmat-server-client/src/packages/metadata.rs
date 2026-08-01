@@ -27,6 +27,8 @@ pub struct RegistryArtifact {
     pub media_type: String,
     pub download_url: String,
     pub expires_at: i64,
+    #[serde(default)]
+    pub key_envelopes: Vec<runmat_package::PackageKeyEnvelope>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -67,6 +69,8 @@ pub struct RegistryReleaseCore {
     pub dependencies: Vec<RegistryDependency>,
     pub advisories: Vec<RegistryAdvisory>,
     #[serde(default)]
+    pub encryption: Option<runmat_package::EncryptedArtifactMetadata>,
+    #[serde(default)]
     pub supply_chain: Option<runmat_package::RegistryReleaseSupplyChain>,
 }
 
@@ -93,6 +97,25 @@ pub struct RegistryCandidate {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RegistryCandidateList {
     pub candidates: Vec<RegistryCandidate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RegistryRecipientKey {
+    pub id: String,
+    pub package_id: String,
+    pub principal_id: String,
+    pub algorithm: String,
+    pub public_key: String,
+    pub fingerprint: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub revoked_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RegistryRecipientKeyList {
+    pub keys: Vec<RegistryRecipientKey>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

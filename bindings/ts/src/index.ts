@@ -152,8 +152,13 @@ export type {
 } from "./fs/provider-types.js";
 export {
   BrowserPackageMountFilesystem,
+  createAndRegisterBrowserRecipientKey,
+  createBrowserPrivatePackageKeyStore,
   createIndexedDbPackageCache,
-  ImmutableBrowserPackageMount
+  generateBrowserRecipientKey,
+  invalidateBrowserPrivatePackageArtifacts,
+  ImmutableBrowserPackageMount,
+  revokeAndRemoveBrowserRecipientKey
 } from "./package-cache/index.js";
 export { BrowserProjectResolver };
 export type {
@@ -162,6 +167,11 @@ export type {
   BrowserProjectResolverConfig,
   BrowserProjectResolverNative,
   BrowserResolvedProject,
+  BrowserRecipientKeyRegistration,
+  BrowserPrivatePackageKeyStore,
+  GeneratedBrowserRecipientKey,
+  RegisterBrowserRecipientKey,
+  RevokeBrowserRecipientKey,
   BrowserMountEntry,
   BrowserTreeEntry,
   BrowserTreeManifest,

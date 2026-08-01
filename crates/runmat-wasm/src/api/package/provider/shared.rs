@@ -69,6 +69,21 @@ pub(super) async fn mount<T: serde::Serialize>(
         .ok_or_else(|| "package provider mountPackageSnapshot must return a root path".to_string())
 }
 
+pub(super) async fn mount_private<T: serde::Serialize>(
+    provider: &JsPackageSourceProvider,
+    snapshot: &T,
+) -> Result<std::path::PathBuf, String> {
+    let value = serde_wasm_bindgen::to_value(snapshot)
+        .map_err(|error| format!("private package snapshot serialization failed: {error}"))?;
+    call_provider(&provider.bindings, "mountPrivatePackageSnapshot", &value)
+        .await?
+        .as_string()
+        .map(Into::into)
+        .ok_or_else(|| {
+            "package provider mountPrivatePackageSnapshot must return a root path".to_string()
+        })
+}
+
 pub(super) async fn call_provider(
     provider: &JsValue,
     name: &str,

@@ -1,3 +1,4 @@
+use super::private_keys::KeyringPrivateArtifactDecryptor;
 use super::registry_transport::RunMatRegistryTransport;
 use super::server_transport::RunMatServerSnapshotTransport;
 use crate::cli::{Cli, PackageProjectArgs};
@@ -19,6 +20,7 @@ pub(crate) struct NativeResolvedProject {
     pub backend: Arc<SqliteCacheBackend>,
     pub cache_config: NativeCacheConfig,
     _cache_lease: Option<NativeCacheLease>,
+    _provider: NativePackageSourceProvider,
 }
 
 pub(super) async fn resolve(
@@ -49,7 +51,8 @@ pub(super) async fn resolve(
     let default_registry_index = default_server_origin.clone();
     let provider = provider
         .with_server_transport(server_transport)
-        .with_registry_transport(Arc::new(RunMatRegistryTransport));
+        .with_registry_transport(Arc::new(RunMatRegistryTransport))
+        .with_private_artifact_decryptor(Arc::new(KeyringPrivateArtifactDecryptor));
     let resolved = runmat_package::resolve_project_async(
         &manifest,
         existing.as_ref(),
@@ -98,33 +101,37 @@ pub(super) async fn resolve(
     if resolved.lock_decision == PathLockDecision::WriteGenerated {
         write_lock(&lock_path, &resolved.lock)?;
     }
-    let cache_lease = NativeCacheLease::acquire(
-        backend.clone(),
-        resolved
-            .acquired_git_sources
-            .iter()
-            .map(|source| source.tree_digest.clone())
-            .chain(
-                resolved
-                    .acquired_server_sources
-                    .iter()
-                    .map(|source| source.tree_digest.clone()),
-            )
-            .chain(
-                resolved
-                    .acquired_registry_sources
-                    .iter()
-                    .map(|source| source.tree_digest.clone()),
-            )
-            .collect(),
-    )
-    .await
-    .context("failed to lease the resolved package graph")?;
+    let cache_state = runmat_package_cache::CacheBackend::snapshot(backend.as_ref())
+        .await
+        .context("failed to inspect the resolved package cache")?
+        .state;
+    let durable_trees = resolved
+        .acquired_git_sources
+        .iter()
+        .map(|source| source.tree_digest.clone())
+        .chain(
+            resolved
+                .acquired_server_sources
+                .iter()
+                .map(|source| source.tree_digest.clone()),
+        )
+        .chain(
+            resolved
+                .acquired_registry_sources
+                .iter()
+                .map(|source| source.tree_digest.clone()),
+        )
+        .filter(|digest| cache_state.objects.contains_key(digest))
+        .collect();
+    let cache_lease = NativeCacheLease::acquire(backend.clone(), durable_trees)
+        .await
+        .context("failed to lease the resolved package graph")?;
     Ok(NativeResolvedProject {
         resolved,
         backend,
         cache_config,
         _cache_lease: cache_lease,
+        _provider: provider,
     })
 }
 

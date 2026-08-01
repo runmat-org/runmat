@@ -149,11 +149,17 @@ export class ImmutableBrowserPackageMount {
  * reserved virtual namespace and delegates every workspace path to the host provider.
  */
 export class BrowserPackageMountFilesystem implements RunMatFilesystemProvider {
-  private readonly mounts = new Map<string, ImmutableBrowserPackageMount>();
+  private readonly mounts = new Map<
+    string,
+    { mount: ImmutableBrowserPackageMount; dispose?: () => void }
+  >();
 
   constructor(private readonly workspace: RunMatFilesystemProvider) {}
 
   clear(): void {
+    for (const value of this.mounts.values()) {
+      value.dispose?.();
+    }
     this.mounts.clear();
   }
 
@@ -161,7 +167,21 @@ export class BrowserPackageMountFilesystem implements RunMatFilesystemProvider {
     const digest = snapshot.source.tree_digest;
     const key = digest.replace(":", "_");
     const root = `/__runmat/packages/${key}`;
-    this.mounts.set(root, new ImmutableBrowserPackageMount(snapshot.tree, cache));
+    this.mounts.set(root, {
+      mount: new ImmutableBrowserPackageMount(snapshot.tree, cache)
+    });
+    return root;
+  }
+
+  registerVolatile(snapshot: PackageSnapshotMountInput): string {
+    const cache = new VolatilePackageObjectStore(snapshot.blobs ?? []);
+    const digest = snapshot.source.tree_digest;
+    const key = digest.replace(":", "_");
+    const root = `/__runmat/packages/${key}`;
+    this.mounts.set(root, {
+      mount: new ImmutableBrowserPackageMount(snapshot.tree, cache),
+      dispose: () => cache.clear()
+    });
     return root;
   }
 
@@ -199,7 +219,7 @@ export class BrowserPackageMountFilesystem implements RunMatFilesystemProvider {
 
   async metadata(path: string): Promise<RunMatFilesystemMetadata> {
     const normalized = normalizeAbsolute(path);
-    const direct = this.mounts.get(normalized);
+    const direct = this.mounts.get(normalized)?.mount;
     if (direct) {
       return { fileType: "directory", len: 0, readonly: true };
     }
@@ -220,7 +240,7 @@ export class BrowserPackageMountFilesystem implements RunMatFilesystemProvider {
 
   async symlinkMetadata(path: string): Promise<RunMatFilesystemMetadata> {
     const normalized = normalizeAbsolute(path);
-    const direct = this.mounts.get(normalized);
+    const direct = this.mounts.get(normalized)?.mount;
     if (direct) {
       return { fileType: "directory", len: 0, readonly: true };
     }
@@ -241,7 +261,7 @@ export class BrowserPackageMountFilesystem implements RunMatFilesystemProvider {
 
   async readDir(path: string): Promise<RunMatFilesystemDirEntry[]> {
     const normalized = normalizeAbsolute(path);
-    const direct = this.mounts.get(normalized);
+    const direct = this.mounts.get(normalized)?.mount;
     const resolved = direct
       ? { root: normalized, mount: direct, relative: "" }
       : this.resolve(normalized);
@@ -302,11 +322,11 @@ export class BrowserPackageMountFilesystem implements RunMatFilesystemProvider {
     | { root: string; mount: ImmutableBrowserPackageMount; relative: string }
     | undefined {
     const normalized = normalizeAbsolute(path);
-    for (const [root, mount] of this.mounts) {
+    for (const [root, value] of this.mounts) {
       if (normalized.startsWith(`${root}/`)) {
         return {
           root,
-          mount,
+          mount: value.mount,
           relative: normalized.slice(root.length + 1)
         };
       }
@@ -327,9 +347,44 @@ export interface PackageSnapshotMountInput {
     tree_digest: string;
   };
   tree: BrowserTreeManifest;
+  blobs?: Array<{ digest: string; bytes: number[] | Uint8Array }>;
 }
 
 export type GitSnapshotMountInput = PackageSnapshotMountInput;
+
+class VolatilePackageObjectStore implements RunMatPackageCacheProvider {
+  private readonly bytes = new Map<string, Uint8Array>();
+
+  constructor(blobs: Array<{ digest: string; bytes: number[] | Uint8Array }>) {
+    for (const blob of blobs) {
+      this.bytes.set(blob.digest, Uint8Array.from(blob.bytes));
+      blob.bytes.fill(0);
+    }
+  }
+
+  clear(): void {
+    for (const bytes of this.bytes.values()) {
+      bytes.fill(0);
+    }
+    this.bytes.clear();
+  }
+
+  async readObjectBytes(digest: string): Promise<Uint8Array | null> {
+    return this.bytes.get(digest)?.slice() ?? null;
+  }
+
+  async snapshot(): Promise<null> {
+    return null;
+  }
+
+  async initialize(): Promise<never> {
+    throw new Error("volatile private package storage is read-only");
+  }
+
+  async commit(): Promise<never> {
+    throw new Error("volatile private package storage is read-only");
+  }
+}
 
 async function verifyDigest(digest: string, bytes: Uint8Array): Promise<void> {
   const [algorithm, expected] = digest.split(":", 2);

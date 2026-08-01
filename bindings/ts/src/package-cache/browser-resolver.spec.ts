@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createInMemoryFsProvider } from "../fs/memory.js";
 import { BrowserProjectResolver } from "./browser-resolver.js";
+import { invalidateBrowserPrivatePackageArtifacts } from "./private-artifact-lifecycle.js";
 import type { RunMatPackageCacheProvider } from "./provider-types.js";
 
 describe("BrowserProjectResolver", () => {
@@ -119,7 +120,139 @@ describe("BrowserProjectResolver", () => {
     expect(releaseLease).toHaveBeenCalledOnce();
     vi.useRealTimers();
   });
+
+  it("keeps decrypted private package bytes volatile and removes the mount on dispose", async () => {
+    const bytes = new TextEncoder().encode("secret_function");
+    const digest = await sha256(bytes);
+    const commit = vi.fn(async () => {
+      throw new Error("private plaintext must not enter the persistent cache");
+    });
+    let root = "";
+    const resolver = new BrowserProjectResolver({
+      native: {
+        async resolveProject(_request, provider) {
+          root = provider.mountPrivatePackageSnapshot({
+            source: {
+              repository: "registry:acme/private",
+              commit: {
+                algorithm: "sha1",
+                hex: "0123456789abcdef0123456789abcdef01234567"
+              },
+              subdir: ".",
+              tree_digest: `sha256:${"a".repeat(64)}`
+            },
+            tree: {
+              digest: `sha256:${"a".repeat(64)}`,
+              entries: [
+                {
+                  path: "secret.m",
+                  kind: "file",
+                  digest,
+                  byte_len: bytes.byteLength,
+                  executable: false
+                }
+              ]
+            },
+            blobs: [{ digest, bytes }]
+          });
+          return resolvedWithoutLease();
+        },
+        async packageCacheRenewLease(_provider, lease) {
+          return lease;
+        },
+        async packageCacheReleaseLease() {}
+      },
+      filesystem: createInMemoryFsProvider(),
+      packageCache: { ...cacheProvider(), commit },
+      gitGateway: { baseUrl: "https://api.runmat.test" }
+    });
+
+    await resolver.resolve(request());
+    expect(Array.from(bytes)).toEqual(Array(bytes.byteLength).fill(0));
+    expect(new TextDecoder().decode(await resolver.filesystem.readFile(`${root}/secret.m`)))
+      .toBe("secret_function");
+    expect(commit).not.toHaveBeenCalled();
+    invalidateBrowserPrivatePackageArtifacts();
+    await expect(resolver.filesystem.readFile(`${root}/secret.m`)).rejects.toThrow();
+    await resolver.dispose();
+    await expect(
+      resolver.filesystem.readFile(`/__runmat/packages/sha256_${"a".repeat(64)}/secret.m`)
+    ).rejects.toThrow();
+  });
+
+  it("removes a partially composed private mount when resolution fails", async () => {
+    const bytes = new TextEncoder().encode("secret_function");
+    const digest = await sha256(bytes);
+    let root = "";
+    const resolver = new BrowserProjectResolver({
+      native: {
+        async resolveProject(_request, provider) {
+          root = provider.mountPrivatePackageSnapshot({
+            source: { tree_digest: `sha256:${"c".repeat(64)}` },
+            tree: {
+              digest: `sha256:${"c".repeat(64)}`,
+              entries: [
+                {
+                  path: "secret.m",
+                  kind: "file",
+                  digest,
+                  byte_len: bytes.byteLength,
+                  executable: false
+                }
+              ]
+            },
+            blobs: [{ digest, bytes }]
+          });
+          throw new Error("verification failed after acquisition");
+        },
+        async packageCacheRenewLease(_provider, lease) {
+          return lease;
+        },
+        async packageCacheReleaseLease() {}
+      },
+      filesystem: createInMemoryFsProvider(),
+      packageCache: cacheProvider(),
+      gitGateway: { baseUrl: "https://api.runmat.test" }
+    });
+
+    await expect(resolver.resolve(request())).rejects.toThrow("verification failed");
+    await expect(resolver.filesystem.readFile(`${root}/secret.m`)).rejects.toThrow();
+    await resolver.dispose();
+  });
 });
+
+function request() {
+  return {
+    manifestPath: "/workspace/runmat.toml",
+    options: {
+      target: "wasm32-unknown-unknown",
+      default_server_origin: "https://api.runmat.com",
+      default_registry_index: "https://api.runmat.com",
+      groups: ["runtime" as const],
+      root_features: [],
+      host_capabilities: ["browser-filesystem", "worker"],
+      source_intent: "execute" as const,
+      source_policy: {}
+    }
+  };
+}
+
+function resolvedWithoutLease() {
+  return {
+    frozen: {},
+    lock: {},
+    lock_decision: "write-generated" as const,
+    acquired_git_sources: [],
+    acquired_server_sources: [],
+    acquired_registry_sources: [],
+    source_inventories: []
+  };
+}
+
+async function sha256(bytes: Uint8Array): Promise<string> {
+  const value = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return `sha256:${Array.from(value, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
 
 function cacheProvider(): RunMatPackageCacheProvider {
   return {

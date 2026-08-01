@@ -47,6 +47,7 @@ console_error_panic_hook = "0.1"
 async-trait = "0.1"
 getrandom = { version = "0.2", features = ["js"] }
 uuid = { version = "1", features = ["v4", "js"], default-features = false }
+zeroize = "1"
 runmat-logging = { path = "../runmat-logging", version = "=0.6.1" }
 tracing = "0.1"
 runmat-telemetry = { workspace = true }
