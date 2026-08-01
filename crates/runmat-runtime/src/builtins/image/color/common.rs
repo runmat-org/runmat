@@ -115,20 +115,6 @@ pub(crate) fn color_layout(tensor: &Tensor, name: &'static str) -> BuiltinResult
     ))
 }
 
-pub(crate) fn truecolor_layout(tensor: &Tensor, name: &'static str) -> BuiltinResult<ColorLayout> {
-    let shape = &tensor.shape;
-    if shape.len() == 3 && shape[2] == 3 && shape[0] > 0 && shape[1] > 0 {
-        return Ok(ColorLayout::Truecolor {
-            rows: shape[0],
-            cols: shape[1],
-        });
-    }
-    Err(builtin_error(
-        name,
-        format!("{name}: expected an MxNx3 RGB image"),
-    ))
-}
-
 pub(crate) fn grayscale_shape(
     tensor: &Tensor,
     name: &'static str,

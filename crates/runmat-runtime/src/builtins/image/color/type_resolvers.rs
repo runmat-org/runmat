@@ -11,6 +11,11 @@ pub fn rgb2gray_type(args: &[Type], _context: &ResolveContext) -> Type {
         Some(Type::Tensor { shape: Some(shape) }) if shape.len() == 3 => Type::Tensor {
             shape: Some(vec![shape[0], shape[1]]),
         },
+        Some(Type::Tensor { shape: Some(shape) }) if shape.len() == 2 && shape[1] == Some(3) => {
+            Type::Tensor {
+                shape: Some(shape.clone()),
+            }
+        }
         Some(Type::Tensor { .. }) => Type::tensor(),
         _ => Type::tensor(),
     }

@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, Tensor, Value,
+    NumericDType, NumericScalar, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -30,7 +30,7 @@ const RGB2GRAY_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "RGB truecolor image.",
+    description: "RGB truecolor image or double colormap.",
 }];
 
 const RGB2GRAY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
@@ -49,7 +49,7 @@ const RGB2GRAY_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescr
 const RGB2GRAY_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.RGB2GRAY.INVALID_INPUT",
     identifier: Some("RunMat:rgb2gray:InvalidInput"),
-    when: "Input cannot be interpreted as an MxNx3 RGB image.",
+    when: "Input cannot be interpreted as an MxNx3 RGB image or an Nx3 double colormap.",
     message: "rgb2gray: invalid input",
 };
 
@@ -149,36 +149,115 @@ async fn rgb2gray_builtin(rgb: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
 }
 
 fn rgb2gray_tensor(rgb: &Tensor) -> BuiltinResult<Tensor> {
-    if !matches!(
-        rgb.dtype,
-        NumericDType::F32 | NumericDType::F64 | NumericDType::U8 | NumericDType::U16
-    ) {
+    const RED: f64 = 0.298_936_021_293_775;
+    const GREEN: f64 = 0.587_043_074_451_121;
+    const BLUE: f64 = 0.114_020_904_255_103;
+
+    let dtype = rgb.numeric_dtype();
+    let layout = common::color_layout(rgb, NAME)?;
+    let supported = match layout {
+        common::ColorLayout::Truecolor { .. } => matches!(
+            dtype,
+            NumericDType::F32 | NumericDType::F64 | NumericDType::U8 | NumericDType::U16
+        ),
+        common::ColorLayout::Colormap { .. } => dtype == NumericDType::F64,
+    };
+    if !supported {
         return Err(rgb2gray_map_error(
             common::builtin_error(
                 NAME,
                 format!(
-                    "rgb2gray: unsupported truecolor class {}",
-                    rgb.dtype.class_name()
+                    "rgb2gray: unsupported {} class {}",
+                    match layout {
+                        common::ColorLayout::Truecolor { .. } => "truecolor",
+                        common::ColorLayout::Colormap { .. } => "colormap",
+                    },
+                    dtype.class_name()
                 ),
             ),
             &RGB2GRAY_ERROR_INVALID_INPUT,
         ));
     }
-    let common::ColorLayout::Truecolor { rows, cols } = common::truecolor_layout(rgb, NAME)? else {
-        unreachable!();
-    };
-    let pixels = rows * cols;
-    let values = common::tensor_values_f64(rgb);
-    let mut data = vec![0.0; pixels];
-    for (pixel, out) in data.iter_mut().enumerate() {
-        let r = common::unit_value(values[pixel], rgb.dtype);
-        let g = common::unit_value(values[pixel + pixels], rgb.dtype);
-        let b = common::unit_value(values[pixel + 2 * pixels], rgb.dtype);
-        let gray = 0.2989 * r + 0.5870 * g + 0.1140 * b;
-        *out = common::unit_to_dtype(gray, rgb.dtype);
+
+    let pixels = layout.pixels();
+    if rgb.len() != pixels * 3 {
+        return Err(rgb2gray_error_with_message(
+            "rgb2gray: image data length does not match shape",
+            &RGB2GRAY_ERROR_INVALID_INPUT,
+        ));
     }
-    let dtype = rgb.dtype;
-    common::tensor_with_dtype(data, vec![rows, cols], dtype, NAME)
+    let mut grayscale = Vec::with_capacity(pixels);
+    for pixel in 0..pixels {
+        let r = rgb2gray_value(rgb, layout.index(pixel, 0))?;
+        let g = rgb2gray_value(rgb, layout.index(pixel, 1))?;
+        let b = rgb2gray_value(rgb, layout.index(pixel, 2))?;
+        grayscale.push(RED * r + GREEN * g + BLUE * b);
+    }
+
+    let (storage, shape) = match layout {
+        common::ColorLayout::Truecolor { rows, cols } => {
+            (grayscale_storage(grayscale, dtype), vec![rows, cols])
+        }
+        common::ColorLayout::Colormap { rows } => {
+            let mut repeated = vec![0.0; rows * 3];
+            for channel in 0..3 {
+                repeated[channel * rows..(channel + 1) * rows].copy_from_slice(&grayscale);
+            }
+            (NumericStorage::F64(repeated), vec![rows, 3])
+        }
+    };
+    Tensor::from_numeric_storage(storage, shape)
+        .map_err(|err| rgb2gray_error_with_message(err, &RGB2GRAY_ERROR_INTERNAL))
+}
+
+fn rgb2gray_value(rgb: &Tensor, index: usize) -> BuiltinResult<f64> {
+    match rgb.numeric_value_at(index) {
+        Some(NumericScalar::F64(value)) => Ok(value),
+        Some(NumericScalar::F32(value)) => Ok(f64::from(value)),
+        Some(NumericScalar::U8(value)) => Ok(f64::from(value)),
+        Some(NumericScalar::U16(value)) => Ok(f64::from(value)),
+        Some(value) => Err(rgb2gray_error_with_message(
+            format!(
+                "rgb2gray: unsupported numeric sample class {}",
+                value.class_name()
+            ),
+            &RGB2GRAY_ERROR_INVALID_INPUT,
+        )),
+        None => Err(rgb2gray_error_with_message(
+            format!(
+                "rgb2gray: {} storage is unavailable at element {index}",
+                rgb.numeric_dtype().class_name()
+            ),
+            &RGB2GRAY_ERROR_INVALID_INPUT,
+        )),
+    }
+}
+
+fn grayscale_storage(values: Vec<f64>, dtype: NumericDType) -> NumericStorage {
+    match dtype {
+        NumericDType::F64 => NumericStorage::F64(values),
+        NumericDType::F32 => {
+            NumericStorage::F32(values.into_iter().map(|value| value as f32).collect())
+        }
+        NumericDType::U8 => NumericStorage::U8(
+            values
+                .into_iter()
+                .map(|value| value.round().clamp(0.0, f64::from(u8::MAX)) as u8)
+                .collect(),
+        ),
+        NumericDType::U16 => NumericStorage::U16(
+            values
+                .into_iter()
+                .map(|value| value.round().clamp(0.0, f64::from(u16::MAX)) as u16)
+                .collect(),
+        ),
+        NumericDType::I8
+        | NumericDType::I16
+        | NumericDType::I32
+        | NumericDType::I64
+        | NumericDType::U32
+        | NumericDType::U64 => unreachable!("unsupported rgb2gray class rejected before output"),
+    }
 }
 
 #[cfg(test)]
@@ -192,9 +271,7 @@ mod tests {
     }
 
     fn typed_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
-        tensor
+        Tensor::new_integer(storage, shape).expect("integer tensor")
     }
 
     #[test]
@@ -219,13 +296,32 @@ mod tests {
     }
 
     #[test]
+    fn preserves_native_single_output_storage() {
+        let rgb = Tensor::from_f32(vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0], vec![1, 2, 3]).unwrap();
+        let Value::Tensor(out) = call(Value::Tensor(rgb)) else {
+            panic!("expected single tensor");
+        };
+        assert_eq!(
+            out.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![
+                0.298_936_021_293_775_f64 as f32,
+                0.587_043_074_451_121_f64 as f32,
+            ])
+        );
+    }
+
+    #[test]
     fn preserves_2d_shape() {
         let rgb = Tensor::new(vec![1.0; 12], vec![2, 2, 3]).unwrap();
         let Value::Tensor(out) = call(Value::Tensor(rgb)) else {
             panic!("expected tensor");
         };
         assert_eq!(out.shape, vec![2, 2]);
-        assert!(out.data.iter().all(|v| (*v - 0.9999).abs() < 1e-12));
+        assert!(out
+            .as_f64_slice()
+            .expect("double output")
+            .iter()
+            .all(|v| (*v - 1.0).abs() < 1e-12));
     }
 
     #[test]
@@ -239,9 +335,26 @@ mod tests {
         let Value::Tensor(out) = call(Value::Tensor(rgb)) else {
             panic!("expected tensor");
         };
-        assert_eq!(out.dtype, NumericDType::U16);
+        assert_eq!(out.numeric_dtype(), NumericDType::U16);
         assert_eq!(out.shape, vec![2, 1]);
-        assert_eq!(out.data, vec![19588.0, 38469.0]);
+        assert_eq!(
+            out.integer_storage(),
+            Some(&IntegerStorage::U16(vec![19591, 38472]))
+        );
+    }
+
+    #[test]
+    fn converts_double_colormap_to_three_equal_gray_columns() {
+        let map = Tensor::new(vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0], vec![2, 3]).unwrap();
+        let Value::Tensor(out) = call(Value::Tensor(map)) else {
+            panic!("expected colormap tensor");
+        };
+        assert_eq!(out.shape, vec![2, 3]);
+        let values = out.as_f64_slice().expect("double colormap");
+        for channel in 0..3 {
+            assert!((values[channel * 2] - 0.298_936_021_293_775).abs() < 1e-15);
+            assert!((values[channel * 2 + 1] - 0.587_043_074_451_121).abs() < 1e-15);
+        }
     }
 
     #[test]
@@ -255,10 +368,12 @@ mod tests {
     }
 
     #[test]
-    fn rejects_colormap_shape() {
-        let map = Tensor::new(vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0], vec![2, 3]).unwrap();
+    fn rejects_non_rgb_matrix_shape() {
+        let map = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
         let err = block_on(rgb2gray_builtin(Value::Tensor(map), Vec::new())).unwrap_err();
-        assert!(err.message().contains("expected an MxNx3 RGB image"));
+        assert!(err
+            .message()
+            .contains("expected an MxNx3 RGB image or an Nx3 colormap"));
     }
 
     #[test]
@@ -295,6 +410,6 @@ mod tests {
         let rgb = Tensor::new(vec![1.0, 1.0, 1.0], vec![1, 1, 3]).unwrap();
         let result = block_on(crate::call_builtin_async(NAME, &[Value::Tensor(rgb)]))
             .expect("rgb2gray registered");
-        assert!(matches!(result, Value::Num(value) if (value - 0.9999).abs() < 1e-12));
+        assert!(matches!(result, Value::Num(value) if (value - 1.0).abs() < 1e-12));
     }
 }
