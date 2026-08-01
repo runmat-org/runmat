@@ -6,7 +6,8 @@ use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, IntValue, IntegerStorage, LogicalArray, Tensor, Value,
+    CharArray, IntValue, IntegerStorage, LogicalArray, NumericDType, NumericScalar, NumericStorage,
+    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -833,15 +834,15 @@ fn parse_size_tensor(t: &Tensor) -> Result<SizeSpec, String> {
         };
     }
 
-    match t.data.len() {
+    match t.len() {
         0 => Ok(SizeSpec::Count(0)),
-        1 => scalar_to_size(t.data[0]),
+        1 => scalar_to_size(tensor::tensor_value_f64(t, 0)),
         2 => {
             let rows = scalar_to_size_component(
-                t.data[0],
+                tensor::tensor_value_f64(t, 0),
                 "size vector components must be non-negative integers or Inf",
             )?;
-            let cols_raw = t.data[1];
+            let cols_raw = tensor::tensor_value_f64(t, 1);
             if cols_raw.is_infinite() && cols_raw.is_sign_positive() {
                 Ok(SizeSpec::Matrix { rows, cols: None })
             } else {
@@ -907,11 +908,26 @@ impl InputType {
             InputType::UInt64 | InputType::Int64 | InputType::Float64 => 8,
         }
     }
+
+    fn numeric_dtype(self) -> NumericDType {
+        match self {
+            Self::UInt8 => NumericDType::U8,
+            Self::Int8 => NumericDType::I8,
+            Self::UInt16 => NumericDType::U16,
+            Self::Int16 => NumericDType::I16,
+            Self::UInt32 => NumericDType::U32,
+            Self::Int32 => NumericDType::I32,
+            Self::UInt64 => NumericDType::U64,
+            Self::Int64 => NumericDType::I64,
+            Self::Float32 => NumericDType::F32,
+            Self::Float64 => NumericDType::F64,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
 enum OutputKind {
-    Double,
+    Numeric(NumericDType),
     Char,
 }
 
@@ -919,13 +935,15 @@ enum OutputKind {
 struct PrecisionSpec {
     input: InputType,
     output: OutputKind,
+    repeat: usize,
 }
 
 impl PrecisionSpec {
     fn default() -> Self {
         Self {
-            input: InputType::Float64,
-            output: OutputKind::Double,
+            input: InputType::UInt8,
+            output: OutputKind::Numeric(NumericDType::F64),
+            repeat: 1,
         }
     }
 }
@@ -952,70 +970,105 @@ fn parse_precision_string(raw: &str) -> Result<PrecisionSpec, String> {
     if let Some(rest) = lower.strip_prefix('*') {
         parse_star_precision(rest.trim())
     } else if let Some((lhs, rhs)) = lower.split_once("=>") {
-        let input = parse_input_label(lhs.trim())?;
+        let (repeat, input) = parse_repeated_input_label(lhs.trim())?;
         let output = parse_output_label(rhs.trim())?;
-        if matches!(output, OutputKind::Char)
-            && !matches!(input, InputType::UInt8 | InputType::UInt16)
-        {
-            return Err(
-                "char output requires an unsigned byte or unsigned 16-bit input precision"
-                    .to_string(),
-            );
-        }
-        Ok(PrecisionSpec { input, output })
+        Ok(PrecisionSpec {
+            input,
+            output,
+            repeat,
+        })
     } else {
-        let input = parse_input_label(lower.trim())?;
+        let (repeat, input) = parse_repeated_input_label(lower.trim())?;
         let wants_char =
             lower == "char" || (matches!(input, InputType::UInt8) && lower.contains("char"));
         let output = if wants_char {
             OutputKind::Char
         } else {
-            OutputKind::Double
+            OutputKind::Numeric(NumericDType::F64)
         };
-        if matches!(output, OutputKind::Char)
-            && !matches!(input, InputType::UInt8 | InputType::UInt16)
-        {
-            return Err(
-                "char precision requires unsigned byte or unsigned 16-bit input".to_string(),
-            );
-        }
-        Ok(PrecisionSpec { input, output })
+        Ok(PrecisionSpec {
+            input,
+            output,
+            repeat,
+        })
     }
 }
 
 fn parse_star_precision(label: &str) -> Result<PrecisionSpec, String> {
-    let output = parse_output_label(label)?;
-    match output {
-        OutputKind::Char => Ok(PrecisionSpec {
+    if label == "char" {
+        return Ok(PrecisionSpec {
             input: InputType::UInt8,
-            output,
-        }),
-        OutputKind::Double => Ok(PrecisionSpec {
-            input: InputType::Float64,
-            output,
-        }),
+            output: OutputKind::Char,
+            repeat: 1,
+        });
     }
+    let input = parse_input_label(label)?;
+    Ok(PrecisionSpec {
+        input,
+        output: OutputKind::Numeric(input.numeric_dtype()),
+        repeat: 1,
+    })
+}
+
+fn parse_repeated_input_label(label: &str) -> Result<(usize, InputType), String> {
+    if let Some((repeat, source)) = label.split_once('*') {
+        if repeat.trim().chars().all(|ch| ch.is_ascii_digit()) {
+            let repeat = repeat
+                .trim()
+                .parse::<usize>()
+                .ok()
+                .filter(|&repeat| repeat > 0)
+                .ok_or_else(|| "precision repeat count must be a positive integer".to_string())?;
+            return Ok((repeat, parse_input_label(source.trim())?));
+        }
+    }
+    Ok((1, parse_input_label(label)?))
 }
 
 fn parse_input_label(label: &str) -> Result<InputType, String> {
     match label {
         "double" | "float64" | "real*8" => Ok(InputType::Float64),
-        "single" | "float32" | "real*4" => Ok(InputType::Float32),
-        "int8" | "schar" | "integer*1" => Ok(InputType::Int8),
-        "uint8" | "uchar" | "unsignedchar" | "char" | "byte" => Ok(InputType::UInt8),
+        "single" | "float" | "float32" | "real*4" => Ok(InputType::Float32),
+        "int8" | "schar" | "signedchar" | "signed char" | "integer*1" => Ok(InputType::Int8),
+        "uint8" | "uchar" | "unsignedchar" | "unsigned char" | "char" | "byte" => {
+            Ok(InputType::UInt8)
+        }
         "int16" | "short" | "integer*2" => Ok(InputType::Int16),
-        "uint16" | "ushort" | "unsignedshort" => Ok(InputType::UInt16),
-        "int32" | "integer*4" | "long" => Ok(InputType::Int32),
-        "uint32" | "unsignedint" | "unsignedlong" => Ok(InputType::UInt32),
-        "int64" | "integer*8" | "longlong" => Ok(InputType::Int64),
-        "uint64" | "unsignedlonglong" => Ok(InputType::UInt64),
+        "uint16" | "ushort" | "unsignedshort" | "unsigned short" => Ok(InputType::UInt16),
+        "int32" | "int" | "integer*4" | "long" => Ok(InputType::Int32),
+        "uint32" | "uint" | "unsignedint" | "unsigned int" | "unsignedlong" | "unsigned long" => {
+            Ok(InputType::UInt32)
+        }
+        "int64" | "integer*8" | "longlong" | "long long" => Ok(InputType::Int64),
+        "uint64" | "unsignedlonglong" | "unsigned long long" => Ok(InputType::UInt64),
         other => Err(format!("unsupported precision '{other}'")),
     }
 }
 
 fn parse_output_label(label: &str) -> Result<OutputKind, String> {
     match label {
-        "double" | "float64" | "real*8" => Ok(OutputKind::Double),
+        "double" | "float64" | "real*8" => Ok(OutputKind::Numeric(NumericDType::F64)),
+        "single" | "float" | "float32" | "real*4" => Ok(OutputKind::Numeric(NumericDType::F32)),
+        "int8" | "schar" | "signedchar" | "signed char" | "integer*1" => {
+            Ok(OutputKind::Numeric(NumericDType::I8))
+        }
+        "int16" | "short" | "integer*2" => Ok(OutputKind::Numeric(NumericDType::I16)),
+        "int32" | "int" | "integer*4" | "long" => Ok(OutputKind::Numeric(NumericDType::I32)),
+        "int64" | "integer*8" | "longlong" | "long long" => {
+            Ok(OutputKind::Numeric(NumericDType::I64))
+        }
+        "uint8" | "uchar" | "unsignedchar" | "unsigned char" => {
+            Ok(OutputKind::Numeric(NumericDType::U8))
+        }
+        "uint16" | "ushort" | "unsignedshort" | "unsigned short" => {
+            Ok(OutputKind::Numeric(NumericDType::U16))
+        }
+        "uint32" | "uint" | "unsignedint" | "unsigned int" | "unsignedlong" | "unsigned long" => {
+            Ok(OutputKind::Numeric(NumericDType::U32))
+        }
+        "uint64" | "unsignedlonglong" | "unsigned long long" => {
+            Ok(OutputKind::Numeric(NumericDType::U64))
+        }
         "char" => Ok(OutputKind::Char),
         other => Err(format!("output class '{other}' is not implemented yet")),
     }
@@ -1174,17 +1227,36 @@ fn read_from_handle(
 ) -> Result<FreadEval, String> {
     let endianness = machine.to_endianness();
     match precision.output {
-        OutputKind::Double => {
+        OutputKind::Numeric(output_dtype) => {
             let limit = size_spec.element_limit();
-            let (values, count) =
-                read_numeric_values(file, precision.input, limit, skip, endianness)?;
+            let (values, count) = read_numeric_values(
+                file,
+                precision.input,
+                precision.repeat,
+                limit,
+                skip,
+                endianness,
+            )?;
             let (data, rows, cols) = finalize_numeric(size_spec, count, values);
-            let tensor = Tensor::new(data, vec![rows, cols]).map_err(|e| format!("fread: {e}"))?;
+            let tensor = Tensor::from_numeric_storage(data, vec![rows, cols])
+                .map_err(|e| format!("fread: {e}"))?;
+            let tensor = if tensor.numeric_dtype() == output_dtype {
+                tensor
+            } else {
+                tensor::coerce_tensor_dtype(tensor, output_dtype)
+            };
             Ok(FreadEval::new(Value::Tensor(tensor), count))
         }
         OutputKind::Char => {
             let limit = size_spec.element_limit();
-            let (values, count) = read_char_values(file, precision.input, limit, skip, endianness)?;
+            let (values, count) = read_char_values(
+                file,
+                precision.input,
+                precision.repeat,
+                limit,
+                skip,
+                endianness,
+            )?;
             let (row_major, rows, cols) = finalize_char(size_spec, count, values);
             let char_array =
                 CharArray::new(row_major, rows, cols).map_err(|e| format!("fread: {e}"))?;
@@ -1219,14 +1291,12 @@ fn adjust_output_for_like(
             }
             ensure_char_result(data)
         }
-        Value::Tensor(tensor) => match tensor.integer_storage() {
-            Some(storage) => tensor_to_integer_like(data, storage),
-            None => Ok(data),
-        },
-        Value::Int(value) => {
-            tensor_to_integer_like(data, &IntegerStorage::from_scalar(value.clone()))
-        }
-        Value::Num(_) => Ok(data),
+        Value::Tensor(tensor) => tensor_to_numeric_like(data, tensor.numeric_dtype()),
+        Value::Int(value) => tensor_to_numeric_like(
+            data,
+            IntegerStorage::from_scalar(value.clone()).numeric_dtype(),
+        ),
+        Value::Num(_) => tensor_to_numeric_like(data, NumericDType::F64),
         Value::ComplexTensor(_) | Value::Complex(_, _) => {
             Err("fread: complex prototypes are not supported yet".to_string())
         }
@@ -1235,19 +1305,11 @@ fn adjust_output_for_like(
     }
 }
 
-fn tensor_to_integer_like(data: Value, prototype: &IntegerStorage) -> Result<Value, String> {
+fn tensor_to_numeric_like(data: Value, dtype: NumericDType) -> Result<Value, String> {
     match data {
-        Value::Tensor(tensor) => {
-            let tensor = crate::builtins::common::tensor::integer_tensor_from_f64_like(
-                prototype,
-                tensor.data,
-                &tensor.shape,
-            )?;
-            Ok(Value::Tensor(tensor))
-        }
+        Value::Tensor(tensor) => Ok(Value::Tensor(tensor::coerce_tensor_dtype(tensor, dtype))),
         Value::CharArray(_) => Err(
-            "fread: character output cannot be converted to an integer 'like' prototype"
-                .to_string(),
+            "fread: character output cannot be converted to a numeric 'like' prototype".to_string(),
         ),
         other => Ok(other),
     }
@@ -1262,8 +1324,11 @@ fn ensure_char_result(data: Value) -> Result<Value, String> {
 
 fn tensor_to_gpu_value(tensor: Tensor) -> Result<Value, String> {
     if let Some(provider) = runmat_accelerate_api::provider() {
+        let data = tensor.as_f64_slice().ok_or_else(|| {
+            "fread: non-double output cannot be returned on the GPU via 'like' yet".to_string()
+        })?;
         let view = HostTensorView {
-            data: &tensor.data,
+            data,
             shape: &tensor.shape,
         };
         if let Ok(handle) = provider.upload(&view) {
@@ -1277,19 +1342,23 @@ fn convert_to_logical_value(data: Value) -> Result<Value, String> {
     match data {
         Value::LogicalArray(_) => Ok(data),
         Value::Tensor(tensor) => {
-            let bits = if let Some(storage) = tensor.integer_storage() {
-                storage
-                    .exact_values()
-                    .iter()
-                    .map(|value| if value.is_zero() { 0 } else { 1 })
-                    .collect()
-            } else {
-                tensor
-                    .data
-                    .iter()
-                    .map(|value| if *value != 0.0 { 1 } else { 0 })
-                    .collect()
-            };
+            let bits = (0..tensor.len())
+                .map(|index| {
+                    let value = tensor
+                        .numeric_value_at(index)
+                        .expect("validated fread numeric tensor index");
+                    match value {
+                        NumericScalar::F64(value) => u8::from(value != 0.0),
+                        NumericScalar::F32(value) => u8::from(value != 0.0),
+                        value => u8::from(
+                            !value
+                                .into_int_value()
+                                .expect("non-floating numeric scalar is integer")
+                                .is_zero(),
+                        ),
+                    }
+                })
+                .collect();
             LogicalArray::new(bits, tensor.shape.clone())
                 .map(Value::LogicalArray)
                 .map_err(|e| format!("fread: {e}"))
@@ -1318,12 +1387,13 @@ fn convert_to_logical_value(data: Value) -> Result<Value, String> {
 fn read_numeric_values<R: Read + Seek>(
     reader: &mut R,
     input: InputType,
+    repeat: usize,
     limit: Option<usize>,
     skip: usize,
     endianness: Endianness,
-) -> Result<(Vec<f64>, usize), String> {
+) -> Result<(NumericStorage, usize), String> {
     if let Some(0) = limit {
-        return Ok((Vec::new(), 0));
+        return Ok((NumericStorage::zeros(input.numeric_dtype(), 0), 0));
     }
     let element_size = input.byte_len();
     let mut buffer = vec![0u8; element_size];
@@ -1349,30 +1419,26 @@ fn read_numeric_values<R: Read + Seek>(
         if remaining > 0 {
             break;
         }
-        let value = decode_to_f64(&buffer, input, endianness)?;
+        let value = decode_numeric_scalar(&buffer, input, endianness)?;
         values.push(value);
         count += 1;
-        if skip > 0 {
+        if skip > 0 && count % repeat == 0 {
             reader
                 .seek(SeekFrom::Current(skip as i64))
                 .map_err(|err| format!("fread: failed to skip bytes ({err})"))?;
         }
     }
-    Ok((values, count))
+    Ok((numeric_storage_from_scalars(input, values)?, count))
 }
 
 fn read_char_values<R: Read + Seek>(
     reader: &mut R,
     input: InputType,
+    repeat: usize,
     limit: Option<usize>,
     skip: usize,
     endianness: Endianness,
 ) -> Result<(Vec<char>, usize), String> {
-    if !matches!(input, InputType::UInt8 | InputType::UInt16) {
-        return Err(
-            "char output requires an unsigned byte or unsigned 16-bit input precision".to_string(),
-        );
-    }
     if let Some(0) = limit {
         return Ok((Vec::new(), 0));
     }
@@ -1403,7 +1469,7 @@ fn read_char_values<R: Read + Seek>(
         let ch = decode_to_char(&buffer, input, endianness)?;
         values.push(ch);
         count += 1;
-        if skip > 0 {
+        if skip > 0 && count % repeat == 0 {
             reader
                 .seek(SeekFrom::Current(skip as i64))
                 .map_err(|err| format!("fread: failed to skip bytes ({err})"))?;
@@ -1413,41 +1479,82 @@ fn read_char_values<R: Read + Seek>(
     Ok((values, count))
 }
 
-fn decode_to_f64(bytes: &[u8], input: InputType, endianness: Endianness) -> Result<f64, String> {
+fn decode_numeric_scalar(
+    bytes: &[u8],
+    input: InputType,
+    endianness: Endianness,
+) -> Result<NumericScalar, String> {
     Ok(match input {
-        InputType::UInt8 => bytes[0] as f64,
-        InputType::Int8 => (bytes[0] as i8) as f64,
-        InputType::UInt16 => read_u16(bytes, endianness) as f64,
-        InputType::Int16 => read_u16(bytes, endianness) as i16 as f64,
-        InputType::UInt32 => read_u32(bytes, endianness) as f64,
-        InputType::Int32 => read_u32(bytes, endianness) as i32 as f64,
-        InputType::UInt64 => read_u64(bytes, endianness) as f64,
-        InputType::Int64 => read_u64(bytes, endianness) as i64 as f64,
+        InputType::UInt8 => NumericScalar::U8(bytes[0]),
+        InputType::Int8 => NumericScalar::I8(bytes[0] as i8),
+        InputType::UInt16 => NumericScalar::U16(read_u16(bytes, endianness)),
+        InputType::Int16 => NumericScalar::I16(read_u16(bytes, endianness) as i16),
+        InputType::UInt32 => NumericScalar::U32(read_u32(bytes, endianness)),
+        InputType::Int32 => NumericScalar::I32(read_u32(bytes, endianness) as i32),
+        InputType::UInt64 => NumericScalar::U64(read_u64(bytes, endianness)),
+        InputType::Int64 => NumericScalar::I64(read_u64(bytes, endianness) as i64),
         InputType::Float32 => {
             let bits = read_u32(bytes, endianness);
-            f32::from_bits(bits) as f64
+            NumericScalar::F32(f32::from_bits(bits))
         }
         InputType::Float64 => {
             let bits = read_u64(bytes, endianness);
-            f64::from_bits(bits)
+            NumericScalar::F64(f64::from_bits(bits))
         }
     })
 }
 
+fn numeric_storage_from_scalars(
+    input: InputType,
+    values: Vec<NumericScalar>,
+) -> Result<NumericStorage, String> {
+    macro_rules! collect_variant {
+        ($scalar_variant:ident, $storage_variant:ident) => {{
+            let mut output = Vec::with_capacity(values.len());
+            for value in values {
+                let NumericScalar::$scalar_variant(value) = value else {
+                    return Err("fread: decoded numeric source class mismatch".to_string());
+                };
+                output.push(value);
+            }
+            NumericStorage::$storage_variant(output)
+        }};
+    }
+    Ok(match input {
+        InputType::UInt8 => collect_variant!(U8, U8),
+        InputType::Int8 => collect_variant!(I8, I8),
+        InputType::UInt16 => collect_variant!(U16, U16),
+        InputType::Int16 => collect_variant!(I16, I16),
+        InputType::UInt32 => collect_variant!(U32, U32),
+        InputType::Int32 => collect_variant!(I32, I32),
+        InputType::UInt64 => collect_variant!(U64, U64),
+        InputType::Int64 => collect_variant!(I64, I64),
+        InputType::Float32 => collect_variant!(F32, F32),
+        InputType::Float64 => collect_variant!(F64, F64),
+    })
+}
+
 fn decode_to_char(bytes: &[u8], input: InputType, endianness: Endianness) -> Result<char, String> {
-    let code = match input {
-        InputType::UInt8 => bytes[0] as u32,
-        InputType::UInt16 => read_u16(bytes, endianness) as u32,
-        _ => {
-            return Err(
-                "char output requires an unsigned byte or unsigned 16-bit input precision"
-                    .to_string(),
-            );
-        }
+    let scalar = decode_numeric_scalar(bytes, input, endianness)?;
+    let code = match scalar {
+        NumericScalar::F64(value) => floating_char_code(value)?,
+        NumericScalar::F32(value) => floating_char_code(f64::from(value))?,
+        value => value
+            .into_int_value()
+            .and_then(|value| value.try_to_u64())
+            .and_then(|value| u32::try_from(value).ok())
+            .ok_or_else(|| "fread: character value is outside the Unicode range".to_string())?,
     };
     char::from_u32(code).ok_or_else(|| {
         format!("value 0x{code:X} cannot be represented as a Unicode scalar for char output")
     })
+}
+
+fn floating_char_code(value: f64) -> Result<u32, String> {
+    if !value.is_finite() || value < 0.0 || value > f64::from(u32::MAX) || value.round() != value {
+        return Err("fread: character value is outside the Unicode range".to_string());
+    }
+    Ok(value as u32)
 }
 
 fn read_u16(bytes: &[u8], endianness: Endianness) -> u16 {
@@ -1478,8 +1585,8 @@ fn read_u64(bytes: &[u8], endianness: Endianness) -> u64 {
 fn finalize_numeric(
     size_spec: &SizeSpec,
     count_read: usize,
-    mut values: Vec<f64>,
-) -> (Vec<f64>, usize, usize) {
+    mut values: NumericStorage,
+) -> (NumericStorage, usize, usize) {
     match size_spec {
         SizeSpec::All | SizeSpec::Count(_) => {
             let rows = count_read;
@@ -1491,16 +1598,12 @@ fn finalize_numeric(
             cols: Some(c),
         } => {
             let target = rows.saturating_mul(*c);
-            if values.len() < target {
-                values.resize(target, 0.0);
-            } else if values.len() > target {
-                values.truncate(target);
-            }
+            resize_numeric_storage(&mut values, target);
             (values, *rows, *c)
         }
         SizeSpec::Matrix { rows, cols: None } => {
             if *rows == 0 {
-                values.clear();
+                resize_numeric_storage(&mut values, 0);
                 (values, 0, 0)
             } else {
                 let cols = if count_read == 0 {
@@ -1509,14 +1612,30 @@ fn finalize_numeric(
                     count_read.div_ceil(*rows)
                 };
                 let target = rows.saturating_mul(cols);
-                if values.len() < target {
-                    values.resize(target, 0.0);
-                } else if values.len() > target {
-                    values.truncate(target);
-                }
+                resize_numeric_storage(&mut values, target);
                 (values, *rows, cols)
             }
         }
+    }
+}
+
+fn resize_numeric_storage(storage: &mut NumericStorage, len: usize) {
+    macro_rules! resize {
+        ($values:expr, $zero:expr) => {{
+            $values.resize(len, $zero);
+        }};
+    }
+    match storage {
+        NumericStorage::F64(values) => resize!(values, 0.0),
+        NumericStorage::F32(values) => resize!(values, 0.0),
+        NumericStorage::I8(values) => resize!(values, 0),
+        NumericStorage::I16(values) => resize!(values, 0),
+        NumericStorage::I32(values) => resize!(values, 0),
+        NumericStorage::I64(values) => resize!(values, 0),
+        NumericStorage::U8(values) => resize!(values, 0),
+        NumericStorage::U16(values) => resize!(values, 0),
+        NumericStorage::U32(values) => resize!(values, 0),
+        NumericStorage::U64(values) => resize!(values, 0),
     }
 }
 
@@ -1614,6 +1733,10 @@ pub(crate) mod tests {
         futures::executor::block_on(fclose::evaluate(args))
     }
 
+    fn double_values(tensor: &Tensor) -> &[f64] {
+        tensor.as_f64_slice().expect("expected double tensor")
+    }
+
     #[test]
     fn fread_like_preserves_every_exact_integer_class() {
         let prototypes = [
@@ -1637,8 +1760,7 @@ pub(crate) mod tests {
                 )
                 .expect("expected storage");
             let data = Value::Tensor(Tensor::new(vec![1.0, 2.5, -3.0], vec![3, 1]).unwrap());
-            let mut prototype_tensor = Tensor::new_integer(storage, vec![1, 1]).unwrap();
-            prototype_tensor.data.clear();
+            let prototype_tensor = Tensor::new_integer(storage, vec![1, 1]).unwrap();
             let prototype = Value::Tensor(prototype_tensor);
             let output = adjust_output_for_like(data, &prototype, PrecisionSpec::default())
                 .expect("integer like output");
@@ -1676,17 +1798,15 @@ pub(crate) mod tests {
     #[cfg(target_pointer_width = "64")]
     fn fread_size_tensor_parser_preserves_exact_integer_storage() {
         let count = (1_u64 << 53) + 1;
-        let mut count_tensor =
+        let count_tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![count]), vec![1, 1]).expect("count");
-        count_tensor.data.clear();
         match parse_size(Some(&Value::Tensor(count_tensor))).expect("size") {
             SizeSpec::Count(value) => assert_eq!(value, usize::try_from(count).unwrap()),
             other => panic!("expected count size, got {other:?}"),
         }
 
-        let mut matrix_tensor =
+        let matrix_tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![count, 3]), vec![1, 2]).expect("matrix");
-        matrix_tensor.data.clear();
         match parse_size(Some(&Value::Tensor(matrix_tensor))).expect("size") {
             SizeSpec::Matrix {
                 rows,
@@ -1701,22 +1821,18 @@ pub(crate) mod tests {
 
     #[test]
     fn fread_size_tensor_parser_rejects_negative_integer_storage() {
-        let mut count_tensor =
+        let count_tensor =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("count");
-        count_tensor.data.clear();
         assert!(parse_size(Some(&Value::Tensor(count_tensor))).is_err());
 
-        let mut matrix_tensor =
+        let matrix_tensor =
             Tensor::new_integer(IntegerStorage::I16(vec![2, -1]), vec![1, 2]).expect("matrix");
-        matrix_tensor.data.clear();
         assert!(parse_size(Some(&Value::Tensor(matrix_tensor))).is_err());
     }
 
     #[test]
     fn fread_scalar_parser_reads_typed_integer_storage_exactly() {
-        let mut scalar =
-            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("scalar");
-        scalar.data.clear();
+        let scalar = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("scalar");
         assert_eq!(
             value_to_scalar(&Value::Tensor(scalar), "scalar").expect("scalar"),
             7.0
@@ -1747,26 +1863,23 @@ pub(crate) mod tests {
 
     #[test]
     fn fread_fid_and_skip_read_typed_integer_storage_exactly() {
-        let mut fid =
+        let fid =
             Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("fid tensor");
-        fid.data.clear();
         assert_eq!(parse_fid(&Value::Tensor(fid)).unwrap(), 7);
         assert_eq!(parse_fid(&Value::Int(IntValue::U16(7))).unwrap(), 7);
         assert!(parse_fid(&Value::Int(IntValue::U64(u64::MAX))).is_err());
 
-        let mut skip =
+        let skip =
             Tensor::new_integer(IntegerStorage::U16(vec![9]), vec![1, 1]).expect("skip tensor");
-        skip.data.clear();
         assert_eq!(parse_skip(Some(&Value::Tensor(skip))).unwrap(), 9);
 
-        let mut too_large =
+        let too_large =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("skip");
-        too_large.data.clear();
         assert!(parse_skip(Some(&Value::Tensor(too_large))).is_err());
     }
 
     #[test]
-    fn fread_typed_scalar_parameters_ignore_poisoned_f64_mirrors() {
+    fn fread_typed_scalar_parameters_cover_every_integer_class() {
         let classes = [
             IntegerStorage::I8(vec![7]),
             IntegerStorage::I16(vec![7]),
@@ -1778,8 +1891,7 @@ pub(crate) mod tests {
             IntegerStorage::U64(vec![7]),
         ];
         for storage in classes {
-            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed scalar");
-            tensor.data = vec![f64::NAN];
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed scalar");
             let value = Value::Tensor(tensor);
             assert_eq!(parse_fid(&value).unwrap(), 7);
             assert!(matches!(
@@ -1792,12 +1904,12 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn fread_reads_default_double() {
+    fn fread_default_reads_uint8_and_returns_double() {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fread_default_double");
         let mut file = File::create(&path).expect("create");
-        file.write_all(&1.5f64.to_le_bytes()).expect("write");
+        file.write_all(&[7_u8]).expect("write");
         drop(file);
 
         let open = run_fopen(&[
@@ -1812,7 +1924,7 @@ pub(crate) mod tests {
         match eval.data() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 1]);
-                assert!((t.data[0] - 1.5).abs() < 1e-12);
+                assert_eq!(double_values(t), &[7.0]);
             }
             other => panic!("unexpected result {other:?}"),
         }
@@ -1822,13 +1934,110 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn fread_logical_conversion_uses_typed_integer_storage_when_mirror_is_poisoned() {
-        let mut tensor = Tensor::new_integer(
+    fn fread_precision_parser_supports_every_numeric_output_class() {
+        let cases = [
+            ("uint8=>double", NumericDType::F64),
+            ("uint8=>single", NumericDType::F32),
+            ("uint8=>int8", NumericDType::I8),
+            ("uint8=>int16", NumericDType::I16),
+            ("uint8=>int32", NumericDType::I32),
+            ("uint8=>int64", NumericDType::I64),
+            ("uint8=>uint8", NumericDType::U8),
+            ("uint8=>uint16", NumericDType::U16),
+            ("uint8=>uint32", NumericDType::U32),
+            ("uint8=>uint64", NumericDType::U64),
+        ];
+        for (precision, expected) in cases {
+            let parsed = parse_precision_string(precision).expect("precision");
+            assert!(matches!(parsed.output, OutputKind::Numeric(dtype) if dtype == expected));
+        }
+        assert!(matches!(
+            parse_precision_string("*single").unwrap().output,
+            OutputKind::Numeric(NumericDType::F32)
+        ));
+        assert!(matches!(
+            parse_precision_string("*uint64").unwrap().output,
+            OutputKind::Numeric(NumericDType::U64)
+        ));
+        let repeated = parse_precision_string("2*uint16=>uint16").unwrap();
+        assert_eq!(repeated.repeat, 2);
+        assert!(matches!(
+            repeated.output,
+            OutputKind::Numeric(NumericDType::U16)
+        ));
+        assert_eq!(parse_precision_string("real*4").unwrap().repeat, 1);
+    }
+
+    #[test]
+    fn fread_star_uint64_preserves_values_beyond_binary64_exact_range() {
+        let _guard = registry_guard();
+        registry::reset_for_tests();
+        let path = unique_path("fread_exact_uint64");
+        let expected = [9_007_199_254_740_993_u64, u64::MAX];
+        let mut file = File::create(&path).expect("create");
+        for value in expected {
+            file.write_all(&value.to_le_bytes()).expect("write");
+        }
+        drop(file);
+
+        let open = run_fopen(&[
+            Value::from(path.to_string_lossy().to_string()),
+            Value::from("rb"),
+        ])
+        .expect("fopen");
+        let fid = open.as_open().unwrap().fid as i32;
+        let eval = run_evaluate(&Value::Num(fid as f64), &[Value::from("*uint64")]).expect("fread");
+        assert_eq!(eval.count(), 2);
+        let Value::Tensor(output) = eval.data() else {
+            panic!("expected tensor output");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(expected.to_vec()))
+        );
+
+        run_fclose(&[Value::Num(fid as f64)]).unwrap();
+        test_support::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn fread_star_single_preserves_native_single_storage() {
+        let _guard = registry_guard();
+        registry::reset_for_tests();
+        let path = unique_path("fread_native_single");
+        let expected = [1.25_f32, -3.5_f32];
+        let mut file = File::create(&path).expect("create");
+        for value in expected {
+            file.write_all(&value.to_le_bytes()).expect("write");
+        }
+        drop(file);
+
+        let open = run_fopen(&[
+            Value::from(path.to_string_lossy().to_string()),
+            Value::from("rb"),
+        ])
+        .expect("fopen");
+        let fid = open.as_open().unwrap().fid as i32;
+        let eval = run_evaluate(&Value::Num(fid as f64), &[Value::from("*single")]).expect("fread");
+        let Value::Tensor(output) = eval.data() else {
+            panic!("expected tensor output");
+        };
+        assert_eq!(
+            output.clone().into_numeric_storage().expect("storage"),
+            NumericStorage::F32(expected.to_vec())
+        );
+
+        run_fclose(&[Value::Num(fid as f64)]).unwrap();
+        test_support::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn fread_logical_conversion_uses_typed_integer_storage() {
+        let tensor = Tensor::new_integer(
             IntegerStorage::U64(vec![0, 9_007_199_254_740_993, u64::MAX]),
             vec![3, 1],
         )
         .expect("integer tensor");
-        tensor.data = vec![f64::NAN];
 
         let Value::LogicalArray(logical) =
             convert_to_logical_value(Value::Tensor(tensor)).expect("logical conversion")
@@ -1861,7 +2070,7 @@ pub(crate) mod tests {
         assert_eq!(eval.count(), 4);
         match eval.data() {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![1.0, 2.0, 3.0, 4.0]);
+                assert_eq!(double_values(t), &[1.0, 2.0, 3.0, 4.0]);
                 assert_eq!(t.shape, vec![4, 1]);
             }
             other => panic!("unexpected result {other:?}"),
@@ -1895,7 +2104,7 @@ pub(crate) mod tests {
         match eval.data() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                assert_eq!(t.data, vec![1.0, 2.0, 3.0, 4.0, 5.0, 0.0]);
+                assert_eq!(double_values(t), &[1.0, 2.0, 3.0, 4.0, 5.0, 0.0]);
             }
             other => panic!("unexpected result {other:?}"),
         }
@@ -2050,7 +2259,7 @@ pub(crate) mod tests {
 
             let proto = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
             let view = HostTensorView {
-                data: &proto.data,
+                data: double_values(&proto),
                 shape: &proto.shape,
             };
             let handle = provider.upload(&view).expect("upload prototype");
@@ -2066,7 +2275,7 @@ pub(crate) mod tests {
                 Value::GpuTensor(result) => {
                     let gathered =
                         test_support::gather(Value::GpuTensor(result.clone())).expect("gather");
-                    assert_eq!(gathered.data, vec![1.5]);
+                    assert_eq!(double_values(&gathered), &[1.5]);
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
             }
@@ -2113,7 +2322,7 @@ pub(crate) mod tests {
             Value::GpuTensor(handle) => {
                 let gathered =
                     test_support::gather(Value::GpuTensor(handle.clone())).expect("gather");
-                assert_eq!(gathered.data, vec![2.25]);
+                assert_eq!(double_values(&gathered), &[2.25]);
             }
             other => panic!("expected gpu tensor, got {other:?}"),
         }
@@ -2144,10 +2353,36 @@ pub(crate) mod tests {
         assert_eq!(eval.count(), 3);
         match eval.data() {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![1.0, 3.0, 5.0]);
+                assert_eq!(double_values(t), &[1.0, 3.0, 5.0]);
             }
             other => panic!("unexpected result {other:?}"),
         }
+
+        run_fclose(&[Value::Num(fid as f64)]).unwrap();
+        test_support::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn fread_repeated_precision_skips_after_each_block() {
+        let _guard = registry_guard();
+        registry::reset_for_tests();
+        let path = unique_path("fread_repeated_skip");
+        let mut file = File::create(&path).expect("create");
+        file.write_all(&[1_u8, 2, 99, 3, 4, 99]).expect("write");
+        drop(file);
+
+        let open = run_fopen(&[
+            Value::from(path.to_string_lossy().to_string()),
+            Value::from("rb"),
+        ])
+        .expect("fopen");
+        let fid = open.as_open().unwrap().fid as i32;
+        let args = vec![Value::Num(4.0), Value::from("2*uint8"), Value::Num(1.0)];
+        let eval = run_evaluate(&Value::Num(fid as f64), &args).expect("fread");
+        let Value::Tensor(output) = eval.data() else {
+            panic!("expected tensor output");
+        };
+        assert_eq!(double_values(output), &[1.0, 2.0, 3.0, 4.0]);
 
         run_fclose(&[Value::Num(fid as f64)]).unwrap();
         test_support::fs::remove_file(path).unwrap();
@@ -2176,7 +2411,7 @@ pub(crate) mod tests {
         assert_eq!(eval.count(), 2);
         match eval.data() {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![258.0, 772.0]);
+                assert_eq!(double_values(t), &[258.0, 772.0]);
                 assert_eq!(t.shape, vec![2, 1]);
             }
             other => panic!("unexpected result {other:?}"),
