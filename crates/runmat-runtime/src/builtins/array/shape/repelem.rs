@@ -20,7 +20,8 @@ use runmat_builtins::ResolveContext;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, IntValue, LogicalArray, StringArray, Tensor, Type, Value,
+    CellArray, CharArray, ComplexTensor, IntValue, LogicalArray, NumericScalar, NumericStorage,
+    StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -278,13 +279,13 @@ async fn repelem_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult
 
     match value {
         Value::Tensor(t) => {
-            let out = repelem_tensor(&t, &factors, single_arg)?;
+            let out = repelem_tensor(t, &factors, single_arg)?;
             Ok(tensor::tensor_into_value(out))
         }
         Value::Num(_) | Value::Int(_) => {
             let tensor =
                 tensor::value_into_tensor_for("repelem", value).map_err(repelem_internal)?;
-            let out = repelem_tensor(&tensor, &factors, single_arg)?;
+            let out = repelem_tensor(tensor, &factors, single_arg)?;
             Ok(tensor::tensor_into_value(out))
         }
         Value::Bool(flag) => {
@@ -388,8 +389,26 @@ fn parse_host_factor(value: &Value, position: usize) -> crate::BuiltinResult<Rep
                 )?))
             } else {
                 ensure_vector_shape(&tensor.shape, position)?;
-                let mut out = Vec::with_capacity(tensor.data.len());
-                for &v in &tensor.data {
+                let len = tensor::tensor_element_len(tensor);
+                let mut out = Vec::with_capacity(len);
+                for index in 0..len {
+                    let v = match tensor
+                        .numeric_value_at(index)
+                        .expect("replication tensor index is in bounds")
+                    {
+                        NumericScalar::F64(value) => value,
+                        NumericScalar::F32(value) => f64::from(value),
+                        NumericScalar::I8(_)
+                        | NumericScalar::I16(_)
+                        | NumericScalar::I32(_)
+                        | NumericScalar::I64(_)
+                        | NumericScalar::U8(_)
+                        | NumericScalar::U16(_)
+                        | NumericScalar::U32(_)
+                        | NumericScalar::U64(_) => {
+                            unreachable!("integer factors return through the exact parser")
+                        }
+                    };
                     out.push(coerce_count(v, position)?);
                 }
                 Ok(RepFactor::Vector(out))
@@ -487,24 +506,44 @@ fn vector_replication_axis(shape: &[usize]) -> crate::BuiltinResult<usize> {
 }
 
 fn repelem_tensor(
-    tensor: &Tensor,
+    tensor: Tensor,
     factors: &[RepFactor],
     single_arg: bool,
 ) -> crate::BuiltinResult<Tensor> {
-    if let Some(storage) = tensor.integer_data.as_ref() {
-        let (values, shape) =
-            repelem_column_major(&storage.exact_values(), &tensor.shape, factors, single_arg)?;
-        let storage = storage
-            .from_exact_values_like(values)
-            .map_err(|e| repelem_internal(format!("repelem: {e}")))?;
-        return Tensor::new_integer(storage, shape)
-            .map_err(|e| repelem_internal(format!("repelem: {e}")));
-    }
-    let (data, shape) = repelem_column_major(&tensor.data, &tensor.shape, factors, single_arg)?;
-    let mut out = Tensor::new_with_dtype(data, shape, tensor.dtype)
+    let input_shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
         .map_err(|e| repelem_internal(format!("repelem: {e}")))?;
-    out.dtype = tensor.dtype;
-    Ok(out)
+    let (storage, output_shape) =
+        repelem_numeric_storage(storage, &input_shape, factors, single_arg)?;
+    Tensor::from_numeric_storage(storage, output_shape)
+        .map_err(|e| repelem_internal(format!("repelem: {e}")))
+}
+
+fn repelem_numeric_storage(
+    storage: NumericStorage,
+    shape: &[usize],
+    factors: &[RepFactor],
+    single_arg: bool,
+) -> crate::BuiltinResult<(NumericStorage, Vec<usize>)> {
+    macro_rules! repeat {
+        ($values:expr, $variant:ident) => {{
+            let (values, shape) = repelem_column_major(&$values, shape, factors, single_arg)?;
+            (NumericStorage::$variant(values), shape)
+        }};
+    }
+    Ok(match storage {
+        NumericStorage::F64(values) => repeat!(values, F64),
+        NumericStorage::F32(values) => repeat!(values, F32),
+        NumericStorage::I8(values) => repeat!(values, I8),
+        NumericStorage::I16(values) => repeat!(values, I16),
+        NumericStorage::I32(values) => repeat!(values, I32),
+        NumericStorage::I64(values) => repeat!(values, I64),
+        NumericStorage::U8(values) => repeat!(values, U8),
+        NumericStorage::U16(values) => repeat!(values, U16),
+        NumericStorage::U32(values) => repeat!(values, U32),
+        NumericStorage::U64(values) => repeat!(values, U64),
+    })
 }
 
 fn repelem_logical(
@@ -907,7 +946,7 @@ fn checked_total(shape: &[usize]) -> crate::BuiltinResult<usize> {
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage, NumericDType};
+    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage};
 
     fn repelem_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::repelem_builtin(value, rest))
@@ -1328,17 +1367,17 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn integer_dtype_tensor_preserves_dtype() {
-        let mut tensor =
-            Tensor::new_with_dtype(vec![1.0, 2.0, 3.0], vec![1, 3], NumericDType::U8).unwrap();
-        tensor.dtype = NumericDType::U8;
+    fn repelem_preserves_native_single_storage() {
+        let tensor = Tensor::from_f32(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
         let result = repelem_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(2))])
             .expect("repelem");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 6]);
-                assert_eq!(t.data, vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
-                assert_eq!(t.dtype, NumericDType::U8);
+                assert_eq!(
+                    t.into_numeric_storage().expect("single storage"),
+                    NumericStorage::F32(vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0])
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }

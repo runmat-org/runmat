@@ -18,7 +18,8 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+    CharArray, ComplexTensor, LogicalArray, NumericScalar, NumericStorage, ResolveContext,
+    StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -393,8 +394,26 @@ fn parse_dims_tensor(tensor: &Tensor) -> crate::BuiltinResult<Vec<usize>> {
     if let Some(parsed) = tensor::integer_tensor_dimension_vector(tensor, "flip", false) {
         return parsed.map_err(|e| flip_error_for("flip", e));
     }
-    let mut dims = Vec::with_capacity(tensor.data.len());
-    for entry in &tensor.data {
+    let len = tensor::tensor_element_len(tensor);
+    let mut dims = Vec::with_capacity(len);
+    for index in 0..len {
+        let entry = match tensor
+            .numeric_value_at(index)
+            .expect("dimension tensor index is in bounds")
+        {
+            NumericScalar::F64(value) => value,
+            NumericScalar::F32(value) => f64::from(value),
+            NumericScalar::I8(_)
+            | NumericScalar::I16(_)
+            | NumericScalar::I32(_)
+            | NumericScalar::I64(_)
+            | NumericScalar::U8(_)
+            | NumericScalar::U16(_)
+            | NumericScalar::U32(_)
+            | NumericScalar::U64(_) => {
+                unreachable!("integer dimension tensors return through the exact parser")
+            }
+        };
         if !entry.is_finite() {
             return Err(flip_error_for(
                 "flip",
@@ -460,21 +479,38 @@ pub(crate) fn flip_tensor_with(
     if tensor::tensor_element_len(&tensor) == 0 || dims.is_empty() {
         return Ok(tensor);
     }
-    if let Some(storage) = tensor.integer_data.as_ref() {
-        let storage = storage
-            .from_exact_values_like(flip_generic(
-                &storage.exact_values(),
-                &tensor.shape,
-                dims,
-                builtin,
-            )?)
-            .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))?;
-        return Tensor::new_integer(storage, tensor.shape.clone())
-            .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")));
-    }
-    let data = flip_generic(&tensor.data, &tensor.shape, dims, builtin)?;
-    Tensor::new(data, tensor.shape.clone())
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))?;
+    let storage = flip_numeric_storage(storage, &shape, dims, builtin)?;
+    Tensor::from_numeric_storage(storage, shape)
         .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))
+}
+
+fn flip_numeric_storage(
+    storage: NumericStorage,
+    shape: &[usize],
+    dims: &[usize],
+    builtin: &'static str,
+) -> crate::BuiltinResult<NumericStorage> {
+    macro_rules! flip {
+        ($values:expr, $variant:ident) => {
+            NumericStorage::$variant(flip_generic(&$values, shape, dims, builtin)?)
+        };
+    }
+    Ok(match storage {
+        NumericStorage::F64(values) => flip!(values, F64),
+        NumericStorage::F32(values) => flip!(values, F32),
+        NumericStorage::I8(values) => flip!(values, I8),
+        NumericStorage::I16(values) => flip!(values, I16),
+        NumericStorage::I32(values) => flip!(values, I32),
+        NumericStorage::I64(values) => flip!(values, I64),
+        NumericStorage::U8(values) => flip!(values, U8),
+        NumericStorage::U16(values) => flip!(values, U16),
+        NumericStorage::U32(values) => flip!(values, U32),
+        NumericStorage::U64(values) => flip!(values, U64),
+    })
 }
 
 pub(crate) fn flip_complex_tensor(
@@ -787,6 +823,19 @@ pub(crate) mod tests {
             Value::Tensor(t) => assert_eq!(t.data, vec![4.0, 3.0, 2.0, 1.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn flip_preserves_native_single_storage() {
+        let tensor = Tensor::from_f32(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
+        let Value::Tensor(output) = flip_builtin(Value::Tensor(tensor), Vec::new()).expect("flip")
+        else {
+            panic!("expected tensor output");
+        };
+        assert_eq!(
+            output.into_numeric_storage().expect("single storage"),
+            NumericStorage::F32(vec![3.0, 2.0, 1.0])
+        );
     }
 
     #[test]
