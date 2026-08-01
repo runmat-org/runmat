@@ -6446,6 +6446,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-test"
+version = "0.6.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 1.0.69",
+ "wasm-bindgen-test",
+]
+
+[[package]]
 name = "runmat-thread-local"
 version = "0.6.1"
 

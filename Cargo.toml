@@ -31,6 +31,7 @@ members = [
     "crates/runmat-package",
     "crates/runmat-package-cache",
     "crates/runmat-package-cache-native",
+    "crates/runmat-test",
     "crates/runmat-static-analysis",
     "crates/runmat-geometry/core",
     "crates/runmat-geometry/io",
@@ -101,6 +102,7 @@ runmat-config = { version = "=0.6.1", path = "crates/runmat-config" }
 runmat-package = { version = "=0.6.1", path = "crates/runmat-package" }
 runmat-package-cache = { version = "=0.6.1", path = "crates/runmat-package-cache" }
 runmat-package-cache-native = { version = "=0.6.1", path = "crates/runmat-package-cache-native" }
+runmat-test = { version = "=0.6.1", path = "crates/runmat-test" }
 runmat-static-analysis = { version = "=0.6.1", path = "crates/runmat-static-analysis" }
 runmat-server-client = { version = "=0.6.1", path = "crates/runmat-server-client" }
 runmat-accelerate = { version = "=0.6.1", path = "crates/runmat-accelerate" }
