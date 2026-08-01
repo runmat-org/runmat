@@ -299,12 +299,10 @@ async fn evaluate_with_options(
 ) -> BuiltinResult<IsMemberTolEvaluation> {
     let a = gather_if_gpu(a).await?;
     let b = gather_if_gpu(b).await?;
-    let mut tensor_a =
+    let tensor_a =
         tensor::value_into_tensor_for(NAME, a).map_err(|_| error(&ERROR_INVALID_INPUT))?;
-    let mut tensor_b =
+    let tensor_b =
         tensor::value_into_tensor_for(NAME, b).map_err(|_| error(&ERROR_INVALID_INPUT))?;
-    materialize_exact_numeric_data(&mut tensor_a);
-    materialize_exact_numeric_data(&mut tensor_b);
     evaluate_tensors(tensor_a, tensor_b, opts, loc_request)
 }
 
@@ -324,7 +322,7 @@ fn evaluate_tensors(
     loc_request: LocRequest,
 ) -> BuiltinResult<IsMemberTolEvaluation> {
     if opts.tol.is_none() {
-        opts.tol = Some(default_tolerance(a.dtype, b.dtype));
+        opts.tol = Some(default_tolerance(a.numeric_dtype(), b.numeric_dtype()));
     }
     if opts.by_rows {
         evaluate_rows(a, b, opts, loc_request)
@@ -410,6 +408,10 @@ fn evaluate_elements(
     opts: IsMemberTolOptions,
     loc_request: LocRequest,
 ) -> BuiltinResult<IsMemberTolEvaluation> {
+    // Tolerance and DataScale arithmetic are defined in the floating-point
+    // comparison domain. Integer tensors enter that domain explicitly here.
+    let a_values = tensor::tensor_values_f64_cow(&a);
+    let b_values = tensor::tensor_values_f64_cow(&b);
     let tol = opts.tol.expect("defaulted tolerance");
     let scale = opts
         .data_scale
@@ -425,24 +427,24 @@ fn evaluate_elements(
             }
         })
         .transpose()?
-        .unwrap_or_else(|| default_element_scale(&a, &b));
+        .unwrap_or_else(|| default_element_scale(&a_values, &b_values));
     let threshold = tol * scale.abs();
 
-    let mut mask_data = Vec::with_capacity(a.data.len());
+    let mut mask_data = Vec::with_capacity(a_values.len());
     let mut loc_data = match loc_request {
-        LocRequest::First => Vec::with_capacity(a.data.len()),
+        LocRequest::First => Vec::with_capacity(a_values.len()),
         LocRequest::None | LocRequest::All => Vec::new(),
     };
     let mut all_cells = match loc_request {
-        LocRequest::All => Vec::with_capacity(a.data.len()),
+        LocRequest::All => Vec::with_capacity(a_values.len()),
         LocRequest::None | LocRequest::First => Vec::new(),
     };
 
-    for &value in &a.data {
+    for &value in a_values.iter() {
         match loc_request {
             LocRequest::None => {
                 mask_data.push(
-                    if first_element_match(value, &b.data, threshold).is_some() {
+                    if first_element_match(value, &b_values, threshold).is_some() {
                         1
                     } else {
                         0
@@ -450,12 +452,12 @@ fn evaluate_elements(
                 );
             }
             LocRequest::First => {
-                let first = first_element_match(value, &b.data, threshold);
+                let first = first_element_match(value, &b_values, threshold);
                 mask_data.push(if first.is_some() { 1 } else { 0 });
                 loc_data.push(first.unwrap_or(0) as f64);
             }
             LocRequest::All => {
-                let matches = all_element_matches(value, &b.data, threshold);
+                let matches = all_element_matches(value, &b_values, threshold);
                 mask_data.push(if matches.is_empty() { 0 } else { 1 });
                 all_cells.push(indices_cell(matches)?);
             }
@@ -489,8 +491,19 @@ fn evaluate_rows(
     if cols_a != cols_b {
         return Err(error(&ERROR_ROWS_COLUMN_MISMATCH));
     }
+    // Keep native tensor storage authoritative; only the tolerance engine sees
+    // the explicitly materialized floating-point comparison values.
+    let a_values = tensor::tensor_values_f64_cow(&a);
+    let b_values = tensor::tensor_values_f64_cow(&b);
     let tol = opts.tol.expect("defaulted tolerance");
-    let scales = row_scales(&a, rows_a, &b, rows_b, opts.data_scale.as_deref(), cols_a)?;
+    let scales = row_scales(
+        &a_values,
+        rows_a,
+        &b_values,
+        rows_b,
+        opts.data_scale.as_deref(),
+        cols_a,
+    )?;
     let thresholds: Vec<f64> = scales.iter().map(|scale| tol * scale.abs()).collect();
 
     let mut mask_data = vec![0u8; rows_a];
@@ -507,10 +520,10 @@ fn evaluate_rows(
         match loc_request {
             LocRequest::None => {
                 mask_data[row_a] = if first_row_match(
-                    &a,
+                    &a_values,
                     row_a,
                     rows_a,
-                    &b,
+                    &b_values,
                     rows_b,
                     cols_a,
                     &thresholds,
@@ -523,12 +536,28 @@ fn evaluate_rows(
                 };
             }
             LocRequest::First => {
-                let first = first_row_match(&a, row_a, rows_a, &b, rows_b, cols_a, &thresholds);
+                let first = first_row_match(
+                    &a_values,
+                    row_a,
+                    rows_a,
+                    &b_values,
+                    rows_b,
+                    cols_a,
+                    &thresholds,
+                );
                 mask_data[row_a] = if first.is_some() { 1 } else { 0 };
                 loc_data[row_a] = first.unwrap_or(0) as f64;
             }
             LocRequest::All => {
-                let matches = all_row_matches(&a, row_a, rows_a, &b, rows_b, cols_a, &thresholds);
+                let matches = all_row_matches(
+                    &a_values,
+                    row_a,
+                    rows_a,
+                    &b_values,
+                    rows_b,
+                    cols_a,
+                    &thresholds,
+                );
                 mask_data[row_a] = if matches.is_empty() { 0 } else { 1 };
                 all_cells.push(indices_cell(matches)?);
             }
@@ -568,10 +597,10 @@ fn all_element_matches(value: f64, candidates: &[f64], threshold: f64) -> Vec<us
 }
 
 fn first_row_match(
-    a: &Tensor,
+    a: &[f64],
     row_a: usize,
     rows_a: usize,
-    b: &Tensor,
+    b: &[f64],
     rows_b: usize,
     cols: usize,
     thresholds: &[f64],
@@ -582,10 +611,10 @@ fn first_row_match(
 }
 
 fn all_row_matches(
-    a: &Tensor,
+    a: &[f64],
     row_a: usize,
     rows_a: usize,
-    b: &Tensor,
+    b: &[f64],
     rows_b: usize,
     cols: usize,
     thresholds: &[f64],
@@ -598,10 +627,10 @@ fn all_row_matches(
 }
 
 fn rows_match(
-    a: &Tensor,
+    a: &[f64],
     row_a: usize,
     rows_a: usize,
-    b: &Tensor,
+    b: &[f64],
     row_b: usize,
     rows_b: usize,
     cols: usize,
@@ -612,8 +641,8 @@ fn rows_match(
         if threshold.is_infinite() {
             continue;
         }
-        let lhs = a.data[row_a + col * rows_a];
-        let rhs = b.data[row_b + col * rows_b];
+        let lhs = a[row_a + col * rows_a];
+        let rhs = b[row_b + col * rows_b];
         if !within_tolerance(lhs, rhs, threshold) {
             return false;
         }
@@ -639,18 +668,17 @@ fn default_tolerance(a: NumericDType, b: NumericDType) -> f64 {
     }
 }
 
-fn default_element_scale(a: &Tensor, b: &Tensor) -> f64 {
-    a.data
-        .iter()
-        .chain(b.data.iter())
+fn default_element_scale(a: &[f64], b: &[f64]) -> f64 {
+    a.iter()
+        .chain(b.iter())
         .filter_map(|value| (!value.is_nan()).then_some(value.abs()))
         .fold(0.0, f64::max)
 }
 
 fn row_scales(
-    a: &Tensor,
+    a: &[f64],
     rows_a: usize,
-    b: &Tensor,
+    b: &[f64],
     rows_b: usize,
     supplied: Option<&[f64]>,
     cols: usize,
@@ -671,13 +699,13 @@ fn row_scales(
     let mut scales = vec![0.0f64; cols];
     for (col, scale) in scales.iter_mut().enumerate() {
         for row in 0..rows_a {
-            let value = a.data[row + col * rows_a];
+            let value = a[row + col * rows_a];
             if !value.is_nan() {
                 *scale = (*scale).max(value.abs());
             }
         }
         for row in 0..rows_b {
-            let value = b.data[row + col * rows_b];
+            let value = b[row + col * rows_b];
             if !value.is_nan() {
                 *scale = (*scale).max(value.abs());
             }
@@ -804,12 +832,6 @@ fn numeric_scalar(value: &Value) -> Option<f64> {
             Some(if logical.data[0] != 0 { 1.0 } else { 0.0 })
         }
         _ => None,
-    }
-}
-
-fn materialize_exact_numeric_data(tensor: &mut Tensor) {
-    if tensor.integer_storage().is_some() {
-        tensor.data = tensor::tensor_values_f64(tensor);
     }
 }
 
@@ -951,6 +973,27 @@ mod tests {
         .unwrap();
 
         assert_eq!(result.mask.data, vec![1, 0, 1]);
+    }
+
+    #[test]
+    fn wide_integers_enter_explicit_f64_tolerance_domain() {
+        let a = Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+            .unwrap();
+        let b = Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_992]), vec![1, 1])
+            .unwrap();
+
+        let result = eval(
+            Value::Tensor(a),
+            Value::Tensor(b),
+            &[
+                Value::Num(1.0e-12),
+                Value::from("DataScale"),
+                Value::Num(1.0),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(result.mask_value(), Value::Bool(true));
     }
 
     #[test]
