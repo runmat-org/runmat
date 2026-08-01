@@ -1,7 +1,7 @@
 //! MATLAB-compatible `ones` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{
-    GpuTensorHandle, HostIntegerDataView, HostIntegerTensorView, HostTensorView, IntegerElementType,
+    GpuTensorHandle, HostIntegerDataView, HostIntegerTensorView, IntegerElementType,
 };
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
@@ -16,7 +16,7 @@ use crate::builtins::common::spec::{
     FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
     ShapeRequirements,
 };
-use crate::builtins::common::tensor;
+use crate::builtins::common::{gpu_helpers, tensor};
 use runmat_builtins::NumericDType;
 use runmat_builtins::Type;
 
@@ -491,22 +491,12 @@ async fn ones_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value
                 .map_err(|e| builtin_error(format!("ones: {e}")))
         }
         Value::GpuTensor(handle) => ones_like_gpu(handle, shape).await,
-        Value::Tensor(t) => match t.integer_storage() {
-            Some(storage) => ones_integer_like(storage, shape),
-            None => match t.dtype {
-                NumericDType::F32 => ones_single(shape),
-                NumericDType::F64 => ones_double(shape),
-                NumericDType::I8
-                | NumericDType::I16
-                | NumericDType::I32
-                | NumericDType::I64
-                | NumericDType::U8
-                | NumericDType::U16
-                | NumericDType::U32
-                | NumericDType::U64 => tensor::ones_with_dtype(shape, t.dtype)
-                    .map(Value::Tensor)
-                    .map_err(|e| builtin_error(format!("ones: {e}"))),
-            },
+        Value::Tensor(t) => match t.numeric_dtype() {
+            NumericDType::F32 => ones_single(shape),
+            NumericDType::F64 => ones_double(shape),
+            dtype => tensor::ones_with_dtype(shape, dtype)
+                .map(Value::Tensor)
+                .map_err(|e| builtin_error(format!("ones: {e}"))),
         },
         Value::Int(value) => ones_integer_like(&IntegerStorage::from_scalar(value.clone()), shape),
         Value::Num(_) => ones_double(shape),
@@ -576,11 +566,7 @@ async fn ones_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::Buil
                 runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
             },
         ) {
-            let view = HostTensorView {
-                data: &host.data,
-                shape: &host.shape,
-            };
-            if let Ok(gpu) = provider.upload(&view) {
+            if let Ok(gpu) = gpu_helpers::upload_tensor(provider, &host) {
                 return Ok(Value::GpuTensor(gpu));
             }
         }
@@ -721,7 +707,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
-                assert!(t.data.iter().all(|&x| x == 1.0));
+                assert!(t.materialize_f64().iter().all(|&x| x == 1.0));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -735,7 +721,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 4]);
-                assert!(t.data.iter().all(|&x| x == 1.0));
+                assert!(t.materialize_f64().iter().all(|&x| x == 1.0));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -776,7 +762,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert!(t.data.iter().all(|&x| x == 1.0));
+                assert!(t.materialize_f64().iter().all(|&x| x == 1.0));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -922,11 +908,7 @@ pub(crate) mod tests {
     fn ones_gpu_like_alloc() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let args = vec![
                 Value::Num(2.0),
                 Value::Num(2.0),
@@ -938,7 +920,7 @@ pub(crate) mod tests {
                 Value::GpuTensor(gpu) => {
                     assert_eq!(gpu.shape, vec![2, 2]);
                     let gathered = test_support::gather(Value::GpuTensor(gpu)).expect("gather");
-                    assert!(gathered.data.iter().all(|&x| x == 1.0));
+                    assert!(gathered.materialize_f64().iter().all(|&x| x == 1.0));
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
             }
@@ -999,7 +981,7 @@ pub(crate) mod tests {
             Value::GpuTensor(h) => {
                 let gathered = test_support::gather(Value::GpuTensor(h)).expect("gather");
                 assert_eq!(gathered.shape, vec![2, 2]);
-                assert!(gathered.data.iter().all(|&x| x == 1.0));
+                assert!(gathered.materialize_f64().iter().all(|&x| x == 1.0));
             }
             other => panic!("expected gpu tensor, got {other:?}"),
         }
