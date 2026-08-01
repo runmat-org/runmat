@@ -241,22 +241,34 @@ fn unary_complex_host(value: Value) -> BuiltinResult<Value> {
             let input = value_into_real_input(other)?;
             let tensor = input.tensor;
             let shape = tensor.shape.clone();
-            if let Some(storage) = tensor.integer_storage() {
-                let complex = ComplexTensor::new_integer(
-                    IntegerComplexStorage::new(storage.clone(), storage.zeros_like(storage.len()))
-                        .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?,
-                    shape,
-                )
+            let is_scalar = is_scalar_tensor(&tensor);
+            let storage = tensor
+                .into_numeric_storage()
                 .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?;
-                return Ok(complex_tensor_into_value(complex));
+            match storage.into_integer_storage() {
+                Ok(storage) => {
+                    let zeros = storage.zeros_like(storage.len());
+                    let complex = ComplexTensor::new_integer(
+                        IntegerComplexStorage::new(storage, zeros)
+                            .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?,
+                        shape,
+                    )
+                    .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?;
+                    Ok(complex_tensor_into_value(complex))
+                }
+                Err(storage) => {
+                    // Floating ComplexTensor storage is currently double-only;
+                    // make the single-to-double component boundary explicit.
+                    let values = storage.materialize_f64();
+                    if is_scalar {
+                        return Ok(Value::Complex(values[0], 0.0));
+                    }
+                    let data = values.into_iter().map(|value| (value, 0.0)).collect();
+                    let complex = ComplexTensor::new(data, shape)
+                        .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?;
+                    Ok(complex_tensor_into_value(complex))
+                }
             }
-            if is_scalar_tensor(&tensor) {
-                return Ok(Value::Complex(tensor.data[0], 0.0));
-            }
-            let data = tensor.data.into_iter().map(|x| (x, 0.0)).collect();
-            let ct = ComplexTensor::new(data, shape)
-                .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?;
-            Ok(complex_tensor_into_value(ct))
         }
     }
 }
@@ -422,21 +434,24 @@ fn compose_complex(real: &RealInput, imag: &RealInput) -> BuiltinResult<Value> {
 }
 
 fn compose_floating_complex(real: &Tensor, imag: &Tensor) -> BuiltinResult<Value> {
+    // Floating ComplexTensor storage is currently double-only. Components
+    // therefore enter this explicit floating materialization boundary.
+    let real_values = tensor::tensor_values_f64_cow(real);
+    let imag_values = tensor::tensor_values_f64_cow(imag);
     let (shape, data) = if real.shape == imag.shape {
-        let data: Vec<(f64, f64)> = real
-            .data
+        let data: Vec<(f64, f64)> = real_values
             .iter()
-            .zip(imag.data.iter())
+            .zip(imag_values.iter())
             .map(|(&re, &im)| (re, im))
             .collect();
         (real.shape.clone(), data)
     } else if is_scalar_tensor(real) {
-        let re = real.data[0];
-        let data: Vec<(f64, f64)> = imag.data.iter().map(|&im| (re, im)).collect();
+        let re = real_values[0];
+        let data: Vec<(f64, f64)> = imag_values.iter().map(|&im| (re, im)).collect();
         (imag.shape.clone(), data)
     } else if is_scalar_tensor(imag) {
-        let im = imag.data[0];
-        let data: Vec<(f64, f64)> = real.data.iter().map(|&re| (re, im)).collect();
+        let im = imag_values[0];
+        let data: Vec<(f64, f64)> = real_values.iter().map(|&re| (re, im)).collect();
         (real.shape.clone(), data)
     } else {
         return Err(complex_error_with_detail(
@@ -519,9 +534,15 @@ fn integer_component_values(
             "real and imaginary parts must have the same size, unless one input is scalar",
         )),
         None if is_scalar_double => Ok(target.storage(
-            std::iter::repeat_with(|| target.cast_scalar(tensor.data[0]))
-                .take(output_len)
-                .collect(),
+            std::iter::repeat_with(|| {
+                target.cast_scalar(
+                    tensor
+                        .as_f64_slice()
+                        .expect("scalar-double input has double storage")[0],
+                )
+            })
+            .take(output_len)
+            .collect(),
         )),
         None => Err(complex_error_with_detail(
             &COMPLEX_ERROR_INTEGER_CLASS,
@@ -681,6 +702,20 @@ pub(crate) mod tests {
             }
             other => panic!("expected Complex result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn complex_single_components_cross_the_current_double_complex_boundary_explicitly() {
+        let real = Tensor::from_f32(vec![0.1, 2.0], vec![1, 2]).unwrap();
+        let imag = Tensor::from_f32(vec![0.2, -3.0], vec![1, 2]).unwrap();
+        let result = complex_call(Value::Tensor(real), vec![Value::Tensor(imag)]).expect("complex");
+        let Value::ComplexTensor(result) = result else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(
+            result.data,
+            vec![(f64::from(0.1_f32), f64::from(0.2_f32)), (2.0, -3.0)]
+        );
     }
 
     #[test]
