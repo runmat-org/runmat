@@ -4,8 +4,8 @@ use encoding_rs::{Encoding, UTF_8};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, IntValue, LogicalArray, ObjectInstance, ResolveContext, StringArray, Tensor, Type,
-    Value,
+    CharArray, IntValue, LogicalArray, NumericScalar, ObjectInstance, ResolveContext, StringArray,
+    Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -1251,9 +1251,7 @@ fn mat2str_value(value: &Value, precision: Option<usize>) -> String {
                 char_row_to_string_slice(&array.data, array.cols, 0).replace('\'', "''")
             )
         }
-        Value::Tensor(tensor) => {
-            matrix_to_string(&tensor.data, tensor.rows(), tensor.cols(), precision)
-        }
+        Value::Tensor(tensor) => tensor_to_matrix_string(tensor, precision),
         Value::LogicalArray(array) => {
             let rows = array.shape.first().copied().unwrap_or(array.data.len());
             let cols = array.shape.get(1).copied().unwrap_or(1);
@@ -1269,6 +1267,30 @@ fn mat2str_value(value: &Value, precision: Option<usize>) -> String {
 }
 
 fn matrix_to_string(data: &[f64], rows: usize, cols: usize, precision: Option<usize>) -> String {
+    matrix_to_string_with(rows, cols, |index| format_number(data[index], precision))
+}
+
+fn tensor_to_matrix_string(tensor: &Tensor, precision: Option<usize>) -> String {
+    matrix_to_string_with(tensor.rows(), tensor.cols(), |index| {
+        let value = tensor
+            .numeric_value_at(index)
+            .expect("validated tensor storage index");
+        match value {
+            NumericScalar::F64(value) => format_number(value, precision),
+            NumericScalar::F32(value) => format_number(f64::from(value), precision),
+            integer => integer
+                .into_int_value()
+                .expect("non-floating numeric scalar is integer")
+                .decimal_string(),
+        }
+    })
+}
+
+fn matrix_to_string_with(
+    rows: usize,
+    cols: usize,
+    mut format_value: impl FnMut(usize) -> String,
+) -> String {
     let mut out = String::from("[");
     for row in 0..rows {
         if row > 0 {
@@ -1278,7 +1300,7 @@ fn matrix_to_string(data: &[f64], rows: usize, cols: usize, precision: Option<us
             if col > 0 {
                 out.push(' ');
             }
-            out.push_str(&format_number(data[row + col * rows], precision));
+            out.push_str(&format_value(row + col * rows));
         }
     }
     out.push(']');
@@ -1300,20 +1322,25 @@ fn format_number(value: f64, precision: Option<usize>) -> String {
 
 fn bytes_from_value(value: &Value, fn_name: &str) -> BuiltinResult<Vec<u8>> {
     match value {
-        Value::Tensor(tensor) => {
-            if let Some(storage) = tensor.integer_storage() {
-                return Ok(storage
-                    .exact_values()
-                    .into_iter()
-                    .map(|value| byte_from_intvalue(&value))
-                    .collect());
-            }
-            tensor
-                .data
-                .iter()
-                .map(|n| byte_from_f64(*n, fn_name))
-                .collect()
-        }
+        Value::Tensor(tensor) => (0..tensor.len())
+            .map(|index| {
+                let value = tensor.numeric_value_at(index).ok_or_else(|| {
+                    compat_error(
+                        fn_name,
+                        format!("{fn_name}: numeric storage is inconsistent"),
+                    )
+                })?;
+                match value {
+                    NumericScalar::F64(value) => byte_from_f64(value, fn_name),
+                    NumericScalar::F32(value) => byte_from_f64(f64::from(value), fn_name),
+                    integer => Ok(byte_from_intvalue(
+                        &integer
+                            .into_int_value()
+                            .expect("non-floating numeric scalar is integer"),
+                    )),
+                }
+            })
+            .collect(),
         Value::Int(i) => Ok(vec![byte_from_intvalue(i)]),
         Value::Num(n) => Ok(vec![byte_from_f64(*n, fn_name)?]),
         Value::CharArray(array) => {
@@ -1637,19 +1664,19 @@ fn scan_size_from_value(value: &Value) -> BuiltinResult<Vec<usize>> {
 }
 
 fn tensor_element_len(tensor: &Tensor) -> usize {
-    tensor
-        .integer_storage()
-        .map_or(tensor.data.len(), |storage| storage.len())
+    tensor.len()
 }
 
 fn scan_tensor_size_dim(tensor: &Tensor, index: usize) -> BuiltinResult<usize> {
-    if let Some(value) = tensor
-        .integer_storage()
-        .and_then(|storage| storage.value_at(index))
-    {
-        return value.try_to_usize().ok_or_else(scan_size_error);
+    match tensor.numeric_value_at(index).ok_or_else(scan_size_error)? {
+        NumericScalar::F64(value) => scan_size_dim(value),
+        NumericScalar::F32(value) => scan_size_dim(f64::from(value)),
+        integer => integer
+            .into_int_value()
+            .expect("non-floating numeric scalar is integer")
+            .try_to_usize()
+            .ok_or_else(scan_size_error),
     }
-    scan_size_dim(tensor.data[index])
 }
 
 fn scan_size_error() -> crate::RuntimeError {
@@ -1694,6 +1721,15 @@ mod tests {
             mat2str_value(&Value::Int(runmat_builtins::IntValue::U64(u64::MAX)), None),
             "18446744073709551615"
         );
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+            vec![1, 2],
+        )
+        .expect("typed integer matrix");
+        assert_eq!(
+            mat2str_value(&Value::Tensor(tensor), None),
+            "[18446744073709551615 9007199254740993]"
+        );
     }
 
     #[test]
@@ -1704,8 +1740,6 @@ mod tests {
         );
         let tensor = Tensor::new_integer(IntegerStorage::U64(vec![9]), vec![1, 1])
             .expect("typed scalar tensor");
-        let mut tensor = tensor;
-        tensor.data.clear();
         assert_eq!(
             parse_nonnegative_usize(&Value::Tensor(tensor), "digitsPattern").unwrap(),
             9
@@ -1729,12 +1763,16 @@ mod tests {
             scan_size_from_value(&Value::Int(IntValue::U16(4))).unwrap(),
             vec![4, 1]
         );
-        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![2, 3]), vec![1, 2])
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![2, 3]), vec![1, 2])
             .expect("typed size vector");
-        tensor.data.clear();
         assert_eq!(
             scan_size_from_value(&Value::Tensor(tensor)).unwrap(),
             vec![2, 3]
+        );
+        let single = Tensor::from_f32(vec![5.0, 6.0], vec![1, 2]).expect("single size vector");
+        assert_eq!(
+            scan_size_from_value(&Value::Tensor(single)).unwrap(),
+            vec![5, 6]
         );
         assert_eq!(
             scan_size_from_value(&Value::Num(f64::INFINITY)).unwrap(),
@@ -1752,12 +1790,15 @@ mod tests {
 
     #[test]
     fn native2unicode_reads_typed_integer_byte_storage_exactly() {
-        let mut bytes =
-            Tensor::new_integer(IntegerStorage::U8(vec![104, 105]), vec![1, 2]).unwrap();
-        bytes.data.fill(0.0);
+        let bytes = Tensor::new_integer(IntegerStorage::U8(vec![104, 105]), vec![1, 2]).unwrap();
         assert_eq!(
             block(native2unicode_builtin(Value::Tensor(bytes), Vec::new())).unwrap(),
             Value::String("hi".into())
+        );
+        let single = Tensor::from_f32(vec![111.0, 107.0], vec![1, 2]).expect("single bytes");
+        assert_eq!(
+            block(native2unicode_builtin(Value::Tensor(single), Vec::new())).unwrap(),
+            Value::String("ok".into())
         );
     }
 
