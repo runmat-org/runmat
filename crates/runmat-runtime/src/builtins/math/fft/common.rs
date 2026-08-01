@@ -75,7 +75,7 @@ pub fn parse_length(value: &Value, builtin: &str) -> BuiltinResult<Option<usize>
                         builtin_error(builtin, format!("{builtin}: length must be non-negative"))
                     });
             }
-            parse_length_scalar(t.data[0], builtin).map(Some)
+            parse_length_scalar(tensor::tensor_value_f64(t, 0), builtin).map(Some)
         }
         Value::ComplexTensor(t) => {
             if t.data.len() != 1 {
@@ -136,9 +136,7 @@ pub fn parse_length(value: &Value, builtin: &str) -> BuiltinResult<Option<usize>
 }
 
 fn tensor_len(tensor: &Tensor) -> usize {
-    tensor
-        .integer_storage()
-        .map_or(tensor.data.len(), |storage| storage.len())
+    tensor.len()
 }
 
 fn parse_length_scalar(value: f64, builtin: &str) -> BuiltinResult<usize> {
@@ -200,13 +198,17 @@ pub fn value_to_complex_tensor(value: Value, builtin: &str) -> BuiltinResult<Com
 
 /// Convert a real-valued tensor into a `ComplexTensor`.
 pub fn tensor_to_complex_tensor(tensor: Tensor, builtin: &str) -> BuiltinResult<ComplexTensor> {
+    let shape = tensor.shape.clone();
+    // FFT arithmetic currently uses double complex storage. Materialize the
+    // authoritative real input explicitly at this transform-domain boundary.
     let data = tensor
-        .data
+        .into_numeric_storage()
+        .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?
+        .materialize_f64()
         .into_iter()
         .map(|re| (re, 0.0))
         .collect::<Vec<_>>();
-    ComplexTensor::new(data, tensor.shape)
-        .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))
+    ComplexTensor::new(data, shape).map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))
 }
 
 pub fn complex_tensor_to_real_value(tensor: ComplexTensor, builtin: &str) -> BuiltinResult<Value> {
@@ -507,7 +509,7 @@ pub fn parse_2d_lengths_from_tensor(
             )),
         };
     }
-    parse_2d_lengths_from_data(&tensor.data, builtin)
+    parse_2d_lengths_from_data(tensor::tensor_values_f64_cow(tensor).as_ref(), builtin)
 }
 
 pub fn parse_nd_sizes_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
@@ -516,12 +518,12 @@ pub fn parse_nd_sizes_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<u
             if let Some(storage) = t.integer_storage() {
                 return parse_nd_sizes_integers(&storage.exact_values(), builtin);
             }
-            parse_nd_sizes_data(&t.data, builtin)
+            parse_nd_sizes_data(tensor::tensor_values_f64_cow(t).as_ref(), builtin)
         }
         Value::LogicalArray(logical) => {
             let t = tensor::logical_to_tensor(logical)
                 .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?;
-            parse_nd_sizes_data(&t.data, builtin)
+            parse_nd_sizes_data(tensor::tensor_values_f64_cow(&t).as_ref(), builtin)
         }
         Value::Num(n) => parse_nd_sizes_data(&[*n], builtin),
         Value::Int(i) => parse_nd_sizes_integers(std::slice::from_ref(i), builtin),
@@ -840,7 +842,7 @@ fn dims_from_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
             Ok(vec![rounded as usize])
         }
         Value::Tensor(tensor) => {
-            if !is_vector_shape(&tensor.shape) && !tensor.data.is_empty() {
+            if !is_vector_shape(&tensor.shape) && !tensor.is_empty() {
                 return Err(builtin_error(
                     builtin,
                     format!("{builtin}: dimension vectors must be row or column vectors"),
@@ -854,8 +856,9 @@ fn dims_from_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
                     )
                 });
             }
-            let mut dims = Vec::with_capacity(tensor.data.len());
-            for &val in &tensor.data {
+            let values = tensor::tensor_values_f64_cow(tensor);
+            let mut dims = Vec::with_capacity(values.len());
+            for &val in values.iter() {
                 if !val.is_finite() {
                     return Err(builtin_error(
                         builtin,
@@ -955,6 +958,19 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(err.contains("non-negative"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn fft_single_inputs_materialize_at_the_current_double_complex_boundary() {
+        let input = Tensor::from_f32(vec![0.1, -2.0], vec![1, 2]).unwrap();
+        let complex = tensor_to_complex_tensor(input, "fft").expect("complex input");
+        assert_eq!(complex.data, vec![(f64::from(0.1_f32), 0.0), (-2.0, 0.0)]);
+
+        let length = Tensor::from_f32(vec![4.0], vec![1, 1]).unwrap();
+        assert_eq!(
+            parse_length(&Value::Tensor(length), "fft").unwrap(),
+            Some(4)
+        );
     }
 
     #[test]
