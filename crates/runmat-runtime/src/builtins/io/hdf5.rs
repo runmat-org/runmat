@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, IntegerStorage, LogicalArray, StringArray, Tensor, Type, Value,
+    IntValue, IntegerStorage, LogicalArray, NumericScalar, NumericStorage, StringArray, Tensor,
+    Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -787,9 +788,27 @@ fn numeric_vector_usize(
                     .map(|value| int_usize_entry(value, builtin, label))
                     .collect()
             } else {
-                t.data
-                    .iter()
-                    .map(|value| numeric_usize_entry(*value, builtin, label))
+                (0..t.shape.iter().product())
+                    .map(|index| {
+                        let value = match t
+                            .numeric_value_at(index)
+                            .expect("numeric vector index is in bounds")
+                        {
+                            NumericScalar::F64(value) => value,
+                            NumericScalar::F32(value) => f64::from(value),
+                            NumericScalar::I8(_)
+                            | NumericScalar::I16(_)
+                            | NumericScalar::I32(_)
+                            | NumericScalar::I64(_)
+                            | NumericScalar::U8(_)
+                            | NumericScalar::U16(_)
+                            | NumericScalar::U32(_)
+                            | NumericScalar::U64(_) => {
+                                unreachable!("integer vectors use the exact parser")
+                            }
+                        };
+                        numeric_usize_entry(value, builtin, label)
+                    })
                     .collect()
             }
         }
@@ -1127,6 +1146,9 @@ mod imp {
                     )
                 })?;
             }
+            WritableData::Single { data, shape } => {
+                create_typed_dataset::<f32>(builtin, &file, &dataset_path, data, &shape)?;
+            }
             WritableData::Integer { storage, shape } => {
                 create_integer_dataset(builtin, &file, &dataset_path, storage, &shape)?;
             }
@@ -1197,6 +1219,17 @@ mod imp {
                     )
                 })
             }
+            WritableData::Single { data, shape } => {
+                validate_full_write_shape(builtin, &shape, &ds.shape())?;
+                let row_major = col_major_to_row_major(&data, &shape);
+                ds.write_raw(&row_major).map_err(|err| {
+                    io_error(
+                        builtin,
+                        format!("{builtin}: unable to write existing dataset {dataset_path}"),
+                        err,
+                    )
+                })
+            }
             WritableData::Integer { storage, shape } => {
                 validate_full_write_shape(builtin, &shape, &ds.shape())?;
                 write_existing_integer_dataset(builtin, ds, dataset_path, storage, &shape)
@@ -1254,6 +1287,11 @@ mod imp {
                 validate_write_selection_shape(builtin, &shape, &selection.count)?;
                 let row_major = col_major_to_row_major(&data, &shape);
                 write_hyperslab::<f64>(builtin, &ds, &selection, row_major)
+            }
+            WritableData::Single { data, shape } => {
+                validate_write_selection_shape(builtin, &shape, &selection.count)?;
+                let row_major = col_major_to_row_major(&data, &shape);
+                write_hyperslab::<f32>(builtin, &ds, &selection, row_major)
             }
             WritableData::Integer { storage, shape } => {
                 validate_write_selection_shape(builtin, &shape, &selection.count)?;
@@ -1361,6 +1399,10 @@ mod imp {
             data: Vec<f64>,
             shape: Vec<usize>,
         },
+        Single {
+            data: Vec<f32>,
+            shape: Vec<usize>,
+        },
         Integer {
             storage: IntegerStorage,
             shape: Vec<usize>,
@@ -1386,16 +1428,22 @@ mod imp {
                     storage: integer_storage_from_scalar(v),
                     shape: vec![1, 1],
                 }),
-                Value::Tensor(t) => match t.integer_data {
-                    Some(storage) => Ok(Self::Integer {
-                        storage,
-                        shape: t.shape,
-                    }),
-                    None => Ok(Self::Numeric {
-                        data: t.data,
-                        shape: t.shape,
-                    }),
-                },
+                Value::Tensor(t) => {
+                    let shape = t.shape.clone();
+                    let storage = t.into_numeric_storage().map_err(|error| {
+                        hdf5_error(builtin, &ERR_UNSUPPORTED, format!("{builtin}: {error}"))
+                    })?;
+                    match storage {
+                        NumericStorage::F64(data) => Ok(Self::Numeric { data, shape }),
+                        NumericStorage::F32(data) => Ok(Self::Single { data, shape }),
+                        storage => Ok(Self::Integer {
+                            storage: storage
+                                .into_integer_storage()
+                                .expect("non-floating numeric storage is integer"),
+                            shape,
+                        }),
+                    }
+                }
                 Value::Bool(v) => Ok(Self::Logical {
                     data: vec![v],
                     shape: vec![1, 1],
@@ -1444,8 +1492,10 @@ mod imp {
         match dtype {
             TypeDescriptor::Float(FloatSize::U4) => {
                 let (raw, out_shape) = read_raw_or_slice::<f32>(builtin, ds, &shape, selection)?;
-                let raw: Vec<f64> = raw.into_iter().map(|v| v as f64).collect();
-                matlab_value_from_f64(row_major_to_col_major(&raw, &out_shape), out_shape)
+                let data = row_major_to_col_major(&raw, &out_shape);
+                Tensor::from_f32(data, out_shape)
+                    .map(Value::Tensor)
+                    .map_err(|error| hdf5_error(builtin, &ERR_IO, format!("{builtin}: {error}")))
             }
             TypeDescriptor::Float(FloatSize::U8) => {
                 let (raw, out_shape) = read_raw_or_slice::<f64>(builtin, ds, &shape, selection)?;
@@ -1755,6 +1805,27 @@ mod imp {
                 let row_major = col_major_to_row_major(&data, &shape);
                 let attr = location
                     .new_attr::<f64>()
+                    .shape(shape.as_slice())
+                    .create(name)
+                    .map_err(|err| {
+                        io_error(
+                            builtin,
+                            format!("{builtin}: unable to create attribute {name}"),
+                            err,
+                        )
+                    })?;
+                attr.write_raw(&row_major).map_err(|err| {
+                    io_error(
+                        builtin,
+                        format!("{builtin}: unable to write attribute {name}"),
+                        err,
+                    )
+                })?;
+            }
+            WritableData::Single { data, shape } => {
+                let row_major = col_major_to_row_major(&data, &shape);
+                let attr = location
+                    .new_attr::<f32>()
                     .shape(shape.as_slice())
                     .create(name)
                     .map_err(|err| {
@@ -2232,6 +2303,36 @@ mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn hdf5_round_trips_native_single_storage() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("single_roundtrip.h5");
+        let tensor = Tensor::from_f32(vec![1.25, 2.5, 3.75, 5.0], vec![2, 2]).unwrap();
+
+        block_on(h5write_builtin(
+            Value::String(path.display().to_string()),
+            Value::String("/single".to_string()),
+            Value::Tensor(tensor),
+            Vec::new(),
+        ))
+        .expect("write single");
+
+        let out = block_on(h5read_builtin(
+            Value::String(path.display().to_string()),
+            Value::String("/single".to_string()),
+            Vec::new(),
+        ))
+        .expect("read single");
+        let Value::Tensor(tensor) = out else {
+            panic!("expected tensor");
+        };
+        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(
+            tensor.into_numeric_storage().expect("single storage"),
+            NumericStorage::F32(vec![1.25, 2.5, 3.75, 5.0])
+        );
     }
 
     #[test]

@@ -9,7 +9,7 @@ use regex::Regex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, IntValue, IntegerStorage, NumericDType, StructValue, Value,
+    CharArray, IntValue, IntegerStorage, NumericDType, NumericStorage, StructValue, Value,
 };
 use runmat_filesystem::{metadata_async, write_async};
 use runmat_macros::runtime_builtin;
@@ -756,32 +756,25 @@ fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray
                 },
             }),
             Value::Tensor(t) => {
-                let class = if let Some(storage) = t.integer_storage() {
-                    integer_storage_mat_class(storage)
-                } else {
-                    tensor_dtype_mat_class(t.dtype)
+                let dims = canonical_dims(&t.shape);
+                let storage = t
+                    .into_numeric_storage()
+                    .map_err(|error| save_error_with(&SAVE_ERROR_IO, format!("save: {error}")))?;
+                let class = tensor_dtype_mat_class(storage.numeric_dtype());
+                let data = match storage {
+                    NumericStorage::F64(real) => MatData::Double { real, imag: None },
+                    NumericStorage::F32(real) => MatData::Numeric {
+                        real: real.into_iter().map(f64::from).collect(),
+                        imag: None,
+                    },
+                    storage => MatData::Integer {
+                        storage: storage
+                            .into_integer_storage()
+                            .expect("non-floating numeric storage is integer"),
+                        imag: None,
+                    },
                 };
-                let data = if let Some(storage) = t.integer_data {
-                    MatData::Integer {
-                        storage,
-                        imag: None,
-                    }
-                } else if class == MatClass::Double {
-                    MatData::Double {
-                        real: t.data,
-                        imag: None,
-                    }
-                } else {
-                    MatData::Numeric {
-                        real: t.data,
-                        imag: None,
-                    }
-                };
-                Ok(MatArray {
-                    class,
-                    dims: canonical_dims(&t.shape),
-                    data,
-                })
+                Ok(MatArray { class, dims, data })
             }
             Value::Complex(re, im) => Ok(MatArray {
                 class: MatClass::Double,
