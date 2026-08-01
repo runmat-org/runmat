@@ -530,11 +530,11 @@ fn tensor_shape_as_size(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
             })
             .collect();
     }
-    if tensor.data.is_empty() {
+    let values = tensor_utils::tensor_values_f64_cow(tensor);
+    if values.is_empty() {
         return Ok(vec![0, 0]);
     }
-    tensor
-        .data
+    values
         .iter()
         .map(|value| {
             if !value.is_finite() || *value < 0.0 || value.fract() != 0.0 {
@@ -593,10 +593,13 @@ fn ismissing_value(value: &Value) -> BuiltinResult<Value> {
             vec![false; tensor_utils::tensor_element_len(tensor)],
             tensor.shape.clone(),
         ),
-        Value::Tensor(tensor) => logical_from_iter(
-            tensor.data.iter().map(|value| value.is_nan()),
-            tensor.shape.clone(),
-        ),
+        Value::Tensor(tensor) => {
+            let values = tensor_utils::tensor_values_f64_cow(tensor);
+            logical_from_iter(
+                values.iter().map(|value| value.is_nan()),
+                tensor.shape.clone(),
+            )
+        }
         Value::ComplexTensor(tensor) => logical_from_iter(
             tensor
                 .data
@@ -641,14 +644,16 @@ fn ismissing_value(value: &Value) -> BuiltinResult<Value> {
         Value::Object(object) if is_tabular_object(object) => ismissing_table(object),
         Value::Object(object) if object.is_class("datetime") => {
             let serials = crate::builtins::datetime::serials_from_datetime_value(value)?;
+            let values = tensor_utils::tensor_values_f64_cow(&serials);
             logical_from_iter(
-                serials.data.iter().map(|serial| serial.is_nan()),
-                serials.shape,
+                values.iter().map(|serial| serial.is_nan()),
+                serials.shape.clone(),
             )
         }
         Value::Object(object) if object.is_class("duration") => {
             let days = crate::builtins::duration::duration_tensor_from_duration_value(value)?;
-            logical_from_iter(days.data.iter().map(|day| day.is_nan()), days.shape)
+            let values = tensor_utils::tensor_values_f64_cow(&days);
+            logical_from_iter(values.iter().map(|day| day.is_nan()), days.shape.clone())
         }
         Value::OutputList(values) => {
             let mut data = Vec::with_capacity(values.len());
@@ -920,11 +925,13 @@ fn remove_missing_tensor(
         return Ok((Value::Tensor(tensor), mask));
     }
     if tensor.rows() == 1 || tensor.cols() == 1 {
-        let mut data = Vec::new();
-        let mut removed = Vec::with_capacity(tensor.data.len());
+        let dtype = tensor.numeric_dtype();
         let source_rows = tensor.rows();
+        let values = tensor_utils::tensor_into_values_f64(tensor);
+        let mut data = Vec::new();
+        let mut removed = Vec::with_capacity(values.len());
         let source_is_row = source_rows == 1;
-        for value in tensor.data {
+        for value in values {
             if value.is_nan() {
                 removed.push(1);
             } else {
@@ -939,9 +946,7 @@ fn remove_missing_tensor(
         };
         let removed_len = removed.len();
         return Ok((
-            Value::Tensor(
-                Tensor::new_with_dtype(data, shape, tensor.dtype).map_err(internal_error)?,
-            ),
+            Value::Tensor(Tensor::new_with_dtype(data, shape, dtype).map_err(internal_error)?),
             LogicalArray::new(removed, vec![1, removed_len]).map_err(internal_error)?,
         ));
     }
@@ -1003,7 +1008,7 @@ fn remove_missing_columns_tensor(tensor: Tensor) -> BuiltinResult<(Value, Logica
             Tensor::new_with_dtype(
                 data,
                 vec![rows, removed.iter().filter(|f| **f == 0).count()],
-                tensor.dtype,
+                tensor.numeric_dtype(),
             )
             .map_err(internal_error)?,
         ),
@@ -1235,9 +1240,11 @@ fn remove_missing_column_major<T: Clone>(
 
 fn empty_like(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::Tensor(tensor) => Tensor::new_with_dtype(Vec::new(), vec![0, 0], tensor.dtype)
-            .map(Value::Tensor)
-            .map_err(internal_error),
+        Value::Tensor(tensor) => {
+            Tensor::new_with_dtype(Vec::new(), vec![0, 0], tensor.numeric_dtype())
+                .map(Value::Tensor)
+                .map_err(internal_error)
+        }
         Value::StringArray(_) | Value::String(_) => StringArray::new(Vec::new(), vec![0, 0])
             .map(Value::StringArray)
             .map_err(internal_error),
@@ -1404,7 +1411,9 @@ fn fill_missing_tensor(
         .dim
         .unwrap_or_else(|| first_nonsingleton_dim(rows, cols));
     validate_matrix_dim(dim, "fillmissing")?;
-    let mut data = tensor.data.clone();
+    let dtype = tensor.numeric_dtype();
+    let shape = tensor.shape.clone();
+    let mut data = tensor_utils::tensor_into_values_f64(tensor);
     let mask: Vec<u8> = data.iter().map(|value| u8::from(value.is_nan())).collect();
     match &options.method {
         FillMethod::Constant(fill) => {
@@ -1425,9 +1434,7 @@ fn fill_missing_tensor(
         FillMethod::Linear => fill_linear_numeric(&mut data, rows, cols, dim),
     }
     Ok((
-        Value::Tensor(
-            Tensor::new_with_dtype(data, tensor.shape, tensor.dtype).map_err(internal_error)?,
-        ),
+        Value::Tensor(Tensor::new_with_dtype(data, shape, dtype).map_err(internal_error)?),
         LogicalArray::new(mask, vec![rows, cols]).map_err(internal_error)?,
     ))
 }
@@ -1863,7 +1870,7 @@ fn moving_mad(tensor: Tensor, window: usize, options: MovingOptions) -> BuiltinR
     let output_dtype = if tensor.integer_storage().is_some() {
         NumericDType::F64
     } else {
-        tensor.dtype
+        tensor.numeric_dtype()
     };
     let values = tensor_utils::tensor_values_f64_cow(&tensor);
     let mut out = vec![f64::NAN; values.len()];
@@ -1972,8 +1979,11 @@ fn collect_indicators(value: &Value, set: &mut IndicatorSet) -> BuiltinResult<()
 fn standardize_missing_value(value: Value, indicators: &IndicatorSet) -> BuiltinResult<Value> {
     match value {
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => Ok(Value::Tensor(tensor)),
-        Value::Tensor(mut tensor) => {
-            for value in &mut tensor.data {
+        Value::Tensor(tensor) => {
+            let dtype = tensor.numeric_dtype();
+            let shape = tensor.shape.clone();
+            let mut values = tensor_utils::tensor_into_values_f64(tensor);
+            for value in &mut values {
                 if indicators
                     .numeric
                     .iter()
@@ -1982,7 +1992,9 @@ fn standardize_missing_value(value: Value, indicators: &IndicatorSet) -> Builtin
                     *value = f64::NAN;
                 }
             }
-            Ok(Value::Tensor(tensor))
+            Tensor::new_with_dtype(values, shape, dtype)
+                .map(Value::Tensor)
+                .map_err(internal_error)
         }
         Value::String(mut s) => {
             if indicators.text.iter().any(|marker| marker == &s) {
@@ -2074,6 +2086,21 @@ fn is_numeric_data_like(value: &Value) -> bool {
 }
 
 fn pairwise_nan_min(left: Value, right: Value) -> BuiltinResult<Value> {
+    if crate::builtins::math::reduction::integer_native::value_has_integer_storage(&left)
+        || crate::builtins::math::reduction::integer_native::value_has_integer_storage(&right)
+    {
+        if let Ok(Some(evaluation)) =
+            crate::builtins::math::reduction::integer_native::elementwise_value_extrema(
+                &left,
+                &right,
+                crate::builtins::math::reduction::integer_native::ExtremaDirection::Min,
+                crate::builtins::math::reduction::integer_native::ExtremaComparison::Natural,
+                false,
+            )
+        {
+            return Ok(evaluation.values);
+        }
+    }
     let left_scalar = numeric_scalar(&left, "nanmin left").ok();
     let right_scalar = numeric_scalar(&right, "nanmin right").ok();
     if let (Some(a), Some(b)) = (left_scalar, right_scalar) {
@@ -2102,7 +2129,7 @@ fn broadcast_pairwise_numeric(
             .zip(right_values.iter())
             .map(|(a, b)| op(*a, *b))
             .collect();
-        return Ok((data, left.shape.clone(), left.dtype));
+        return Ok((data, left.shape.clone(), left.numeric_dtype()));
     }
     if left_len == 1 {
         let left_values = tensor_utils::tensor_values_f64_cow(left);
@@ -2111,7 +2138,7 @@ fn broadcast_pairwise_numeric(
             .iter()
             .map(|b| op(left_values[0], *b))
             .collect();
-        return Ok((data, right.shape.clone(), right.dtype));
+        return Ok((data, right.shape.clone(), right.numeric_dtype()));
     }
     if right_len == 1 {
         let left_values = tensor_utils::tensor_values_f64_cow(left);
@@ -2120,7 +2147,7 @@ fn broadcast_pairwise_numeric(
             .iter()
             .map(|a| op(*a, right_values[0]))
             .collect();
-        return Ok((data, left.shape.clone(), left.dtype));
+        return Ok((data, left.shape.clone(), left.numeric_dtype()));
     }
     Err(invalid_argument(
         "nanmin: pairwise inputs must have the same shape or one scalar input",
@@ -2591,6 +2618,33 @@ mod tests {
         let result = block_on(nanmin_builtin(left, vec![Value::Tensor(right)])).unwrap();
 
         assert!(matches!(result, Value::Tensor(tensor) if tensor.data == vec![5.0, 4.0, 3.0]));
+    }
+
+    #[test]
+    fn nanmin_pairwise_preserves_exact_wide_same_class_integers() {
+        let left = Tensor::new_integer(
+            IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("left uint64");
+        let right = Tensor::new_integer(
+            IntegerStorage::U64(vec![1_u64 << 53, u64::MAX - 1]),
+            vec![1, 2],
+        )
+        .expect("right uint64");
+
+        let result = block_on(nanmin_builtin(
+            Value::Tensor(left),
+            vec![Value::Tensor(right)],
+        ))
+        .unwrap();
+        let Value::Tensor(tensor) = result else {
+            panic!("expected uint64 tensor");
+        };
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::U64(vec![1_u64 << 53, u64::MAX - 1]))
+        );
     }
 
     #[test]
