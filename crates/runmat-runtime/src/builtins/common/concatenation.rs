@@ -4,7 +4,9 @@
 //! Supports both horizontal concatenation [A, B] and vertical concatenation [A; B].
 
 use crate::builtins::math::elementwise::integer_cast::{integer_values, IntegerTarget};
-use runmat_builtins::{CharArray, IntValue, Tensor, Value};
+use runmat_builtins::{
+    CharArray, IntValue, NumericDType, NumericScalar, NumericStorage, Tensor, Value,
+};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -77,23 +79,24 @@ pub fn hcat_matrices(a: &Tensor, b: &Tensor) -> BuiltinResult<Tensor> {
 
     let new_rows = a.rows();
     let new_cols = a.cols() + b.cols();
-    let mut new_data = Vec::with_capacity(new_rows * new_cols);
+    let target = floating_concat_dtype(a, b)?;
+    let mut indices = Vec::with_capacity(new_rows * new_cols);
 
     // Column-major layout: build column-by-column
     for col in 0..new_cols {
         if col < a.cols() {
             for row in 0..a.rows() {
-                new_data.push(a.data[row + col * a.rows()]);
+                indices.push((a, row + col * a.rows()));
             }
         } else {
             let bcol = col - a.cols();
             for row in 0..b.rows() {
-                new_data.push(b.data[row + bcol * b.rows()]);
+                indices.push((b, row + bcol * b.rows()));
             }
         }
     }
 
-    Tensor::new_2d(new_data, new_rows, new_cols).map_err(concat_error)
+    floating_concat_tensor(indices, vec![new_rows, new_cols], target)
 }
 
 /// Vertically concatenate two matrices [A; B]
@@ -119,21 +122,79 @@ pub fn vcat_matrices(a: &Tensor, b: &Tensor) -> BuiltinResult<Tensor> {
 
     let new_rows = a.rows() + b.rows();
     let new_cols = a.cols();
-    let mut new_data = Vec::with_capacity(new_rows * new_cols);
+    let target = floating_concat_dtype(a, b)?;
+    let mut indices = Vec::with_capacity(new_rows * new_cols);
 
-    // Column-major: copy columns of A then columns of B
+    // Column-major: each output column contains A's rows followed by B's rows.
     for col in 0..a.cols() {
         for row in 0..a.rows() {
-            new_data.push(a.data[row + col * a.rows()]);
+            indices.push((a, row + col * a.rows()));
         }
-    }
-    for col in 0..b.cols() {
         for row in 0..b.rows() {
-            new_data.push(b.data[row + col * b.rows()]);
+            indices.push((b, row + col * b.rows()));
         }
     }
 
-    Tensor::new_2d(new_data, new_rows, new_cols).map_err(concat_error)
+    floating_concat_tensor(indices, vec![new_rows, new_cols], target)
+}
+
+fn floating_concat_dtype(a: &Tensor, b: &Tensor) -> BuiltinResult<NumericDType> {
+    match (a.numeric_dtype(), b.numeric_dtype()) {
+        (NumericDType::F64, NumericDType::F64) => Ok(NumericDType::F64),
+        (NumericDType::F32, NumericDType::F32)
+        | (NumericDType::F32, NumericDType::F64)
+        | (NumericDType::F64, NumericDType::F32) => Ok(NumericDType::F32),
+        (left, right) => Err(concat_error(format!(
+            "floating concatenation received unexpected {} and {} storage",
+            left.class_name(),
+            right.class_name()
+        ))),
+    }
+}
+
+fn floating_concat_tensor(
+    indices: Vec<(&Tensor, usize)>,
+    shape: Vec<usize>,
+    target: NumericDType,
+) -> BuiltinResult<Tensor> {
+    let storage = match target {
+        NumericDType::F64 => NumericStorage::F64(
+            indices
+                .into_iter()
+                .map(|(tensor, index)| floating_value_f64(tensor, index))
+                .collect::<BuiltinResult<Vec<_>>>()?,
+        ),
+        NumericDType::F32 => NumericStorage::F32(
+            indices
+                .into_iter()
+                .map(|(tensor, index)| floating_value_f64(tensor, index).map(|value| value as f32))
+                .collect::<BuiltinResult<Vec<_>>>()?,
+        ),
+        NumericDType::I8
+        | NumericDType::I16
+        | NumericDType::I32
+        | NumericDType::I64
+        | NumericDType::U8
+        | NumericDType::U16
+        | NumericDType::U32
+        | NumericDType::U64 => unreachable!("floating concat target is validated"),
+    };
+    Tensor::from_numeric_storage(storage, shape).map_err(concat_error)
+}
+
+fn floating_value_f64(tensor: &Tensor, index: usize) -> BuiltinResult<f64> {
+    match tensor.numeric_value_at(index) {
+        Some(NumericScalar::F64(value)) => Ok(value),
+        Some(NumericScalar::F32(value)) => Ok(f64::from(value)),
+        Some(value) => Err(concat_error(format!(
+            "floating concatenation received unexpected {} sample",
+            value.class_name()
+        ))),
+        None => Err(concat_error(format!(
+            "floating concatenation could not read {} element {index}",
+            tensor.numeric_dtype().class_name()
+        ))),
+    }
 }
 
 fn hcat_integer_matrices(a: &Tensor, b: &Tensor) -> BuiltinResult<Tensor> {
@@ -191,7 +252,10 @@ fn integer_value_at(target: IntegerTarget, tensor: &Tensor, index: usize) -> Int
                 .value_at(index)
                 .expect("integer tensor storage length matches tensor shape"),
         ),
-        None => target.cast_scalar(tensor.data[index]),
+        None => target.cast_scalar(
+            floating_value_f64(tensor, index)
+                .expect("noninteger concat operand has floating storage"),
+        ),
     }
 }
 
@@ -468,6 +532,11 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
     }
 
     // Now concatenate all matrices horizontally
+    if matrices.is_empty() {
+        return Ok(Value::Tensor(
+            Tensor::new(Vec::new(), vec![0, 0]).map_err(concat_error)?,
+        ));
+    }
     let mut result = matrices[0].clone();
     for matrix in &matrices[1..] {
         result = hcat_matrices(&result, matrix)?;
@@ -732,6 +801,11 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
     }
 
     // Now concatenate all matrices vertically
+    if matrices.is_empty() {
+        return Ok(Value::Tensor(
+            Tensor::new(Vec::new(), vec![0, 0]).map_err(concat_error)?,
+        ));
+    }
     let mut result = matrices[0].clone();
     for matrix in &matrices[1..] {
         result = vcat_matrices(&result, matrix)?;
@@ -844,11 +918,11 @@ fn integer_matrix_from_value(target: IntegerTarget, value: &Value) -> BuiltinRes
                     .iter()
                     .map(|value| target.cast_int(value))
                     .collect(),
-                None => tensor
-                    .data
-                    .iter()
-                    .map(|&value| target.cast_scalar(value))
-                    .collect(),
+                None => (0..tensor.len())
+                    .map(|index| {
+                        floating_value_f64(tensor, index).map(|value| target.cast_scalar(value))
+                    })
+                    .collect::<BuiltinResult<Vec<_>>>()?,
             };
             Tensor::new_integer(target.storage(values), tensor.shape.clone()).map_err(concat_error)
         }
@@ -904,7 +978,10 @@ mod tests {
         assert_eq!(result.rows(), 2);
         assert_eq!(result.cols(), 3);
         // Column-major result: [ [1 3 5]; [2 4 6] ] data
-        assert_eq!(result.data, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        assert_eq!(
+            result.as_f64_slice().expect("double result"),
+            &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -916,10 +993,11 @@ mod tests {
         let result = vcat_matrices(&a, &b).unwrap();
         assert_eq!(result.rows(), 2);
         assert_eq!(result.cols(), 2);
-        // Column-major: columns preserved
-        // With our current vcat implementation, data appends column-wise preserving row order within each input
-        // For 1x2 stacked over 1x2, result data is [1,2,3,4]
-        assert_eq!(result.data, vec![1.0, 2.0, 3.0, 4.0]);
+        // [1 2; 3 4] in column-major storage.
+        assert_eq!(
+            result.as_f64_slice().expect("double result"),
+            &[1.0, 3.0, 2.0, 4.0]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -932,7 +1010,7 @@ mod tests {
             assert_eq!(m.rows(), 1);
             assert_eq!(m.cols(), 3);
             // Column-major: 1x3 row vector still row-major visually, data order follows cols
-            assert_eq!(m.data, vec![1.0, 2.0, 3.0]);
+            assert_eq!(m.as_f64_slice().expect("double result"), &[1.0, 2.0, 3.0]);
         } else {
             panic!("Expected matrix result");
         }
@@ -947,10 +1025,47 @@ mod tests {
         if let Value::Tensor(m) = result {
             assert_eq!(m.rows(), 2);
             assert_eq!(m.cols(), 1);
-            assert_eq!(m.data, vec![1.0, 2.0]);
+            assert_eq!(m.as_f64_slice().expect("double result"), &[1.0, 2.0]);
         } else {
             panic!("Expected matrix result");
         }
+    }
+
+    #[test]
+    fn floating_concatenation_preserves_native_single_and_layout() {
+        let single_row = Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap();
+        let double_row = Tensor::new(vec![3.25, 4.5], vec![1, 2]).unwrap();
+        let vertical = vcat_matrices(&single_row, &double_row).unwrap();
+        assert_eq!(vertical.shape, vec![2, 2]);
+        assert_eq!(
+            vertical.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![1.0, 3.25, 2.0, 4.5])
+        );
+
+        let single_column = Tensor::from_f32(vec![1.0, 2.0], vec![2, 1]).unwrap();
+        let double_column = Tensor::new(vec![3.25, 4.5], vec![2, 1]).unwrap();
+        let horizontal = hcat_matrices(&single_column, &double_column).unwrap();
+        assert_eq!(horizontal.shape, vec![2, 2]);
+        assert_eq!(
+            horizontal.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![1.0, 2.0, 3.25, 4.5])
+        );
+    }
+
+    #[test]
+    fn all_neutral_double_operands_return_empty_matrix() {
+        let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap());
+        let Value::Tensor(horizontal) = hcat_values(&[empty.clone(), empty.clone()]).unwrap()
+        else {
+            panic!("expected horizontal empty tensor");
+        };
+        let Value::Tensor(vertical) = vcat_values(&[empty.clone(), empty]).unwrap() else {
+            panic!("expected vertical empty tensor");
+        };
+        assert_eq!(horizontal.shape, vec![0, 0]);
+        assert_eq!(vertical.shape, vec![0, 0]);
+        assert!(horizontal.is_empty());
+        assert!(vertical.is_empty());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
