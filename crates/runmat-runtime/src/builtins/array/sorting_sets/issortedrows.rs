@@ -75,7 +75,7 @@ async fn issortedrows_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinR
     let indices = evaluation.indices_value();
     let sorted = match indices {
         Value::Tensor(tensor) => tensor
-            .data
+            .materialize_f64()
             .iter()
             .enumerate()
             .all(|(idx, value)| *value == idx as f64 + 1.0),

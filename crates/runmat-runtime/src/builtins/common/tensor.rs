@@ -1,6 +1,7 @@
 use std::{borrow::Cow, convert::TryFrom};
 
 use num_complex::Complex64;
+use runmat_accelerate_api::{GpuTensorStorage, HostTensorOwned};
 use runmat_builtins::{
     ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericDType, NumericStorage, Tensor,
     Value,
@@ -139,6 +140,16 @@ pub fn tensor_into_values_f64(tensor: Tensor) -> Vec<f64> {
         .into_numeric_storage()
         .expect("validated tensor storage")
         .materialize_f64()
+}
+
+/// Consume a tensor at a provider API boundary that currently accepts only owned f64 storage.
+pub fn tensor_into_host_f64_owned(tensor: Tensor) -> HostTensorOwned {
+    let shape = tensor.shape.clone();
+    HostTensorOwned {
+        data: tensor_into_values_f64(tensor),
+        shape,
+        storage: GpuTensorStorage::Real,
+    }
 }
 
 /// Return a complex tensor's numeric values as Complex64, reading typed integer

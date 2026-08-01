@@ -8,9 +8,7 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
-use runmat_accelerate_api::{
-    GpuTensorHandle, GpuTensorStorage, HostTensorOwned, SetdiffOptions, SetdiffOrder, SetdiffResult,
-};
+use runmat_accelerate_api::{GpuTensorHandle, SetdiffOptions, SetdiffOrder, SetdiffResult};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -1440,16 +1438,8 @@ impl SetdiffEvaluation {
         let values_tensor = tensor::value_into_tensor_for("setdiff", values)
             .map_err(|e| setdiff_internal_error(e))?;
         Ok(SetdiffResult {
-            values: HostTensorOwned {
-                data: values_tensor.data,
-                shape: values_tensor.shape,
-                storage: GpuTensorStorage::Real,
-            },
-            ia: HostTensorOwned {
-                data: ia.data,
-                shape: ia.shape,
-                storage: GpuTensorStorage::Real,
-            },
+            values: tensor::tensor_into_host_f64_owned(values_tensor),
+            ia: tensor::tensor_into_host_f64_owned(ia),
         })
     }
 
