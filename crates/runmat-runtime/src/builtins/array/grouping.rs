@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, IntValue, IntegerStorage, LogicalArray, ObjectInstance, SparseTensor, StringArray,
-    Tensor, Value,
+    CellArray, IntValue, IntegerStorage, LogicalArray, NumericScalar, ObjectInstance, SparseTensor,
+    StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -585,47 +585,28 @@ fn tensor_columns(
     split_matrix: bool,
 ) -> BuiltinResult<Vec<GroupColumn>> {
     if !split_matrix || tensor.cols() <= 1 || tensor.rows() == 1 {
-        let rows = tensor.data.len();
-        let value = if let Some(storage) = tensor.integer_storage() {
-            Tensor::new_integer(storage.clone(), vec![rows, 1]).map_err(grouping_error)?
-        } else {
-            Tensor::new_with_dtype(tensor.data, vec![rows, 1], tensor.dtype)
-                .map_err(grouping_error)?
-        };
+        let rows = tensor_utils::tensor_element_len(&tensor);
+        let value = tensor.reshape(vec![rows, 1]).map_err(grouping_error)?;
         return Ok(vec![GroupColumn {
             name: base_name.to_string(),
             rows,
             value: Value::Tensor(value),
         }]);
     }
-    let mut out = Vec::with_capacity(tensor.cols());
-    for col in 0..tensor.cols() {
-        let value = if let Some(storage) = tensor.integer_storage() {
-            let values = (0..tensor.rows())
-                .map(|row| {
-                    storage
-                        .value_at(row + col * tensor.rows())
-                        .expect("integer tensor storage matches tensor shape")
-                })
-                .collect();
-            Tensor::new_integer(
-                storage
-                    .from_exact_values_like(values)
-                    .map_err(grouping_error)?,
-                vec![tensor.rows(), 1],
-            )
-            .map_err(grouping_error)?
-        } else {
-            let mut data = Vec::with_capacity(tensor.rows());
-            for row in 0..tensor.rows() {
-                data.push(tensor.get2(row, col).map_err(grouping_error)?);
-            }
-            Tensor::new_with_dtype(data, vec![tensor.rows(), 1], tensor.dtype)
-                .map_err(grouping_error)?
-        };
+    let rows = tensor.rows();
+    let cols = tensor.cols();
+    let storage = tensor.into_numeric_storage().map_err(grouping_error)?;
+    let mut out = Vec::with_capacity(cols);
+    for col in 0..cols {
+        let indices = (0..rows).map(|row| row + col * rows).collect::<Vec<_>>();
+        let value = Tensor::from_numeric_storage(
+            storage.gather(&indices).map_err(grouping_error)?,
+            vec![rows, 1],
+        )
+        .map_err(grouping_error)?;
         out.push(GroupColumn {
             name: format!("{base_name}{col_plus}", col_plus = col + 1),
-            rows: tensor.rows(),
+            rows,
             value: Value::Tensor(value),
         });
     }
@@ -788,23 +769,10 @@ fn build_grouping_with_options(
 
 fn atom_at(value: &Value, row: usize) -> BuiltinResult<Atom> {
     match value {
-        Value::Tensor(tensor) => {
-            if let Some(storage) = tensor.integer_storage() {
-                return storage
-                    .value_at(row)
-                    .map(Atom::Integer)
-                    .ok_or_else(|| grouping_error("grouping: numeric row out of bounds"));
-            }
-            let value = *tensor
-                .data
-                .get(row)
-                .ok_or_else(|| grouping_error("grouping: numeric row out of bounds"))?;
-            if value.is_nan() {
-                Ok(Atom::Missing)
-            } else {
-                Ok(Atom::Number(value))
-            }
-        }
+        Value::Tensor(tensor) => tensor
+            .numeric_value_at(row)
+            .map(numeric_scalar_atom)
+            .ok_or_else(|| grouping_error("grouping: numeric row out of bounds")),
         Value::LogicalArray(array) => Ok(array
             .data
             .get(row)
@@ -835,7 +803,11 @@ fn atom_at(value: &Value, row: usize) -> BuiltinResult<Atom> {
         }
         Value::Object(object) if object.is_class("datetime") => {
             let serials = crate::builtins::datetime::serials_from_datetime_value(value)?;
-            let value = serials.data.get(row).copied().unwrap_or(f64::NAN);
+            let value = if row < tensor_utils::tensor_element_len(&serials) {
+                tensor_utils::tensor_value_f64(&serials, row)
+            } else {
+                f64::NAN
+            };
             if value.is_nan() {
                 Ok(Atom::Missing)
             } else {
@@ -844,7 +816,11 @@ fn atom_at(value: &Value, row: usize) -> BuiltinResult<Atom> {
         }
         Value::Object(object) if object.is_class("duration") => {
             let tensor = crate::builtins::duration::duration_tensor_from_duration_value(value)?;
-            let value = tensor.data.get(row).copied().unwrap_or(f64::NAN);
+            let value = if row < tensor_utils::tensor_element_len(&tensor) {
+                tensor_utils::tensor_value_f64(&tensor, row)
+            } else {
+                f64::NAN
+            };
             if value.is_nan() {
                 Ok(Atom::Missing)
             } else {
@@ -853,6 +829,33 @@ fn atom_at(value: &Value, row: usize) -> BuiltinResult<Atom> {
         }
         other if row == 0 => scalar_atom(other),
         _ => Ok(Atom::Missing),
+    }
+}
+
+fn numeric_scalar_atom(value: NumericScalar) -> Atom {
+    match value {
+        NumericScalar::F64(value) => {
+            if value.is_nan() {
+                Atom::Missing
+            } else {
+                Atom::Number(value)
+            }
+        }
+        NumericScalar::F32(value) => {
+            if value.is_nan() {
+                Atom::Missing
+            } else {
+                Atom::Number(f64::from(value))
+            }
+        }
+        NumericScalar::I8(value) => Atom::Integer(IntValue::I8(value)),
+        NumericScalar::I16(value) => Atom::Integer(IntValue::I16(value)),
+        NumericScalar::I32(value) => Atom::Integer(IntValue::I32(value)),
+        NumericScalar::I64(value) => Atom::Integer(IntValue::I64(value)),
+        NumericScalar::U8(value) => Atom::Integer(IntValue::U8(value)),
+        NumericScalar::U16(value) => Atom::Integer(IntValue::U16(value)),
+        NumericScalar::U32(value) => Atom::Integer(IntValue::U32(value)),
+        NumericScalar::U64(value) => Atom::Integer(IntValue::U64(value)),
     }
 }
 
@@ -1092,8 +1095,7 @@ fn accumarray_subscripts(subs: Value) -> BuiltinResult<Vec<Vec<usize>>> {
                 return Ok(out);
             }
             if tensor.cols() <= 1 || tensor.rows() == 1 {
-                tensor
-                    .data
+                tensor_utils::tensor_into_values_f64(tensor)
                     .into_iter()
                     .map(|value| Ok(vec![positive_integer(value, "accumarray subscript")?]))
                     .collect()
@@ -1164,7 +1166,7 @@ fn accumarray_data_values(data: Value, rows: usize) -> BuiltinResult<Vec<f64>> {
             if len == 1 {
                 Ok(vec![tensor_utils::tensor_value_f64(&tensor, 0); rows])
             } else if len == rows {
-                Ok(tensor.data)
+                Ok(tensor_utils::tensor_into_values_f64(tensor))
             } else {
                 Err(grouping_error(
                     "accumarray: data must be scalar or match subscript row count",
@@ -1569,8 +1571,7 @@ fn parse_name_selector(
                     })
                     .collect();
             }
-            tensor
-                .data
+            tensor_utils::tensor_values_f64_cow(tensor)
                 .iter()
                 .map(|value| {
                     let idx = positive_integer(*value, context)?;
@@ -1692,7 +1693,10 @@ fn vector_elements(value: Value) -> BuiltinResult<Vec<Value>> {
             if let Some(storage) = tensor.integer_storage() {
                 return Ok(storage.exact_values().into_iter().map(Value::Int).collect());
             }
-            Ok(tensor.data.into_iter().map(Value::Num).collect())
+            Ok(tensor_utils::tensor_into_values_f64(tensor)
+                .into_iter()
+                .map(Value::Num)
+                .collect())
         }
         Value::LogicalArray(array) => Ok(array
             .data
@@ -1753,12 +1757,7 @@ fn numeric_values(value: &Value, context: &str) -> BuiltinResult<Vec<f64>> {
         Value::Num(value) => Ok(vec![*value]),
         Value::Int(value) => Ok(vec![value.to_f64()]),
         Value::Bool(value) => Ok(vec![if *value { 1.0 } else { 0.0 }]),
-        Value::Tensor(tensor) => {
-            if let Some(storage) = tensor.integer_storage() {
-                return Ok(integer_storage_to_f64_vec(storage));
-            }
-            Ok(tensor.data.clone())
-        }
+        Value::Tensor(tensor) => Ok(tensor_utils::tensor_values_f64(tensor)),
         Value::LogicalArray(array) => Ok(array
             .data
             .iter()
@@ -1766,7 +1765,7 @@ fn numeric_values(value: &Value, context: &str) -> BuiltinResult<Vec<f64>> {
             .collect()),
         Value::SparseTensor(sparse) => sparse
             .to_dense()
-            .map(|tensor| tensor.data)
+            .map(tensor_utils::tensor_into_values_f64)
             .map_err(grouping_error),
         other => Err(grouping_error(format!(
             "{context}: expected numeric input, got {other:?}"
@@ -2008,7 +2007,7 @@ fn is_missing_text(text: &str) -> bool {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage};
+    use runmat_builtins::{IntValue, IntegerStorage, NumericStorage};
 
     #[test]
     fn discretize_typed_bin_count_preserves_exact_unsigned_values() {
@@ -2244,6 +2243,25 @@ mod tests {
         match counted {
             Value::Tensor(tensor) => assert_eq!(tensor.data, vec![2.0, 1.0]),
             other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn grouping_columns_preserve_native_single_storage() {
+        let tensor = Tensor::from_f32(vec![1.0, 2.0, 10.0, 20.0], vec![2, 2]).unwrap();
+        let columns = tensor_columns("G", tensor, true).unwrap();
+        assert_eq!(columns.len(), 2);
+        for (column, expected) in columns
+            .iter()
+            .zip([vec![1.0_f32, 2.0], vec![10.0_f32, 20.0]])
+        {
+            let Value::Tensor(tensor) = &column.value else {
+                panic!("expected numeric group column");
+            };
+            assert_eq!(
+                tensor.clone().into_numeric_storage().unwrap(),
+                NumericStorage::F32(expected)
+            );
         }
     }
 
