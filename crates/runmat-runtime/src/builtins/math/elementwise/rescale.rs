@@ -1,6 +1,6 @@
 //! MATLAB-compatible `rescale` builtin.
 
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -292,7 +292,7 @@ async fn input_tensor(value: Value) -> BuiltinResult<RescaleInput> {
     let (value, gpu_provider) = gather_value(value).await?;
     match value {
         Value::Tensor(tensor) => {
-            let output_dtype = if tensor.dtype == NumericDType::F32 {
+            let output_dtype = if tensor.numeric_dtype() == NumericDType::F32 {
                 NumericDType::F32
             } else {
                 NumericDType::F64
@@ -580,12 +580,7 @@ fn output_value(
         let provider = preferred_provider
             .or_else(runmat_accelerate_api::provider)
             .ok_or_else(|| rescale_internal("no active GPU provider for rescale output"))?;
-        let view = HostTensorView {
-            data: &tensor.data,
-            shape: &tensor.shape,
-        };
-        let handle = provider
-            .upload(&view)
+        let handle = gpu_helpers::upload_tensor(provider, &tensor)
             .map_err(|err| rescale_internal(format!("gpu upload failed: {err}")))?;
         runmat_accelerate_api::set_handle_precision(&handle, provider.precision());
         return Ok(gpu_helpers::resident_gpu_value(handle));
@@ -602,8 +597,12 @@ fn provider_for_gpu(
 }
 
 fn rescale_tensor_into_value(tensor: Tensor) -> Value {
-    if tensor.dtype == NumericDType::F64 && tensor.data.len() == 1 {
-        Value::Num(tensor.data[0])
+    if tensor.numeric_dtype() == NumericDType::F64 && tensor.len() == 1 {
+        Value::Num(
+            tensor
+                .as_f64_slice()
+                .expect("double tensor has double storage")[0],
+        )
     } else {
         Value::Tensor(tensor)
     }
@@ -652,7 +651,7 @@ fn rescale_internal(detail: impl AsRef<str>) -> RuntimeError {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, LogicalArray};
+    use runmat_builtins::{IntegerStorage, LogicalArray, NumericStorage};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
@@ -662,16 +661,18 @@ mod tests {
         Value::Tensor(Tensor::new_with_dtype(data, shape, NumericDType::F32).unwrap())
     }
 
-    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, poison: f64) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-        tensor.data.fill(poison);
-        Value::Tensor(tensor)
+    fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, shape).unwrap())
     }
 
     fn values(value: Value) -> (Vec<f64>, Vec<usize>, NumericDType) {
         match value {
             Value::Num(n) => (vec![n], vec![1, 1], NumericDType::F64),
-            Value::Tensor(t) => (t.data, t.shape, t.dtype),
+            Value::Tensor(t) => {
+                let dtype = t.numeric_dtype();
+                let data = t.materialize_f64();
+                (data, t.shape, dtype)
+            }
             other => panic!("expected numeric output, got {other:?}"),
         }
     }
@@ -870,13 +871,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn single_input_preserves_single_dtype_metadata() {
+    async fn single_input_preserves_native_single_storage() {
         let result = rescale_builtin(single_tensor(vec![1.0, 2.0, 3.0], vec![1, 3]), vec![])
             .await
             .unwrap();
-        let (data, _, dtype) = values(result);
-        assert_eq!(dtype, NumericDType::F32);
-        assert_close(&data, &[0.0, 0.5, 1.0]);
+        let Value::Tensor(tensor) = result else {
+            panic!("expected single tensor");
+        };
+        assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
+        match tensor.into_numeric_storage().unwrap() {
+            NumericStorage::F32(values) => assert_eq!(values, vec![0.0, 0.5, 1.0]),
+            storage => panic!("expected native single storage, got {storage:?}"),
+        }
     }
 
     #[tokio::test]
@@ -899,9 +905,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rescale_read_typed_integer_storage_exactly() {
+    async fn integer_inputs_promote_to_double_output() {
         let result = rescale_builtin(
-            poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 3]), vec![1, 3], f64::NAN),
+            integer_tensor(IntegerStorage::I16(vec![1, 2, 3]), vec![1, 3]),
             vec![],
         )
         .await
@@ -912,14 +918,14 @@ mod tests {
         assert_close(&data, &[0.0, 0.5, 1.0]);
 
         let result = rescale_builtin(
-            poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 3]), vec![1, 3], f64::NAN),
+            integer_tensor(IntegerStorage::I16(vec![1, 2, 3]), vec![1, 3]),
             vec![
-                poisoned_int_tensor(IntegerStorage::I16(vec![-1]), vec![1, 1], f64::NAN),
-                poisoned_int_tensor(IntegerStorage::I16(vec![1]), vec![1, 1], f64::NAN),
+                integer_tensor(IntegerStorage::I16(vec![-1]), vec![1, 1]),
+                integer_tensor(IntegerStorage::I16(vec![1]), vec![1, 1]),
                 Value::from("InputMin"),
-                poisoned_int_tensor(IntegerStorage::I16(vec![1]), vec![1, 1], f64::NAN),
+                integer_tensor(IntegerStorage::I16(vec![1]), vec![1, 1]),
                 Value::from("InputMax"),
-                poisoned_int_tensor(IntegerStorage::I16(vec![3]), vec![1, 1], f64::NAN),
+                integer_tensor(IntegerStorage::I16(vec![3]), vec![1, 1]),
             ],
         )
         .await
@@ -935,11 +941,7 @@ mod tests {
     fn gpu_input_returns_gpu_value_and_matches_cpu() {
         crate::builtins::common::test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result =
                 block_on(rescale_builtin(Value::GpuTensor(handle), vec![])).expect("rescale gpu");
             let Value::GpuTensor(_) = result else {
@@ -947,7 +949,7 @@ mod tests {
             };
             let gathered = crate::builtins::common::test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 3]);
-            assert_close(&gathered.data, &[0.0, 0.5, 1.0]);
+            assert_close(&gathered.materialize_f64(), &[0.0, 0.5, 1.0]);
         });
     }
 
