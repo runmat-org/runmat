@@ -6,7 +6,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
+    ComplexTensor, NumericScalar, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -443,11 +443,10 @@ fn diagonal_product_real(upper: &Tensor, dimension: usize) -> BuiltinResult<f64>
     let mut product = 1.0f64;
     for i in 0..dimension {
         let idx = i + i * rows;
-        let value = *upper
-            .data
-            .get(idx)
+        let value = upper
+            .numeric_value_at(idx)
             .ok_or_else(|| builtin_error(format!("{NAME}: upper factor diagonal out of range")))?;
-        product *= value;
+        product *= floating_scalar_to_f64(value)?;
     }
     Ok(product)
 }
@@ -479,37 +478,20 @@ fn permutation_sign_from_tensor(pivots: &Tensor, expected_len: usize) -> Builtin
     if expected_len == 0 {
         return Ok(1.0);
     }
-    if pivots.data.len() != expected_len {
+    if pivots.len() != expected_len {
         return Err(builtin_error(format!(
             "{NAME}: pivot vector length mismatch"
         )));
     }
-    let len = pivots.data.len();
+    let len = pivots.len();
     let mut permutation = Vec::with_capacity(len);
     let mut seen = vec![false; len];
-    for &raw in &pivots.data {
-        if !raw.is_finite() {
-            return Err(builtin_error(format!(
-                "{NAME}: pivot vector contains non-finite entries"
-            )));
-        }
-        let rounded = raw.round();
-        if (rounded - raw).abs() > 1.0e-6 {
-            return Err(builtin_error(format!(
-                "{NAME}: pivot vector must contain integer values"
-            )));
-        }
-        if rounded < 1.0 {
-            return Err(builtin_error(format!(
-                "{NAME}: pivot vector index out of range"
-            )));
-        }
-        let idx = (rounded as isize - 1) as usize;
-        if idx >= len {
-            return Err(builtin_error(format!(
-                "{NAME}: pivot vector index out of range"
-            )));
-        }
+    for position in 0..len {
+        let raw = pivots
+            .numeric_value_at(position)
+            .ok_or_else(|| builtin_error(format!("{NAME}: pivot vector length mismatch")))?;
+        let one_based = pivot_index(raw, len)?;
+        let idx = one_based - 1;
         if seen[idx] {
             return Err(builtin_error(format!(
                 "{NAME}: pivot vector must describe a permutation"
@@ -519,6 +501,56 @@ fn permutation_sign_from_tensor(pivots: &Tensor, expected_len: usize) -> Builtin
         permutation.push(idx);
     }
     Ok(permutation_sign(&permutation))
+}
+
+fn floating_scalar_to_f64(value: NumericScalar) -> BuiltinResult<f64> {
+    match value {
+        NumericScalar::F64(value) => Ok(value),
+        NumericScalar::F32(value) => Ok(f64::from(value)),
+        _ => Err(builtin_error(format!(
+            "{NAME}: provider upper factor must use floating storage"
+        ))),
+    }
+}
+
+fn pivot_index(value: NumericScalar, len: usize) -> BuiltinResult<usize> {
+    match value {
+        NumericScalar::F64(value) => floating_pivot_index(value, len),
+        NumericScalar::F32(value) => floating_pivot_index(f64::from(value), len),
+        integer => {
+            let one_based = integer
+                .into_int_value()
+                .expect("non-floating numeric scalar is integer")
+                .try_to_usize()
+                .ok_or_else(|| builtin_error(format!("{NAME}: pivot vector index out of range")))?;
+            if one_based == 0 || one_based > len {
+                return Err(builtin_error(format!(
+                    "{NAME}: pivot vector index out of range"
+                )));
+            }
+            Ok(one_based)
+        }
+    }
+}
+
+fn floating_pivot_index(value: f64, len: usize) -> BuiltinResult<usize> {
+    if !value.is_finite() {
+        return Err(builtin_error(format!(
+            "{NAME}: pivot vector contains non-finite entries"
+        )));
+    }
+    let rounded = value.round();
+    if (rounded - value).abs() > 1.0e-6 {
+        return Err(builtin_error(format!(
+            "{NAME}: pivot vector must contain integer values"
+        )));
+    }
+    if rounded < 1.0 || rounded > len as f64 {
+        return Err(builtin_error(format!(
+            "{NAME}: pivot vector index out of range"
+        )));
+    }
+    Ok(rounded as usize)
 }
 
 fn permutation_sign(permutation: &[usize]) -> f64 {
@@ -572,14 +604,24 @@ pub(crate) mod tests {
 
     #[test]
     fn det_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![4, 1, 2, 3]), vec![2, 2])
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![4, 1, 2, 3]), vec![2, 2])
             .expect("integer");
-        tensor.data.fill(0.0);
         let result = det_real_value(tensor).expect("det");
         match result {
             Value::Num(v) => assert!((v - 10.0).abs() < 1e-12),
             other => panic!("expected scalar, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn det_provider_helpers_read_authoritative_storage() {
+        let upper =
+            Tensor::from_f32(vec![2.0, 0.0, 0.0, 3.0], vec![2, 2]).expect("single upper factor");
+        assert!((diagonal_product_real(&upper, 2).unwrap() - 6.0).abs() < 1.0e-12);
+
+        let pivots =
+            Tensor::new_integer(IntegerStorage::U64(vec![2, 1]), vec![2, 1]).expect("pivots");
+        assert_eq!(permutation_sign_from_tensor(&pivots, 2).unwrap(), -1.0);
     }
 
     #[test]
@@ -635,15 +677,17 @@ pub(crate) mod tests {
         .unwrap();
         let cpu_det = det_real_tensor(&tensor).expect("cpu det");
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let data = tensor.as_f64_slice().expect("double tensor");
         let view = HostTensorView {
-            data: &tensor.data,
+            data,
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
         let result = det_builtin(Value::GpuTensor(handle)).expect("det");
         let gathered = test_support::gather(result).expect("gather");
         assert_eq!(gathered.shape, vec![1, 1]);
-        let det_gpu = gathered.data[0];
+        let det_gpu = gathered.numeric_value_at(0).unwrap();
+        let det_gpu = floating_scalar_to_f64(det_gpu).unwrap();
         let tol = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1.0e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1.0e-5,
