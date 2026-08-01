@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, IntegerStorage, LogicalArray, NumericDType, Tensor, Value,
+    IntValue, LogicalArray, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -386,10 +386,11 @@ fn parse_colormap_bins(value: &Value) -> BuiltinResult<usize> {
     if tensor.shape.len() != 2 || tensor.cols != 3 || tensor.rows == 0 {
         return Err(invalid("colormap must be a non-empty Nx3 numeric array"));
     }
-    if !tensor.data.iter().all(|value| value.is_finite()) {
+    let values = tensor_utils::tensor_values_f64_cow(&tensor);
+    if !values.iter().all(|value| value.is_finite()) {
         return Err(invalid("colormap values must be finite"));
     }
-    if !tensor.data.iter().all(|value| (0.0..=1.0).contains(value)) {
+    if !values.iter().all(|value| (0.0..=1.0).contains(value)) {
         return Err(invalid("colormap values must be in the range [0, 1]"));
     }
     validate_bin_count(tensor.rows)?;
@@ -410,7 +411,7 @@ fn validate_bin_count(bins: usize) -> BuiltinResult<()> {
 
 #[derive(Clone)]
 struct GrayscaleInput {
-    values: Vec<f64>,
+    storage: NumericStorage,
     class_min: f64,
     class_max: f64,
     default_bins: usize,
@@ -421,24 +422,12 @@ impl GrayscaleInput {
         match value {
             Value::Tensor(tensor) => Self::from_tensor(tensor),
             Value::LogicalArray(logical) => Self::from_logical(logical),
-            Value::Num(value) => Self::from_float_values(vec![value], NumericDType::F64, &[1, 1]),
-            Value::Int(IntValue::U8(value)) => Ok(Self {
-                values: vec![f64::from(value)],
-                class_min: 0.0,
-                class_max: 255.0,
-                default_bins: DEFAULT_GRAYSCALE_BINS,
-            }),
-            Value::Int(IntValue::U16(value)) => Ok(Self {
-                values: vec![f64::from(value)],
-                class_min: 0.0,
-                class_max: 65535.0,
-                default_bins: DEFAULT_GRAYSCALE_BINS,
-            }),
-            Value::Int(value) => {
-                Self::from_float_values(vec![value.to_f64()], NumericDType::F64, &[1, 1])
+            Value::Num(value) => {
+                Self::from_float_storage(NumericStorage::F64(vec![value]), &[1, 1])
             }
+            Value::Int(value) => Ok(Self::from_integer_scalar(value)),
             Value::Bool(value) => Ok(Self {
-                values: vec![if value { 1.0 } else { 0.0 }],
+                storage: NumericStorage::F64(vec![if value { 1.0 } else { 0.0 }]),
                 class_min: 0.0,
                 class_max: 1.0,
                 default_bins: LOGICAL_BINS,
@@ -455,28 +444,80 @@ impl GrayscaleInput {
                 "expected an MxN grayscale image; truecolor RGB images are not accepted",
             ));
         }
-        if let Some((class_min, class_max)) = exact_integer_image_range(tensor.integer_storage()) {
-            return Self::from_integer_values(tensor.data, class_min, class_max);
+        let shape = tensor.shape.clone();
+        let storage = tensor
+            .into_numeric_storage()
+            .map_err(|err| internal(format!("grayscale tensor storage: {err}")))?;
+        match storage {
+            storage @ NumericStorage::I8(_) => Ok(Self::from_integer_storage(
+                storage,
+                i8::MIN as f64,
+                i8::MAX as f64,
+            )),
+            storage @ NumericStorage::I16(_) => Ok(Self::from_integer_storage(
+                storage,
+                i16::MIN as f64,
+                i16::MAX as f64,
+            )),
+            storage @ NumericStorage::I32(_) => Ok(Self::from_integer_storage(
+                storage,
+                i32::MIN as f64,
+                i32::MAX as f64,
+            )),
+            storage @ NumericStorage::I64(_) => Ok(Self::from_integer_storage(
+                storage,
+                i64::MIN as f64,
+                i64::MAX as f64,
+            )),
+            storage @ NumericStorage::U8(_) => Ok(Self::from_integer_storage(storage, 0.0, 255.0)),
+            storage @ NumericStorage::U16(_) => {
+                Ok(Self::from_integer_storage(storage, 0.0, 65535.0))
+            }
+            storage @ NumericStorage::U32(_) => {
+                Ok(Self::from_integer_storage(storage, 0.0, u32::MAX as f64))
+            }
+            storage @ NumericStorage::U64(_) => {
+                Ok(Self::from_integer_storage(storage, 0.0, u64::MAX as f64))
+            }
+            storage @ (NumericStorage::F32(_) | NumericStorage::F64(_)) => {
+                Self::from_float_storage(storage, &shape)
+            }
         }
-        match tensor.dtype {
-            NumericDType::I8 => {
-                Self::from_integer_values(tensor.data, i8::MIN as f64, i8::MAX as f64)
+    }
+
+    fn from_integer_scalar(value: IntValue) -> Self {
+        match value {
+            IntValue::I8(value) => Self::from_integer_storage(
+                NumericStorage::I8(vec![value]),
+                i8::MIN as f64,
+                i8::MAX as f64,
+            ),
+            IntValue::I16(value) => Self::from_integer_storage(
+                NumericStorage::I16(vec![value]),
+                i16::MIN as f64,
+                i16::MAX as f64,
+            ),
+            IntValue::I32(value) => Self::from_integer_storage(
+                NumericStorage::I32(vec![value]),
+                i32::MIN as f64,
+                i32::MAX as f64,
+            ),
+            IntValue::I64(value) => Self::from_integer_storage(
+                NumericStorage::I64(vec![value]),
+                i64::MIN as f64,
+                i64::MAX as f64,
+            ),
+            IntValue::U8(value) => {
+                Self::from_integer_storage(NumericStorage::U8(vec![value]), 0.0, 255.0)
             }
-            NumericDType::I16 => {
-                Self::from_integer_values(tensor.data, i16::MIN as f64, i16::MAX as f64)
+            IntValue::U16(value) => {
+                Self::from_integer_storage(NumericStorage::U16(vec![value]), 0.0, 65535.0)
             }
-            NumericDType::I32 => {
-                Self::from_integer_values(tensor.data, i32::MIN as f64, i32::MAX as f64)
+            IntValue::U32(value) => {
+                Self::from_integer_storage(NumericStorage::U32(vec![value]), 0.0, u32::MAX as f64)
             }
-            NumericDType::I64 => {
-                Self::from_integer_values(tensor.data, i64::MIN as f64, i64::MAX as f64)
-            }
-            NumericDType::U8 => Self::from_integer_values(tensor.data, 0.0, 255.0),
-            NumericDType::U16 => Self::from_integer_values(tensor.data, 0.0, 65535.0),
-            NumericDType::U32 => Self::from_integer_values(tensor.data, 0.0, u32::MAX as f64),
-            NumericDType::U64 => Self::from_integer_values(tensor.data, 0.0, u64::MAX as f64),
-            NumericDType::F32 | NumericDType::F64 => {
-                Self::from_float_values(tensor.data, tensor.dtype, &tensor.shape)
+            IntValue::U64(value) => {
+                Self::from_integer_storage(NumericStorage::U64(vec![value]), 0.0, u64::MAX as f64)
             }
         }
     }
@@ -486,60 +527,50 @@ impl GrayscaleInput {
             return Err(unsupported("expected an MxN logical image"));
         }
         Ok(Self {
-            values: logical
-                .data
-                .into_iter()
-                .map(|value| if value == 0 { 0.0 } else { 1.0 })
-                .collect(),
+            storage: NumericStorage::F64(
+                logical
+                    .data
+                    .into_iter()
+                    .map(|value| if value == 0 { 0.0 } else { 1.0 })
+                    .collect(),
+            ),
             class_min: 0.0,
             class_max: 1.0,
             default_bins: LOGICAL_BINS,
         })
     }
 
-    fn from_integer_values(
-        values: Vec<f64>,
-        class_min: f64,
-        class_max: f64,
-    ) -> BuiltinResult<Self> {
-        if values.iter().any(|value| {
-            !value.is_finite()
-                || *value < class_min
-                || *value > class_max
-                || (value.round() - *value).abs() > INTEGER_TOL
-        }) {
-            return Err(invalid(format!(
-                "integer grayscale image values must be finite integer values in [{class_min:.0}, {class_max:.0}]"
-            )));
-        }
-        Ok(Self {
-            values,
+    fn from_integer_storage(storage: NumericStorage, class_min: f64, class_max: f64) -> Self {
+        Self {
+            storage,
             class_min,
             class_max,
             default_bins: DEFAULT_GRAYSCALE_BINS,
-        })
+        }
     }
 
-    fn from_float_values(
-        values: Vec<f64>,
-        _dtype: NumericDType,
-        shape: &[usize],
-    ) -> BuiltinResult<Self> {
+    fn from_float_storage(storage: NumericStorage, shape: &[usize]) -> BuiltinResult<Self> {
         if !is_grayscale_shape(shape) {
             return Err(unsupported(
                 "expected an MxN grayscale image; truecolor RGB images are not accepted",
             ));
         }
-        if values
-            .iter()
-            .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
-        {
+        let valid = match &storage {
+            NumericStorage::F64(values) => values
+                .iter()
+                .all(|value| value.is_finite() && (0.0..=1.0).contains(value)),
+            NumericStorage::F32(values) => values
+                .iter()
+                .all(|value| value.is_finite() && (0.0..=1.0).contains(value)),
+            _ => false,
+        };
+        if !valid {
             return Err(invalid(
                 "floating-point grayscale image values must be finite and normalized to [0, 1]",
             ));
         }
         Ok(Self {
-            values,
+            storage,
             class_min: 0.0,
             class_max: 1.0,
             default_bins: DEFAULT_GRAYSCALE_BINS,
@@ -550,14 +581,13 @@ impl GrayscaleInput {
         let bins = requested_bins.unwrap_or(self.default_bins);
         validate_bin_count(bins)?;
         let locations = linspace(self.class_min, self.class_max, bins);
-        let counts =
-            histogram_counts_by_nearest_bin(&self.values, self.class_min, self.class_max, bins)?;
+        let counts = histogram_counts(&self.storage, self.class_min, self.class_max, bins)?;
         ImhistEvaluation::from_counts_locations(counts, locations)
     }
 }
 
 struct IndexedInput {
-    values: Vec<f64>,
+    storage: NumericStorage,
     zero_based: bool,
     bins: usize,
 }
@@ -569,10 +599,15 @@ impl IndexedInput {
                 if !is_grayscale_shape(&tensor.shape) {
                     return Err(unsupported("indexed image must be an MxN matrix"));
                 }
-                let zero_based = exact_integer_image_range(tensor.integer_storage()).is_some()
-                    || matches!(tensor.dtype, NumericDType::U8 | NumericDType::U16);
+                let zero_based = matches!(
+                    tensor.numeric_dtype(),
+                    runmat_builtins::NumericDType::U8 | runmat_builtins::NumericDType::U16
+                );
+                let storage = tensor
+                    .into_numeric_storage()
+                    .map_err(|err| internal(format!("indexed tensor storage: {err}")))?;
                 Ok(Self {
-                    values: tensor.data,
+                    storage,
                     zero_based,
                     bins,
                 })
@@ -582,37 +617,32 @@ impl IndexedInput {
                     return Err(unsupported("indexed image must be an MxN matrix"));
                 }
                 Ok(Self {
-                    values: logical
-                        .data
-                        .into_iter()
-                        .map(|value| if value == 0 { 0.0 } else { 1.0 })
-                        .collect(),
+                    storage: NumericStorage::F64(
+                        logical
+                            .data
+                            .into_iter()
+                            .map(|value| if value == 0 { 0.0 } else { 1.0 })
+                            .collect(),
+                    ),
                     zero_based: true,
                     bins,
                 })
             }
             Value::Num(value) => Ok(Self {
-                values: vec![value],
+                storage: NumericStorage::F64(vec![value]),
                 zero_based: false,
                 bins,
             }),
-            Value::Int(IntValue::U8(value)) => Ok(Self {
-                values: vec![f64::from(value)],
-                zero_based: true,
-                bins,
-            }),
-            Value::Int(IntValue::U16(value)) => Ok(Self {
-                values: vec![f64::from(value)],
-                zero_based: true,
-                bins,
-            }),
-            Value::Int(value) => Ok(Self {
-                values: vec![value.to_f64()],
-                zero_based: false,
-                bins,
-            }),
+            Value::Int(value) => {
+                let zero_based = matches!(value, IntValue::U8(_) | IntValue::U16(_));
+                Ok(Self {
+                    storage: numeric_storage_from_int(value),
+                    zero_based,
+                    bins,
+                })
+            }
             Value::Bool(value) => Ok(Self {
-                values: vec![if value { 1.0 } else { 0.0 }],
+                storage: NumericStorage::F64(vec![if value { 1.0 } else { 0.0 }]),
                 zero_based: true,
                 bins,
             }),
@@ -624,35 +654,22 @@ impl IndexedInput {
 
     fn evaluate(&self) -> BuiltinResult<ImhistEvaluation> {
         let mut counts = vec![0.0; self.bins];
-        for &value in &self.values {
-            if !value.is_finite() || (value.round() - value).abs() > INTEGER_TOL {
-                return Err(invalid(
-                    "indexed image values must be finite integer indices",
-                ));
-            }
-            let rounded = value.round();
-            let index = if self.zero_based {
-                rounded as isize
-            } else {
-                rounded as isize - 1
-            };
-            if index < 0 || index as usize >= self.bins {
-                return Err(invalid(format!(
-                    "indexed image value {value} is outside the colormap range"
-                )));
-            }
-            counts[index as usize] += 1.0;
-        }
+        count_indexed_values(&self.storage, self.zero_based, &mut counts)?;
         let locations: Vec<f64> = (1..=self.bins).map(|value| value as f64).collect();
         ImhistEvaluation::from_counts_locations(counts, locations)
     }
 }
 
-fn exact_integer_image_range(storage: Option<&IntegerStorage>) -> Option<(f64, f64)> {
-    match storage {
-        Some(IntegerStorage::U8(_)) => Some((0.0, 255.0)),
-        Some(IntegerStorage::U16(_)) => Some((0.0, 65535.0)),
-        _ => None,
+fn numeric_storage_from_int(value: IntValue) -> NumericStorage {
+    match value {
+        IntValue::I8(value) => NumericStorage::I8(vec![value]),
+        IntValue::I16(value) => NumericStorage::I16(vec![value]),
+        IntValue::I32(value) => NumericStorage::I32(vec![value]),
+        IntValue::I64(value) => NumericStorage::I64(vec![value]),
+        IntValue::U8(value) => NumericStorage::U8(vec![value]),
+        IntValue::U16(value) => NumericStorage::U16(vec![value]),
+        IntValue::U32(value) => NumericStorage::U32(vec![value]),
+        IntValue::U64(value) => NumericStorage::U64(vec![value]),
     }
 }
 
@@ -778,7 +795,30 @@ fn linspace(start: f64, stop: f64, count: usize) -> Vec<f64> {
     (0..count).map(|idx| start + step * idx as f64).collect()
 }
 
-fn histogram_counts_by_nearest_bin(
+fn histogram_counts(
+    storage: &NumericStorage,
+    class_min: f64,
+    class_max: f64,
+    bins: usize,
+) -> BuiltinResult<Vec<f64>> {
+    match storage {
+        NumericStorage::F64(values) => histogram_float_counts(values, class_min, class_max, bins),
+        NumericStorage::F32(values) => {
+            let values: Vec<f64> = values.iter().map(|value| f64::from(*value)).collect();
+            histogram_float_counts(&values, class_min, class_max, bins)
+        }
+        NumericStorage::I8(values) => histogram_signed_counts(values, i8::MIN, bins),
+        NumericStorage::I16(values) => histogram_signed_counts(values, i16::MIN, bins),
+        NumericStorage::I32(values) => histogram_signed_counts(values, i32::MIN, bins),
+        NumericStorage::I64(values) => histogram_signed_counts(values, i64::MIN, bins),
+        NumericStorage::U8(values) => histogram_unsigned_counts(values, u8::MAX, bins),
+        NumericStorage::U16(values) => histogram_unsigned_counts(values, u16::MAX, bins),
+        NumericStorage::U32(values) => histogram_unsigned_counts(values, u32::MAX, bins),
+        NumericStorage::U64(values) => histogram_unsigned_counts(values, u64::MAX, bins),
+    }
+}
+
+fn histogram_float_counts(
     values: &[f64],
     class_min: f64,
     class_max: f64,
@@ -819,6 +859,159 @@ fn histogram_counts_by_nearest_bin(
     Ok(counts)
 }
 
+fn nearest_integer_bin(offset: u128, range: u128, bins: usize) -> usize {
+    if bins <= 1 || range == 0 {
+        return 0;
+    }
+    let numerator = offset * (bins - 1) as u128;
+    ((numerator * 2 + range) / (range * 2)) as usize
+}
+
+trait HistogramSigned: Copy {
+    fn to_i128(self) -> i128;
+}
+
+macro_rules! impl_histogram_signed {
+    ($($ty:ty),+ $(,)?) => {
+        $(
+            impl HistogramSigned for $ty {
+                fn to_i128(self) -> i128 {
+                    self as i128
+                }
+            }
+        )+
+    };
+}
+
+impl_histogram_signed!(i8, i16, i32, i64);
+
+fn histogram_signed_counts<T: HistogramSigned>(
+    values: &[T],
+    minimum: T,
+    bins: usize,
+) -> BuiltinResult<Vec<f64>> {
+    let minimum = minimum.to_i128();
+    let range = (-minimum * 2 - 1) as u128;
+    let mut counts = vec![0.0; bins];
+    for &value in values {
+        let offset = (value.to_i128() - minimum) as u128;
+        counts[nearest_integer_bin(offset, range, bins)] += 1.0;
+    }
+    Ok(counts)
+}
+
+trait HistogramUnsigned: Copy {
+    fn to_u128(self) -> u128;
+}
+
+macro_rules! impl_histogram_unsigned {
+    ($($ty:ty),+ $(,)?) => {
+        $(
+            impl HistogramUnsigned for $ty {
+                fn to_u128(self) -> u128 {
+                    self as u128
+                }
+            }
+        )+
+    };
+}
+
+impl_histogram_unsigned!(u8, u16, u32, u64);
+
+fn histogram_unsigned_counts<T: HistogramUnsigned>(
+    values: &[T],
+    maximum: T,
+    bins: usize,
+) -> BuiltinResult<Vec<f64>> {
+    let range = maximum.to_u128();
+    let mut counts = vec![0.0; bins];
+    for &value in values {
+        counts[nearest_integer_bin(value.to_u128(), range, bins)] += 1.0;
+    }
+    Ok(counts)
+}
+
+fn count_indexed_values(
+    storage: &NumericStorage,
+    zero_based: bool,
+    counts: &mut [f64],
+) -> BuiltinResult<()> {
+    match storage {
+        NumericStorage::F64(values) => count_float_indices(values, zero_based, counts),
+        NumericStorage::F32(values) => {
+            let values: Vec<f64> = values.iter().map(|value| f64::from(*value)).collect();
+            count_float_indices(&values, zero_based, counts)
+        }
+        NumericStorage::I8(values) => count_signed_indices(values, zero_based, counts),
+        NumericStorage::I16(values) => count_signed_indices(values, zero_based, counts),
+        NumericStorage::I32(values) => count_signed_indices(values, zero_based, counts),
+        NumericStorage::I64(values) => count_signed_indices(values, zero_based, counts),
+        NumericStorage::U8(values) => count_unsigned_indices(values, zero_based, counts),
+        NumericStorage::U16(values) => count_unsigned_indices(values, zero_based, counts),
+        NumericStorage::U32(values) => count_unsigned_indices(values, zero_based, counts),
+        NumericStorage::U64(values) => count_unsigned_indices(values, zero_based, counts),
+    }
+}
+
+fn count_float_indices(values: &[f64], zero_based: bool, counts: &mut [f64]) -> BuiltinResult<()> {
+    for &value in values {
+        if !value.is_finite() || (value.round() - value).abs() > INTEGER_TOL {
+            return Err(invalid(
+                "indexed image values must be finite integer indices",
+            ));
+        }
+        let rounded = value.round();
+        let adjusted = if zero_based { rounded } else { rounded - 1.0 };
+        if adjusted < 0.0 || adjusted >= counts.len() as f64 {
+            return Err(invalid(format!(
+                "indexed image value {value} is outside the colormap range"
+            )));
+        }
+        counts[adjusted as usize] += 1.0;
+    }
+    Ok(())
+}
+
+fn count_signed_indices<T: HistogramSigned + std::fmt::Display>(
+    values: &[T],
+    zero_based: bool,
+    counts: &mut [f64],
+) -> BuiltinResult<()> {
+    for &value in values {
+        let raw = value.to_i128();
+        let adjusted = if zero_based { raw } else { raw - 1 };
+        if adjusted < 0 || adjusted as u128 >= counts.len() as u128 {
+            return Err(invalid(format!(
+                "indexed image value {value} is outside the colormap range"
+            )));
+        }
+        counts[adjusted as usize] += 1.0;
+    }
+    Ok(())
+}
+
+fn count_unsigned_indices<T: HistogramUnsigned + std::fmt::Display>(
+    values: &[T],
+    zero_based: bool,
+    counts: &mut [f64],
+) -> BuiltinResult<()> {
+    for &value in values {
+        let raw = value.to_u128();
+        let Some(adjusted) = raw.checked_sub(u128::from(!zero_based)) else {
+            return Err(invalid(format!(
+                "indexed image value {value} is outside the colormap range"
+            )));
+        };
+        if adjusted >= counts.len() as u128 {
+            return Err(invalid(format!(
+                "indexed image value {value} is outside the colormap range"
+            )));
+        }
+        counts[adjusted as usize] += 1.0;
+    }
+    Ok(())
+}
+
 #[cfg(feature = "plot-core")]
 fn format_bin_label(value: f64) -> String {
     if (value.round() - value).abs() <= INTEGER_TOL {
@@ -836,30 +1029,31 @@ struct PlotDisplayBins {
 
 #[cfg(feature = "plot-core")]
 fn plot_display_bins(counts: &Tensor, locations: &Tensor) -> BuiltinResult<PlotDisplayBins> {
-    if counts.data.len() != locations.data.len() {
+    let counts = tensor_utils::tensor_values_f64_cow(counts);
+    let locations = tensor_utils::tensor_values_f64_cow(locations);
+    if counts.len() != locations.len() {
         return Err(internal("counts and bin locations length mismatch"));
     }
-    if counts.data.is_empty() {
+    if counts.is_empty() {
         return Err(internal("histogram has no bins to plot"));
     }
-    if counts.data.len() <= MAX_PLOT_BINS {
+    if counts.len() <= MAX_PLOT_BINS {
         return Ok(PlotDisplayBins {
             labels: locations
-                .data
                 .iter()
                 .map(|value| format_bin_label(*value))
                 .collect(),
-            counts: counts.data.clone(),
+            counts: counts.to_vec(),
         });
     }
 
-    let stride = counts.data.len().div_ceil(MAX_PLOT_BINS);
-    let mut labels = Vec::with_capacity(counts.data.len().div_ceil(stride));
+    let stride = counts.len().div_ceil(MAX_PLOT_BINS);
+    let mut labels = Vec::with_capacity(counts.len().div_ceil(stride));
     let mut display_counts = Vec::with_capacity(labels.capacity());
-    for start in (0..counts.data.len()).step_by(stride) {
-        let end = (start + stride).min(counts.data.len());
-        let total = counts.data[start..end].iter().sum::<f64>();
-        let location = 0.5 * (locations.data[start] + locations.data[end - 1]);
+    for start in (0..counts.len()).step_by(stride) {
+        let end = (start + stride).min(counts.len());
+        let total = counts[start..end].iter().sum::<f64>();
+        let location = 0.5 * (locations[start] + locations[end - 1]);
         labels.push(format_bin_label(location));
         display_counts.push(total);
     }
@@ -874,7 +1068,7 @@ fn plot_display_bins(counts: &Tensor, locations: &Tensor) -> BuiltinResult<PlotD
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::NumericDType;
+    use runmat_builtins::{IntegerStorage, NumericDType};
 
     fn call(image: Value, rest: Vec<Value>, outputs: Option<usize>) -> Value {
         let _guard = outputs.map(|count| crate::output_count::push_output_count(Some(count)));
@@ -982,7 +1176,41 @@ mod tests {
         let indexed = IndexedInput::from_value(Value::Tensor(image), 3).expect("indexed input");
 
         assert!(indexed.zero_based);
-        assert_eq!(indexed.values, vec![0.0, 1.0, 1.0, 2.0]);
+        assert_eq!(indexed.storage, NumericStorage::U16(vec![0, 1, 1, 2]));
+    }
+
+    #[test]
+    fn wide_integer_grayscale_storage_stays_exact_through_binning() {
+        let image = Tensor::new_integer(
+            IntegerStorage::U64(vec![0, (1_u64 << 53) + 1, u64::MAX]),
+            vec![1, 3],
+        )
+        .expect("uint64 tensor");
+        let grayscale = GrayscaleInput::from_tensor(image).expect("uint64 image");
+
+        assert_eq!(
+            grayscale.storage,
+            NumericStorage::U64(vec![0, (1_u64 << 53) + 1, u64::MAX])
+        );
+        let evaluation = grayscale.evaluate(Some(256)).expect("uint64 histogram");
+        let counts = tensor_utils::tensor_values_f64_cow(&evaluation.counts);
+        assert_eq!(counts.iter().sum::<f64>(), 3.0);
+        assert_eq!(counts[0], 2.0);
+        assert_eq!(counts[255], 1.0);
+    }
+
+    #[test]
+    fn wide_integer_index_errors_report_the_exact_native_value() {
+        let exact = (1_u64 << 53) + 1;
+        let image = Tensor::new_integer(IntegerStorage::U64(vec![exact]), vec![1, 1])
+            .expect("uint64 tensor");
+        let indexed =
+            IndexedInput::from_value(Value::Tensor(image), 3).expect("indexed uint64 image");
+
+        let Err(err) = indexed.evaluate() else {
+            panic!("wide index must be rejected");
+        };
+        assert!(err.message().contains(&exact.to_string()));
     }
 
     #[test]
