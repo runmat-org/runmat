@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, NumericDType, Tensor, Value,
+    ComplexTensor, IntegerStorage, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -343,9 +343,8 @@ enum SampleOp {
 
 enum SampleInput {
     Real {
-        data: Vec<f64>,
+        storage: NumericStorage,
         shape: Vec<usize>,
-        dtype: NumericDType,
     },
     Complex {
         data: Vec<(f64, f64)>,
@@ -369,20 +368,12 @@ impl SampleInput {
                         )
                     })?;
                 match gathered {
-                    Value::Tensor(tensor) => Ok(Self::Real {
-                        data: tensor.data,
-                        shape: tensor.shape,
-                        dtype: tensor.dtype,
-                    }),
+                    Value::Tensor(tensor) => Self::from_tensor(tensor, builtin),
                     Value::LogicalArray(logical) => {
                         let tensor = tensor::logical_to_tensor(&logical).map_err(|err| {
                             sample_error_with_detail(builtin, &SAMPLE_ERROR_INVALID_INPUT, err)
                         })?;
-                        Ok(Self::Real {
-                            data: tensor.data,
-                            shape: tensor.shape,
-                            dtype: NumericDType::F64,
-                        })
+                        Self::from_tensor(tensor, builtin)
                     }
                     Value::ComplexTensor(tensor) => Ok(Self::Complex {
                         data: tensor.data,
@@ -395,39 +386,28 @@ impl SampleInput {
                     )),
                 }
             }
-            Value::Tensor(tensor) => Ok(Self::Real {
-                data: tensor.data,
-                shape: tensor.shape,
-                dtype: tensor.dtype,
-            }),
+            Value::Tensor(tensor) => Self::from_tensor(tensor, builtin),
             Value::LogicalArray(logical) => {
                 let tensor = tensor::logical_to_tensor(&logical).map_err(|err| {
                     sample_error_with_detail(builtin, &SAMPLE_ERROR_INVALID_INPUT, err)
                 })?;
-                Ok(Self::Real {
-                    data: tensor.data,
-                    shape: tensor.shape,
-                    dtype: NumericDType::F64,
-                })
+                Self::from_tensor(tensor, builtin)
             }
             Value::ComplexTensor(tensor) => Ok(Self::Complex {
                 data: tensor.data,
                 shape: tensor.shape,
             }),
             Value::Num(value) => Ok(Self::Real {
-                data: vec![value],
+                storage: NumericStorage::F64(vec![value]),
                 shape: vec![1, 1],
-                dtype: NumericDType::F64,
             }),
             Value::Int(value) => Ok(Self::Real {
-                data: vec![value.to_f64()],
+                storage: NumericStorage::from_integer_storage(IntegerStorage::from_scalar(value)),
                 shape: vec![1, 1],
-                dtype: NumericDType::F64,
             }),
             Value::Bool(value) => Ok(Self::Real {
-                data: vec![if value { 1.0 } else { 0.0 }],
+                storage: NumericStorage::F64(vec![if value { 1.0 } else { 0.0 }]),
                 shape: vec![1, 1],
-                dtype: NumericDType::F64,
             }),
             Value::Complex(re, im) => Ok(Self::Complex {
                 data: vec![(re, im)],
@@ -439,6 +419,14 @@ impl SampleInput {
                 format!("received {other:?}"),
             )),
         }
+    }
+
+    fn from_tensor(tensor: Tensor, builtin: &'static str) -> BuiltinResult<Self> {
+        let shape = tensor.shape.clone();
+        let storage = tensor
+            .into_numeric_storage()
+            .map_err(|err| sample_error_with_detail(builtin, &SAMPLE_ERROR_INVALID_INPUT, err))?;
+        Ok(Self::Real { storage, shape })
     }
 }
 
@@ -1015,9 +1003,37 @@ fn apply_resample(
     options: &HostResampleOptions,
 ) -> BuiltinResult<ResampleEval> {
     match input {
-        SampleInput::Real { data, shape, dtype } => {
+        SampleInput::Real { storage, shape } => {
+            let dtype = storage.numeric_dtype();
+            let data = match storage {
+                NumericStorage::F64(values) => values,
+                NumericStorage::F32(values) => {
+                    values.into_iter().map(f64::from).collect::<Vec<_>>()
+                }
+                NumericStorage::I8(_)
+                | NumericStorage::I16(_)
+                | NumericStorage::I32(_)
+                | NumericStorage::I64(_)
+                | NumericStorage::U8(_)
+                | NumericStorage::U16(_)
+                | NumericStorage::U32(_)
+                | NumericStorage::U64(_) => {
+                    return Err(sample_error_with_detail(
+                        RESAMPLE_NAME,
+                        &SAMPLE_ERROR_INVALID_INPUT,
+                        "resample input must be single or double",
+                    ))
+                }
+            };
             let (output, shape) = resample_rational_column_major(data, shape, p, q, options)?;
-            let tensor = Tensor::new_with_dtype(output, shape, dtype).map_err(|err| {
+            let storage = match dtype {
+                runmat_builtins::NumericDType::F64 => NumericStorage::F64(output),
+                runmat_builtins::NumericDType::F32 => {
+                    NumericStorage::F32(output.into_iter().map(|value| value as f32).collect())
+                }
+                _ => unreachable!("resample input dtype was validated"),
+            };
+            let tensor = Tensor::from_numeric_storage(storage, shape).map_err(|err| {
                 sample_error_with_detail(RESAMPLE_NAME, &SAMPLE_ERROR_BUILD_OUTPUT, err)
             })?;
             Ok(ResampleEval {
@@ -1150,10 +1166,10 @@ fn apply_sample_rate(
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
     match input {
-        SampleInput::Real { data, shape, dtype } => {
-            let (output, shape) =
-                resample_column_major(data, shape, factor, phase, op, 0.0, builtin)?;
-            let tensor = Tensor::new_with_dtype(output, shape, dtype).map_err(|err| {
+        SampleInput::Real { storage, shape } => {
+            let (storage, shape) =
+                resample_numeric_storage(storage, shape, factor, phase, op, builtin)?;
+            let tensor = Tensor::from_numeric_storage(storage, shape).map_err(|err| {
                 sample_error_with_detail(builtin, &SAMPLE_ERROR_BUILD_OUTPUT, err)
             })?;
             Ok(tensor::tensor_into_value(tensor))
@@ -1172,6 +1188,35 @@ fn apply_sample_rate(
             }
         }
     }
+}
+
+fn resample_numeric_storage(
+    storage: NumericStorage,
+    shape: Vec<usize>,
+    factor: usize,
+    phase: usize,
+    op: SampleOp,
+    builtin: &'static str,
+) -> BuiltinResult<(NumericStorage, Vec<usize>)> {
+    macro_rules! resample {
+        ($values:expr, $zero:expr, $variant:ident) => {{
+            let (values, shape) =
+                resample_column_major($values, shape, factor, phase, op, $zero, builtin)?;
+            (NumericStorage::$variant(values), shape)
+        }};
+    }
+    Ok(match storage {
+        NumericStorage::F64(values) => resample!(values, 0.0, F64),
+        NumericStorage::F32(values) => resample!(values, 0.0_f32, F32),
+        NumericStorage::I8(values) => resample!(values, 0_i8, I8),
+        NumericStorage::I16(values) => resample!(values, 0_i16, I16),
+        NumericStorage::I32(values) => resample!(values, 0_i32, I32),
+        NumericStorage::I64(values) => resample!(values, 0_i64, I64),
+        NumericStorage::U8(values) => resample!(values, 0_u8, U8),
+        NumericStorage::U16(values) => resample!(values, 0_u16, U16),
+        NumericStorage::U32(values) => resample!(values, 0_u32, U32),
+        NumericStorage::U64(values) => resample!(values, 0_u64, U64),
+    })
 }
 
 fn upsample_gpu(
@@ -1838,6 +1883,37 @@ mod tests {
     }
 
     #[test]
+    fn host_sample_rate_preserves_exact_uint64_storage() {
+        let input = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            vec![1, 2],
+        )
+        .unwrap();
+        let Value::Tensor(upsampled) = call_upsample(vec![Value::Tensor(input), Value::Num(2.0)])
+        else {
+            panic!("expected integer upsample output");
+        };
+        assert_eq!(
+            upsampled.integer_storage(),
+            Some(&IntegerStorage::U64(vec![
+                9_007_199_254_740_993,
+                0,
+                u64::MAX,
+                0
+            ]))
+        );
+        let Value::Tensor(downsampled) =
+            call_downsample(vec![Value::Tensor(upsampled), Value::Num(2.0)])
+        else {
+            panic!("expected integer downsample output");
+        };
+        assert_eq!(
+            downsampled.integer_storage(),
+            Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]))
+        );
+    }
+
+    #[test]
     fn downsample_row_vector_keeps_every_nth_sample() {
         let out = call_downsample(vec![
             tensor(vec![1.0, 2.0, 3.0, 4.0, 5.0], vec![1, 5]),
@@ -2087,6 +2163,19 @@ mod tests {
         };
         assert_eq!(downsampled.shape, vec![1, 3]);
         assert_eq!(downsampled.data, vec![1.0, 3.0, 5.0]);
+    }
+
+    #[test]
+    fn resample_rejects_integer_signal_storage() {
+        let input = Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3]), vec![1, 3]).unwrap();
+        let error = block_on(resample_builtin(
+            Value::Tensor(input),
+            Value::Num(2.0),
+            Value::Num(1.0),
+            Vec::new(),
+        ))
+        .unwrap_err();
+        assert_eq!(error.identifier(), SAMPLE_ERROR_INVALID_INPUT.identifier);
     }
 
     #[test]
