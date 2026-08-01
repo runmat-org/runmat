@@ -150,7 +150,12 @@ async fn covariance_tensor(
         .await
         .map_err(|err| conversion_error(name, format!("{name}: unable to gather input: {err}")))?;
     match gathered {
-        Value::Tensor(tensor) if matches!(tensor.dtype, NumericDType::F64 | NumericDType::F32) => {
+        Value::Tensor(tensor)
+            if matches!(
+                tensor.numeric_dtype(),
+                NumericDType::F64 | NumericDType::F32
+            ) =>
+        {
             Ok(tensor)
         }
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
@@ -161,7 +166,7 @@ async fn covariance_tensor(
             name,
             format!(
                 "{name}: covariance matrix must be numeric real, got {}",
-                tensor.dtype.class_name()
+                tensor.numeric_dtype().class_name()
             ),
         )),
         Value::LogicalArray(logical) => {
@@ -211,10 +216,11 @@ fn covariance_to_correlation(
         }
     }
 
-    let r = Tensor::new_with_dtype(r, vec![n, n], covariance.dtype)
+    let dtype = covariance.numeric_dtype();
+    let r = Tensor::new_with_dtype(r, vec![n, n], dtype)
         .map(tensor::tensor_into_value)
         .map_err(|err| internal_error(name, format!("{name}: {err}")))?;
-    let sigma = Tensor::new_with_dtype(sigma, vec![n, 1], covariance.dtype)
+    let sigma = Tensor::new_with_dtype(sigma, vec![n, 1], dtype)
         .map(tensor::tensor_into_value)
         .map_err(|err| internal_error(name, format!("{name}: {err}")))?;
     Ok((r, sigma))
@@ -522,10 +528,16 @@ mod tests {
         );
     }
 
-    fn mirrorless_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.clear();
-        Value::Tensor(tensor)
+    fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
+    }
+
+    fn assert_tensor_values(tensor: &Tensor, expected: &[f64]) {
+        let values = tensor.materialize_f64();
+        assert_eq!(values.len(), expected.len());
+        for (actual, expected) in values.into_iter().zip(expected.iter().copied()) {
+            assert_close(actual, expected);
+        }
     }
 
     #[test]
@@ -539,24 +551,41 @@ mod tests {
                 match &values[0] {
                     Value::Tensor(tensor) => {
                         assert_eq!(tensor.shape, vec![2, 2]);
-                        assert_close(tensor.data[0], 1.0);
-                        assert_close(tensor.data[1], 1.0 / 3.0);
-                        assert_close(tensor.data[2], 1.0 / 3.0);
-                        assert_close(tensor.data[3], 1.0);
+                        assert_tensor_values(tensor, &[1.0, 1.0 / 3.0, 1.0 / 3.0, 1.0]);
                     }
                     other => panic!("expected correlation tensor, got {other:?}"),
                 }
                 match &values[1] {
                     Value::Tensor(tensor) => {
                         assert_eq!(tensor.shape, vec![2, 1]);
-                        assert_close(tensor.data[0], 2.0);
-                        assert_close(tensor.data[1], 3.0);
+                        assert_tensor_values(tensor, &[2.0, 3.0]);
                     }
                     other => panic!("expected sigma tensor, got {other:?}"),
                 }
             }
             other => panic!("expected output list, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn corrcov_preserves_native_single_outputs() {
+        let covariance = Value::Tensor(
+            Tensor::from_f32(vec![4.0, 2.0, 2.0, 9.0], vec![2, 2]).expect("single covariance"),
+        );
+        let _guard = crate::output_count::push_output_count(Some(2));
+        let Value::OutputList(outputs) =
+            block_on(corrcov::corrcov_builtin(covariance, Vec::new())).expect("corrcov")
+        else {
+            panic!("expected output list");
+        };
+        let [Value::Tensor(correlation), Value::Tensor(sigma)] = outputs.as_slice() else {
+            panic!("expected tensor outputs");
+        };
+        assert_eq!(correlation.numeric_dtype(), NumericDType::F32);
+        assert_eq!(sigma.numeric_dtype(), NumericDType::F32);
+        let third = f64::from(1.0_f32 / 3.0);
+        assert_tensor_values(correlation, &[1.0, third, third, 1.0]);
+        assert_tensor_values(sigma, &[2.0, 3.0]);
     }
 
     #[test]
@@ -590,12 +619,8 @@ mod tests {
             let sigma = test_support::gather(values[1].clone()).expect("sigma");
             assert_eq!(correlation.shape, vec![2, 2]);
             assert_eq!(sigma.shape, vec![2, 1]);
-            assert_close(correlation.data[0], 1.0);
-            assert_close(correlation.data[1], 1.0 / 3.0);
-            assert_close(correlation.data[2], 1.0 / 3.0);
-            assert_close(correlation.data[3], 1.0);
-            assert_close(sigma.data[0], 2.0);
-            assert_close(sigma.data[1], 3.0);
+            assert_tensor_values(&correlation, &[1.0, 1.0 / 3.0, 1.0 / 3.0, 1.0]);
+            assert_tensor_values(&sigma, &[2.0, 3.0]);
         });
     }
 
@@ -627,10 +652,7 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 2]);
-                assert_close(tensor.data[0], 1.0);
-                assert_close(tensor.data[1], 0.2);
-                assert_close(tensor.data[2], 0.2);
-                assert_close(tensor.data[3], 1.0);
+                assert_tensor_values(&tensor, &[1.0, 0.2, 0.2, 1.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -642,10 +664,11 @@ mod tests {
         let out = block_on(corrcov::corrcov_builtin(c, Vec::new())).expect("corrcov");
         match out {
             Value::Tensor(tensor) => {
-                assert!(tensor.data[0].is_nan());
-                assert!(tensor.data[1].is_nan());
-                assert!(tensor.data[2].is_nan());
-                assert_close(tensor.data[3], 1.0);
+                let values = tensor.materialize_f64();
+                assert!(values[0].is_nan());
+                assert!(values[1].is_nan());
+                assert!(values[2].is_nan());
+                assert_close(values[3], 1.0);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -684,7 +707,7 @@ mod tests {
     #[test]
     fn corrcov_accepts_typed_integer_tensors_and_scalar_logical_extensions() {
         {
-            let integer = mirrorless_int_tensor(IntegerStorage::U16(vec![4, 2, 2, 9]), vec![2, 2]);
+            let integer = int_tensor(IntegerStorage::U16(vec![4, 2, 2, 9]), vec![2, 2]);
             let _guard = crate::output_count::push_output_count(Some(2));
             let out = block_on(corrcov::corrcov_builtin(integer, Vec::new())).unwrap();
             match out {
@@ -692,21 +715,17 @@ mod tests {
                     assert_eq!(values.len(), 2);
                     match &values[0] {
                         Value::Tensor(tensor) => {
-                            assert_eq!(tensor.dtype, NumericDType::F64);
+                            assert_eq!(tensor.numeric_dtype(), NumericDType::F64);
                             assert_eq!(tensor.shape, vec![2, 2]);
-                            assert_close(tensor.data[0], 1.0);
-                            assert_close(tensor.data[1], 1.0 / 3.0);
-                            assert_close(tensor.data[2], 1.0 / 3.0);
-                            assert_close(tensor.data[3], 1.0);
+                            assert_tensor_values(tensor, &[1.0, 1.0 / 3.0, 1.0 / 3.0, 1.0]);
                         }
                         other => panic!("expected correlation tensor, got {other:?}"),
                     }
                     match &values[1] {
                         Value::Tensor(tensor) => {
-                            assert_eq!(tensor.dtype, NumericDType::F64);
+                            assert_eq!(tensor.numeric_dtype(), NumericDType::F64);
                             assert_eq!(tensor.shape, vec![2, 1]);
-                            assert_close(tensor.data[0], 2.0);
-                            assert_close(tensor.data[1], 3.0);
+                            assert_tensor_values(tensor, &[2.0, 3.0]);
                         }
                         other => panic!("expected sigma tensor, got {other:?}"),
                     }
@@ -727,7 +746,7 @@ mod tests {
         let out = block_on(corrcov::corrcov_builtin(logical, Vec::new())).unwrap();
         match out {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.dtype, NumericDType::F64);
+                assert_eq!(tensor.numeric_dtype(), NumericDType::F64);
                 assert_eq!(tensor.shape, vec![2, 2]);
             }
             other => panic!("expected tensor, got {other:?}"),
