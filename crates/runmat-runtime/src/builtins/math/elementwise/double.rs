@@ -5,7 +5,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, LogicalArray, NumericDType, SparseTensor, Tensor, Value,
+    CharArray, ComplexTensor, LogicalArray, NumericStorage, SparseTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -230,13 +230,15 @@ fn double_from_logical(array: LogicalArray) -> BuiltinResult<Value> {
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn double_from_tensor(mut tensor: Tensor) -> BuiltinResult<Value> {
-    if tensor.integer_storage().is_some() {
-        tensor.data = tensor::tensor_values_f64(&tensor);
-        tensor.integer_data = None;
-    }
-    tensor.dtype = NumericDType::F64;
-    Ok(Value::Tensor(tensor))
+fn double_from_tensor(tensor: Tensor) -> BuiltinResult<Value> {
+    let shape = tensor.shape.clone();
+    let values = tensor
+        .into_numeric_storage()
+        .map_err(|error| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, error))?
+        .materialize_f64();
+    Tensor::from_numeric_storage(NumericStorage::F64(values), shape)
+        .map(Value::Tensor)
+        .map_err(|error| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, error))
 }
 
 fn double_from_complex_tensor(mut tensor: ComplexTensor) -> BuiltinResult<Value> {
@@ -296,8 +298,13 @@ async fn double_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     match (provider, value) {
         (Some(provider), Value::Tensor(tensor)) => {
             if provider.precision() == ProviderPrecision::F64 {
+                let upload_data = tensor
+                    .clone()
+                    .into_numeric_storage()
+                    .map_err(|error| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, error))?
+                    .materialize_f64();
                 let view = HostTensorView {
-                    data: &tensor.data,
+                    data: &upload_data,
                     shape: &tensor.shape,
                 };
                 match provider.upload(&view) {
@@ -402,9 +409,14 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
         Value::Tensor(tensor) => {
+            let shape = tensor.shape.clone();
+            let upload_data = tensor
+                .into_numeric_storage()
+                .map_err(|error| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, error))?
+                .materialize_f64();
             let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
+                data: &upload_data,
+                shape: &shape,
             };
             let handle = provider
                 .upload(&view)
@@ -454,8 +466,8 @@ pub(crate) mod tests {
     use runmat_accelerate_api::ProviderPrecision;
     use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView, HostTensorView};
     use runmat_builtins::{
-        IntValue, IntegerComplexStorage, IntegerStorage, ResolveContext, SparseTensor,
-        SymbolicExpr, Type,
+        IntValue, IntegerComplexStorage, IntegerStorage, NumericDType, ResolveContext,
+        SparseTensor, SymbolicExpr, Type,
     };
 
     fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -590,7 +602,10 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, tensor.shape);
-                assert_eq!(t.data, tensor.data);
+                assert_eq!(
+                    t.into_numeric_storage().expect("double storage"),
+                    NumericStorage::F64(vec![1.25, 2.5, 3.75, 4.5])
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -608,9 +623,10 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.dtype, NumericDType::F64);
-                assert!(t.integer_storage().is_none());
-                assert_eq!(t.data, vec![(1_u64 << 63) as f64, u64::MAX as f64]);
+                assert_eq!(
+                    t.into_numeric_storage().expect("double storage"),
+                    NumericStorage::F64(vec![(1_u64 << 63) as f64, u64::MAX as f64])
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }

@@ -5,7 +5,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, LogicalArray, NumericDType, Tensor, Value,
+    CharArray, ComplexTensor, LogicalArray, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -268,8 +268,13 @@ async fn single_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let converted = single_tensor_to_host(tensor)?;
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         let _ = provider.free(&handle);
+        let upload_data = converted
+            .clone()
+            .into_numeric_storage()
+            .map_err(|error| single_error_with_detail(&SINGLE_ERROR_INTERNAL, error))?
+            .materialize_f64();
         let view = HostTensorView {
-            data: &converted.data,
+            data: &upload_data,
             shape: &converted.shape,
         };
         match provider.upload(&view) {
@@ -284,14 +289,22 @@ async fn single_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     Ok(tensor::tensor_into_value(converted))
 }
 
-fn single_tensor_to_host(mut tensor: Tensor) -> BuiltinResult<Tensor> {
-    if tensor.integer_storage().is_some() {
-        tensor.data = tensor::tensor_values_f64(&tensor);
-        tensor.integer_data = None;
-    }
-    cast_slice_to_single(&mut tensor.data);
-    tensor.dtype = NumericDType::F32;
-    Ok(tensor)
+fn single_tensor_to_host(tensor: Tensor) -> BuiltinResult<Tensor> {
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|error| single_error_with_detail(&SINGLE_ERROR_INTERNAL, error))?;
+    let values = match storage {
+        NumericStorage::F32(values) => values,
+        NumericStorage::F64(values) => values.into_iter().map(|value| value as f32).collect(),
+        storage => storage
+            .materialize_f64()
+            .into_iter()
+            .map(|value| value as f32)
+            .collect(),
+    };
+    Tensor::from_numeric_storage(NumericStorage::F32(values), shape)
+        .map_err(|error| single_error_with_detail(&SINGLE_ERROR_INTERNAL, error))
 }
 
 fn single_complex_tensor_to_host(mut tensor: ComplexTensor) -> BuiltinResult<ComplexTensor> {
@@ -306,12 +319,6 @@ fn single_complex_tensor_to_host(mut tensor: ComplexTensor) -> BuiltinResult<Com
     }
     cast_complex_slice_to_single(&mut tensor.data);
     Ok(tensor)
-}
-
-fn cast_slice_to_single(data: &mut [f64]) {
-    for value in data.iter_mut() {
-        *value = (*value as f32) as f64;
-    }
 }
 
 fn cast_complex_slice_to_single(data: &mut [(f64, f64)]) {
@@ -402,9 +409,14 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
         Value::Tensor(tensor) => {
+            let shape = tensor.shape.clone();
+            let upload_data = tensor
+                .into_numeric_storage()
+                .map_err(|error| single_error_with_detail(&SINGLE_ERROR_INTERNAL, error))?
+                .materialize_f64();
             let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
+                data: &upload_data,
+                shape: &shape,
             };
             let handle = provider
                 .upload(&view)
@@ -538,11 +550,10 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                let expected: Vec<f64> = [1.25f32, 2.5, 3.75, 4.5]
-                    .into_iter()
-                    .map(|v| v as f64)
-                    .collect();
-                assert_eq!(t.data, expected);
+                assert_eq!(
+                    t.into_numeric_storage().expect("single storage"),
+                    NumericStorage::F32(vec![1.25, 2.5, 3.75, 4.5])
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -559,9 +570,10 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.dtype, NumericDType::F32);
-                assert_eq!(t.integer_storage(), None);
-                assert_eq!(t.data, vec![1.0, 2.0, 3.0, 4.0]);
+                assert_eq!(
+                    t.into_numeric_storage().expect("single storage"),
+                    NumericStorage::F32(vec![1.0, 2.0, 3.0, 4.0])
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }
