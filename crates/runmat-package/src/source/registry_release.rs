@@ -36,6 +36,8 @@ pub struct RegistryReleaseMetadata {
     pub readme_digest: Option<String>,
     pub license: Option<String>,
     #[serde(default)]
+    pub encryption: Option<super::EncryptedArtifactMetadata>,
+    #[serde(default)]
     pub supply_chain: Option<super::RegistryReleaseSupplyChain>,
 }
 
@@ -79,10 +81,17 @@ impl RegistryReleaseMetadata {
             tree_digest: String,
             metadata: CanonicalMetadata<'a>,
             #[serde(skip_serializing_if = "Option::is_none")]
+            encryption: Option<&'a super::EncryptedArtifactMetadata>,
+            #[serde(skip_serializing_if = "Option::is_none")]
             supply_chain: Option<&'a super::RegistryReleaseSupplyChain>,
         }
+        if let Some(encryption) = &self.encryption {
+            encryption.validate(source)?;
+        }
         let bytes = serde_json::to_vec(&Canonical {
-            format: if self.supply_chain.is_some() {
+            format: if self.encryption.is_some() {
+                "runmat-registry-release-v3"
+            } else if self.supply_chain.is_some() {
                 "runmat-registry-release-v2"
             } else {
                 "runmat-registry-release-v1"
@@ -105,6 +114,7 @@ impl RegistryReleaseMetadata {
                 readme_digest: &self.readme_digest,
                 license: &self.license,
             },
+            encryption: self.encryption.as_ref(),
             supply_chain: self.supply_chain.as_ref(),
         })
         .map_err(|error| error.to_string())?;

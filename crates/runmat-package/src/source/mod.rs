@@ -1,5 +1,6 @@
 mod acquisition;
 mod catalog;
+mod encrypted_artifact;
 mod git_policy;
 mod handoff;
 mod inventory;
@@ -16,6 +17,12 @@ pub use acquisition::{SourceAcquisitionIntent, SourceAcquisitionPolicy, SourceLo
 pub use catalog::{
     FrozenProject, FrozenSourceDescriptor, PackageMount, PackageSourceCatalog, ProjectRevision,
     SourceCatalog, StableSourceId, VisibleProjectSource,
+};
+pub use encrypted_artifact::{
+    ArtifactContentCipher, EncryptedArtifactMetadata, KeyEnvelopeAlgorithm, PackageKeyEnvelope,
+    RecipientEncryptionKey, RecipientKeyAlgorithm, AES_256_GCM_NONCE_BYTE_LEN,
+    AES_256_GCM_WRAPPED_KEY_BYTE_LEN, ENCRYPTED_ARTIFACT_SCHEMA_VERSION, P256_PUBLIC_KEY_BYTE_LEN,
+    PACKAGE_KEY_ENVELOPE_SCHEMA_VERSION,
 };
 pub use git_policy::{
     plan_git_acquisition, validate_git_acquisition, GitAcquisitionIntent, GitAcquisitionPlan,

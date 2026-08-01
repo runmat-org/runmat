@@ -2,8 +2,8 @@ use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine as _};
 use chrono::TimeZone as _;
 use ed25519_dalek::{Signer as _, SigningKey};
 use runmat_package::{
-    BuildProvenance, CanonicalPackageId, ContentDigest, DependencyGroup, PackageTrustTier,
-    PackageVersion, RegistryId, RegistryOrigin, RegistryPackageReference,
+    BuildProvenance, CanonicalPackageId, ContentDigest, DependencyGroup, EncryptedArtifactMetadata,
+    PackageTrustTier, PackageVersion, RegistryId, RegistryOrigin, RegistryPackageReference,
     RegistryReleaseDependency, RegistryReleaseId, RegistryReleaseMetadata,
     RegistryReleaseSupplyChain, RegistrySourceId, RELEASE_SUPPLY_CHAIN_SCHEMA_VERSION,
 };
@@ -34,6 +34,7 @@ fn golden_metadata() -> RegistryReleaseMetadata {
         optional_capabilities: vec!["gpu".to_string()],
         readme_digest: Some(format!("sha256:{}", "c".repeat(64))),
         license: Some("MIT".to_string()),
+        encryption: None,
         supply_chain: None,
     }
 }
@@ -75,6 +76,29 @@ fn release_metadata_tampering_is_detected() {
     let mut changed = metadata;
     changed.required_capabilities.push("network".to_string());
     assert!(changed.validate_source(&source).is_err());
+}
+
+#[test]
+fn encrypted_release_digest_has_a_cross_host_v3_encoding() {
+    let mut source = RegistrySourceId {
+        registry_origin: RegistryOrigin::new("https://packages.runmat.test").unwrap(),
+        package: CanonicalPackageId::new(RegistryId::default(), "acme", "private").unwrap(),
+        release: RegistryReleaseId::new("rel_99999999999999999999999999999999").unwrap(),
+        version: "1.2.3".parse::<PackageVersion>().unwrap(),
+        release_digest: ContentDigest::sha256([]),
+        artifact_digest: ContentDigest::sha256("ciphertext"),
+        tree_digest: ContentDigest::sha256("tree"),
+    };
+    let mut metadata = golden_metadata();
+    metadata.encryption =
+        Some(EncryptedArtifactMetadata::new(9, b"plaintext", [7; 12], &source).unwrap());
+    source.release_digest = metadata.compute_digest(&source).unwrap();
+
+    assert_eq!(
+        source.release_digest.to_string(),
+        "sha256:c0198cc057aa54fe9a34472e45a653d9262218114b9f4db70d286f8f99eb1fab"
+    );
+    metadata.validate_source(&source).unwrap();
 }
 
 fn assert_signed_release_digest_and_signature_match_the_server_cross_host_golden() {
@@ -125,6 +149,7 @@ fn assert_signed_release_digest_and_signature_match_the_server_cross_host_golden
         optional_capabilities: Vec::new(),
         readme_digest: None,
         license: Some("MIT".to_string()),
+        encryption: None,
         supply_chain: Some(supply_chain),
     };
     let mut source = RegistrySourceId {

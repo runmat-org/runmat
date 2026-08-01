@@ -166,8 +166,27 @@ impl RegistryArtifactInventory {
         source: RegistrySourceId,
         limits: ArchiveLimits,
     ) -> Result<RegistrySnapshot, CacheError> {
-        if ContentDigest::sha256(artifact_bytes) != source.artifact_digest {
-            return Err(CacheError::DigestMismatch(source.artifact_digest));
+        let expected = source.artifact_digest.clone();
+        Self::decode_snapshot_with_digest(artifact_bytes, source, expected, limits)
+    }
+
+    pub fn decode_decrypted_snapshot(
+        plaintext_bytes: &[u8],
+        source: RegistrySourceId,
+        plaintext_digest: ContentDigest,
+        limits: ArchiveLimits,
+    ) -> Result<RegistrySnapshot, CacheError> {
+        Self::decode_snapshot_with_digest(plaintext_bytes, source, plaintext_digest, limits)
+    }
+
+    fn decode_snapshot_with_digest(
+        artifact_bytes: &[u8],
+        source: RegistrySourceId,
+        expected_artifact_digest: ContentDigest,
+        limits: ArchiveLimits,
+    ) -> Result<RegistrySnapshot, CacheError> {
+        if ContentDigest::sha256(artifact_bytes) != expected_artifact_digest {
+            return Err(CacheError::DigestMismatch(expected_artifact_digest));
         }
         let inventory: Self = serde_json::from_slice(artifact_bytes)
             .map_err(|error| CacheError::InvalidObject(error.to_string()))?;

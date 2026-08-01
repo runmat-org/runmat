@@ -11,6 +11,7 @@ const ALWAYS_EXCLUDED: &[&str] = &[
     "target",
     "target/**",
 ];
+const ALWAYS_EXCLUDED_TREES: &[&str] = &[".git", ".runmat", "target"];
 
 pub struct PublicationPolicy {
     include: GlobSet,
@@ -41,15 +42,22 @@ impl PublicationPolicy {
     }
 
     pub fn accepts(&self, entry: &PublicationEntry) -> Result<bool, CacheError> {
-        let path = entry.path.as_str();
+        self.accepts_path(entry.path.as_str(), entry.role)
+    }
+
+    pub fn accepts_path(&self, path: &str, role: ArtifactEntryRole) -> Result<bool, CacheError> {
         let selected =
             (self.include_all || self.include.is_match(path)) && !self.exclude.is_match(path);
-        if selected && entry.role == ArtifactEntryRole::Native && !self.allow_native {
+        if selected && role == ArtifactEntryRole::Native && !self.allow_native {
             return Err(CacheError::InvalidObject(format!(
                 "native publication entry `{path}` requires explicit native-artifact policy"
             )));
         }
         Ok(selected)
+    }
+
+    pub fn should_descend(&self, path: &str) -> bool {
+        !ALWAYS_EXCLUDED_TREES.contains(&path)
     }
 }
 

@@ -93,7 +93,10 @@ impl ReleaseArtifactBuilder {
                         )));
                     }
                     (
-                        TreeInventoryEntry::symlink(entry.path.as_str(), target.as_str()),
+                        TreeInventoryEntry::symlink(
+                            entry.path.as_str(),
+                            archive_link_target(&entry.path, &target),
+                        ),
                         TreeEntry::symlink(entry.path.clone(), target.clone()),
                         ReleaseInventoryEntry {
                             path: entry.path,
@@ -125,4 +128,25 @@ impl ReleaseArtifactBuilder {
             inventory,
         })
     }
+}
+
+fn archive_link_target(
+    link: &runmat_package::NormalizedRelativePath,
+    target: &runmat_package::NormalizedRelativePath,
+) -> String {
+    let link_parent = link
+        .as_str()
+        .rsplit_once('/')
+        .map(|(parent, _)| parent.split('/').collect::<Vec<_>>())
+        .unwrap_or_default();
+    let target_components = target.as_str().split('/').collect::<Vec<_>>();
+    let common = link_parent
+        .iter()
+        .zip(&target_components)
+        .take_while(|(left, right)| left == right)
+        .count();
+    std::iter::repeat_n("..", link_parent.len() - common)
+        .chain(target_components[common..].iter().copied())
+        .collect::<Vec<_>>()
+        .join("/")
 }
