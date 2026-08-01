@@ -429,19 +429,16 @@ async fn extract_scatter_values(
                 return Ok((Value::GpuTensor(real), Value::GpuTensor(imag), limits));
             }
             let gathered = gather_gpu_value(handle).await?;
-            let (real, imag) = extract_host_points(gathered, n, offset)?;
-            let limits = symmetric_limits(&real.data, &imag.data);
+            let (real, imag, limits) = extract_host_points(gathered, n, offset)?;
             Ok((Value::Tensor(real), Value::Tensor(imag), limits))
         }
         Value::GpuTensor(handle) => {
             let gathered = gather_gpu_value(handle).await?;
-            let (real, imag) = extract_host_points(gathered, n, offset)?;
-            let limits = symmetric_limits(&real.data, &imag.data);
+            let (real, imag, limits) = extract_host_points(gathered, n, offset)?;
             Ok((Value::Tensor(real), Value::Tensor(imag), limits))
         }
         other => {
-            let (real, imag) = extract_host_points(other, n, offset)?;
-            let limits = symmetric_limits(&real.data, &imag.data);
+            let (real, imag, limits) = extract_host_points(other, n, offset)?;
             Ok((Value::Tensor(real), Value::Tensor(imag), limits))
         }
     }
@@ -463,7 +460,11 @@ async fn gather_gpu_value(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))
 }
 
-fn extract_host_points(value: Value, n: usize, offset: usize) -> BuiltinResult<(Tensor, Tensor)> {
+fn extract_host_points(
+    value: Value,
+    n: usize,
+    offset: usize,
+) -> BuiltinResult<(Tensor, Tensor, Option<(f64, f64)>)> {
     let samples = complex_samples(value)?;
     if samples.is_empty() {
         return Err(scatterplot_error(
@@ -484,6 +485,7 @@ fn extract_host_points(value: Value, n: usize, offset: usize) -> BuiltinResult<(
         real.push(re);
         imag.push(im);
     }
+    let limits = symmetric_limits(&real, &imag);
     let shape = vec![real.len(), 1];
     let x = Tensor::new(real, shape.clone()).map_err(|err| {
         scatterplot_error(
@@ -497,7 +499,7 @@ fn extract_host_points(value: Value, n: usize, offset: usize) -> BuiltinResult<(
             &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
         )
     })?;
-    Ok((x, y))
+    Ok((x, y, limits))
 }
 
 fn complex_samples(value: Value) -> BuiltinResult<Vec<(f64, f64)>> {
@@ -624,7 +626,7 @@ mod tests {
         reset_hold_state_for_run,
     };
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_builtins::{IntegerStorage, NumericStorage};
     use runmat_plot::plots::{scatter::MarkerStyle, PlotElement};
 
     fn setup_plot_tests() {
@@ -663,24 +665,37 @@ mod tests {
     #[test]
     fn scatterplot_decimates_from_zero_based_offset() {
         let data = complex_tensor(&[(1.0, 10.0), (2.0, 20.0), (3.0, 30.0), (4.0, 40.0)]);
-        let (x, y) =
+        let (x, y, limits) =
             extract_host_points(Value::ComplexTensor(data), 2, 1).expect("decimated points");
-        assert_eq!(x.data, vec![2.0, 4.0]);
-        assert_eq!(y.data, vec![20.0, 40.0]);
+        assert_eq!(x.as_f64_slice(), Some(&[2.0, 4.0][..]));
+        assert_eq!(y.as_f64_slice(), Some(&[20.0, 40.0][..]));
+        assert_eq!(limits, Some((-42.0, 42.0)));
     }
 
     #[test]
     fn scatterplot_samples_and_scalars_read_typed_integer_storage() {
         let samples = poisoned_integer_tensor(IntegerStorage::I16(vec![1, -2, 3]), vec![3, 1]);
-        let (x, y) = extract_host_points(Value::Tensor(samples), 1, 0).expect("integer samples");
-        assert_eq!(x.data, vec![1.0, -2.0, 3.0]);
-        assert_eq!(y.data, vec![0.0, 0.0, 0.0]);
+        let (x, y, _) = extract_host_points(Value::Tensor(samples), 1, 0).expect("integer samples");
+        assert_eq!(x.as_f64_slice(), Some(&[1.0, -2.0, 3.0][..]));
+        assert_eq!(y.as_f64_slice(), Some(&[0.0, 0.0, 0.0][..]));
 
         let decimation = poisoned_integer_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]);
         assert_eq!(
             parse_nonnegative_integer(&Value::Tensor(decimation), "n").expect("decimation"),
             2
         );
+    }
+
+    #[test]
+    fn scatterplot_materializes_native_single_at_the_plotting_boundary() {
+        let samples =
+            Tensor::from_numeric_storage(NumericStorage::F32(vec![1.25, -2.5]), vec![2, 1])
+                .expect("single samples");
+        let (x, y, limits) =
+            extract_host_points(Value::Tensor(samples), 1, 0).expect("single samples");
+        assert_eq!(x.as_f64_slice(), Some(&[1.25, -2.5][..]));
+        assert_eq!(y.as_f64_slice(), Some(&[0.0, 0.0][..]));
+        assert_eq!(limits, Some((-2.625, 2.625)));
     }
 
     #[test]
