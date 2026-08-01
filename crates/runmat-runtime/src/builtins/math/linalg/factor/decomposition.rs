@@ -1215,16 +1215,19 @@ fn conjugate_transpose(value: Value) -> BuiltinResult<Value> {
         Value::Tensor(tensor) => {
             let rows = tensor.rows();
             let cols = tensor.cols();
-            let dtype = tensor.dtype;
-            let values = tensor::tensor_into_values_f64(tensor);
-            let mut data = vec![0.0; values.len()];
+            let mut indices = vec![0; tensor.len()];
             for row in 0..rows {
                 for col in 0..cols {
-                    data[col + row * cols] = values[row + col * rows];
+                    indices[col + row * cols] = row + col * rows;
                 }
             }
+            let storage = tensor
+                .into_numeric_storage()
+                .map_err(|e| internal(format!("decomposition: {e}")))?
+                .reorder(&indices)
+                .map_err(|e| internal(format!("decomposition: {e}")))?;
             Ok(Value::Tensor(
-                Tensor::new_with_dtype(data, vec![cols, rows], dtype)
+                Tensor::from_numeric_storage(storage, vec![cols, rows])
                     .map_err(|e| internal(format!("decomposition: {e}")))?,
             ))
         }
@@ -1257,7 +1260,7 @@ fn scale_matrix(value: Value, scale: (f64, f64)) -> BuiltinResult<Value> {
     match value {
         Value::Tensor(tensor) if scale.1 == 0.0 => {
             let shape = tensor.shape.clone();
-            let dtype = tensor.dtype;
+            let dtype = tensor.numeric_dtype();
             Ok(Value::Tensor(
                 Tensor::new_with_dtype(
                     tensor::tensor_into_values_f64(tensor)
@@ -1302,7 +1305,7 @@ fn scale_matrix(value: Value, scale: (f64, f64)) -> BuiltinResult<Value> {
 
 fn matrix_datatype(matrix: &Value) -> &'static str {
     match matrix {
-        Value::Tensor(tensor) if tensor.dtype == NumericDType::F32 => "single",
+        Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32 => "single",
         _ => "double",
     }
 }
@@ -1376,9 +1379,7 @@ fn complex_scalar(value: &Value, label: &str) -> BuiltinResult<(f64, f64)> {
 }
 
 fn tensor_element_len(tensor: &Tensor) -> usize {
-    tensor
-        .integer_storage()
-        .map_or(tensor.data.len(), |storage| storage.len())
+    tensor.len()
 }
 
 fn complex_tensor_element_len(tensor: &ComplexTensor) -> usize {
@@ -1449,7 +1450,7 @@ fn complex_div(lhs: (f64, f64), rhs: (f64, f64)) -> BuiltinResult<(f64, f64)> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerComplexStorage, IntegerStorage};
+    use runmat_builtins::{IntegerComplexStorage, IntegerStorage, NumericScalar};
 
     fn tensor(data: &[f64], rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data.to_vec(), vec![rows, cols]).unwrap())
@@ -1459,10 +1460,8 @@ mod tests {
         Value::ComplexTensor(ComplexTensor::new(data.to_vec(), vec![rows, cols]).unwrap())
     }
 
-    fn mirrorless_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-        tensor.data.clear();
-        Value::Tensor(tensor)
+    fn typed_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, shape).unwrap())
     }
 
     fn mirrorless_complex_int_tensor(
@@ -1504,7 +1503,7 @@ mod tests {
     fn approx_vec(value: Value) -> Vec<f64> {
         match value {
             Value::Num(n) => vec![n],
-            Value::Tensor(t) => t.data,
+            Value::Tensor(t) => t.materialize_f64(),
             other => panic!("expected real tensor, got {other:?}"),
         }
     }
@@ -1574,10 +1573,11 @@ mod tests {
 
     #[test]
     fn stored_matrix_helpers_read_typed_integer_storage_exactly() {
-        let matrix = mirrorless_int_tensor(IntegerStorage::I16(vec![1, 2, 3, 4, 5, 6]), vec![2, 3]);
+        let matrix = typed_int_tensor(IntegerStorage::I16(vec![1, 2, 3, 4, 5, 6]), vec![2, 3]);
 
         match conjugate_transpose(matrix).expect("ctranspose") {
             Value::Tensor(tensor) => {
+                assert_eq!(tensor.numeric_dtype(), NumericDType::I16);
                 assert_eq!(tensor.shape, vec![3, 2]);
                 assert_eq!(
                     tensor::tensor_values_f64(&tensor),
@@ -1587,8 +1587,24 @@ mod tests {
             other => panic!("expected tensor, got {other:?}"),
         }
 
+        let wide = (1_u64 << 53) + 1;
+        let matrix = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![wide, 2, 3, 4]), vec![2, 2])
+                .expect("wide integer matrix"),
+        );
+        match conjugate_transpose(matrix).expect("wide integer ctranspose") {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.numeric_dtype(), NumericDType::U64);
+                assert_eq!(tensor.numeric_value_at(0), Some(NumericScalar::U64(wide)));
+                assert_eq!(tensor.numeric_value_at(1), Some(NumericScalar::U64(3)));
+                assert_eq!(tensor.numeric_value_at(2), Some(NumericScalar::U64(2)));
+                assert_eq!(tensor.numeric_value_at(3), Some(NumericScalar::U64(4)));
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+
         let scaled = scale_matrix(
-            mirrorless_int_tensor(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2]),
+            typed_int_tensor(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2]),
             (2.0, 0.0),
         )
         .expect("scale");
@@ -1679,12 +1695,12 @@ mod tests {
 
     #[test]
     fn structure_predicates_read_typed_integer_storage_exactly() {
-        let diagonal = mirrorless_int_tensor(IntegerStorage::I16(vec![1, 0, 0, 4]), vec![2, 2]);
+        let diagonal = typed_int_tensor(IntegerStorage::I16(vec![1, 0, 0, 4]), vec![2, 2]);
         assert!(is_diagonal_matrix(&diagonal));
         assert!(is_triangular_matrix(&diagonal));
         assert!(is_hermitian_matrix(&diagonal));
 
-        let not_diagonal = mirrorless_int_tensor(IntegerStorage::I16(vec![1, 2, 0, 4]), vec![2, 2]);
+        let not_diagonal = typed_int_tensor(IntegerStorage::I16(vec![1, 2, 0, 4]), vec![2, 2]);
         assert!(!is_diagonal_matrix(&not_diagonal));
         assert!(is_lower_triangular(&not_diagonal));
         assert!(!is_upper_triangular(&not_diagonal));
@@ -1785,9 +1801,7 @@ mod tests {
     fn decomposition_scalar_operands_read_typed_integer_storage_exactly() {
         let a = tensor(&[2.0, 0.0, 0.0, 4.0], 2, 2);
         let d = call_constructor(vec![a]).expect("decomposition");
-        let mut scale =
-            Tensor::new_integer(IntegerStorage::I16(vec![3]), vec![1, 1]).expect("scale");
-        scale.data.clear();
+        let scale = Tensor::new_integer(IntegerStorage::I16(vec![3]), vec![1, 1]).expect("scale");
 
         let scaled = call_mtimes(d, Value::Tensor(scale.clone())).expect("scale");
         let prop = block_on(decomposition_subsref(
