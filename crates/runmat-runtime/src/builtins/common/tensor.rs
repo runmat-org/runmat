@@ -2,7 +2,8 @@ use std::{borrow::Cow, convert::TryFrom};
 
 use num_complex::Complex64;
 use runmat_builtins::{
-    ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericDType, Tensor, Value,
+    ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericDType, NumericStorage, Tensor,
+    Value,
 };
 
 use crate::dispatcher::gather_if_needed_async;
@@ -91,37 +92,31 @@ pub fn integer_tensor_from_f64_like(
 /// Return a tensor's numeric values as f64, reading typed integer storage
 /// exactly instead of using the compatibility backing buffer.
 pub fn tensor_values_f64(tensor: &Tensor) -> Vec<f64> {
-    tensor
-        .integer_storage()
-        .map(|storage| {
-            storage
-                .exact_values()
-                .into_iter()
-                .map(|value| value.to_f64())
-                .collect()
-        })
-        .unwrap_or_else(|| tensor.data.clone())
+    tensor.materialize_f64()
 }
 
-/// Return a borrowed view for ordinary double tensors and materialize exact
-/// f64 values only for typed integer storage.
+/// Return a borrowed view for native double tensors and explicitly materialize
+/// every other numeric class in the f64 computation domain.
 pub fn tensor_values_f64_cow(tensor: &Tensor) -> Cow<'_, [f64]> {
-    if tensor.integer_storage().is_some() {
-        Cow::Owned(tensor_values_f64(tensor))
-    } else {
-        Cow::Borrowed(&tensor.data)
+    match tensor.as_f64_slice() {
+        Some(values) => Cow::Borrowed(values),
+        None => Cow::Owned(tensor.materialize_f64()),
     }
 }
 
 /// Return one numeric tensor value as f64, reading typed integer storage exactly
 /// instead of using the compatibility backing buffer.
 pub fn tensor_value_f64(tensor: &Tensor, index: usize) -> f64 {
-    match tensor.integer_storage() {
-        Some(storage) => storage
-            .value_at(index)
-            .expect("tensor_value_f64: integer storage index is in bounds")
+    match tensor
+        .numeric_value_at(index)
+        .expect("tensor_value_f64: numeric storage index is in bounds")
+    {
+        runmat_builtins::NumericScalar::F64(value) => value,
+        runmat_builtins::NumericScalar::F32(value) => f64::from(value),
+        scalar => scalar
+            .into_int_value()
+            .expect("non-floating numeric scalar is integer")
             .to_f64(),
-        None => tensor.data[index],
     }
 }
 
@@ -137,14 +132,13 @@ pub fn scalar_integer_value(value: &Value) -> Option<IntValue> {
     }
 }
 
-/// Consume a tensor and return f64 values, preserving the fast path for
-/// ordinary double tensors while reading typed integer storage exactly.
+/// Consume a tensor and explicitly materialize its authoritative storage in
+/// the f64 computation domain.
 pub fn tensor_into_values_f64(tensor: Tensor) -> Vec<f64> {
-    if tensor.integer_storage().is_some() {
-        tensor_values_f64(&tensor)
-    } else {
-        tensor.data
-    }
+    tensor
+        .into_numeric_storage()
+        .expect("validated tensor storage")
+        .materialize_f64()
 }
 
 /// Return a complex tensor's numeric values as Complex64, reading typed integer
@@ -294,9 +288,7 @@ pub fn is_scalar_tensor(tensor: &Tensor) -> bool {
 }
 
 pub fn tensor_element_len(tensor: &Tensor) -> usize {
-    tensor
-        .integer_storage()
-        .map_or(tensor.data.len(), |storage| storage.len())
+    tensor.len()
 }
 
 fn scalar_f64_from_host_value(value: &Value) -> Result<Option<f64>, String> {
@@ -486,7 +478,7 @@ pub async fn dims_from_value_async(value: &Value) -> Result<Option<Vec<usize>>, 
         Value::Int(i) => parse_integer_shape_dimension(i).map(|dim| Some(vec![dim])),
         Value::Tensor(t) => match t.integer_storage() {
             Some(storage) => dims_from_integer_tensor_values(storage, &t.shape),
-            None => dims_from_tensor_values(&t.data, &t.shape),
+            None => dims_from_tensor_values(tensor_values_f64_cow(t).as_ref(), &t.shape),
         },
         Value::LogicalArray(la) => {
             let values: Vec<f64> = la
@@ -502,21 +494,24 @@ pub async fn dims_from_value_async(value: &Value) -> Result<Option<Vec<usize>>, 
                 .map_err(|e| format!("dimensions: {e}"))?;
             match gathered {
                 Value::Tensor(t) => {
-                    if t.data.is_empty() {
+                    if t.is_empty() {
                         tracing::warn!(
                             gpu_shape = ?handle.shape,
                             "dims_from_value_async: gathered GPU tensor has no data"
                         );
                     }
                     tracing::trace!(
-                        "dims_from_value_async: GPU tensor values gpu_shape={:?} host_shape={:?} values={:?}",
+                        "dims_from_value_async: GPU tensor values gpu_shape={:?} host_shape={:?} class={} elements={}",
                         handle.shape,
                         t.shape,
-                        t.data
+                        t.numeric_dtype().class_name(),
+                        t.len()
                     );
                     let dims = match t.integer_storage() {
                         Some(storage) => dims_from_integer_tensor_values(storage, &t.shape)?,
-                        None => dims_from_tensor_values(&t.data, &t.shape)?,
+                        None => {
+                            dims_from_tensor_values(tensor_values_f64_cow(&t).as_ref(), &t.shape)?
+                        }
                     };
                     if dims.is_none() {
                         tracing::debug!(
@@ -633,17 +628,18 @@ pub fn clamp_u32(value: f64) -> f64 {
 /// Cast all elements of a tensor to the target dtype through typed constructors.
 pub fn coerce_tensor_dtype(tensor: Tensor, dtype: NumericDType) -> Tensor {
     let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .expect("validated tensor storage");
     match dtype {
-        NumericDType::F64 => Tensor::new(tensor_values_f64(&tensor), shape)
-            .expect("dtype coercion preserves the tensor element count"),
-        NumericDType::F32 => Tensor::from_f32(
-            tensor_values_f64(&tensor)
-                .into_iter()
-                .map(|value| value as f32)
-                .collect(),
-            shape,
-        )
-        .expect("dtype coercion preserves the tensor element count"),
+        NumericDType::F64 => {
+            Tensor::from_numeric_storage(NumericStorage::F64(storage.materialize_f64()), shape)
+                .expect("dtype coercion preserves the tensor element count")
+        }
+        NumericDType::F32 => {
+            Tensor::from_numeric_storage(NumericStorage::F32(storage.materialize_f32()), shape)
+                .expect("dtype coercion preserves the tensor element count")
+        }
         integer_dtype => {
             let prototype = match integer_dtype {
                 NumericDType::I8 => IntegerStorage::I8(Vec::new()),
@@ -656,21 +652,24 @@ pub fn coerce_tensor_dtype(tensor: Tensor, dtype: NumericDType) -> Tensor {
                 NumericDType::U64 => IntegerStorage::U64(Vec::new()),
                 NumericDType::F32 | NumericDType::F64 => unreachable!(),
             };
-            if let Some(storage) = tensor.integer_storage() {
-                let values = storage
-                    .exact_values()
-                    .into_iter()
-                    .map(|value| prototype.cast_exact_assignment(&value))
-                    .collect();
-                return Tensor::new_integer(
-                    prototype
-                        .from_same_class_values(values)
-                        .expect("integer coercion produces target-class values"),
-                    shape,
-                )
-                .expect("dtype coercion preserves the tensor element count");
-            }
-            integer_tensor_from_f64_like(&prototype, tensor.data, &shape)
+            let floating_storage = match storage.into_integer_storage() {
+                Ok(storage) => {
+                    let values = storage
+                        .exact_values()
+                        .into_iter()
+                        .map(|value| prototype.cast_exact_assignment(&value))
+                        .collect();
+                    return Tensor::new_integer(
+                        prototype
+                            .from_same_class_values(values)
+                            .expect("integer coercion produces target-class values"),
+                        shape,
+                    )
+                    .expect("dtype coercion preserves the tensor element count");
+                }
+                Err(storage) => storage,
+            };
+            integer_tensor_from_f64_like(&prototype, floating_storage.materialize_f64(), &shape)
                 .expect("dtype coercion preserves the tensor element count")
         }
     }
@@ -958,6 +957,19 @@ mod dimension_tests {
         match tensor_values_f64_cow(&tensor) {
             std::borrow::Cow::Borrowed(values) => assert_eq!(values, &[1.0, 2.0]),
             std::borrow::Cow::Owned(values) => panic!("expected borrowed values, got {values:?}"),
+        }
+    }
+
+    #[test]
+    fn tensor_values_f64_cow_materializes_native_single_storage() {
+        let tensor = Tensor::from_f32(vec![0.1, f32::MAX], vec![1, 2]).expect("single tensor");
+        match tensor_values_f64_cow(&tensor) {
+            std::borrow::Cow::Owned(values) => {
+                assert_eq!(values, vec![f64::from(0.1_f32), f64::from(f32::MAX)])
+            }
+            std::borrow::Cow::Borrowed(values) => {
+                panic!("expected explicit single materialization, got {values:?}")
+            }
         }
     }
 

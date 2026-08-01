@@ -2158,6 +2158,44 @@ impl Tensor {
             .map_or(self.dtype, IntegerStorage::numeric_dtype)
     }
 
+    /// Returns the authoritative number of stored numeric elements.
+    pub fn len(&self) -> usize {
+        self.integer_storage()
+            .map_or(self.data.len(), IntegerStorage::len)
+    }
+
+    /// Returns whether the authoritative numeric storage contains no elements.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Borrows native double storage when this tensor's authoritative class is double.
+    pub fn as_f64_slice(&self) -> Option<&[f64]> {
+        (self.integer_storage().is_none() && self.dtype == NumericDType::F64)
+            .then_some(self.data.as_slice())
+    }
+
+    /// Explicitly materializes this tensor in the `f64` computation domain.
+    ///
+    /// Integer values outside the exact binary64 range may lose precision.
+    pub fn materialize_f64(&self) -> Vec<f64> {
+        if let Some(storage) = self.integer_storage() {
+            return storage.to_f64_vec();
+        }
+        match self.dtype {
+            NumericDType::F64 => self.data.clone(),
+            NumericDType::F32 => self
+                .data
+                .iter()
+                .map(|&value| f64::from(value as f32))
+                .collect(),
+            dtype => panic!(
+                "{} tensor is missing authoritative integer storage",
+                dtype.class_name()
+            ),
+        }
+    }
+
     /// Read one element without routing an integer through floating-point storage.
     pub fn numeric_value_at(&self, index: usize) -> Option<NumericScalar> {
         if let Some(storage) = self.integer_storage() {
