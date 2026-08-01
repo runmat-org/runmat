@@ -32,6 +32,16 @@ pub enum PackageError {
     Lock(#[from] LockError),
     #[error(transparent)]
     Graph(#[from] GraphError),
+    #[error(transparent)]
+    Resolve(#[from] ResolveError),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum ResolveError {
+    #[error("{0}")]
+    Conflict(String),
+    #[error("candidate metadata provider failed: {0}")]
+    Provider(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

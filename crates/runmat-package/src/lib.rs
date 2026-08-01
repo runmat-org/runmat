@@ -6,8 +6,9 @@ pub mod identity;
 pub mod lock;
 pub mod manifest;
 pub mod policy;
+pub mod resolve;
 
-pub use error::{GraphError, IdentityError, LockError, ManifestError, PackageError};
+pub use error::{GraphError, IdentityError, LockError, ManifestError, PackageError, ResolveError};
 pub use graph::{
     build_path_graph, build_project_path_graph, build_project_path_graph_async, DependencyPath,
     GraphEdge, GraphPackage, PackageGraph, PathGraphInput, PathPackageInput, VisibilityResolution,
@@ -26,4 +27,10 @@ pub use manifest::{
     DependencyGroup, DependencyLocator, DependencySpec, GitSelector, HostCapability,
     PackageManifest, PublicationDeclaration, RegistryDeclaration, SourceReplacement,
     TargetEnvironment, TargetPredicate,
+};
+pub use resolve::{
+    acquire_candidates, acquire_candidates_with_policy, resolve, CandidateIndex, CandidateMetadata,
+    CandidateProvider, CandidateQuery, Incompatibility, RequirementPath, Resolution,
+    ResolutionEdge, ResolutionPackage, ResolutionRequest, ResolutionRequirement,
+    SourceSelectionPolicy,
 };
