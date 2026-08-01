@@ -1,7 +1,7 @@
 //! Shared exact host-side conversion support for MATLAB integer cast builtins.
 
 use runmat_builtins::{
-    ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, Tensor, Value,
+    ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericStorage, Tensor, Value,
 };
 
 use crate::builtins::common::tensor;
@@ -119,18 +119,27 @@ impl IntegerTarget {
     }
 
     pub(crate) fn cast_tensor(self, tensor: Tensor) -> Result<Tensor, String> {
-        let values = match tensor.integer_data {
-            Some(storage) => integer_values(storage)
-                .iter()
-                .map(|value| self.cast_int(value))
-                .collect(),
-            None => tensor
-                .data
+        let shape = tensor.shape.clone();
+        let storage = tensor.into_numeric_storage()?;
+        let values = match storage {
+            NumericStorage::F64(values) => values
                 .iter()
                 .map(|&value| self.cast_scalar(value))
                 .collect(),
+            NumericStorage::F32(values) => values
+                .iter()
+                .map(|&value| self.cast_scalar(f64::from(value)))
+                .collect(),
+            storage => integer_values(
+                storage
+                    .into_integer_storage()
+                    .expect("integer numeric storage"),
+            )
+            .iter()
+            .map(|value| self.cast_int(value))
+            .collect(),
         };
-        Tensor::new_integer(self.storage(values), tensor.shape)
+        Tensor::new_integer(self.storage(values), shape)
     }
 
     pub(crate) fn storage(self, values: Vec<IntValue>) -> IntegerStorage {
@@ -350,11 +359,11 @@ pub(crate) fn cast_complex_value(value: Value, target: IntegerTarget) -> Result<
 fn cast_tensor_value(target: IntegerTarget, tensor: Tensor) -> Result<Value, CastError> {
     let tensor = target.cast_tensor(tensor).map_err(CastError::Internal)?;
     if crate::builtins::common::tensor::is_scalar_tensor(&tensor) {
-        let storage = tensor
-            .integer_data
-            .expect("integer cast must construct exact integer storage");
         Ok(Value::Int(
-            integer_values(storage).pop().expect("scalar storage"),
+            tensor
+                .integer_storage()
+                .and_then(|storage| storage.value_at(0))
+                .expect("integer cast must construct one exact integer value"),
         ))
     } else {
         Ok(Value::Tensor(tensor))
@@ -435,6 +444,19 @@ mod tests {
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::U64(vec![0, i64::MAX as u64]))
+        );
+    }
+
+    #[test]
+    fn native_single_array_casts_through_authoritative_storage() {
+        let source = Tensor::from_f32(vec![-2.5, 1.5, 300.0], vec![1, 3]).expect("single tensor");
+        let output = IntegerTarget::U8
+            .cast_tensor(source)
+            .expect("uint8 conversion");
+
+        assert_eq!(
+            output.into_numeric_storage().expect("uint8 storage"),
+            NumericStorage::U8(vec![0, 2, u8::MAX])
         );
     }
 
