@@ -41,12 +41,12 @@ pub fn emit_bytecode(
 
 fn discover_source_catalog(
     source_name: Option<&str>,
-) -> Option<runmat_config::project::DiscoveredSourceSymbols> {
+) -> Option<runmat_package::DiscoveredSourceSymbols> {
     let source_name = source_name?;
     let Ok(cwd) = std::env::current_dir() else {
         return None;
     };
-    runmat_config::project::discover_source_symbols_from_source_name(source_name, &cwd)
+    runmat_package::discover_source_symbols_from_source_name(source_name, &cwd)
         .ok()
         .flatten()
 }

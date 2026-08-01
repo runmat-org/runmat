@@ -27,8 +27,8 @@ fn mir_local_fact_count_for_entrypoint(
 
 fn discover_source_catalog(
     source_name: Option<&str>,
-) -> Option<runmat_config::project::DiscoveredSourceSymbols> {
-    use runmat_config::project::discover_source_symbols_from_source_name;
+) -> Option<runmat_package::DiscoveredSourceSymbols> {
+    use runmat_package::discover_source_symbols_from_source_name;
     use std::path::{Path, PathBuf};
 
     let Ok(cwd) = runmat_filesystem::current_dir() else {
@@ -97,12 +97,35 @@ async fn load_dynamic_function(
                         .with_identifier("RunMat:FunctionSourceRead")
                         .build()
                     })?;
+            let path_name = path.to_string_lossy();
+            let source_cwd = path
+                .parent()
+                .map(std::path::Path::to_path_buf)
+                .unwrap_or_else(|| std::path::PathBuf::from("."));
+            let source_catalog = runmat_package::discover_source_symbols_from_source_name_async(
+                path_name.as_ref(),
+                &source_cwd,
+            )
+            .await
+            .map_err(|error| {
+                build_runtime_error(format!(
+                    "Could not construct source catalog for '{}': {error}",
+                    path.display()
+                ))
+                .with_identifier("RunMat:ProjectComposition")
+                .build()
+            })?;
+            let project_revision = source_catalog
+                .as_ref()
+                .and_then(|catalog| catalog.project_revision());
 
             let cached = cache
                 .lock()
                 .unwrap_or_else(|poison| poison.into_inner())
                 .get(&path)
-                .filter(|entry| entry.source_text == source_text)
+                .filter(|entry| {
+                    entry.source_text == source_text && entry.project_revision == project_revision
+                })
                 .cloned();
             let registry = if let Some(entry) = cached {
                 debug!(
@@ -127,7 +150,6 @@ async fn load_dynamic_function(
                         .with_identifier("RunMat:FunctionParseError")
                         .build()
                     })?;
-                let path_name = path.to_string_lossy();
                 let mut companion = super::compile::discover_companion_source_statements_async(
                     path_name.as_ref(),
                     compat,
@@ -144,7 +166,6 @@ async fn load_dynamic_function(
                 if !companion.statements.is_empty() {
                     ast.body.append(&mut companion.statements);
                 }
-                let source_catalog = discover_source_catalog(Some(path_name.as_ref()));
                 let known_project_symbols = source_catalog
                     .as_ref()
                     .map(|catalog| &catalog.symbols)
@@ -220,6 +241,7 @@ async fn load_dynamic_function(
                         path.clone(),
                         DynamicFunctionCacheEntry {
                             source_text,
+                            project_revision,
                             registry: Arc::clone(&registry),
                         },
                     );
@@ -540,9 +562,7 @@ impl RunMatSession {
                         expr: String,
                         compat: runmat_parser::CompatMode,
                         top_level_await_enabled: bool,
-                        source_catalog: Arc<
-                            Option<runmat_config::project::DiscoveredSourceSymbols>,
-                        >,
+                        source_catalog: Arc<Option<runmat_package::DiscoveredSourceSymbols>>,
                     ) -> Result<Value, RuntimeError> {
                         let wrapped = format!("__runmat_input_result__ = ({expr});");
                         let ast = parse_with_options(&wrapped, ParserOptions::new(compat))

@@ -55,6 +55,7 @@ runmat-plot = { version = "=0.6.1", path = "../runmat-plot" }
 runmat-accelerate = { version = "=0.6.1", path = "../runmat-accelerate" }
 runmat-accelerate-api = { version = "=0.6.1", path = "../runmat-accelerate-api" }
 runmat-config = { version = "=0.6.1", path = "../runmat-config", features = ["accelerate"] }
+runmat-package = { workspace = true }
 runmat-time = { version = "=0.6.1", path = "../runmat-time" }
 runmat-filesystem = { version = "=0.6.1", path = "../runmat-filesystem" }
 runmat-telemetry = { version = "=0.6.1", path = "../runmat-telemetry" }

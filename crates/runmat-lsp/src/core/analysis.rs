@@ -33,6 +33,10 @@ pub struct DocumentAnalysis {
     /// Machine-readable name-resolution decisions, including the indexed
     /// project source that justified a successful resolution.
     pub resolution: Vec<runmat_static_analysis::frontend::ResolutionEvidence>,
+    /// Immutable graph/source identity used for this analysis, when the
+    /// document belongs to a package project.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub project_revision: Option<runmat_package::ProjectRevision>,
 }
 
 impl DocumentAnalysis {
@@ -164,6 +168,7 @@ fn document_analysis_from_frontend(
         .map(|_| build_semantic_model(&frontend, &tokens, text));
     let diagnostics = frontend.diagnostics.clone();
     let resolution = frontend.resolution.clone();
+    let project_revision = frontend.project_revision.clone();
     DocumentAnalysis {
         tokens,
         syntax_error,
@@ -173,6 +178,7 @@ fn document_analysis_from_frontend(
         semantic,
         diagnostics,
         resolution,
+        project_revision,
     }
 }
 
@@ -187,7 +193,7 @@ fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> 
 fn discover_source_context(
     source_name: Option<&str>,
 ) -> (
-    Option<runmat_config::project::DiscoveredSourceSymbols>,
+    Option<runmat_package::DiscoveredSourceSymbols>,
     Option<HirDiagnostic>,
 ) {
     let cwd = source_name
@@ -210,10 +216,7 @@ fn discover_source_context(
             return (None, None);
         };
         match futures::executor::block_on(
-            runmat_config::project::discover_source_symbols_from_source_name_async(
-                source_name,
-                &cwd,
-            ),
+            runmat_package::discover_source_symbols_from_source_name_async(source_name, &cwd),
         ) {
             Ok(Some(discovered)) => (Some(discovered), None),
             Ok(None) => (None, None),
@@ -231,7 +234,7 @@ fn discover_source_context(
 async fn discover_source_context_async(
     source_name: Option<&str>,
 ) -> (
-    Option<runmat_config::project::DiscoveredSourceSymbols>,
+    Option<runmat_package::DiscoveredSourceSymbols>,
     Option<HirDiagnostic>,
 ) {
     let cwd = source_name
@@ -251,9 +254,7 @@ async fn discover_source_context_async(
     let Some(source_name) = source_name else {
         return (None, None);
     };
-    match runmat_config::project::discover_source_symbols_from_source_name_async(source_name, &cwd)
-        .await
-    {
+    match runmat_package::discover_source_symbols_from_source_name_async(source_name, &cwd).await {
         Ok(Some(discovered)) => (Some(discovered), None),
         Ok(None) => (None, None),
         Err(error) => (None, Some(source_catalog_diagnostic(error.to_string()))),
@@ -5505,7 +5506,8 @@ roots = ["."]
             "function y = summarize(x); y = x; end",
         )
         .expect("write package function");
-        fs::write(root.join("main.m"), "x = 1;").expect("write source file");
+        let source_text = "x = stats.summarize(1);";
+        fs::write(root.join("main.m"), source_text).expect("write source file");
 
         let source_name = root.join("main.m");
         let symbols = super::discover_known_project_symbols(source_name.to_str());
@@ -5513,6 +5515,18 @@ roots = ["."]
             symbols.contains("stats.summarize"),
             "expected project symbol discovery to include package-qualified names"
         );
+        let analysis = analyze_document_with_compat_and_source(
+            source_text,
+            CompatMode::RunMat,
+            source_name.to_str(),
+        );
+        assert!(analysis.project_revision.is_some());
+        assert!(analysis.resolution.iter().any(|evidence| {
+            evidence.name == "stats.summarize"
+                && evidence.definition.as_ref().is_some_and(|definition| {
+                    definition.package_instance.is_some() && definition.source_id.is_some()
+                })
+        }));
 
         let _ = fs::remove_dir_all(&root);
     }

@@ -14,7 +14,7 @@ runmat-mir = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-parser = { workspace = true }
 runmat-vm = { workspace = true }
-runmat-config = { workspace = true }
+runmat-package = { workspace = true }
 serde = { workspace = true }
 
 [dev-dependencies]

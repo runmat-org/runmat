@@ -11092,6 +11092,47 @@ fn path_function_cache_recompiles_changed_source() {
 }
 
 #[test]
+fn path_function_cache_recompiles_changed_project_companion() {
+    let _cwd_lock = cwd_lock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let sources = temp.path().join("src");
+    std::fs::create_dir_all(&sources).expect("create source directory");
+    std::fs::write(
+        temp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "cache-revision"
+
+[sources]
+roots = ["src"]
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        sources.join("changing_value.m"),
+        "function y = changing_value()\n  y = helper_value();\nend\n",
+    )
+    .expect("write function");
+    let helper = sources.join("helper_value.m");
+    std::fs::write(&helper, "function y = helper_value()\n  y = 1;\nend\n").expect("write helper");
+    let _cwd = push_cwd(temp.path());
+    let _path = push_path_state("");
+
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(&mut session, "addpath('src'); y = changing_value();")
+        .expect("initial call");
+    std::fs::write(&helper, "function y = helper_value()\n  y = 2;\nend\n").expect("update helper");
+    let outcome =
+        execute_text_request(&mut session, "y = changing_value();").expect("updated call");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_builtins::Value::Num(2.0)
+    ));
+}
+
+#[test]
 fn addpath_state_is_isolated_between_sessions() {
     let _cwd_lock = cwd_lock();
     let temp = tempfile::TempDir::new().expect("tempdir");

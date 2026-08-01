@@ -189,11 +189,9 @@ async fn check_m_file(
         .with_context(|| format!("Failed to read script file: {}", path.display()))?;
     let cwd = runmat_filesystem::current_dir().context("Failed to read current directory")?;
     let source_name = path.to_string_lossy();
-    let mut source_catalog: Option<runmat_config::project::DiscoveredSourceSymbols> = None;
+    let mut source_catalog: Option<runmat_package::DiscoveredSourceSymbols> = None;
     let mut catalog_diagnostics = Vec::new();
-    match runmat_config::project::discover_source_symbols_from_source_name_async(&source_name, &cwd)
-        .await
-    {
+    match runmat_package::discover_source_symbols_from_source_name_async(&source_name, &cwd).await {
         Ok(Some(discovered)) => source_catalog = Some(discovered),
         Ok(None) => {}
         Err(error) => catalog_diagnostics.push(source_catalog_diagnostic(error.to_string())),
@@ -208,7 +206,7 @@ async fn check_m_file(
         match runmat_config::project::build_loose_source_index_async(&root).await {
             Ok(index) => {
                 let discovered =
-                    runmat_config::project::source_symbols_from_index(&index, &root, &path, None);
+                    runmat_package::source_symbols_from_index(&index, &root, &path, None);
                 merge_source_catalog(&mut source_catalog, discovered);
             }
             Err(error) => catalog_diagnostics.push(source_catalog_diagnostic(format!(
@@ -314,8 +312,8 @@ async fn check_m_file(
 }
 
 fn merge_source_catalog(
-    destination: &mut Option<runmat_config::project::DiscoveredSourceSymbols>,
-    mut additional: runmat_config::project::DiscoveredSourceSymbols,
+    destination: &mut Option<runmat_package::DiscoveredSourceSymbols>,
+    mut additional: runmat_package::DiscoveredSourceSymbols,
 ) {
     if let Some(destination) = destination {
         destination.symbols.extend(additional.symbols);

@@ -37,6 +37,10 @@ pub use resolve::{
 };
 pub use source::{
     build_frozen_project, build_frozen_project_async, discover_frozen_project_from,
-    discover_frozen_project_from_async, FrozenProject, FrozenProjectError, FrozenSourceDescriptor,
-    PackageMount, PackageSourceCatalog, SourceCatalog, StableSourceId,
+    discover_frozen_project_from_async, discover_known_project_symbols_from_source_name,
+    discover_known_project_symbols_from_source_name_async,
+    discover_source_symbols_from_source_name, discover_source_symbols_from_source_name_async,
+    source_symbols_from_index, DiscoverSourceSymbolsError, DiscoveredSourceSymbols, FrozenProject,
+    FrozenProjectError, FrozenSourceDescriptor, PackageMount, PackageSourceCatalog,
+    ProjectRevision, ProjectSymbolDefinition, SourceCatalog, StableSourceId,
 };

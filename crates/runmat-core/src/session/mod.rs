@@ -147,6 +147,7 @@ struct WorkspaceMaterializeTicket {
 #[derive(Clone)]
 struct DynamicFunctionCacheEntry {
     source_text: String,
+    project_revision: Option<runmat_package::ProjectRevision>,
     registry: Arc<runmat_vm::FunctionRegistry>,
 }
 

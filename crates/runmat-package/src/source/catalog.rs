@@ -64,6 +64,12 @@ pub struct SourceCatalog {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectRevision {
+    pub graph_digest: ContentDigest,
+    pub source_revision: ContentDigest,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FrozenProject {
     pub manifest_path: PathBuf,
     pub workspace_root: PathBuf,
@@ -79,6 +85,13 @@ impl FrozenProject {
 
     pub fn graph_digest(&self) -> &ContentDigest {
         &self.graph.graph_digest
+    }
+
+    pub fn revision(&self) -> ProjectRevision {
+        ProjectRevision {
+            graph_digest: self.graph.graph_digest.clone(),
+            source_revision: self.sources.revision.clone(),
+        }
     }
 
     pub fn all_sources(&self) -> impl Iterator<Item = (&FrozenSourceDescriptor, &PathBuf)> {

@@ -5363,6 +5363,7 @@ dependencies = [
  "runmat-gc",
  "runmat-hir",
  "runmat-mir",
+ "runmat-package",
  "runmat-parser",
  "runmat-plot",
  "runmat-runtime",
@@ -5997,9 +5998,9 @@ name = "runmat-static-analysis"
 version = "0.6.1"
 dependencies = [
  "runmat-builtins",
- "runmat-config",
  "runmat-hir",
  "runmat-mir",
+ "runmat-package",
  "runmat-parser",
  "runmat-runtime",
  "runmat-vm",

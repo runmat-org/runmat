@@ -26,10 +26,8 @@ fn mir_local_fact_count_for_entrypoint(
         .count()
 }
 
-fn discover_source_catalog(
-    source_name: &str,
-) -> Option<runmat_config::project::DiscoveredSourceSymbols> {
-    use runmat_config::project::discover_source_symbols_from_source_name;
+fn discover_source_catalog(source_name: &str) -> Option<runmat_package::DiscoveredSourceSymbols> {
+    use runmat_package::discover_source_symbols_from_source_name;
 
     let source_path = PathBuf::from(source_name);
     let cwd = if source_path.is_absolute() {

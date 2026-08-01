@@ -30,7 +30,7 @@ pub struct ResolutionEvidence {
     pub state: ResolutionState,
     pub reason: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub definition: Option<runmat_config::project::ProjectSymbolDefinition>,
+    pub definition: Option<runmat_package::ProjectSymbolDefinition>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -113,6 +113,7 @@ pub struct FrontendAnalysis {
     pub compile_failure: Option<CompileError>,
     pub bytecode: Option<runmat_vm::Bytecode>,
     pub resolution: Vec<ResolutionEvidence>,
+    pub project_revision: Option<runmat_package::ProjectRevision>,
     pub domains: AnalysisDomains,
 }
 
@@ -146,7 +147,7 @@ pub fn analyze_source_with_catalog(
     source: &str,
     compat: CompatMode,
     lowering_context: &LoweringContext<'_>,
-    source_catalog: Option<&runmat_config::project::DiscoveredSourceSymbols>,
+    source_catalog: Option<&runmat_package::DiscoveredSourceSymbols>,
 ) -> FrontendAnalysis {
     let ast = match runmat_parser::parse_with_options(source, ParserOptions::new(compat)) {
         Ok(ast) => ast,
@@ -176,6 +177,7 @@ pub fn analyze_source_with_catalog(
                 compile_failure: None,
                 bytecode: None,
                 resolution: Vec::new(),
+                project_revision: source_catalog.and_then(|catalog| catalog.project_revision()),
                 domains: AnalysisDomains::unavailable_after_syntax(),
             };
         }
@@ -192,7 +194,7 @@ pub fn analyze_source_with_catalog(
 pub fn analyze_program_with_catalog(
     ast: &runmat_parser::Program,
     lowering_context: &LoweringContext<'_>,
-    source_catalog: Option<&runmat_config::project::DiscoveredSourceSymbols>,
+    source_catalog: Option<&runmat_package::DiscoveredSourceSymbols>,
 ) -> FrontendAnalysis {
     let lowering = match runmat_hir::lower(ast, lowering_context) {
         Ok(lowering) => lowering,
@@ -219,6 +221,7 @@ pub fn analyze_program_with_catalog(
                 compile_failure: None,
                 bytecode: None,
                 resolution: Vec::new(),
+                project_revision: source_catalog.and_then(|catalog| catalog.project_revision()),
                 domains: AnalysisDomains::unavailable_after_hir(),
             };
         }
@@ -249,6 +252,7 @@ pub fn analyze_program_with_catalog(
                 compile_failure: None,
                 bytecode: None,
                 resolution: Vec::new(),
+                project_revision: source_catalog.and_then(|catalog| catalog.project_revision()),
                 domains: AnalysisDomains::unavailable_after_hir(),
             };
         }
@@ -315,6 +319,7 @@ pub fn analyze_program_with_catalog(
         compile_failure,
         bytecode: compiled.ok(),
         resolution: resolution.evidence,
+        project_revision: source_catalog.and_then(|catalog| catalog.project_revision()),
         domains,
     }
 }
@@ -389,7 +394,7 @@ struct ResolutionDiagnostics {
 fn call_resolution_diagnostics(
     lowering: &LoweringResult,
     environment_effects: &[EnvironmentEffect],
-    source_catalog: Option<&runmat_config::project::DiscoveredSourceSymbols>,
+    source_catalog: Option<&runmat_package::DiscoveredSourceSymbols>,
 ) -> ResolutionDiagnostics {
     let mut diagnostics = Vec::new();
     let mut evidence = Vec::new();
@@ -584,9 +589,9 @@ fn call_resolution_diagnostics(
 }
 
 fn catalog_definition<'a>(
-    catalog: Option<&'a runmat_config::project::DiscoveredSourceSymbols>,
+    catalog: Option<&'a runmat_package::DiscoveredSourceSymbols>,
     name: &str,
-) -> Option<&'a runmat_config::project::ProjectSymbolDefinition> {
+) -> Option<&'a runmat_package::ProjectSymbolDefinition> {
     catalog?
         .definitions
         .iter()
@@ -638,16 +643,28 @@ mod tests {
     #[test]
     fn preserves_the_project_definition_that_justified_resolution() {
         let symbols = HashSet::from(["helper".to_string()]);
-        let definition = runmat_config::project::ProjectSymbolDefinition {
+        let package_instance = runmat_package::ContentDigest::sha256("package");
+        let source_id = runmat_package::StableSourceId {
+            package_instance: package_instance.clone(),
+            relative_path: runmat_package::NormalizedRelativePath::new("src/helper.m").unwrap(),
+            content_digest: runmat_package::ContentDigest::sha256("function y = helper();"),
+        };
+        let graph_digest = runmat_package::ContentDigest::sha256("graph");
+        let source_revision = runmat_package::ContentDigest::sha256("sources");
+        let definition = runmat_package::ProjectSymbolDefinition {
             name: "helper".to_string(),
             qualified_name: "helper".to_string(),
             source_path: PathBuf::from("src/helper.m"),
             package_name: "demo".to_string(),
+            package_instance: Some(package_instance),
+            source_id: Some(source_id),
             is_private: false,
         };
-        let catalog = runmat_config::project::DiscoveredSourceSymbols {
+        let catalog = runmat_package::DiscoveredSourceSymbols {
             manifest_path: Some(PathBuf::from("runmat.toml")),
             project_root: PathBuf::from("."),
+            graph_digest: Some(graph_digest.clone()),
+            source_revision: Some(source_revision.clone()),
             symbols: symbols.clone(),
             definitions: vec![definition.clone()],
         };
@@ -667,6 +684,13 @@ mod tests {
                 reason: "matched a statically indexed project source".to_string(),
                 definition: Some(definition),
             }]
+        );
+        assert_eq!(
+            analysis.project_revision,
+            Some(runmat_package::ProjectRevision {
+                graph_digest,
+                source_revision,
+            })
         );
     }
 
