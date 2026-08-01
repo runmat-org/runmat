@@ -155,6 +155,71 @@ describe("IndexedDB package cache", () => {
     handle.close();
   });
 
+  it("restores and navigates a large immutable MATLAB source tree", async () => {
+    const dbName = databaseName("large-tree");
+    const handle = await createIndexedDbPackageCache({ dbName });
+    await handle.provider.initialize(initial());
+    const sourceCount = 512;
+    const sources = await Promise.all(
+      Array.from({ length: sourceCount }, async (_, index) => {
+        const name = `ecosystem_fn_${index.toString().padStart(4, "0")}.m`;
+        const bytes = new TextEncoder().encode(
+          `function value = ecosystem_fn_${index.toString().padStart(4, "0")}(input)\nvalue = input + 2;\nend\n`
+        );
+        return { name, bytes, digest: await digest(bytes) };
+      })
+    );
+    await handle.provider.commit({
+      expected_revision: 0,
+      next_state: {
+        schema_version: 1,
+        objects: Object.fromEntries(sources.map((source) => [source.digest, { kind: "blob" }]))
+      },
+      writes: Object.fromEntries(
+        sources.map((source) => [
+          source.digest,
+          { object: { kind: "blob" }, bytes: source.bytes }
+        ])
+      ),
+      deletes: []
+    });
+    const mount = new ImmutableBrowserPackageMount(
+      {
+        digest: "sha256:large-representative-tree",
+        entries: [
+          {
+            path: "src",
+            kind: "directory",
+            byte_len: 0,
+            executable: false
+          },
+          ...sources.map((source) => ({
+            path: `src/${source.name}`,
+            kind: "file" as const,
+            digest: source.digest,
+            byte_len: source.bytes.byteLength,
+            executable: false
+          }))
+        ]
+      },
+      handle.provider
+    );
+
+    expect(mount.readDir("src")).toHaveLength(sourceCount);
+    for (const index of [0, 255, 511]) {
+      const source = sources[index];
+      expect(await mount.readFile(`src/${source.name}`)).toEqual(source.bytes);
+    }
+    handle.close();
+
+    const reopened = await createIndexedDbPackageCache({ dbName });
+    expect((await reopened.provider.snapshot())?.revision).toBe(1);
+    expect(await reopened.provider.readObjectBytes(sources[511].digest)).toEqual(
+      sources[511].bytes
+    );
+    reopened.close();
+  });
+
   it("reports a blocked schema upgrade cleanly", async () => {
     const dbName = databaseName("blocked");
     const blocker = await openRawDatabase(dbName, 1);
@@ -202,4 +267,9 @@ function deleteDatabase(name: string): Promise<void> {
     request.onerror = () => reject(request.error);
     request.onblocked = () => resolve();
   });
+}
+
+async function digest(bytes: Uint8Array): Promise<string> {
+  const value = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return `sha256:${Array.from(value, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }

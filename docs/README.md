@@ -87,6 +87,15 @@ If you want to understand how the runtime works internally, start with the [Comp
 
 - [WASM & TypeScript/JavaScript](./wasm/index.md)
 
+## Packages
+
+- [Packages](./packages/index.md)
+- [Hosted Package Registry](./packages/registry.md)
+- [Publishing Packages](./packages/publishing.md)
+- [Package Security](./packages/security.md)
+- [Migrating Existing Toolboxes](./packages/migration.md)
+- [Packages In CI](./packages/ci.md)
+
 ## Language Server Protocol (LSP)
 
 - [Language Server Protocol (LSP)](./lsp/index.md)
@@ -129,4 +138,5 @@ If you want to understand how the runtime works internally, start with the [Comp
 - [Supported Architectures](./development/supported-architectures.md)
 - [Testing Strategy](./development/testing.md)
 - [Benchmarking](./development/benchmarking.md)
+- [Package Ecosystem Validation](./development/package-ecosystem-validation.md)
 - [Telemetry](./development/telemetry.md)
