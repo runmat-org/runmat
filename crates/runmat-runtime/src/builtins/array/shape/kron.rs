@@ -7,11 +7,12 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, IntegerStorage, ResolveContext, Tensor, Type, Value,
+    CharArray, ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericStorage,
+    ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -216,12 +217,12 @@ async fn kron_gpu_mixed_left(left: GpuTensorHandle, right: Value) -> crate::Buil
     if let Some(provider) = provider.as_deref() {
         if let Ok(tensor_right) = tensor::value_into_tensor_for("kron", right.clone()) {
             if runmat_accelerate_api::handle_integer_type(&left).is_none()
-                && tensor_right.integer_storage().is_none()
+                && matches!(
+                    tensor_right.numeric_dtype(),
+                    NumericDType::F64 | NumericDType::F32
+                )
             {
-                if let Ok(uploaded) = provider.upload(&HostTensorView {
-                    data: &tensor_right.data,
-                    shape: &tensor_right.shape,
-                }) {
+                if let Ok(uploaded) = gpu_helpers::upload_tensor(provider, &tensor_right) {
                     match provider.kron(&left, &uploaded) {
                         Ok(handle) => {
                             let _ = provider.free(&uploaded);
@@ -250,12 +251,12 @@ async fn kron_gpu_mixed_right(left: Value, right: GpuTensorHandle) -> crate::Bui
     if let Some(provider) = provider.as_deref() {
         if let Ok(tensor_left) = tensor::value_into_tensor_for("kron", left.clone()) {
             if runmat_accelerate_api::handle_integer_type(&right).is_none()
-                && tensor_left.integer_storage().is_none()
+                && matches!(
+                    tensor_left.numeric_dtype(),
+                    NumericDType::F64 | NumericDType::F32
+                )
             {
-                if let Ok(uploaded) = provider.upload(&HostTensorView {
-                    data: &tensor_left.data,
-                    shape: &tensor_left.shape,
-                }) {
+                if let Ok(uploaded) = gpu_helpers::upload_tensor(provider, &tensor_left) {
                     match provider.kron(&uploaded, &right) {
                         Ok(handle) => {
                             let _ = provider.free(&uploaded);
@@ -343,7 +344,13 @@ fn integer_kron_operand(value: &Value) -> Option<KronIntegerOperand<'_>> {
 fn integer_kron_scalar(value: &Value) -> Option<Value> {
     match value {
         Value::Num(_) | Value::Bool(_) => Some(value.clone()),
-        Value::Tensor(tensor) if tensor.integer_storage().is_none() && tensor.data.len() == 1 => {
+        Value::Tensor(tensor)
+            if tensor.len() == 1
+                && matches!(
+                    tensor.numeric_dtype(),
+                    NumericDType::F64 | NumericDType::F32
+                ) =>
+        {
             Some(value.clone())
         }
         Value::LogicalArray(array) if array.data.len() == 1 => Some(value.clone()),
@@ -540,28 +547,65 @@ fn tensor_to_complex(tensor: &Tensor) -> crate::BuiltinResult<ComplexTensor> {
 
 fn kron_tensor(a: &Tensor, b: &Tensor) -> crate::BuiltinResult<Tensor> {
     let (shape_a, shape_b, shape_out) = aligned_shapes(&a.shape, &b.shape)?;
-    let total_out = checked_total(&shape_out, "kron")?;
-    if total_out == 0 {
-        return Tensor::new(Vec::new(), shape_out)
-            .map_err(|e| kron_error_with_message(format!("kron: {e}"), &KRON_ERROR_INTERNAL));
-    }
+    let storage_a = a
+        .clone()
+        .into_numeric_storage()
+        .map_err(|e| kron_error_with_message(format!("kron: {e}"), &KRON_ERROR_INTERNAL))?;
+    let storage_b = b
+        .clone()
+        .into_numeric_storage()
+        .map_err(|e| kron_error_with_message(format!("kron: {e}"), &KRON_ERROR_INTERNAL))?;
+    let storage = match (storage_a, storage_b) {
+        (NumericStorage::F64(a), NumericStorage::F64(b)) => {
+            NumericStorage::F64(kron_real_values(&a, &shape_a, &b, &shape_b, &shape_out)?)
+        }
+        (NumericStorage::F32(a), NumericStorage::F32(b)) => {
+            NumericStorage::F32(kron_real_values(&a, &shape_a, &b, &shape_b, &shape_out)?)
+        }
+        (NumericStorage::F32(a), NumericStorage::F64(b)) => {
+            let b = b.into_iter().map(|value| value as f32).collect::<Vec<_>>();
+            NumericStorage::F32(kron_real_values(&a, &shape_a, &b, &shape_b, &shape_out)?)
+        }
+        (NumericStorage::F64(a), NumericStorage::F32(b)) => {
+            let a = a.into_iter().map(|value| value as f32).collect::<Vec<_>>();
+            NumericStorage::F32(kron_real_values(&a, &shape_a, &b, &shape_b, &shape_out)?)
+        }
+        _ => {
+            return Err(kron_error_with_message(
+                "kron: integer storage reached the floating evaluation path",
+                &KRON_ERROR_INTERNAL,
+            ))
+        }
+    };
+    Tensor::from_numeric_storage(storage, shape_out)
+        .map_err(|e| kron_error_with_message(format!("kron: {e}"), &KRON_ERROR_INTERNAL))
+}
 
-    let strides_out = column_major_strides(&shape_out);
+fn kron_real_values<T>(
+    a: &[T],
+    shape_a: &[usize],
+    b: &[T],
+    shape_b: &[usize],
+    shape_out: &[usize],
+) -> crate::BuiltinResult<Vec<T>>
+where
+    T: Copy + Default + std::ops::Mul<Output = T>,
+{
+    let total_out = checked_total(shape_out, "kron")?;
+    let strides_out = column_major_strides(shape_out);
     let mut coords_a = vec![0usize; shape_out.len()];
     let mut coords_b = vec![0usize; shape_out.len()];
-    let mut data = vec![0.0f64; total_out];
+    let mut data = vec![T::default(); total_out];
 
-    for (idx_a, &value_a) in a.data.iter().enumerate() {
-        unravel_index(idx_a, &shape_a, &mut coords_a);
-        for (idx_b, &value_b) in b.data.iter().enumerate() {
-            unravel_index(idx_b, &shape_b, &mut coords_b);
-            let out_index = combine_indices(&coords_a, &coords_b, &shape_b, &strides_out)?;
+    for (idx_a, &value_a) in a.iter().enumerate() {
+        unravel_index(idx_a, shape_a, &mut coords_a);
+        for (idx_b, &value_b) in b.iter().enumerate() {
+            unravel_index(idx_b, shape_b, &mut coords_b);
+            let out_index = combine_indices(&coords_a, &coords_b, shape_b, &strides_out)?;
             data[out_index] = value_a * value_b;
         }
     }
-
-    Tensor::new(data, shape_out)
-        .map_err(|e| kron_error_with_message(format!("kron: {e}"), &KRON_ERROR_INTERNAL))
+    Ok(data)
 }
 
 fn kron_complex_tensor(
@@ -738,6 +782,40 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn kron_preserves_native_single_for_single_and_mixed_floating_inputs() {
+        let single = Tensor::from_f32(vec![1.5, -2.0], vec![2, 1]).unwrap();
+        let single_scale = Tensor::from_f32(vec![2.0], vec![1, 1]).unwrap();
+        let result = kron_builtin(
+            Value::Tensor(single.clone()),
+            Value::Tensor(single_scale),
+            Vec::new(),
+        )
+        .expect("single kron");
+        let Value::Tensor(result) = result else {
+            panic!("single kron must return a tensor");
+        };
+        assert_eq!(
+            result.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![3.0, -4.0])
+        );
+
+        let double_scale = Tensor::new(vec![0.5], vec![1, 1]).unwrap();
+        let result = kron_builtin(
+            Value::Tensor(single),
+            Value::Tensor(double_scale),
+            Vec::new(),
+        )
+        .expect("mixed floating kron");
+        let Value::Tensor(result) = result else {
+            panic!("mixed floating kron must return a tensor");
+        };
+        assert_eq!(
+            result.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![0.75, -1.0])
+        );
     }
 
     #[test]
