@@ -16,7 +16,7 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexTensor, IntegerStorage, LiteralValue, LogicalArray, NumericDType,
-    ResolveContext, Tensor, Type, Value,
+    NumericScalar, NumericStorage, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -835,24 +835,40 @@ fn coerce_diag_input(value: Value) -> BuiltinResult<DiagInput> {
 }
 
 fn evaluate_tensor(tensor: Tensor, args: &ParsedDiagArgs) -> BuiltinResult<Value> {
-    if let Some(storage) = tensor.integer_storage() {
-        let zero = storage
-            .zeros_like(1)
-            .value_at(0)
-            .expect("one typed integer zero");
-        let (values, shape) =
-            evaluate_column_major_diag(&storage.exact_values(), &tensor.shape, args, zero)?;
-        let storage = storage
-            .from_exact_values_like(values)
-            .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))?;
-        return Tensor::new_integer(storage, shape)
-            .map(Value::Tensor)
-            .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")));
-    }
-    let (data, shape) = evaluate_column_major_diag(&tensor.data, &tensor.shape, args, 0.0)?;
-    Tensor::new(data, shape)
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))?;
+    let (storage, shape) = evaluate_numeric_storage(storage, &shape, args)?;
+    Tensor::from_numeric_storage(storage, shape)
         .map(Value::Tensor)
         .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
+}
+
+fn evaluate_numeric_storage(
+    storage: NumericStorage,
+    shape: &[usize],
+    args: &ParsedDiagArgs,
+) -> BuiltinResult<(NumericStorage, Vec<usize>)> {
+    macro_rules! evaluate_storage {
+        ($values:expr, $variant:ident, $zero:expr) => {{
+            let (values, shape) = evaluate_column_major_diag(&$values, shape, args, $zero)?;
+            Ok((NumericStorage::$variant(values), shape))
+        }};
+    }
+
+    match storage {
+        NumericStorage::F64(values) => evaluate_storage!(values, F64, 0.0f64),
+        NumericStorage::F32(values) => evaluate_storage!(values, F32, 0.0f32),
+        NumericStorage::I8(values) => evaluate_storage!(values, I8, 0i8),
+        NumericStorage::I16(values) => evaluate_storage!(values, I16, 0i16),
+        NumericStorage::I32(values) => evaluate_storage!(values, I32, 0i32),
+        NumericStorage::I64(values) => evaluate_storage!(values, I64, 0i64),
+        NumericStorage::U8(values) => evaluate_storage!(values, U8, 0u8),
+        NumericStorage::U16(values) => evaluate_storage!(values, U16, 0u16),
+        NumericStorage::U32(values) => evaluate_storage!(values, U32, 0u32),
+        NumericStorage::U64(values) => evaluate_storage!(values, U64, 0u64),
+    }
 }
 
 fn evaluate_logical(array: LogicalArray, args: &ParsedDiagArgs) -> BuiltinResult<Value> {
@@ -1224,7 +1240,8 @@ async fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<V
             complex_tensor_from_value(value).map(Value::ComplexTensor)
         }
         Value::Tensor(proto_tensor) => {
-            let tensor = cast_tensor_dtype(tensor_from_value(value)?, proto_tensor.dtype)?;
+            let tensor =
+                cast_tensor_dtype(tensor_from_value(value)?, proto_tensor.numeric_dtype())?;
             Ok(Value::Tensor(tensor))
         }
         Value::Num(_)
@@ -1274,8 +1291,9 @@ async fn apply_gpu_like_template(
         cast_tensor_dtype(tensor, provider_precision_to_dtype(precision))?
     };
 
+    let host_values = host_tensor.materialize_f64();
     let view = HostTensorView {
-        data: &host_tensor.data,
+        data: &host_values,
         shape: &host_tensor.shape,
     };
     let uploaded = provider
@@ -1296,7 +1314,7 @@ fn provider_precision_to_dtype(precision: ProviderPrecision) -> NumericDType {
 }
 
 fn cast_tensor_dtype(tensor: Tensor, dtype: NumericDType) -> BuiltinResult<Tensor> {
-    if tensor.dtype == dtype {
+    if tensor.numeric_dtype() == dtype {
         return Ok(tensor);
     }
     Ok(tensor::coerce_tensor_dtype(tensor, dtype))
@@ -1366,19 +1384,19 @@ fn logical_array_from_value(value: Value) -> BuiltinResult<LogicalArray> {
     match value {
         Value::LogicalArray(array) => Ok(array),
         Value::Tensor(tensor) => {
-            let data: Vec<u8> = if let Some(storage) = tensor.integer_storage() {
-                storage
-                    .exact_values()
-                    .into_iter()
-                    .map(|value| if value.is_zero() { 0 } else { 1 })
-                    .collect()
-            } else {
-                tensor
-                    .data
-                    .iter()
-                    .map(|value| if *value != 0.0 { 1 } else { 0 })
-                    .collect()
-            };
+            let data = (0..tensor.len())
+                .map(|index| {
+                    tensor
+                        .numeric_value_at(index)
+                        .map(|value| if numeric_scalar_is_zero(value) { 0 } else { 1 })
+                        .ok_or_else(|| {
+                            diag_error(
+                                MESSAGE_ID_INVALID_INPUT,
+                                "diag: numeric storage length mismatch",
+                            )
+                        })
+                })
+                .collect::<BuiltinResult<Vec<_>>>()?;
             LogicalArray::new(data, tensor.shape)
                 .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
         }
@@ -1425,6 +1443,21 @@ fn logical_array_from_value(value: Value) -> BuiltinResult<LogicalArray> {
             MESSAGE_ID_INVALID_INPUT,
             format!("diag: cannot convert {other:?} to logical output"),
         )),
+    }
+}
+
+fn numeric_scalar_is_zero(value: NumericScalar) -> bool {
+    match value {
+        NumericScalar::F64(value) => value == 0.0,
+        NumericScalar::F32(value) => value == 0.0,
+        NumericScalar::I8(value) => value == 0,
+        NumericScalar::I16(value) => value == 0,
+        NumericScalar::I32(value) => value == 0,
+        NumericScalar::I64(value) => value == 0,
+        NumericScalar::U8(value) => value == 0,
+        NumericScalar::U16(value) => value == 0,
+        NumericScalar::U32(value) => value == 0,
+        NumericScalar::U64(value) => value == 0,
     }
 }
 
@@ -1688,6 +1721,35 @@ mod tests {
         assert_eq!(
             scalar.integer_storage(),
             Some(&IntegerStorage::U64(vec![u64::MAX]))
+        );
+    }
+
+    #[test]
+    fn diag_preserves_native_single_for_construction_and_extraction() {
+        let input = Tensor::from_numeric_storage(NumericStorage::F32(vec![1.25, -2.5]), vec![1, 2])
+            .expect("single vector");
+        let Value::Tensor(matrix) = run_diag(Value::Tensor(input), Vec::new()).expect("diag")
+        else {
+            panic!("expected single matrix");
+        };
+        assert_eq!(matrix.shape, vec![2, 2]);
+        assert_eq!(
+            matrix
+                .clone()
+                .into_numeric_storage()
+                .expect("matrix storage"),
+            NumericStorage::F32(vec![1.25, 0.0, 0.0, -2.5])
+        );
+
+        let Value::Tensor(vector) =
+            run_diag(Value::Tensor(matrix), Vec::new()).expect("diag extract")
+        else {
+            panic!("expected single vector");
+        };
+        assert_eq!(vector.shape, vec![2, 1]);
+        assert_eq!(
+            vector.into_numeric_storage().expect("vector storage"),
+            NumericStorage::F32(vec![1.25, -2.5])
         );
     }
 
