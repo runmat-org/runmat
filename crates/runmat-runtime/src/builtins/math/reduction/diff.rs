@@ -4,7 +4,8 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, IntegerStorage, ResolveContext, Tensor, Type, Value,
+    CharArray, ComplexTensor, IntValue, IntegerStorage, NumericStorage, ResolveContext, Tensor,
+    Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -463,7 +464,7 @@ pub fn diff_tensor_host(tensor: Tensor, order: usize, dim: Option<usize>) -> Bui
     let mut working_dim = dim.unwrap_or_else(|| default_dimension(&current.shape));
     for _ in 0..order {
         current = diff_tensor_once(current, working_dim)?;
-        if current.data.is_empty() {
+        if tensor::tensor_element_len(&current) == 0 {
             break;
         }
         // Preserve explicit dimension if the caller provided one; update when defaulting and shape shrinks.
@@ -494,12 +495,37 @@ fn diff_complex_tensor(
 }
 
 fn diff_tensor_once(tensor: Tensor, dim: usize) -> BuiltinResult<Tensor> {
-    if let Some(storage) = tensor.integer_storage().cloned() {
-        return diff_integer_tensor_once(tensor, storage, dim);
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|error| diff_internal_error(format!("diff: {error}")))?;
+    match storage {
+        NumericStorage::F64(values) => {
+            diff_floating_tensor_once(values, shape, dim, NumericStorage::F64)
+        }
+        NumericStorage::F32(values) => {
+            diff_floating_tensor_once(values, shape, dim, NumericStorage::F32)
+        }
+        storage => diff_integer_tensor_once(
+            shape,
+            storage
+                .into_integer_storage()
+                .expect("integer numeric storage"),
+            dim,
+        ),
     }
-    let Tensor {
-        data, mut shape, ..
-    } = tensor;
+}
+
+fn diff_floating_tensor_once<T, F>(
+    data: Vec<T>,
+    mut shape: Vec<usize>,
+    dim: usize,
+    wrap: F,
+) -> BuiltinResult<Tensor>
+where
+    T: Copy + std::ops::Sub<Output = T>,
+    F: FnOnce(Vec<T>) -> NumericStorage,
+{
     let dim_index = dim.saturating_sub(1);
     while shape.len() <= dim_index {
         shape.push(1);
@@ -508,7 +534,7 @@ fn diff_tensor_once(tensor: Tensor, dim: usize) -> BuiltinResult<Tensor> {
     let mut output_shape = shape.clone();
     if len_dim <= 1 || data.is_empty() {
         output_shape[dim_index] = output_shape[dim_index].saturating_sub(1);
-        return Tensor::new(Vec::new(), output_shape)
+        return Tensor::from_numeric_storage(wrap(Vec::new()), output_shape)
             .map_err(|e| diff_internal_error(format!("diff: {e}")));
     }
     output_shape[dim_index] = len_dim - 1;
@@ -528,15 +554,15 @@ fn diff_tensor_once(tensor: Tensor, dim: usize) -> BuiltinResult<Tensor> {
         }
     }
 
-    Tensor::new(out, output_shape).map_err(|e| diff_internal_error(format!("diff: {e}")))
+    Tensor::from_numeric_storage(wrap(out), output_shape)
+        .map_err(|e| diff_internal_error(format!("diff: {e}")))
 }
 
 fn diff_integer_tensor_once(
-    tensor: Tensor,
+    mut shape: Vec<usize>,
     storage: IntegerStorage,
     dim: usize,
 ) -> BuiltinResult<Tensor> {
-    let mut shape = tensor.shape;
     let dim_index = dim.saturating_sub(1);
     while shape.len() <= dim_index {
         shape.push(1);
@@ -863,6 +889,20 @@ pub(crate) mod tests {
         let args = vec![Value::Int(IntValue::I32(0))];
         let result = diff_builtin(Value::Tensor(tensor.clone()), args).expect("diff");
         assert_eq!(result, Value::Tensor(tensor));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn diff_preserves_native_single_storage() {
+        let tensor = Tensor::from_f32(vec![1.0, 4.0, 9.0], vec![1, 3]).unwrap();
+        let result = diff_builtin(Value::Tensor(tensor), Vec::new()).expect("diff");
+        match result {
+            Value::Tensor(output) => assert_eq!(
+                output.into_numeric_storage().expect("single storage"),
+                NumericStorage::F32(vec![3.0, 5.0])
+            ),
+            other => panic!("expected tensor result, got {other:?}"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

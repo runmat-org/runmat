@@ -666,27 +666,23 @@ fn gradient_real_tensor_host_with_spacing(
     dim: usize,
     spacing: &GradientSpacing,
 ) -> BuiltinResult<Tensor> {
-    let Tensor {
-        data,
-        integer_data,
-        shape,
-        dtype,
-        ..
-    } = tensor;
-    let output_dtype = if integer_data.is_some() {
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|error| gradient_internal_error(format!("gradient: {error}")))?;
+    let output_dtype = match storage.numeric_dtype() {
+        NumericDType::F32 => NumericDType::F32,
         NumericDType::F64
-    } else {
-        dtype
+        | NumericDType::I8
+        | NumericDType::I16
+        | NumericDType::I32
+        | NumericDType::I64
+        | NumericDType::U8
+        | NumericDType::U16
+        | NumericDType::U32
+        | NumericDType::U64 => NumericDType::F64,
     };
-    let data = integer_data
-        .map(|storage| {
-            storage
-                .exact_values()
-                .into_iter()
-                .map(|value| value.to_f64())
-                .collect()
-        })
-        .unwrap_or(data);
+    let data = storage.materialize_f64();
     let dim_index = dim.saturating_sub(1);
     let mut shape = matlab_gradient_shape(&shape, data.len());
 
@@ -886,7 +882,7 @@ mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntegerStorage, NumericDType, Tensor};
+    use runmat_builtins::{IntegerStorage, NumericDType, NumericStorage, Tensor};
 
     fn gradient_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::gradient_builtin(value, rest))
@@ -1036,7 +1032,10 @@ mod tests {
             Tensor::new_with_dtype(vec![1.0, 4.0, 9.0], vec![1, 3], NumericDType::F32).unwrap();
         let result = gradient_builtin(Value::Tensor(tensor), Vec::new()).expect("gradient");
         match result {
-            Value::Tensor(out) => assert_eq!(out.dtype, NumericDType::F32),
+            Value::Tensor(out) => assert_eq!(
+                out.into_numeric_storage().expect("single storage"),
+                NumericStorage::F32(vec![3.0, 4.0, 5.0])
+            ),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
