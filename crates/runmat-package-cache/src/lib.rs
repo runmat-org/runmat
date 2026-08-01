@@ -22,7 +22,7 @@ pub use backend::{
 };
 pub use config::CacheConfig;
 pub use error::{BackendError, CacheError};
-pub use gc::{GcPlan, GcPolicy};
+pub use gc::{execute_gc, GcPlan, GcPolicy};
 pub use layout::{CacheNamespace, StorageKey};
 pub use lease::{Lease, LeaseId, LeaseOwner};
 pub use materialize::{MaterializationRecord, MaterializationState, MountDescriptor};
@@ -31,9 +31,11 @@ pub use object::{
     TreeEntryKind, TreeManifest,
 };
 pub use source::{
-    cache_git_snapshot, load_git_snapshot, GitInventoryEntry, GitInventoryEntryKind, GitSnapshot,
+    cache_git_snapshot, cache_source_inventory, load_git_snapshot, load_source_inventory,
+    publish_source_inventory, GitInventoryEntry, GitInventoryEntryKind, GitSnapshot,
     GitTreeInventory, SnapshotBlob,
 };
 pub use state::{
-    AccessRecord, CacheState, CorruptionRecord, QuotaPressure, QuotaRecord, CACHE_SCHEMA_VERSION,
+    AccessRecord, CacheState, CacheStatus, CorruptionRecord, QuotaPressure, QuotaRecord,
+    CACHE_SCHEMA_VERSION,
 };

@@ -1,6 +1,14 @@
-use runmat_package::{GitRepositoryUrl, GitSelector, NormalizedRelativePath};
+use futures::executor::block_on;
+use runmat_package::{
+    GitAcquisitionPlan, GitLockAction, GitPackageProvider, GitRepositoryUrl, GitSelector,
+    NormalizedRelativePath,
+};
 use runmat_package_cache_native::filesystem::CacheLayout;
-use runmat_package_cache_native::git::{GitAcquireRequest, NativeGitClient};
+use runmat_package_cache_native::git::{
+    GitAcquireRequest, NativeGitClient, NativeGitPackageProvider,
+};
+use runmat_package_cache_native::{NativeCacheConfig, SqliteCacheBackend};
+use std::sync::Arc;
 
 #[test]
 fn exact_commit_and_subdirectory_are_reused_offline() {
@@ -66,6 +74,46 @@ fn concurrent_clients_produce_one_identical_snapshot() {
         .map(|handle| handle.join().unwrap())
         .collect();
     assert_eq!(snapshots[0], snapshots[1]);
+}
+
+#[test]
+fn exact_snapshot_replays_from_transactional_cache_without_git_storage() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = create_source_repository(directory.path().join("source"));
+    let config = NativeCacheConfig {
+        root: directory.path().join("cache"),
+        quota_bytes: None,
+    };
+    let layout = config.layout();
+    layout.create().unwrap();
+    let repository = GitRepositoryUrl::new("https://example.com/acme/project.git").unwrap();
+    seed_shared_repository(&layout, &repository, &source);
+    let commit = source.head().unwrap().target().unwrap().to_string();
+    let backend = Arc::new(SqliteCacheBackend::open(&config).unwrap());
+    let provider = NativeGitPackageProvider::new(
+        NativeGitClient::new(layout.clone()),
+        backend,
+        layout.clone(),
+    );
+    let initial = GitAcquisitionPlan {
+        repository: repository.clone(),
+        selector: GitSelector::Rev { value: commit },
+        subdir: NormalizedRelativePath::new("package").unwrap(),
+        allow_network: false,
+        expected: None,
+        lock_action: GitLockAction::Write,
+    };
+    let first = block_on(provider.acquire(&initial)).unwrap();
+    let unavailable = directory.path().join("detached-git-storage");
+    std::fs::rename(layout.git_repository_path(&repository), &unavailable).unwrap();
+    let replay = GitAcquisitionPlan {
+        expected: Some(first.source.clone()),
+        lock_action: GitLockAction::Preserve,
+        ..initial
+    };
+    let second = block_on(provider.acquire(&replay)).unwrap();
+    assert_eq!(second.source, first.source);
+    assert_eq!(second.root, first.root);
 }
 
 fn create_source_repository(path: std::path::PathBuf) -> git2::Repository {

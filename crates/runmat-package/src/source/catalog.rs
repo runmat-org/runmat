@@ -1,4 +1,7 @@
-use crate::{ContentDigest, NormalizedRelativePath, PackageAlias, PackageGraph, SourceId};
+use crate::{
+    ContentDigest, IdentityError, NormalizedRelativePath, PackageAlias, PackageGraph, SourceId,
+};
+use runmat_config::project::ProjectSourceFile;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -113,6 +116,107 @@ pub struct FrozenProject {
     pub sources: SourceCatalog,
     #[serde(with = "stable_source_path_map")]
     pub access_paths: BTreeMap<StableSourceId, PathBuf>,
+}
+
+pub(crate) struct FrozenPackageInput {
+    pub instance: ContentDigest,
+    pub local_name: String,
+    pub source: SourceId,
+    pub root: PathBuf,
+    pub files: Vec<FrozenSourceInput>,
+}
+
+pub(crate) struct FrozenSourceInput {
+    pub descriptor: ProjectSourceFile,
+    pub bytes: Vec<u8>,
+}
+
+pub(crate) fn assemble_frozen_project(
+    manifest_path: PathBuf,
+    workspace_root: PathBuf,
+    graph: PackageGraph,
+    package_inputs: Vec<FrozenPackageInput>,
+) -> Result<FrozenProject, CatalogAssemblyError> {
+    let mut packages = BTreeMap::new();
+    let mut access_paths = BTreeMap::new();
+    for package in package_inputs {
+        if !graph.packages.contains_key(&package.instance) {
+            return Err(CatalogAssemblyError::MissingInstance(package.instance));
+        }
+        let mut sources = Vec::with_capacity(package.files.len());
+        for file in package.files {
+            let relative_path = source_relative_path(&file.descriptor)?;
+            let id = StableSourceId {
+                package_instance: package.instance.clone(),
+                relative_path,
+                content_digest: ContentDigest::sha256(&file.bytes),
+            };
+            let access_path = package
+                .root
+                .join(&file.descriptor.source_root)
+                .join(&file.descriptor.relative_path);
+            if access_paths.insert(id.clone(), access_path).is_some() {
+                return Err(CatalogAssemblyError::DuplicateSource(id));
+            }
+            sources.push(FrozenSourceDescriptor {
+                id,
+                qualified_name: file.descriptor.qualified_name,
+                package_path: file.descriptor.package_path,
+                class_name: file.descriptor.class_name,
+                class_qualified_name: file.descriptor.class_qualified_name,
+                is_private: file.descriptor.is_private,
+            });
+        }
+        sources.sort_by(|left, right| left.id.cmp(&right.id));
+        let logical_root = logical_mount_root(&package.instance)?;
+        packages.insert(
+            package.instance.clone(),
+            PackageSourceCatalog {
+                package_instance: package.instance.clone(),
+                local_name: package.local_name,
+                mount: PackageMount {
+                    package_instance: package.instance.clone(),
+                    source: package.source,
+                    logical_root,
+                },
+                sources,
+            },
+        );
+    }
+    let revision = compute_source_revision(&graph.graph_digest, &packages)
+        .map_err(|error| CatalogAssemblyError::Revision(error.to_string()))?;
+    Ok(FrozenProject {
+        manifest_path,
+        workspace_root,
+        graph,
+        sources: SourceCatalog { packages, revision },
+        access_paths,
+    })
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum CatalogAssemblyError {
+    #[error("package graph has no instance {0}")]
+    MissingInstance(ContentDigest),
+    #[error("source catalog contains duplicate source identity {0:?}")]
+    DuplicateSource(StableSourceId),
+    #[error("invalid project source path: {0}")]
+    SourcePath(#[from] IdentityError),
+    #[error("failed to encode source revision: {0}")]
+    Revision(String),
+}
+
+fn source_relative_path(
+    source: &ProjectSourceFile,
+) -> Result<NormalizedRelativePath, IdentityError> {
+    NormalizedRelativePath::new(source.source_root.join(&source.relative_path))
+}
+
+fn logical_mount_root(identity: &ContentDigest) -> Result<NormalizedRelativePath, IdentityError> {
+    NormalizedRelativePath::new(format!(
+        "packages/{}",
+        identity.to_string().replace(':', "_")
+    ))
 }
 
 mod stable_source_path_map {

@@ -4,7 +4,10 @@ use crate::concurrency::ProcessLock;
 use crate::filesystem::CacheLayout;
 use crate::NativeCacheError;
 use git2::Oid;
-use runmat_package::{GitRepositoryUrl, GitSelector, NormalizedRelativePath};
+use runmat_package::{
+    validate_git_acquisition, GitAcquisitionPlan, GitRepositoryUrl, GitSelector,
+    NormalizedRelativePath,
+};
 use runmat_package_cache::{ArchiveLimits, GitSnapshot};
 use std::sync::Arc;
 
@@ -68,5 +71,17 @@ impl NativeGitClient {
                 ArchiveLimits::default(),
             )
             .map_err(NativeCacheError::from)
+    }
+
+    pub fn acquire_plan(&self, plan: &GitAcquisitionPlan) -> Result<GitSnapshot, NativeCacheError> {
+        let snapshot = self.acquire(&GitAcquireRequest {
+            repository: plan.repository.clone(),
+            selector: plan.selector.clone(),
+            subdir: plan.subdir.clone(),
+            allow_network: plan.allow_network,
+        })?;
+        validate_git_acquisition(plan, &snapshot.source)
+            .map_err(|error| NativeCacheError::Git(error.to_string()))?;
+        Ok(snapshot)
     }
 }

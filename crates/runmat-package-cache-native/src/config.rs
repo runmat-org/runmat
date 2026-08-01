@@ -10,12 +10,20 @@ pub struct NativeCacheConfig {
 
 impl NativeCacheConfig {
     pub fn platform_default() -> Result<Self, NativeCacheError> {
-        let root = dirs::cache_dir()
-            .ok_or_else(|| {
-                NativeCacheError::Config("platform cache directory is unavailable".into())
-            })?
-            .join("runmat")
-            .join("packages");
+        let root = match std::env::var_os("RUNMAT_PACKAGE_CACHE_DIR") {
+            Some(root) if !root.is_empty() => PathBuf::from(root),
+            Some(_) => {
+                return Err(NativeCacheError::Config(
+                    "RUNMAT_PACKAGE_CACHE_DIR must not be empty".into(),
+                ));
+            }
+            None => dirs::cache_dir()
+                .ok_or_else(|| {
+                    NativeCacheError::Config("platform cache directory is unavailable".into())
+                })?
+                .join("runmat")
+                .join("packages"),
+        };
         Ok(Self {
             root,
             quota_bytes: None,

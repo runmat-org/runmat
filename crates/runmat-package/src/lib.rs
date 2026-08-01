@@ -11,8 +11,9 @@ pub mod source;
 
 pub use error::{GraphError, IdentityError, LockError, ManifestError, PackageError, ResolveError};
 pub use graph::{
-    build_path_graph, DependencyPath, GraphEdge, GraphPackage, PackageGraph, PathGraphInput,
-    PathPackageInput, VisibilityResolution,
+    build_path_graph, build_resolved_graph, DependencyPath, GraphEdge, GraphPackage, PackageGraph,
+    PathGraphInput, PathPackageInput, ResolvedDependencyInput, ResolvedGraphInput,
+    ResolvedPackageInput, VisibilityResolution,
 };
 pub use identity::{
     CanonicalPackageId, ContentDigest, DigestAlgorithm, GitCommitId, GitObjectAlgorithm,
@@ -40,9 +41,13 @@ pub use source::{
     discover_frozen_project_from_async, discover_known_project_symbols_from_source_name,
     discover_known_project_symbols_from_source_name_async,
     discover_source_symbols_from_source_name, discover_source_symbols_from_source_name_async,
-    source_symbols_from_frozen, source_symbols_from_index, DiscoverSourceSymbolsError,
+    plan_git_acquisition, resolve_project_async, source_symbols_from_frozen,
+    source_symbols_from_index, validate_git_acquisition, DiscoverSourceSymbolsError,
     DiscoveredSourceSymbols, FrozenProject, FrozenProjectError, FrozenProjectHandoff,
-    FrozenProjectHandoffError, FrozenSourceDescriptor, PackageMount, PackageSourceCatalog,
-    ProjectRevision, ProjectSymbolDefinition, SourceCatalog, StableSourceId, VisibleProjectSource,
-    FROZEN_PROJECT_HANDOFF_SCHEMA_VERSION,
+    FrozenProjectHandoffError, FrozenSourceDescriptor, GitAcquisitionIntent, GitAcquisitionPlan,
+    GitAcquisitionPolicy, GitLockAction, GitPackageMount, GitPackageProvider, GitPolicyError,
+    PackageMount, PackageSourceCatalog, ProjectResolveError, ProjectResolveOptions,
+    ProjectRevision, ProjectSymbolDefinition, ResolvedProject, SourceCatalog, SourceInventory,
+    SourceInventoryEntry, StableSourceId, VisibleProjectSource,
+    FROZEN_PROJECT_HANDOFF_SCHEMA_VERSION, SOURCE_INVENTORY_SCHEMA_VERSION,
 };

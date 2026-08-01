@@ -44,12 +44,18 @@ import {
 import { createDefaultFsProvider } from "./fs/default.js";
 import { createIndexedDbPackageCache } from "./package-cache/indexeddb.js";
 import { fetchGitTreeInventoryWire } from "./package-cache/git-gateway.js";
+import { BrowserProjectResolver } from "./package-cache/browser-resolver.js";
 import type {
+  BrowserProjectResolverConfig,
   IndexedDbPackageCacheOptions,
   PackageCacheSnapshot,
+  PackageCacheGcPlan,
+  PackageCacheStatus,
   RunMatPackageCacheProvider
 } from "./package-cache/index.js";
 import type {
+  GitAcquisitionPlan,
+  GitAcquisitionPlanRequest,
   GitGatewayRequest,
   GitSnapshotWire,
   GitTreeInventoryWire,
@@ -145,24 +151,38 @@ export type {
   RunMatOpenFileDialogSelection
 } from "./fs/provider-types.js";
 export {
+  BrowserPackageMountFilesystem,
   createIndexedDbPackageCache,
   ImmutableBrowserPackageMount
 } from "./package-cache/index.js";
+export { BrowserProjectResolver };
 export type {
+  BrowserProjectResolveOptions,
+  BrowserProjectResolveRequest,
+  BrowserProjectResolverConfig,
+  BrowserProjectResolverNative,
+  BrowserResolvedProject,
   BrowserMountEntry,
   BrowserTreeEntry,
   BrowserTreeManifest,
   IndexedDbPackageCacheHandle,
   IndexedDbPackageCacheOptions,
   PackageCacheCommitOutcome,
+  PackageCacheGcPlan,
   PackageCacheFaultInjector,
   PackageCacheRevision,
   PackageCacheSnapshot,
+  PackageCacheStatus,
   PackageCacheTransaction,
   RunMatPackageCacheProvider,
   GitGatewayRequest,
   GitGatewaySelector,
+  GitAcquisitionIntent,
+  GitAcquisitionPlan,
+  GitAcquisitionPlanRequest,
+  GitAcquisitionPolicy,
   GitSnapshotWire,
+  GitSourceWire,
   GitTreeInventoryWire,
   ServerGitGatewayOptions
 } from "./package-cache/index.js";
@@ -1101,7 +1121,17 @@ interface RunMatNativeModule {
     subdir: string,
     inventory: GitTreeInventoryWire
   ) => GitSnapshotWire;
+  planGitAcquisition?: (request: GitAcquisitionPlanRequest) => GitAcquisitionPlan;
   validateGitSnapshot?: (snapshot: GitSnapshotWire) => GitSnapshotWire;
+  resolveProject?: BrowserProjectResolverConfig["native"]["resolveProject"];
+  packageCacheStatus?: (
+    provider: RunMatPackageCacheProvider
+  ) => Promise<PackageCacheStatus>;
+  packageCacheGc?: (
+    provider: RunMatPackageCacheProvider,
+    targetBytes: bigint,
+    retainRecentMs: bigint
+  ) => Promise<PackageCacheGcPlan>;
   plotRendererReady?: () => boolean;
   renderCurrentFigureScene?: (handle: number) => void;
   exportFigureScene?: (handle: number) => Uint8Array | null | Promise<Uint8Array | null>;
@@ -1267,6 +1297,45 @@ export async function fetchGitSnapshot(
   ]);
   requireNativeFunction(native, "buildGitSnapshot");
   return native.buildGitSnapshot(request.repository, request.subdir ?? ".", inventory);
+}
+
+export async function planGitAcquisition(
+  request: GitAcquisitionPlanRequest
+): Promise<GitAcquisitionPlan> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "planGitAcquisition");
+  return native.planGitAcquisition(request);
+}
+
+export async function createBrowserProjectResolver(
+  config: Omit<BrowserProjectResolverConfig, "native">
+): Promise<BrowserProjectResolver> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "resolveProject");
+  return new BrowserProjectResolver({
+    ...config,
+    native: {
+      resolveProject: native.resolveProject
+    }
+  });
+}
+
+export async function browserPackageCacheStatus(
+  provider: RunMatPackageCacheProvider
+): Promise<PackageCacheStatus> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "packageCacheStatus");
+  return native.packageCacheStatus(provider);
+}
+
+export async function browserPackageCacheGc(
+  provider: RunMatPackageCacheProvider,
+  targetBytes: bigint,
+  retainRecentMs = 0n
+): Promise<PackageCacheGcPlan> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "packageCacheGc");
+  return native.packageCacheGc(provider, targetBytes, retainRecentMs);
 }
 
 export async function plotRendererReady(): Promise<boolean> {

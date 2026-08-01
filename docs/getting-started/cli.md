@@ -149,6 +149,9 @@ Common options:
 | `--debug` | Enable debug logging. |
 | `--log-level LEVEL` | Set log verbosity. |
 | `--verbose` | Print more execution detail. |
+| `--offline` | Resolve packages only from locally available content. |
+| `--locked` | Require an existing, current `runmat.lock`. |
+| `--frozen` | Require the lock and prohibit network access or lock mutation. |
 | `--no-jit` | Use the interpreter only. |
 | `--jit-threshold N` | Set the execution count before JIT tiering. |
 | `--jit-opt-level LEVEL` | Set JIT optimization policy. |
@@ -161,6 +164,24 @@ Common options:
 | `--plot-backend BACKEND` | Select plotting backend (auto | wgpu | static | web). |
 
 Configuration is resolved from built-in defaults, project files, environment variables, and CLI flags. CLI flags have the highest precedence. See [Configuration Reference](/docs/runtime/getting-started/config).
+
+## Packages
+
+Package resolution is available directly and is also applied automatically by run, REPL, check, benchmark, and bytecode workflows:
+
+```bash
+runmat package resolve
+runmat package fetch
+runmat package update
+runmat package tree
+runmat package why DEPENDENCY
+runmat package vendor
+runmat package cache status
+runmat package cache gc
+runmat package cache prune
+```
+
+`resolve` creates or refreshes `runmat.lock`; `fetch` fills missing immutable cache content without selecting a newer locked commit; and `update` is the explicit operation that may advance a branch or tag. `tree` and `why` project the same resolved graph used by execution and static analysis. See [Projects](/docs/runtime/getting-started/projects) for Git syntax, lock modes, browser behavior, cache recovery, and vendoring.
 
 ## Color and Terminal Output
 

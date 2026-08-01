@@ -11,13 +11,15 @@ use std::io::{self, Read, Write};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 
+use crate::cli::Cli;
+use crate::commands::package::install_project_for_source;
 use crate::commands::session::create_session;
 use crate::commands::streams::emit_execution_streams;
 use crate::diagnostics::{format_compact_runtime_diagnostic, format_frontend_error};
 use crate::presentation::{self, StreamStyles};
 use crate::telemetry::{capture_provider_snapshot, RuntimeExecutionCounters, TelemetryRunKind};
 
-pub async fn execute_repl(config: &RunMatRuntimeConfig) -> Result<()> {
+pub async fn execute_repl(config: &RunMatRuntimeConfig, cli: &Cli) -> Result<()> {
     info!("Starting RunMat REPL");
     if config.runtime.verbose {
         info!("Verbose mode enabled");
@@ -36,6 +38,8 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig) -> Result<()> {
         config,
         "Failed to create REPL engine",
     )?;
+    let cwd = std::env::current_dir().context("Failed to resolve current directory")?;
+    install_project_for_source(&mut engine, &cwd, cli).await?;
     let repl_run = engine.telemetry_run(TelemetryRunConfig {
         kind: TelemetryRunKind::Repl,
         jit_enabled: config.jit.enabled,

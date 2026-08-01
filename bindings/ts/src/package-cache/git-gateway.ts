@@ -18,6 +18,39 @@ export interface GitSnapshotWire {
   }>;
 }
 
+export type GitAcquisitionIntent = "execute" | "fetch" | "update";
+
+export interface GitSourceWire {
+  repository: string;
+  commit: {
+    algorithm: "sha1" | "sha256";
+    hex: string;
+  };
+  subdir: string;
+  tree_digest: string;
+}
+
+export interface GitAcquisitionPolicy {
+  locked?: boolean;
+  frozen?: boolean;
+  offline?: boolean;
+}
+
+export interface GitAcquisitionPlanRequest extends GitGatewayRequest {
+  lockedSource?: GitSourceWire;
+  intent: GitAcquisitionIntent;
+  policy?: GitAcquisitionPolicy;
+}
+
+export interface GitAcquisitionPlan {
+  repository: string;
+  selector: GitGatewaySelector;
+  subdir: string;
+  allow_network: boolean;
+  expected?: GitSourceWire;
+  lock_action: "preserve" | "write" | "replace";
+}
+
 export interface GitTreeInventoryWire {
   commit: string;
   entries: Array<{

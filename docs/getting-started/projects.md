@@ -2,7 +2,7 @@
 title: "Projects"
 category: "Getting Started"
 section: "1.4"
-last_updated: "May 30, 2026"
+last_updated: "July 31, 2026"
 ---
 
 # Projects
@@ -115,6 +115,55 @@ roots = ["src"]
 ```
 
 The dependency alias participates in project symbol discovery. A source file from the dependency can be resolved by its own qualified name, by its package-qualified name, or through the root dependency alias when imports or function handles need that form.
+
+## Git Dependencies And Locking
+
+Git dependencies use a credential-free HTTPS or SSH repository URL, one selector, and an optional repository subdirectory:
+
+```toml
+[dependencies]
+tools = { git = "https://github.com/acme/shared-tools.git", tag = "v1.4.0", subdir = "runmat", version = "^1.4" }
+```
+
+Use exactly one of `rev`, `tag`, or `branch`. RunMat resolves a mutable tag or branch to an exact commit and verified tree digest, records that immutable identity in `runmat.lock`, and reuses it until `runmat package update` is requested explicitly. Path dependencies inside a Git package are resolved as exact subdirectory trees from the same commit, so monorepo layouts remain immutable and checkout-independent.
+
+Normal `run`, REPL, `check`, benchmark, bytecode, and package commands share one resolver and one frozen graph. `--locked` requires the existing lock to match the current manifest, selected target/groups/features, path contents, and immutable dependencies. `--offline` permits only already cached content. `--frozen` combines locked and offline behavior and prohibits network access, selector updates, and lockfile mutation.
+
+```bash
+runmat package resolve
+runmat package fetch
+runmat package update
+runmat package tree
+runmat package why tools
+runmat --locked check src/main.m
+runmat --offline run src/main.m
+runmat --frozen run src/main.m
+```
+
+Git credentials come from the host credential provider and are never written to the manifest, lockfile, cache identity, or diagnostics. Native RunMat stores normalized shared Git object databases separately from verified content-addressed snapshots. Browser RunMat uses the authenticated Server Git snapshot gateway, validates the returned inventory in portable Rust, publishes the same canonical blobs/tree to IndexedDB transactionally, and mounts the verified tree read-only through the configured virtual filesystem.
+
+## Shared Package Cache
+
+Inspect and collect the shared package cache with:
+
+```bash
+runmat package cache status
+runmat package cache status --json
+runmat package cache gc
+runmat package cache gc --target-bytes 1073741824
+runmat package cache prune
+```
+
+GC and prune never delete objects protected by a pin or active lease. Cache writes publish metadata and payloads together through revision compare-and-swap; interrupted staging is discarded, incomplete dependency closures are not exposed, digest mismatches become explicit corruption records, and cache eviction is reported as a recoverable miss. Native processes coordinate immutable materialization with narrow process locks. Browser tabs and workers use IndexedDB transactions and retry stale revisions rather than overwriting newer state.
+
+The native cache location follows the platform cache directory. `RUNMAT_PACKAGE_CACHE_DIR` can select an explicit cache root for hermetic CI or embedding; do not place credentials in that path or variable.
+
+`runmat package vendor` copies the resolved dependency closure into a project-local `vendor` directory by default and records `runmat-vendor.json` with the graph and source identities:
+
+```bash
+runmat package vendor
+runmat package vendor --output third_party/runmat
+```
 
 ## Complete Project Example
 

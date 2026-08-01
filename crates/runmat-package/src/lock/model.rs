@@ -67,6 +67,14 @@ impl PackageLock {
         graph: &crate::PackageGraph,
         selection: LockSelection,
     ) -> Result<Self, LockError> {
+        Self::from_graph_with_features(graph, selection, &Default::default())
+    }
+
+    pub fn from_graph_with_features(
+        graph: &crate::PackageGraph,
+        selection: LockSelection,
+        features: &std::collections::BTreeMap<ContentDigest, BTreeSet<String>>,
+    ) -> Result<Self, LockError> {
         let root = graph.packages.get(&graph.root).ok_or_else(|| {
             LockError::Invalid("package graph root instance is missing".to_string())
         })?;
@@ -82,9 +90,9 @@ impl PackageLock {
             .packages
             .iter()
             .filter(|(identity, _)| *identity != &graph.root)
-            .map(|(_, package)| LockedPackage {
+            .map(|(identity, package)| LockedPackage {
                 instance: package.instance.clone(),
-                features: BTreeSet::new(),
+                features: features.get(identity).cloned().unwrap_or_default(),
                 required_capabilities: package.required_capabilities.clone(),
                 runmat_version: None,
                 singleton: package.singleton,

@@ -13,8 +13,8 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 use crate::source::{
-    catalog::compute_source_revision, FrozenProject, FrozenSourceDescriptor, PackageMount,
-    PackageSourceCatalog, SourceCatalog, StableSourceId,
+    catalog::{assemble_frozen_project, FrozenPackageInput, FrozenSourceInput},
+    FrozenProject,
 };
 
 #[derive(Debug, Error)]
@@ -109,66 +109,46 @@ fn graph_input(
 fn build_catalog(
     project: LoadedPathProject,
     graph: PackageGraph,
-    _package_keys: &BTreeMap<PathBuf, String>,
+    package_keys: &BTreeMap<PathBuf, String>,
 ) -> Result<FrozenProject, PathProjectError> {
-    let mut packages = BTreeMap::new();
-    let mut access_paths = BTreeMap::new();
-    for package in project.packages.values() {
-        let workspace_path = workspace_path(&project.workspace_root, &package.project_root)
-            .map_err(|error| PathProjectError::Invalid(error.to_string()))?;
-        let graph_package = graph
-            .packages
-            .values()
-            .find(|candidate| {
-                matches!(
-                    &candidate.instance.source,
-                    SourceId::Path(path) if path.workspace_path == workspace_path
-                )
-            })
-            .ok_or_else(|| PathProjectError::MissingInstance(package.manifest_path.clone()))?;
-        let package_instance = graph_package.instance.identity_digest.clone();
-        let mut sources = Vec::with_capacity(package.sources.len());
-        for source in &package.sources {
-            let access_path = source_access_path(&package.project_root, &source.descriptor);
-            let id = StableSourceId {
-                package_instance: package_instance.clone(),
-                relative_path: source_relative_path(&source.descriptor)?,
-                content_digest: ContentDigest::sha256(&source.bytes),
-            };
-            access_paths.insert(id.clone(), access_path);
-            sources.push(FrozenSourceDescriptor {
-                id,
-                qualified_name: source.descriptor.qualified_name.clone(),
-                package_path: source.descriptor.package_path.clone(),
-                class_name: source.descriptor.class_name.clone(),
-                class_qualified_name: source.descriptor.class_qualified_name.clone(),
-                is_private: source.descriptor.is_private,
-            });
-        }
-        sources.sort_by(|left, right| left.id.cmp(&right.id));
-        packages.insert(
-            package_instance.clone(),
-            PackageSourceCatalog {
-                package_instance: package_instance.clone(),
+    let inputs = project
+        .packages
+        .values()
+        .map(|package| {
+            package_keys
+                .get(&package.manifest_path)
+                .ok_or_else(|| PathProjectError::MissingInstance(package.manifest_path.clone()))?;
+            let expected_path = workspace_path(&project.workspace_root, &package.project_root)
+                .map_err(|error| PathProjectError::Invalid(error.to_string()))?;
+            let graph_package = graph
+                .packages
+                .values()
+                .find(|candidate| {
+                    candidate.local_name == package.manifest.package.name
+                        && matches!(
+                            &candidate.instance.source,
+                            SourceId::Path(path) if path.workspace_path == expected_path
+                        )
+                })
+                .ok_or_else(|| PathProjectError::MissingInstance(package.manifest_path.clone()))?;
+            Ok(FrozenPackageInput {
+                instance: graph_package.instance.identity_digest.clone(),
                 local_name: package.manifest.package.name.clone(),
-                mount: PackageMount {
-                    package_instance: package_instance.clone(),
-                    source: graph_package.instance.source.clone(),
-                    logical_root: logical_mount_root(&package_instance)?,
-                },
-                sources,
-            },
-        );
-    }
-    let revision = compute_source_revision(&graph.graph_digest, &packages)
-        .map_err(|error| PathProjectError::Revision(error.to_string()))?;
-    Ok(FrozenProject {
-        manifest_path: project.root_manifest,
-        workspace_root: project.workspace_root,
-        graph,
-        sources: SourceCatalog { packages, revision },
-        access_paths,
-    })
+                source: graph_package.instance.source.clone(),
+                root: package.project_root.clone(),
+                files: package
+                    .sources
+                    .iter()
+                    .map(|source| FrozenSourceInput {
+                        descriptor: source.descriptor.clone(),
+                        bytes: source.bytes.clone(),
+                    })
+                    .collect(),
+            })
+        })
+        .collect::<Result<Vec<_>, PathProjectError>>()?;
+    assemble_frozen_project(project.root_manifest, project.workspace_root, graph, inputs)
+        .map_err(|error| PathProjectError::Invalid(error.to_string()))
 }
 
 fn stable_package_key(workspace_root: &Path, manifest: &Path) -> Result<String, GraphError> {
@@ -243,34 +223,6 @@ fn append_tree_entry(
     output.extend_from_slice(bytes);
     output.push(0);
     Ok(())
-}
-
-fn source_access_path(project_root: &Path, source: &ProjectSourceFile) -> PathBuf {
-    project_root
-        .join(&source.source_root)
-        .join(&source.relative_path)
-}
-
-fn source_relative_path(
-    source: &ProjectSourceFile,
-) -> Result<NormalizedRelativePath, PathProjectError> {
-    let path = source.source_root.join(&source.relative_path);
-    NormalizedRelativePath::new(&path).map_err(|error| PathProjectError::SourcePath {
-        path,
-        reason: error.to_string(),
-    })
-}
-
-fn logical_mount_root(
-    identity: &ContentDigest,
-) -> Result<NormalizedRelativePath, PathProjectError> {
-    let key = identity.to_string().replace(':', "_");
-    NormalizedRelativePath::new(format!("packages/{key}")).map_err(|error| {
-        PathProjectError::SourcePath {
-            path: PathBuf::from(key),
-            reason: error.to_string(),
-        }
-    })
 }
 
 fn validate_path_versions(project: &LoadedPathProject) -> Result<(), PathProjectError> {

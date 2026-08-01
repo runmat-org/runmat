@@ -1,4 +1,9 @@
 import type { RunMatPackageCacheProvider } from "./provider-types.js";
+import type {
+  RunMatFilesystemDirEntry,
+  RunMatFilesystemMetadata,
+  RunMatFilesystemProvider
+} from "../fs/provider-types.js";
 
 export interface BrowserTreeEntry {
   path: string;
@@ -41,6 +46,21 @@ export class ImmutableBrowserPackageMount {
     if (!entry) {
       return null;
     }
+    return {
+      path: entry.path,
+      kind: entry.kind,
+      byteLength: Number(entry.byte_len),
+      executable: entry.executable,
+      linkTarget: entry.link_target
+    };
+  }
+
+  statFollowing(path: string): BrowserMountEntry | null {
+    const normalized = normalizeLookup(path);
+    if (!this.entries.has(normalized)) {
+      return null;
+    }
+    const entry = this.resolveEntry(normalized, new Set());
     return {
       path: entry.path,
       kind: entry.kind,
@@ -98,6 +118,14 @@ export class ImmutableBrowserPackageMount {
   }
 
   private resolveFile(path: string, visited: Set<string>): BrowserTreeEntry {
+    const entry = this.resolveEntry(path, visited);
+    if (entry.kind !== "file") {
+      throw new Error(`Package mount entry '${path}' is not a file`);
+    }
+    return entry;
+  }
+
+  private resolveEntry(path: string, visited: Set<string>): BrowserTreeEntry {
     if (visited.has(path)) {
       throw new Error(`Package mount contains a symlink cycle at '${path}'`);
     }
@@ -110,13 +138,191 @@ export class ImmutableBrowserPackageMount {
       if (!entry.link_target) {
         throw new Error(`Package mount symlink '${path}' has no target`);
       }
-      return this.resolveFile(entry.link_target, visited);
-    }
-    if (entry.kind !== "file") {
-      throw new Error(`Package mount entry '${path}' is not a file`);
+      return this.resolveEntry(entry.link_target, visited);
     }
     return entry;
   }
+}
+
+/**
+ * Filesystem composition adapter that projects immutable package trees beneath a
+ * reserved virtual namespace and delegates every workspace path to the host provider.
+ */
+export class BrowserPackageMountFilesystem implements RunMatFilesystemProvider {
+  private readonly mounts = new Map<string, ImmutableBrowserPackageMount>();
+
+  constructor(private readonly workspace: RunMatFilesystemProvider) {}
+
+  register(snapshot: GitSnapshotMountInput, cache: RunMatPackageCacheProvider): string {
+    const digest = snapshot.source.tree_digest;
+    const key = digest.replace(":", "_");
+    const root = `/__runmat/packages/${key}`;
+    this.mounts.set(root, new ImmutableBrowserPackageMount(snapshot.tree, cache));
+    return root;
+  }
+
+  async readFile(path: string): Promise<Uint8Array | ArrayBuffer> {
+    const resolved = this.resolve(path);
+    return resolved
+      ? resolved.mount.readFile(resolved.relative)
+      : this.workspace.readFile(path);
+  }
+
+  async readMany(paths: string[]): Promise<Array<Uint8Array | ArrayBuffer | null>> {
+    return Promise.all(
+      paths.map(async (path) => {
+        try {
+          return await this.readFile(path);
+        } catch {
+          return null;
+        }
+      })
+    );
+  }
+
+  writeFile(
+    path: string,
+    data: Uint8Array | ArrayBuffer | ArrayBufferView
+  ): void | Promise<void> {
+    this.assertMutable(path);
+    return this.workspace.writeFile(path, data);
+  }
+
+  removeFile(path: string): void | Promise<void> {
+    this.assertMutable(path);
+    return this.workspace.removeFile(path);
+  }
+
+  async metadata(path: string): Promise<RunMatFilesystemMetadata> {
+    const normalized = normalizeAbsolute(path);
+    const direct = this.mounts.get(normalized);
+    if (direct) {
+      return { fileType: "directory", len: 0, readonly: true };
+    }
+    const resolved = this.resolve(normalized);
+    if (!resolved) {
+      return this.workspace.metadata(path);
+    }
+    const entry = resolved.mount.statFollowing(resolved.relative);
+    if (!entry) {
+      throw missing(path);
+    }
+    return {
+      fileType: entry.kind === "directory" ? "directory" : entry.kind,
+      len: entry.byteLength,
+      readonly: true
+    };
+  }
+
+  async symlinkMetadata(path: string): Promise<RunMatFilesystemMetadata> {
+    const normalized = normalizeAbsolute(path);
+    const direct = this.mounts.get(normalized);
+    if (direct) {
+      return { fileType: "directory", len: 0, readonly: true };
+    }
+    const resolved = this.resolve(normalized);
+    if (!resolved) {
+      return this.workspace.symlinkMetadata?.(path) ?? this.workspace.metadata(path);
+    }
+    const entry = resolved.mount.stat(resolved.relative);
+    if (!entry) {
+      throw missing(path);
+    }
+    return {
+      fileType: entry.kind === "directory" ? "directory" : entry.kind,
+      len: entry.byteLength,
+      readonly: true
+    };
+  }
+
+  async readDir(path: string): Promise<RunMatFilesystemDirEntry[]> {
+    const normalized = normalizeAbsolute(path);
+    const direct = this.mounts.get(normalized);
+    const resolved = direct
+      ? { root: normalized, mount: direct, relative: "" }
+      : this.resolve(normalized);
+    if (!resolved) {
+      return this.workspace.readDir(path);
+    }
+    return resolved.mount.readDir(resolved.relative).map((entry) => ({
+      path: `${resolved.root}/${entry.path}`,
+      fileName: entry.path.split("/").at(-1) ?? entry.path,
+      fileType: entry.kind === "directory" ? "directory" : entry.kind
+    }));
+  }
+
+  canonicalize(path: string): string | Promise<string> {
+    const normalized = normalizeAbsolute(path);
+    if (this.mounts.has(normalized) || this.resolve(normalized)) {
+      return normalized;
+    }
+    return this.workspace.canonicalize?.(path) ?? normalized;
+  }
+
+  createDir(path: string): void | Promise<void> {
+    this.assertMutable(path);
+    return required(this.workspace.createDir, "createDir").call(this.workspace, path);
+  }
+
+  createDirAll(path: string): void | Promise<void> {
+    this.assertMutable(path);
+    return required(this.workspace.createDirAll, "createDirAll").call(this.workspace, path);
+  }
+
+  removeDir(path: string): void | Promise<void> {
+    this.assertMutable(path);
+    return required(this.workspace.removeDir, "removeDir").call(this.workspace, path);
+  }
+
+  removeDirAll(path: string): void | Promise<void> {
+    this.assertMutable(path);
+    return required(this.workspace.removeDirAll, "removeDirAll").call(this.workspace, path);
+  }
+
+  rename(from: string, to: string): void | Promise<void> {
+    this.assertMutable(from);
+    this.assertMutable(to);
+    return required(this.workspace.rename, "rename").call(this.workspace, from, to);
+  }
+
+  setReadonly(path: string, readonly: boolean): void | Promise<void> {
+    this.assertMutable(path);
+    return required(this.workspace.setReadonly, "setReadonly").call(
+      this.workspace,
+      path,
+      readonly
+    );
+  }
+
+  private resolve(path: string):
+    | { root: string; mount: ImmutableBrowserPackageMount; relative: string }
+    | undefined {
+    const normalized = normalizeAbsolute(path);
+    for (const [root, mount] of this.mounts) {
+      if (normalized.startsWith(`${root}/`)) {
+        return {
+          root,
+          mount,
+          relative: normalized.slice(root.length + 1)
+        };
+      }
+    }
+    return undefined;
+  }
+
+  private assertMutable(path: string): void {
+    const normalized = normalizeAbsolute(path);
+    if (this.mounts.has(normalized) || this.resolve(normalized)) {
+      throw new Error(`Package mount '${normalized}' is read-only`);
+    }
+  }
+}
+
+export interface GitSnapshotMountInput {
+  source: {
+    tree_digest: string;
+  };
+  tree: BrowserTreeManifest;
 }
 
 async function verifyDigest(digest: string, bytes: Uint8Array): Promise<void> {
@@ -138,4 +344,27 @@ async function verifyDigest(digest: string, bytes: Uint8Array): Promise<void> {
 
 function normalizeLookup(path: string): string {
   return path.replaceAll("\\", "/").replace(/^\/+|\/+$/g, "");
+}
+
+function normalizeAbsolute(path: string): string {
+  const normalized = `/${normalizeLookup(path)}`;
+  return normalized === "/" ? "/" : normalized.replace(/\/+$/g, "");
+}
+
+function required<T extends (...args: never[]) => unknown>(
+  value: T | undefined,
+  name: string
+): T {
+  if (!value) {
+    throw new Error(`Workspace filesystem provider does not implement ${name}`);
+  }
+  return value;
+}
+
+function missing(path: string): Error {
+  const error = new Error(`Package mount path '${path}' does not exist`) as Error & {
+    code?: string;
+  };
+  error.code = "ENOENT";
+  return error;
 }

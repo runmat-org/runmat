@@ -33,3 +33,20 @@ export interface RunMatPackageCacheProvider {
   commit(transaction: PackageCacheTransaction): Promise<PackageCacheCommitOutcome>;
   readObjectBytes(digest: string): Promise<Uint8Array | null>;
 }
+
+export interface PackageCacheStatus {
+  schema_version: number;
+  object_count: number | bigint;
+  objects_by_kind: Record<"blob" | "tree" | "source-index", number | bigint>;
+  logical_bytes: number | bigint;
+  stored_payload_bytes: number | bigint;
+  pin_count: number | bigint;
+  lease_count: number | bigint;
+  corruption_count: number | bigint;
+  materialization_count: number | bigint;
+}
+
+export interface PackageCacheGcPlan {
+  delete: string[];
+  reclaim_bytes: number | bigint;
+}

@@ -9,6 +9,7 @@ use crate::cli::parse::{parse_bool_env, parse_figure_size, parse_log_level_env};
 use crate::cli::remote::{FsCommand, OrgCommand, ProjectCommand, RemoteCommand};
 use crate::cli::value_types::{CaptureFiguresMode, FigureSize, GcPreset, LogLevel, OptLevel};
 use crate::cli::ColorMode;
+use crate::cli::PackageCommand;
 
 #[derive(Parser, Clone)]
 #[command(
@@ -50,6 +51,7 @@ Environment Variables:
   RUNMAT_SERVER_URL=<url>     Remote server URL (remote commands)
   RUNMAT_ORG_ID=<uuid>        Remote org override (remote commands)
   RUNMAT_PROJECT_ID=<uuid>    Remote project override (remote commands)
+  RUNMAT_PACKAGE_CACHE_DIR=<path>  Shared package cache override
   NO_COLOR=<non-empty>        Disable ANSI color by default
   CLICOLOR=0                  Disable automatic ANSI color
   CLICOLOR_FORCE=<non-zero>   Force ANSI color for human output
@@ -63,6 +65,18 @@ pub struct Cli {
     /// Control ANSI styling for human-readable output
     #[arg(long, value_enum, default_value = "auto", global = true)]
     pub color: ColorMode,
+
+    /// Resolve only from locally available package content
+    #[arg(long, global = true)]
+    pub offline: bool,
+
+    /// Require an up-to-date lockfile
+    #[arg(long, global = true)]
+    pub locked: bool,
+
+    /// Require the lockfile and prohibit network access or lock mutation
+    #[arg(long, global = true)]
+    pub frozen: bool,
 
     /// Enable debug logging
     #[arg(short, long, value_parser = parse_bool_env)]
@@ -329,6 +343,11 @@ pub enum Commands {
     Fs {
         #[command(subcommand)]
         fs_command: FsCommand,
+    },
+    /// Package resolution and shared-cache operations
+    Package {
+        #[command(subcommand)]
+        package_command: PackageCommand,
     },
 }
 

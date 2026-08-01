@@ -4,7 +4,8 @@ use crate::state::CacheState;
 use runmat_package::ContentDigest;
 use std::collections::BTreeSet;
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GcPlan {
     pub delete: BTreeSet<ContentDigest>,
     pub reclaim_bytes: u64,

@@ -2,7 +2,7 @@ use anyhow::Result;
 use runmat_config::runtime::RunMatRuntimeConfig;
 
 use crate::cli::{Cli, Commands};
-use crate::commands::{accel, benchmark, check, config, gc, repl, script, version};
+use crate::commands::{accel, benchmark, check, config, gc, package, repl, script, version};
 use crate::remote;
 
 pub async fn dispatch(cli: &Cli, config: &RunMatRuntimeConfig) -> Result<()> {
@@ -28,7 +28,7 @@ pub async fn dispatch(cli: &Cli, config: &RunMatRuntimeConfig) -> Result<()> {
         (None, Some(script_path)) => {
             script::execute_script(script_path, emit_bytecode, cli, config).await
         }
-        (None, None) => repl::execute_repl(config).await,
+        (None, None) => repl::execute_repl(config, cli).await,
         (Some(_), Some(_)) => {
             log::error!("Cannot specify both command and script file");
             std::process::exit(1);
@@ -41,7 +41,7 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
         Commands::Repl { verbose } => {
             let mut repl_config = config.clone();
             repl_config.runtime.verbose = verbose || config.runtime.verbose;
-            repl::execute_repl(&repl_config).await
+            repl::execute_repl(&repl_config, cli).await
         }
         Commands::Run { file, json, args } => {
             script::execute_script_with_args(
@@ -78,7 +78,7 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
             file,
             iterations,
             jit,
-        } => benchmark::execute_benchmark(file, iterations, jit, config).await,
+        } => benchmark::execute_benchmark(file, iterations, jit, cli, config).await,
         Commands::Config { config_command } => {
             config::execute_config_command(config_command, config).await
         }
@@ -98,6 +98,7 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
             remote::execute_project_command(project_command).await
         }
         Commands::Fs { fs_command } => remote::execute_fs_command(fs_command).await,
+        Commands::Package { package_command } => package::execute(package_command, cli).await,
         Commands::Remote { remote_command } => {
             remote::execute_remote_command(remote_command, cli, config).await
         }

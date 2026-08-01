@@ -37,6 +37,8 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 owo-colors = "4.3.0"
 supports-color = "3.0.2"
 libc = "0.2"
+target-lexicon = { workspace = true }
+tempfile = "3.12"
 
 # Ensure vendored OpenSSL can be enabled for cross targets (feature unification)
 openssl = { version = "0.10", optional = true }
@@ -56,6 +58,8 @@ runmat-accelerate = { version = "=0.6.1", path = "../runmat-accelerate" }
 runmat-accelerate-api = { version = "=0.6.1", path = "../runmat-accelerate-api" }
 runmat-config = { version = "=0.6.1", path = "../runmat-config", features = ["accelerate"] }
 runmat-package = { workspace = true }
+runmat-package-cache = { workspace = true }
+runmat-package-cache-native = { workspace = true }
 runmat-time = { version = "=0.6.1", path = "../runmat-time" }
 runmat-filesystem = { version = "=0.6.1", path = "../runmat-filesystem" }
 runmat-telemetry = { version = "=0.6.1", path = "../runmat-telemetry" }
@@ -75,6 +79,7 @@ occt-native = ["runmat-core/occt-native", "runmat-runtime/occt-native"]
 
 [dev-dependencies]
 tempfile = "3.12" 
+git2 = { version = "0.20", default-features = false }
 serde_json = { workspace = true }
 openapiv3 = "2.0"
 serde_yaml = "0.9"

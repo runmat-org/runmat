@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { fetchGitTreeInventoryWire } from "./git-gateway.js";
-import { __internals, fetchGitSnapshot } from "../index.js";
+import { __internals, fetchGitSnapshot, planGitAcquisition } from "../index.js";
 
 describe("Git snapshot gateway", () => {
   afterEach(() => {
@@ -101,5 +101,32 @@ describe("Git snapshot gateway", () => {
       "package",
       inventory
     );
+  });
+
+  it("delegates offline/frozen/locked policy to the portable Rust planner", async () => {
+    const plan = {
+      repository: "https://github.com/runmat-org/runmat",
+      selector: {
+        kind: "rev" as const,
+        value: "0123456789abcdef0123456789abcdef01234567"
+      },
+      subdir: ".",
+      allow_network: false,
+      lock_action: "preserve" as const
+    };
+    const nativePlanner = vi.fn().mockReturnValue(plan);
+    __internals.setNativeModuleOverride({
+      default: async () => {},
+      initRunMat: vi.fn(),
+      planGitAcquisition: nativePlanner
+    } as never);
+    const request = {
+      repository: "https://github.com/runmat-org/runmat",
+      selector: { kind: "branch" as const, value: "main" },
+      intent: "execute" as const,
+      policy: { frozen: true }
+    };
+    await expect(planGitAcquisition(request)).resolves.toBe(plan);
+    expect(nativePlanner).toHaveBeenCalledWith(request);
   });
 });
