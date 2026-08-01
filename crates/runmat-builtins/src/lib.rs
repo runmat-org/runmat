@@ -2174,6 +2174,60 @@ impl Tensor {
         }
     }
 
+    /// Assign one numeric scalar using the destination array's class semantics.
+    ///
+    /// Integer-to-integer assignments remain exact and floating assignments use
+    /// the same round-and-saturate conversion as MATLAB integer arrays.
+    pub fn set_numeric_assignment_at(
+        &mut self,
+        index: usize,
+        value: NumericScalar,
+    ) -> Result<(), String> {
+        if let Some(storage) = self.integer_data.as_mut() {
+            let exact = match value {
+                NumericScalar::F64(value) => storage.cast_f64_assignment(value),
+                NumericScalar::F32(value) => storage.cast_f64_assignment(f64::from(value)),
+                value => storage.cast_exact_assignment(
+                    &value
+                        .into_int_value()
+                        .expect("non-floating numeric scalar is integer"),
+                ),
+            };
+            let compatibility_value = exact.to_f64();
+            storage.set_value(index, exact)?;
+            let destination = self
+                .data
+                .get_mut(index)
+                .ok_or_else(|| format!("Tensor index {index} out of bounds"))?;
+            *destination = compatibility_value;
+            return Ok(());
+        }
+
+        let value = match value {
+            NumericScalar::F64(value) => value,
+            NumericScalar::F32(value) => f64::from(value),
+            value => value
+                .into_int_value()
+                .expect("non-floating numeric scalar is integer")
+                .to_f64(),
+        };
+        let destination = self
+            .data
+            .get_mut(index)
+            .ok_or_else(|| format!("Tensor index {index} out of bounds"))?;
+        *destination = match self.dtype {
+            NumericDType::F64 => value,
+            NumericDType::F32 => f64::from(value as f32),
+            dtype => {
+                return Err(format!(
+                    "{} tensor is missing authoritative integer storage",
+                    dtype.class_name()
+                ))
+            }
+        };
+        Ok(())
+    }
+
     /// Consumes transitional tensor fields into one native numeric buffer.
     ///
     /// This is the ownership bridge used while call sites migrate away from

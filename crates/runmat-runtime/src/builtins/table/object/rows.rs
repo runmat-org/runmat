@@ -251,38 +251,16 @@ pub(super) fn assign_rows(mut current: Value, rows: &[usize], rhs: Value) -> Bui
             }
             let target_rows = target.rows();
             let target_cols = target.cols();
-            if target.integer_storage().is_some() {
-                let target_storage = target
-                    .integer_data
-                    .as_mut()
-                    .expect("integer storage was checked above");
-                for col in 0..target_cols {
-                    for (src_row, &dst_row) in rows.iter().enumerate() {
-                        let source_index = src_row + col * source.rows();
-                        let target_index = dst_row + col * target_rows;
-                        let exact = match source.integer_storage() {
-                            Some(source_storage) => target_storage.cast_exact_assignment(
-                                &source_storage.value_at(source_index).ok_or_else(|| {
-                                    invalid_index("table: source integer storage is inconsistent")
-                                })?,
-                            ),
-                            None => target_storage.cast_f64_assignment(
-                                source.get2(src_row, col).map_err(invalid_index)?,
-                            ),
-                        };
-                        let compatibility_value = exact.to_f64();
-                        target_storage
-                            .set_value(target_index, exact)
-                            .map_err(invalid_variable)?;
-                        target.data[target_index] = compatibility_value;
-                    }
-                }
-                return Ok(current);
-            }
-            for col in 0..target.cols() {
+            for col in 0..target_cols {
                 for (src_row, &dst_row) in rows.iter().enumerate() {
-                    let value = source.get2(src_row, col).map_err(invalid_index)?;
-                    target.set2(dst_row, col, value).map_err(invalid_index)?;
+                    let source_index = src_row + col * source.rows();
+                    let target_index = dst_row + col * target_rows;
+                    let value = source.numeric_value_at(source_index).ok_or_else(|| {
+                        invalid_index("table: source numeric storage is inconsistent")
+                    })?;
+                    target
+                        .set_numeric_assignment_at(target_index, value)
+                        .map_err(invalid_variable)?;
                 }
             }
             Ok(current)
@@ -441,6 +419,20 @@ mod tests {
         assert_eq!(
             result.integer_storage(),
             Some(&IntegerStorage::I8(vec![i8::MAX, 0]))
+        );
+    }
+
+    #[test]
+    fn assign_rows_preserves_native_single_target_storage() {
+        let current = Value::Tensor(Tensor::from_f32(vec![0.0, 2.0], vec![2, 1]).unwrap());
+        let rhs = Value::Tensor(Tensor::new(vec![1.25], vec![1, 1]).unwrap());
+
+        let Value::Tensor(result) = assign_rows(current, &[0], rhs).unwrap() else {
+            panic!("expected tensor result");
+        };
+        assert_eq!(
+            result.into_numeric_storage().expect("single storage"),
+            runmat_builtins::NumericStorage::F32(vec![1.25, 2.0])
         );
     }
 
