@@ -7,8 +7,8 @@ use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, HostTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, ResolveContext, Tensor, Type,
-    Value,
+    ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericDType, NumericStorage,
+    ResolveContext, Tensor, Type, Value,
 };
 
 use crate::builtins::array::type_resolvers::size_vector_len;
@@ -561,9 +561,12 @@ impl ParsedMeshgrid {
         if !prefer_gpu {
             if let Some(max_len) = axes.iter().map(|axis| axis.len).max() {
                 if max_len > 0
-                    && !axes
-                        .iter()
-                        .any(|axis| axis.real_integer_data.is_some() || axis.integer_data.is_some())
+                    && !axes.iter().any(|axis| {
+                        axis.real_storage
+                            .as_ref()
+                            .is_some_and(real_storage_is_integer)
+                            || axis.integer_data.is_some()
+                    })
                     && sequence_gpu_preference(max_len, SequenceIntent::MeshAxis, false).prefer_gpu
                 {
                     prefer_gpu = true;
@@ -664,9 +667,16 @@ struct AxisData {
     values: Vec<(f64, f64)>,
     len: usize,
     is_complex: bool,
-    real_integer_data: Option<IntegerStorage>,
+    real_storage: Option<NumericStorage>,
     integer_data: Option<IntegerComplexStorage>,
     gpu_real: Option<GpuTensorHandle>,
+}
+
+fn real_storage_is_integer(storage: &NumericStorage) -> bool {
+    !matches!(
+        storage.numeric_dtype(),
+        NumericDType::F64 | NumericDType::F32
+    )
 }
 
 async fn axis_from_value(
@@ -681,10 +691,10 @@ async fn axis_from_value(
             axis_from_tensor(tensor, index)
         }
         Value::Num(n) => Ok(AxisData {
-            values: vec![(n, 0.0)],
+            values: Vec::new(),
             len: 1,
             is_complex: false,
-            real_integer_data: None,
+            real_storage: Some(NumericStorage::F64(vec![n])),
             integer_data: None,
             gpu_real: None,
         }),
@@ -692,15 +702,17 @@ async fn axis_from_value(
             values: Vec::new(),
             len: 1,
             is_complex: false,
-            real_integer_data: Some(IntegerStorage::from_scalar(i)),
+            real_storage: Some(NumericStorage::from_integer_storage(
+                IntegerStorage::from_scalar(i),
+            )),
             integer_data: None,
             gpu_real: None,
         }),
         Value::Bool(b) => Ok(AxisData {
-            values: vec![(if b { 1.0 } else { 0.0 }, 0.0)],
+            values: Vec::new(),
             len: 1,
             is_complex: false,
-            real_integer_data: None,
+            real_storage: Some(NumericStorage::F64(vec![if b { 1.0 } else { 0.0 }])),
             integer_data: None,
             gpu_real: None,
         }),
@@ -708,7 +720,7 @@ async fn axis_from_value(
             values: vec![(re, im)],
             len: 1,
             is_complex: im != 0.0,
-            real_integer_data: None,
+            real_storage: None,
             integer_data: None,
             gpu_real: None,
         }),
@@ -724,7 +736,7 @@ async fn axis_from_value(
                     values: Vec::new(),
                     len: vector_len_from_shape(&handle.shape),
                     is_complex,
-                    real_integer_data: None,
+                    real_storage: None,
                     integer_data: None,
                     gpu_real: Some(handle),
                 });
@@ -761,18 +773,15 @@ async fn axis_from_value(
 
 fn axis_from_tensor(tensor: Tensor, index: usize) -> crate::BuiltinResult<AxisData> {
     if is_vector_shape(&tensor.shape) {
-        let len = tensor::tensor_element_len(&tensor);
-        let values = if tensor.integer_data.is_some() {
-            Vec::new()
-        } else {
-            let values = tensor::tensor_values_f64_cow(&tensor);
-            values.iter().map(|&value| (value, 0.0)).collect()
-        };
+        let storage = tensor
+            .into_numeric_storage()
+            .map_err(|error| builtin_error(format!("meshgrid: {error}")))?;
+        let len = storage.len();
         return Ok(AxisData {
             len,
-            values,
+            values: Vec::new(),
             is_complex: false,
-            real_integer_data: tensor.integer_data,
+            real_storage: Some(storage),
             integer_data: None,
             gpu_real: None,
         });
@@ -783,14 +792,15 @@ fn axis_from_tensor(tensor: Tensor, index: usize) -> crate::BuiltinResult<AxisDa
     //
     // This is a pragmatic compatibility shim for cases where callers already have
     // coordinate matrices (X/Y) and pass them through `meshgrid` again.
-    if let Some(axis) = axis_from_meshgrid_matrix_real(&tensor, index)? {
+    let shape = tensor.shape.clone();
+    if let Some(axis) = axis_from_meshgrid_matrix_real(tensor, index)? {
         return Ok(axis);
     }
 
     Err(builtin_error(format!(
         "meshgrid: input argument {} must be a vector (1xN or Nx1), got shape {:?}",
         index + 1,
-        tensor.shape
+        shape
     )))
 }
 
@@ -817,7 +827,7 @@ fn axis_from_complex_tensor(tensor: ComplexTensor, index: usize) -> crate::Built
             len,
             values,
             is_complex,
-            real_integer_data: None,
+            real_storage: None,
             integer_data: tensor.integer_data,
             gpu_real: None,
         });
@@ -843,7 +853,7 @@ fn axis_from_complex_tensor(tensor: ComplexTensor, index: usize) -> crate::Built
 }
 
 fn axis_from_meshgrid_matrix_real(
-    tensor: &Tensor,
+    tensor: Tensor,
     index: usize,
 ) -> crate::BuiltinResult<Option<AxisData>> {
     let (rows, cols) = match tensor.shape.as_slice() {
@@ -854,99 +864,55 @@ fn axis_from_meshgrid_matrix_real(
         return Ok(None);
     }
 
-    if let Some(storage) = tensor.integer_storage() {
-        return Ok(axis_from_integer_meshgrid_matrix(
-            storage, rows, cols, index,
-        ));
-    }
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|error| builtin_error(format!("meshgrid: {error}")))?;
 
     // Index 0 is expected to be the X-axis: a meshgrid X matrix has identical rows.
     // Index 1 is expected to be the Y-axis: a meshgrid Y matrix has identical columns.
     let expect_rows_constant = index == 0;
 
     if expect_rows_constant {
-        if !matrix_rows_are_identical_real(tensor, rows, cols) {
-            return Ok(None);
+        for row in 1..rows {
+            for col in 0..cols {
+                if storage.value_at(row + rows * col) != storage.value_at(rows * col) {
+                    return Ok(None);
+                }
+            }
         }
-        // Extract the first row as the axis vector (length = cols).
-        let mut values = Vec::with_capacity(cols);
-        for col in 0..cols {
-            let idx = rows * col;
-            values.push((tensor.data[idx], 0.0));
-        }
+        let indices: Vec<usize> = (0..cols).map(|col| rows * col).collect();
+        let storage = storage
+            .gather(&indices)
+            .map_err(|error| builtin_error(format!("meshgrid: {error}")))?;
         return Ok(Some(AxisData {
-            len: values.len(),
-            values,
+            len: cols,
+            values: Vec::new(),
             is_complex: false,
-            real_integer_data: None,
+            real_storage: Some(storage),
             integer_data: None,
             gpu_real: None,
         }));
     }
 
-    if !matrix_cols_are_identical_real(tensor, rows, cols) {
-        return Ok(None);
-    }
-    // Extract the first column as the axis vector (length = rows).
-    let mut values = Vec::with_capacity(rows);
-    for row in 0..rows {
-        values.push((tensor.data[row], 0.0));
-    }
-    Ok(Some(AxisData {
-        len: values.len(),
-        values,
-        is_complex: false,
-        real_integer_data: None,
-        integer_data: None,
-        gpu_real: None,
-    }))
-}
-
-fn axis_from_integer_meshgrid_matrix(
-    storage: &IntegerStorage,
-    rows: usize,
-    cols: usize,
-    index: usize,
-) -> Option<AxisData> {
-    let expect_rows_constant = index == 0;
-    let values = storage.exact_values();
-    if expect_rows_constant {
-        for row in 1..rows {
-            for col in 0..cols {
-                if values[row + rows * col] != values[rows * col] {
-                    return None;
-                }
-            }
-        }
-        let axis_values = (0..cols).map(|col| values[rows * col].clone()).collect();
-        let storage = storage.from_exact_values_like(axis_values).ok()?;
-        return Some(AxisData {
-            values: Vec::new(),
-            len: cols,
-            is_complex: false,
-            real_integer_data: Some(storage),
-            integer_data: None,
-            gpu_real: None,
-        });
-    }
-
     for col in 1..cols {
         for row in 0..rows {
-            if values[row + rows * col] != values[row] {
-                return None;
+            if storage.value_at(row + rows * col) != storage.value_at(row) {
+                return Ok(None);
             }
         }
     }
-    let axis_values = (0..rows).map(|row| values[row].clone()).collect();
-    let storage = storage.from_exact_values_like(axis_values).ok()?;
-    Some(AxisData {
+    let indices: Vec<usize> = (0..rows).collect();
+    let storage = storage
+        .gather(&indices)
+        .map_err(|error| builtin_error(format!("meshgrid: {error}")))?;
+    Ok(Some(AxisData {
         values: Vec::new(),
         len: rows,
         is_complex: false,
-        real_integer_data: Some(storage),
+        real_storage: Some(storage),
         integer_data: None,
         gpu_real: None,
-    })
+    }))
 }
 
 fn axis_from_meshgrid_matrix_complex(
@@ -976,7 +942,7 @@ fn axis_from_meshgrid_matrix_complex(
             len: values.len(),
             values,
             is_complex,
-            real_integer_data: None,
+            real_storage: None,
             integer_data: None,
             gpu_real: None,
         }));
@@ -994,36 +960,10 @@ fn axis_from_meshgrid_matrix_complex(
         len: values.len(),
         values,
         is_complex,
-        real_integer_data: None,
+        real_storage: None,
         integer_data: None,
         gpu_real: None,
     }))
-}
-
-fn matrix_rows_are_identical_real(tensor: &Tensor, rows: usize, cols: usize) -> bool {
-    for row in 1..rows {
-        for col in 0..cols {
-            let idx0 = rows * col;
-            let idx = row + rows * col;
-            if tensor.data[idx] != tensor.data[idx0] {
-                return false;
-            }
-        }
-    }
-    true
-}
-
-fn matrix_cols_are_identical_real(tensor: &Tensor, rows: usize, cols: usize) -> bool {
-    for col in 1..cols {
-        for row in 0..rows {
-            let idx0 = row;
-            let idx = row + rows * col;
-            if tensor.data[idx] != tensor.data[idx0] {
-                return false;
-            }
-        }
-    }
-    true
 }
 
 fn matrix_rows_are_identical_complex(tensor: &ComplexTensor, rows: usize, cols: usize) -> bool {
@@ -1086,7 +1026,7 @@ async fn axis_to_host_async(axis: &AxisData) -> crate::BuiltinResult<AxisData> {
             values: vec![(n, 0.0)],
             len: 1,
             is_complex: false,
-            real_integer_data: None,
+            real_storage: None,
             integer_data: None,
             gpu_real: None,
         }),
@@ -1094,7 +1034,7 @@ async fn axis_to_host_async(axis: &AxisData) -> crate::BuiltinResult<AxisData> {
             values: vec![(re, im)],
             len: 1,
             is_complex: im != 0.0,
-            real_integer_data: None,
+            real_storage: None,
             integer_data: None,
             gpu_real: None,
         }),
@@ -1229,16 +1169,16 @@ fn build_outputs(
     let mut x_data = Vec::with_capacity(total);
     let mut y_data = Vec::with_capacity(total);
     let mut z_data = z_axis.map(|_| Vec::with_capacity(total));
-    let mut x_real_integer_values = x_axis
-        .real_integer_data
+    let mut x_real_indices = x_axis
+        .real_storage
         .as_ref()
         .map(|_| Vec::with_capacity(total));
-    let mut y_real_integer_values = y_axis
-        .real_integer_data
+    let mut y_real_indices = y_axis
+        .real_storage
         .as_ref()
         .map(|_| Vec::with_capacity(total));
-    let mut z_real_integer_values = z_axis.and_then(|axis| {
-        axis.real_integer_data
+    let mut z_real_indices = z_axis.and_then(|axis| {
+        axis.real_storage
             .as_ref()
             .map(|_| Vec::with_capacity(total))
     });
@@ -1263,14 +1203,14 @@ fn build_outputs(
                     x_axis,
                     col,
                     &mut x_data,
-                    x_real_integer_values.as_mut(),
+                    x_real_indices.as_mut(),
                     x_integer_values.as_mut(),
                 );
                 append_axis_value(
                     y_axis,
                     row,
                     &mut y_data,
-                    y_real_integer_values.as_mut(),
+                    y_real_indices.as_mut(),
                     y_integer_values.as_mut(),
                 );
                 if let Some(ref mut z_vec) = z_data {
@@ -1278,7 +1218,7 @@ fn build_outputs(
                         z_axis.expect("z output has a z axis"),
                         k,
                         z_vec,
-                        z_real_integer_values.as_mut(),
+                        z_real_indices.as_mut(),
                         z_integer_values.as_mut(),
                     );
                 }
@@ -1295,16 +1235,16 @@ fn build_outputs(
     outputs.push(GridOutput {
         shape: base_shape.clone(),
         data: x_data,
-        real_integer_data: x_axis.real_integer_data.clone(),
-        real_integer_values: x_real_integer_values,
+        real_storage: x_axis.real_storage.clone(),
+        real_indices: x_real_indices,
         integer_data: x_axis.integer_data.clone(),
         integer_values: x_integer_values,
     });
     outputs.push(GridOutput {
         shape: base_shape.clone(),
         data: y_data,
-        real_integer_data: y_axis.real_integer_data.clone(),
-        real_integer_values: y_real_integer_values,
+        real_storage: y_axis.real_storage.clone(),
+        real_indices: y_real_indices,
         integer_data: y_axis.integer_data.clone(),
         integer_values: y_integer_values,
     });
@@ -1312,8 +1252,8 @@ fn build_outputs(
         outputs.push(GridOutput {
             shape: base_shape,
             data: z_vec,
-            real_integer_data: z_axis.and_then(|axis| axis.real_integer_data.clone()),
-            real_integer_values: z_real_integer_values,
+            real_storage: z_axis.and_then(|axis| axis.real_storage.clone()),
+            real_indices: z_real_indices,
             integer_data: z_axis.and_then(|axis| axis.integer_data.clone()),
             integer_values: z_integer_values,
         });
@@ -1325,11 +1265,11 @@ fn append_axis_value(
     axis: &AxisData,
     index: usize,
     data: &mut Vec<(f64, f64)>,
-    real_integer_values: Option<&mut Vec<IntValue>>,
+    real_indices: Option<&mut Vec<usize>>,
     integer_values: Option<&mut (Vec<IntValue>, Vec<IntValue>)>,
 ) {
-    if let (Some(storage), Some(values)) = (axis.real_integer_data.as_ref(), real_integer_values) {
-        values.push(storage.value_at(index).expect("axis index is in bounds"));
+    if let Some(indices) = real_indices {
+        indices.push(index);
     } else if let (Some(storage), Some((real, imag))) = (axis.integer_data.as_ref(), integer_values)
     {
         real.push(
@@ -1352,8 +1292,8 @@ fn append_axis_value(
 struct GridOutput {
     shape: Vec<usize>,
     data: Vec<(f64, f64)>,
-    real_integer_data: Option<IntegerStorage>,
-    real_integer_values: Option<Vec<IntValue>>,
+    real_storage: Option<NumericStorage>,
+    real_indices: Option<Vec<usize>>,
     integer_data: Option<IntegerComplexStorage>,
     integer_values: Option<(Vec<IntValue>, Vec<IntValue>)>,
 }
@@ -1371,20 +1311,24 @@ impl GridOutput {
     }
 
     fn to_real_value(&self, residency: DevicePreference) -> crate::BuiltinResult<Value> {
-        if let (Some(prototype), Some(values)) = (
-            self.real_integer_data.as_ref(),
-            self.real_integer_values.as_ref(),
-        ) {
+        if let (Some(prototype), Some(indices)) =
+            (self.real_storage.as_ref(), self.real_indices.as_ref())
+        {
             let storage = prototype
-                .from_exact_values_like(values.clone())
+                .gather(indices)
                 .map_err(|e| builtin_error(format!("meshgrid: {e}")))?;
-            let tensor = Tensor::new_integer(storage, self.shape.clone())
+            let is_integer = !matches!(
+                storage.numeric_dtype(),
+                NumericDType::F64 | NumericDType::F32
+            );
+            let tensor = Tensor::from_numeric_storage(storage, self.shape.clone())
                 .map_err(|e| builtin_error(format!("meshgrid: {e}")))?;
             return match residency {
                 DevicePreference::Host => Ok(Value::Tensor(tensor)),
-                DevicePreference::Gpu => Err(builtin_error(
+                DevicePreference::Gpu if is_integer => Err(builtin_error(
                     "meshgrid: GPU-resident typed integer outputs are not supported",
                 )),
+                DevicePreference::Gpu => to_gpu_tensor_value(tensor),
             };
         }
         let mut real = Vec::with_capacity(self.data.len());
@@ -1405,10 +1349,30 @@ impl GridOutput {
     }
 
     fn to_complex_value(&self, residency: DevicePreference) -> crate::BuiltinResult<Value> {
-        if self.real_integer_data.is_some() {
-            return Err(builtin_error(
-                "meshgrid: complex output for typed integer axes is not supported",
-            ));
+        if let (Some(storage), Some(indices)) =
+            (self.real_storage.as_ref(), self.real_indices.as_ref())
+        {
+            if !matches!(
+                storage.numeric_dtype(),
+                NumericDType::F64 | NumericDType::F32
+            ) {
+                return Err(builtin_error(
+                    "meshgrid: complex output for typed integer axes is not supported",
+                ));
+            }
+            let real = storage
+                .gather(indices)
+                .map_err(|e| builtin_error(format!("meshgrid: {e}")))?
+                .materialize_f64();
+            let tensor = ComplexTensor::new(
+                real.into_iter().map(|value| (value, 0.0)).collect(),
+                self.shape.clone(),
+            )
+            .map_err(|e| builtin_error(format!("meshgrid: {e}")))?;
+            return match residency {
+                DevicePreference::Host => Ok(complex_tensor_into_value(tensor)),
+                DevicePreference::Gpu => to_complex_gpu_tensor_value(tensor),
+            };
         }
         if let (Some(prototype), Some((real, imag))) =
             (self.integer_data.as_ref(), self.integer_values.as_ref())
@@ -1442,10 +1406,15 @@ impl GridOutput {
 }
 
 fn to_gpu_tensor_value(tensor: Tensor) -> crate::BuiltinResult<Value> {
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|error| builtin_error(format!("meshgrid: {error}")))?;
     if let Some(provider) = runmat_accelerate_api::provider() {
+        let data = storage.materialize_f64();
         let view = HostTensorView {
-            data: &tensor.data,
-            shape: &tensor.shape,
+            data: &data,
+            shape: &shape,
         };
         match provider.upload(&view) {
             Ok(handle) => return Ok(Value::GpuTensor(handle)),
@@ -1454,6 +1423,8 @@ fn to_gpu_tensor_value(tensor: Tensor) -> crate::BuiltinResult<Value> {
             }
         }
     }
+    let tensor = Tensor::from_numeric_storage(storage, shape)
+        .map_err(|error| builtin_error(format!("meshgrid: {error}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -1839,6 +1810,26 @@ pub(crate) mod tests {
         assert_eq!(
             y_out.data,
             vec![-1.0, 0.0, 1.0, -1.0, 0.0, 1.0, -1.0, 0.0, 1.0]
+        );
+    }
+
+    #[test]
+    fn meshgrid_preserves_native_single_storage() {
+        let x = Tensor::from_f32(vec![-1.0, 0.0, 1.0], vec![1, 3]).expect("single axis");
+        let eval = evaluate(&[Value::Tensor(x)]).expect("meshgrid");
+        let Value::Tensor(x_out) = eval_first(&eval).expect("X") else {
+            panic!("expected tensor X output");
+        };
+        let Value::Tensor(y_out) = eval_second(&eval).expect("Y") else {
+            panic!("expected tensor Y output");
+        };
+        assert_eq!(
+            x_out.into_numeric_storage().expect("single X storage"),
+            NumericStorage::F32(vec![-1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0])
+        );
+        assert_eq!(
+            y_out.into_numeric_storage().expect("single Y storage"),
+            NumericStorage::F32(vec![-1.0, 0.0, 1.0, -1.0, 0.0, 1.0, -1.0, 0.0, 1.0])
         );
     }
 
