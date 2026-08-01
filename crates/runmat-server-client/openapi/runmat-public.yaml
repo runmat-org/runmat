@@ -389,6 +389,634 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/packages/registry:
+    get:
+      tags:
+      - packages::registry::management::packages
+      operationId: list_registry_packages
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PackageListResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+    post:
+      tags:
+      - packages::registry::management::packages
+      operationId: create_registry_package
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePackageRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PackageManagementResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/packages/registry/groups:
+    get:
+      tags:
+      - packages::registry::management::groups
+      operationId: list_package_groups
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PackageGroupListResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+    post:
+      tags:
+      - packages::registry::management::groups
+      operationId: create_package_group
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGroupRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PackageGroupResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/packages/registry/groups/{groupId}:
+    delete:
+      tags:
+      - packages::registry::management::groups
+      operationId: delete_package_group
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: groupId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: ''
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/packages/registry/groups/{groupId}/members:
+    get:
+      tags:
+      - packages::registry::management::groups
+      operationId: list_package_group_members
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: groupId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PackageGroupMembersResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/packages/registry/groups/{groupId}/members/{principalId}:
+    put:
+      tags:
+      - packages::registry::management::groups
+      operationId: add_package_group_member
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: groupId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: principalId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: ''
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+    delete:
+      tags:
+      - packages::registry::management::groups
+      operationId: delete_package_group_member
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: groupId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: principalId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: ''
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/packages/registry/{packageId}:
+    patch:
+      tags:
+      - packages::registry::management::packages
+      operationId: update_registry_package
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: packageId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePackageRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PackageManagementResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/packages/registry/{packageId}/advisories:
+    get:
+      tags:
+      - packages::registry::management::releases
+      operationId: list_package_advisories
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: packageId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PackageAdvisoryListResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+    post:
+      tags:
+      - packages::registry::management::releases
+      operationId: create_package_advisory
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: packageId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdvisoryRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PackageAdvisoryManagementResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/packages/registry/{packageId}/advisories/{advisoryId}:
+    put:
+      tags:
+      - packages::registry::management::releases
+      operationId: update_package_advisory
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: packageId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: advisoryId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdvisoryRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PackageAdvisoryManagementResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/packages/registry/{packageId}/grants:
+    get:
+      tags:
+      - packages::registry::management::grants
+      operationId: list_package_grants
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: packageId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PackageGrantListResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+    put:
+      tags:
+      - packages::registry::management::grants
+      operationId: update_package_grant
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: packageId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateGrantRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PackageGrantResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/packages/registry/{packageId}/grants/{grantId}:
+    delete:
+      tags:
+      - packages::registry::management::grants
+      operationId: delete_package_grant
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: packageId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: grantId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: ''
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/packages/registry/{packageId}/releases/{releaseId}/status:
+    patch:
+      tags:
+      - packages::registry::management::releases
+      operationId: set_package_release_status
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: packageId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: releaseId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetReleaseStatusRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseStatusResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
   /v1/packages/projects/{projectId}/snapshots/{selector}:
     get:
       tags:
@@ -3465,6 +4093,329 @@ components:
           type: string
         treeDigest:
           type: string
+    AdvisoryRequest:
+      type: object
+      required:
+      - affectedRequirement
+      - severity
+      - title
+      properties:
+        affectedRequirement:
+          type: string
+        severity:
+          $ref: '#/components/schemas/AdvisorySeverityRequest'
+        title:
+          type: string
+        url:
+          type: string
+          nullable: true
+        withdrawnAt:
+          type: string
+          format: date-time
+          nullable: true
+      additionalProperties: false
+    AdvisorySeverityRequest:
+      type: string
+      enum:
+      - low
+      - moderate
+      - high
+      - critical
+    CreateGroupRequest:
+      type: object
+      required:
+      - name
+      properties:
+        name:
+          type: string
+      additionalProperties: false
+    CreatePackageRequest:
+      type: object
+      required:
+      - namespace
+      - name
+      - visibility
+      properties:
+        description:
+          type: string
+          nullable: true
+        name:
+          type: string
+        namespace:
+          type: string
+        visibility:
+          $ref: '#/components/schemas/PackageVisibilityRequest'
+      additionalProperties: false
+    PackageAdvisoryListResponse:
+      type: object
+      required:
+      - advisories
+      properties:
+        advisories:
+          type: array
+          items:
+            $ref: '#/components/schemas/PackageAdvisoryManagementResponse'
+    PackageAdvisoryManagementResponse:
+      type: object
+      required:
+      - id
+      - packageId
+      - affectedRequirement
+      - severity
+      - title
+      - createdAt
+      properties:
+        affectedRequirement:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        id:
+          type: string
+        packageId:
+          type: string
+        severity:
+          type: string
+        title:
+          type: string
+        url:
+          type: string
+          nullable: true
+        withdrawnAt:
+          type: string
+          format: date-time
+          nullable: true
+    PackageGrantListResponse:
+      type: object
+      required:
+      - grants
+      properties:
+        grants:
+          type: array
+          items:
+            $ref: '#/components/schemas/PackageGrantResponse'
+    PackageGrantResponse:
+      type: object
+      required:
+      - id
+      - packageId
+      - subjectKind
+      - subjectId
+      - role
+      - createdAt
+      properties:
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        id:
+          type: string
+        packageId:
+          type: string
+        role:
+          type: string
+        subjectId:
+          type: string
+        subjectKind:
+          type: string
+    PackageGrantRoleRequest:
+      type: string
+      enum:
+      - read
+      - publish
+      - admin
+    PackageGrantSubjectRequest:
+      oneOf:
+      - type: object
+        required:
+        - id
+        - kind
+        properties:
+          id:
+            type: string
+          kind:
+            type: string
+            enum:
+            - user
+      - type: object
+        required:
+        - id
+        - kind
+        properties:
+          id:
+            type: string
+          kind:
+            type: string
+            enum:
+            - service-account
+      - type: object
+        required:
+        - id
+        - kind
+        properties:
+          id:
+            type: string
+          kind:
+            type: string
+            enum:
+            - group
+      discriminator:
+        propertyName: kind
+    PackageGroupListResponse:
+      type: object
+      required:
+      - groups
+      properties:
+        groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/PackageGroupResponse'
+    PackageGroupMembersResponse:
+      type: object
+      required:
+      - groupId
+      - principals
+      properties:
+        groupId:
+          type: string
+        principals:
+          type: array
+          items:
+            type: string
+    PackageGroupResponse:
+      type: object
+      required:
+      - id
+      - orgId
+      - name
+      - createdAt
+      properties:
+        createdAt:
+          type: string
+          format: date-time
+        id:
+          type: string
+        name:
+          type: string
+        orgId:
+          type: string
+    PackageListResponse:
+      type: object
+      required:
+      - packages
+      properties:
+        packages:
+          type: array
+          items:
+            $ref: '#/components/schemas/PackageManagementResponse'
+    PackageManagementResponse:
+      type: object
+      required:
+      - id
+      - orgId
+      - registry
+      - namespace
+      - name
+      - visibility
+      - createdAt
+      - updatedAt
+      properties:
+        createdAt:
+          type: string
+          format: date-time
+        description:
+          type: string
+          nullable: true
+        id:
+          type: string
+        name:
+          type: string
+        namespace:
+          type: string
+        orgId:
+          type: string
+        registry:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+        visibility:
+          type: string
+    PackageVisibilityRequest:
+      type: string
+      enum:
+      - public
+      - private
+    ReleaseStatusRequest:
+      type: string
+      enum:
+      - active
+      - yanked
+      - quarantined
+      - revoked
+    ReleaseStatusResponse:
+      type: object
+      required:
+      - releaseId
+      - packageId
+      - version
+      - status
+      - changedAt
+      properties:
+        changedAt:
+          type: string
+          format: date-time
+        packageId:
+          type: string
+        reason:
+          type: string
+          nullable: true
+        releaseId:
+          type: string
+        status:
+          type: string
+        version:
+          type: string
+    SetReleaseStatusRequest:
+      type: object
+      required:
+      - status
+      properties:
+        reason:
+          type: string
+          nullable: true
+        status:
+          $ref: '#/components/schemas/ReleaseStatusRequest'
+      additionalProperties: false
+    UpdateGrantRequest:
+      type: object
+      required:
+      - subject
+      - role
+      properties:
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        role:
+          $ref: '#/components/schemas/PackageGrantRoleRequest'
+        subject:
+          $ref: '#/components/schemas/PackageGrantSubjectRequest'
+      additionalProperties: false
+    UpdatePackageRequest:
+      type: object
+      required:
+      - visibility
+      properties:
+        description:
+          type: string
+          nullable: true
+        visibility:
+          $ref: '#/components/schemas/PackageVisibilityRequest'
+      additionalProperties: false
     RegistryAdvisoryResponse:
       type: object
       required:
