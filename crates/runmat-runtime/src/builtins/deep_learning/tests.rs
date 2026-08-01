@@ -523,6 +523,42 @@ fn forward_and_predict_execute_supported_feedforward_networks() {
 }
 
 #[test]
+fn forward_preserves_native_single_through_fully_connected_and_softmax() {
+    let input_layer = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let fully_connected = block_on(fully_connected_layer_builtin(
+        Value::Num(2.0),
+        vec![
+            Value::String("Weights".into()),
+            Value::Tensor(
+                Tensor::from_f32(vec![1.0, -1.0, 0.5, 2.0], vec![2, 2]).expect("weights"),
+            ),
+            Value::String("Bias".into()),
+            Value::Tensor(Tensor::from_f32(vec![0.0, 0.0], vec![2, 1]).expect("bias")),
+        ],
+    ))
+    .unwrap();
+    let softmax = block_on(softmax_layer_builtin(vec![])).unwrap();
+    let network = block_on(dlnetwork_builtin(vec![Value::Cell(
+        CellArray::new(vec![input_layer, fully_connected, softmax], 3, 1).unwrap(),
+    )]))
+    .unwrap();
+    let input =
+        Value::Tensor(Tensor::from_f32(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).expect("input"));
+    let output = block_on(forward_builtin(network, input, vec![])).expect("forward");
+    let Value::Tensor(output) = output else {
+        panic!("expected tensor output");
+    };
+    let NumericStorage::F32(values) = output.into_numeric_storage().expect("output storage") else {
+        panic!("expected native single output");
+    };
+    assert_eq!(values.len(), 4);
+    assert!((values[0] - 0.26894143).abs() < 1.0e-6, "{values:?}");
+    assert!((values[1] - 0.5).abs() < 1.0e-6, "{values:?}");
+    assert!((values[2] - 0.7310586).abs() < 1.0e-6, "{values:?}");
+    assert!((values[3] - 0.5).abs() < 1.0e-6, "{values:?}");
+}
+
+#[test]
 fn forward_and_predict_read_typed_integer_storage_exactly() {
     let input_layer = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
     let fc = block_on(fully_connected_layer_builtin(

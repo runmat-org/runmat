@@ -1,5 +1,7 @@
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CellArray, ObjectInstance, StructValue, Tensor, Value};
+use runmat_builtins::{
+    CellArray, NumericDType, NumericStorage, ObjectInstance, StructValue, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::{builtins::common::tensor, BuiltinResult};
@@ -674,7 +676,7 @@ fn validate_gpu_forward_layers(
                     ));
                 }
                 let bias = tensor_property(layer, "Bias", function)?;
-                if bias.data.len() != weights.rows {
+                if tensor::tensor_element_len(&bias) != weights.rows {
                     return Err(deep_learning_error(
                         function,
                         format!(
@@ -731,11 +733,16 @@ async fn fully_connected_forward_gpu(
     let weights = tensor_property(layer, "Weights", function)?;
     let bias = tensor_property(layer, "Bias", function)?;
     let weights_transposed = transpose_2d(&weights, function)?;
-    let bias_row = Tensor::new(bias.data, vec![1, weights.rows])
-        .map_err(|err| deep_learning_error(function, err))?;
+    let bias_row = Tensor::from_numeric_storage(
+        bias.into_numeric_storage()
+            .map_err(|err| deep_learning_error(function, err))?,
+        vec![1, weights.rows],
+    )
+    .map_err(|err| deep_learning_error(function, err))?;
+    let weights_upload = tensor::tensor_values_f64_cow(&weights_transposed);
     let weights_handle = provider
         .upload(&HostTensorView {
-            data: &weights_transposed.data,
+            data: weights_upload.as_ref(),
             shape: &weights_transposed.shape,
         })
         .map_err(|err| {
@@ -744,8 +751,9 @@ async fn fully_connected_forward_gpu(
                 format!("{function}: GPU weight upload failed: {err}"),
             )
         })?;
+    let bias_upload = tensor::tensor_values_f64_cow(&bias_row);
     let bias_handle = match provider.upload(&HostTensorView {
-        data: &bias_row.data,
+        data: bias_upload.as_ref(),
         shape: &bias_row.shape,
     }) {
         Ok(handle) => handle,
@@ -814,7 +822,7 @@ fn fully_connected_forward(
         ));
     }
     let bias = tensor_property(layer, "Bias", function)?;
-    if bias.data.len() != weights.rows {
+    if tensor::tensor_element_len(&bias) != weights.rows {
         return Err(deep_learning_error(
             function,
             format!(
@@ -823,19 +831,22 @@ fn fully_connected_forward(
             ),
         ));
     }
+    let dtype = input.numeric_dtype();
+    let input_values = floating_tensor_values(&input, function)?;
+    let weight_values = floating_tensor_values(&weights, function)?;
+    let bias_values = floating_tensor_values(&bias, function)?;
     let mut out = vec![0.0; input.rows * weights.rows];
     for row in 0..input.rows {
         for out_col in 0..weights.rows {
-            let mut acc = bias.data[out_col];
+            let mut acc = bias_values[out_col];
             for feature in 0..input.cols {
-                acc += input.data[row + feature * input.rows]
-                    * weights.data[out_col + feature * weights.rows];
+                acc += input_values[row + feature * input.rows]
+                    * weight_values[out_col + feature * weights.rows];
             }
             out[row + out_col * input.rows] = acc;
         }
     }
-    Tensor::new(out, vec![input.rows, weights.rows])
-        .map_err(|err| deep_learning_error(function, err))
+    floating_tensor_from_f64(out, vec![input.rows, weights.rows], dtype, function)
 }
 
 fn elu_forward(
@@ -868,14 +879,16 @@ fn elu_alpha(layer: &ObjectInstance, function: &'static str) -> BuiltinResult<f6
 }
 
 fn softmax_rows(input: Tensor, function: &'static str) -> BuiltinResult<Tensor> {
-    let mut out = vec![0.0; input.data.len()];
+    let dtype = input.numeric_dtype();
+    let input_values = floating_tensor_values(&input, function)?;
+    let mut out = vec![0.0; input_values.len()];
     for row in 0..input.rows {
         let max_value = (0..input.cols)
-            .map(|col| input.data[row + col * input.rows])
+            .map(|col| input_values[row + col * input.rows])
             .fold(f64::NEG_INFINITY, f64::max);
         let mut denom = 0.0;
         for col in 0..input.cols {
-            let value = (input.data[row + col * input.rows] - max_value).exp();
+            let value = (input_values[row + col * input.rows] - max_value).exp();
             out[row + col * input.rows] = value;
             denom += value;
         }
@@ -889,7 +902,7 @@ fn softmax_rows(input: Tensor, function: &'static str) -> BuiltinResult<Tensor> 
             out[row + col * input.rows] /= denom;
         }
     }
-    Tensor::new(out, input.shape).map_err(|err| deep_learning_error(function, err))
+    floating_tensor_from_f64(out, input.shape, dtype, function)
 }
 
 fn map_tensor(
@@ -897,12 +910,13 @@ fn map_tensor(
     f: impl Fn(f64) -> f64,
     function: &'static str,
 ) -> BuiltinResult<Tensor> {
-    Tensor::new_with_dtype(
-        input.data.into_iter().map(f).collect(),
-        input.shape,
-        input.dtype,
-    )
-    .map_err(|err| deep_learning_error(function, err))
+    let dtype = input.numeric_dtype();
+    let shape = input.shape.clone();
+    let data = floating_tensor_values(&input, function)?
+        .into_iter()
+        .map(f)
+        .collect();
+    floating_tensor_from_f64(data, shape, dtype, function)
 }
 
 fn require_2d(tensor: Tensor, function: &'static str, label: &str) -> BuiltinResult<Tensor> {
@@ -922,15 +936,57 @@ fn transpose_2d(tensor: &Tensor, function: &'static str) -> BuiltinResult<Tensor
             "predict: ObservationsIn='columns' requires a 2-D matrix",
         ));
     }
-    let values = tensor::tensor_values_f64_cow(tensor);
-    let mut out = vec![0.0; values.len()];
+    let mut indices = vec![0usize; tensor::tensor_element_len(tensor)];
     for row in 0..tensor.rows {
         for col in 0..tensor.cols {
-            out[col + row * tensor.cols] = values[row + col * tensor.rows];
+            indices[col + row * tensor.cols] = row + col * tensor.rows;
         }
     }
-    Tensor::new(out, vec![tensor.cols, tensor.rows])
+    let storage = tensor
+        .clone()
+        .into_numeric_storage()
+        .map_err(|err| deep_learning_error(function, err))?
+        .reorder(&indices)
+        .map_err(|err| deep_learning_error(function, err))?;
+    Tensor::from_numeric_storage(storage, vec![tensor.cols, tensor.rows])
         .map_err(|err| deep_learning_error(function, err))
+}
+
+fn floating_tensor_values(tensor: &Tensor, function: &'static str) -> BuiltinResult<Vec<f64>> {
+    match tensor
+        .clone()
+        .into_numeric_storage()
+        .map_err(|err| deep_learning_error(function, err))?
+    {
+        NumericStorage::F64(values) => Ok(values),
+        NumericStorage::F32(values) => Ok(values.into_iter().map(f64::from).collect()),
+        storage => Err(deep_learning_error(
+            function,
+            format!(
+                "{function}: model forward requires double or single tensors, got {}",
+                storage.class_name()
+            ),
+        )),
+    }
+}
+
+fn floating_tensor_from_f64(
+    data: Vec<f64>,
+    shape: Vec<usize>,
+    dtype: NumericDType,
+    function: &'static str,
+) -> BuiltinResult<Tensor> {
+    match dtype {
+        NumericDType::F64 | NumericDType::F32 => Tensor::new_with_dtype(data, shape, dtype)
+            .map_err(|err| deep_learning_error(function, err)),
+        dtype => Err(deep_learning_error(
+            function,
+            format!(
+                "{function}: model forward cannot construct {} output",
+                dtype.class_name()
+            ),
+        )),
+    }
 }
 
 pub(super) fn feature_input_width(
