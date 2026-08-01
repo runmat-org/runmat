@@ -249,6 +249,53 @@ pub enum SourceId {
     Registry(RegistrySourceId),
 }
 
+impl SourceId {
+    pub fn tree_digest(&self) -> &ContentDigest {
+        match self {
+            Self::Path(source) => &source.tree_digest,
+            Self::Git(source) => &source.tree_digest,
+            Self::ServerProject(source) => &source.tree_digest,
+            Self::Registry(source) => &source.tree_digest,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), IdentityError> {
+        match self {
+            Self::Path(_) => Ok(()),
+            Self::Git(source) => {
+                let parsed: GitCommitId = source.commit.hex.parse()?;
+                if parsed.algorithm != source.commit.algorithm {
+                    return Err(IdentityError::InvalidGitObjectId {
+                        value: source.commit.hex.clone(),
+                        reason: "object algorithm does not match object ID length",
+                    });
+                }
+                GitRepositoryUrl::new(source.repository.as_str())?;
+                Ok(())
+            }
+            Self::ServerProject(source) => {
+                ServerProjectSourceId::new(
+                    &source.service,
+                    source.project.clone(),
+                    source.snapshot.clone(),
+                    source.tree_digest.clone(),
+                )?;
+                Ok(())
+            }
+            Self::Registry(source) => {
+                if source.registry != *source.package.registry() {
+                    return Err(IdentityError::InvalidName {
+                        kind: "registry source",
+                        value: source.package.to_string(),
+                        reason: "source registry and package registry disagree",
+                    });
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
 impl Display for SourceId {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         match self {

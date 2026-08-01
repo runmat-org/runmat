@@ -28,6 +28,8 @@ pub enum PackageError {
     Identity(#[from] IdentityError),
     #[error(transparent)]
     Manifest(#[from] ManifestError),
+    #[error(transparent)]
+    Lock(#[from] LockError),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -50,4 +52,16 @@ pub enum ManifestError {
     InvalidRegistry { registry: String, reason: String },
     #[error("invalid source replacement `{registry}`: {reason}")]
     InvalidSourceReplacement { registry: String, reason: String },
+}
+
+#[derive(Debug, Error)]
+pub enum LockError {
+    #[error("failed to decode runmat.lock: {0}")]
+    Decode(#[from] toml::de::Error),
+    #[error("failed to encode runmat.lock: {0}")]
+    Encode(#[from] toml::ser::Error),
+    #[error("invalid runmat.lock: {0}")]
+    Invalid(String),
+    #[error("incompatible runmat.lock: {0}")]
+    Incompatible(String),
 }

@@ -2,14 +2,19 @@
 
 pub mod error;
 pub mod identity;
+pub mod lock;
 pub mod manifest;
 pub mod policy;
 
-pub use error::{IdentityError, ManifestError, PackageError};
+pub use error::{IdentityError, LockError, ManifestError, PackageError};
 pub use identity::{
     CanonicalPackageId, ContentDigest, DigestAlgorithm, GitCommitId, GitObjectAlgorithm,
     GitRepositoryUrl, GitSourceId, NormalizedRelativePath, PackageAlias, PackageInstanceId,
     PackageVersion, PathSourceId, RegistryId, RegistrySourceId, ServerProjectSourceId, SourceId,
+};
+pub use lock::{
+    decode_lock, diff_locks, encode_lock, LockCompatibility, LockDiff, LockSelection, LockedEdge,
+    LockedPackage, PackageLock, RootLock, LOCK_SCHEMA_VERSION, RESOLVER_FORMAT_VERSION,
 };
 pub use manifest::{
     DependencyGroup, DependencyLocator, DependencySpec, GitSelector, HostCapability,
