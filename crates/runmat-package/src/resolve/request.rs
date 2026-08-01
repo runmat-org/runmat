@@ -1,5 +1,5 @@
 use crate::{
-    CanonicalPackageId, DependencyGroup, HostCapability, PackageAlias, TargetEnvironment,
+    CanonicalPackageId, ContentDigest, DependencyGroup, PackageAlias, TargetEnvironment,
     TargetPredicate,
 };
 use semver::{Version, VersionReq};
@@ -28,5 +28,7 @@ pub struct ResolutionRequest {
     pub environment: TargetEnvironment,
     pub runmat_version: Version,
     pub offline: bool,
-    pub allowed_capabilities: BTreeSet<HostCapability>,
+    pub locked_instances: BTreeSet<ContentDigest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update_packages: Option<BTreeSet<CanonicalPackageId>>,
 }

@@ -1,8 +1,9 @@
 use runmat_package::{
-    acquire_candidates_with_policy, resolve, CandidateIndex, CandidateMetadata, CandidateProvider,
-    CandidateQuery, CanonicalPackageId, ContentDigest, DependencyGroup, HostCapability,
-    PackageInstanceId, PathSourceId, ResolutionRequest, ResolutionRequirement, ResolveError,
-    SourceId, SourceSelectionPolicy, TargetEnvironment, TargetPredicate,
+    acquire_candidates_with_policy, dependency_tree, plan_update, resolve, why, CandidateIndex,
+    CandidateMetadata, CandidateProvider, CandidateQuery, CanonicalPackageId, ContentDigest,
+    DependencyGroup, HostCapability, PackageInstanceId, PathSourceId, ResolutionRequest,
+    ResolutionRequirement, ResolveError, SourceId, SourceSelectionPolicy, TargetEnvironment,
+    TargetPredicate, UpdatePolicy,
 };
 use semver::{Version, VersionReq};
 use std::cell::RefCell;
@@ -65,7 +66,8 @@ fn request(requirements: Vec<ResolutionRequirement>) -> ResolutionRequest {
         },
         runmat_version: Version::new(0, 6, 1),
         offline: false,
-        allowed_capabilities: [HostCapability::Worker].into_iter().collect(),
+        locked_instances: BTreeSet::new(),
+        update_packages: None,
     }
 }
 
@@ -180,6 +182,7 @@ fn permits_multiple_versions_but_enforces_singletons_and_offline_policy() {
     )
     .unwrap_err();
     assert!(error.reason.contains("singleton"));
+    assert_eq!(error.paths.len(), 2);
 
     let mut online_only = candidate("default:runmat/network", "2.0.0", Vec::new());
     online_only.available_offline = false;
@@ -266,4 +269,137 @@ fn async_candidate_acquisition_walks_metadata_and_applies_mirrors() {
     assert!(queries
         .iter()
         .all(|query| query.source_registry.to_string() == "mirror" && query.offline));
+}
+
+#[test]
+fn tree_why_and_serialized_outcomes_are_deterministic() {
+    let mut index = CandidateIndex::default();
+    index.insert(candidate(
+        "default:runmat/a",
+        "1.0.0",
+        vec![req("shared", "default:runmat/shared", "^1")],
+    ));
+    index.insert(candidate(
+        "default:runmat/b",
+        "1.0.0",
+        vec![req("shared", "default:runmat/shared", "^1")],
+    ));
+    index.insert(candidate("default:runmat/shared", "1.0.0", Vec::new()));
+    let request = request(vec![
+        req("a", "default:runmat/a", "^1"),
+        req("b", "default:runmat/b", "^1"),
+    ]);
+    let first = resolve(&request, &index).unwrap();
+    let second = resolve(&request, &index).unwrap();
+    assert_eq!(
+        serde_json::to_string(&first).unwrap(),
+        serde_json::to_string(&second).unwrap()
+    );
+    let tree = dependency_tree(&first, "application");
+    assert!(tree.contains("a: default:runmat/a 1.0.0"));
+    assert!(tree.contains("shared: default:runmat/shared 1.0.0 (*)"));
+    let shared = first
+        .packages
+        .values()
+        .find(|package| package.candidate.instance.package.to_string() == "default:runmat/shared")
+        .unwrap();
+    assert_eq!(
+        why(
+            &first,
+            "application",
+            &shared.candidate.instance.identity_digest
+        )
+        .into_iter()
+        .map(|path| path.to_string())
+        .collect::<Vec<_>>(),
+        vec![
+            "application -> a -> shared".to_string(),
+            "application -> b -> shared".to_string()
+        ]
+    );
+}
+
+#[test]
+fn constrained_updates_freeze_every_unpermitted_package() {
+    let a1 = candidate(
+        "default:runmat/a",
+        "1.0.0",
+        vec![req("shared", "default:runmat/shared", "^1")],
+    );
+    let a1_identity = a1.instance.identity_digest.clone();
+    let a2 = candidate(
+        "default:runmat/a",
+        "2.0.0",
+        vec![req("shared", "default:runmat/shared", "^2")],
+    );
+    let mut index = CandidateIndex::default();
+    index.insert(a1);
+    index.insert(a2);
+    index.insert(candidate("default:runmat/shared", "1.0.0", Vec::new()));
+    index.insert(candidate("default:runmat/shared", "2.0.0", Vec::new()));
+
+    let mut locked_request = request(vec![req("a", "default:runmat/a", ">=1")]);
+    locked_request.locked_instances.insert(a1_identity);
+    locked_request.update_packages = Some(BTreeSet::new());
+    let current = resolve(&locked_request, &index).unwrap();
+    assert_eq!(
+        versions(&current, "default:runmat/a"),
+        ["1.0.0".to_string()].into_iter().collect()
+    );
+
+    let proposed = resolve(&request(vec![req("a", "default:runmat/a", ">=1")]), &index).unwrap();
+    let package_a: CanonicalPackageId = "default:runmat/a".parse().unwrap();
+    assert!(plan_update(
+        &current,
+        &proposed,
+        &UpdatePolicy::Packages {
+            packages: [package_a.clone()].into_iter().collect(),
+            recursive: false,
+        }
+    )
+    .is_err());
+    let plan = plan_update(
+        &current,
+        &proposed,
+        &UpdatePolicy::Packages {
+            packages: [package_a].into_iter().collect(),
+            recursive: true,
+        },
+    )
+    .unwrap();
+    assert_eq!(plan.changed_packages.len(), 2);
+    assert_eq!(plan.added.len(), 2);
+    assert_eq!(plan.removed.len(), 2);
+}
+
+#[test]
+fn candidate_and_requirement_permutations_do_not_change_the_result() {
+    let candidates = ["1.0.0", "2.0.0", "3.0.0"];
+    let permutations = [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+    ];
+    let mut expected = None;
+    for permutation in permutations {
+        let mut index = CandidateIndex::default();
+        for index_value in permutation {
+            index.insert(candidate(
+                "default:runmat/a",
+                candidates[index_value],
+                Vec::new(),
+            ));
+        }
+        let resolution =
+            resolve(&request(vec![req("a", "default:runmat/a", ">=1")]), &index).unwrap();
+        let encoded = serde_json::to_string(&resolution).unwrap();
+        if let Some(expected) = &expected {
+            assert_eq!(&encoded, expected);
+        } else {
+            expected = Some(encoded);
+        }
+    }
 }

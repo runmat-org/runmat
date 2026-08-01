@@ -31,6 +31,7 @@ struct SolverState {
     packages: BTreeMap<ContentDigest, ResolutionPackage>,
     by_package: BTreeMap<crate::CanonicalPackageId, Vec<ContentDigest>>,
     edges: BTreeSet<ResolutionEdge>,
+    paths: BTreeMap<ContentDigest, BTreeSet<RequirementPath>>,
 }
 
 pub fn resolve(
@@ -84,6 +85,11 @@ fn resolve_requirement(
         .map(|package| package.candidate.instance.identity_digest.clone())
     {
         add_edge(state, from, requirement, existing.clone(), &path)?;
+        state
+            .paths
+            .entry(existing.clone())
+            .or_default()
+            .insert(path.clone());
         let changed = {
             let package = state.packages.get_mut(&existing).expect("indexed package");
             let before = package.enabled_features.len();
@@ -104,6 +110,22 @@ fn resolve_requirement(
         .filter(|candidate| candidate_matches(candidate, requirement, request))
         .cloned()
         .collect::<Vec<_>>();
+    let locked_for_package = index
+        .candidates(&requirement.package)
+        .iter()
+        .filter(|candidate| {
+            request
+                .locked_instances
+                .contains(&candidate.instance.identity_digest)
+        })
+        .map(|candidate| candidate.instance.identity_digest.clone())
+        .collect::<BTreeSet<_>>();
+    if request.update_packages.as_ref().is_some_and(|packages| {
+        !packages.contains(&requirement.package) && !locked_for_package.is_empty()
+    }) {
+        eligible
+            .retain(|candidate| locked_for_package.contains(&candidate.instance.identity_digest));
+    }
     eligible.sort_by(|left, right| {
         right
             .instance
@@ -117,12 +139,16 @@ fn resolve_requirement(
     });
     let mut last_conflict = None;
     for candidate in eligible {
-        if singleton_conflict(state, &candidate) {
-            last_conflict = Some(conflict(
-                requirement,
-                path.clone(),
-                "a singleton/native package would require multiple instances",
-            ));
+        if let Some(mut paths) = singleton_conflict_paths(state, &candidate) {
+            paths.push(path.clone());
+            paths.sort();
+            paths.dedup();
+            last_conflict = Some(Incompatibility {
+                package: Box::new(requirement.package.clone()),
+                requirement: Box::new(requirement.version.clone()),
+                paths,
+                reason: "a singleton/native package would require multiple instances".to_string(),
+            });
             continue;
         }
         let mut trial = state.clone();
@@ -139,6 +165,11 @@ fn resolve_requirement(
                 enabled_features: requested_features.clone(),
             },
         );
+        trial
+            .paths
+            .entry(identity.clone())
+            .or_default()
+            .insert(path.clone());
         if let Err(error) = add_edge(
             &mut trial,
             from.clone(),
@@ -289,7 +320,7 @@ fn candidate_matches(
             .is_none_or(|required| required.matches(&request.runmat_version))
         && candidate
             .required_capabilities
-            .is_subset(&request.allowed_capabilities)
+            .is_subset(&request.environment.capabilities)
         && (candidate.target_artifacts.is_empty()
             || candidate
                 .target_artifacts
@@ -297,14 +328,26 @@ fn candidate_matches(
                 .any(|target| request.environment.supports(target)))
 }
 
-fn singleton_conflict(state: &SolverState, candidate: &CandidateMetadata) -> bool {
-    state
+fn singleton_conflict_paths(
+    state: &SolverState,
+    candidate: &CandidateMetadata,
+) -> Option<Vec<RequirementPath>> {
+    let conflicting = state
         .by_package
         .get(&candidate.instance.package)
         .into_iter()
         .flatten()
         .filter_map(|identity| state.packages.get(identity))
-        .any(|selected| selected.candidate.singleton || candidate.singleton)
+        .any(|selected| selected.candidate.singleton || candidate.singleton);
+    conflicting.then(|| {
+        state
+            .by_package
+            .get(&candidate.instance.package)
+            .into_iter()
+            .flatten()
+            .flat_map(|identity| state.paths.get(identity).into_iter().flatten().cloned())
+            .collect()
+    })
 }
 
 fn add_edge(

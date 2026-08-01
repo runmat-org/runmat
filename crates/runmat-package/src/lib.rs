@@ -29,8 +29,8 @@ pub use manifest::{
     TargetEnvironment, TargetPredicate,
 };
 pub use resolve::{
-    acquire_candidates, acquire_candidates_with_policy, resolve, CandidateIndex, CandidateMetadata,
-    CandidateProvider, CandidateQuery, Incompatibility, RequirementPath, Resolution,
-    ResolutionEdge, ResolutionPackage, ResolutionRequest, ResolutionRequirement,
-    SourceSelectionPolicy,
+    acquire_candidates, acquire_candidates_with_policy, dependency_tree, plan_update, resolve, why,
+    CandidateIndex, CandidateMetadata, CandidateProvider, CandidateQuery, Incompatibility,
+    RequirementPath, Resolution, ResolutionEdge, ResolutionPackage, ResolutionRequest,
+    ResolutionRequirement, SourceSelectionPolicy, UpdatePlan, UpdatePolicy,
 };
