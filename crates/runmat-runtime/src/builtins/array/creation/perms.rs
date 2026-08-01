@@ -3,8 +3,8 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type,
-    Value,
+    CellArray, CharArray, ComplexTensor, LogicalArray, NumericStorage, ResolveContext, StringArray,
+    Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -178,18 +178,37 @@ fn evaluate_host(value: Value) -> BuiltinResult<Value> {
 fn perms_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     let elements = vector_len(&tensor.shape)?;
     let rows = checked_output_rows(elements)?;
-    if let Some(storage) = tensor.integer_data {
-        let storage = storage
-            .from_exact_values_like(permuted_columns(&storage.exact_values(), rows, elements)?)
-            .map_err(|error| perms_error_with(&ERROR_INTERNAL, format!("perms: {error}")))?;
-        return Tensor::new_integer(storage, vec![rows, elements])
-            .map(Value::Tensor)
-            .map_err(|error| perms_error_with(&ERROR_INTERNAL, format!("perms: {error}")));
-    }
-    let data = permuted_columns(&tensor.data, rows, elements)?;
-    Tensor::new_with_dtype(data, vec![rows, elements], tensor.dtype)
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|error| perms_error_with(&ERROR_INTERNAL, format!("perms: {error}")))?;
+    let storage = permute_numeric_storage(storage, rows, elements)?;
+    Tensor::from_numeric_storage(storage, vec![rows, elements])
         .map(Value::Tensor)
         .map_err(|e| perms_error_with(&ERROR_INTERNAL, format!("perms: {e}")))
+}
+
+fn permute_numeric_storage(
+    storage: NumericStorage,
+    rows: usize,
+    elements: usize,
+) -> BuiltinResult<NumericStorage> {
+    macro_rules! permute {
+        ($values:expr, $variant:ident) => {
+            NumericStorage::$variant(permuted_columns(&$values, rows, elements)?)
+        };
+    }
+    Ok(match storage {
+        NumericStorage::F64(values) => permute!(values, F64),
+        NumericStorage::F32(values) => permute!(values, F32),
+        NumericStorage::I8(values) => permute!(values, I8),
+        NumericStorage::I16(values) => permute!(values, I16),
+        NumericStorage::I32(values) => permute!(values, I32),
+        NumericStorage::I64(values) => permute!(values, I64),
+        NumericStorage::U8(values) => permute!(values, U8),
+        NumericStorage::U16(values) => permute!(values, U16),
+        NumericStorage::U32(values) => permute!(values, U32),
+        NumericStorage::U64(values) => permute!(values, U64),
+    })
 }
 
 fn perms_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
@@ -490,13 +509,15 @@ mod tests {
     }
 
     #[test]
-    fn numeric_dtype_is_preserved_for_tensors() {
-        let tensor = Tensor::new_with_dtype(vec![1.0, 2.0], vec![1, 2], NumericDType::U32).unwrap();
+    fn native_single_storage_is_preserved_for_tensors() {
+        let tensor = Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap();
         let Value::Tensor(out) = call(Value::Tensor(tensor)).expect("perms") else {
             panic!("expected tensor");
         };
-        assert_eq!(out.dtype, NumericDType::U32);
-        assert_eq!(tensor_rows(&out), vec![vec![2.0, 1.0], vec![1.0, 2.0]]);
+        assert_eq!(
+            out.into_numeric_storage().expect("single storage"),
+            NumericStorage::F32(vec![2.0, 1.0, 1.0, 2.0])
+        );
     }
 
     #[test]

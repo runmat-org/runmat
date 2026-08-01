@@ -3,7 +3,8 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericDType, Tensor, Value,
+    ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericDType, NumericStorage, Tensor,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -135,12 +136,23 @@ impl InputVector {
             Value::Int(value) => Ok(Self::TypedInteger(IntegerStorage::from_scalar(value))),
             Value::Tensor(tensor) => {
                 validate_vector_shape(&tensor.shape, tensor_utils::tensor_element_len(&tensor))?;
-                Ok(match tensor.integer_data {
-                    Some(storage) => Self::TypedInteger(storage),
-                    None => Self::Real {
-                        values: tensor.data,
-                        dtype: tensor.dtype,
+                let storage = tensor
+                    .into_numeric_storage()
+                    .map_err(|err| error_with_detail(&ERROR_INTERNAL, err))?;
+                Ok(match storage {
+                    NumericStorage::F64(values) => Self::Real {
+                        values,
+                        dtype: NumericDType::F64,
                     },
+                    NumericStorage::F32(values) => Self::Real {
+                        values: values.into_iter().map(f64::from).collect(),
+                        dtype: NumericDType::F32,
+                    },
+                    storage => Self::TypedInteger(
+                        storage
+                            .into_integer_storage()
+                            .expect("integer numeric storage"),
+                    ),
                 })
             }
             Value::Complex(re, im) => Ok(Self::Complex(vec![(re, im)])),
@@ -522,18 +534,16 @@ mod tests {
     }
 
     #[test]
-    fn toeplitz_preserves_matching_real_tensor_dtype() {
-        let input =
-            Tensor::new_with_dtype(vec![1.0, 2.0, 3.0], vec![1, 3], NumericDType::U16).unwrap();
+    fn toeplitz_preserves_native_single_storage() {
+        let input = Tensor::from_f32(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
         let out = block_on(toeplitz_builtin(vec![Value::Tensor(input)])).expect("toeplitz");
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor");
         };
         assert_eq!(tensor.shape, vec![3, 3]);
-        assert_eq!(tensor.dtype, NumericDType::U16);
         assert_eq!(
-            tensor.data,
-            vec![1.0, 2.0, 3.0, 2.0, 1.0, 2.0, 3.0, 2.0, 1.0]
+            tensor.into_numeric_storage().expect("single storage"),
+            NumericStorage::F32(vec![1.0, 2.0, 3.0, 2.0, 1.0, 2.0, 3.0, 2.0, 1.0])
         );
     }
 

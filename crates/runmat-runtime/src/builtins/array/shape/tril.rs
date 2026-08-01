@@ -17,7 +17,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, LogicalArray, ResolveContext, Tensor, Type, Value,
+    ComplexTensor, LogicalArray, NumericStorage, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -325,22 +325,47 @@ fn scalar_to_isize(value: &Value, name: &str) -> crate::BuiltinResult<isize> {
     }
 }
 
-fn tril_tensor(mut tensor: Tensor, offset: isize) -> crate::BuiltinResult<Tensor> {
-    if let Some(storage) = tensor.integer_data.take() {
-        let zero = storage
-            .zeros_like(1)
-            .value_at(0)
-            .expect("one typed integer zero");
-        let mut values = storage.exact_values();
-        apply_tril_inplace(&mut values, &tensor.shape, offset, zero)?;
-        let storage = storage
-            .from_exact_values_like(values)
-            .map_err(|e| tril_error_with_message(format!("tril: {e}"), &TRIL_ERROR_INTERNAL))?;
-        return Tensor::new_integer(storage, tensor.shape)
-            .map_err(|e| tril_error_with_message(format!("tril: {e}"), &TRIL_ERROR_INTERNAL));
+fn tril_tensor(tensor: Tensor, offset: isize) -> crate::BuiltinResult<Tensor> {
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| tril_error_with_message(format!("tril: {e}"), &TRIL_ERROR_INTERNAL))?;
+    let storage = map_tril_storage(storage, &shape, offset)?;
+    Tensor::from_numeric_storage(storage, shape)
+        .map_err(|e| tril_error_with_message(format!("tril: {e}"), &TRIL_ERROR_INTERNAL))
+}
+
+fn map_tril_storage(
+    storage: NumericStorage,
+    shape: &[usize],
+    offset: isize,
+) -> crate::BuiltinResult<NumericStorage> {
+    macro_rules! apply {
+        ($values:expr, $variant:ident) => {
+            NumericStorage::$variant(apply_tril_values($values, shape, offset)?)
+        };
     }
-    apply_tril_inplace(&mut tensor.data, &tensor.shape, offset, 0.0)?;
-    Ok(tensor)
+    Ok(match storage {
+        NumericStorage::F64(values) => apply!(values, F64),
+        NumericStorage::F32(values) => apply!(values, F32),
+        NumericStorage::I8(values) => apply!(values, I8),
+        NumericStorage::I16(values) => apply!(values, I16),
+        NumericStorage::I32(values) => apply!(values, I32),
+        NumericStorage::I64(values) => apply!(values, I64),
+        NumericStorage::U8(values) => apply!(values, U8),
+        NumericStorage::U16(values) => apply!(values, U16),
+        NumericStorage::U32(values) => apply!(values, U32),
+        NumericStorage::U64(values) => apply!(values, U64),
+    })
+}
+
+fn apply_tril_values<T: Clone + Default>(
+    mut values: Vec<T>,
+    shape: &[usize],
+    offset: isize,
+) -> crate::BuiltinResult<Vec<T>> {
+    apply_tril_inplace(&mut values, shape, offset, T::default())?;
+    Ok(values)
 }
 
 fn tril_logical_array(
@@ -533,6 +558,19 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn tril_preserves_native_single_storage() {
+        let tensor = Tensor::from_f32(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).unwrap();
+        let Value::Tensor(result) = tril_builtin(Value::Tensor(tensor), Vec::new()).expect("tril")
+        else {
+            panic!("expected tensor result");
+        };
+        assert_eq!(
+            result.into_numeric_storage().expect("single storage"),
+            NumericStorage::F32(vec![1.0, 4.0, 0.0, 5.0])
+        );
     }
 
     #[test]
