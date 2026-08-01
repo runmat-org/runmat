@@ -5,7 +5,8 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
+    CellArray, CharArray, ComplexTensor, LogicalArray, NumericDType, NumericScalar, StringArray,
+    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -216,29 +217,34 @@ fn floats_equal(a: f64, b: f64, nan_equal: bool) -> bool {
 }
 
 fn tensors_equal(a: &Tensor, b: &Tensor, nan_equal: bool) -> bool {
-    if a.dtype != b.dtype || a.shape != b.shape {
+    if a.numeric_dtype() != b.numeric_dtype() || a.shape != b.shape || a.len() != b.len() {
         return false;
     }
-    if a.data.len() != b.data.len() {
-        return false;
-    }
-    match (a.integer_storage(), b.integer_storage()) {
-        (Some(a), Some(b)) => return a == b,
-        (Some(_), None) | (None, Some(_)) => return false,
-        (None, None) => {}
-    }
-    // NaN != NaN in isequal (use isequaln for NaN equality)
-    a.data
-        .iter()
-        .zip(b.data.iter())
-        .all(|(x, y)| floats_equal(*x, *y, nan_equal))
+    (0..a.len()).all(|index| {
+        let lhs = a.numeric_value_at(index).expect("validated tensor index");
+        let rhs = b.numeric_value_at(index).expect("validated tensor index");
+        numeric_scalars_equal(lhs, rhs, nan_equal)
+    })
 }
 
 fn scalar_tensor_equal(t: &Tensor, n: f64, nan_equal: bool) -> bool {
-    if t.dtype != runmat_builtins::NumericDType::F64 || t.data.len() != 1 {
+    if t.numeric_dtype() != NumericDType::F64 || t.len() != 1 {
         return false;
     }
-    floats_equal(t.data[0], n, nan_equal)
+    matches!(
+        t.numeric_value_at(0),
+        Some(NumericScalar::F64(value)) if floats_equal(value, n, nan_equal)
+    )
+}
+
+fn numeric_scalars_equal(a: NumericScalar, b: NumericScalar, nan_equal: bool) -> bool {
+    match (a, b) {
+        (NumericScalar::F64(a), NumericScalar::F64(b)) => floats_equal(a, b, nan_equal),
+        (NumericScalar::F32(a), NumericScalar::F32(b)) => {
+            a == b || (nan_equal && a.is_nan() && b.is_nan())
+        }
+        (a, b) => a == b,
+    }
 }
 
 fn complex_tensors_equal(a: &ComplexTensor, b: &ComplexTensor, nan_equal: bool) -> bool {
@@ -479,6 +485,25 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[test]
+    fn isequal_and_isequaln_compare_single_storage_without_widening_class() {
+        let left = Tensor::from_f32(vec![0.1, f32::NAN], vec![1, 2]).unwrap();
+        let right = Tensor::from_f32(vec![0.1, f32::NAN], vec![1, 2]).unwrap();
+
+        assert_eq!(
+            run_isequal(vec![
+                Value::Tensor(left.clone()),
+                Value::Tensor(right.clone())
+            ])
+            .expect("isequal"),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            run_isequaln(vec![Value::Tensor(left), Value::Tensor(right)]).expect("isequaln"),
+            Value::Bool(true)
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isequal_strings() {
@@ -532,21 +557,24 @@ pub(crate) mod tests {
 
     #[test]
     fn isequal_integer_tensor_values_are_compared_exactly() {
-        let same_left = Tensor::new_integer(
+        let mut same_left = Tensor::new_integer(
             IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
             vec![1, 2],
         )
         .expect("left integer tensor");
-        let same_right = Tensor::new_integer(
+        let mut same_right = Tensor::new_integer(
             IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
             vec![1, 2],
         )
         .expect("right integer tensor");
-        let different = Tensor::new_integer(
+        let mut different = Tensor::new_integer(
             IntegerStorage::U64(vec![(1_u64 << 53), u64::MAX]),
             vec![1, 2],
         )
         .expect("different integer tensor");
+        same_left.data.fill(f64::NAN);
+        same_right.data.clear();
+        different.data.fill(0.0);
 
         assert_eq!(
             run_isequal(vec![Value::Tensor(same_left), Value::Tensor(same_right)])
