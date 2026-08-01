@@ -445,17 +445,14 @@ async fn build_chart(
             "histogram2: cannot convert YBinEdges tensor: {err}"
         ))
     })?;
-    let values = apply_normalization_2d(
-        &raw_counts,
-        &x_edges.data,
-        &y_edges.data,
-        &options.normalization,
-    )?;
+    let x_edges = tensor::tensor_into_values_f64(x_edges);
+    let y_edges = tensor::tensor_into_values_f64(y_edges);
+    let values = apply_normalization_2d(&raw_counts, &x_edges, &y_edges, &options.normalization)?;
 
     let surface = build_surface_from_values(
         &values,
-        &x_edges.data,
-        &y_edges.data,
+        &x_edges,
+        &y_edges,
         options.display_style,
         options.show_empty_bins,
         options.face_alpha,
@@ -465,8 +462,8 @@ async fn build_chart(
     Ok(Histogram2Chart {
         values,
         raw_counts,
-        x_bin_edges: x_edges.data,
-        y_bin_edges: y_edges.data,
+        x_bin_edges: x_edges,
+        y_bin_edges: y_edges,
         surface,
     })
 }
@@ -600,12 +597,14 @@ pub(crate) fn apply_normalization_2d(
     validate_normalization(norm)?;
     let x_bins = x_edges.len().saturating_sub(1);
     let y_bins = y_edges.len().saturating_sub(1);
-    let counts = &raw_counts.data;
+    let counts = raw_counts
+        .as_f64_slice()
+        .ok_or_else(|| internal("histogram2: raw bin counts must be double"))?;
     let total: f64 = counts.iter().sum();
     let x_widths: Vec<f64> = x_edges.windows(2).map(|pair| pair[1] - pair[0]).collect();
     let y_widths: Vec<f64> = y_edges.windows(2).map(|pair| pair[1] - pair[0]).collect();
     let values = match norm {
-        "count" => counts.clone(),
+        "count" => counts.to_vec(),
         "probability" => {
             if total > 0.0 {
                 counts.iter().map(|&c| c / total).collect()
@@ -783,20 +782,21 @@ mod tests {
     }
 
     fn int_matrix(values: Vec<i16>, rows: usize, cols: usize) -> Tensor {
-        let mut tensor = Tensor::new_integer(
+        Tensor::new_integer(
             runmat_builtins::IntegerStorage::I16(values),
             vec![rows, cols],
         )
-        .expect("integer matrix");
-        tensor.data.clear();
-        tensor
+        .expect("integer matrix")
+    }
+
+    fn double_values(tensor: &Tensor) -> &[f64] {
+        tensor.as_f64_slice().expect("expected double tensor")
     }
 
     #[test]
     fn histogram2_option_scalar_reads_typed_integer_storage_exactly() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
-        tensor.data.clear();
 
         assert_eq!(
             option_scalar(&Value::Tensor(tensor), "FaceAlpha").unwrap(),
@@ -805,7 +805,7 @@ mod tests {
     }
 
     #[test]
-    fn histogram2_boolean_option_reads_all_integer_storage_classes_with_poisoned_f64_mirrors() {
+    fn histogram2_boolean_option_reads_all_integer_storage_classes_exactly() {
         let storages = [
             runmat_builtins::IntegerStorage::I8(vec![1]),
             runmat_builtins::IntegerStorage::I16(vec![1]),
@@ -818,8 +818,7 @@ mod tests {
         ];
 
         for storage in storages {
-            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("logical");
-            tensor.data = vec![f64::NAN];
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("logical");
             assert!(option_bool(&Value::Tensor(tensor), "ShowEmptyBins").expect("logical"));
         }
     }
@@ -862,7 +861,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(values.shape, vec![2, 2]);
-        assert_eq!(values.data, vec![2.0, 0.0, 0.0, 2.0]);
+        assert_eq!(double_values(&values), &[2.0, 0.0, 0.0, 2.0]);
 
         let figure = clone_figure(current_figure_handle()).unwrap();
         let plot = figure.plots().next().unwrap();
@@ -903,7 +902,7 @@ mod tests {
             &get_builtin(vec![Value::Num(handle), Value::String("Values".into())]).unwrap(),
         )
         .unwrap();
-        assert_eq!(values.data, vec![0.5, 0.0, 0.0, 0.5]);
+        assert_eq!(double_values(&values), &[0.5, 0.0, 0.0, 0.5]);
         assert!(matches!(
             get_builtin(vec![Value::Num(handle), Value::String("DisplayStyle".into())]).unwrap(),
             Value::String(style) if style == "tile"
@@ -945,7 +944,7 @@ mod tests {
             &get_builtin(vec![Value::Num(handle), Value::String("Values".into())]).unwrap(),
         )
         .unwrap();
-        assert_eq!(values.data, vec![0.5, 0.5, 0.5, 1.0]);
+        assert_eq!(double_values(&values), &[0.5, 0.5, 0.5, 1.0]);
         let figure = clone_figure(current_figure_handle()).unwrap();
         let PlotElement::Surface(surface) = figure.plots().next().unwrap() else {
             panic!("expected surface plot");
