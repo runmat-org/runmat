@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ClassDef, MethodDef, NumericDType, ObjectInstance, PropertyDef, Tensor, Value,
+    ClassDef, MethodDef, ObjectInstance, PropertyDef, Tensor, Value,
 };
 use runmat_geometry_ops::{boundary_edges, delaunay_2d, nearest_neighbor_indices, point_locations};
 use runmat_macros::runtime_builtin;
@@ -630,9 +630,9 @@ fn triangles_tensor(triangles: &[[usize; 3]]) -> BuiltinResult<Value> {
             data.push(tri[col] as f64 + 1.0);
         }
     }
-    let mut tensor = Tensor::new_2d(data, triangles.len(), 3).map_err(invalid)?;
-    tensor.dtype = NumericDType::F64;
-    Ok(Value::Tensor(tensor))
+    Tensor::new_2d(data, triangles.len(), 3)
+        .map(Value::Tensor)
+        .map_err(invalid)
 }
 
 fn constraints_tensor(constraints: &[[usize; 2]]) -> BuiltinResult<Value> {
@@ -695,14 +695,7 @@ mod tests {
     use runmat_builtins::IntegerStorage;
 
     fn tensor(data: &[f64], rows: usize, cols: usize) -> Value {
-        Value::Tensor(Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            rows,
-            cols,
-            shape: vec![rows, cols],
-            dtype: NumericDType::F64,
-        })
+        Value::Tensor(Tensor::new_2d(data.to_vec(), rows, cols).expect("test tensor"))
     }
 
     fn poisoned_integer_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
