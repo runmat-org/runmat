@@ -54,6 +54,7 @@ impl RunMatSession {
                 ),
             ),
             dynamic_function_cache: Arc::new(Mutex::new(HashMap::new())),
+            project_handoff: None,
             source_pool: SourcePool::default(),
             interrupt_flag: Arc::new(AtomicBool::new(false)),
             is_executing: false,

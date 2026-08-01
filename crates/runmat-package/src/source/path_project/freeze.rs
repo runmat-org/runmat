@@ -8,14 +8,13 @@ use crate::{
 };
 use runmat_config::project::ProjectSourceFile;
 use semver::{Version, VersionReq};
-use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 use crate::source::{
-    FrozenProject, FrozenSourceDescriptor, PackageMount, PackageSourceCatalog, SourceCatalog,
-    StableSourceId,
+    catalog::compute_source_revision, FrozenProject, FrozenSourceDescriptor, PackageMount,
+    PackageSourceCatalog, SourceCatalog, StableSourceId,
 };
 
 #[derive(Debug, Error)]
@@ -161,7 +160,8 @@ fn build_catalog(
             },
         );
     }
-    let revision = source_revision(&graph.graph_digest, &packages)?;
+    let revision = compute_source_revision(&graph.graph_digest, &packages)
+        .map_err(|error| PathProjectError::Revision(error.to_string()))?;
     Ok(FrozenProject {
         manifest_path: project.root_manifest,
         workspace_root: project.workspace_root,
@@ -271,25 +271,6 @@ fn logical_mount_root(
             reason: error.to_string(),
         }
     })
-}
-
-fn source_revision(
-    graph_digest: &ContentDigest,
-    packages: &BTreeMap<ContentDigest, PackageSourceCatalog>,
-) -> Result<ContentDigest, PathProjectError> {
-    #[derive(Serialize)]
-    struct Input<'a> {
-        format: &'static str,
-        graph_digest: &'a ContentDigest,
-        packages: &'a BTreeMap<ContentDigest, PackageSourceCatalog>,
-    }
-    serde_json::to_vec(&Input {
-        format: "runmat-source-catalog-v1",
-        graph_digest,
-        packages,
-    })
-    .map(ContentDigest::sha256)
-    .map_err(|error| PathProjectError::Revision(error.to_string()))
 }
 
 fn validate_path_versions(project: &LoadedPathProject) -> Result<(), PathProjectError> {

@@ -6098,6 +6098,7 @@ dependencies = [
  "runmat-geometry-io",
  "runmat-hir",
  "runmat-logging",
+ "runmat-package",
  "runmat-plot",
  "runmat-runtime",
  "runmat-telemetry",

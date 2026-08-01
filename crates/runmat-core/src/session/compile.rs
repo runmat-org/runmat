@@ -496,6 +496,13 @@ pub(super) async fn discover_project_compilation_context_async(
     )
     .await
     .map_err(|error| error.to_string())?;
+    let frozen = if let Some(frozen) = frozen {
+        let handoff = runmat_package::FrozenProjectHandoff::new(frozen);
+        handoff.validate().map_err(|error| error.to_string())?;
+        Some(handoff.into_project())
+    } else {
+        None
+    };
     let (loose_index, source_catalog) = if let Some(frozen) = frozen.as_ref() {
         (
             None,
@@ -519,6 +526,28 @@ pub(super) async fn discover_project_compilation_context_async(
         loose_index,
         source_catalog,
     }))
+}
+
+pub(super) fn project_compilation_context_from_handoff(
+    source_name: &str,
+    handoff: &runmat_package::FrozenProjectHandoff,
+) -> Result<ProjectCompilationContext, String> {
+    handoff.validate().map_err(|error| error.to_string())?;
+    let cwd = source_lookup_cwd(source_name)
+        .ok_or_else(|| format!("cannot resolve project requester `{source_name}`"))?;
+    let primary_source_path = resolved_source_path(source_name, &cwd);
+    let frozen = handoff.project.clone();
+    let source_catalog = Some(runmat_package::source_symbols_from_frozen(
+        &frozen,
+        &primary_source_path,
+    ));
+    Ok(ProjectCompilationContext {
+        cwd,
+        primary_source_path,
+        frozen: Some(frozen),
+        loose_index: None,
+        source_catalog,
+    })
 }
 
 async fn compose_frozen_project_async(
@@ -720,6 +749,15 @@ pub(super) async fn discover_companion_source_statements_async(
     compose_project_compilation_context_async(&context, compat_mode).await
 }
 
+pub(super) async fn companion_source_statements_from_handoff_async(
+    source_name: &str,
+    compat_mode: runmat_parser::CompatMode,
+    handoff: &runmat_package::FrozenProjectHandoff,
+) -> Result<CompanionSourceDiscovery, String> {
+    let context = project_compilation_context_from_handoff(source_name, handoff)?;
+    compose_project_compilation_context_async(&context, compat_mode).await
+}
+
 impl RunMatSession {
     #[cfg(test)]
     pub(crate) fn compile_input_for_source_name(
@@ -731,19 +769,27 @@ impl RunMatSession {
         let previous_source_fullpath_name = self.active_source_fullpath_name.clone();
         self.active_source_name = source_name.to_string();
         self.active_source_fullpath_name = None;
-        self.pending_companion_source_discovery = Some(
-            futures::executor::block_on(discover_companion_source_statements_async(
-                source_name,
-                self.compat_mode,
-            ))
-            .map_err(|error| {
-                RunError::Runtime(
-                    build_runtime_error(format!("project composition failed: {error}"))
-                        .with_identifier("RunMat:ProjectComposition")
-                        .build(),
+        let handoff = self.project_handoff.clone();
+        let companion = futures::executor::block_on(async {
+            if let Some(handoff) = handoff.as_ref() {
+                companion_source_statements_from_handoff_async(
+                    source_name,
+                    self.compat_mode,
+                    handoff,
                 )
-            })?,
-        );
+                .await
+            } else {
+                discover_companion_source_statements_async(source_name, self.compat_mode).await
+            }
+        })
+        .map_err(|error| {
+            RunError::Runtime(
+                build_runtime_error(format!("project composition failed: {error}"))
+                    .with_identifier("RunMat:ProjectComposition")
+                    .build(),
+            )
+        })?;
+        self.pending_companion_source_discovery = Some(companion);
         let result = self.compile_input(input);
         self.active_source_name = previous_source_name;
         self.active_source_fullpath_name = previous_source_fullpath_name;
@@ -858,6 +904,10 @@ impl RunMatSession {
                     .expect("canonical frontend returned no bytecode without an error"),
             )
         };
+        let project_cache_namespace = source_catalog
+            .as_ref()
+            .and_then(runmat_package::DiscoveredSourceSymbols::project_revision)
+            .map(|revision| revision.cache_namespace());
         bytecode.source_id = Some(source_id);
         for function in bytecode.function_registry.functions.values_mut() {
             function.source_id = companion_function_source_ids
@@ -876,6 +926,7 @@ impl RunMatSession {
             lowering,
             analysis,
             bytecode,
+            project_cache_namespace,
             function_registry_after_success,
             next_semantic_function_id_after_success,
         })

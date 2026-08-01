@@ -1,4 +1,14 @@
+#[cfg(target_arch = "wasm32")]
+use runmat_thread_local::runmat_thread_local;
+#[cfg(target_arch = "wasm32")]
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+
+#[cfg(target_arch = "wasm32")]
+runmat_thread_local! {
+    static INSTALLED_HANDOFF: RefCell<Option<runmat_package::FrozenProjectHandoff>> =
+        const { RefCell::new(None) };
+}
 
 #[derive(Clone, Debug)]
 pub struct ProjectContext {
@@ -21,6 +31,11 @@ impl ProjectContext {
 
     pub async fn discover_from_source_name_async(source_name: Option<&str>) -> Option<Self> {
         let requester = source_name.map(PathBuf::from);
+        #[cfg(target_arch = "wasm32")]
+        if let Some(handoff) = INSTALLED_HANDOFF.with(|slot| slot.borrow().clone()) {
+            let requester_path = requester.as_deref().unwrap_or(Path::new("/"));
+            return Self::from_handoff(handoff, requester_path).ok();
+        }
         let start = match requester.as_ref() {
             Some(path) if path.is_absolute() => {
                 if is_file_async(path).await {
@@ -34,9 +49,9 @@ impl ProjectContext {
         let frozen = runmat_package::discover_frozen_project_from_async(&start, Default::default())
             .await
             .ok()?;
-        frozen.map(|frozen| {
+        frozen.and_then(|frozen| {
             let requester = requester.as_deref().unwrap_or(&start);
-            Self::from_frozen(frozen, requester)
+            Self::from_handoff(runmat_package::FrozenProjectHandoff::new(frozen), requester).ok()
         })
     }
 
@@ -54,6 +69,33 @@ impl ProjectContext {
 
     pub fn source_revision(&self) -> &runmat_package::ContentDigest {
         self.frozen.source_revision()
+    }
+
+    pub fn from_handoff(
+        handoff: runmat_package::FrozenProjectHandoff,
+        requester: &Path,
+    ) -> Result<Self, runmat_package::FrozenProjectHandoffError> {
+        handoff.validate()?;
+        Ok(Self::from_frozen(handoff.into_project(), requester))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn install_handoff(
+        handoff: runmat_package::FrozenProjectHandoff,
+    ) -> Result<runmat_package::ProjectRevision, runmat_package::FrozenProjectHandoffError> {
+        handoff.validate()?;
+        let revision = handoff.revision();
+        INSTALLED_HANDOFF.with(|slot| {
+            slot.replace(Some(handoff));
+        });
+        Ok(revision)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn clear_installed_handoff() {
+        INSTALLED_HANDOFF.with(|slot| {
+            slot.replace(None);
+        });
     }
 
     pub fn definition_lookup_names<'a>(

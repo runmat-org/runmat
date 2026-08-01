@@ -48,6 +48,7 @@ use crate::{
 mod compile;
 mod config;
 mod init;
+mod project;
 mod run;
 mod workspace;
 
@@ -77,6 +78,8 @@ pub struct RunMatSession {
     search_path: Arc<runmat_runtime::builtins::common::path_state::SearchPath>,
     /// Canonically compiled functions discovered through the runtime search path.
     dynamic_function_cache: Arc<Mutex<HashMap<PathBuf, DynamicFunctionCacheEntry>>>,
+    /// Optional host-frozen project snapshot used by every compilation in this session.
+    project_handoff: Option<runmat_package::FrozenProjectHandoff>,
     /// Interned source pool for user-defined functions
     source_pool: SourcePool,
     /// Cooperative cancellation flag shared with the runtime.
@@ -117,6 +120,7 @@ pub(crate) struct PreparedExecution {
     lowering: LoweringResult,
     analysis: runmat_mir::analysis::AnalysisStore,
     pub(crate) bytecode: runmat_vm::Bytecode,
+    project_cache_namespace: Option<String>,
     function_registry_after_success: runmat_vm::FunctionRegistry,
     next_semantic_function_id_after_success: usize,
 }

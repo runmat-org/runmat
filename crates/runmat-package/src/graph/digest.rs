@@ -3,7 +3,7 @@ use crate::{ContentDigest, GraphError};
 use serde::Serialize;
 use std::collections::BTreeMap;
 
-pub(super) fn compute_graph_digest(
+pub(crate) fn compute_graph_digest(
     root: &ContentDigest,
     packages: &BTreeMap<ContentDigest, GraphPackage>,
     edges: &[GraphEdge],

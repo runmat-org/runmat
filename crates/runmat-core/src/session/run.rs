@@ -59,6 +59,7 @@ async fn load_dynamic_function(
     compat: CompatMode,
     top_level_await_enabled: bool,
     cache: Arc<Mutex<HashMap<std::path::PathBuf, DynamicFunctionCacheEntry>>>,
+    project_handoff: Option<runmat_package::FrozenProjectHandoff>,
 ) -> Option<Result<Value, RuntimeError>> {
     let resolve_span = info_span!(
         "runtime.callable.resolve",
@@ -99,17 +100,23 @@ async fn load_dynamic_function(
                         .build()
                     })?;
             let path_name = path.to_string_lossy();
-            let project_context =
-                super::compile::discover_project_compilation_context_async(path_name.as_ref())
-                    .await
-                    .map_err(|error| {
-                        build_runtime_error(format!(
-                            "Could not construct project context for '{}': {error}",
-                            path.display()
-                        ))
-                        .with_identifier("RunMat:ProjectComposition")
-                        .build()
-                    })?;
+            let project_context = if let Some(handoff) = project_handoff.as_ref() {
+                Some(super::compile::project_compilation_context_from_handoff(
+                    path_name.as_ref(),
+                    handoff,
+                ))
+                .transpose()
+            } else {
+                super::compile::discover_project_compilation_context_async(path_name.as_ref()).await
+            }
+            .map_err(|error| {
+                build_runtime_error(format!(
+                    "Could not construct project context for '{}': {error}",
+                    path.display()
+                ))
+                .with_identifier("RunMat:ProjectComposition")
+                .build()
+            })?;
             let source_catalog = project_context
                 .as_ref()
                 .and_then(|context| context.source_catalog.clone());
@@ -287,9 +294,11 @@ impl RunMatSession {
         let dynamic_function_cache = Arc::clone(&self.dynamic_function_cache);
         let dynamic_function_compat = self.compat_mode;
         let dynamic_function_top_level_await = self.top_level_await_enabled;
+        let dynamic_project_handoff = self.project_handoff.clone();
         let loader: Arc<runmat_runtime::user_functions::DynamicFunctionLoader> =
             Arc::new(move |name, args, requested_outputs| {
                 let cache = Arc::clone(&dynamic_function_cache);
+                let project_handoff = dynamic_project_handoff.clone();
                 Box::pin(load_dynamic_function(
                     name,
                     args,
@@ -297,6 +306,7 @@ impl RunMatSession {
                     dynamic_function_compat,
                     dynamic_function_top_level_await,
                     cache,
+                    project_handoff,
                 ))
             });
         let runtime_context = Arc::new(
@@ -308,11 +318,20 @@ impl RunMatSession {
         let source_lookup_name = self
             .current_source_fullpath_name()
             .unwrap_or_else(|| self.current_source_name());
-        let companion = super::compile::discover_companion_source_statements_async(
-            source_lookup_name,
-            self.compat_mode,
-        )
-        .await
+        let companion = if let Some(handoff) = self.project_handoff.as_ref() {
+            super::compile::companion_source_statements_from_handoff_async(
+                source_lookup_name,
+                self.compat_mode,
+                handoff,
+            )
+            .await
+        } else {
+            super::compile::discover_companion_source_statements_async(
+                source_lookup_name,
+                self.compat_mode,
+            )
+            .await
+        }
         .map_err(|error| {
             RunError::Runtime(
                 build_runtime_error(format!("project composition failed: {error}"))
@@ -660,6 +679,7 @@ impl RunMatSession {
             lowering,
             analysis,
             mut bytecode,
+            project_cache_namespace,
             function_registry_after_success,
             next_semantic_function_id_after_success,
         } = self.compile_input(input)?;
@@ -683,6 +703,8 @@ impl RunMatSession {
             runmat_runtime::source_context::replace_current_source_id(bytecode.source_id);
         #[cfg(target_arch = "wasm32")]
         let _ = &analysis;
+        #[cfg(not(feature = "jit"))]
+        let _ = &project_cache_namespace;
         if self.verbose {
             debug!("AST: {ast:?}");
         }
@@ -850,7 +872,11 @@ impl RunMatSession {
                     }
 
                     // Use JIT for assignments
-                    match jit_engine.execute_or_compile(&bytecode, &mut self.variable_array) {
+                    match jit_engine.execute_or_compile_with_cache_namespace(
+                        &bytecode,
+                        &mut self.variable_array,
+                        project_cache_namespace.as_deref(),
+                    ) {
                         Ok((_, actual_used_jit)) => {
                             used_jit = actual_used_jit;
                             execution_completed = true;

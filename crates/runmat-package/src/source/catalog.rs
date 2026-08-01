@@ -3,7 +3,27 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+pub(crate) fn compute_source_revision(
+    graph_digest: &ContentDigest,
+    packages: &BTreeMap<ContentDigest, PackageSourceCatalog>,
+) -> Result<ContentDigest, serde_json::Error> {
+    #[derive(Serialize)]
+    struct Input<'a> {
+        format: &'static str,
+        graph_digest: &'a ContentDigest,
+        packages: &'a BTreeMap<ContentDigest, PackageSourceCatalog>,
+    }
+
+    serde_json::to_vec(&Input {
+        format: "runmat-source-catalog-v1",
+        graph_digest,
+        packages,
+    })
+    .map(ContentDigest::sha256)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StableSourceId {
     pub package_instance: ContentDigest,
     pub relative_path: NormalizedRelativePath,
@@ -11,6 +31,7 @@ pub struct StableSourceId {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FrozenSourceDescriptor {
     pub id: StableSourceId,
     pub qualified_name: String,
@@ -43,6 +64,7 @@ impl FrozenSourceDescriptor {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PackageMount {
     pub package_instance: ContentDigest,
     pub source: SourceId,
@@ -50,6 +72,7 @@ pub struct PackageMount {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PackageSourceCatalog {
     pub package_instance: ContentDigest,
     pub local_name: String,
@@ -58,24 +81,72 @@ pub struct PackageSourceCatalog {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SourceCatalog {
     pub packages: BTreeMap<ContentDigest, PackageSourceCatalog>,
     pub revision: ContentDigest,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProjectRevision {
     pub graph_digest: ContentDigest,
     pub source_revision: ContentDigest,
 }
 
+impl ProjectRevision {
+    /// Stable namespace for compiler and executable caches derived from this project.
+    pub fn cache_namespace(&self) -> String {
+        format!(
+            "runmat-project-v1\0{}\0{}",
+            self.graph_digest, self.source_revision
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FrozenProject {
     pub manifest_path: PathBuf,
     pub workspace_root: PathBuf,
     pub graph: PackageGraph,
     pub sources: SourceCatalog,
+    #[serde(with = "stable_source_path_map")]
     pub access_paths: BTreeMap<StableSourceId, PathBuf>,
+}
+
+mod stable_source_path_map {
+    use super::StableSourceId;
+    use serde::{de::Error as _, Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
+
+    pub fn serialize<S>(
+        paths: &BTreeMap<StableSourceId, PathBuf>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        paths.iter().collect::<Vec<_>>().serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(
+        deserializer: D,
+    ) -> Result<BTreeMap<StableSourceId, PathBuf>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let entries = Vec::<(StableSourceId, PathBuf)>::deserialize(deserializer)?;
+        let expected_len = entries.len();
+        let paths = entries.into_iter().collect::<BTreeMap<_, _>>();
+        if paths.len() != expected_len {
+            return Err(D::Error::custom(
+                "frozen-project access paths contain duplicate source identities",
+            ));
+        }
+        Ok(paths)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

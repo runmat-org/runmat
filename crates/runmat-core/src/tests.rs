@@ -7888,6 +7888,64 @@ right = { path = "deps/right" }
 }
 
 #[test]
+fn installed_project_handoff_is_the_execution_authority() {
+    let _guard = cwd_lock();
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "handoff-demo"
+
+[sources]
+roots = ["."]
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        tmp.path().join("helper.m"),
+        "function y = helper(x); y = x + 1; end",
+    )
+    .expect("write helper");
+    std::fs::write(tmp.path().join("main.m"), "r = helper(41);").expect("write main");
+
+    let frozen = runmat_package::discover_frozen_project_from(
+        &tmp.path().join("main.m"),
+        Default::default(),
+    )
+    .expect("freeze project")
+    .expect("project exists");
+    let handoff = runmat_package::FrozenProjectHandoff::new(frozen);
+    let expected_revision = handoff.revision();
+
+    // A broken manifest proves compilation consumes the installed snapshot
+    // instead of rediscovering the graph at execution time.
+    std::fs::write(tmp.path().join("runmat.toml"), "not valid toml = [")
+        .expect("invalidate manifest after freeze");
+
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    assert_eq!(
+        session
+            .install_project_handoff(handoff)
+            .expect("install handoff"),
+        expected_revision
+    );
+    assert_eq!(session.project_revision(), Some(expected_revision.clone()));
+
+    let _cwd = push_cwd(tmp.path());
+    let outcome = execute_path_request(&mut session, "main.m").expect("execute frozen project");
+    assert!(
+        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(42.0)),
+        "installed handoff should supply companion functions; upserts={:?}, diagnostics={:?}",
+        outcome.workspace_delta.upserts,
+        outcome.diagnostics
+    );
+
+    session.clear_project_handoff();
+    assert_eq!(session.project_revision(), None);
+}
+
+#[test]
 fn execute_path_request_resolves_package_private_function_for_active_package_source() {
     let _guard = cwd_lock();
     let tmp = tempfile::TempDir::new().expect("tempdir");

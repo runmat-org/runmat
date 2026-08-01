@@ -267,6 +267,7 @@ async fn check_m_file(
             "document_kind": "script",
             "outcome": outcome,
             "path": path,
+            "project_revision": analysis.project_revision,
             "analysis": analysis.domains,
             "resolution": analysis.resolution,
             "diagnostics": diagnostics,

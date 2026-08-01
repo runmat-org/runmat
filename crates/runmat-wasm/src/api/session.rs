@@ -1184,6 +1184,7 @@ impl RunMatWasm {
         web_sys::console::log_1(
             &format!("RunMat wasm: builtins registered ({builtin_count})").into(),
         );
+        let installed_handoff = self.session.borrow().project_handoff().cloned();
         let config = self.config.borrow();
         let consent = config.telemetry_consent;
         let mut session = RunMatSession::with_options(config.enable_jit, config.verbose)
@@ -1198,6 +1199,11 @@ impl RunMatWasm {
         session.set_compat_mode(config.language_compat);
         session.set_callstack_limit(config.callstack_limit);
         session.set_error_namespace(config.error_namespace.clone());
+        if let Some(handoff) = installed_handoff {
+            session
+                .install_project_handoff(handoff)
+                .map_err(|err| js_error(&format!("Failed to restore project handoff: {err}")))?;
+        }
         if self.telemetry_sink.is_some() {
             session.set_telemetry_platform_info(TelemetryPlatformInfo {
                 os: Some("web".to_string()),
@@ -1214,6 +1220,38 @@ impl RunMatWasm {
         runtime_reset_plot_state();
         runtime_invalidate_surface_revisions();
         Ok(())
+    }
+
+    #[wasm_bindgen(js_name = installProjectHandoff)]
+    pub fn install_project_handoff_js(&self, value: JsValue) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let handoff: runmat_package::FrozenProjectHandoff =
+            serde_wasm_bindgen::from_value(value)
+                .map_err(|err| js_error(&format!("Project handoff parse failed: {err}")))?;
+        let revision = self
+            .session
+            .borrow_mut()
+            .install_project_handoff(handoff)
+            .map_err(|err| js_error(&format!("Project handoff validation failed: {err}")))?;
+        serde_wasm_bindgen::to_value(&revision)
+            .map_err(|err| js_error(&format!("Project revision serialization failed: {err}")))
+    }
+
+    #[wasm_bindgen(js_name = clearProjectHandoff)]
+    pub fn clear_project_handoff_js(&self) -> Result<(), JsValue> {
+        self.ensure_not_disposed()?;
+        self.session.borrow_mut().clear_project_handoff();
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = projectRevision)]
+    pub fn project_revision_js(&self) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let Some(revision) = self.session.borrow().project_revision() else {
+            return Ok(JsValue::NULL);
+        };
+        serde_wasm_bindgen::to_value(&revision)
+            .map_err(|err| js_error(&format!("Project revision serialization failed: {err}")))
     }
 
     #[wasm_bindgen(js_name = cancelExecution)]

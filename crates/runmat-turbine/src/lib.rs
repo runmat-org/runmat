@@ -519,7 +519,10 @@ impl TurbineEngine {
     /// Compile bytecode to native machine code
     pub fn compile_bytecode(&mut self, bytecode: &Bytecode) -> Result<u64> {
         let hash = self.calculate_bytecode_hash(bytecode);
+        self.compile_bytecode_with_hash(bytecode, hash)
+    }
 
+    fn compile_bytecode_with_hash(&mut self, bytecode: &Bytecode, hash: u64) -> Result<u64> {
         if self.cache.contains(hash) {
             debug!("Function already compiled: {hash}");
             return Ok(hash);
@@ -667,7 +670,21 @@ impl TurbineEngine {
         bytecode: &Bytecode,
         vars: &mut Vec<Value>,
     ) -> Result<(i32, bool)> {
-        let hash = self.calculate_bytecode_hash(bytecode);
+        self.execute_or_compile_with_cache_namespace(bytecode, vars, None)
+    }
+
+    /// Execute or compile bytecode within an optional host-owned cache namespace.
+    ///
+    /// Project-aware callers use the frozen graph/source revision namespace so
+    /// otherwise identical instruction streams from different snapshots cannot
+    /// alias in the persistent JIT cache.
+    pub fn execute_or_compile_with_cache_namespace(
+        &mut self,
+        bytecode: &Bytecode,
+        vars: &mut Vec<Value>,
+        cache_namespace: Option<&str>,
+    ) -> Result<(i32, bool)> {
+        let hash = self.calculate_bytecode_hash_with_cache_namespace(bytecode, cache_namespace);
         let _span = info_span!(
             "turbine.execute_or_compile",
             hash = hash,
@@ -694,7 +711,7 @@ impl TurbineEngine {
 
         // Check if we should compile this function
         if self.should_compile(hash) {
-            match self.compile_bytecode(bytecode) {
+            match self.compile_bytecode_with_hash(bytecode, hash) {
                 Ok(_) => {
                     info!("Bytecode compiled successfully, executing JIT version");
                     match self.execute_compiled_with_function_products(
@@ -795,9 +812,19 @@ impl TurbineEngine {
 
     /// Calculate a hash for bytecode instructions
     pub fn calculate_bytecode_hash(&self, bytecode: &Bytecode) -> u64 {
+        self.calculate_bytecode_hash_with_cache_namespace(bytecode, None)
+    }
+
+    /// Calculate the executable cache key within an optional host namespace.
+    pub fn calculate_bytecode_hash_with_cache_namespace(
+        &self,
+        bytecode: &Bytecode,
+        cache_namespace: Option<&str>,
+    ) -> u64 {
         use std::collections::hash_map::DefaultHasher;
 
         let mut hasher = DefaultHasher::new();
+        cache_namespace.hash(&mut hasher);
 
         // Hash the instructions and variable count
         bytecode.var_count.hash(&mut hasher);

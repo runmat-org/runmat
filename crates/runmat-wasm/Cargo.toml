@@ -29,6 +29,7 @@ runmat-accelerate = { workspace = true }
 runmat-accelerate-api = { workspace = true }
 runmat-vm = { workspace = true }
 runmat-filesystem = { workspace = true }
+runmat-package = { workspace = true }
 runmat-thread-local = { workspace = true }
 glam = "0.24"
 serde = { workspace = true }

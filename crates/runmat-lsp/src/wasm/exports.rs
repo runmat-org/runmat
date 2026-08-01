@@ -7,6 +7,7 @@ use serde::Serialize;
 use serde_wasm_bindgen;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Once;
 use wasm_bindgen::prelude::*;
 
@@ -76,6 +77,66 @@ pub fn builtin_inventory_counts() -> JsValue {
     let consts = runmat_builtins::constants().len();
     let registered = runmat_builtins::wasm_registry::is_registered();
     serde_wasm_bindgen::to_value(&(funcs, docs, consts, registered)).unwrap_or(JsValue::NULL)
+}
+
+#[wasm_bindgen(js_name = "projectHandoff")]
+pub async fn project_handoff(source_path: String) -> Result<JsValue, JsValue> {
+    let frozen = runmat_package::discover_frozen_project_from_async(
+        Path::new(&source_path),
+        Default::default(),
+    )
+    .await
+    .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let Some(frozen) = frozen else {
+        return Ok(JsValue::NULL);
+    };
+    let handoff = runmat_package::FrozenProjectHandoff::new(frozen);
+    handoff
+        .validate()
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    to_js(&handoff)
+}
+
+#[wasm_bindgen(js_name = "projectRevision")]
+pub async fn project_revision(source_path: String) -> Result<JsValue, JsValue> {
+    let frozen = runmat_package::discover_frozen_project_from_async(
+        Path::new(&source_path),
+        Default::default(),
+    )
+    .await
+    .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let Some(frozen) = frozen else {
+        return Ok(JsValue::NULL);
+    };
+    let handoff = runmat_package::FrozenProjectHandoff::new(frozen);
+    handoff
+        .validate()
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    to_js(&handoff.revision())
+}
+
+#[wasm_bindgen(js_name = "validateProjectHandoff")]
+pub fn validate_project_handoff(value: JsValue) -> Result<JsValue, JsValue> {
+    let handoff: runmat_package::FrozenProjectHandoff = serde_wasm_bindgen::from_value(value)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    handoff
+        .validate()
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    to_js(&handoff.revision())
+}
+
+#[wasm_bindgen(js_name = "installProjectHandoff")]
+pub fn install_project_handoff(value: JsValue) -> Result<JsValue, JsValue> {
+    let handoff: runmat_package::FrozenProjectHandoff = serde_wasm_bindgen::from_value(value)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let revision = crate::core::project::ProjectContext::install_handoff(handoff)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    to_js(&revision)
+}
+
+#[wasm_bindgen(js_name = "clearProjectHandoff")]
+pub fn clear_project_handoff() {
+    crate::core::project::ProjectContext::clear_installed_handoff();
 }
 
 #[wasm_bindgen]

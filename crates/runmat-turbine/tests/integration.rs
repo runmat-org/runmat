@@ -205,6 +205,16 @@ fn test_bytecode_hash_consistency() {
             let hash2 = engine.calculate_bytecode_hash(&bytecode);
             assert_eq!(hash1, hash2);
 
+            let project_a =
+                engine.calculate_bytecode_hash_with_cache_namespace(&bytecode, Some("project-a"));
+            let project_a_again =
+                engine.calculate_bytecode_hash_with_cache_namespace(&bytecode, Some("project-a"));
+            let project_b =
+                engine.calculate_bytecode_hash_with_cache_namespace(&bytecode, Some("project-b"));
+            assert_eq!(project_a, project_a_again);
+            assert_ne!(hash1, project_a);
+            assert_ne!(project_a, project_b);
+
             // Different bytecode should produce different hash
             let source2 = "different = 88";
             let bytecode2 = compile_source(source2);

@@ -1,10 +1,14 @@
 mod catalog;
+mod handoff;
 mod path_project;
 mod symbols;
 
 pub use catalog::{
     FrozenProject, FrozenSourceDescriptor, PackageMount, PackageSourceCatalog, ProjectRevision,
     SourceCatalog, StableSourceId, VisibleProjectSource,
+};
+pub use handoff::{
+    FrozenProjectHandoff, FrozenProjectHandoffError, FROZEN_PROJECT_HANDOFF_SCHEMA_VERSION,
 };
 pub use path_project::{
     build_frozen_project, build_frozen_project_async, discover_frozen_project_from,

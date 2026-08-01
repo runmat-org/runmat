@@ -17,6 +17,7 @@ pub use api::plot::{
     wasm_render_figure_image, wasm_render_figure_image_with_camera_state,
     wasm_render_figure_image_with_textmark, wasm_select_figure, wasm_set_hold_mode,
 };
+pub use api::project::{project_handoff, project_revision, validate_project_handoff};
 // Stateful session wrapper.
 pub use api::session::RunMatWasm;
 // Log and trace streams.

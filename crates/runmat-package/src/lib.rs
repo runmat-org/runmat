@@ -41,7 +41,8 @@ pub use source::{
     discover_known_project_symbols_from_source_name_async,
     discover_source_symbols_from_source_name, discover_source_symbols_from_source_name_async,
     source_symbols_from_frozen, source_symbols_from_index, DiscoverSourceSymbolsError,
-    DiscoveredSourceSymbols, FrozenProject, FrozenProjectError, FrozenSourceDescriptor,
-    PackageMount, PackageSourceCatalog, ProjectRevision, ProjectSymbolDefinition, SourceCatalog,
-    StableSourceId, VisibleProjectSource,
+    DiscoveredSourceSymbols, FrozenProject, FrozenProjectError, FrozenProjectHandoff,
+    FrozenProjectHandoffError, FrozenSourceDescriptor, PackageMount, PackageSourceCatalog,
+    ProjectRevision, ProjectSymbolDefinition, SourceCatalog, StableSourceId, VisibleProjectSource,
+    FROZEN_PROJECT_HANDOFF_SCHEMA_VERSION,
 };

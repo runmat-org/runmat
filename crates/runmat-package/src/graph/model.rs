@@ -65,4 +65,50 @@ impl PackageGraph {
             .filter(|candidate| &candidate.instance.package == package)
             .collect()
     }
+
+    pub(crate) fn validate_digest(&self) -> Result<(), GraphError> {
+        if !self.packages.contains_key(&self.root) {
+            return Err(GraphError::Invalid(
+                "root package instance is missing".to_string(),
+            ));
+        }
+        for (identity, package) in &self.packages {
+            if identity != &package.instance.identity_digest {
+                return Err(GraphError::Invalid(format!(
+                    "package map key {identity} does not match its instance identity {}",
+                    package.instance.identity_digest
+                )));
+            }
+        }
+        for edge in &self.edges {
+            if !self.packages.contains_key(&edge.from) || !self.packages.contains_key(&edge.to) {
+                return Err(GraphError::Invalid(format!(
+                    "dependency edge `{}` references an absent package instance",
+                    edge.alias
+                )));
+            }
+        }
+        if self.edges.windows(2).any(|pair| pair[0] > pair[1]) {
+            return Err(GraphError::Invalid(
+                "dependency edges are not in canonical order".to_string(),
+            ));
+        }
+        let mut aliases = BTreeSet::new();
+        for edge in &self.edges {
+            if !aliases.insert((edge.from.clone(), edge.alias.clone())) {
+                return Err(GraphError::Invalid(format!(
+                    "package {} has duplicate dependency alias `{}`",
+                    edge.from, edge.alias
+                )));
+            }
+        }
+        let expected =
+            super::digest::compute_graph_digest(&self.root, &self.packages, &self.edges)?;
+        if expected != self.graph_digest {
+            return Err(GraphError::Invalid(
+                "package graph digest does not match its canonical contents".to_string(),
+            ));
+        }
+        Ok(())
+    }
 }
