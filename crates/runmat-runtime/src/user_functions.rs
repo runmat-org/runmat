@@ -8,8 +8,12 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 pub type UserFunctionFuture = Pin<Box<dyn Future<Output = Result<Value, RuntimeError>>>>;
+pub type DynamicFunctionLoadFuture =
+    Pin<Box<dyn Future<Output = Option<Result<Value, RuntimeError>>>>>;
 pub type FunctionInvoker = dyn Fn(usize, &[Value], usize) -> UserFunctionFuture + Send + Sync;
 pub type FunctionResolver = dyn Fn(&str) -> Option<usize> + Send + Sync;
+pub type DynamicFunctionLoader =
+    dyn Fn(String, Vec<Value>, usize) -> DynamicFunctionLoadFuture + Send + Sync;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceFunctionInfo {
@@ -56,6 +60,8 @@ runmat_thread_local! {
         const { RefCell::new(None) };
     static SEMANTIC_FUNCTION_RESOLVER: RefCell<Option<Arc<FunctionResolver>>> =
         const { RefCell::new(None) };
+    static ACTIVE_RUNTIME_CONTEXT: RefCell<Option<Arc<RuntimeContext>>> =
+        const { RefCell::new(None) };
     static SOURCE_FUNCTION_CATALOG: RefCell<Option<Arc<Vec<SourceFunctionInfo>>>> =
         const { RefCell::new(None) };
     static ACTIVE_SEMANTIC_FUNCTION_STACK: RefCell<Vec<usize>> =
@@ -68,6 +74,10 @@ pub struct FunctionInvokerGuard {
 
 pub struct FunctionResolverGuard {
     previous: Option<Arc<FunctionResolver>>,
+}
+
+pub struct RuntimeContextGuard {
+    previous: Option<Arc<RuntimeContext>>,
 }
 
 pub struct SourceFunctionCatalogGuard {
@@ -89,6 +99,15 @@ impl Drop for FunctionResolverGuard {
     fn drop(&mut self) {
         let previous = self.previous.take();
         SEMANTIC_FUNCTION_RESOLVER.with(|slot| {
+            *slot.borrow_mut() = previous;
+        });
+    }
+}
+
+impl Drop for RuntimeContextGuard {
+    fn drop(&mut self) {
+        let previous = self.previous.take();
+        ACTIVE_RUNTIME_CONTEXT.with(|slot| {
             *slot.borrow_mut() = previous;
         });
     }
@@ -125,6 +144,38 @@ pub fn install_semantic_function_resolver(
     let previous = SEMANTIC_FUNCTION_RESOLVER
         .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), resolver));
     FunctionResolverGuard { previous }
+}
+
+pub struct RuntimeContext {
+    search_path: Arc<crate::builtins::common::path_state::SearchPath>,
+    dynamic_function_loader: Option<Arc<DynamicFunctionLoader>>,
+}
+
+impl RuntimeContext {
+    pub fn new(search_path: Arc<crate::builtins::common::path_state::SearchPath>) -> Self {
+        Self {
+            search_path,
+            dynamic_function_loader: None,
+        }
+    }
+
+    pub fn with_dynamic_function_loader(mut self, loader: Arc<DynamicFunctionLoader>) -> Self {
+        self.dynamic_function_loader = Some(loader);
+        self
+    }
+
+    pub fn search_path(&self) -> &Arc<crate::builtins::common::path_state::SearchPath> {
+        &self.search_path
+    }
+}
+
+pub fn install_runtime_context(context: Arc<RuntimeContext>) -> RuntimeContextGuard {
+    let previous = ACTIVE_RUNTIME_CONTEXT.with(|slot| slot.borrow_mut().replace(context));
+    RuntimeContextGuard { previous }
+}
+
+pub fn active_runtime_context() -> Option<Arc<RuntimeContext>> {
+    ACTIVE_RUNTIME_CONTEXT.with(|slot| slot.borrow().clone())
 }
 
 pub fn install_source_function_catalog(
@@ -193,6 +244,15 @@ pub fn resolve_semantic_function_by_name(name: &str) -> Option<usize> {
     resolver(name)
 }
 
+pub async fn try_load_and_call_dynamic_function(
+    name: String,
+    args: Vec<Value>,
+    requested_outputs: usize,
+) -> Option<Result<Value, RuntimeError>> {
+    let loader = active_runtime_context()?.dynamic_function_loader.clone()?;
+    loader(name, args, requested_outputs).await
+}
+
 pub async fn try_call_semantic_descriptor(
     request: CallableRequest,
 ) -> Option<Result<Value, RuntimeError>> {
@@ -216,5 +276,17 @@ pub async fn try_call_semantic_descriptor(
         // not generic semantic name resolution.
         return None;
     }
-    try_call_semantic_function_by_name(&name, &args, requested_outputs).await
+    if let Some(result) = try_call_semantic_function_by_name(&name, &args, requested_outputs).await
+    {
+        return Some(result);
+    }
+    if matches!(
+        identity,
+        CallableIdentity::DynamicName(_)
+            | CallableIdentity::Imported(_)
+            | CallableIdentity::ExternalName(_)
+    ) {
+        return try_load_and_call_dynamic_function(name, args, requested_outputs).await;
+    }
+    None
 }

@@ -6,6 +6,8 @@ use runmat_server_client::auth::{
 use runmat_server_client::public_api;
 use uuid::Uuid;
 
+use crate::presentation;
+
 pub async fn list_projects(
     org: Option<Uuid>,
     limit: Option<u32>,
@@ -80,6 +82,10 @@ pub async fn select_project(project_id: Uuid) -> Result<()> {
     let mut config = RemoteConfig::load()?;
     config.project_id = Some(project_id);
     config.save()?;
-    println!("Default project set to {project_id}");
+    println!(
+        "{} {}",
+        presentation::stdout().success("Default project set to"),
+        presentation::stdout().identifier(project_id)
+    );
     Ok(())
 }

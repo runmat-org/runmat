@@ -5,6 +5,8 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use uuid::Uuid;
 
+use crate::presentation;
+
 pub async fn git_clone(
     server_url: &str,
     token: &str,
@@ -30,7 +32,11 @@ pub async fn git_clone(
         &["config", "runmat.project", &project_id.to_string()],
     )
     .ok();
-    println!("Cloned snapshots into {}", directory.display());
+    println!(
+        "{} {}",
+        presentation::stdout().success("Cloned snapshots into"),
+        presentation::stdout().path(directory.display())
+    );
     Ok(())
 }
 
@@ -44,7 +50,11 @@ pub async fn git_pull(
     run_git_with_input(directory, &["fast-import"], &stream)
         .context("Failed to import snapshot history")?;
     run_git(directory, &["checkout", "-f", "main"]).context("Failed to checkout")?;
-    println!("Pulled snapshots into {}", directory.display());
+    println!(
+        "{} {}",
+        presentation::stdout().success("Pulled snapshots into"),
+        presentation::stdout().path(directory.display())
+    );
     Ok(())
 }
 
@@ -90,7 +100,11 @@ pub async fn git_push(
         let text = response.text().await.unwrap_or_default();
         anyhow::bail!("Git push failed ({status}): {text}")
     }
-    println!("Pushed git history to project {project_id}");
+    println!(
+        "{} {}",
+        presentation::stdout().success("Pushed git history to project"),
+        presentation::stdout().identifier(project_id)
+    );
     Ok(())
 }
 

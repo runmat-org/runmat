@@ -5,12 +5,20 @@ pub fn format_log_record(
     record: &log::Record,
 ) -> std::io::Result<()> {
     let timestamp = buf.timestamp_nanos();
+    let styles = crate::presentation::stderr();
+    let level = match record.level() {
+        log::Level::Error => styles.error(record.level()),
+        log::Level::Warn => styles.warning(record.level()),
+        log::Level::Info => styles.info(record.level()),
+        log::Level::Debug => styles.identifier(record.level()),
+        log::Level::Trace => styles.muted(record.level()),
+    };
     writeln!(
         buf,
         "[{} {:>5} {}] {}",
-        timestamp,
-        record.level(),
-        record.target(),
+        styles.muted(timestamp),
+        level,
+        styles.muted(record.target()),
         record.args()
     )
 }

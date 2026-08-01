@@ -2,8 +2,13 @@ use anyhow::Result;
 use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_gc::gc_stats;
 
+use crate::presentation;
+
 pub fn show_version(detailed: bool) {
-    println!("RunMat v{}", env!("CARGO_PKG_VERSION"));
+    println!(
+        "{}",
+        presentation::stdout().brand(format!("RunMat v{}", env!("CARGO_PKG_VERSION")))
+    );
 
     if detailed {
         println!(
@@ -26,22 +31,25 @@ pub fn show_version(detailed: bool) {
 }
 
 pub async fn show_system_info(config: &RunMatRuntimeConfig) -> Result<()> {
-    println!("RunMat System Information");
-    println!("==========================");
+    let styles = presentation::stdout();
+    println!("{}", styles.brand("RunMat System Information"));
+    println!("{}", styles.muted("=========================="));
     println!();
 
-    println!("Version: {}", env!("CARGO_PKG_VERSION"));
+    println!("{} {}", styles.label("Version:"), env!("CARGO_PKG_VERSION"));
     println!(
-        "Rust Version: {}",
+        "{} {}",
+        styles.label("Rust Version:"),
         std::env::var("RUSTC_VERSION").unwrap_or_else(|_| "unknown".to_string())
     );
     println!(
-        "Target: {}",
+        "{} {}",
+        styles.label("Target:"),
         std::env::var("TARGET").unwrap_or_else(|_| "unknown".to_string())
     );
     println!();
 
-    println!("Runtime Configuration:");
+    println!("{}", styles.heading("Runtime Configuration:"));
     println!(
         "  JIT Compiler: {}",
         if config.jit.enabled {
@@ -70,7 +78,7 @@ pub async fn show_system_info(config: &RunMatRuntimeConfig) -> Result<()> {
     println!("  GC Statistics: {}", config.gc.collect_stats);
     println!();
 
-    println!("Environment:");
+    println!("{}", styles.heading("Environment:"));
     println!("  RUNMAT_CONFIG: {:?}", std::env::var("RUNMAT_CONFIG").ok());
     println!(
         "  RUNMAT_SERVER_URL: {:?}",
@@ -84,13 +92,16 @@ pub async fn show_system_info(config: &RunMatRuntimeConfig) -> Result<()> {
     println!();
 
     let gc_stats = gc_stats();
-    println!("Garbage Collector Status:");
+    println!("{}", styles.heading("Garbage Collector Status:"));
     println!("{}", gc_stats.summary_report());
     println!();
 
-    println!("Help:");
-    println!("  See 'runmat --help' for commands.");
-    println!("  See 'runmat <command> --help' for subcommand details.");
+    println!("{}", styles.heading("Help:"));
+    println!("  See '{}' for commands.", styles.help("runmat --help"));
+    println!(
+        "  See '{}' for subcommand details.",
+        styles.help("runmat <command> --help")
+    );
 
     Ok(())
 }

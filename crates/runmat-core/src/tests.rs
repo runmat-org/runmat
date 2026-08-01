@@ -10879,6 +10879,261 @@ fn addpath_command_syntax_resolves_scripts_on_search_path() {
 }
 
 #[test]
+fn addpath_makes_function_callable_in_same_execution() {
+    let _cwd_lock = cwd_lock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let functions = temp.path().join("functions");
+    std::fs::create_dir_all(&functions).expect("create functions dir");
+    std::fs::write(
+        functions.join("path_increment.m"),
+        "function y = path_increment(x)\n  y = x + 1;\nend\n",
+    )
+    .expect("write function");
+    let _cwd = push_cwd(temp.path());
+    let _path = push_path_state("");
+
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        "addpath('functions'); located = which('path_increment'); y = path_increment(41);",
+    )
+    .expect("path function call succeeds");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_builtins::Value::Num(42.0)
+    ));
+    let located = outcome_named_upsert_value(&outcome, "located")
+        .and_then(|value| match value {
+            runmat_builtins::Value::String(value) => Some(value.clone()),
+            runmat_builtins::Value::CharArray(value) => value.row_string(),
+            _ => None,
+        })
+        .expect("which result");
+    assert!(located.ends_with("path_increment.m"));
+}
+
+#[test]
+fn addpath_persists_for_later_repl_executions() {
+    let _cwd_lock = cwd_lock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let functions = temp.path().join("functions");
+    std::fs::create_dir_all(&functions).expect("create functions dir");
+    std::fs::write(
+        functions.join("later_increment.m"),
+        "function y = later_increment(x)\n  y = x + 2;\nend\n",
+    )
+    .expect("write function");
+    let _cwd = push_cwd(temp.path());
+    let _path = push_path_state("");
+
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(&mut session, "addpath('functions');").expect("add path");
+    let outcome =
+        execute_text_request(&mut session, "y = later_increment(40);").expect("call function");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_builtins::Value::Num(42.0)
+    ));
+}
+
+#[test]
+fn path_function_resolution_supports_feval_and_function_handles() {
+    let _cwd_lock = cwd_lock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let functions = temp.path().join("functions");
+    std::fs::create_dir_all(&functions).expect("create functions dir");
+    std::fs::write(
+        functions.join("path_pair.m"),
+        "function [a, b] = path_pair(x)\n  a = x + 1;\n  b = x + 2;\nend\n",
+    )
+    .expect("write function");
+    let _cwd = push_cwd(temp.path());
+    let _path = push_path_state("");
+
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        "addpath('functions'); [a, b] = feval('path_pair', 40); f = @path_pair; [c, d] = f(40);",
+    )
+    .expect("dynamic invocation forms succeed");
+
+    for (name, expected) in [("a", 41.0), ("b", 42.0), ("c", 41.0), ("d", 42.0)] {
+        assert!(
+            outcome_has_named_upsert(&outcome, name, &runmat_builtins::Value::Num(expected)),
+            "{name} did not equal {expected}; upserts: {:?}",
+            outcome.workspace_delta.upserts
+        );
+    }
+}
+
+#[test]
+fn genpath_package_private_and_callback_resolution_share_the_runtime_path() {
+    let _cwd_lock = cwd_lock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let root = temp.path().join("root");
+    let nested = root.join("nested");
+    let package = root.join("+tools");
+    let private = root.join("private");
+    for directory in [&nested, &package, &private] {
+        std::fs::create_dir_all(directory).expect("create source directory");
+    }
+    std::fs::write(
+        nested.join("callback_increment.m"),
+        "function y = callback_increment(x)\n  y = x + 1;\nend\n",
+    )
+    .expect("write callback function");
+    std::fs::write(
+        package.join("package_value.m"),
+        "function y = package_value()\n  y = 20;\nend\n",
+    )
+    .expect("write package function");
+    std::fs::write(
+        root.join("private_entry.m"),
+        "function y = private_entry(x)\n  y = private_increment(x);\nend\n",
+    )
+    .expect("write private entry");
+    std::fs::write(
+        private.join("private_increment.m"),
+        "function y = private_increment(x)\n  y = x + 10;\nend\n",
+    )
+    .expect("write private function");
+    let _cwd = push_cwd(temp.path());
+    let _path = push_path_state("");
+
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(&mut session, "addpath(genpath('root'));").expect("add generated path");
+    for (source, name, expected) in [
+        ("a = tools.package_value();", "a", 20.0),
+        ("b = private_entry(12);", "b", 22.0),
+        (
+            "values = arrayfun('callback_increment', [1, 2, 3]); c = values(3);",
+            "c",
+            4.0,
+        ),
+    ] {
+        let outcome =
+            execute_text_request(&mut session, source).expect("runtime path invocation succeeds");
+        assert!(
+            outcome_has_named_upsert(&outcome, name, &runmat_builtins::Value::Num(expected)),
+            "{name} did not equal {expected}; upserts: {:?}",
+            outcome.workspace_delta.upserts
+        );
+    }
+}
+
+#[test]
+fn path_precedence_and_rmpath_reselect_callable_source() {
+    let _cwd_lock = cwd_lock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    for (directory, value) in [("first", 1), ("second", 2)] {
+        let path = temp.path().join(directory);
+        std::fs::create_dir_all(&path).expect("create function directory");
+        std::fs::write(
+            path.join("selected_value.m"),
+            format!("function y = selected_value()\n  y = {value};\nend\n"),
+        )
+        .expect("write selected function");
+    }
+    let _cwd = push_cwd(temp.path());
+    let _path = push_path_state("");
+
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        concat!(
+            "addpath('first'); addpath('second'); ",
+            "before = selected_value(); ",
+            "rmpath('second'); after = selected_value();"
+        ),
+    )
+    .expect("path reselection succeeds");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "before",
+        &runmat_builtins::Value::Num(2.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "after",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+}
+
+#[test]
+fn path_function_cache_recompiles_changed_source() {
+    let _cwd_lock = cwd_lock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let functions = temp.path().join("functions");
+    std::fs::create_dir_all(&functions).expect("create functions dir");
+    let source = functions.join("changing_value.m");
+    std::fs::write(&source, "function y = changing_value()\n  y = 1;\nend\n")
+        .expect("write function");
+    let _cwd = push_cwd(temp.path());
+    let _path = push_path_state("");
+
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(&mut session, "addpath('functions'); y = changing_value();")
+        .expect("initial call");
+    std::fs::write(&source, "function y = changing_value()\n  y = 2;\nend\n")
+        .expect("update function");
+    let outcome =
+        execute_text_request(&mut session, "y = changing_value();").expect("updated call");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_builtins::Value::Num(2.0)
+    ));
+}
+
+#[test]
+fn addpath_state_is_isolated_between_sessions() {
+    let _cwd_lock = cwd_lock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let first = temp.path().join("first");
+    let second = temp.path().join("second");
+    std::fs::create_dir_all(&first).expect("create first dir");
+    std::fs::create_dir_all(&second).expect("create second dir");
+    std::fs::write(
+        first.join("session_value.m"),
+        "function y = session_value()\n  y = 1;\nend\n",
+    )
+    .expect("write first function");
+    std::fs::write(
+        second.join("session_value.m"),
+        "function y = session_value()\n  y = 2;\nend\n",
+    )
+    .expect("write second function");
+    let _cwd = push_cwd(temp.path());
+    let _path = push_path_state("");
+
+    let mut first_session = RunMatSession::with_options(false, false).expect("first session");
+    let mut second_session = RunMatSession::with_options(false, false).expect("second session");
+    execute_text_request(&mut first_session, "addpath('first');").expect("first path");
+    execute_text_request(&mut second_session, "addpath('second');").expect("second path");
+    let first_outcome =
+        execute_text_request(&mut first_session, "y = session_value();").expect("first call");
+    let second_outcome =
+        execute_text_request(&mut second_session, "y = session_value();").expect("second call");
+
+    assert!(outcome_has_named_upsert(
+        &first_outcome,
+        "y",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &second_outcome,
+        "y",
+        &runmat_builtins::Value::Num(2.0)
+    ));
+}
+
+#[test]
 fn filesystem_command_syntax_executes_path_word_builtins() {
     let _cwd_lock = cwd_lock();
     let temp = tempfile::TempDir::new().expect("tempdir");

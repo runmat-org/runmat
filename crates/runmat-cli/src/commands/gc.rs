@@ -5,6 +5,7 @@ use runmat_gc::{gc_allocate, gc_collect_major, gc_collect_minor, gc_get_config, 
 use runmat_time::Instant;
 
 use crate::cli::GcCommand;
+use crate::presentation;
 
 pub async fn execute_gc_command(gc_command: GcCommand) -> Result<()> {
     match gc_command {
@@ -17,7 +18,12 @@ pub async fn execute_gc_command(gc_command: GcCommand) -> Result<()> {
             match gc_collect_minor() {
                 Ok(collected) => {
                     let duration = start.elapsed();
-                    println!("Minor GC collected {collected} objects in {duration:?}");
+                    println!(
+                        "{}",
+                        presentation::stdout().success(format!(
+                            "Minor GC collected {collected} objects in {duration:?}"
+                        ))
+                    );
                 }
                 Err(e) => {
                     error!("Minor GC failed: {e}");
@@ -30,7 +36,12 @@ pub async fn execute_gc_command(gc_command: GcCommand) -> Result<()> {
             match gc_collect_major() {
                 Ok(collected) => {
                     let duration = start.elapsed();
-                    println!("Major GC collected {collected} objects in {duration:?}");
+                    println!(
+                        "{}",
+                        presentation::stdout().success(format!(
+                            "Major GC collected {collected} objects in {duration:?}"
+                        ))
+                    );
                 }
                 Err(e) => {
                     error!("Major GC failed: {e}");
@@ -39,7 +50,10 @@ pub async fn execute_gc_command(gc_command: GcCommand) -> Result<()> {
             }
         }
         GcCommand::Config => {
-            println!("Current GC Configuration:");
+            println!(
+                "{}",
+                presentation::stdout().heading("Current GC Configuration:")
+            );
             let config = gc_get_config();
             println!(
                 "  Young Generation Size: {} MB",
@@ -77,7 +91,12 @@ pub async fn execute_gc_command(gc_command: GcCommand) -> Result<()> {
             let start_time = Instant::now();
             let initial_stats = gc_stats();
 
-            println!("Running GC stress test with {allocations} allocations...");
+            println!(
+                "{}",
+                presentation::stdout().info(format!(
+                    "Running GC stress test with {allocations} allocations..."
+                ))
+            );
 
             let mut objects = Vec::new();
             for i in 0..allocations {
@@ -107,7 +126,10 @@ pub async fn execute_gc_command(gc_command: GcCommand) -> Result<()> {
             let duration = start_time.elapsed();
             let final_stats = gc_stats();
 
-            println!("GC Stress Test Results:");
+            println!(
+                "{}",
+                presentation::stdout().heading("GC Stress Test Results:")
+            );
             println!("  Duration: {duration:?}");
             println!("  Allocations completed: {}", objects.len());
             println!(

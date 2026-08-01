@@ -3,6 +3,7 @@ pub mod cli;
 pub mod commands;
 pub mod diagnostics;
 pub mod logging;
+pub mod presentation;
 pub mod remote;
 pub mod telemetry;
 

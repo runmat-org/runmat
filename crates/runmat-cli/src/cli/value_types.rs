@@ -1,5 +1,16 @@
 use clap::ValueEnum;
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
+pub enum ColorMode {
+    /// Detect color support for each output stream
+    #[default]
+    Auto,
+    /// Always style human-readable output
+    Always,
+    /// Never emit CLI-owned ANSI styling
+    Never,
+}
+
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub enum LogLevel {
     Error,

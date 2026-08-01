@@ -11,6 +11,7 @@ use std::path::PathBuf;
 
 use crate::cli::Cli;
 use crate::commands::accel::dump_provider_telemetry_if_requested;
+use crate::presentation;
 use crate::AlreadyReportedCliError;
 
 pub async fn execute_fea_path(
@@ -21,8 +22,13 @@ pub async fn execute_fea_path(
 ) -> Result<()> {
     info!("Executing FEA document: {path:?}");
     if !json {
-        eprintln!("Running {}", path.display());
-        eprintln!("  loading study document");
+        let styles = presentation::stderr();
+        eprintln!(
+            "{} {}",
+            styles.heading("Running"),
+            styles.path(path.display())
+        );
+        eprintln!("  {}", styles.muted("loading study document"));
     }
     let document = load_fea_document_from_path_async(&path)
         .await
@@ -32,16 +38,21 @@ pub async fn execute_fea_path(
     match document {
         FeaResolvedDocument::Study(spec) => {
             if !json {
+                let styles = presentation::stderr();
                 eprintln!(
-                    "  study: {} ({:?}, {:?})",
-                    spec.study_id, spec.run_kind, spec.backend
+                    "  {} {} ({:?}, {:?})",
+                    styles.label("study:"),
+                    styles.identifier(&spec.study_id),
+                    spec.run_kind,
+                    spec.backend
                 );
                 eprintln!(
-                    "  geometry: {} regions, {} meshes",
+                    "  {} {} regions, {} meshes",
+                    styles.label("geometry:"),
                     spec.geometry.regions.len(),
                     spec.geometry.meshes.len()
                 );
-                eprintln!("  validating, planning, and solving");
+                eprintln!("  {}", styles.info("validating, planning, and solving"));
             }
             let envelope = analysis_run_study_op(&spec, context).map_err(report_operation_error)?;
             if json {
@@ -52,13 +63,18 @@ pub async fn execute_fea_path(
         }
         FeaResolvedDocument::Sweep(spec) => {
             if !json {
+                let styles = presentation::stderr();
                 eprintln!(
-                    "  sweep: {} ({} studies, fail_fast: {})",
-                    spec.sweep_id,
+                    "  {} {} ({} studies, fail_fast: {})",
+                    styles.label("sweep:"),
+                    styles.identifier(&spec.sweep_id),
                     spec.studies.len(),
                     spec.fail_fast
                 );
-                eprintln!("  validating, planning, and solving studies");
+                eprintln!(
+                    "  {}",
+                    styles.info("validating, planning, and solving studies")
+                );
             }
             let envelope =
                 analysis_run_study_sweep_op(&spec, context).map_err(report_operation_error)?;
@@ -75,18 +91,41 @@ pub async fn execute_fea_path(
 }
 
 fn print_study_run_summary(data: &AnalysisStudyRunData, verbose: bool) {
-    println!("FEA run complete: {}", data.study_id);
-    println!("  run id: {}", data.run_id);
-    println!("  kind: {:?}", data.run_kind);
-    println!("  backend: {:?}", data.backend);
+    let styles = presentation::stdout();
     println!(
-        "  status: {:?} (publishable: {})",
-        data.run_status, data.publishable
+        "{}: {}",
+        styles.success("FEA run complete"),
+        styles.identifier(&data.study_id)
     );
-    println!("  solver: {:?}", data.solver_convergence);
-    println!("  quality: {:?}", data.result_quality);
-    println!("  evidence: {}", data.evidence_artifact_path);
-    println!("  results: fea.results(\"{}\")", data.run_id);
+    println!(
+        "  {} {}",
+        styles.label("run id:"),
+        styles.identifier(&data.run_id)
+    );
+    println!("  {} {:?}", styles.label("kind:"), data.run_kind);
+    println!("  {} {:?}", styles.label("backend:"), data.backend);
+    println!(
+        "  {} {:?} (publishable: {})",
+        styles.label("status:"),
+        data.run_status,
+        data.publishable
+    );
+    println!(
+        "  {} {:?}",
+        styles.label("solver:"),
+        data.solver_convergence
+    );
+    println!("  {} {:?}", styles.label("quality:"), data.result_quality);
+    println!(
+        "  {} {}",
+        styles.label("evidence:"),
+        styles.path(&data.evidence_artifact_path)
+    );
+    println!(
+        "  {} {}",
+        styles.label("results:"),
+        styles.help(format!("fea.results(\"{}\")", data.run_id))
+    );
     if !data.quality_reasons.is_empty() {
         println!("  quality reasons:");
         for reason in &data.quality_reasons {
@@ -107,11 +146,20 @@ fn print_study_run_summary(data: &AnalysisStudyRunData, verbose: bool) {
 }
 
 fn print_sweep_run_summary(data: &AnalysisStudySweepData) {
-    println!("FEA sweep complete: {}", data.sweep_id);
+    let styles = presentation::stdout();
+    println!(
+        "{}: {}",
+        styles.success("FEA sweep complete"),
+        styles.identifier(&data.sweep_id)
+    );
     println!("  studies: {}", data.study_count);
     println!("  succeeded: {}", data.success_count);
     println!("  failed: {}", data.failed_count);
-    println!("  evidence: {}", data.evidence_artifact_path);
+    println!(
+        "  {} {}",
+        styles.label("evidence:"),
+        styles.path(&data.evidence_artifact_path)
+    );
     if !data.run_entries.is_empty() {
         println!("  runs:");
         for entry in &data.run_entries {
@@ -122,7 +170,7 @@ fn print_sweep_run_summary(data: &AnalysisStudySweepData) {
         }
     }
     if !data.failure_entries.is_empty() {
-        println!("  failures:");
+        println!("  {}", styles.error("failures:"));
         for entry in &data.failure_entries {
             println!(
                 "    {}: {} ({})",
