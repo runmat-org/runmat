@@ -640,21 +640,17 @@ fn tensor_to_numeric_data(tensor: Tensor) -> BuiltinResult<NumericData> {
     }
     let rows = tensor.rows();
     let cols = tensor.cols();
-    if rows == 0 || cols == 0 {
-        return Ok(NumericData::Real {
-            data: tensor.data,
-            rows,
-            cols,
-        });
-    }
-    match tensor.integer_data {
-        Some(storage) => Ok(NumericData::Integer {
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|_| num2str_error(&NUM2STR_ERROR_INVALID_INPUT))?;
+    match storage.into_integer_storage() {
+        Ok(storage) => Ok(NumericData::Integer {
             storage,
             rows,
             cols,
         }),
-        None => Ok(NumericData::Real {
-            data: tensor.data,
+        Err(storage) => Ok(NumericData::Real {
+            data: storage.materialize_f64(),
             rows,
             cols,
         }),
