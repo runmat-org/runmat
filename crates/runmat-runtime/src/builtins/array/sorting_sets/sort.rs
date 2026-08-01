@@ -8,7 +8,7 @@ use runmat_accelerate_api::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, IntegerStorage, Tensor, Value,
+    ComplexTensor, IntValue, IntegerStorage, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -417,9 +417,8 @@ fn sort_host(value: Value, args: &SortArgs) -> crate::BuiltinResult<SortEvaluati
 }
 
 fn sort_real_tensor(tensor: Tensor, args: &SortArgs) -> crate::BuiltinResult<SortEvaluation> {
-    let dim = args
-        .dimension
-        .unwrap_or_else(|| default_dimension(&tensor.shape));
+    let shape = tensor.shape.clone();
+    let dim = args.dimension.unwrap_or_else(|| default_dimension(&shape));
     if dim == 0 {
         return Err(sort_error(
             &SORT_ERROR_INVALID_DIMENSION,
@@ -427,37 +426,65 @@ fn sort_real_tensor(tensor: Tensor, args: &SortArgs) -> crate::BuiltinResult<Sor
         ));
     }
 
-    if let Some(storage) = tensor.integer_storage() {
-        return sort_integer_tensor(storage, tensor.shape.clone(), dim, args);
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| sort_internal(format!("sort: {e}")))?;
+    match storage {
+        NumericStorage::F64(values) => {
+            sort_floating_tensor(values, shape, dim, args, NumericStorage::F64)
+        }
+        NumericStorage::F32(values) => {
+            sort_floating_tensor(values, shape, dim, args, NumericStorage::F32)
+        }
+        storage => sort_integer_tensor(
+            storage
+                .into_integer_storage()
+                .expect("non-floating numeric storage is integer"),
+            shape,
+            dim,
+            args,
+        ),
     }
+}
 
-    let dim_len = dimension_length(&tensor.shape, dim);
-    if tensor.data.is_empty() || dim_len <= 1 {
-        let indices = vec![1.0; tensor.data.len()];
-        let index_tensor = Tensor::new(indices, tensor.shape.clone())
+fn sort_floating_tensor<T>(
+    values: Vec<T>,
+    shape: Vec<usize>,
+    dim: usize,
+    args: &SortArgs,
+    wrap: fn(Vec<T>) -> NumericStorage,
+) -> crate::BuiltinResult<SortEvaluation>
+where
+    T: Copy + Into<f64>,
+{
+    let dim_len = dimension_length(&shape, dim);
+    if values.is_empty() || dim_len <= 1 {
+        let indices = vec![1.0; values.len()];
+        let index_tensor =
+            Tensor::new(indices, shape.clone()).map_err(|e| sort_internal(format!("sort: {e}")))?;
+        let sorted_tensor = Tensor::from_numeric_storage(wrap(values), shape)
             .map_err(|e| sort_internal(format!("sort: {e}")))?;
-        let sorted_value = tensor::tensor_into_value(tensor);
         return Ok(SortEvaluation {
-            sorted: sorted_value,
+            sorted: tensor::tensor_into_value(sorted_tensor),
             indices: index_tensor,
         });
     }
 
-    let stride_before = stride_before(&tensor.shape, dim);
-    let stride_after = stride_after(&tensor.shape, dim);
-    let mut sorted = tensor.data.clone();
-    let mut indices = vec![0.0f64; tensor.data.len()];
-    let mut buffer: Vec<(usize, f64)> = Vec::with_capacity(dim_len);
+    let stride_before = stride_before(&shape, dim);
+    let stride_after = stride_after(&shape, dim);
+    let mut sorted = values;
+    let mut indices = vec![0.0f64; sorted.len()];
+    let mut buffer: Vec<(usize, T)> = Vec::with_capacity(dim_len);
 
     for after in 0..stride_after {
         for before in 0..stride_before {
             buffer.clear();
             for k in 0..dim_len {
                 let idx = before + k * stride_before + after * stride_before * dim_len;
-                let value = tensor.data[idx];
+                let value = sorted[idx];
                 buffer.push((k, value));
             }
-            buffer.sort_by(|a, b| compare_real_values(a.1, b.1, args));
+            buffer.sort_by(|a, b| compare_real_values(a.1.into(), b.1.into(), args));
             for (pos, (original_index, value)) in buffer.iter().enumerate() {
                 let target = before + pos * stride_before + after * stride_before * dim_len;
                 sorted[target] = *value;
@@ -466,10 +493,10 @@ fn sort_real_tensor(tensor: Tensor, args: &SortArgs) -> crate::BuiltinResult<Sor
         }
     }
 
-    let sorted_tensor = Tensor::new(sorted, tensor.shape.clone())
+    let sorted_tensor = Tensor::from_numeric_storage(wrap(sorted), shape.clone())
         .map_err(|e| sort_internal(format!("sort: {e}")))?;
-    let index_tensor = Tensor::new(indices, tensor.shape.clone())
-        .map_err(|e| sort_internal(format!("sort: {e}")))?;
+    let index_tensor =
+        Tensor::new(indices, shape).map_err(|e| sort_internal(format!("sort: {e}")))?;
 
     Ok(SortEvaluation {
         sorted: tensor::tensor_into_value(sorted_tensor),
@@ -478,7 +505,7 @@ fn sort_real_tensor(tensor: Tensor, args: &SortArgs) -> crate::BuiltinResult<Sor
 }
 
 fn sort_integer_tensor(
-    storage: &IntegerStorage,
+    storage: IntegerStorage,
     shape: Vec<usize>,
     dim: usize,
     args: &SortArgs,
@@ -943,7 +970,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{
-        ComplexTensor, IntValue, IntegerStorage, ResolveContext, Tensor, Type, Value,
+        ComplexTensor, IntValue, IntegerStorage, NumericStorage, ResolveContext, Tensor, Type,
+        Value,
     };
 
     fn sort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -966,6 +994,25 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn sort_preserves_native_single_storage_and_indices() {
+        let tensor = Tensor::from_f32(vec![3.0, 1.0, 2.0], vec![3, 1]).expect("input");
+        let (sorted, indices) = evaluate(Value::Tensor(tensor), &[])
+            .expect("sort")
+            .into_values();
+        let Value::Tensor(sorted) = sorted else {
+            panic!("expected sorted tensor");
+        };
+        assert_eq!(
+            sorted.into_numeric_storage().expect("storage"),
+            NumericStorage::F32(vec![1.0, 2.0, 3.0])
+        );
+        let Value::Tensor(indices) = indices else {
+            panic!("expected index tensor");
+        };
+        assert_eq!(indices.data, vec![2.0, 3.0, 1.0]);
     }
 
     #[test]

@@ -592,12 +592,13 @@ fn issorted_real(tensor: &Tensor, args: &IssortedArgs) -> crate::BuiltinResult<b
     if let Some(storage) = tensor.integer_storage() {
         return issorted_integer(&storage.exact_values(), &tensor.shape, args);
     }
-    if tensor.data.is_empty() {
+    let values = tensor.materialize_f64();
+    if values.is_empty() {
         return Ok(true);
     }
     match args.mode {
-        CheckMode::Dimension(dim) => Ok(check_real_dimension(tensor, dim, args)),
-        CheckMode::Rows => check_real_rows(tensor, args),
+        CheckMode::Dimension(dim) => Ok(check_real_dimension(&values, &tensor.shape, dim, args)),
+        CheckMode::Rows => check_real_rows(&values, tensor, args),
     }
 }
 
@@ -744,18 +745,18 @@ fn issorted_string(array: &StringArray, args: &IssortedArgs) -> crate::BuiltinRe
     }
 }
 
-fn check_real_dimension(tensor: &Tensor, dim: usize, args: &IssortedArgs) -> bool {
+fn check_real_dimension(values: &[f64], shape: &[usize], dim: usize, args: &IssortedArgs) -> bool {
     let dim_index = dim.saturating_sub(1);
-    if dim_index >= tensor.shape.len() {
+    if dim_index >= shape.len() {
         return true;
     }
-    let len_dim = tensor.shape[dim_index];
+    let len_dim = shape[dim_index];
     if len_dim <= 1 {
         return true;
     }
 
-    let before = product(&tensor.shape[..dim_index]);
-    let after = product(&tensor.shape[dim_index + 1..]);
+    let before = product(&shape[..dim_index]);
+    let after = product(&shape[dim_index + 1..]);
     let effective_comp = match args.comparison {
         ComparisonMethod::Auto => ComparisonMethod::Real,
         other => other,
@@ -766,7 +767,7 @@ fn check_real_dimension(tensor: &Tensor, dim: usize, args: &IssortedArgs) -> boo
             slice.clear();
             for k in 0..len_dim {
                 let idx = before_idx + k * before + after_idx * before * len_dim;
-                slice.push(tensor.data[idx]);
+                slice.push(values[idx]);
             }
             if !check_real_slice(&slice, args.direction, effective_comp, args.missing) {
                 return false;
@@ -834,7 +835,11 @@ fn check_string_dimension(array: &StringArray, dim: usize, args: &IssortedArgs) 
     true
 }
 
-fn check_real_rows(tensor: &Tensor, args: &IssortedArgs) -> crate::BuiltinResult<bool> {
+fn check_real_rows(
+    values: &[f64],
+    tensor: &Tensor,
+    args: &IssortedArgs,
+) -> crate::BuiltinResult<bool> {
     if tensor.shape.len() > 2 {
         return Err(issorted_error(
             &ISSORTED_ERROR_ROWS_REQUIRES_2D,
@@ -852,7 +857,7 @@ fn check_real_rows(tensor: &Tensor, args: &IssortedArgs) -> crate::BuiltinResult
     };
     let orders = direction_orders(args.direction);
     for &order in orders {
-        if real_rows_in_order(tensor, rows, cols, order, effective_comp, args.missing) {
+        if real_rows_in_order(values, rows, cols, order, effective_comp, args.missing) {
             return Ok(true);
         }
     }
@@ -906,20 +911,20 @@ fn check_string_rows(array: &StringArray, args: &IssortedArgs) -> crate::Builtin
 }
 
 fn real_rows_in_order(
-    tensor: &Tensor,
+    values: &[f64],
     rows: usize,
     cols: usize,
     order: OrderSpec,
     comparison: ComparisonMethod,
     missing: MissingPlacement,
 ) -> bool {
-    if order.strict && tensor.data.iter().any(|v| v.is_nan()) {
+    if order.strict && values.iter().any(|v| v.is_nan()) {
         return false;
     }
     let missing_resolved = missing.resolve(order.direction);
     for row in 0..rows - 1 {
         let ord = compare_real_row_pair(
-            tensor,
+            values,
             rows,
             cols,
             row,
@@ -995,7 +1000,7 @@ fn string_rows_in_order(
 
 #[allow(clippy::too_many_arguments)]
 fn compare_real_row_pair(
-    tensor: &Tensor,
+    values: &[f64],
     rows: usize,
     cols: usize,
     a: usize,
@@ -1007,13 +1012,8 @@ fn compare_real_row_pair(
     for col in 0..cols {
         let idx_a = a + col * rows;
         let idx_b = b + col * rows;
-        let ord = compare_real_scalars(
-            tensor.data[idx_a],
-            tensor.data[idx_b],
-            direction,
-            comparison,
-            missing,
-        );
+        let ord =
+            compare_real_scalars(values[idx_a], values[idx_b], direction, comparison, missing);
         if ord != Ordering::Equal {
             return ord;
         }
@@ -1445,6 +1445,21 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![3.0, 2.0, 1.0], vec![3, 1]).unwrap();
         let result = issorted_builtin(Value::Tensor(tensor), vec![]).expect("issorted");
         assert_eq!(result, Value::Bool(false));
+    }
+
+    #[test]
+    fn issorted_reads_native_single_storage() {
+        let ascending = Tensor::from_f32(vec![1.0, 2.0, 3.0], vec![3, 1]).expect("input");
+        assert_eq!(
+            issorted_builtin(Value::Tensor(ascending), Vec::new()).expect("issorted"),
+            Value::Bool(true)
+        );
+
+        let descending = Tensor::from_f32(vec![3.0, 2.0, 1.0], vec![3, 1]).expect("input");
+        assert_eq!(
+            issorted_builtin(Value::Tensor(descending), Vec::new()).expect("issorted"),
+            Value::Bool(false)
+        );
     }
 
     #[test]
