@@ -21,3 +21,4 @@ url = { workspace = true }
 [dev-dependencies]
 futures = "0.3"
 tempfile = "3.12"
+wasm-bindgen-test = "0.3"
