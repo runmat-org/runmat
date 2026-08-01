@@ -1,6 +1,6 @@
 //! MATLAB-compatible `inf` array constructor with GPU-aware semantics.
 
-use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, HostTensorView, ProviderPrecision};
+use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, ProviderPrecision};
 use runmat_builtins::ResolveContext;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
@@ -461,11 +461,7 @@ async fn inf_gpu(shape: &[usize]) -> crate::BuiltinResult<Value> {
             }
         }
         let host = inf_tensor(shape, dtype_from_precision(precision))?;
-        let view = HostTensorView {
-            data: &host.data,
-            shape: &host.shape,
-        };
-        if let Ok(gpu) = provider.upload(&view) {
+        if let Ok(gpu) = gpu_helpers::upload_tensor(provider, &host) {
             runmat_accelerate_api::set_handle_precision(&gpu, precision);
             return Ok(Value::GpuTensor(gpu));
         }
@@ -478,21 +474,21 @@ async fn inf_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value>
     match proto {
         Value::ComplexTensor(_) | Value::Complex(_, _) => inf_complex(shape),
         Value::GpuTensor(handle) => inf_like_gpu(handle, shape).await,
-        Value::Tensor(t) if t.integer_storage().is_some() => {
-            Err(inf_error(&INF_ERROR_INTEGER_LIKE_PROTOTYPE))
-        }
-        Value::Tensor(t) => match t.dtype {
+        Value::Tensor(t) => match t.numeric_dtype() {
             NumericDType::F32 => inf_single(shape),
-            NumericDType::F64
-            | NumericDType::I8
+            NumericDType::F64 => inf_double(shape),
+            NumericDType::I8
             | NumericDType::I16
             | NumericDType::I32
             | NumericDType::I64
             | NumericDType::U8
             | NumericDType::U16
             | NumericDType::U32
-            | NumericDType::U64 => inf_double(shape),
+            | NumericDType::U64 => Err(inf_error(&INF_ERROR_INTEGER_LIKE_PROTOTYPE)),
         },
+        Value::SparseTensor(sparse) if sparse.integer_storage().is_some() => {
+            Err(inf_error(&INF_ERROR_INTEGER_LIKE_PROTOTYPE))
+        }
         Value::SparseTensor(_) => inf_double(shape),
         Value::Int(_) => Err(inf_error(&INF_ERROR_INTEGER_LIKE_PROTOTYPE)),
         Value::Num(_) | Value::Bool(_) => inf_double(shape),
@@ -512,6 +508,9 @@ fn inf_complex(shape: &[usize]) -> crate::BuiltinResult<Value> {
 
 #[async_recursion::async_recursion(?Send)]
 async fn inf_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+        return Err(inf_error(&INF_ERROR_INTEGER_LIKE_PROTOTYPE));
+    }
     if let Some(provider) =
         runmat_accelerate_api::provider_for_handle(handle).or_else(runmat_accelerate_api::provider)
     {
@@ -541,11 +540,7 @@ async fn inf_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::Built
         }
 
         let host = inf_tensor(shape, dtype_from_precision(precision))?;
-        let view = HostTensorView {
-            data: &host.data,
-            shape: &host.shape,
-        };
-        if let Ok(gpu) = provider.upload(&view) {
+        if let Ok(gpu) = gpu_helpers::upload_tensor(provider, &host) {
             runmat_accelerate_api::set_handle_precision(&gpu, precision);
             return Ok(Value::GpuTensor(gpu));
         }
@@ -666,7 +661,7 @@ pub(crate) mod tests {
 
     fn assert_all_pos_inf(tensor: &Tensor) {
         assert!(tensor
-            .data
+            .materialize_f64()
             .iter()
             .all(|value| value.is_infinite() && value.is_sign_positive()));
     }
@@ -740,7 +735,7 @@ pub(crate) mod tests {
         .expect("inf");
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape, vec![2, 2]);
-        assert_eq!(tensor.dtype, NumericDType::F32);
+        assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
         assert_all_pos_inf(&tensor);
     }
 
@@ -791,7 +786,7 @@ pub(crate) mod tests {
         .expect("inf");
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape, vec![2, 3]);
-        assert_eq!(tensor.dtype, NumericDType::F32);
+        assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
         assert_all_pos_inf(&tensor);
     }
 
@@ -832,6 +827,39 @@ pub(crate) mod tests {
             .unwrap_err();
             assert!(err.message().contains("integer 'like' prototypes"));
         }
+
+        let prototype = SparseTensor::zeros_with_integer_storage(
+            1,
+            1,
+            &runmat_builtins::IntegerStorage::U64(Vec::new()),
+        );
+        let err = block_on(inf_builtin(vec![
+            Value::Num(2.0),
+            Value::from("like"),
+            Value::SparseTensor(prototype),
+        ]))
+        .expect_err("integer sparse like");
+        assert!(err.message().contains("integer 'like' prototypes"));
+    }
+
+    #[test]
+    fn inf_rejects_resident_integer_gpu_like_prototype() {
+        test_support::with_test_provider(|provider| {
+            let values = [1_u64];
+            let prototype = provider
+                .upload_integer(&runmat_accelerate_api::HostIntegerTensorView {
+                    data: runmat_accelerate_api::HostIntegerDataView::U64(&values),
+                    shape: &[1, 1],
+                })
+                .expect("integer prototype");
+            let err = block_on(inf_builtin(vec![
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::GpuTensor(prototype),
+            ]))
+            .expect_err("integer gpu like");
+            assert!(err.message().contains("integer 'like' prototypes"));
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -853,11 +881,7 @@ pub(crate) mod tests {
     fn inf_gpu_like_alloc() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result = block_on(inf_builtin(vec![
                 Value::Num(2.0),
                 Value::Num(2.0),
