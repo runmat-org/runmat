@@ -17,7 +17,7 @@ use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, CharArray, ComplexTensor, HandleRef, Listener, LogicalArray, MException,
-    ObjectInstance, StructValue, Tensor, Value,
+    NumericScalar, ObjectInstance, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -409,7 +409,7 @@ fn parse_index_component(value: &Value) -> BuiltinResult<IndexComponent> {
         }
         Value::String(s) => parse_index_text(s.trim()),
         Value::StringArray(sa) if sa.data.len() == 1 => parse_index_text(sa.data[0].trim()),
-        Value::Tensor(tensor) if tensor.data.len() > 1 => {
+        Value::Tensor(tensor) if tensor.len() > 1 => {
             let indices = if let Some(indices) =
                 tensor::integer_tensor_dimension_vector(tensor, "getfield", false)
             {
@@ -420,10 +420,16 @@ fn parse_index_component(value: &Value) -> BuiltinResult<IndexComponent> {
                     )
                 })?
             } else {
-                tensor
-                    .data
-                    .iter()
-                    .map(|&value| parse_positive_integer(value))
+                (0..tensor.len())
+                    .map(|index| {
+                        let value = tensor.numeric_value_at(index).ok_or_else(|| {
+                            getfield_error_with_message(
+                                "getfield: numeric index storage is invalid",
+                                &GETFIELD_ERROR_INDEX_INVALID,
+                            )
+                        })?;
+                        parse_positive_numeric_scalar(value)
+                    })
                     .collect::<BuiltinResult<Vec<_>>>()?
             };
             Ok(IndexComponent::Vector(indices, tensor.shape.clone()))
@@ -437,6 +443,20 @@ fn parse_index_component(value: &Value) -> BuiltinResult<IndexComponent> {
             })?;
             Ok(IndexComponent::Scalar(idx))
         }
+    }
+}
+
+fn parse_positive_numeric_scalar(value: NumericScalar) -> BuiltinResult<usize> {
+    match value {
+        NumericScalar::F64(value) => parse_positive_integer(value),
+        NumericScalar::F32(value) => parse_positive_integer(f64::from(value)),
+        value => value
+            .into_int_value()
+            .and_then(|value| value.try_to_usize())
+            .filter(|index| *index >= 1)
+            .ok_or_else(|| {
+                getfield_error_with_message("index must be >= 1", &GETFIELD_ERROR_INDEX_INVALID)
+            }),
     }
 }
 
@@ -600,7 +620,10 @@ async fn apply_indices(value: Value, selector: &IndexSelector) -> BuiltinResult<
                 Value::Num(n) => Ok(Value::Bool(n != 0.0)),
                 Value::Tensor(t) => {
                     let bits: Vec<u8> = t
-                        .data
+                        .as_f64_slice()
+                        .ok_or_else(|| {
+                            getfield_flow("getfield: logical indexing returned non-double storage")
+                        })?
                         .iter()
                         .map(|&v| if v != 0.0 { 1 } else { 0 })
                         .collect();
@@ -637,33 +660,19 @@ fn apply_vector_index(value: &Value, selector: &IndexSelector) -> BuiltinResult<
     };
     match value {
         Value::Tensor(tensor) => {
-            if let Some(storage) = tensor.integer_storage() {
-                let mut selected = Vec::with_capacity(indices.len());
-                for &index in indices {
-                    if index < 1 || index > storage.len() {
-                        return Err(getfield_error(&GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS));
-                    }
-                    selected.push(
-                        storage
-                            .value_at(index - 1)
-                            .expect("validated integer storage index"),
-                    );
-                }
-                let storage = storage
-                    .from_same_class_values(selected)
-                    .map_err(|e| getfield_flow(format!("getfield: {e}")))?;
-                let tensor = Tensor::new_integer(storage, shape.clone())
-                    .map_err(|e| getfield_flow(format!("getfield: {e}")))?;
-                return Ok(Some(Value::Tensor(tensor)));
-            }
-            let mut data = Vec::with_capacity(indices.len());
+            let mut zero_based = Vec::with_capacity(indices.len());
             for &index in indices {
-                if index < 1 || index > tensor.data.len() {
+                if index < 1 || index > tensor.len() {
                     return Err(getfield_error(&GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS));
                 }
-                data.push(tensor.data[index - 1]);
+                zero_based.push(index - 1);
             }
-            let tensor = Tensor::new(data, shape.clone())
+            let storage = tensor
+                .clone()
+                .into_numeric_storage()
+                .and_then(|storage| storage.gather(&zero_based))
+                .map_err(|e| getfield_flow(format!("getfield: {e}")))?;
+            let tensor = Tensor::from_numeric_storage(storage, shape.clone())
                 .map_err(|e| getfield_flow(format!("getfield: {e}")))?;
             Ok(Some(Value::Tensor(tensor)))
         }
@@ -714,7 +723,7 @@ fn dimension_length(value: &Value, dims: usize, dim_idx: usize) -> BuiltinResult
 
 fn tensor_dimension_length(tensor: &Tensor, dims: usize, dim_idx: usize) -> BuiltinResult<usize> {
     if dims == 1 {
-        let total = tensor.data.len();
+        let total = tensor.len();
         if total == 0 {
             return Err(getfield_error_with_message(
                 "Index exceeds the number of array elements (0).",
@@ -1185,7 +1194,7 @@ pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{
         Access, CellArray, CharArray, ClassDef, ComplexTensor, HandleRef, IntValue, IntegerStorage,
-        Listener, MException, ObjectInstance, PropertyDef, StructValue,
+        Listener, MException, NumericStorage, ObjectInstance, PropertyDef, StructValue,
     };
 
     #[cfg(feature = "wgpu")]
@@ -1339,6 +1348,35 @@ pub(crate) mod tests {
                     Some(&IntegerStorage::U64(vec![u64::MAX, u64::MAX - 1]))
                 );
                 assert_eq!(tensor.data, vec![u64::MAX as f64, (u64::MAX - 1) as f64]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn getfield_vector_index_preserves_single_target_storage() {
+        let values = Tensor::from_numeric_storage(NumericStorage::F32(vec![1.25, 2.5]), vec![1, 2])
+            .expect("single target");
+        let mut st = StructValue::new();
+        st.fields
+            .insert("values".to_string(), Value::Tensor(values));
+        let selector =
+            Tensor::new_integer(IntegerStorage::U64(vec![2, 1]), vec![1, 2]).expect("selector");
+        let index =
+            CellArray::new_with_shape(vec![Value::Tensor(selector)], vec![1, 1]).expect("index");
+
+        let result = run_getfield(
+            Value::Struct(st),
+            vec![Value::from("values"), Value::Cell(index)],
+        )
+        .expect("vector index");
+        match result {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![1, 2]);
+                assert_eq!(
+                    tensor.into_numeric_storage().expect("single storage"),
+                    NumericStorage::F32(vec![2.5, 1.25])
+                );
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
