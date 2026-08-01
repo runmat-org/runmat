@@ -1445,22 +1445,19 @@ async fn bit_value_buffer_from(value: Value) -> BuiltinResult<BitValueBuffer> {
 }
 
 fn tensor_to_bit_value_buffer(tensor: Tensor) -> BuiltinResult<BitValueBuffer> {
+    let shape = tensor.shape.clone();
     let data = match tensor.integer_storage() {
         Some(storage) => storage
             .exact_values()
             .iter()
             .map(|value| int_value_to_i128(value) != 0)
             .collect(),
-        None => tensor
-            .data
+        None => tensor::tensor_into_values_f64(tensor)
             .into_iter()
             .map(finite_nonzero_bit_value)
             .collect::<BuiltinResult<Vec<_>>>()?,
     };
-    Ok(BitValueBuffer {
-        data,
-        shape: tensor.shape,
-    })
+    Ok(BitValueBuffer { data, shape })
 }
 
 fn finite_nonzero_bit_value(value: f64) -> BuiltinResult<bool> {
@@ -1476,22 +1473,19 @@ fn finite_nonzero_bit_value(value: f64) -> BuiltinResult<bool> {
 }
 
 fn tensor_to_shift_buffer(tensor: Tensor) -> BuiltinResult<ShiftBuffer> {
+    let shape = tensor.shape.clone();
     let data = match tensor.integer_storage() {
         Some(storage) => storage
             .exact_values()
             .iter()
             .map(int_value_to_i128)
             .collect(),
-        None => tensor
-            .data
+        None => tensor::tensor_into_values_f64(tensor)
             .into_iter()
             .map(double_to_shift)
             .collect::<BuiltinResult<Vec<_>>>()?,
     };
-    Ok(ShiftBuffer {
-        data,
-        shape: tensor.shape,
-    })
+    Ok(ShiftBuffer { data, shape })
 }
 
 fn tensor_to_bit_buffer(
@@ -1500,6 +1494,7 @@ fn tensor_to_bit_buffer(
     assumed: Option<IntegerClass>,
 ) -> BuiltinResult<BitBuffer> {
     let is_scalar = tensor::element_count(&tensor.shape) == 1;
+    let shape = tensor.shape.clone();
     let (data, native_class, output_class) = match tensor.integer_storage() {
         Some(storage) => (
             storage.exact_values().iter().map(int_to_bits).collect(),
@@ -1507,23 +1502,21 @@ fn tensor_to_bit_buffer(
             Some(IntegerClass::from_storage(storage)),
         ),
         None => {
-            let class = match tensor.dtype {
-                NumericDType::I8 => Some(IntegerClass::I8),
-                NumericDType::I16 => Some(IntegerClass::I16),
-                NumericDType::I32 => Some(IntegerClass::I32),
-                NumericDType::I64 => Some(IntegerClass::I64),
-                NumericDType::U8 => Some(IntegerClass::U8),
-                NumericDType::U16 => Some(IntegerClass::U16),
-                NumericDType::U32 => Some(IntegerClass::U32),
-                NumericDType::U64 => Some(IntegerClass::U64),
-                NumericDType::F32 | NumericDType::F64 => None,
-            };
-            let data = tensor
-                .data
+            if !matches!(
+                tensor.numeric_dtype(),
+                NumericDType::F32 | NumericDType::F64
+            ) {
+                return Err(error_with_detail(
+                    name,
+                    &ERROR_INVALID_INPUT,
+                    "integer tensor is missing authoritative native storage",
+                ));
+            }
+            let data = tensor::tensor_into_values_f64(tensor)
                 .into_iter()
                 .map(|value| double_to_bits(name, value, assumed))
                 .collect::<BuiltinResult<Vec<_>>>()?;
-            (data, class, class)
+            (data, None, None)
         }
     };
     let compute_class = match native_class {
@@ -1532,7 +1525,7 @@ fn tensor_to_bit_buffer(
     };
     Ok(BitBuffer {
         data,
-        shape: tensor.shape,
+        shape,
         compute_class,
         output_class,
         is_scalar,
@@ -1747,24 +1740,6 @@ impl IntegerClass {
         }
     }
 
-    fn from_dtype(dtype: NumericDType) -> BuiltinResult<Self> {
-        match dtype {
-            NumericDType::I8 => Ok(Self::I8),
-            NumericDType::I16 => Ok(Self::I16),
-            NumericDType::I32 => Ok(Self::I32),
-            NumericDType::I64 => Ok(Self::I64),
-            NumericDType::U8 => Ok(Self::U8),
-            NumericDType::U16 => Ok(Self::U16),
-            NumericDType::U32 => Ok(Self::U32),
-            NumericDType::U64 => Ok(Self::U64),
-            NumericDType::F32 | NumericDType::F64 => Err(error_with_detail(
-                IDIVIDE_NAME,
-                &ERROR_INVALID_INPUT,
-                "dense inputs must use an integer class",
-            )),
-        }
-    }
-
     fn from_storage(storage: &IntegerStorage) -> Self {
         match storage {
             IntegerStorage::I8(_) => Self::I8,
@@ -1898,35 +1873,18 @@ fn tensor_to_integer_buffer(name: &'static str, tensor: Tensor) -> BuiltinResult
             class: IntegerClass::from_storage(storage),
         });
     }
-    let class = IntegerClass::from_dtype(tensor.dtype)?;
-    let (min, max) = class.range();
-    let data = tensor
-        .data
-        .into_iter()
-        .map(|value| {
-            if !value.is_finite() || value.fract() != 0.0 {
-                return Err(error_with_detail(
-                    name,
-                    &ERROR_INVALID_INPUT,
-                    "integer tensor values must be finite integers",
-                ));
-            }
-            let integer = value as i128;
-            if !(min..=max).contains(&integer) {
-                return Err(error_with_detail(
-                    name,
-                    &ERROR_INVALID_INPUT,
-                    "integer tensor value is outside its dtype range",
-                ));
-            }
-            Ok(integer)
-        })
-        .collect::<BuiltinResult<Vec<_>>>()?;
-    Ok(IntegerBuffer {
-        data,
-        shape: tensor.shape,
-        class,
-    })
+    match tensor.numeric_dtype() {
+        NumericDType::F32 | NumericDType::F64 => Err(error_with_detail(
+            name,
+            &ERROR_INVALID_INPUT,
+            "dense inputs must use an integer class",
+        )),
+        _ => Err(error_with_detail(
+            name,
+            &ERROR_INVALID_INPUT,
+            "integer tensor is missing authoritative native storage",
+        )),
+    }
 }
 
 async fn idivide_buffer_from(value: Value) -> BuiltinResult<IdivideBuffer> {
@@ -2131,13 +2089,13 @@ fn swap_tensor_bytes(tensor: Tensor) -> BuiltinResult<Value> {
             .map(Value::Tensor)
             .map_err(|err| error_with_detail(SWAPBYTES_NAME, &ERROR_INVALID_INPUT, err));
     }
-    let dtype = tensor.dtype;
-    let data = tensor
-        .data
+    let dtype = tensor.numeric_dtype();
+    let shape = tensor.shape.clone();
+    let data = tensor::tensor_into_values_f64(tensor)
         .into_iter()
         .map(|value| swap_tensor_scalar(value, dtype))
         .collect::<BuiltinResult<Vec<_>>>()?;
-    Tensor::new_with_dtype(data, tensor.shape, dtype)
+    Tensor::new_with_dtype(data, shape, dtype)
         .map(Value::Tensor)
         .map_err(|err| error_with_detail(SWAPBYTES_NAME, &ERROR_INVALID_INPUT, err))
 }

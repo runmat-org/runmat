@@ -88,7 +88,10 @@ fn binary_bitwise_sparse_operands_preserve_or_materialize_by_zero_semantics() {
     .expect("sparse xor nonzero scalar") else {
         panic!("xor with a nonzero scalar materializes implicit zeros");
     };
-    assert_eq!(xor.data, vec![7.0, 1.0, 1.0, 11.0]);
+    assert_eq!(
+        xor.as_f64_slice().expect("double bitxor output"),
+        &[7.0, 1.0, 1.0, 11.0]
+    );
 }
 
 #[test]
@@ -124,7 +127,10 @@ fn binary_bitwise_sparse_dense_and_broadcast_forms_use_zero_aware_output_storage
         panic!("bitor materializes when broadcast dense values make implicit zeros nonzero");
     };
     assert_eq!(or.shape, vec![2, 2]);
-    assert_eq!(or.data, vec![6.0, 1.0, 0.0, 11.0]);
+    assert_eq!(
+        or.as_f64_slice().expect("double bitor output"),
+        &[6.0, 1.0, 0.0, 11.0]
+    );
 }
 
 #[test]
@@ -293,7 +299,10 @@ fn bitcmp_sparse_double_materializes_when_complementing_implicit_zeros() {
         panic!("bitcmp must materialize a complement of sparse implicit zeros");
     };
     assert_eq!(output.shape, vec![2, 2]);
-    assert_eq!(output.data, vec![250.0, 255.0, 255.0, 254.0]);
+    assert_eq!(
+        output.as_f64_slice().expect("double bitcmp output"),
+        &[250.0, 255.0, 255.0, 254.0]
+    );
 }
 
 #[test]
@@ -434,7 +443,10 @@ fn sparse_bitwise_position_and_value_arrays_broadcast_with_zero_aware_storage() 
     .expect("broadcast sparse bitset set") else {
         panic!("setting an implicit position materializes the result");
     };
-    assert_eq!(set.data, vec![2.0, 0.0, 2.0, 7.0]);
+    assert_eq!(
+        set.as_f64_slice().expect("double bitset output"),
+        &[2.0, 0.0, 2.0, 7.0]
+    );
 }
 
 #[test]
@@ -526,7 +538,10 @@ fn bitset_sparse_scalar_forms_preserve_or_materialize_from_zero_semantics() {
     .expect("sparse set") else {
         panic!("setting implicit zero materializes");
     };
-    assert_eq!(set.data, vec![3.0, 1.0, 1.0, 3.0]);
+    assert_eq!(
+        set.as_f64_slice().expect("double bitset output"),
+        &[3.0, 1.0, 1.0, 3.0]
+    );
 }
 
 #[test]
@@ -1021,8 +1036,11 @@ fn swapbytes_preserves_tensor_dtype() {
     let Value::Tensor(tensor) = out else {
         panic!("expected tensor");
     };
-    assert_eq!(tensor.dtype, NumericDType::U16);
-    assert_eq!(tensor.data, vec![0x3412_u16 as f64, 0xff00_u16 as f64]);
+    assert_eq!(tensor.numeric_dtype(), NumericDType::U16);
+    assert_eq!(
+        tensor.integer_storage(),
+        Some(&IntegerStorage::U16(vec![0x3412, 0xff00]))
+    );
 }
 
 #[test]
