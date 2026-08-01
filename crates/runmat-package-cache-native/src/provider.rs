@@ -227,7 +227,7 @@ impl NativePackageSourceProvider {
             .await?;
         transfer
             .metadata
-            .validate_source(&transfer.source)
+            .verify_supply_chain(&transfer.package_id, &transfer.source)
             .map_err(|error| format!("registry metadata is invalid: {error}"))?;
         let metadata = transfer.metadata;
         let snapshot = RegistryArtifactInventory::decode_snapshot(

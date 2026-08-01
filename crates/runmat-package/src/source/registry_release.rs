@@ -35,6 +35,8 @@ pub struct RegistryReleaseMetadata {
     pub optional_capabilities: Vec<String>,
     pub readme_digest: Option<String>,
     pub license: Option<String>,
+    #[serde(default)]
+    pub supply_chain: Option<super::RegistryReleaseSupplyChain>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,16 +59,34 @@ impl RegistryReleaseMetadata {
         }
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
+        struct CanonicalMetadata<'a> {
+            singleton: bool,
+            runmat_requirement: &'a Option<String>,
+            dependencies: &'a [RegistryReleaseDependency],
+            features: &'a BTreeMap<String, Vec<String>>,
+            required_capabilities: &'a [String],
+            optional_capabilities: &'a [String],
+            readme_digest: &'a Option<String>,
+            license: &'a Option<String>,
+        }
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
         struct Canonical<'a> {
             format: &'static str,
             package: CanonicalPackage<'a>,
             version: String,
             artifact_digest: String,
             tree_digest: String,
-            metadata: &'a RegistryReleaseMetadata,
+            metadata: CanonicalMetadata<'a>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            supply_chain: Option<&'a super::RegistryReleaseSupplyChain>,
         }
         let bytes = serde_json::to_vec(&Canonical {
-            format: "runmat-registry-release-v1",
+            format: if self.supply_chain.is_some() {
+                "runmat-registry-release-v2"
+            } else {
+                "runmat-registry-release-v1"
+            },
             package: CanonicalPackage {
                 registry: source.registry_origin.as_str(),
                 namespace: source.package.organization(),
@@ -75,7 +95,17 @@ impl RegistryReleaseMetadata {
             version: source.version.to_string(),
             artifact_digest: source.artifact_digest.to_string(),
             tree_digest: source.tree_digest.to_string(),
-            metadata: self,
+            metadata: CanonicalMetadata {
+                singleton: self.singleton,
+                runmat_requirement: &self.runmat_requirement,
+                dependencies: &self.dependencies,
+                features: &self.features,
+                required_capabilities: &self.required_capabilities,
+                optional_capabilities: &self.optional_capabilities,
+                readme_digest: &self.readme_digest,
+                license: &self.license,
+            },
+            supply_chain: self.supply_chain.as_ref(),
         })
         .map_err(|error| error.to_string())?;
         Ok(ContentDigest::sha256(bytes))
@@ -87,6 +117,18 @@ impl RegistryReleaseMetadata {
             return Err(
                 "registry release metadata digest differs from the exact source".to_string(),
             );
+        }
+        Ok(())
+    }
+
+    pub fn verify_supply_chain(
+        &self,
+        package_id: &str,
+        source: &RegistrySourceId,
+    ) -> Result<(), String> {
+        self.validate_source(source)?;
+        if let Some(supply_chain) = &self.supply_chain {
+            supply_chain.verify(package_id)?;
         }
         Ok(())
     }

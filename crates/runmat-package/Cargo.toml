@@ -8,6 +8,9 @@ homepage = "https://runmat.com"
 repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
+base64 = "0.22"
+chrono = { workspace = true }
+ed25519-dalek = "2"
 futures = "0.3"
 runmat-config = { workspace = true }
 runmat-filesystem = { workspace = true }

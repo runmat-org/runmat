@@ -81,6 +81,7 @@ impl RegistryTransport for RunMatRegistryTransport {
                 .await
                 .map_err(|error| error.to_string())?;
             Ok(RegistryArtifactTransfer {
+                package_id: response.metadata.release.package_id.clone(),
                 source,
                 metadata,
                 artifact_bytes,
@@ -111,7 +112,7 @@ fn candidate_record(
         &candidate.artifact.tree_digest,
     )?;
     let metadata = release_metadata(&candidate.release)?;
-    metadata.validate_source(&source)?;
+    metadata.verify_supply_chain(&candidate.release.package_id, &source)?;
     Ok(RegistryCandidateRecord {
         source,
         metadata,
@@ -154,6 +155,7 @@ fn release_metadata(metadata: &RegistryReleaseCore) -> Result<RegistryReleaseMet
         optional_capabilities: metadata.optional_capabilities.clone(),
         readme_digest: metadata.readme_digest.clone(),
         license: metadata.license.clone(),
+        supply_chain: metadata.supply_chain.clone(),
     })
 }
 
@@ -230,6 +232,7 @@ mod tests {
                 license: None,
                 dependencies: Vec::new(),
                 advisories: Vec::new(),
+                supply_chain: None,
             },
             artifact: runmat_server_client::packages::RegistryArtifact {
                 id: "art_0123456789abcdef0123456789abcdef".to_string(),

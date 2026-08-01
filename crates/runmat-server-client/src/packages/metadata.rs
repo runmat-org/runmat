@@ -66,6 +66,8 @@ pub struct RegistryReleaseCore {
     pub license: Option<String>,
     pub dependencies: Vec<RegistryDependency>,
     pub advisories: Vec<RegistryAdvisory>,
+    #[serde(default)]
+    pub supply_chain: Option<runmat_package::RegistryReleaseSupplyChain>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

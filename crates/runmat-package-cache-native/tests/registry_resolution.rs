@@ -56,6 +56,7 @@ impl RegistryTransport for FixtureRegistryTransport {
                 artifact_bytes.push(b' ');
             }
             Ok(RegistryArtifactTransfer {
+                package_id: "pkg_0123456789abcdef0123456789abcdef".to_string(),
                 source: self.record.source.clone(),
                 metadata: self.record.metadata.clone(),
                 artifact_bytes,
@@ -208,6 +209,7 @@ roots = ["src"]
         optional_capabilities: Vec::new(),
         readme_digest: None,
         license: Some("MIT".to_string()),
+        supply_chain: None,
     };
     let mut source = RegistrySourceId {
         registry_origin: RegistryOrigin::new("https://packages.runmat.test").unwrap(),

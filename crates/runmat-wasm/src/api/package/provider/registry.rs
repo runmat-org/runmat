@@ -53,6 +53,8 @@ struct ReleaseCoreWire {
     license: Option<String>,
     dependencies: Vec<DependencyWire>,
     advisories: Vec<serde_json::Value>,
+    #[serde(default)]
+    supply_chain: Option<runmat_package::RegistryReleaseSupplyChain>,
 }
 
 #[derive(serde::Deserialize)]
@@ -121,8 +123,9 @@ pub(super) async fn candidates(
                 &candidate.artifact.digest,
                 &candidate.artifact.tree_digest,
             )?;
+            let package_id = candidate.release.package_id.clone();
             let metadata = metadata(candidate.release)?;
-            metadata.validate_source(&source)?;
+            metadata.verify_supply_chain(&package_id, &source)?;
             Ok(RegistryCandidateRecord {
                 source,
                 metadata,
@@ -188,8 +191,9 @@ pub(super) async fn acquire(
             &release.artifact.digest,
             &release.artifact.tree_digest,
         )?;
+        let package_id = release.release.package_id.clone();
         let acquired_metadata = metadata(release.release)?;
-        acquired_metadata.validate_source(&acquired_source)?;
+        acquired_metadata.verify_supply_chain(&package_id, &acquired_source)?;
         let acquired = runmat_package_cache::RegistryArtifactInventory::decode_snapshot(
             &artifact_bytes,
             acquired_source,
@@ -256,7 +260,6 @@ fn source(
 }
 
 fn metadata(release: ReleaseCoreWire) -> Result<RegistryReleaseMetadata, String> {
-    let _ = release.package_id;
     let _ = release.advisories;
     Ok(RegistryReleaseMetadata {
         singleton: release.singleton,
@@ -292,5 +295,6 @@ fn metadata(release: ReleaseCoreWire) -> Result<RegistryReleaseMetadata, String>
         optional_capabilities: release.optional_capabilities,
         readme_digest: release.readme_digest,
         license: release.license,
+        supply_chain: release.supply_chain,
     })
 }

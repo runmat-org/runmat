@@ -15,6 +15,7 @@ chrono = { workspace = true }
 dirs = "5.0"
 keyring = "2.3"
 rand = "0.8"
+runmat-package = { workspace = true }
 progenitor-client = "0.11"
 regress = "0.10"
 futures = "0.3"

@@ -6,6 +6,7 @@ use runmat_package::{
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegistryArtifactTransfer {
+    pub package_id: String,
     pub source: RegistrySourceId,
     pub metadata: RegistryReleaseMetadata,
     pub artifact_bytes: Vec<u8>,

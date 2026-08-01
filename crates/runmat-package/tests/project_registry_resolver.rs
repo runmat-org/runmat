@@ -213,6 +213,7 @@ roots = ["src"]
         optional_capabilities: Vec::new(),
         readme_digest: None,
         license: Some("MIT".to_string()),
+        supply_chain: None,
     };
     let mut source = RegistrySourceId {
         registry_origin: RegistryOrigin::new("https://packages.runmat.test").unwrap(),

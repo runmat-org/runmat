@@ -8,6 +8,7 @@ mod project_resolver;
 mod registry_policy;
 mod registry_release;
 mod server_policy;
+mod supply_chain;
 mod symbols;
 mod vendor;
 
@@ -45,6 +46,10 @@ pub use registry_release::{
 pub use server_policy::{
     plan_server_project_acquisition, validate_server_project_acquisition, ServerPolicyError,
     ServerProjectAcquisitionPlan, ServerSnapshotSelector,
+};
+pub use supply_chain::{
+    BuildProvenance, PackageTrustTier, RegistryReleaseSupplyChain, SbomFormat, SbomReference,
+    WrapperProvenance, RELEASE_SUPPLY_CHAIN_SCHEMA_VERSION,
 };
 pub use symbols::{
     discover_known_project_symbols_from_source_name,
