@@ -9,6 +9,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::tensor::{tensor_into_values_f64, tensor_values_f64_cow};
 use crate::builtins::strings::common::is_missing_string;
 use crate::builtins::strings::text_analytics::documents::{
     checked_count_len, counts_from_bag, documents_from_object, vocabulary_from_bag,
@@ -289,7 +290,10 @@ fn real_matrix_input(value: &Value, fn_name: &str) -> BuiltinResult<RealRows> {
             RealRows::new(1, 1, nonzero_real_rows(1, 1, &[scalar]))
         }
         Value::Tensor(tensor) => {
-            RealRows::new(tensor.rows, tensor.cols, nonzero_real_rows(tensor.rows, tensor.cols, &tensor.data))
+            let rows = tensor.rows();
+            let cols = tensor.cols();
+            let values = tensor_values_f64_cow(tensor);
+            RealRows::new(rows, cols, nonzero_real_rows(rows, cols, &values))
         }
         Value::SparseTensor(sparse) => real_rows_from_sparse(sparse),
         Value::Complex(..) | Value::ComplexTensor(_) => Err(similarity_error(format!(
@@ -341,16 +345,11 @@ fn complex_matrix_input(value: &Value, fn_name: &str) -> BuiltinResult<ComplexRo
             ComplexRows::new(1, 1, nonzero_complex_rows(1, 1, &[(scalar, 0.0)]))
         }
         Value::Tensor(tensor) => {
-            let data = tensor
-                .data
-                .iter()
-                .map(|value| (*value, 0.0))
-                .collect::<Vec<_>>();
-            ComplexRows::new(
-                tensor.rows,
-                tensor.cols,
-                nonzero_complex_rows(tensor.rows, tensor.cols, &data),
-            )
+            let rows = tensor.rows();
+            let cols = tensor.cols();
+            let values = tensor_values_f64_cow(tensor);
+            let data = values.iter().map(|value| (*value, 0.0)).collect::<Vec<_>>();
+            ComplexRows::new(rows, cols, nonzero_complex_rows(rows, cols, &data))
         }
         Value::SparseTensor(sparse) => {
             let real = real_rows_from_sparse(sparse)?;
@@ -404,19 +403,17 @@ enum Terms {
 impl TextModel {
     fn from_counts(terms: Terms, counts: Tensor, fn_name: &str) -> BuiltinResult<Self> {
         let term_len = terms.len();
-        if counts.cols != term_len {
+        let rows = counts.rows();
+        let cols = counts.cols();
+        if cols != term_len {
             return Err(similarity_error(format!(
                 "{fn_name}: count matrix columns ({}) must match term count ({term_len})",
-                counts.cols
+                cols
             )));
         }
-        let rows = counts.rows;
-        let real_rows = RealRows::new(
-            counts.rows,
-            counts.cols,
-            nonzero_real_rows(counts.rows, counts.cols, &counts.data),
-        )?;
-        let idf = idf_from_counts(&counts.data, rows, counts.cols);
+        let values = tensor_into_values_f64(counts);
+        let real_rows = RealRows::new(rows, cols, nonzero_real_rows(rows, cols, &values))?;
+        let idf = idf_from_counts(&values, rows, cols);
         Ok(Self {
             terms,
             counts: real_rows,
@@ -765,7 +762,7 @@ fn complex_dot_conj(lhs: &[(usize, (f64, f64))], rhs: &[(usize, (f64, f64))]) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{CellArray, ObjectInstance, StringArray};
+    use runmat_builtins::{CellArray, IntegerStorage, ObjectInstance, StringArray};
 
     fn dense_sparse(value: Value) -> Tensor {
         match value {
@@ -806,7 +803,29 @@ mod tests {
         let m = tensor(vec![1.0, 0.0, 0.0, 1.0], 2, 2);
         let out = dense_sparse(cosine_similarity_builtin(vec![m]).await.expect("cosine"));
         assert_eq!(out.shape, vec![2, 2]);
-        assert_eq!(out.data, vec![1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(out.materialize_f64(), vec![1.0, 0.0, 0.0, 1.0]);
+    }
+
+    #[tokio::test]
+    async fn native_single_and_integer_matrix_extensions_use_explicit_double_domain() {
+        let inputs = [
+            Value::Tensor(
+                Tensor::from_f32(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).expect("single matrix"),
+            ),
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U16(vec![1, 0, 0, 1]), vec![2, 2])
+                    .expect("integer matrix"),
+            ),
+        ];
+        for input in inputs {
+            let out = dense_sparse(
+                cosine_similarity_builtin(vec![input])
+                    .await
+                    .expect("extended numeric cosine"),
+            );
+            assert_eq!(out.shape, vec![2, 2]);
+            assert_eq!(out.materialize_f64(), vec![1.0, 0.0, 0.0, 1.0]);
+        }
     }
 
     #[tokio::test]
@@ -820,8 +839,9 @@ mod tests {
         );
         let inv = 1.0 / 2.0_f64.sqrt();
         assert_eq!(out.shape, vec![2, 1]);
-        assert!((out.data[0] - inv).abs() < 1e-12);
-        assert!((out.data[1] - inv).abs() < 1e-12);
+        let values = out.materialize_f64();
+        assert!((values[0] - inv).abs() < 1e-12);
+        assert!((values[1] - inv).abs() < 1e-12);
     }
 
     #[tokio::test]
@@ -833,9 +853,10 @@ mod tests {
         ]);
         let out = dense_sparse(cosine_similarity_builtin(vec![docs]).await.expect("cosine"));
         assert_eq!(out.shape, vec![3, 3]);
-        assert!((out.data[0] - 1.0).abs() < 1e-12);
-        assert!(out.data[1] > 0.0 && out.data[1] < 1.0);
-        assert!(out.data[2] > 0.0 && out.data[2] < 1.0);
+        let values = out.materialize_f64();
+        assert!((values[0] - 1.0).abs() < 1e-12);
+        assert!(values[1] > 0.0 && values[1] < 1.0);
+        assert!(values[2] > 0.0 && values[2] < 1.0);
     }
 
     #[tokio::test]
@@ -860,7 +881,7 @@ mod tests {
                 .expect("cosine"),
         );
         assert_eq!(out.shape, vec![2, 1]);
-        assert_eq!(out.data, vec![1.0, 0.0]);
+        assert_eq!(out.materialize_f64(), vec![1.0, 0.0]);
     }
 
     #[tokio::test]
@@ -891,7 +912,10 @@ mod tests {
         match out {
             Value::SparseTensor(sparse) => {
                 assert_eq!(sparse.nnz(), 2);
-                assert_eq!(sparse.to_dense().unwrap().data, vec![1.0, 0.0, 0.0, 1.0]);
+                assert_eq!(
+                    sparse.to_dense().unwrap().materialize_f64(),
+                    vec![1.0, 0.0, 0.0, 1.0]
+                );
             }
             other => panic!("expected sparse result, got {other:?}"),
         }
