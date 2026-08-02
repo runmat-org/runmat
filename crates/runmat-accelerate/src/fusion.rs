@@ -1869,8 +1869,11 @@ impl FusionGroupPlan {
                     }
                 }
                 Value::Int(_) => return None,
-                Value::Tensor(t) if t.data.len() == 1 => {
-                    let scalar = t.data[0];
+                Value::Tensor(t) if t.integer_storage().is_none() && t.len() == 1 => {
+                    let scalar = t
+                        .numeric_value_at(0)
+                        .expect("validated floating scalar tensor")
+                        .materialize_f64();
                     if scalar_ty == "f64" {
                         format!("f64({})", scalar)
                     } else {
@@ -2880,9 +2883,9 @@ fn value_info_scalar(info: &ValueInfo) -> Option<f64> {
         Some(Value::Int(_)) => None,
         // Do not establish eligibility for a floating fusion by reading the
         // lossy f64 mirror of a native integer tensor.
-        Some(Value::Tensor(t)) if t.integer_storage().is_none() && t.data.len() == 1 => {
-            Some(t.data[0])
-        }
+        Some(Value::Tensor(t)) if t.integer_storage().is_none() && t.len() == 1 => t
+            .numeric_value_at(0)
+            .map(runmat_builtins::NumericScalar::materialize_f64),
         Some(Value::LogicalArray(arr)) if arr.data.len() == 1 => Some(arr.data[0] as f64),
         Some(Value::Bool(flag)) => Some(if *flag { 1.0 } else { 0.0 }),
         _ => None,
@@ -3209,10 +3212,8 @@ fn resolve_numeric_vector_constant(graph: &AccelGraph, vid: ValueId) -> Option<V
         // Axis and dimension vectors feed floating shader literals below, so
         // native integer tensors must take the normal unfused path rather than
         // being derived from their f64 mirror.
-        Some(Value::Tensor(tensor))
-            if tensor.integer_storage().is_none() && !tensor.data.is_empty() =>
-        {
-            Some(tensor.data.clone())
+        Some(Value::Tensor(tensor)) if tensor.integer_storage().is_none() && !tensor.is_empty() => {
+            Some(tensor.materialize_f64())
         }
         Some(Value::LogicalArray(arr)) if !arr.data.is_empty() => Some(
             arr.data
@@ -3830,13 +3831,12 @@ mod tests {
     }
 
     #[test]
-    fn native_integer_tensor_constants_do_not_use_a_poisoned_f64_mirror() {
-        let mut tensor = runmat_builtins::Tensor::new_integer(
+    fn native_integer_tensor_constants_decline_float_fusion() {
+        let tensor = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![1_u64 << 63]),
             vec![1, 1],
         )
         .expect("integer tensor");
-        tensor.data = vec![f64::NAN];
         let value = Value::Tensor(tensor);
         let info = ValueInfo {
             id: 99,

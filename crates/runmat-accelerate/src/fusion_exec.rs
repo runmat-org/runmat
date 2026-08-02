@@ -116,8 +116,9 @@ fn ensure_gpu_tensor(
     match value {
         Value::GpuTensor(handle) => Ok((handle.clone(), None)),
         Value::Tensor(tensor) => {
+            let data = tensor.materialize_f64();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &data,
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view)?;
@@ -183,12 +184,14 @@ fn scalar_from_value(value: &Value) -> Result<f64> {
     }
     match value {
         Value::Tensor(t) => {
-            if t.data.len() == 1 {
-                Ok(t.data[0])
+            if t.len() == 1 {
+                Ok(t.numeric_value_at(0)
+                    .expect("validated scalar tensor storage")
+                    .materialize_f64())
             } else {
                 Err(anyhow!(
                     "image normalize: expected scalar tensor, got {} elements",
-                    t.data.len()
+                    t.len()
                 ))
             }
         }
@@ -324,13 +327,14 @@ fn execute_elementwise_outputs(
                 owned: None,
             }),
             Value::Tensor(t) => {
-                if let Err(msg) = ensure_provider_supports_dtype(provider, t.dtype) {
+                if let Err(msg) = ensure_provider_supports_dtype(provider, t.numeric_dtype()) {
                     return Err(anyhow!(
                         "fusion: tensor input requires unsupported precision ({msg})"
                     ));
                 }
+                let data = t.materialize_f64();
                 let view = HostTensorView {
-                    data: &t.data,
+                    data: &data,
                     shape: &t.shape,
                 };
                 let handle = provider.upload(&view)?;
@@ -521,13 +525,14 @@ pub fn execute_reduction(
                 owned: None,
             }),
             Value::Tensor(t) => {
-                if let Err(msg) = ensure_provider_supports_dtype(provider, t.dtype) {
+                if let Err(msg) = ensure_provider_supports_dtype(provider, t.numeric_dtype()) {
                     return Err(anyhow!(
                         "fusion: tensor input requires unsupported precision ({msg})"
                     ));
                 }
+                let data = t.materialize_f64();
                 let view = HostTensorView {
-                    data: &t.data,
+                    data: &data,
                     shape: &t.shape,
                 };
                 let handle = provider.upload(&view)?;
@@ -970,8 +975,9 @@ pub async fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Res
         let handle = match v {
             Value::GpuTensor(h) => h.clone(),
             Value::Tensor(t) => {
+                let data = t.materialize_f64();
                 let view = HostTensorView {
-                    data: &t.data,
+                    data: &data,
                     shape: &t.shape,
                 };
                 let h = prov.upload(&view)?;
