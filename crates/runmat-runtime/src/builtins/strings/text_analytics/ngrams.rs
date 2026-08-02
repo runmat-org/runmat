@@ -15,7 +15,7 @@ use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::strings::common::is_missing_string;
 use crate::builtins::strings::core::compat::scalar_text;
 use crate::builtins::strings::text_analytics::documents::{
-    checked_count_len, documents_from_object, words_from_word_vector,
+    checked_count_len, documents_from_object, is_nonnegative_integer_count, words_from_word_vector,
     words_from_word_vector_preserving_missing, TOKENIZED_DOCUMENT_CLASS,
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
@@ -428,11 +428,13 @@ fn bag_from_unique_ngrams(
             raw_ngrams.len()
         )));
     }
-    if counts
-        .data
-        .iter()
-        .any(|value| !value.is_finite() || *value < 0.0 || value.fract() != 0.0)
-    {
+    if (0..counts.len()).any(|index| {
+        !is_nonnegative_integer_count(
+            counts
+                .numeric_value_at(index)
+                .expect("tensor storage length matches shape"),
+        )
+    }) {
         return Err(ngrams_error(
             "bagOfNgrams: counts must be nonnegative integers",
         ));
@@ -474,9 +476,10 @@ fn bag_from_unique_ngrams(
         keep_cols.len(),
         "bagOfNgrams",
     )?);
+    let values = tensor_utils::tensor_values_f64_cow(&counts);
     for col in keep_cols {
         for row in 0..counts.rows {
-            filtered_counts.push(counts.data[row + col * counts.rows]);
+            filtered_counts.push(values[row + col * counts.rows]);
         }
     }
     let lengths = requested_lengths.unwrap_or_else(|| infer_ngram_lengths(&ngrams));
@@ -694,7 +697,7 @@ fn vocabulary_array(ngrams: &[Vec<String>]) -> BuiltinResult<StringArray> {
 mod tests {
     use super::*;
     use crate::builtins::strings::text_analytics::documents::TOKENIZED_DOCUMENT_CLASS;
-    use runmat_builtins::{CellArray, IntegerStorage};
+    use runmat_builtins::{CellArray, IntegerStorage, NumericStorage};
 
     fn run(args: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(bag_of_ngrams_builtin(args))
@@ -832,6 +835,30 @@ mod tests {
         assert_eq!(bag.properties.get("NumDocuments"), Some(&Value::Num(2.0)));
         assert_eq!(bag.properties.get("NumNgrams"), Some(&Value::Num(2.0)));
         assert_eq!(tensor_property(&bag, "NgramLengths").data, vec![2.0]);
+    }
+
+    #[test]
+    fn accepts_native_single_and_rejects_negative_exact_integer_counts() {
+        let ngrams = StringArray::new(
+            vec!["a".into(), "b".into(), "b".into(), "c".into()],
+            vec![2, 2],
+        )
+        .unwrap();
+        let single = Tensor::from_numeric_storage(NumericStorage::F32(vec![2.0, 3.0]), vec![1, 2])
+            .expect("single counts");
+        let bag = object(
+            run(vec![
+                Value::StringArray(ngrams.clone()),
+                Value::Tensor(single),
+            ])
+            .expect("single bag"),
+        );
+        assert_eq!(tensor_property(&bag, "Counts").data, vec![2.0, 3.0]);
+
+        let mut negative =
+            Tensor::new_integer(IntegerStorage::I64(vec![1, -1]), vec![1, 2]).unwrap();
+        negative.data.clear();
+        assert!(run(vec![Value::StringArray(ngrams), Value::Tensor(negative),]).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

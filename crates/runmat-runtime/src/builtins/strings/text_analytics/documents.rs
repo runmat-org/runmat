@@ -8,8 +8,8 @@ use regex::Regex;
 use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, ClassDef, LogicalArray, ObjectInstance, PropertyDef, ResolveContext, StringArray,
-    Tensor, Type, Value,
+    CellArray, ClassDef, LogicalArray, NumericScalar, ObjectInstance, PropertyDef, ResolveContext,
+    StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -2396,15 +2396,16 @@ pub(in crate::builtins::strings::text_analytics) fn document_shape_from_object(
 
 fn shape_from_object(object: &ObjectInstance, fn_name: &str) -> BuiltinResult<Vec<usize>> {
     if let Some(Value::Tensor(tensor)) = object.properties.get("Shape") {
-        tensor
-            .data
-            .iter()
-            .map(|value| {
-                nonnegative_platform_usize(*value).ok_or_else(|| {
+        (0..tensor.len())
+            .map(|index| {
+                let value = tensor
+                    .numeric_value_at(index)
+                    .expect("tensor storage length matches shape");
+                nonnegative_numeric_usize(value).ok_or_else(|| {
                     text_analytics_error(
                         fn_name,
                         format!(
-                            "{fn_name}: tokenizedDocument Shape property has invalid dimension {value}"
+                            "{fn_name}: tokenizedDocument Shape property has invalid dimension {value:?}"
                         ),
                     )
                 })
@@ -2442,6 +2443,28 @@ fn nonnegative_platform_usize(value: f64) -> Option<usize> {
         return None;
     }
     Some(value as usize)
+}
+
+fn nonnegative_numeric_usize(value: NumericScalar) -> Option<usize> {
+    match value {
+        NumericScalar::F64(value) => nonnegative_platform_usize(value),
+        NumericScalar::F32(value) => nonnegative_platform_usize(f64::from(value)),
+        value => value.into_int_value()?.try_to_usize(),
+    }
+}
+
+pub(in crate::builtins::strings::text_analytics) fn is_nonnegative_integer_count(
+    value: NumericScalar,
+) -> bool {
+    match value {
+        NumericScalar::F64(value) => value.is_finite() && value >= 0.0 && value.fract() == 0.0,
+        NumericScalar::F32(value) => value.is_finite() && value >= 0.0 && value.fract() == 0.0,
+        value => value
+            .into_int_value()
+            .expect("non-floating numeric scalar is integer")
+            .try_to_u64()
+            .is_some(),
+    }
 }
 
 pub(in crate::builtins::strings::text_analytics) fn options_from_document_object(
@@ -2520,11 +2543,13 @@ fn bag_from_unique_words_and_counts(words: &Value, counts: &Value) -> BuiltinRes
             ),
         ));
     }
-    if tensor
-        .data
-        .iter()
-        .any(|value| !value.is_finite() || *value < 0.0 || value.fract() != 0.0)
-    {
+    if (0..tensor.len()).any(|index| {
+        !is_nonnegative_integer_count(
+            tensor
+                .numeric_value_at(index)
+                .expect("tensor storage length matches shape"),
+        )
+    }) {
         return Err(text_analytics_error(
             "bagOfWords",
             "bagOfWords: counts must be nonnegative integers",
@@ -2823,7 +2848,7 @@ fn positive_platform_usize(value: f64) -> Option<usize> {
 mod tests {
     use super::*;
     use crate::builtins::table::table_from_columns;
-    use runmat_builtins::IntegerStorage;
+    use runmat_builtins::{IntegerStorage, NumericStorage};
 
     fn poisoned_integer_scalar(storage: IntegerStorage) -> Value {
         let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
@@ -3009,6 +3034,22 @@ mod tests {
             Value::Tensor(Tensor::new(vec![usize::MAX as f64 + 1.0, 1.0], vec![1, 2]).unwrap()),
         );
         assert!(document_shape_from_object(&document, "test").is_err());
+    }
+
+    #[test]
+    fn tokenized_document_shape_reads_native_single_storage() {
+        let mut document = object(run_tokenized(Vec::new()).expect("tokenized"));
+        document.properties.insert(
+            "Shape".to_string(),
+            Value::Tensor(
+                Tensor::from_numeric_storage(NumericStorage::F32(vec![1.0, 1.0]), vec![1, 2])
+                    .expect("single shape"),
+            ),
+        );
+        assert_eq!(
+            document_shape_from_object(&document, "test").unwrap(),
+            vec![1, 1]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -3332,6 +3373,26 @@ mod tests {
             object(run_bag(vec![Value::StringArray(words), Value::Tensor(counts)]).expect("bag"));
         assert_eq!(bag.properties.get("NumDocuments"), Some(&Value::Num(2.0)));
         assert_eq!(bag.properties.get("NumWords"), Some(&Value::Num(2.0)));
+    }
+
+    #[test]
+    fn bag_of_words_accepts_native_single_and_exact_integer_counts() {
+        let words = StringArray::new(vec!["alpha".into(), "beta".into()], vec![1, 2]).unwrap();
+        let single = Tensor::from_numeric_storage(NumericStorage::F32(vec![2.0, 3.0]), vec![1, 2])
+            .expect("single counts");
+        let bag = object(
+            run_bag(vec![
+                Value::StringArray(words.clone()),
+                Value::Tensor(single),
+            ])
+            .expect("single bag"),
+        );
+        assert_eq!(tensor_property(&bag, "Counts").data, vec![2.0, 3.0]);
+
+        let mut negative =
+            Tensor::new_integer(IntegerStorage::I64(vec![1, -1]), vec![1, 2]).unwrap();
+        negative.data.clear();
+        assert!(run_bag(vec![Value::StringArray(words), Value::Tensor(negative),]).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
