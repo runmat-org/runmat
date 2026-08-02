@@ -4,24 +4,18 @@ use super::server_transport::RunMatServerSnapshotTransport;
 use crate::cli::{Cli, PackageProjectArgs};
 use anyhow::{Context, Result};
 use runmat_package::{
-    decode_lock, encode_lock, DependencyGroup, HostCapability, PackageLock, PathLockDecision,
-    ProjectResolveOptions, ResolvedProject, SourceAcquisitionIntent, SourceAcquisitionPolicy,
+    DependencyGroup, HostCapability, ProjectResolveOptions, SourceAcquisitionIntent,
+    SourceAcquisitionPolicy,
 };
 use runmat_package_cache_native::{
-    git::NativeGitClient, NativeCacheConfig, NativeCacheLease, NativePackageSourceProvider,
-    SqliteCacheBackend,
+    git::NativeGitClient, resolve_native_project, NativeCacheConfig, NativePackageSourceProvider,
+    NativeProjectResolveRequest, SqliteCacheBackend,
 };
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-pub(crate) struct NativeResolvedProject {
-    pub resolved: ResolvedProject,
-    pub backend: Arc<SqliteCacheBackend>,
-    pub cache_config: NativeCacheConfig,
-    _cache_lease: Option<NativeCacheLease>,
-    _provider: NativePackageSourceProvider,
-}
+pub(crate) use runmat_package_cache_native::NativeResolvedProject;
 
 pub(super) async fn resolve(
     args: &PackageProjectArgs,
@@ -43,12 +37,6 @@ async fn resolve_with_groups(
     intent: SourceAcquisitionIntent,
     groups: BTreeSet<DependencyGroup>,
 ) -> Result<NativeResolvedProject> {
-    let manifest = canonical_manifest(&args.manifest_path)?;
-    let lock_path = manifest
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join("runmat.lock");
-    let existing = read_lock(&lock_path)?;
     let cache_config = NativeCacheConfig::platform_default()
         .context("failed to locate the platform package cache")?;
     let layout = cache_config.layout();
@@ -68,86 +56,30 @@ async fn resolve_with_groups(
         .with_server_transport(server_transport)
         .with_registry_transport(Arc::new(RunMatRegistryTransport))
         .with_private_artifact_decryptor(Arc::new(KeyringPrivateArtifactDecryptor));
-    let resolved = runmat_package::resolve_project_async(
-        &manifest,
-        existing.as_ref(),
-        ProjectResolveOptions {
-            target: target_lexicon::HOST.to_string(),
-            default_server_origin,
-            default_registry_index,
-            groups,
-            root_features: BTreeSet::new(),
-            host_capabilities: native_capabilities(),
-            source_intent: intent,
-            source_policy: SourceAcquisitionPolicy {
-                locked: cli.locked,
-                frozen: cli.frozen,
-                offline: cli.offline || cli.frozen,
+    resolve_native_project(
+        NativeProjectResolveRequest {
+            manifest_path: args.manifest_path.clone(),
+            options: ProjectResolveOptions {
+                target: target_lexicon::HOST.to_string(),
+                default_server_origin,
+                default_registry_index,
+                groups,
+                root_features: BTreeSet::new(),
+                host_capabilities: native_capabilities(),
+                source_intent: intent,
+                source_policy: SourceAcquisitionPolicy {
+                    locked: cli.locked,
+                    frozen: cli.frozen,
+                    offline: cli.offline || cli.frozen,
+                },
             },
         },
-        &provider,
-    )
-    .await
-    .map_err(|error| anyhow::anyhow!("package resolution failed: {error}"))?;
-    let cached_trees = resolved
-        .acquired_git_sources
-        .iter()
-        .map(|source| &source.tree_digest)
-        .chain(
-            resolved
-                .acquired_server_sources
-                .iter()
-                .map(|source| &source.tree_digest),
-        )
-        .chain(
-            resolved
-                .acquired_registry_sources
-                .iter()
-                .map(|source| &source.tree_digest),
-        )
-        .collect::<BTreeSet<_>>();
-    for inventory in &resolved.source_inventories {
-        if cached_trees.contains(&inventory.tree_digest) {
-            runmat_package_cache::publish_source_inventory(&backend, inventory, now_ms(), 16)
-                .await
-                .context("failed to cache package source inventory")?;
-        }
-    }
-    if resolved.lock_decision == PathLockDecision::WriteGenerated {
-        write_lock(&lock_path, &resolved.lock)?;
-    }
-    let cache_state = runmat_package_cache::CacheBackend::snapshot(backend.as_ref())
-        .await
-        .context("failed to inspect the resolved package cache")?
-        .state;
-    let durable_trees = resolved
-        .acquired_git_sources
-        .iter()
-        .map(|source| source.tree_digest.clone())
-        .chain(
-            resolved
-                .acquired_server_sources
-                .iter()
-                .map(|source| source.tree_digest.clone()),
-        )
-        .chain(
-            resolved
-                .acquired_registry_sources
-                .iter()
-                .map(|source| source.tree_digest.clone()),
-        )
-        .filter(|digest| cache_state.objects.contains_key(digest))
-        .collect();
-    let cache_lease = NativeCacheLease::acquire(backend.clone(), durable_trees)
-        .await
-        .context("failed to lease the resolved package graph")?;
-    Ok(NativeResolvedProject {
-        resolved,
         backend,
         cache_config,
-        _cache_lease: cache_lease,
-        _provider: provider,
-    })
+        provider,
+    )
+    .await
+    .map_err(anyhow::Error::from)
 }
 
 pub(crate) async fn resolve_for_test_manifest(
@@ -163,60 +95,6 @@ pub(crate) async fn resolve_for_test_manifest(
             .collect(),
     )
     .await
-}
-
-fn now_ms() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .try_into()
-        .unwrap_or(u64::MAX)
-}
-
-fn canonical_manifest(path: &Path) -> Result<PathBuf> {
-    let path = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .context("failed to resolve current directory")?
-            .join(path)
-    };
-    std::fs::canonicalize(&path)
-        .with_context(|| format!("failed to locate project manifest {}", path.display()))
-}
-
-fn read_lock(path: &Path) -> Result<Option<PackageLock>> {
-    match std::fs::read(path) {
-        Ok(bytes) => std::str::from_utf8(&bytes)
-            .context("runmat.lock is not valid UTF-8")
-            .and_then(|text| decode_lock(text).map_err(anyhow::Error::from))
-            .with_context(|| format!("failed to decode {}", path.display()))
-            .map(Some),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error).with_context(|| format!("failed to read {}", path.display())),
-    }
-}
-
-fn write_lock(path: &Path, lock: &PackageLock) -> Result<()> {
-    let bytes = encode_lock(lock).context("failed to encode runmat.lock")?;
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let mut temporary =
-        tempfile::NamedTempFile::new_in(parent).context("failed to stage runmat.lock")?;
-    use std::io::Write as _;
-    temporary
-        .write_all(bytes.as_bytes())
-        .context("failed to write staged runmat.lock")?;
-    temporary
-        .as_file()
-        .sync_all()
-        .context("failed to sync staged runmat.lock")?;
-    temporary
-        .persist(path)
-        .map_err(|error| error.error)
-        .with_context(|| format!("failed to atomically publish {}", path.display()))?;
-    Ok(())
 }
 
 fn native_capabilities() -> BTreeSet<HostCapability> {
