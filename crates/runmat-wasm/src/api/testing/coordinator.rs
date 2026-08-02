@@ -54,7 +54,7 @@ async fn run_tests_inner(
         JsWorkerBackend::new(backend.clone()).map_err(|error| js_error(&error.to_string()))?;
     let cancellation = BrowserCancellation::new(backend);
     let mut reporters = ReporterFanout::default();
-    if let Some(observer) = observer {
+    if let Some(observer) = observer.clone() {
         reporters.push_observer(JsEventObserver(observer));
     }
     for report in report_formats {
@@ -76,6 +76,7 @@ async fn run_tests_inner(
         )
         .await
         .map_err(|error| js_error(&error.to_string()))?;
+    let coordinator_event_count = run.events.len();
     if coverage_options.is_requested() {
         let formats = if coverage_options.formats.is_empty() {
             vec![CoverageReportFormat::Json, CoverageReportFormat::Html]
@@ -101,6 +102,11 @@ async fn run_tests_inner(
         plugins.push(CoveragePlugin::new(filter, formats));
         plugins.apply(&mut run);
     }
+    if let Some(observer) = observer {
+        for event in &run.events[coordinator_event_count..] {
+            emit_js_event(&observer, event).map_err(|error| js_error(&error.to_string()))?;
+        }
+    }
     let coverage = run.coverage.clone();
     serde_wasm_bindgen::to_value(&BrowserRunOutput {
         result: run.result,
@@ -125,16 +131,23 @@ impl EventObserver for JsEventObserver {
         &mut self,
         event: &runmat_test::event::TestEvent,
     ) -> runmat_test_runner::RunnerResult<()> {
-        let event = serde_wasm_bindgen::to_value(event).map_err(|error| {
-            runmat_test_runner::RunnerError::Reporter(format!(
-                "failed to serialize browser test event: {error}"
-            ))
-        })?;
-        self.0.call1(&JsValue::NULL, &event).map_err(|error| {
-            runmat_test_runner::RunnerError::Reporter(format!(
-                "browser test event observer failed: {error:?}"
-            ))
-        })?;
-        Ok(())
+        emit_js_event(&self.0, event)
     }
+}
+
+fn emit_js_event(
+    observer: &js_sys::Function,
+    event: &runmat_test::event::TestEvent,
+) -> runmat_test_runner::RunnerResult<()> {
+    let event = serde_wasm_bindgen::to_value(event).map_err(|error| {
+        runmat_test_runner::RunnerError::Reporter(format!(
+            "failed to serialize browser test event: {error}"
+        ))
+    })?;
+    observer.call1(&JsValue::NULL, &event).map_err(|error| {
+        runmat_test_runner::RunnerError::Reporter(format!(
+            "browser test event observer failed: {error:?}"
+        ))
+    })?;
+    Ok(())
 }
