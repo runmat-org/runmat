@@ -256,12 +256,15 @@ fn sawtooth_real(value: Value, xmax: f64) -> BuiltinResult<Value> {
 }
 
 fn sawtooth_tensor(tensor: Tensor, xmax: f64) -> BuiltinResult<Tensor> {
+    let shape = tensor.shape.clone();
     let data = tensor
-        .data
-        .iter()
-        .map(|&value| sawtooth_scalar(value, xmax))
+        .into_numeric_storage()
+        .map_err(|err| sawtooth_error_with_detail(&SAWTOOTH_ERROR_INTERNAL, &err))?
+        .materialize_f64()
+        .into_iter()
+        .map(|value| sawtooth_scalar(value, xmax))
         .collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone())
+    Tensor::new(data, shape)
         .map_err(|err| sawtooth_error_with_detail(&SAWTOOTH_ERROR_INTERNAL, &err))
 }
 
@@ -488,6 +491,19 @@ mod tests {
         let logical = LogicalArray::new(vec![0, 1], vec![1, 2]).unwrap();
         let result = expect_tensor(call(Value::LogicalArray(logical)).unwrap());
         assert_eq!(result.shape, vec![1, 2]);
+        assert_close(result.data[0], -1.0);
+        assert_close(result.data[1], sawtooth_scalar(1.0, 1.0));
+    }
+
+    #[test]
+    fn sawtooth_single_extension_promotes_to_documented_double_domain() {
+        let input = Tensor::from_numeric_storage(
+            runmat_builtins::NumericStorage::F32(vec![0.0, 1.0]),
+            vec![1, 2],
+        )
+        .unwrap();
+        let result = expect_tensor(call(Value::Tensor(input)).unwrap());
+        assert_eq!(result.numeric_dtype(), runmat_builtins::NumericDType::F64);
         assert_close(result.data[0], -1.0);
         assert_close(result.data[1], sawtooth_scalar(1.0, 1.0));
     }

@@ -4,7 +4,7 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, NumericDType, Tensor, Value,
+    ComplexTensor, NumericDType, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -279,12 +279,26 @@ fn sinc_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn sinc_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let data = tensor
-        .data
-        .iter()
-        .map(|&value| sinc_real_value(value))
-        .collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone())
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, &e))?;
+    let storage = match storage {
+        NumericStorage::F32(values) => NumericStorage::F32(
+            values
+                .into_iter()
+                .map(|value| sinc_real_value(f64::from(value)) as f32)
+                .collect(),
+        ),
+        storage => NumericStorage::F64(
+            storage
+                .materialize_f64()
+                .into_iter()
+                .map(sinc_real_value)
+                .collect(),
+        ),
+    };
+    Tensor::from_numeric_storage(storage, shape)
         .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, &e))
 }
 
@@ -594,6 +608,22 @@ mod tests {
             Value::Tensor(out) => assert_eq!(out.shape, vec![2, 2]),
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn sinc_preserves_native_single_storage() {
+        let input =
+            Tensor::from_numeric_storage(NumericStorage::F32(vec![0.0, 0.5, 1.0]), vec![1, 3])
+                .unwrap();
+        let result = call(Value::Tensor(input)).expect("single sinc");
+        let Value::Tensor(output) = result else {
+            panic!("expected tensor");
+        };
+        assert_eq!(output.numeric_dtype(), NumericDType::F32);
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![1.0, (2.0 / std::f32::consts::PI), 0.0])
+        );
     }
 
     #[test]

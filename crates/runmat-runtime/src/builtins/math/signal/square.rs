@@ -12,7 +12,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -246,12 +246,26 @@ fn square_real(value: Value, duty: f64) -> BuiltinResult<Value> {
 }
 
 fn square_tensor(tensor: Tensor, duty: f64) -> BuiltinResult<Tensor> {
-    let data = tensor
-        .data
-        .iter()
-        .map(|&value| square_scalar(value, duty))
-        .collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone())
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|err| square_error_with_detail(&SQUARE_ERROR_INTERNAL, &err))?;
+    let storage = match storage {
+        NumericStorage::F32(values) => NumericStorage::F32(
+            values
+                .into_iter()
+                .map(|value| square_scalar(f64::from(value), duty) as f32)
+                .collect(),
+        ),
+        storage => NumericStorage::F64(
+            storage
+                .materialize_f64()
+                .into_iter()
+                .map(|value| square_scalar(value, duty))
+                .collect(),
+        ),
+    };
+    Tensor::from_numeric_storage(storage, shape)
         .map_err(|err| square_error_with_detail(&SQUARE_ERROR_INTERNAL, &err))
 }
 
@@ -427,6 +441,18 @@ mod tests {
         let result = expect_tensor(call(Value::LogicalArray(logical)).unwrap());
         assert_eq!(result.shape, vec![1, 2]);
         assert_eq!(result.data, vec![1.0, 1.0]);
+    }
+
+    #[test]
+    fn square_preserves_native_single_storage() {
+        let input =
+            Tensor::from_numeric_storage(NumericStorage::F32(vec![0.0, 4.0]), vec![1, 2]).unwrap();
+        let result = expect_tensor(call(Value::Tensor(input)).unwrap());
+        assert_eq!(result.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(
+            result.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![1.0, -1.0])
+        );
     }
 
     #[test]
