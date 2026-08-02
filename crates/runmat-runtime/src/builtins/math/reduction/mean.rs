@@ -1,6 +1,6 @@
 //! MATLAB-compatible `mean` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView, ProviderPrecision};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -406,7 +406,7 @@ impl InputMeta {
 
 fn numeric_dtype_from_value(value: &Value) -> Option<NumericDType> {
     match value {
-        Value::Tensor(t) => Some(t.dtype),
+        Value::Tensor(t) => Some(t.numeric_dtype()),
         Value::GpuTensor(handle) => {
             let precision = runmat_accelerate_api::handle_precision(handle).or_else(|| {
                 runmat_accelerate_api::provider_for_handle(handle)
@@ -1599,12 +1599,7 @@ fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
             "mean: no acceleration provider available to honour GPU output",
         ));
     };
-    let view = HostTensorView {
-        data: &tensor.data,
-        shape: &tensor.shape,
-    };
-    let handle = provider
-        .upload(&view)
+    let handle = gpu_helpers::upload_tensor(provider, &tensor)
         .map_err(|e| mean_internal_error(format!("mean: failed to upload GPU result: {e}")))?;
     Ok(Value::GpuTensor(handle))
 }
@@ -1628,7 +1623,11 @@ fn real_to_complex(value: Value) -> BuiltinResult<Value> {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(t) => {
-            let data: Vec<(f64, f64)> = t.data.iter().map(|&v| (v, 0.0)).collect();
+            let data: Vec<(f64, f64)> = t
+                .materialize_f64()
+                .into_iter()
+                .map(|value| (value, 0.0))
+                .collect();
             let tensor = ComplexTensor::new(data, t.shape.clone())
                 .map_err(|e| mean_internal_error(format!("mean: {e}")))?;
             Ok(complex_tensor_into_value(tensor))
@@ -1690,6 +1689,10 @@ pub(crate) mod tests {
 
     fn mean_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::mean_builtin(value, rest))
+    }
+
+    fn values(tensor: &Tensor) -> Vec<f64> {
+        tensor.materialize_f64()
     }
 
     #[test]
@@ -1757,7 +1760,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 3]);
-                assert_eq!(out.data, vec![2.5, 3.5, 4.5]);
+                assert_eq!(values(&out), vec![2.5, 3.5, 4.5]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1765,16 +1768,15 @@ pub(crate) mod tests {
 
     #[test]
     fn mean_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::I16(vec![0, 2, 4, 6]), vec![2, 2]).expect("tensor");
-        tensor.data = vec![0.0, 0.0, 0.0, 0.0];
 
         let result = mean_builtin(Value::Tensor(tensor), Vec::new()).expect("mean");
 
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
-                assert_eq!(out.data, vec![1.0, 5.0]);
+                assert_eq!(values(&out), vec![1.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1782,9 +1784,8 @@ pub(crate) mod tests {
 
     #[test]
     fn mean_all_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U16(vec![0, 2, 4, 6]), vec![2, 2]).expect("tensor");
-        tensor.data = vec![0.0, 0.0, 0.0, 0.0];
 
         let result = mean_builtin(Value::Tensor(tensor), vec![Value::from("all")]).expect("mean");
 
@@ -1793,12 +1794,9 @@ pub(crate) mod tests {
 
     #[test]
     fn mean_vecdim_reads_typed_integer_dimensions_and_values_exactly() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::I16(vec![1, 3, 5, 7]), vec![2, 2]).expect("tensor");
-        tensor.data = vec![0.0, 0.0, 0.0, 0.0];
-        let mut dims =
-            Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![1, 2]).expect("dims");
-        dims.data = vec![0.0, 0.0];
+        let dims = Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![1, 2]).expect("dims");
 
         let result = mean_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).expect("mean");
 
@@ -1814,7 +1812,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
-                assert_eq!(out.data, vec![2.0, 5.0]);
+                assert_eq!(values(&out), vec![2.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1879,9 +1877,8 @@ pub(crate) mod tests {
 
     #[test]
     fn mean_native_template_reads_typed_integer_scalar_storage_exactly() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U16(vec![42]), vec![1, 1]).expect("tensor");
-        tensor.data.clear();
         let meta = InputMeta {
             class: InputClass::Integer(IntClass::U16),
             device: DevicePreference::Host,
@@ -2031,7 +2028,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
-                assert_eq!(out.data, vec![1.0, 3.5]);
+                assert_eq!(values(&out), vec![1.0, 3.5]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -2045,8 +2042,7 @@ pub(crate) mod tests {
         match result {
             Value::Num(v) => assert!((v - 2.5).abs() < 1e-12),
             Value::Tensor(t) => {
-                assert_eq!(t.data.len(), 1);
-                assert!((t.data[0] - 2.5).abs() < 1e-12);
+                assert_eq!(values(&t), vec![2.5]);
             }
             other => panic!("expected scalar result, got {other:?}"),
         }
@@ -2063,7 +2059,7 @@ pub(crate) mod tests {
             (Value::Num(x), Value::Num(y)) => assert!((x - y).abs() < 1e-12),
             (Value::Tensor(tx), Value::Tensor(ty)) => {
                 assert_eq!(tx.shape, ty.shape);
-                for (x, y) in tx.data.iter().zip(ty.data.iter()) {
+                for (x, y) in values(&tx).iter().zip(values(&ty).iter()) {
                     assert!((x - y).abs() < 1e-12);
                 }
             }
@@ -2103,8 +2099,7 @@ pub(crate) mod tests {
         if let Value::Num(v) = fused {
             assert!((v - 12.5).abs() < 1e-12);
         } else if let Value::Tensor(t) = fused {
-            assert_eq!(t.data.len(), 1);
-            assert!((t.data[0] - 12.5).abs() < 1e-12);
+            assert_eq!(values(&t), vec![12.5]);
         } else {
             panic!("unexpected result {fused:?}");
         }
@@ -2194,15 +2189,11 @@ pub(crate) mod tests {
     fn mean_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
-            let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result = mean_builtin(Value::GpuTensor(handle), Vec::new()).expect("mean");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 3]);
-            assert_eq!(gathered.data, vec![2.5, 3.5, 4.5]);
+            assert_eq!(values(&gathered), vec![2.5, 3.5, 4.5]);
         });
     }
 
@@ -2211,16 +2202,12 @@ pub(crate) mod tests {
     fn mean_gpu_omit_nan_falls_back_to_host() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![f64::NAN, 2.0, f64::NAN, 4.0], vec![2, 2]).unwrap();
-            let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result =
                 mean_builtin(Value::GpuTensor(handle), vec![Value::from("omitnan")]).expect("mean");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 2]);
-            assert_eq!(gathered.data, vec![2.0, 4.0]);
+            assert_eq!(values(&gathered), vec![2.0, 4.0]);
         });
     }
 
@@ -2229,16 +2216,12 @@ pub(crate) mod tests {
     fn mean_gpu_all_dimension_roundtrip() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
-            let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result =
                 mean_builtin(Value::GpuTensor(handle), vec![Value::from("all")]).expect("mean");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 1]);
-            assert!((gathered.data[0] - 2.5).abs() < 1e-12);
+            assert_eq!(values(&gathered), vec![2.5]);
         });
     }
 
@@ -2255,11 +2238,7 @@ pub(crate) mod tests {
             )
             .expect("mean cpu");
 
-            let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let gpu_result = mean_builtin(Value::GpuTensor(handle), vec![Value::Tensor(cpu_dims)])
                 .expect("mean gpu");
 
@@ -2270,7 +2249,7 @@ pub(crate) mod tests {
             };
             let gpu_tensor = test_support::gather(gpu_result).expect("gather");
             assert_eq!(gpu_tensor.shape, cpu_tensor.shape);
-            for (a, b) in gpu_tensor.data.iter().zip(cpu_tensor.data.iter()) {
+            for (a, b) in values(&gpu_tensor).iter().zip(values(&cpu_tensor).iter()) {
                 assert!((a - b).abs() < 1e-12);
             }
         });
@@ -2362,12 +2341,8 @@ pub(crate) mod tests {
     fn mean_like_gpu_prototype_residency() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-            let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let input = provider.upload(&view).expect("upload");
-            let prototype = provider.upload(&view).expect("upload");
+            let input = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
+            let prototype = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result = mean_builtin(
                 Value::GpuTensor(input),
                 vec![
@@ -2381,8 +2356,7 @@ pub(crate) mod tests {
                 Value::GpuTensor(handle) => {
                     let gathered =
                         test_support::gather(Value::GpuTensor(handle.clone())).expect("gather");
-                    assert_eq!(gathered.data.len(), 1);
-                    assert!((gathered.data[0] - 1.5).abs() < 1e-12);
+                    assert_eq!(values(&gathered), vec![1.5]);
                 }
                 other => panic!("expected GPU tensor result, got {other:?}"),
             }
@@ -2403,20 +2377,14 @@ pub(crate) mod tests {
             output: OutputTemplate::Double,
         };
         let cpu = mean_host(Value::Tensor(t.clone()), &args).unwrap();
-        let view = runmat_accelerate_api::HostTensorView {
-            data: &t.data,
-            shape: &t.shape,
-        };
-        let h = runmat_accelerate_api::provider()
-            .unwrap()
-            .upload(&view)
-            .unwrap();
+        let provider = runmat_accelerate_api::provider().unwrap();
+        let h = gpu_helpers::upload_tensor(provider.as_ref(), &t).unwrap();
         let gpu = block_on(mean_gpu(h, &args)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
                 assert_eq!(gt.shape, ct.shape);
-                for (a, b) in gt.data.iter().zip(ct.data.iter()) {
+                for (a, b) in values(&gt).iter().zip(values(&ct).iter()) {
                     assert!((a - b).abs() < 1e-12);
                 }
             }
