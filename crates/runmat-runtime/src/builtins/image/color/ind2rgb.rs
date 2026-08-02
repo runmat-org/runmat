@@ -76,13 +76,6 @@ const IND2RGB_ERROR_INVALID_INDEX: BuiltinErrorDescriptor = BuiltinErrorDescript
     message: "ind2rgb: index values must be finite",
 };
 
-const IND2RGB_ERROR_INDEX_OUT_OF_RANGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IND2RGB.INDEX_OUT_OF_RANGE",
-    identifier: Some("RunMat:ind2rgb:IndexOutOfRange"),
-    when: "At least one index value falls outside the colormap bounds.",
-    message: "ind2rgb: index is outside the colormap",
-};
-
 const IND2RGB_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.IND2RGB.INTERNAL",
     identifier: Some("RunMat:ind2rgb:Internal"),
@@ -90,12 +83,11 @@ const IND2RGB_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "ind2rgb: internal conversion failure",
 };
 
-const IND2RGB_ERRORS: [BuiltinErrorDescriptor; 6] = [
+const IND2RGB_ERRORS: [BuiltinErrorDescriptor; 5] = [
     IND2RGB_ERROR_TOO_MANY_INPUTS,
     IND2RGB_ERROR_INVALID_INPUT,
     IND2RGB_ERROR_INVALID_COLORMAP,
     IND2RGB_ERROR_INVALID_INDEX,
-    IND2RGB_ERROR_INDEX_OUT_OF_RANGE,
     IND2RGB_ERROR_INTERNAL,
 ];
 
@@ -119,13 +111,6 @@ fn ind2rgb_error_with_message(
         builder = builder.with_identifier(identifier);
     }
     builder.build()
-}
-
-fn ind2rgb_error_with_detail(
-    error: &'static BuiltinErrorDescriptor,
-    detail: impl AsRef<str>,
-) -> RuntimeError {
-    ind2rgb_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
 }
 
 fn ind2rgb_map_error(err: RuntimeError, fallback: &'static BuiltinErrorDescriptor) -> RuntimeError {
@@ -177,42 +162,76 @@ async fn ind2rgb_builtin(indexed: Value, map: Value, rest: Vec<Value>) -> Builti
     if !rest.is_empty() {
         return Err(ind2rgb_error(&IND2RGB_ERROR_TOO_MANY_INPUTS));
     }
+    let indexed_is_logical = match &indexed {
+        Value::Bool(_) | Value::LogicalArray(_) => true,
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_logical(handle),
+        _ => false,
+    };
+    let map_is_logical = match &map {
+        Value::Bool(_) | Value::LogicalArray(_) => true,
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_logical(handle),
+        _ => false,
+    };
     let indexed = common::gather_tensor(NAME, indexed)
         .await
         .map_err(|err| ind2rgb_map_error(err, &IND2RGB_ERROR_INVALID_INPUT))?;
     let map = common::gather_tensor(NAME, map)
         .await
         .map_err(|err| ind2rgb_map_error(err, &IND2RGB_ERROR_INVALID_INPUT))?;
+    let indexed_dtype = indexed.numeric_dtype();
+    if indexed_is_logical
+        || !matches!(
+            indexed_dtype,
+            NumericDType::F32 | NumericDType::F64 | NumericDType::U8 | NumericDType::U16
+        )
+    {
+        return Err(ind2rgb_error_with_message(
+            format!(
+                "ind2rgb: {} indexed image is not supported; expected single, double, uint8, or uint16",
+                if indexed_is_logical {
+                    "logical"
+                } else {
+                    indexed_dtype.class_name()
+                }
+            ),
+            &IND2RGB_ERROR_INVALID_INPUT,
+        ));
+    }
+    let map_dtype = map.numeric_dtype();
+    if map_is_logical || map_dtype != NumericDType::F64 {
+        return Err(ind2rgb_error_with_message(
+            format!(
+                "ind2rgb: {} colormap is not supported; expected double",
+                if map_is_logical {
+                    "logical"
+                } else {
+                    map_dtype.class_name()
+                }
+            ),
+            &IND2RGB_ERROR_INVALID_COLORMAP,
+        ));
+    }
     let layout = common::color_layout(&map, NAME)
         .map_err(|err| ind2rgb_map_error(err, &IND2RGB_ERROR_INVALID_COLORMAP))?;
     let common::ColorLayout::Colormap { rows: map_rows } = layout else {
         return Err(ind2rgb_error(&IND2RGB_ERROR_INVALID_COLORMAP));
     };
 
-    let pixels = indexed.data.len();
+    let pixels = indexed.len();
     let mut shape = indexed.shape.clone();
     shape.push(3);
-    let dtype = match map.dtype {
-        NumericDType::F32 => NumericDType::F32,
-        _ => NumericDType::F64,
-    };
     let indexed_values = common::tensor_values_f64(&indexed);
     let map_values = common::tensor_values_f64(&map);
     let mut data = vec![0.0; pixels * 3];
     for (pixel, raw_index) in indexed_values.iter().copied().enumerate() {
-        let map_index = map_index(raw_index, indexed.dtype, map_rows)
+        let map_index = map_index(raw_index, indexed_dtype, map_rows)
             .map_err(|err| ind2rgb_map_error(err, &IND2RGB_ERROR_INVALID_INDEX))?;
         for channel in 0..3 {
-            let value = common::unit_value(map_values[layout.index(map_index, channel)], map.dtype);
-            data[pixel + pixels * channel] = if matches!(dtype, NumericDType::F32) {
-                (value as f32) as f64
-            } else {
-                value
-            };
+            data[pixel + pixels * channel] = map_values[layout.index(map_index, channel)];
         }
     }
 
-    let out = common::tensor_with_dtype(data, shape, dtype, NAME)
+    let out = common::tensor_with_dtype(data, shape, NumericDType::F64, NAME)
         .map_err(|err| ind2rgb_map_error(err, &IND2RGB_ERROR_INTERNAL))?;
     Ok(common::image_value_from_tensor(out))
 }
@@ -222,16 +241,10 @@ fn map_index(value: f64, dtype: NumericDType, map_rows: usize) -> BuiltinResult<
         return Err(ind2rgb_error(&IND2RGB_ERROR_INVALID_INDEX));
     }
     let index = if matches!(dtype, NumericDType::U8 | NumericDType::U16) {
-        value.round() as isize
+        (value.round() as isize).clamp(0, map_rows as isize - 1)
     } else {
-        value.round() as isize - 1
+        (value.round() as isize).clamp(1, map_rows as isize) - 1
     };
-    if index < 0 || index as usize >= map_rows {
-        return Err(ind2rgb_error_with_detail(
-            &IND2RGB_ERROR_INDEX_OUT_OF_RANGE,
-            format!("index {} is outside the colormap", value),
-        ));
-    }
     Ok(index as usize)
 }
 
@@ -239,24 +252,22 @@ fn map_index(value: f64, dtype: NumericDType, map_rows: usize) -> BuiltinResult<
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, Tensor};
+    use runmat_builtins::{IntegerStorage, LogicalArray, Tensor};
 
     fn call(indexed: Tensor, map: Tensor) -> BuiltinResult<Tensor> {
-        let Value::Tensor(out) = block_on(ind2rgb_builtin(
+        let value = block_on(ind2rgb_builtin(
             Value::Tensor(indexed),
             Value::Tensor(map),
             Vec::new(),
-        ))
-        .expect("ind2rgb") else {
+        ))?;
+        let Value::Tensor(out) = value else {
             panic!("expected tensor");
         };
         Ok(out)
     }
 
-    fn typed_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
-        tensor
+    fn values(tensor: &Tensor) -> Vec<f64> {
+        tensor.materialize_f64()
     }
 
     #[test]
@@ -265,7 +276,8 @@ mod tests {
         let map = Tensor::new(vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0], vec![2, 3]).unwrap();
         let out = call(indexed, map).unwrap();
         assert_eq!(out.shape, vec![1, 2, 3]);
-        assert_eq!(out.data, vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        assert_eq!(out.numeric_dtype(), NumericDType::F64);
+        assert_eq!(values(&out), vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
     }
 
     #[test]
@@ -273,47 +285,87 @@ mod tests {
         let indexed = Tensor::new_with_dtype(vec![0.0, 1.0], vec![1, 2], NumericDType::U8).unwrap();
         let map = Tensor::new(vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0], vec![2, 3]).unwrap();
         let out = call(indexed, map).unwrap();
-        assert_eq!(out.data, vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        assert_eq!(values(&out), vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
     }
 
     #[test]
-    fn scales_uint8_colormap_values_to_unit_rgb() {
-        let indexed = Tensor::new_with_dtype(vec![0.0, 1.0], vec![2, 1], NumericDType::U8).unwrap();
-        let map = Tensor::new_with_dtype(
-            vec![255.0, 0.0, 0.0, 128.0, 0.0, 255.0],
-            vec![2, 3],
-            NumericDType::U8,
-        )
-        .unwrap();
+    fn accepts_single_indices_and_returns_double() {
+        let indexed =
+            Tensor::new_with_dtype(vec![1.0, 2.0], vec![2, 1], NumericDType::F32).unwrap();
+        let map = Tensor::new(vec![1.0, 0.0, 0.0, 0.5, 0.0, 1.0], vec![2, 3]).unwrap();
         let out = call(indexed, map).unwrap();
         assert_eq!(out.shape, vec![2, 1, 3]);
-        assert_eq!(out.dtype, NumericDType::F64);
-        assert_eq!(out.data, vec![1.0, 0.0, 0.0, 128.0 / 255.0, 0.0, 1.0]);
+        assert_eq!(out.numeric_dtype(), NumericDType::F64);
+        assert_eq!(values(&out), vec![1.0, 0.0, 0.0, 0.5, 0.0, 1.0]);
     }
 
     #[test]
-    fn ind2rgb_reads_typed_integer_indices_and_colormap_exactly() {
-        let indexed = typed_tensor(IntegerStorage::U8(vec![0, 1]), vec![2, 1]);
-        let map = typed_tensor(IntegerStorage::U8(vec![255, 0, 0, 128, 0, 255]), vec![2, 3]);
+    fn ind2rgb_reads_typed_integer_indices_exactly() {
+        let indexed = Tensor::new_integer(IntegerStorage::U16(vec![0, 1]), vec![2, 1]).unwrap();
+        let map = Tensor::new(vec![1.0, 0.0, 0.0, 0.5, 0.0, 1.0], vec![2, 3]).unwrap();
 
         let out = call(indexed, map).unwrap();
 
         assert_eq!(out.shape, vec![2, 1, 3]);
-        assert_eq!(out.dtype, NumericDType::F64);
-        assert_eq!(out.data, vec![1.0, 0.0, 0.0, 128.0 / 255.0, 0.0, 1.0]);
+        assert_eq!(out.numeric_dtype(), NumericDType::F64);
+        assert_eq!(values(&out), vec![1.0, 0.0, 0.0, 0.5, 0.0, 1.0]);
     }
 
     #[test]
-    fn rejects_out_of_range_indices() {
-        let indexed = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
+    fn clips_indices_to_colormap_range() {
+        let indexed = Tensor::new(vec![-10.0, 100.0], vec![1, 2]).unwrap();
+        let map = Tensor::new(vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0], vec![2, 3]).unwrap();
+        let out = call(indexed, map).unwrap();
+        assert_eq!(values(&out), vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn rejects_unsupported_index_classes() {
+        for storage in [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ] {
+            let indexed = Tensor::new_integer(storage, vec![1, 1]).unwrap();
+            let map = Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 3]).unwrap();
+            let err = call(indexed, map).unwrap_err();
+            assert!(err.message().contains("indexed image is not supported"));
+        }
+    }
+
+    #[test]
+    fn rejects_non_double_colormap() {
+        let indexed = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let map =
+            Tensor::new_with_dtype(vec![1.0, 0.0, 0.0], vec![1, 3], NumericDType::F32).unwrap();
+        let err = call(indexed, map).unwrap_err();
+        assert!(err.message().contains("colormap is not supported"));
+    }
+
+    #[test]
+    fn rejects_logical_indexed_image_and_colormap() {
+        let logical_indexed = LogicalArray::new(vec![1], vec![1, 1]).unwrap();
         let map = Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 3]).unwrap();
         let err = block_on(ind2rgb_builtin(
-            Value::Tensor(indexed),
+            Value::LogicalArray(logical_indexed),
             Value::Tensor(map),
             Vec::new(),
         ))
         .unwrap_err();
-        assert!(err.message().contains("outside the colormap"));
+        assert!(err.message().contains("logical indexed image"));
+
+        let indexed = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let logical_map = LogicalArray::new(vec![1, 0, 0], vec![1, 3]).unwrap();
+        let err = block_on(ind2rgb_builtin(
+            Value::Tensor(indexed),
+            Value::LogicalArray(logical_map),
+            Vec::new(),
+        ))
+        .unwrap_err();
+        assert!(err.message().contains("logical colormap"));
     }
 
     #[test]
@@ -350,7 +402,6 @@ mod tests {
         assert!(codes.contains(&"RM.IND2RGB.INVALID_INPUT"));
         assert!(codes.contains(&"RM.IND2RGB.INVALID_COLORMAP"));
         assert!(codes.contains(&"RM.IND2RGB.INVALID_INDEX"));
-        assert!(codes.contains(&"RM.IND2RGB.INDEX_OUT_OF_RANGE"));
         assert!(codes.contains(&"RM.IND2RGB.INTERNAL"));
     }
 
