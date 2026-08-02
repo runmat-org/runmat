@@ -485,7 +485,8 @@ fn empty_value_like(proto: Option<&Value>) -> BuiltinResult<Value> {
             | Value::Num(_)
             | Value::Int(_)
             | Value::GpuTensor(_) => default_empty_double(),
-            Value::Object(_)
+            Value::ObjectArray(_)
+            | Value::Object(_)
             | Value::HandleObject(_)
             | Value::Listener(_)
             | Value::Symbolic(_)

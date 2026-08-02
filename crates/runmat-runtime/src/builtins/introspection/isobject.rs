@@ -86,7 +86,8 @@ fn isobject_builtin(value: Value) -> crate::BuiltinResult<Value> {
 pub(crate) fn isobject_value(value: &Value) -> bool {
     matches!(
         value,
-        Value::Object(_)
+        Value::ObjectArray(_)
+            | Value::Object(_)
             | Value::HandleObject(_)
             | Value::Listener(_)
             | Value::ClassRef(_)

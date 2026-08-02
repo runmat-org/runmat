@@ -112,6 +112,7 @@ pub(crate) fn class_name_for_value(value: &Value) -> String {
             }
         }
         Value::Listener(_) => "event.listener".to_string(),
+        Value::ObjectArray(array) => array.class_name().to_string(),
         Value::Object(obj) => obj.class_name.clone(),
         Value::ClassRef(_) => "meta.class".to_string(),
         Value::MException(_) => "MException".to_string(),

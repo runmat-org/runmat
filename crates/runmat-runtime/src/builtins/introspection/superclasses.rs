@@ -132,7 +132,8 @@ fn requested_class_name(value: &Value) -> BuiltinResult<String> {
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
         Value::CharArray(ca) if ca.rows <= 1 => Ok(ca.data.iter().collect::<String>()),
         Value::ClassRef(class_name) => Ok(class_name.clone()),
-        Value::Object(_)
+        Value::ObjectArray(_)
+        | Value::Object(_)
         | Value::HandleObject(_)
         | Value::GpuTensor(_)
         | Value::Listener(_)

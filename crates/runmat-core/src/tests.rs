@@ -10060,11 +10060,12 @@ fn runtests_discovers_subfolder_tests_when_requested() {
 
     let results =
         outcome_named_upsert_value(&outcome, "results").expect("results should be assigned");
-    let runmat_builtins::Value::Cell(cell) = results else {
-        panic!("expected result cell array, got {results:?}");
+    let runmat_builtins::Value::ObjectArray(array) = results else {
+        panic!("expected TestResult object array, got {results:?}");
     };
-    assert_eq!((cell.rows, cell.cols), (1, 2));
-    for value in &cell.data {
+    assert_eq!(array.shape(), &[1, 2]);
+    assert_eq!(array.class_name(), "matlab.unittest.TestResult");
+    for value in array.data() {
         let runmat_builtins::Value::Object(obj) = value else {
             panic!("expected TestResult object, got {value:?}");
         };
@@ -10184,11 +10185,12 @@ end
         .expect("exec succeeds");
     let results =
         outcome_named_upsert_value(&outcome, "results").expect("results should be assigned");
-    let runmat_builtins::Value::Cell(cell) = results else {
-        panic!("expected function test result cell, got {results:?}");
+    let runmat_builtins::Value::ObjectArray(array) = results else {
+        panic!("expected function TestResult object array, got {results:?}");
     };
-    assert_eq!((cell.rows, cell.cols), (1, 2));
-    for value in &cell.data {
+    assert_eq!(array.shape(), &[1, 2]);
+    assert_eq!(array.class_name(), "matlab.unittest.TestResult");
+    for value in array.data() {
         let runmat_builtins::Value::Object(obj) = value else {
             panic!("expected TestResult object, got {value:?}");
         };

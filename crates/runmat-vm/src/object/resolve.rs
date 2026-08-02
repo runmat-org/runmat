@@ -130,6 +130,25 @@ pub async fn load_member(
     caller_function_name: Option<&str>,
 ) -> Result<Value, RuntimeError> {
     match base {
+        Value::ObjectArray(array) => {
+            let mut values = Vec::with_capacity(array.len());
+            for value in array.data() {
+                values.push(
+                    Box::pin(load_member(
+                        value.clone(),
+                        field.clone(),
+                        allow_init,
+                        caller_function_name,
+                    ))
+                    .await?,
+                );
+            }
+            if values.len() == 1 {
+                Ok(values.remove(0))
+            } else {
+                Ok(Value::OutputList(values))
+            }
+        }
         Value::Object(obj) => {
             if let Some(cls) = runmat_builtins::get_class(&obj.class_name) {
                 if class_defines_member_subsref(&cls)
@@ -575,8 +594,8 @@ fn is_possible_graphics_handle_value(value: &Value) -> bool {
 mod tests {
     use super::{load_member, load_static_member, store_member};
     use runmat_builtins::{
-        get_static_property_value, register_class, Access, ClassDef, MethodDef, ObjectInstance,
-        PropertyDef, Value,
+        get_static_property_value, register_class, Access, ClassDef, MethodDef, ObjectArray,
+        ObjectInstance, PropertyDef, Value,
     };
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -586,6 +605,31 @@ mod tests {
     fn unique_class_name(prefix: &str) -> String {
         let id = TEST_CLASS_COUNTER.fetch_add(1, Ordering::Relaxed);
         format!("{}_{}", prefix, id)
+    }
+
+    #[test]
+    fn object_array_member_access_returns_comma_separated_values_in_order() {
+        let values = ["first", "second"]
+            .into_iter()
+            .map(|name| {
+                let mut object = ObjectInstance::new("matlab.unittest.TestResult".into());
+                object
+                    .properties
+                    .insert("Name".into(), Value::String(name.into()));
+                Value::Object(object)
+            })
+            .collect();
+        let array =
+            Value::ObjectArray(ObjectArray::row("matlab.unittest.TestResult", values).unwrap());
+        let loaded =
+            futures::executor::block_on(load_member(array, "Name".into(), false, None)).unwrap();
+        assert_eq!(
+            loaded,
+            Value::OutputList(vec![
+                Value::String("first".into()),
+                Value::String("second".into())
+            ])
+        );
     }
 
     #[test]

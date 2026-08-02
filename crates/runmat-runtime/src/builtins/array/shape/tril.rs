@@ -244,7 +244,8 @@ async fn tril_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
             "tril: cell arrays are not supported",
             &TRIL_ERROR_UNSUPPORTED_INPUT,
         )),
-        Value::Object(_)
+        Value::ObjectArray(_)
+        | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::SparseTensor(_)

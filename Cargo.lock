@@ -6367,6 +6367,7 @@ dependencies = [
  "runmat-meshing-core",
  "runmat-meshing-evidence",
  "runmat-plot",
+ "runmat-test",
  "runmat-thread-local",
  "runmat-time",
  "rustfft",

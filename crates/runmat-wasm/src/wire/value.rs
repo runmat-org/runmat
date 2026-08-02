@@ -5,6 +5,7 @@ use serde_json::{json, Map as JsonMap, Value as JsonValue};
 pub(crate) const MAX_DATA_PREVIEW: usize = 4096;
 const MAX_STRUCT_FIELDS: usize = 64;
 const MAX_OBJECT_FIELDS: usize = 64;
+const MAX_OBJECT_ARRAY_ITEMS: usize = 256;
 const MAX_OUTPUT_LIST_ITEMS: usize = 64;
 const MAX_RECURSION_DEPTH: usize = 2;
 
@@ -202,6 +203,26 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
             })
         }
         Value::Object(obj) => object_to_json(obj, depth + 1),
+        Value::ObjectArray(array) => {
+            let truncated = array.len() > MAX_OBJECT_ARRAY_ITEMS;
+            let items = array
+                .data()
+                .iter()
+                .take(MAX_OBJECT_ARRAY_ITEMS)
+                .map(|value| value_to_json(value, depth + 1))
+                .collect::<Vec<_>>();
+            let (rows, cols) = rows_cols_from_shape(array.shape());
+            json!({
+                "kind": "object-array",
+                "className": array.class_name(),
+                "shape": array.shape(),
+                "rows": rows,
+                "cols": cols,
+                "length": array.len(),
+                "items": items,
+                "truncated": truncated,
+            })
+        }
         Value::HandleObject(handle) => json!({
             "kind": "handle",
             "className": handle.class_name,
@@ -339,7 +360,7 @@ fn preview_slice<T: Clone>(data: &[T], limit: usize) -> (Vec<T>, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::SparseTensor;
+    use runmat_builtins::{ObjectArray, ObjectInstance, SparseTensor};
 
     #[test]
     fn sparse_tensor_json_uses_bounded_storage_previews() {
@@ -368,5 +389,28 @@ mod tests {
         assert_eq!(json["rowIndicesTruncated"], true);
         assert_eq!(json["valuesTruncated"], true);
         assert_eq!(json["truncated"], true);
+    }
+
+    #[test]
+    fn object_array_json_preserves_class_shape_and_items() {
+        let mut first = ObjectInstance::new("matlab.unittest.TestResult".into());
+        first.properties.insert("Passed".into(), Value::Bool(true));
+        let mut second = ObjectInstance::new("matlab.unittest.TestResult".into());
+        second
+            .properties
+            .insert("Passed".into(), Value::Bool(false));
+        let array = ObjectArray::row(
+            "matlab.unittest.TestResult",
+            vec![Value::Object(first), Value::Object(second)],
+        )
+        .unwrap();
+
+        let json = value_to_json(&Value::ObjectArray(array), 0);
+
+        assert_eq!(json["kind"], "object-array");
+        assert_eq!(json["className"], "matlab.unittest.TestResult");
+        assert_eq!(json["shape"], json!([1, 2]));
+        assert_eq!(json["items"].as_array().unwrap().len(), 2);
+        assert_eq!(json["truncated"], false);
     }
 }

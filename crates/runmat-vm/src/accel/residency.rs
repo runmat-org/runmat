@@ -75,6 +75,15 @@ fn clear_handles_in_value_excluding_with_visited(
                 )?;
             }
         }
+        Value::ObjectArray(array) => {
+            for elem in array.data() {
+                clear_handles_in_value_excluding_with_visited(
+                    elem,
+                    keep_ids,
+                    visited_handle_targets,
+                )?;
+            }
+        }
         Value::Closure(closure) => {
             for capture in &closure.captures {
                 clear_handles_in_value_excluding_with_visited(
@@ -158,6 +167,11 @@ fn collect_gpu_buffer_ids_with_visited(
         }
         Value::Object(object_value) => {
             for elem in object_value.properties.values() {
+                collect_gpu_buffer_ids_with_visited(elem, output, visited_handle_targets)?;
+            }
+        }
+        Value::ObjectArray(array) => {
+            for elem in array.data() {
                 collect_gpu_buffer_ids_with_visited(elem, output, visited_handle_targets)?;
             }
         }

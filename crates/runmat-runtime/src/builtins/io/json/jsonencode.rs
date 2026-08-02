@@ -442,6 +442,12 @@ fn value_to_json(value: &Value, options: &JsonEncodeOptions) -> BuiltinResult<Js
         Value::CharArray(ca) => char_array_to_json(ca, options),
         Value::Struct(sv) => struct_to_json(sv, options),
         Value::Cell(ca) => cell_array_to_json(ca, options),
+        Value::ObjectArray(array) => array
+            .data()
+            .iter()
+            .map(|value| value_to_json(value, options))
+            .collect::<BuiltinResult<Vec<_>>>()
+            .map(JsonValue::Array),
         Value::Object(obj) => object_to_json(obj, options),
         Value::GpuTensor(_) => Err(jsonencode_error(&JSONENCODE_ERROR_UNEXPECTED_GPU)),
         Value::HandleObject(_)

@@ -226,6 +226,7 @@ async fn flipud_builtin(value: Value) -> crate::BuiltinResult<Value> {
         | Value::Closure(_)
         | Value::SparseTensor(_)
         | Value::Struct(_)
+        | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)

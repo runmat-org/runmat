@@ -386,6 +386,7 @@ fn parse_fft2_single(value: &Value) -> BuiltinResult<(Option<usize>, Option<usiz
         | Value::Closure(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
+        | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::ClassRef(_)
         | Value::MException(_)

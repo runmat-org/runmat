@@ -148,6 +148,7 @@ async fn uint32_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
         Value::SymbolicArray(array) => uint32_from_symbolic_array(array),
         Value::Cell(_) => Err(conversion_error("cell")),
         Value::Struct(_) => Err(conversion_error("struct")),
+        Value::ObjectArray(array) => Err(conversion_error(array.class_name())),
         Value::Object(obj) => Err(conversion_error(&obj.class_name)),
         Value::HandleObject(handle) => Err(conversion_error(&handle.class_name)),
         Value::Listener(_) => Err(conversion_error("event.listener")),

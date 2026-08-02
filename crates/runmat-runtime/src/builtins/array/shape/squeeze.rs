@@ -174,7 +174,7 @@ fn value_kind(value: &Value) -> &'static str {
         Value::String(_) => "string scalar",
         Value::Symbolic(_) => "symbolic scalar",
         Value::SymbolicArray(_) => "symbolic array",
-        Value::Object(_) => "object",
+        Value::ObjectArray(_) | Value::Object(_) => "object",
         Value::HandleObject(_) => "handle object",
         Value::Listener(_) => "listener",
         Value::Struct(_) => "struct",

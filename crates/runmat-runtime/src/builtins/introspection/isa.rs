@@ -171,6 +171,7 @@ fn value_is_a(value: &Value, requested: &str) -> bool {
                 return true;
             }
             match value {
+                Value::ObjectArray(array) => class_inherits(array.class_name(), &requested_lower),
                 Value::Object(obj) => class_inherits(&obj.class_name, &requested_lower),
                 Value::HandleObject(handle) => {
                     !handle.class_name.is_empty()
@@ -217,6 +218,7 @@ fn is_logical(value: &Value) -> bool {
 fn is_handle_like(value: &Value) -> bool {
     match value {
         Value::HandleObject(_) | Value::Listener(_) => true,
+        Value::ObjectArray(array) => class_inherits(array.class_name(), "handle"),
         Value::Object(obj) => class_inherits(&obj.class_name, "handle"),
         _ => false,
     }

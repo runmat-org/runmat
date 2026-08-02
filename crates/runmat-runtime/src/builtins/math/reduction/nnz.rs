@@ -659,6 +659,7 @@ fn describe_value_kind(value: &Value) -> String {
         Value::Cell(_) => "cell array".to_string(),
         Value::Struct(_) => "struct".to_string(),
         Value::GpuTensor(_) => "GPU tensor".to_string(),
+        Value::ObjectArray(array) => format!("{} object array", array.class_name()),
         Value::Object(obj) => format!("{} object", obj.class_name),
         Value::HandleObject(h) => format!("handle object ({})", h.class_name),
         Value::Listener(l) => format!("listener for {}", l.event_name),

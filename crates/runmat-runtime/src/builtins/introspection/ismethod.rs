@@ -142,6 +142,7 @@ fn value_has_public_method(receiver: &Value, method_name: &str) -> bool {
 
 fn receiver_class_name(receiver: &Value) -> Option<String> {
     match receiver {
+        Value::ObjectArray(array) => Some(array.class_name().to_string()),
         Value::Object(object) => Some(object.class_name.clone()),
         Value::HandleObject(handle) => {
             if handle.class_name.is_empty() {

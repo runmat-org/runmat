@@ -867,7 +867,10 @@ impl ValueClass {
             },
             Value::Cell(_) => ValueClass::Cell,
             Value::Struct(_) => ValueClass::Struct,
-            Value::Object(_) | Value::HandleObject(_) | Value::Listener(_) => ValueClass::Object,
+            Value::ObjectArray(_)
+            | Value::Object(_)
+            | Value::HandleObject(_)
+            | Value::Listener(_) => ValueClass::Object,
             _ => ValueClass::Other("other"),
         }
     }
@@ -1736,6 +1739,7 @@ fn normalize_numeric_value(value: Value, builtin: &'static str) -> BuiltinResult
         Value::Cell(_)
         | Value::SparseTensor(_)
         | Value::Struct(_)
+        | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
@@ -1782,6 +1786,7 @@ fn normalize_logical_value(value: Value, builtin: &'static str) -> BuiltinResult
         | Value::StringArray(_)
         | Value::Struct(_)
         | Value::Cell(_)
+        | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)

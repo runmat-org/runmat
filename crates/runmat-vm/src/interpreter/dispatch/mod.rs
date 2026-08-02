@@ -181,6 +181,12 @@ fn for_each_gpu_handle_in_value_with_visited(
             }
             Ok(())
         }
+        Value::ObjectArray(array) => {
+            for elem in array.data() {
+                for_each_gpu_handle_in_value_with_visited(elem, f, visited_handle_targets)?;
+            }
+            Ok(())
+        }
         Value::Closure(closure) => {
             for capture in &closure.captures {
                 for_each_gpu_handle_in_value_with_visited(capture, f, visited_handle_targets)?;
@@ -520,6 +526,15 @@ fn collect_spawn_task_ids_in_value_with_visited(
                 )?;
             }
         }
+        Value::ObjectArray(array) => {
+            for entry in array.data() {
+                collect_spawn_task_ids_in_value_with_visited(
+                    entry,
+                    output,
+                    visited_handle_targets,
+                )?;
+            }
+        }
         Value::Closure(closure) => {
             for entry in &closure.captures {
                 collect_spawn_task_ids_in_value_with_visited(
@@ -616,6 +631,18 @@ fn value_contains_spawn_task_id_with_visited(
         }
         Value::Object(object_value) => {
             for entry in object_value.properties.values() {
+                if value_contains_spawn_task_id_with_visited(
+                    entry,
+                    task_id,
+                    visited_handle_targets,
+                )? {
+                    return Ok(true);
+                }
+            }
+            false
+        }
+        Value::ObjectArray(array) => {
+            for entry in array.data() {
                 if value_contains_spawn_task_id_with_visited(
                     entry,
                     task_id,

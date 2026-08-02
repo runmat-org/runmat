@@ -401,7 +401,8 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
             &TIMES_ERROR_INVALID_ARGUMENT,
             "unsupported prototype conversion to GPU output",
         )),
-        Value::Object(_)
+        Value::ObjectArray(_)
+        | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::FunctionHandle(_)

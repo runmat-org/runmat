@@ -217,6 +217,7 @@ pub(crate) async fn cast_value(value: Value, target: IntegerTarget) -> Result<Va
         Value::SymbolicArray(array) => cast_symbolic_array(target, array),
         Value::Cell(_) => Err(CastError::Unsupported("cell".to_string())),
         Value::Struct(_) => Err(CastError::Unsupported("struct".to_string())),
+        Value::ObjectArray(array) => Err(CastError::Unsupported(array.class_name().to_string())),
         Value::Object(object) => Err(CastError::Unsupported(object.class_name)),
         Value::HandleObject(handle) => Err(CastError::Unsupported(handle.class_name)),
         Value::Listener(_) => Err(CastError::Unsupported("event.listener".to_string())),

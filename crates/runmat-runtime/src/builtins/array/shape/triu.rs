@@ -242,7 +242,8 @@ async fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
             "triu: cell arrays are not supported",
             &TRIU_ERROR_UNSUPPORTED_INPUT,
         )),
-        Value::Object(_)
+        Value::ObjectArray(_)
+        | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::SparseTensor(_)

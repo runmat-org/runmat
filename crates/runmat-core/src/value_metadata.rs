@@ -30,6 +30,7 @@ pub fn matlab_class_name(value: &Value) -> String {
         // Internal destructuring helper; shouldn't surface in user-facing values,
         // but handle it defensively for completeness.
         Value::OutputList(_) => "OutputList".to_string(),
+        Value::ObjectArray(array) => array.class_name().to_string(),
         Value::Object(obj) => obj.class_name.clone(),
         Value::ClassRef(_) => "meta.class".to_string(),
         Value::MException(_) => "MException".to_string(),
@@ -54,6 +55,7 @@ pub fn value_shape(value: &Value) -> Option<Vec<usize>> {
         Value::ComplexTensor(t) => Some(t.shape.clone()),
         Value::Cell(ca) => Some(ca.shape.clone()),
         Value::GpuTensor(handle) => Some(handle.shape.clone()),
+        Value::ObjectArray(array) => Some(array.shape().to_vec()),
         Value::Object(obj) if obj.is_class("datetime") => match obj.properties.get("__serial") {
             Some(Value::Tensor(tensor)) => Some(tensor.shape.clone()),
             Some(Value::Num(_)) => Some(vec![1, 1]),
@@ -133,6 +135,7 @@ pub fn preview_numeric_values(value: &Value, limit: usize) -> Option<(Vec<f64>, 
         | Value::Symbolic(_)
         | Value::SymbolicArray(_)
         | Value::Struct(_)
+        | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)

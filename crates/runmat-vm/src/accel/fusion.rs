@@ -36,6 +36,7 @@ pub fn value_kind(value: &Value) -> &'static str {
         Value::Cell(_) => "Cell",
         Value::Struct(_) => "Struct",
         Value::GpuTensor(_) => "GpuTensor",
+        Value::ObjectArray(_) => "ObjectArray",
         Value::Object(_) => "Object",
         Value::HandleObject(_) => "HandleObject",
         Value::Listener(_) => "Listener",

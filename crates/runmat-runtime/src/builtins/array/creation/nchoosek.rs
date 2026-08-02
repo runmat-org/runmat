@@ -332,6 +332,7 @@ fn combinations_value(value: Value, k: usize) -> BuiltinResult<Value> {
         | Value::Symbolic(_)
         | Value::SymbolicArray(_)
         | Value::Struct(_)
+        | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)

@@ -151,7 +151,7 @@ fn isreal_host(value: Value) -> BuiltinResult<Value> {
         Value::Struct(_) => false,
         Value::Cell(_) => false,
         Value::Object(obj) if obj.is_class("duration") => true,
-        Value::Object(_) => false,
+        Value::ObjectArray(_) | Value::Object(_) => false,
         Value::HandleObject(_) => false,
         Value::Listener(_) => false,
         Value::FunctionHandle(_)

@@ -67,6 +67,7 @@ fn arrayfun_output_type(returns: &Type) -> Type {
         | Type::Cell { .. }
         | Type::String
         | Type::Struct { .. }
+        | Type::Object { .. }
         | Type::Symbolic
         | Type::SymbolicArray { .. } => Type::Unknown,
         Type::Function { .. } | Type::Void | Type::Union(_) | Type::OutputList(_) => Type::Unknown,

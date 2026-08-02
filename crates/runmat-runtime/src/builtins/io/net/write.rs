@@ -544,6 +544,7 @@ fn flatten_numeric(value: &Value) -> BuiltinResult<Vec<f64>> {
         )),
         Value::Cell(_)
         | Value::Struct(_)
+        | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)

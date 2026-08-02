@@ -820,7 +820,7 @@ fn type_name(value: &Value) -> &'static str {
         Value::Cell(_) => "cell array",
         Value::Struct(_) => "struct",
         Value::GpuTensor(_) => "gpuArray",
-        Value::Object(_) => "object",
+        Value::ObjectArray(_) | Value::Object(_) => "object",
         Value::HandleObject(_) => "handle object",
         Value::Listener(_) => "listener",
         Value::FunctionHandle(_)

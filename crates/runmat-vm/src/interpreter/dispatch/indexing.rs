@@ -368,6 +368,29 @@ fn gather_cell_with_plan(
     crate::ops::cells::gather_cell_paren_linear_indices(ca, &indices, &plan.output_shape)
 }
 
+fn gather_object_array_with_plan(
+    array: &runmat_builtins::ObjectArray,
+    plan: &crate::indexing::plan::IndexPlan,
+) -> Result<Value, RuntimeError> {
+    if plan.indices.len() == 1 {
+        return array
+            .get_linear(plan.indices[0] as usize)
+            .cloned()
+            .ok_or_else(|| {
+                crate::interpreter::errors::mex("IndexOutOfBounds", "Index out of bounds")
+            });
+    }
+    let indices = plan
+        .indices
+        .iter()
+        .map(|index| *index as usize)
+        .collect::<Vec<_>>();
+    array
+        .select_linear(&indices, plan.output_shape.clone())
+        .map(Value::ObjectArray)
+        .map_err(|error| crate::interpreter::errors::mex("IndexOutOfBounds", &error))
+}
+
 fn pop_index_values(stack: &mut Vec<Value>, count: usize) -> Result<Vec<Value>, RuntimeError> {
     let mut values = Vec::with_capacity(count);
     for _ in 0..count {
@@ -972,6 +995,12 @@ pub async fn paren_index_value(
     function_registry: &crate::bytecode::FunctionRegistry,
 ) -> Result<Value, RuntimeError> {
     match &base {
+        Value::ObjectArray(array) => {
+            let selectors =
+                build_slice_selectors(raw_indices.len(), 0, 0, &raw_indices, array.shape()).await?;
+            let plan = build_index_plan(&selectors, raw_indices.len(), array.shape())?;
+            gather_object_array_with_plan(array, &plan)
+        }
         Value::Object(_) | Value::HandleObject(_) => {
             if let Some(err) = missing_member_index_overload_error(&base, ObjectIndexOp::Subsref) {
                 return Err(err);
@@ -2443,7 +2472,7 @@ mod tests {
     };
     use crate::bytecode::EndExpr;
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, Value};
+    use runmat_builtins::{CellArray, ObjectArray, ObjectInstance, Value};
 
     #[test]
     fn map_slice_plan_error_preserves_identifier_and_adds_context() {
@@ -2637,5 +2666,50 @@ mod tests {
         let indices = block_on(super::resolve_cell_indices(&[scalar]))
             .expect("scalar tensor index should pass");
         assert_eq!(indices, vec![2]);
+    }
+
+    #[test]
+    fn object_array_scalar_index_returns_object_and_slice_preserves_array() {
+        let values = ["first", "second"]
+            .into_iter()
+            .map(|name| {
+                let mut object = ObjectInstance::new("matlab.unittest.TestResult".into());
+                object
+                    .properties
+                    .insert("Name".into(), Value::String(name.into()));
+                Value::Object(object)
+            })
+            .collect();
+        let array =
+            Value::ObjectArray(ObjectArray::row("matlab.unittest.TestResult", values).unwrap());
+        let registry = crate::bytecode::FunctionRegistry::default();
+
+        let scalar = block_on(super::paren_index_value(
+            array.clone(),
+            vec![Value::Num(2.0)],
+            1,
+            &registry,
+        ))
+        .unwrap();
+        assert!(matches!(
+            scalar,
+            Value::Object(object)
+                if object.properties.get("Name") == Some(&Value::String("second".into()))
+        ));
+
+        let selector =
+            Value::Tensor(runmat_builtins::Tensor::new(vec![2.0, 1.0], vec![1, 2]).unwrap());
+        let slice = block_on(super::paren_index_value(
+            array,
+            vec![selector],
+            1,
+            &registry,
+        ))
+        .unwrap();
+        assert!(matches!(
+            slice,
+            Value::ObjectArray(array)
+                if array.shape() == [1, 2] && array.class_name() == "matlab.unittest.TestResult"
+        ));
     }
 }

@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, ObjectInstance, Value,
+    ObjectArray, ObjectInstance, ResolveContext, Type, Value,
 };
 use runmat_hir::RUNTESTS_BUILTIN_NAME;
 use runmat_macros::runtime_builtin;
@@ -46,7 +46,7 @@ const RUNTESTS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Optional,
     default: None,
-    description: "Scalar TestResult object or cell row of TestResult objects.",
+    description: "Scalar TestResult object or homogeneous TestResult object row.",
 }];
 
 const RUNTESTS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
@@ -183,10 +183,18 @@ struct RunTestsOptions {
     summary = "Discover and run MATLAB-style test files.",
     keywords = "test,unit testing,runtests,diagnostics,developer tools",
     descriptor(self::RUNTESTS_DESCRIPTOR),
+    type_resolver(runtests_type),
     builtin_path = "crate::builtins::diagnostics::runtests"
 )]
 pub async fn runtests_builtin(_args: Vec<Value>) -> BuiltinResult<Value> {
     requires_vm_workspace_context()
+}
+
+fn runtests_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    Type::Object {
+        class_name: Some(crate::testing::TEST_RESULT_CLASS.into()),
+        shape: None,
+    }
 }
 
 pub fn requires_vm_workspace_context() -> BuiltinResult<Value> {
@@ -281,9 +289,8 @@ pub fn runtests_result_value(outcomes: Vec<RunTestOutcome>) -> BuiltinResult<Val
     if values.len() == 1 {
         Ok(values.remove(0))
     } else {
-        let len = values.len();
-        CellArray::new(values, 1, len)
-            .map(Value::Cell)
+        ObjectArray::row("matlab.unittest.TestResult", values)
+            .map(Value::ObjectArray)
             .map_err(|err| runtests_error_detail(&RUNTESTS_ERROR_INVALID_INPUT, err))
     }
 }
@@ -625,7 +632,7 @@ fn runtests_flow(err: RuntimeError) -> RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{CharArray, LogicalArray, StringArray};
+    use runmat_builtins::{CellArray, CharArray, LogicalArray, StringArray};
 
     #[test]
     fn parse_accepts_target_and_include_subfolders() {
@@ -687,7 +694,7 @@ mod tests {
     }
 
     #[test]
-    fn result_value_returns_cell_for_multiple_results() {
+    fn result_value_returns_object_array_for_multiple_results() {
         let value = runtests_result_value(vec![
             RunTestOutcome {
                 name: "testA".to_string(),
@@ -705,11 +712,11 @@ mod tests {
             },
         ])
         .expect("result");
-        let Value::Cell(cell) = value else {
-            panic!("expected cell result");
+        let Value::ObjectArray(array) = value else {
+            panic!("expected object-array result");
         };
-        assert_eq!(cell.rows, 1);
-        assert_eq!(cell.cols, 2);
+        assert_eq!(array.class_name(), "matlab.unittest.TestResult");
+        assert_eq!(array.shape(), &[1, 2]);
     }
 
     #[test]

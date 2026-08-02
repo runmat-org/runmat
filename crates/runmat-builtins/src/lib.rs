@@ -1,5 +1,7 @@
 pub use inventory;
+mod object_array;
 pub mod symbolic;
+pub use object_array::ObjectArray;
 use runmat_gc_api::{GcHandle, Trace, Tracer};
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
@@ -100,6 +102,8 @@ pub enum Value {
     GpuTensor(runmat_accelerate_api::GpuTensorHandle),
     // Simple object instance until full class system lands
     Object(ObjectInstance),
+    /// Homogeneous N-D value/handle object array with column-major storage.
+    ObjectArray(ObjectArray),
     /// Handle-object wrapper providing identity semantics and validity tracking
     HandleObject(HandleRef),
     /// Event listener handle for events
@@ -1600,6 +1604,13 @@ pub enum Type {
         /// Optional set of known field names observed via control-flow (None = unknown fields)
         known_fields: Option<Vec<String>>, // kept sorted unique for deterministic Eq
     },
+    /// Scalar or array object type with compatible class and shape facts.
+    Object {
+        /// Fully qualified class name when statically known.
+        class_name: Option<String>,
+        /// MATLAB shape; None means dynamic and individual dimensions may be unknown.
+        shape: Option<Vec<Option<usize>>>,
+    },
     /// Multiple return values captured as a list (internal destructuring helper)
     OutputList(Vec<Type>),
 }
@@ -1652,6 +1663,25 @@ impl Type {
             (Type::Int, Type::Num) | (Type::Num, Type::Int) => true, // Number compatibility
             (Type::Tensor { .. }, Type::Tensor { .. }) => true, // Tensor compatibility regardless of dims for now
             (Type::OutputList(a), Type::OutputList(b)) => a.len() == b.len(),
+            (
+                Type::Object {
+                    class_name: a_class,
+                    ..
+                },
+                Type::Object {
+                    class_name: b_class,
+                    ..
+                },
+            ) => {
+                a_class.is_none()
+                    || b_class.is_none()
+                    || a_class
+                        .as_ref()
+                        .zip(b_class.as_ref())
+                        .is_some_and(|(a, b)| {
+                            a == b || is_class_or_subclass(a, b) || is_class_or_subclass(b, a)
+                        })
+            }
             (a, b) => a == b,
         }
     }
@@ -1742,6 +1772,31 @@ impl Type {
                     Type::OutputList(vec![Type::Unknown; a.len().max(b.len())])
                 }
             }
+            (
+                Type::Object {
+                    class_name: a_class,
+                    shape: a_shape,
+                },
+                Type::Object {
+                    class_name: b_class,
+                    shape: b_shape,
+                },
+            ) => {
+                let class_name = match (a_class, b_class) {
+                    (Some(a), Some(b)) if a == b => Some(a.clone()),
+                    (Some(a), Some(b)) if is_class_or_subclass(a, b) => Some(b.clone()),
+                    (Some(a), Some(b)) if is_class_or_subclass(b, a) => Some(a.clone()),
+                    _ => None,
+                };
+                Type::Object {
+                    class_name,
+                    shape: if a_shape == b_shape {
+                        a_shape.clone()
+                    } else {
+                        None
+                    },
+                }
+            }
             (a, b) if a == b => a.clone(),
             _ => Type::Union(vec![self.clone(), other.clone()]),
         }
@@ -1790,8 +1845,18 @@ impl Type {
             Value::GpuTensor(h) => Type::Tensor {
                 shape: Some(h.shape.iter().map(|&d| Some(d)).collect()),
             },
-            Value::Object(_) => Type::Unknown,
-            Value::HandleObject(_) => Type::Unknown,
+            Value::Object(object) => Type::Object {
+                class_name: Some(object.class_name.clone()),
+                shape: Some(vec![Some(1), Some(1)]),
+            },
+            Value::ObjectArray(array) => Type::Object {
+                class_name: Some(array.class_name().to_owned()),
+                shape: Some(array.shape().iter().copied().map(Some).collect()),
+            },
+            Value::HandleObject(handle) => Type::Object {
+                class_name: Some(handle.class_name.clone()),
+                shape: Some(vec![Some(1), Some(1)]),
+            },
             Value::Listener(_) => Type::Unknown,
             Value::Struct(_) => Type::Struct { known_fields: None },
             Value::FunctionHandle(_)
@@ -2621,6 +2686,7 @@ impl Trace for Value {
             Value::Listener(listener) => listener.trace(tracer),
             Value::Closure(closure) => closure.trace(tracer),
             Value::Object(object) => object.trace(tracer),
+            Value::ObjectArray(array) => array.trace(tracer),
             Value::OutputList(values) => {
                 for value in values {
                     value.trace(tracer);
@@ -2684,6 +2750,7 @@ impl fmt::Display for Value {
                 h.shape, h.device_id, h.buffer_id
             ),
             Value::Object(obj) => write!(f, "{}(props={})", obj.class_name, obj.properties.len()),
+            Value::ObjectArray(array) => write!(f, "{array}"),
             Value::HandleObject(h) => {
                 write!(
                     f,

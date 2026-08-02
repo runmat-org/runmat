@@ -664,6 +664,7 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
         }
         Value::MException(_)
         | Value::HandleObject(_)
+        | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::Listener(_)
         | Value::Struct(_)
@@ -721,7 +722,7 @@ async fn convert_to_string_array(
                 .map_err(|flow| remap_string_flow(flow))?;
             convert_to_string_array(gathered, encoding).await
         }
-        Value::Object(_) | Value::HandleObject(_) | Value::Listener(_) => Err(string_flow(
+        Value::ObjectArray(_) | Value::Object(_) | Value::HandleObject(_) | Value::Listener(_) => Err(string_flow(
             "string: unsupported conversion from handle-based objects. Use class-specific formatters.",
         )),
         Value::Struct(_) => Err(string_flow(

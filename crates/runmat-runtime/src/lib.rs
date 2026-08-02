@@ -29,6 +29,7 @@ pub mod interrupt;
 pub mod output_context;
 pub mod output_count;
 pub mod source_context;
+pub mod testing;
 
 pub mod builtins;
 pub mod comparison;

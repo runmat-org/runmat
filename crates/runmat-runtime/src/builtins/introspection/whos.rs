@@ -632,6 +632,13 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> BuiltinResult
             }
             total
         }
+        Value::ObjectArray(array) => {
+            let mut total = 0usize;
+            for value in array.data() {
+                total = total.saturating_add(value_memory_bytes(value, seen)?);
+            }
+            total
+        }
         Value::HandleObject(handle) => {
             let ptr = runmat_gc::gc_handle_addr(&handle.target);
             if seen.insert(ptr) {

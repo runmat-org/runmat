@@ -1173,9 +1173,11 @@ fn materialize_for_max(name: &str, value: Value) -> BuiltinResult<InputData> {
         Value::GpuTensor(_) => Err(max_internal_error(format!(
             "{name}: internal error – GPU tensors must be gathered before host execution"
         ))),
-        Value::Object(_) | Value::HandleObject(_) | Value::Struct(_) | Value::Listener(_) => {
-            Err(max_invalid_input(format!("{name}: unsupported input type")))
-        }
+        Value::ObjectArray(_)
+        | Value::Object(_)
+        | Value::HandleObject(_)
+        | Value::Struct(_)
+        | Value::Listener(_) => Err(max_invalid_input(format!("{name}: unsupported input type"))),
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)

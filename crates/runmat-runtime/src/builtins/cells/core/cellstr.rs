@@ -145,6 +145,7 @@ async fn cellstr_builtin(value: Value) -> crate::BuiltinResult<Value> {
         | Value::Complex(_, _)
         | Value::ComplexTensor(_)
         | Value::Struct(_)
+        | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
@@ -285,12 +286,14 @@ fn coerce_to_char_vector(value: Value) -> BuiltinResult<Value> {
             CELLSTR_CELL_CONTENT_NOT_TEXT_TEXT,
             &CELLSTR_ERROR_INVALID_CONTENTS,
         )),
-        Value::Cell(_) | Value::Struct(_) | Value::Object(_) | Value::HandleObject(_) => {
-            Err(cellstr_error_with_message(
-                CELLSTR_CELL_CONTENT_NOT_TEXT_TEXT,
-                &CELLSTR_ERROR_INVALID_CONTENTS,
-            ))
-        }
+        Value::Cell(_)
+        | Value::Struct(_)
+        | Value::ObjectArray(_)
+        | Value::Object(_)
+        | Value::HandleObject(_) => Err(cellstr_error_with_message(
+            CELLSTR_CELL_CONTENT_NOT_TEXT_TEXT,
+            &CELLSTR_ERROR_INVALID_CONTENTS,
+        )),
         other => Err(cellstr_error_with_message(
             format!("cellstr: unsupported cell element {other:?}"),
             &CELLSTR_ERROR_INVALID_CONTENTS,
