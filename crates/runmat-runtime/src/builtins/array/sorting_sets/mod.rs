@@ -1,6 +1,7 @@
 //! Sorting and set-related array builtins.
 
 pub mod argsort;
+pub(super) mod float_order;
 pub(super) mod integer_order;
 pub mod intersect;
 pub mod ismember;

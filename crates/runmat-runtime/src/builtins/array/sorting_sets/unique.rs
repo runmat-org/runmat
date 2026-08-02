@@ -19,7 +19,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
-use super::{integer_order, type_resolvers::set_values_output_type};
+use super::{float_order::SetFloat, integer_order, type_resolvers::set_values_output_type};
 use crate::build_runtime_error;
 use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::gpu_helpers;
@@ -480,7 +480,7 @@ pub fn unique_numeric_from_tensor(
     }
 }
 
-fn unique_floating<T: UniqueFloat>(
+fn unique_floating<T: SetFloat>(
     values: Vec<T>,
     shape: Vec<usize>,
     opts: &UniqueOptions,
@@ -674,7 +674,7 @@ fn unique_integer_rows(
     Ok(UniqueEvaluation::new(Value::Tensor(output), ia, ic))
 }
 
-fn unique_floating_elements<T: UniqueFloat>(
+fn unique_floating_elements<T: SetFloat>(
     input: Vec<T>,
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
@@ -760,7 +760,7 @@ fn unique_floating_elements<T: UniqueFloat>(
     ))
 }
 
-fn unique_floating_rows<T: UniqueFloat>(
+fn unique_floating_rows<T: SetFloat>(
     input: Vec<T>,
     shape: Vec<usize>,
     opts: &UniqueOptions,
@@ -883,7 +883,7 @@ fn unique_complex_from_tensor(
     }
 }
 
-fn unique_floating_complex<T: UniqueFloat>(
+fn unique_floating_complex<T: SetFloat>(
     values: Vec<(T, T)>,
     shape: Vec<usize>,
     opts: &UniqueOptions,
@@ -895,7 +895,7 @@ fn unique_floating_complex<T: UniqueFloat>(
     }
 }
 
-fn unique_complex_elements<T: UniqueFloat>(
+fn unique_complex_elements<T: SetFloat>(
     input: Vec<(T, T)>,
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
@@ -982,7 +982,7 @@ fn unique_complex_elements<T: UniqueFloat>(
     ))
 }
 
-fn unique_complex_rows<T: UniqueFloat>(
+fn unique_complex_rows<T: SetFloat>(
     input: Vec<(T, T)>,
     shape: Vec<usize>,
     opts: &UniqueOptions,
@@ -1507,7 +1507,7 @@ struct IntegerRowEntry {
 struct FloatingRowKey(Vec<u64>);
 
 impl FloatingRowKey {
-    fn from_slice<T: UniqueFloat>(values: &[T]) -> Self {
+    fn from_slice<T: SetFloat>(values: &[T]) -> Self {
         Self(values.iter().map(|&value| value.canonical_key()).collect())
     }
 }
@@ -1533,7 +1533,7 @@ struct ComplexKey {
 }
 
 impl ComplexKey {
-    fn new<T: UniqueFloat>(value: (T, T)) -> Self {
+    fn new<T: SetFloat>(value: (T, T)) -> Self {
         Self {
             re: value.0.canonical_key(),
             im: value.1.canonical_key(),
@@ -1588,102 +1588,7 @@ struct StringRowEntry {
     last: usize,
 }
 
-fn canonicalize_f64(value: f64) -> u64 {
-    if value.is_nan() {
-        0x7ff8_0000_0000_0000u64
-    } else if value == 0.0 {
-        0u64
-    } else {
-        value.to_bits()
-    }
-}
-
-fn canonicalize_f32(value: f32) -> u64 {
-    if value.is_nan() {
-        u64::from(0x7fc0_0000u32)
-    } else if value == 0.0 {
-        0u64
-    } else {
-        u64::from(value.to_bits())
-    }
-}
-
-trait UniqueFloat: Copy + Default + PartialOrd + std::fmt::Debug {
-    fn canonical_key(self) -> u64;
-    fn compare(self, other: Self) -> Ordering;
-    fn is_nan(self) -> bool;
-    fn hypot(self, other: Self) -> Self;
-    fn numeric_storage(values: Vec<Self>) -> NumericStorage;
-    fn complex_storage(values: Vec<(Self, Self)>) -> ComplexStorage;
-}
-
-impl UniqueFloat for f64 {
-    fn canonical_key(self) -> u64 {
-        canonicalize_f64(self)
-    }
-
-    fn compare(self, other: Self) -> Ordering {
-        compare_float(self, other)
-    }
-
-    fn is_nan(self) -> bool {
-        f64::is_nan(self)
-    }
-
-    fn hypot(self, other: Self) -> Self {
-        f64::hypot(self, other)
-    }
-
-    fn numeric_storage(values: Vec<Self>) -> NumericStorage {
-        NumericStorage::F64(values)
-    }
-
-    fn complex_storage(values: Vec<(Self, Self)>) -> ComplexStorage {
-        ComplexStorage::F64(values)
-    }
-}
-
-impl UniqueFloat for f32 {
-    fn canonical_key(self) -> u64 {
-        canonicalize_f32(self)
-    }
-
-    fn compare(self, other: Self) -> Ordering {
-        compare_float(self, other)
-    }
-
-    fn is_nan(self) -> bool {
-        f32::is_nan(self)
-    }
-
-    fn hypot(self, other: Self) -> Self {
-        f32::hypot(self, other)
-    }
-
-    fn numeric_storage(values: Vec<Self>) -> NumericStorage {
-        NumericStorage::F32(values)
-    }
-
-    fn complex_storage(values: Vec<(Self, Self)>) -> ComplexStorage {
-        ComplexStorage::F32(values)
-    }
-}
-
-fn compare_float<T: UniqueFloat>(a: T, b: T) -> Ordering {
-    if a.is_nan() {
-        if b.is_nan() {
-            Ordering::Equal
-        } else {
-            Ordering::Greater
-        }
-    } else if b.is_nan() {
-        Ordering::Less
-    } else {
-        a.partial_cmp(&b).unwrap_or(Ordering::Equal)
-    }
-}
-
-fn compare_floating_rows<T: UniqueFloat>(a: &[T], b: &[T]) -> Ordering {
+fn compare_floating_rows<T: SetFloat>(a: &[T], b: &[T]) -> Ordering {
     for (lhs, rhs) in a.iter().zip(b.iter()) {
         let ord = lhs.compare(*rhs);
         if ord != Ordering::Equal {
@@ -1703,11 +1608,11 @@ fn compare_integer_rows(a: &[IntValue], b: &[IntValue]) -> Ordering {
     Ordering::Equal
 }
 
-fn complex_is_nan<T: UniqueFloat>(value: (T, T)) -> bool {
+fn complex_is_nan<T: SetFloat>(value: (T, T)) -> bool {
     value.0.is_nan() || value.1.is_nan()
 }
 
-fn compare_complex<T: UniqueFloat>(a: (T, T), b: (T, T)) -> Ordering {
+fn compare_complex<T: SetFloat>(a: (T, T), b: (T, T)) -> Ordering {
     match (complex_is_nan(a), complex_is_nan(b)) {
         (true, true) => Ordering::Equal,
         (true, false) => Ordering::Greater,
@@ -1728,7 +1633,7 @@ fn compare_complex<T: UniqueFloat>(a: (T, T), b: (T, T)) -> Ordering {
     }
 }
 
-fn compare_complex_rows<T: UniqueFloat>(a: &[(T, T)], b: &[(T, T)]) -> Ordering {
+fn compare_complex_rows<T: SetFloat>(a: &[(T, T)], b: &[(T, T)]) -> Ordering {
     for (lhs, rhs) in a.iter().zip(b.iter()) {
         let ord = compare_complex(*lhs, *rhs);
         if ord != Ordering::Equal {
