@@ -384,11 +384,12 @@ fn evaluate_tensor_condition(tensor: &Tensor) -> crate::BuiltinResult<ConditionO
         return Ok(ConditionOutcome::Pass);
     }
 
-    if tensor.data.is_empty() {
+    if tensor.is_empty() {
         return Ok(ConditionOutcome::Pass);
     }
-    for value in &tensor.data {
-        if value.is_nan() || *value == 0.0 {
+    for index in 0..tensor.len() {
+        let value = crate::builtins::common::tensor::tensor_value_f64(tensor, index);
+        if value.is_nan() || value == 0.0 {
             return Ok(ConditionOutcome::Fail);
         }
     }
@@ -654,6 +655,20 @@ pub(crate) mod tests {
             assert_builtin(vec![Value::Tensor(failing)]).expect_err("assert should fail"),
         );
         assert_eq!(err.identifier(), Some(assert_default_identifier()));
+    }
+
+    #[test]
+    fn assert_reads_native_single_tensor_storage() {
+        let passing = Tensor::from_f32(vec![f32::MIN_POSITIVE, -2.0], vec![2, 1]).unwrap();
+        assert_builtin(vec![Value::Tensor(passing)]).expect("assert should pass");
+
+        for values in [vec![1.0_f32, 0.0], vec![1.0_f32, f32::NAN]] {
+            let failing = Tensor::from_f32(values, vec![2, 1]).unwrap();
+            let err = unwrap_error(
+                assert_builtin(vec![Value::Tensor(failing)]).expect_err("assert should fail"),
+            );
+            assert_eq!(err.identifier(), Some(assert_default_identifier()));
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
