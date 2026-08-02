@@ -985,20 +985,18 @@ fn parse_lengths_inner(
         }
         Value::Num(n) => parse_numeric_dimension(*n).map(|d| vec![d]),
         Value::Tensor(tensor) => {
-            let dims = if let Some(storage) = tensor.integer_storage() {
-                (0..storage.len())
-                    .map(|index| {
-                        let value = storage.value_at(index).ok_or_else(|| fspecial_error(err))?;
+            let dims = (0..tensor.len())
+                .map(|index| {
+                    let value = tensor
+                        .numeric_value_at(index)
+                        .ok_or_else(|| fspecial_error(err))?;
+                    if let Some(value) = value.into_int_value() {
                         parse_integer_dimension(&value)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?
-            } else {
-                tensor
-                    .data
-                    .iter()
-                    .map(|&v| parse_numeric_dimension(v))
-                    .collect::<Result<Vec<_>, _>>()?
-            };
+                    } else {
+                        parse_numeric_dimension(value.materialize_f64())
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?;
             if enforce_positive && dims.contains(&0) {
                 return Err(fspecial_error(err));
             }

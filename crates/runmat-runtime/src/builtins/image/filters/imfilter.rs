@@ -451,9 +451,7 @@ fn parse_scalar(builtin: &str, value: &Value) -> BuiltinResult<f64> {
 }
 
 fn tensor_element_len(tensor: &Tensor) -> usize {
-    tensor
-        .integer_storage()
-        .map_or(tensor.data.len(), |storage| storage.len())
+    tensor.len()
 }
 
 /// Core host implementation of `imfilter`, shared with the in-process acceleration provider.
@@ -495,7 +493,7 @@ pub fn build_imfilter_plan(
     options: &ImfilterOptions,
     builtin: &str,
 ) -> BuiltinResult<ImfilterPlan> {
-    if kernel.data.is_empty() || kernel.shape.contains(&0) {
+    if kernel.is_empty() || kernel.shape.contains(&0) {
         return Err(filter_error(
             builtin,
             format!("{builtin}: filter must be non-empty along every dimension"),

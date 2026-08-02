@@ -5,9 +5,7 @@
 //! correlation and returns an output the same size as the input image, matching
 //! MathWorks MATLAB semantics.
 
-use runmat_accelerate_api::{
-    GpuTensorHandle, HostTensorView, ImfilterMode, ImfilterOptions, ImfilterShape,
-};
+use runmat_accelerate_api::{GpuTensorHandle, ImfilterMode, ImfilterOptions, ImfilterShape};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -264,11 +262,7 @@ async fn filter2_gpu(
         other => {
             let tensor = tensor::value_into_tensor_for(FILTER2_BUILTIN, other)
                 .map_err(|err| filter2_error_with_detail(&FILTER2_ERROR_INVALID_INPUT, err))?;
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            match provider.upload(&view) {
+            match gpu_helpers::upload_tensor(provider, &tensor) {
                 Ok(uploaded) => {
                     kernel_tensor_cache = Some(tensor);
                     uploaded_kernel = Some(uploaded.clone());
