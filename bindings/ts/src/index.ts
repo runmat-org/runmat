@@ -1290,8 +1290,11 @@ async function loadNativeModule(wasmModule?: WasmInitInput): Promise<RunMatNativ
   }
   if (!loadPromise) {
     loadPromise = (async () => {
-      const wasmModuleUrl = new URL("./pkg/runmat_wasm.js", import.meta.url);
-      const native = (await import(wasmModuleUrl.href)) as unknown as RunMatNativeModule;
+      const moduleBaseUrl = import.meta.url;
+      const wasmModuleUrl = `${moduleBaseUrl.slice(0, moduleBaseUrl.lastIndexOf("/") + 1)}pkg/runmat_wasm.js`;
+      const native = (await import(
+        /* webpackIgnore: true */ wasmModuleUrl
+      )) as unknown as RunMatNativeModule;
       if (typeof native.default === "function") {
         await native.default(wasmModule);
       }
