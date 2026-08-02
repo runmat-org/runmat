@@ -3,7 +3,8 @@
 use std::f64::consts::TAU;
 
 use runmat_accelerate_api::{
-    GpuTensorHandle, ProviderBitModulationRequest, ProviderModulationRequest,
+    GpuTensorHandle, IntegerElementType, ProviderBitModulationRequest, ProviderModulationRequest,
+    ProviderPrecision,
 };
 use runmat_builtins::{
     ComplexTensor, IntValue, IntegerStorage, LogicalArray, ResolveContext, Tensor, Type, Value,
@@ -82,6 +83,9 @@ async fn pskmod_gpu(
         .or_else(runmat_accelerate_api::provider)
         .ok_or_else(|| pskmod_error("pskmod: no acceleration provider registered"))?;
     let constellation = constellation_table(order, &options)?;
+    if let Some(class) = runmat_accelerate_api::handle_integer_type(&handle) {
+        validate_gpu_symbol_class(class)?;
+    }
     if runmat_accelerate_api::handle_is_logical(&handle)
         && !matches!(options.input_type, InputType::Bit)
     {
@@ -94,6 +98,7 @@ async fn pskmod_gpu(
                 constellation: &constellation,
             };
             if let Ok(out) = provider.modulate_constellation(request).await {
+                set_output_precision(&out, options.output_dtype);
                 return Ok(gpu_helpers::complex_gpu_value(out));
             }
         }
@@ -107,6 +112,7 @@ async fn pskmod_gpu(
                     constellation: &constellation,
                 };
                 if let Ok(out) = provider.modulate_bits_constellation(request).await {
+                    set_output_precision(&out, options.output_dtype);
                     return Ok(gpu_helpers::complex_gpu_value(out));
                 }
             }
@@ -120,7 +126,34 @@ async fn pskmod_gpu(
     };
     let out = gpu_helpers::upload_complex_tensor(provider, &tensor)
         .map_err(|err| pskmod_error(format!("pskmod: {err}")))?;
+    set_output_precision(&out, options.output_dtype);
     Ok(gpu_helpers::complex_gpu_value(out))
+}
+
+fn set_output_precision(handle: &GpuTensorHandle, dtype: OutputDType) {
+    let precision = match dtype {
+        OutputDType::Double => ProviderPrecision::F64,
+        OutputDType::Single => ProviderPrecision::F32,
+    };
+    runmat_accelerate_api::set_handle_precision(handle, precision);
+}
+
+fn validate_gpu_symbol_class(class: IntegerElementType) -> BuiltinResult<()> {
+    if matches!(
+        class,
+        IntegerElementType::I8
+            | IntegerElementType::I16
+            | IntegerElementType::I32
+            | IntegerElementType::U8
+            | IntegerElementType::U16
+            | IntegerElementType::U32
+    ) {
+        Ok(())
+    } else {
+        Err(pskmod_error(
+            "pskmod: integer X must have class int8, int16, int32, uint8, uint16, or uint32",
+        ))
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -259,6 +292,7 @@ impl SymbolInput {
                 Self::from_tensor(tensor, order, input_type)
             }
             Value::Int(i) => {
+                validate_scalar_symbol_class(&i)?;
                 let symbol = integer_to_symbol_with_name(&i, "X")?;
                 match input_type {
                     InputType::Integer => Ok(Self {
@@ -292,6 +326,7 @@ impl SymbolInput {
     fn from_tensor(tensor: Tensor, order: usize, input_type: InputType) -> BuiltinResult<Self> {
         let shape = tensor.shape.clone();
         if let Some(storage) = tensor.integer_storage() {
+            validate_symbol_storage_class(storage)?;
             let symbols = integer_storage_to_symbols(storage, "X")?;
             return match input_type {
                 InputType::Integer => Ok(Self {
@@ -303,8 +338,7 @@ impl SymbolInput {
         }
         match input_type {
             InputType::Integer => {
-                let data = tensor
-                    .data
+                let data = tensor_utils::tensor_values_f64_cow(&tensor)
                     .iter()
                     .map(|&value| number_to_symbol_with_name(value, "X"))
                     .collect::<BuiltinResult<Vec<_>>>()?;
@@ -314,8 +348,7 @@ impl SymbolInput {
                 })
             }
             InputType::Bit => {
-                let bits = tensor
-                    .data
+                let bits = tensor_utils::tensor_values_f64_cow(&tensor)
                     .iter()
                     .map(|&value| number_to_bit(value, "X"))
                     .collect::<BuiltinResult<Vec<_>>>()?;
@@ -333,6 +366,42 @@ impl SymbolInput {
             InputType::Integer => Err(pskmod_error("pskmod: logical X requires InputType='bit'")),
             InputType::Bit => bits_to_symbols(logical.data, logical.shape, order),
         }
+    }
+}
+
+fn validate_scalar_symbol_class(value: &IntValue) -> BuiltinResult<()> {
+    if matches!(
+        value,
+        IntValue::I8(_)
+            | IntValue::I16(_)
+            | IntValue::I32(_)
+            | IntValue::U8(_)
+            | IntValue::U16(_)
+            | IntValue::U32(_)
+    ) {
+        Ok(())
+    } else {
+        Err(pskmod_error(
+            "pskmod: integer X must have class int8, int16, int32, uint8, uint16, or uint32",
+        ))
+    }
+}
+
+fn validate_symbol_storage_class(storage: &IntegerStorage) -> BuiltinResult<()> {
+    if matches!(
+        storage,
+        IntegerStorage::I8(_)
+            | IntegerStorage::I16(_)
+            | IntegerStorage::I32(_)
+            | IntegerStorage::U8(_)
+            | IntegerStorage::U16(_)
+            | IntegerStorage::U32(_)
+    ) {
+        Ok(())
+    } else {
+        Err(pskmod_error(
+            "pskmod: integer X must have class int8, int16, int32, uint8, uint16, or uint32",
+        ))
     }
 }
 
@@ -565,8 +634,7 @@ fn vector_to_symbols(value: &Value, name: &str) -> BuiltinResult<Vec<usize>> {
             if let Some(storage) = tensor.integer_storage() {
                 integer_storage_to_symbols(storage, name)
             } else {
-                tensor
-                    .data
+                tensor_utils::tensor_values_f64_cow(tensor)
                     .iter()
                     .map(|&number| number_to_symbol_with_name(number, name))
                     .collect()
@@ -726,9 +794,7 @@ mod tests {
     }
 
     fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.clear();
-        Value::Tensor(tensor)
+        Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
     }
 
     fn assert_complex_close(actual: &[(f64, f64)], expected: &[(f64, f64)]) {
@@ -760,7 +826,7 @@ mod tests {
     #[test]
     fn pskmod_reads_typed_integer_symbol_storage_exactly() {
         let out = pskmod(
-            integer_tensor(IntegerStorage::U64(vec![0, 1, 2, 3]), vec![1, 4]),
+            integer_tensor(IntegerStorage::U32(vec![0, 1, 2, 3]), vec![1, 4]),
             4,
             vec![],
         );
@@ -769,6 +835,34 @@ mod tests {
             &out.data,
             &[(1.0, 0.0), (0.0, 1.0), (0.0, -1.0), (-1.0, 0.0)],
         );
+    }
+
+    #[test]
+    fn pskmod_accepts_only_documented_integer_symbol_classes() {
+        for storage in [
+            IntegerStorage::I8(vec![0, 1, 2, 3]),
+            IntegerStorage::I16(vec![0, 1, 2, 3]),
+            IntegerStorage::I32(vec![0, 1, 2, 3]),
+            IntegerStorage::U8(vec![0, 1, 2, 3]),
+            IntegerStorage::U16(vec![0, 1, 2, 3]),
+            IntegerStorage::U32(vec![0, 1, 2, 3]),
+        ] {
+            pskmod(integer_tensor(storage, vec![1, 4]), 4, vec![]);
+        }
+        for storage in [
+            IntegerStorage::I64(vec![0, 1, 2, 3]),
+            IntegerStorage::U64(vec![0, 1, 2, 3]),
+        ] {
+            let err = block_on(super::pskmod_builtin(
+                integer_tensor(storage, vec![1, 4]),
+                Value::Num(4.0),
+                vec![],
+            ))
+            .expect_err("unsupported integer X class");
+            assert!(err
+                .message()
+                .contains("int8, int16, int32, uint8, uint16, or uint32"));
+        }
     }
 
     #[test]
@@ -875,6 +969,19 @@ mod tests {
     }
 
     #[test]
+    fn pskmod_single_input_still_defaults_to_double_output() {
+        let out = pskmod(
+            Value::Tensor(Tensor::from_f32(vec![1.0], vec![1, 1]).unwrap()),
+            8,
+            vec![],
+        );
+        let theta = TAU / 8.0;
+        assert_eq!(out.data[0].0, theta.cos());
+        assert_eq!(out.data[0].1, theta.sin());
+        assert_ne!(out.data[0].0, (theta.cos() as f32) as f64);
+    }
+
+    #[test]
     fn pskmod_rejects_out_of_range_symbols() {
         let err = block_on(super::pskmod_builtin(
             tensor(vec![0.0, 8.0], vec![1, 2]),
@@ -954,6 +1061,61 @@ mod tests {
             assert_complex_close(&actual.data, &expected.data);
             provider.free(&input_handle).ok();
             provider.free(&output_handle).ok();
+        });
+    }
+
+    #[test]
+    fn pskmod_gpu_enforces_integer_symbol_classes_and_output_precision() {
+        test_support::with_test_provider(|provider| {
+            let accepted =
+                Tensor::new_integer(IntegerStorage::U32(vec![0, 1, 2, 3]), vec![1, 4]).unwrap();
+            let accepted_handle =
+                gpu_helpers::upload_tensor(provider, &accepted).expect("accepted integer upload");
+            let result = block_on(super::pskmod_builtin(
+                Value::GpuTensor(accepted_handle),
+                Value::Num(4.0),
+                vec![],
+            ))
+            .expect("supported integer gpuArray");
+            let Value::GpuTensor(result_handle) = result else {
+                panic!("expected resident modulation output");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&result_handle),
+                Some(ProviderPrecision::F64)
+            );
+
+            let rejected =
+                Tensor::new_integer(IntegerStorage::U64(vec![0, 1, 2, 3]), vec![1, 4]).unwrap();
+            let rejected_handle =
+                gpu_helpers::upload_tensor(provider, &rejected).expect("rejected integer upload");
+            let err = block_on(super::pskmod_builtin(
+                Value::GpuTensor(rejected_handle),
+                Value::Num(4.0),
+                vec![],
+            ))
+            .expect_err("unsupported integer gpuArray class");
+            assert!(err
+                .message()
+                .contains("int8, int16, int32, uint8, uint16, or uint32"));
+
+            let single = Tensor::from_f32(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]).unwrap();
+            let single_handle =
+                gpu_helpers::upload_tensor(provider, &single).expect("single upload");
+            runmat_accelerate_api::set_handle_precision(&single_handle, ProviderPrecision::F32);
+            let result = block_on(super::pskmod_builtin(
+                Value::GpuTensor(single_handle),
+                Value::Num(4.0),
+                vec![Value::from("OutputDataType"), Value::from("single")],
+            ))
+            .expect("explicit single gpuArray output");
+            let Value::GpuTensor(result_handle) = result else {
+                panic!("expected resident single modulation output");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&result_handle),
+                Some(ProviderPrecision::F32)
+            );
         });
     }
 
@@ -1099,16 +1261,14 @@ mod tests {
 
     #[test]
     fn pskmod_typed_integer_tensors_preserve_exact_symbol_values() {
-        let mut order = Tensor::new_integer(IntegerStorage::U64(vec![4]), vec![1, 1]).unwrap();
-        order.data.clear();
+        let order = Tensor::new_integer(IntegerStorage::U64(vec![4]), vec![1, 1]).unwrap();
         assert_eq!(parse_modulation_order(&Value::Tensor(order)).unwrap(), 4);
 
-        let mut phase = Tensor::new_integer(IntegerStorage::I16(vec![3]), vec![1, 1]).unwrap();
-        phase.data.clear();
+        let phase = Tensor::new_integer(IntegerStorage::I16(vec![3]), vec![1, 1]).unwrap();
         assert_eq!(scalar_number(&Value::Tensor(phase), "phase").unwrap(), 3.0);
 
         let out = pskmod(
-            integer_tensor(IntegerStorage::U64(vec![0, 1, 2, 3]), vec![1, 4]),
+            integer_tensor(IntegerStorage::U32(vec![0, 1, 2, 3]), vec![1, 4]),
             4,
             vec![],
         );
@@ -1138,8 +1298,7 @@ mod tests {
             IntegerStorage::U32(vec![4]),
             IntegerStorage::U64(vec![4]),
         ] {
-            let mut order = Tensor::new_integer(storage, vec![1, 1]).expect("typed order");
-            order.data.fill(f64::NAN);
+            let order = Tensor::new_integer(storage, vec![1, 1]).expect("typed order");
             assert_eq!(parse_modulation_order(&Value::Tensor(order)).unwrap(), 4);
         }
     }
