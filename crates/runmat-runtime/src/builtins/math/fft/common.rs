@@ -3,7 +3,9 @@ use crate::dispatcher::download_handle_async;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use num_complex::Complex;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorOwned};
-use runmat_builtins::{ComplexTensor, IntValue, NumericStorage, Tensor, Value};
+use runmat_builtins::{
+    ComplexStorage, ComplexTensor, IntValue, NumericDType, NumericStorage, Tensor, Value,
+};
 use rustfft::FftPlanner;
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -30,12 +32,12 @@ fn checked_mul(a: usize, b: usize, builtin: &str, context: &str) -> BuiltinResul
         .ok_or_else(|| builtin_error(builtin, format!("{builtin}: {context} overflow")))
 }
 
-fn zeroed_complex_vec(
+fn zeroed_complex_vec<T: rustfft::FftNum>(
     len: usize,
     builtin: &str,
     context: &str,
-) -> BuiltinResult<Vec<Complex<f64>>> {
-    let max_len = isize::MAX as usize / size_of::<Complex<f64>>();
+) -> BuiltinResult<Vec<Complex<T>>> {
+    let max_len = isize::MAX as usize / size_of::<Complex<T>>();
     if len > max_len {
         return Err(builtin_error(
             builtin,
@@ -49,7 +51,7 @@ fn zeroed_complex_vec(
             format!("{builtin}: {context} allocation failed: {err}"),
         )
     })?;
-    values.resize(len, Complex::new(0.0, 0.0));
+    values.resize(len, Complex::new(T::zero(), T::zero()));
     Ok(values)
 }
 
@@ -199,25 +201,40 @@ pub fn value_to_complex_tensor(value: Value, builtin: &str) -> BuiltinResult<Com
 /// Convert a real-valued tensor into a `ComplexTensor`.
 pub fn tensor_to_complex_tensor(tensor: Tensor, builtin: &str) -> BuiltinResult<ComplexTensor> {
     let shape = tensor.shape.clone();
-    // FFT arithmetic currently uses double complex storage. Materialize the
-    // authoritative real input explicitly at this transform-domain boundary.
-    let data = tensor
+    let storage = match tensor
         .into_numeric_storage()
         .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?
-        .materialize_f64()
-        .into_iter()
-        .map(|re| (re, 0.0))
-        .collect::<Vec<_>>();
-    ComplexTensor::new(data, shape).map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))
+    {
+        NumericStorage::F64(values) => {
+            ComplexStorage::F64(values.into_iter().map(|real| (real, 0.0)).collect())
+        }
+        NumericStorage::F32(values) => {
+            ComplexStorage::F32(values.into_iter().map(|real| (real, 0.0)).collect())
+        }
+        storage => ComplexStorage::F64(
+            storage
+                .materialize_f64()
+                .into_iter()
+                .map(|real| (real, 0.0))
+                .collect(),
+        ),
+    };
+    ComplexTensor::from_complex_storage(storage, shape)
+        .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))
 }
 
 pub fn complex_tensor_to_real_value(tensor: ComplexTensor, builtin: &str) -> BuiltinResult<Value> {
-    let data = tensor
-        .materialize_f64()
-        .iter()
-        .map(|(re, _)| *re)
-        .collect::<Vec<_>>();
-    let real = Tensor::new(data, tensor.shape.clone())
+    let shape = tensor.shape.clone();
+    let storage = match tensor.into_complex_storage() {
+        ComplexStorage::F64(values) => {
+            NumericStorage::F64(values.into_iter().map(|(real, _)| real).collect())
+        }
+        ComplexStorage::F32(values) => {
+            NumericStorage::F32(values.into_iter().map(|(real, _)| real).collect())
+        }
+        ComplexStorage::Integer(storage) => NumericStorage::from(storage.real),
+    };
+    let real = Tensor::from_numeric_storage(storage, shape)
         .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?;
     Ok(Value::Tensor(real))
 }
@@ -317,6 +334,71 @@ pub enum TransformDirection {
     Inverse,
 }
 
+#[allow(clippy::too_many_arguments)]
+fn transform_typed_values<T: rustfft::FftNum>(
+    input: Vec<Complex<T>>,
+    current_len: usize,
+    target_len: usize,
+    inner_stride: usize,
+    outer_stride: usize,
+    num_slices: usize,
+    direction: TransformDirection,
+    inverse_scale: T,
+    builtin: &str,
+) -> BuiltinResult<Vec<Complex<T>>> {
+    let output_len = checked_mul(target_len, num_slices, builtin, "output length")?;
+    let mut output = zeroed_complex_vec(output_len, builtin, "output")?;
+    let mut planner = FftPlanner::<T>::new();
+    let plan: Option<Arc<dyn rustfft::Fft<T>>> = if target_len > 1 {
+        Some(match direction {
+            TransformDirection::Forward => planner.plan_fft_forward(target_len),
+            TransformDirection::Inverse => planner.plan_fft_inverse(target_len),
+        })
+    } else {
+        None
+    };
+    let copy_len = current_len.min(target_len);
+    let mut buffer = zeroed_complex_vec(target_len, builtin, "workspace")?;
+    let scale = match direction {
+        TransformDirection::Forward => T::one(),
+        TransformDirection::Inverse => inverse_scale,
+    };
+
+    for outer in 0..outer_stride {
+        let base_in = checked_mul(
+            outer,
+            checked_mul(current_len, inner_stride, builtin, "input slice span")?,
+            builtin,
+            "input slice offset",
+        )?;
+        let base_out = checked_mul(
+            outer,
+            checked_mul(target_len, inner_stride, builtin, "output slice span")?,
+            builtin,
+            "output slice offset",
+        )?;
+        for inner in 0..inner_stride {
+            buffer.fill(Complex::new(T::zero(), T::zero()));
+            for (k, slot) in buffer.iter_mut().enumerate().take(copy_len) {
+                let src_idx = base_in + inner + k * inner_stride;
+                if src_idx < input.len() {
+                    *slot = input[src_idx];
+                }
+            }
+            if let Some(plan) = &plan {
+                plan.process(&mut buffer);
+            }
+            for (k, value) in buffer.iter().enumerate().take(target_len) {
+                let dst_idx = base_out + inner + k * inner_stride;
+                if dst_idx < output.len() {
+                    output[dst_idx] = *value * scale;
+                }
+            }
+        }
+    }
+    Ok(output)
+}
+
 pub fn transform_complex_tensor(
     mut tensor: ComplexTensor,
     length: Option<usize>,
@@ -324,6 +406,11 @@ pub fn transform_complex_tensor(
     direction: TransformDirection,
     builtin: &str,
 ) -> BuiltinResult<ComplexTensor> {
+    let output_dtype = if tensor.numeric_dtype() == NumericDType::F32 {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
+    };
     let origin_rank = tensor.shape.len();
     if crate::builtins::common::shape::is_scalar_shape(&tensor.shape) {
         tensor.shape = crate::builtins::common::shape::normalize_scalar_shape(&tensor.shape);
@@ -353,87 +440,90 @@ pub fn transform_complex_tensor(
         let mut out_shape = shape;
         out_shape[dim_index] = 0;
         trim_trailing_ones(&mut out_shape, origin_rank);
-        return ComplexTensor::new(Vec::<(f64, f64)>::new(), out_shape)
-            .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")));
+        return ComplexTensor::from_complex_storage(
+            match output_dtype {
+                NumericDType::F32 => ComplexStorage::F32(Vec::new()),
+                NumericDType::F64 => ComplexStorage::F64(Vec::new()),
+                _ => unreachable!("FFT output is single or double"),
+            },
+            out_shape,
+        )
+        .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")));
     }
 
     let inner_stride = checked_product(&shape[..dim_index], builtin, "inner stride")?;
     let outer_stride = checked_product(&shape[dim_index + 1..], builtin, "outer stride")?;
     let num_slices = checked_mul(inner_stride, outer_stride, builtin, "slice count")?;
 
-    let input = tensor
-        .materialize_f64()
-        .into_iter()
-        .map(|(re, im)| Complex::new(re, im))
-        .collect::<Vec<_>>();
-
     if num_slices == 0 {
         let mut out_shape = shape;
         out_shape[dim_index] = target_len;
         trim_trailing_ones(&mut out_shape, origin_rank.max(dim_index + 1));
-        return ComplexTensor::new(Vec::<(f64, f64)>::new(), out_shape)
-            .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")));
-    }
-
-    let output_len = checked_mul(target_len, num_slices, builtin, "output length")?;
-    let mut output = zeroed_complex_vec(output_len, builtin, "output")?;
-
-    let mut planner = FftPlanner::<f64>::new();
-    let plan: Option<Arc<dyn rustfft::Fft<f64>>> = if target_len > 1 {
-        Some(match direction {
-            TransformDirection::Forward => planner.plan_fft_forward(target_len),
-            TransformDirection::Inverse => planner.plan_fft_inverse(target_len),
-        })
-    } else {
-        None
-    };
-
-    let copy_len = current_len.min(target_len);
-    let mut buffer = zeroed_complex_vec(target_len, builtin, "workspace")?;
-    let scale = match direction {
-        TransformDirection::Forward => 1.0,
-        TransformDirection::Inverse => 1.0 / (target_len as f64),
-    };
-
-    for outer in 0..outer_stride {
-        let base_in = checked_mul(
-            outer,
-            checked_mul(current_len, inner_stride, builtin, "input slice span")?,
-            builtin,
-            "input slice offset",
-        )?;
-        let base_out = checked_mul(
-            outer,
-            checked_mul(target_len, inner_stride, builtin, "output slice span")?,
-            builtin,
-            "output slice offset",
-        )?;
-        for inner in 0..inner_stride {
-            buffer.fill(Complex::new(0.0, 0.0));
-            for (k, slot) in buffer.iter_mut().enumerate().take(copy_len) {
-                let src_idx = base_in + inner + k * inner_stride;
-                if src_idx < input.len() {
-                    *slot = input[src_idx];
-                }
-            }
-            if let Some(p) = &plan {
-                p.process(&mut buffer);
-            }
-            for (k, value) in buffer.iter().enumerate().take(target_len) {
-                let dst_idx = base_out + inner + k * inner_stride;
-                if dst_idx < output.len() {
-                    output[dst_idx] = *value * scale;
-                }
-            }
-        }
+        return ComplexTensor::from_complex_storage(
+            match output_dtype {
+                NumericDType::F32 => ComplexStorage::F32(Vec::new()),
+                NumericDType::F64 => ComplexStorage::F64(Vec::new()),
+                _ => unreachable!("FFT output is single or double"),
+            },
+            out_shape,
+        )
+        .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")));
     }
 
     let mut out_shape = shape;
     out_shape[dim_index] = target_len;
     trim_trailing_ones(&mut out_shape, origin_rank.max(dim_index + 1));
 
-    let data = output.into_iter().map(|c| (c.re, c.im)).collect::<Vec<_>>();
-    ComplexTensor::new(data, out_shape)
+    let storage = match tensor.into_complex_storage() {
+        ComplexStorage::F32(values) => {
+            let input = values
+                .into_iter()
+                .map(|(real, imag)| Complex::new(real, imag))
+                .collect();
+            let output = transform_typed_values(
+                input,
+                current_len,
+                target_len,
+                inner_stride,
+                outer_stride,
+                num_slices,
+                direction,
+                1.0_f32 / target_len as f32,
+                builtin,
+            )?;
+            ComplexStorage::F32(
+                output
+                    .into_iter()
+                    .map(|value| (value.re, value.im))
+                    .collect(),
+            )
+        }
+        storage => {
+            let input = storage
+                .materialize_f64()
+                .into_iter()
+                .map(|(real, imag)| Complex::new(real, imag))
+                .collect();
+            let output = transform_typed_values(
+                input,
+                current_len,
+                target_len,
+                inner_stride,
+                outer_stride,
+                num_slices,
+                direction,
+                1.0_f64 / target_len as f64,
+                builtin,
+            )?;
+            ComplexStorage::F64(
+                output
+                    .into_iter()
+                    .map(|value| (value.re, value.im))
+                    .collect(),
+            )
+        }
+    };
+    ComplexTensor::from_complex_storage(storage, out_shape)
         .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))
 }
 
@@ -964,13 +1054,19 @@ mod tests {
     }
 
     #[test]
-    fn fft_single_inputs_materialize_at_the_current_double_complex_boundary() {
+    fn fft_single_inputs_preserve_native_complex_single_storage() {
         let input = Tensor::from_f32(vec![0.1, -2.0], vec![1, 2]).unwrap();
         let complex = tensor_to_complex_tensor(input, "fft").expect("complex input");
         assert_eq!(
-            complex.materialize_f64(),
-            vec![(f64::from(0.1_f32), 0.0), (-2.0, 0.0)]
+            complex.as_f32_slice(),
+            Some(&[(0.1_f32, 0.0), (-2.0_f32, 0.0)][..])
         );
+
+        let transformed =
+            transform_complex_tensor(complex, None, None, TransformDirection::Forward, "fft")
+                .expect("single FFT");
+        assert_eq!(transformed.numeric_dtype(), NumericDType::F32);
+        assert!(transformed.as_f32_slice().is_some());
 
         let length = Tensor::from_f32(vec![4.0], vec![1, 1]).unwrap();
         assert_eq!(

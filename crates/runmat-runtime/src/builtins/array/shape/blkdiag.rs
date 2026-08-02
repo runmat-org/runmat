@@ -555,7 +555,7 @@ fn assemble_blocks(blocks: Vec<Block>) -> BuiltinResult<Value> {
     let class = OutputClass::for_blocks(&blocks)?;
     match class {
         OutputClass::Char => assemble_char(blocks),
-        OutputClass::Complex => assemble_complex(blocks),
+        OutputClass::Complex(dtype) => assemble_complex(blocks, dtype),
         OutputClass::Sparse => assemble_sparse(blocks),
         OutputClass::Logical => assemble_logical(blocks),
         OutputClass::Real(dtype) => assemble_real(blocks, dtype),
@@ -658,7 +658,7 @@ impl Block {
 enum OutputClass {
     Real(NumericDType),
     Logical,
-    Complex,
+    Complex(NumericDType),
     Sparse,
     Char,
 }
@@ -683,7 +683,7 @@ impl OutputClass {
             .any(|block| matches!(block, Block::Complex(_)));
         let has_sparse = blocks.iter().any(|block| matches!(block, Block::Sparse(_)));
         if has_sparse && has_complex && !complex_blocks_are_real(blocks) {
-            return Ok(Self::Complex);
+            return Ok(Self::Complex(promoted_complex_dtype(blocks)));
         }
 
         if has_sparse {
@@ -691,7 +691,7 @@ impl OutputClass {
         }
 
         if has_complex {
-            return Ok(Self::Complex);
+            return Ok(Self::Complex(promoted_complex_dtype(blocks)));
         }
 
         if blocks
@@ -702,6 +702,19 @@ impl OutputClass {
         }
 
         Ok(Self::Real(promoted_dense_dtype(blocks)))
+    }
+}
+
+fn promoted_complex_dtype(blocks: &[Block]) -> NumericDType {
+    if blocks.iter().any(|block| match block {
+        Block::Real(tensor) => tensor.numeric_dtype() == NumericDType::F32,
+        Block::Complex(tensor) => tensor.numeric_dtype() == NumericDType::F32,
+        Block::Sparse(tensor) => tensor.numeric_dtype() == NumericDType::F32,
+        Block::Logical(_) | Block::Char(_) => false,
+    }) {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
     }
 }
 
@@ -829,7 +842,7 @@ fn assemble_logical(blocks: Vec<Block>) -> BuiltinResult<Value> {
         .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail))
 }
 
-fn assemble_complex(blocks: Vec<Block>) -> BuiltinResult<Value> {
+fn assemble_complex(blocks: Vec<Block>, dtype: NumericDType) -> BuiltinResult<Value> {
     let (rows, cols) = output_dims(&blocks)?;
     let len = checked_len(rows, cols)?;
     let mut data = filled_vec((0.0, 0.0), len)?;
@@ -847,8 +860,6 @@ fn assemble_complex(blocks: Vec<Block>) -> BuiltinResult<Value> {
                 }
             }
             Block::Real(tensor) => {
-                // Floating complex storage is currently double-only, so real
-                // blocks enter this explicit component materialization.
                 let values = tensor::tensor_values_f64_cow(tensor);
                 for col in 0..tensor.cols {
                     for row in 0..tensor.rows {
@@ -891,7 +902,7 @@ fn assemble_complex(blocks: Vec<Block>) -> BuiltinResult<Value> {
         row_offset += block.rows();
         col_offset += block.cols();
     }
-    let tensor = ComplexTensor::new(data, vec![rows, cols])
+    let tensor = ComplexTensor::from_f64_values_with_dtype(data, vec![rows, cols], dtype)
         .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail))?;
     Ok(complex_tensor_into_blkdiag_value(tensor))
 }
@@ -1509,6 +1520,32 @@ mod tests {
                 assert_eq!(out.materialize_f64()[0], (9.0, 0.0));
                 assert_eq!(out.materialize_f64()[4], (1.0, 2.0));
                 assert_eq!(out.materialize_f64()[5], (3.0, -4.0));
+            }
+            other => panic!("expected complex tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn complex_single_inputs_preserve_native_storage_and_promote_real_blocks() {
+        let real = Tensor::new(vec![9.0], vec![1, 1]).unwrap();
+        let complex = ComplexTensor::from_f32(vec![(1.0, 2.0), (3.0, -4.0)], vec![2, 1]).unwrap();
+        match call(vec![Value::Tensor(real), Value::ComplexTensor(complex)]).unwrap() {
+            Value::ComplexTensor(out) => {
+                assert_eq!(out.shape, vec![3, 2]);
+                assert_eq!(out.numeric_dtype(), NumericDType::F32);
+                assert_eq!(
+                    out.as_f32_slice(),
+                    Some(
+                        &[
+                            (9.0, 0.0),
+                            (0.0, 0.0),
+                            (0.0, 0.0),
+                            (0.0, 0.0),
+                            (1.0, 2.0),
+                            (3.0, -4.0),
+                        ][..]
+                    )
+                );
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }

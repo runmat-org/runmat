@@ -16,7 +16,7 @@ use runmat_accelerate_api::{GpuTensorHandle, PagefunOp, PagefunRequest};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
+    ComplexTensor, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -1070,9 +1070,13 @@ impl TypeName for Value {
             Value::StringArray(_) => "string array",
             Value::CharArray(_) => "char array",
             Value::Symbolic(_) => "sym",
-            Value::Tensor(_) => "double array",
-            Value::SparseTensor(_) => "sparse double array",
-            Value::ComplexTensor(_) => "complex double array",
+            Value::Tensor(tensor) => numeric_array_type_name(tensor.numeric_dtype(), ""),
+            Value::SparseTensor(tensor) => {
+                numeric_array_type_name(tensor.numeric_dtype(), "sparse")
+            }
+            Value::ComplexTensor(tensor) => {
+                numeric_array_type_name(tensor.numeric_dtype(), "complex")
+            }
             Value::Cell(_) => "cell array",
             Value::Struct(_) => "struct",
             Value::GpuTensor(_) => "gpuArray",
@@ -1088,6 +1092,42 @@ impl TypeName for Value {
             Value::MException(_) => "MException",
             Value::OutputList(_) => "output list",
         }
+    }
+}
+
+fn numeric_array_type_name(dtype: NumericDType, kind: &str) -> &'static str {
+    match (kind, dtype) {
+        ("", NumericDType::F64) => "double array",
+        ("", NumericDType::F32) => "single array",
+        ("", NumericDType::I8) => "int8 array",
+        ("", NumericDType::I16) => "int16 array",
+        ("", NumericDType::I32) => "int32 array",
+        ("", NumericDType::I64) => "int64 array",
+        ("", NumericDType::U8) => "uint8 array",
+        ("", NumericDType::U16) => "uint16 array",
+        ("", NumericDType::U32) => "uint32 array",
+        ("", NumericDType::U64) => "uint64 array",
+        ("sparse", NumericDType::F64) => "sparse double array",
+        ("sparse", NumericDType::F32) => "sparse single array",
+        ("sparse", NumericDType::I8) => "sparse int8 array",
+        ("sparse", NumericDType::I16) => "sparse int16 array",
+        ("sparse", NumericDType::I32) => "sparse int32 array",
+        ("sparse", NumericDType::I64) => "sparse int64 array",
+        ("sparse", NumericDType::U8) => "sparse uint8 array",
+        ("sparse", NumericDType::U16) => "sparse uint16 array",
+        ("sparse", NumericDType::U32) => "sparse uint32 array",
+        ("sparse", NumericDType::U64) => "sparse uint64 array",
+        ("complex", NumericDType::F64) => "complex double array",
+        ("complex", NumericDType::F32) => "complex single array",
+        ("complex", NumericDType::I8) => "complex int8 array",
+        ("complex", NumericDType::I16) => "complex int16 array",
+        ("complex", NumericDType::I32) => "complex int32 array",
+        ("complex", NumericDType::I64) => "complex int64 array",
+        ("complex", NumericDType::U8) => "complex uint8 array",
+        ("complex", NumericDType::U16) => "complex uint16 array",
+        ("complex", NumericDType::U32) => "complex uint32 array",
+        ("complex", NumericDType::U64) => "complex uint64 array",
+        _ => "numeric array",
     }
 }
 
@@ -1430,6 +1470,20 @@ pub(crate) mod tests {
             pagefun_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
             Type::tensor()
         );
+    }
+
+    #[test]
+    fn pagefun_type_names_report_authoritative_numeric_storage() {
+        let single = Value::Tensor(Tensor::from_f32(vec![1.0], vec![1, 1]).unwrap());
+        let integer = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap(),
+        );
+        let complex_single =
+            Value::ComplexTensor(ComplexTensor::from_f32(vec![(1.0, -2.0)], vec![1, 1]).unwrap());
+
+        assert_eq!(single.type_name(), "single array");
+        assert_eq!(integer.type_name(), "uint64 array");
+        assert_eq!(complex_single.type_name(), "complex single array");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
