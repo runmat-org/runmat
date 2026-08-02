@@ -1,10 +1,10 @@
 //! MATLAB-compatible `floor` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::{GpuTensorHandle, ProviderPrecision};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, NumericDType, NumericStorage, Tensor, Value,
+    CharArray, ComplexTensor, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -70,90 +70,11 @@ const FLOOR_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "Numeric, logical, char, or complex input.",
 }];
-const FLOOR_INPUTS_X_N: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numeric, logical, char, or complex input.",
-    },
-    BuiltinParamDescriptor {
-        name: "N",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("0"),
-        description: "Digits for decimal-place rounding.",
-    },
-];
-const FLOOR_INPUTS_X_N_MODE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numeric, logical, char, or complex input.",
-    },
-    BuiltinParamDescriptor {
-        name: "N",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Digits argument.",
-    },
-    BuiltinParamDescriptor {
-        name: "mode",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"decimals\""),
-        description: "Rounding mode ('decimals' or 'significant').",
-    },
-];
-const FLOOR_INPUTS_X_LIKE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numeric, logical, char, or complex input.",
-    },
-    BuiltinParamDescriptor {
-        name: "likeKeyword",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"like\""),
-        description: "Output-template keyword.",
-    },
-    BuiltinParamDescriptor {
-        name: "prototype",
-        ty: BuiltinParamType::LikePrototype,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Output prototype (numeric or gpuArray).",
-    },
-];
-const FLOOR_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "Y = floor(X)",
-        inputs: &FLOOR_INPUTS_X,
-        outputs: &FLOOR_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = floor(X, N)",
-        inputs: &FLOOR_INPUTS_X_N,
-        outputs: &FLOOR_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = floor(X, N, mode)",
-        inputs: &FLOOR_INPUTS_X_N_MODE,
-        outputs: &FLOOR_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = floor(X, \"like\", prototype)",
-        inputs: &FLOOR_INPUTS_X_LIKE,
-        outputs: &FLOOR_OUTPUT,
-    },
-];
+const FLOOR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "Y = floor(X)",
+    inputs: &FLOOR_INPUTS_X,
+    outputs: &FLOOR_OUTPUT,
+}];
 const FLOOR_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.FLOOR.INVALID_INPUT",
     identifier: Some("RunMat:floor:InvalidInput"),
@@ -166,36 +87,15 @@ const FLOOR_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescrip
     when: "Argument count does not match supported floor invocation forms.",
     message: "floor: invalid argument",
 };
-const FLOOR_ERROR_INVALID_DIGITS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FLOOR.INVALID_DIGITS",
-    identifier: Some("RunMat:floor:InvalidDigits"),
-    when: "N is not an integer scalar or violates significant-digit constraints.",
-    message: "floor: invalid digits argument",
-};
-const FLOOR_ERROR_INVALID_MODE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FLOOR.INVALID_MODE",
-    identifier: Some("RunMat:floor:InvalidMode"),
-    when: "mode is not a supported text token.",
-    message: "floor: invalid mode",
-};
-const FLOOR_ERROR_INVALID_LIKE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FLOOR.INVALID_LIKE",
-    identifier: Some("RunMat:floor:InvalidLike"),
-    when: "like/prototype arguments are invalid or unsupported.",
-    message: "floor: invalid like prototype",
-};
 const FLOOR_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.FLOOR.INTERNAL",
     identifier: Some("RunMat:floor:Internal"),
     when: "Internal tensor conversion/allocation/provider interaction failed.",
     message: "floor: internal error",
 };
-const FLOOR_ERRORS: [BuiltinErrorDescriptor; 6] = [
+const FLOOR_ERRORS: [BuiltinErrorDescriptor; 3] = [
     FLOOR_ERROR_INVALID_INPUT,
     FLOOR_ERROR_INVALID_ARGUMENT,
-    FLOOR_ERROR_INVALID_DIGITS,
-    FLOOR_ERROR_INVALID_MODE,
-    FLOOR_ERROR_INVALID_LIKE,
     FLOOR_ERROR_INTERNAL,
 ];
 pub const FLOOR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -228,374 +128,99 @@ fn builtin_error_with_detail(
     builtin_path = "crate::builtins::math::rounding::floor"
 )]
 async fn floor_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let args = parse_arguments(&rest)?;
+    if !rest.is_empty() {
+        return Err(builtin_error_with_detail(
+            &FLOOR_ERROR_INVALID_ARGUMENT,
+            "floor accepts exactly one input",
+        ));
+    }
     crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
-    let base = match value {
-        Value::GpuTensor(handle) => floor_gpu(handle, &args).await?,
-        Value::Complex(re, im) => Value::Complex(
-            apply_floor_scalar(re, args.strategy),
-            apply_floor_scalar(im, args.strategy),
-        ),
-        Value::ComplexTensor(ct) => floor_complex_tensor(ct, args.strategy)?,
-        Value::CharArray(ca) => floor_char_array(ca, args.strategy)?,
+    match value {
+        Value::GpuTensor(handle) => floor_gpu(handle).await,
+        Value::Complex(re, im) => Ok(Value::Complex(
+            apply_floor_scalar(re),
+            apply_floor_scalar(im),
+        )),
+        Value::ComplexTensor(ct) => floor_complex_tensor(ct),
+        Value::CharArray(ca) => floor_char_array(ca),
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)
                 .map_err(|err| builtin_error_with_detail(&FLOOR_ERROR_INVALID_INPUT, err))?;
-            let floored = floor_tensor(tensor, args.strategy)?;
-            tensor::tensor_into_value(floored)
+            Ok(tensor::tensor_into_value(floor_tensor(tensor)?))
         }
-        Value::String(_) | Value::StringArray(_) => {
-            return Err(builtin_error_with_detail(
-                &FLOOR_ERROR_INVALID_INPUT,
-                "expected numeric or logical input",
-            ));
-        }
-        other => floor_numeric(other, args.strategy)?,
-    };
-    apply_output_template(base, &args.output).await
+        Value::String(_) | Value::StringArray(_) => Err(builtin_error_with_detail(
+            &FLOOR_ERROR_INVALID_INPUT,
+            "expected numeric or logical input",
+        )),
+        other => floor_numeric(other),
+    }
 }
 
-fn floor_numeric(value: Value, strategy: FloorStrategy) -> BuiltinResult<Value> {
+fn floor_numeric(value: Value) -> BuiltinResult<Value> {
     let tensor = tensor::value_into_tensor_for("floor", value)
         .map_err(|err| builtin_error_with_detail(&FLOOR_ERROR_INVALID_INPUT, err))?;
-    let floored = floor_tensor(tensor, strategy)?;
+    let floored = floor_tensor(tensor)?;
     Ok(tensor::tensor_into_value(floored))
 }
 
-fn floor_tensor(tensor: Tensor, strategy: FloorStrategy) -> BuiltinResult<Tensor> {
+fn floor_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let shape = tensor.shape.clone();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|err| builtin_error_with_detail(&FLOOR_ERROR_INTERNAL, err))?;
     let output = match storage {
-        NumericStorage::F64(values) => NumericStorage::F64(
-            values
-                .into_iter()
-                .map(|value| apply_floor_scalar(value, strategy))
-                .collect(),
-        ),
+        NumericStorage::F64(values) => {
+            NumericStorage::F64(values.into_iter().map(apply_floor_scalar).collect())
+        }
         NumericStorage::F32(values) => NumericStorage::F32(
             values
                 .into_iter()
-                .map(|value| apply_floor_scalar(f64::from(value), strategy) as f32)
+                .map(|value| apply_floor_scalar(f64::from(value)) as f32)
                 .collect(),
         ),
-        integer if matches!(strategy, FloorStrategy::Integer) => integer,
-        integer => NumericStorage::F64(
-            integer
-                .materialize_f64()
-                .into_iter()
-                .map(|value| apply_floor_scalar(value, strategy))
-                .collect(),
-        ),
+        integer => integer,
     };
     Tensor::from_numeric_storage(output, shape)
         .map_err(|err| builtin_error_with_detail(&FLOOR_ERROR_INTERNAL, err))
 }
 
-fn floor_complex_tensor(ct: ComplexTensor, strategy: FloorStrategy) -> BuiltinResult<Value> {
+fn floor_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let data: Vec<(f64, f64)> = ct
         .data
         .iter()
-        .map(|&(re, im)| {
-            (
-                apply_floor_scalar(re, strategy),
-                apply_floor_scalar(im, strategy),
-            )
-        })
+        .map(|&(re, im)| (apply_floor_scalar(re), apply_floor_scalar(im)))
         .collect();
     let tensor = ComplexTensor::new(data, ct.shape.clone())
         .map_err(|e| builtin_error_with_detail(&FLOOR_ERROR_INTERNAL, e))?;
     Ok(Value::ComplexTensor(tensor))
 }
 
-fn floor_char_array(ca: CharArray, strategy: FloorStrategy) -> BuiltinResult<Value> {
+fn floor_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let mut data = Vec::with_capacity(ca.data.len());
     for ch in ca.data {
-        data.push(apply_floor_scalar(ch as u32 as f64, strategy));
+        data.push(apply_floor_scalar(ch as u32 as f64));
     }
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
         .map_err(|e| builtin_error_with_detail(&FLOOR_ERROR_INTERNAL, e))?;
     Ok(Value::Tensor(tensor))
 }
 
-async fn floor_gpu(handle: GpuTensorHandle, args: &FloorArgs) -> BuiltinResult<Value> {
-    if matches!(args.strategy, FloorStrategy::Integer) {
-        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-            if let Ok(out) = provider.unary_floor(&handle).await {
-                return Ok(Value::GpuTensor(out));
-            }
+async fn floor_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+        if let Ok(out) = provider.unary_floor(&handle).await {
+            return Ok(Value::GpuTensor(out));
         }
     }
     let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-    let floored = floor_tensor(tensor, args.strategy)?;
+    let floored = floor_tensor(tensor)?;
     Ok(tensor::tensor_into_value(floored))
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum FloorStrategy {
-    Integer,
-    Decimals(i32),
-    Significant(i32),
-}
-
-#[derive(Clone, Debug)]
-struct FloorArgs {
-    strategy: FloorStrategy,
-    output: OutputTemplate,
-}
-
-#[derive(Clone, Debug)]
-enum OutputTemplate {
-    Default,
-    Like(Value),
-}
-
-fn parse_arguments(args: &[Value]) -> BuiltinResult<FloorArgs> {
-    let (strategy_len, output) = parse_output_template(args)?;
-    let strategy = match strategy_len {
-        0 => FloorStrategy::Integer,
-        1 => FloorStrategy::Decimals(parse_digits(&args[0])?),
-        2 => {
-            let digits = parse_digits(&args[0])?;
-            let mode = parse_mode(&args[1])?;
-            match mode {
-                FloorMode::Decimals => FloorStrategy::Decimals(digits),
-                FloorMode::Significant => {
-                    if digits <= 0 {
-                        return Err(builtin_error_with_detail(
-                            &FLOOR_ERROR_INVALID_DIGITS,
-                            "N must be a positive integer for 'significant' rounding",
-                        ));
-                    }
-                    FloorStrategy::Significant(digits)
-                }
-            }
-        }
-        _ => {
-            return Err(builtin_error_with_detail(
-                &FLOOR_ERROR_INVALID_ARGUMENT,
-                "too many input arguments",
-            ))
-        }
-    };
-    Ok(FloorArgs { strategy, output })
-}
-
-fn parse_output_template(args: &[Value]) -> BuiltinResult<(usize, OutputTemplate)> {
-    if !args.is_empty() && is_keyword(&args[args.len() - 1], "like") {
-        return Err(builtin_error_with_detail(
-            &FLOOR_ERROR_INVALID_LIKE,
-            "expected prototype after 'like'",
-        ));
-    }
-    if args.len() >= 2 && is_keyword(&args[args.len() - 2], "like") {
-        let proto = &args[args.len() - 1];
-        if matches!(
-            proto,
-            Value::String(_) | Value::StringArray(_) | Value::CharArray(_)
-        ) {
-            return Err(builtin_error_with_detail(
-                &FLOOR_ERROR_INVALID_LIKE,
-                "unsupported prototype for 'like'",
-            ));
-        }
-        return Ok((args.len() - 2, OutputTemplate::Like(proto.clone())));
-    }
-    Ok((args.len(), OutputTemplate::Default))
-}
-
-fn parse_digits(value: &Value) -> BuiltinResult<i32> {
-    let err =
-        || builtin_error_with_detail(&FLOOR_ERROR_INVALID_DIGITS, "N must be an integer scalar");
-    let raw = match value {
-        Value::Int(i) => i.try_to_i64().ok_or_else(|| {
-            builtin_error_with_detail(&FLOOR_ERROR_INVALID_DIGITS, "integer overflow in N")
-        })?,
-        Value::Num(n) => {
-            if !n.is_finite() {
-                return Err(err());
-            }
-            let rounded = n.round();
-            if (rounded - n).abs() > f64::EPSILON {
-                return Err(err());
-            }
-            rounded as i64
-        }
-        Value::Bool(b) => {
-            if *b {
-                1
-            } else {
-                0
-            }
-        }
-        Value::Tensor(tensor) => {
-            if !tensor::is_scalar_tensor(tensor) {
-                return Err(err());
-            }
-            let value = tensor::tensor_value_f64(tensor, 0);
-            if !value.is_finite() {
-                return Err(err());
-            }
-            let rounded = value.round();
-            if (rounded - value).abs() > f64::EPSILON {
-                return Err(err());
-            }
-            if rounded > i64::MAX as f64 || rounded < i64::MIN as f64 {
-                return Err(builtin_error_with_detail(
-                    &FLOOR_ERROR_INVALID_DIGITS,
-                    "integer overflow in N",
-                ));
-            }
-            rounded as i64
-        }
-        other => {
-            return Err(builtin_error_with_detail(
-                &FLOOR_ERROR_INVALID_DIGITS,
-                format!("N must be numeric, got {:?}", other),
-            ))
-        }
-    };
-    if raw > i32::MAX as i64 || raw < i32::MIN as i64 {
-        return Err(builtin_error_with_detail(
-            &FLOOR_ERROR_INVALID_DIGITS,
-            "integer overflow in N",
-        ));
-    }
-    Ok(raw as i32)
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum FloorMode {
-    Decimals,
-    Significant,
-}
-
-fn parse_mode(value: &Value) -> BuiltinResult<FloorMode> {
-    let Some(text) = tensor::value_to_string(value) else {
-        return Err(builtin_error_with_detail(
-            &FLOOR_ERROR_INVALID_MODE,
-            "mode must be a character vector or string scalar",
-        ));
-    };
-    let lowered = text.trim().to_ascii_lowercase();
-    match lowered.as_str() {
-        "significant" => Ok(FloorMode::Significant),
-        "decimal" | "decimals" => Ok(FloorMode::Decimals),
-        other => Err(builtin_error_with_detail(
-            &FLOOR_ERROR_INVALID_MODE,
-            format!("unknown rounding mode '{other}'"),
-        )),
-    }
-}
-
-fn is_keyword(value: &Value, target: &str) -> bool {
-    tensor::value_to_string(value)
-        .map(|s| s.trim().eq_ignore_ascii_case(target))
-        .unwrap_or(false)
-}
-
-fn apply_floor_scalar(value: f64, strategy: FloorStrategy) -> f64 {
+fn apply_floor_scalar(value: f64) -> f64 {
     if !value.is_finite() {
         return value;
     }
-    match strategy {
-        FloorStrategy::Integer => value.floor(),
-        FloorStrategy::Decimals(digits) => floor_with_decimals(value, digits),
-        FloorStrategy::Significant(digits) => floor_with_significant(value, digits),
-    }
-}
-
-fn floor_with_decimals(value: f64, digits: i32) -> f64 {
-    if digits == 0 {
-        return value.floor();
-    }
-    let factor = 10f64.powi(digits);
-    if !factor.is_finite() || factor == 0.0 {
-        return value;
-    }
-    (value * factor).floor() / factor
-}
-
-fn floor_with_significant(value: f64, digits: i32) -> f64 {
-    if value == 0.0 {
-        return 0.0;
-    }
-    let abs_val = value.abs();
-    let order = abs_val.log10().floor();
-    let scale_power = digits - 1 - order as i32;
-    let scale = 10f64.powi(scale_power);
-    if !scale.is_finite() || scale == 0.0 {
-        return value;
-    }
-    (value * scale).floor() / scale
-}
-
-async fn apply_output_template(value: Value, output: &OutputTemplate) -> BuiltinResult<Value> {
-    match output {
-        OutputTemplate::Default => Ok(value),
-        OutputTemplate::Like(proto) => match proto {
-            Value::GpuTensor(_) => convert_to_gpu(value),
-            Value::Tensor(_)
-            | Value::Num(_)
-            | Value::Int(_)
-            | Value::Bool(_)
-            | Value::LogicalArray(_)
-            | Value::Complex(_, _)
-            | Value::ComplexTensor(_) => convert_to_host_like(value).await,
-            _ => Err(builtin_error_with_detail(
-                &FLOOR_ERROR_INVALID_LIKE,
-                "unsupported prototype for 'like'; provide a numeric or gpuArray prototype",
-            )),
-        },
-    }
-}
-
-fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
-    let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        builtin_error_with_detail(
-            &FLOOR_ERROR_INVALID_LIKE,
-            "GPU output requested via 'like' but no acceleration provider is active",
-        )
-    })?;
-    match value {
-        Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
-        Value::Tensor(tensor) => {
-            let dtype = tensor.numeric_dtype();
-            let handle = gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|e| builtin_error_with_detail(&FLOOR_ERROR_INTERNAL, e.to_string()))?;
-            if dtype == NumericDType::F32 {
-                runmat_accelerate_api::set_handle_precision(&handle, ProviderPrecision::F32);
-            }
-            Ok(Value::GpuTensor(handle))
-        }
-        Value::Num(n) => {
-            let tensor = Tensor::new(vec![n], vec![1, 1])
-                .map_err(|e| builtin_error_with_detail(&FLOOR_ERROR_INTERNAL, e))?;
-            convert_to_gpu(Value::Tensor(tensor))
-        }
-        Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)
-                .map_err(|err| builtin_error_with_detail(&FLOOR_ERROR_INVALID_INPUT, err))?;
-            convert_to_gpu(Value::Tensor(tensor))
-        }
-        other => Err(builtin_error_with_detail(
-            &FLOOR_ERROR_INVALID_LIKE,
-            format!(
-                "'like' GPU prototypes are only supported for real numeric outputs (got {other:?})"
-            ),
-        )),
-    }
-}
-
-async fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
-    match value {
-        Value::GpuTensor(handle) => {
-            let proxy = Value::GpuTensor(handle);
-            gpu_helpers::gather_value_async(&proxy).await
-        }
-        other => Ok(other),
-    }
+    value.floor()
 }
 
 #[cfg(test)]
@@ -624,7 +249,7 @@ pub(crate) mod tests {
     #[test]
     fn floor_tensor_preserves_native_single_storage() {
         let input = Tensor::from_f32(vec![1.75, -1.25], vec![1, 2]).unwrap();
-        let output = floor_tensor(input, FloorStrategy::Integer).unwrap();
+        let output = floor_tensor(input).unwrap();
 
         assert_eq!(
             output.into_numeric_storage().unwrap(),
@@ -633,39 +258,13 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn floor_typed_digit_parser_rejects_unrepresentable_uint64() {
-        assert_eq!(
-            parse_digits(&Value::Int(IntValue::I32(-3))).expect("digits"),
-            -3
-        );
-        assert!(parse_digits(&Value::Int(IntValue::U64(u64::MAX))).is_err());
-    }
-
-    #[test]
-    fn floor_digit_parser_reads_typed_integer_storage_exactly() {
-        let mut digits =
-            Tensor::new_integer(IntegerStorage::I16(vec![2]), vec![1, 1]).expect("digits");
-        digits.data[0] = -9.0;
-        assert_eq!(parse_digits(&Value::Tensor(digits)).expect("digits"), 2);
-
-        let mut wide =
-            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("digits");
-        wide.data[0] = 1.0;
-        let err = parse_digits(&Value::Tensor(wide)).expect_err("overflow");
-        assert_error_contains(err, "integer overflow in N");
-    }
-
-    #[test]
-    fn floor_descriptor_signatures_cover_core_forms() {
+    fn floor_descriptor_exposes_matlab_form() {
         let labels: Vec<&str> = FLOOR_DESCRIPTOR
             .signatures
             .iter()
             .map(|sig| sig.label)
             .collect();
-        assert!(labels.contains(&"Y = floor(X)"));
-        assert!(labels.contains(&"Y = floor(X, N)"));
-        assert!(labels.contains(&"Y = floor(X, N, mode)"));
-        assert!(labels.contains(&"Y = floor(X, \"like\", prototype)"));
+        assert_eq!(labels, vec!["Y = floor(X)"]);
     }
 
     #[test]
@@ -795,22 +394,6 @@ pub(crate) mod tests {
             }
             other => panic!("expected typed integer tensor, got {other:?}"),
         }
-
-        let mut digits_input =
-            Tensor::new_integer(IntegerStorage::I16(vec![123, -987]), vec![2, 1]).expect("integer");
-        digits_input.data.fill(f64::NAN);
-        let result = floor_builtin(
-            Value::Tensor(digits_input),
-            vec![Value::Int(IntValue::I32(-2))],
-        )
-        .expect("floor");
-        match result {
-            Value::Tensor(out) => {
-                assert!(out.integer_storage().is_none());
-                assert_eq!(out.data, vec![100.0, -1000.0]);
-            }
-            other => panic!("expected floating tensor, got {other:?}"),
-        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -832,50 +415,6 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn floor_decimal_digits() {
-        let value = Value::Num(21.456);
-        let args = vec![Value::Int(IntValue::I32(2))];
-        let result = floor_builtin(value, args).expect("floor");
-        match result {
-            Value::Num(v) => assert!((v - 21.45).abs() < 1e-12),
-            other => panic!("expected scalar result, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn floor_negative_digits() {
-        let tensor = Tensor::new(vec![123.4, -987.6], vec![2, 1]).unwrap();
-        let args = vec![Value::Int(IntValue::I32(-2))];
-        let result = floor_builtin(Value::Tensor(tensor), args).expect("floor");
-        match result {
-            Value::Tensor(t) => assert_eq!(t.data, vec![100.0, -1000.0]),
-            other => panic!("expected tensor result, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn floor_significant_digits() {
-        let value = Value::Num(98765.4321);
-        let args = vec![Value::Int(IntValue::I32(3)), Value::from("significant")];
-        let result = floor_builtin(value, args).expect("floor");
-        match result {
-            Value::Num(v) => assert_eq!(v, 98700.0),
-            other => panic!("expected scalar result, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn floor_significant_requires_positive_digits() {
-        let args = vec![Value::Int(IntValue::I32(0)), Value::from("significant")];
-        let err = floor_builtin(Value::Num(1.23), args).unwrap_err();
-        assert_error_contains(err, "positive integer");
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
     fn floor_string_input_errors() {
         let err = floor_builtin(Value::from("hello"), Vec::new()).unwrap_err();
         assert_error_contains(err, "numeric");
@@ -883,36 +422,12 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn floor_like_invalid_prototype_errors() {
-        let args = vec![Value::from("like"), Value::from("prototype")];
-        let err = floor_builtin(Value::Num(1.0), args).unwrap_err();
-        assert_error_contains(err, "unsupported prototype");
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn floor_like_gpu_output() {
-        test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new(vec![0.9, -1.2, 2.7, -3.4], vec![2, 2]).unwrap();
-            let like_proto = {
-                let proto = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
-                let view = HostTensorView {
-                    data: &proto.data,
-                    shape: &proto.shape,
-                };
-                provider.upload(&view).expect("upload proto")
-            };
-            let args = vec![Value::from("like"), Value::GpuTensor(like_proto)];
-            let result = floor_builtin(Value::Tensor(tensor), args).expect("floor");
-            match result {
-                Value::GpuTensor(handle) => {
-                    let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-                    assert_eq!(gathered.shape, vec![2, 2]);
-                    assert_eq!(gathered.data, vec![0.0, -2.0, 2.0, -4.0]);
-                }
-                other => panic!("expected GPU tensor, got {other:?}"),
-            }
-        });
+    fn floor_rejects_non_matlab_extra_forms() {
+        let digits = floor_builtin(Value::Num(1.2), vec![Value::Num(2.0)]).unwrap_err();
+        assert_error_contains(digits, "exactly one input");
+        let like =
+            floor_builtin(Value::Num(1.2), vec![Value::from("like"), Value::Num(0.0)]).unwrap_err();
+        assert_error_contains(like, "exactly one input");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -933,7 +448,7 @@ pub(crate) mod tests {
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
         let t = Tensor::new(vec![0.3, 1.1, -0.2, -1.7], vec![2, 2]).unwrap();
-        let cpu = floor_numeric(Value::Tensor(t.clone()), FloorStrategy::Integer).unwrap();
+        let cpu = floor_numeric(Value::Tensor(t.clone())).unwrap();
         let view = HostTensorView {
             data: &t.data,
             shape: &t.shape,
@@ -942,14 +457,7 @@ pub(crate) mod tests {
             .unwrap()
             .upload(&view)
             .unwrap();
-        let gpu = block_on(floor_gpu(
-            h,
-            &FloorArgs {
-                strategy: FloorStrategy::Integer,
-                output: OutputTemplate::Default,
-            },
-        ))
-        .unwrap();
+        let gpu = block_on(floor_gpu(h)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
