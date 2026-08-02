@@ -404,16 +404,14 @@ fn rot90_tensor(tensor: Tensor, steps: usize) -> crate::BuiltinResult<Tensor> {
     if steps == 0 {
         return Ok(tensor);
     }
-    if let Some(storage) = tensor.integer_storage() {
-        let (values, shape) = rot90_generic(&storage.exact_values(), &tensor.shape, steps)?;
-        let storage = storage
-            .from_exact_values_like(values)
-            .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL))?;
-        return Tensor::new_integer(storage, shape)
-            .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL));
-    }
-    let (data, shape) = rot90_generic(&tensor.data, &tensor.shape, steps)?;
-    Tensor::new(data, shape)
+    let shape = tensor.shape.clone();
+    let indices = (0..tensor.len()).collect::<Vec<_>>();
+    let (indices, shape) = rot90_generic(&indices, &shape, steps)?;
+    let storage = tensor
+        .into_numeric_storage()
+        .and_then(|storage| storage.gather(&indices))
+        .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL))?;
+    Tensor::from_numeric_storage(storage, shape)
         .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL))
 }
 
@@ -679,7 +677,9 @@ pub(crate) mod tests {
     }
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage, Tensor, Type};
+    use runmat_builtins::{
+        IntValue, IntegerComplexStorage, IntegerStorage, NumericStorage, Tensor, Type,
+    };
 
     #[test]
     fn rot90_rotation_parser_reduces_full_uint64_range_exactly() {
@@ -759,6 +759,24 @@ pub(crate) mod tests {
                 )
             );
         }
+    }
+
+    #[test]
+    fn rot90_preserves_native_single_storage() {
+        let input = Tensor::from_numeric_storage(
+            NumericStorage::F32(vec![1.25, 2.5, 3.75, 4.5]),
+            vec![2, 2],
+        )
+        .unwrap();
+        let Value::Tensor(output) = rot90_builtin(Value::Tensor(input), Vec::new()).expect("rot90")
+        else {
+            panic!("expected single tensor");
+        };
+
+        assert_eq!(
+            output.into_numeric_storage(),
+            Ok(NumericStorage::F32(vec![3.75, 1.25, 4.5, 2.5]))
+        );
     }
 
     #[test]

@@ -427,9 +427,7 @@ fn parse_numeric(value: f64) -> Result<PauseArgument, RuntimeError> {
 }
 
 fn parse_tensor(tensor: Tensor) -> Result<PauseArgument, RuntimeError> {
-    let len = tensor
-        .integer_storage()
-        .map_or(tensor.data.len(), |storage| storage.len());
+    let len = tensor.len();
     if len == 0 {
         return Ok(PauseArgument::Wait(PauseWait::Default));
     }

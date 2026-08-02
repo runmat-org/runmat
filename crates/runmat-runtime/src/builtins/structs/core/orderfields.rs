@@ -10,7 +10,7 @@ use crate::builtins::structs::type_resolvers::orderfields_type;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, StructValue, Tensor, Value,
+    CellArray, NumericScalar, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use std::cmp::Ordering;
@@ -621,18 +621,26 @@ fn extract_indices(current: &[String], arg: &Value) -> BuiltinResult<Option<Vec<
     let mut seen = HashSet::with_capacity(current.len());
     let mut order = Vec::with_capacity(current.len());
     for index in 0..tensor_len {
-        let idx = match tensor.integer_storage() {
-            Some(storage) => storage
-                .value_at(index)
-                .and_then(|value| value.try_to_isize())
-                .ok_or_else(|| orderfields_error(&ORDERFIELDS_ERROR_INDEX_OUT_OF_RANGE))?,
-            None => {
-                let value = tensor.data[index];
+        let idx = match tensor
+            .numeric_value_at(index)
+            .ok_or_else(|| orderfields_error(&ORDERFIELDS_ERROR_INDEX_OUT_OF_RANGE))?
+        {
+            NumericScalar::F64(value) => {
                 if !value.is_finite() || value.fract() != 0.0 {
                     return Err(orderfields_error(&ORDERFIELDS_ERROR_INDEX_NOT_INTEGER));
                 }
                 value as isize
             }
+            NumericScalar::F32(value) => {
+                if !value.is_finite() || value.fract() != 0.0 {
+                    return Err(orderfields_error(&ORDERFIELDS_ERROR_INDEX_NOT_INTEGER));
+                }
+                value as isize
+            }
+            value => value
+                .into_int_value()
+                .and_then(|value| value.try_to_isize())
+                .ok_or_else(|| orderfields_error(&ORDERFIELDS_ERROR_INDEX_OUT_OF_RANGE))?,
         };
         if idx < 1 || idx as usize > current.len() {
             return Err(orderfields_error(&ORDERFIELDS_ERROR_INDEX_OUT_OF_RANGE));

@@ -1,6 +1,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    NumericScalar, Value,
 };
 use runmat_macros::runtime_builtin;
 use std::sync::OnceLock;
@@ -432,7 +433,32 @@ fn single_subscript_count(
             }
         }
         Value::Tensor(tensor) => {
-            validate_numeric_subscript_values(&tensor.data)?;
+            for index in 0..tensor.len() {
+                let value = tensor.numeric_value_at(index).ok_or_else(|| {
+                    num_args_error(
+                        &NUM_ARGUMENTS_ERROR_SUBSTRUCT,
+                        "numeric subscript storage is invalid",
+                    )
+                })?;
+                match value {
+                    NumericScalar::F64(value) => validate_positive_integer_subscript(value)?,
+                    NumericScalar::F32(value) => {
+                        validate_positive_integer_subscript(f64::from(value))?
+                    }
+                    value => {
+                        if !value
+                            .into_int_value()
+                            .and_then(|value| value.try_to_u64())
+                            .is_some_and(|value| value >= 1)
+                        {
+                            return Err(num_args_error(
+                                &NUM_ARGUMENTS_ERROR_SUBSTRUCT,
+                                "numeric subscripts must be finite positive integers",
+                            ));
+                        }
+                    }
+                }
+            }
             checked_shape_element_count(&tensor.shape)
         }
         Value::LogicalArray(array) => Ok(array.data.iter().filter(|&&bit| bit != 0).count()),
@@ -468,13 +494,6 @@ fn validate_positive_integer_subscript(value: f64) -> crate::BuiltinResult<()> {
             "numeric subscripts must be finite positive integers",
         ))
     }
-}
-
-fn validate_numeric_subscript_values(values: &[f64]) -> crate::BuiltinResult<()> {
-    for &value in values {
-        validate_positive_integer_subscript(value)?;
-    }
-    Ok(())
 }
 
 fn checked_shape_element_count(shape: &[usize]) -> crate::BuiltinResult<usize> {

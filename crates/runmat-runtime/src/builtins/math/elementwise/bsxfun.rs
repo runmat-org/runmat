@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, LogicalArray, Tensor, Value,
+    CharArray, ComplexTensor, LogicalArray, NumericScalar, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -312,10 +312,8 @@ impl ArrayData {
     fn value_at(&self, idx: usize) -> BuiltinResult<Value> {
         match self {
             Self::Tensor(tensor) => tensor
-                .data
-                .get(idx)
-                .copied()
-                .map(Value::Num)
+                .numeric_value_at(idx)
+                .map(numeric_scalar_value)
                 .ok_or_else(|| bsxfun_error(&BSXFUN_ERROR_INTERNAL)),
             Self::Logical(array) => array
                 .data
@@ -339,6 +337,18 @@ fn normalize_shape(shape: &[usize]) -> Vec<usize> {
         vec![1, 1]
     } else {
         shape.to_vec()
+    }
+}
+
+fn numeric_scalar_value(value: NumericScalar) -> Value {
+    match value {
+        NumericScalar::F64(value) => Value::Num(value),
+        NumericScalar::F32(value) => Value::Num(f64::from(value)),
+        value => Value::Int(
+            value
+                .into_int_value()
+                .expect("non-floating numeric scalar is integer"),
+        ),
     }
 }
 

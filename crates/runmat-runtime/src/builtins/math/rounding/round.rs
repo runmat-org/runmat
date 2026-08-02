@@ -4,7 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
+    CharArray, ComplexTensor, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -287,11 +287,28 @@ fn round_numeric(value: Value, strategy: RoundStrategy) -> BuiltinResult<Value> 
     }
 }
 
-fn round_tensor(mut tensor: Tensor, strategy: RoundStrategy) -> BuiltinResult<Tensor> {
-    for value in &mut tensor.data {
-        *value = round_scalar(*value, strategy);
-    }
-    Ok(tensor)
+fn round_tensor(tensor: Tensor, strategy: RoundStrategy) -> BuiltinResult<Tensor> {
+    let shape = tensor.shape.clone();
+    let storage = match tensor
+        .into_numeric_storage()
+        .map_err(|err| builtin_error_with_detail(&ROUND_ERROR_INTERNAL, err))?
+    {
+        NumericStorage::F64(values) => NumericStorage::F64(
+            values
+                .into_iter()
+                .map(|value| round_scalar(value, strategy))
+                .collect(),
+        ),
+        NumericStorage::F32(values) => NumericStorage::F32(
+            values
+                .into_iter()
+                .map(|value| round_scalar(f64::from(value), strategy) as f32)
+                .collect(),
+        ),
+        storage => storage,
+    };
+    Tensor::from_numeric_storage(storage, shape)
+        .map_err(|err| builtin_error_with_detail(&ROUND_ERROR_INTERNAL, err))
 }
 
 fn round_complex_tensor(ct: ComplexTensor, strategy: RoundStrategy) -> BuiltinResult<Value> {
@@ -569,6 +586,40 @@ pub(crate) mod tests {
             .expect_err("integer array digit round must fail");
         assert_error_contains(&array, "integer inputs support only");
         assert_eq!(array.identifier(), ROUND_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn round_preserves_native_single_and_exact_integer_tensor_storage() {
+        let single =
+            Tensor::from_numeric_storage(NumericStorage::F32(vec![1.25, -2.75]), vec![1, 2])
+                .unwrap();
+        let Value::Tensor(single) =
+            round_builtin(Value::Tensor(single), Vec::new()).expect("round single")
+        else {
+            panic!("expected single tensor");
+        };
+        assert_eq!(
+            single.into_numeric_storage(),
+            Ok(NumericStorage::F32(vec![1.0, -3.0]))
+        );
+
+        let integer = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            vec![1, 2],
+        )
+        .unwrap();
+        let Value::Tensor(integer) =
+            round_builtin(Value::Tensor(integer), Vec::new()).expect("round integer")
+        else {
+            panic!("expected integer tensor");
+        };
+        assert_eq!(
+            integer.integer_storage(),
+            Some(&runmat_builtins::IntegerStorage::U64(vec![
+                9_007_199_254_740_993,
+                u64::MAX,
+            ]))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
