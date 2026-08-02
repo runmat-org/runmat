@@ -272,8 +272,9 @@ async fn vecnorm_gpu(handle: GpuTensorHandle, args: VecnormArgs) -> BuiltinResul
     let result = vecnorm_real_tensor(&tensor, args)?;
 
     if let Some(provider) = provider {
+        let data = tensor::tensor_values_f64_cow(&result);
         let view = HostTensorView {
-            data: &result.data,
+            data: data.as_ref(),
             shape: &result.shape,
         };
         match provider.upload(&view) {
@@ -297,7 +298,7 @@ async fn vecnorm_gpu(handle: GpuTensorHandle, args: VecnormArgs) -> BuiltinResul
 
 fn vecnorm_real_tensor(tensor: &Tensor, args: VecnormArgs) -> BuiltinResult<Tensor> {
     let dim = resolve_dim(&tensor.shape, args.dim);
-    let dtype = if tensor.dtype == NumericDType::F32 {
+    let dtype = if tensor.numeric_dtype() == NumericDType::F32 {
         NumericDType::F32
     } else {
         NumericDType::F64
