@@ -1300,12 +1300,13 @@ impl XlsTable {
                 }
             }
         } else {
+            let values = sparse.as_f64_slice().expect("double sparse storage");
             for col in 0..cols {
                 let start = sparse.col_ptrs[col];
                 let end = sparse.col_ptrs[col + 1];
                 for entry in start..end {
                     let row = sparse.row_indices[entry];
-                    cells[row * cols + col] = CellValue::Number(sparse.values[entry]);
+                    cells[row * cols + col] = CellValue::Number(values[entry]);
                 }
             }
         }
@@ -1746,14 +1747,7 @@ mod tests {
     fn xlswrite_accepts_top_level_sparse_matrix() {
         let path = temp_path("xlsx");
         let filename = path.to_string_lossy().into_owned();
-        let sparse = SparseTensor {
-            rows: 2,
-            cols: 2,
-            col_ptrs: vec![0, 1, 2],
-            row_indices: vec![1, 0],
-            values: vec![9.0, 8.0],
-            integer_data: None,
-        };
+        let sparse = SparseTensor::new(2, 2, vec![0, 1, 2], vec![1, 0], vec![9.0, 8.0]).unwrap();
 
         block_on(xlswrite_builtin(
             Value::from(filename),
@@ -1781,9 +1775,6 @@ mod tests {
             IntegerStorage::U64(vec![u64::MAX, (1_u64 << 53) + 1]),
         )
         .expect("integer sparse");
-        let mut sparse = sparse;
-        sparse.values = vec![0.0, 0.0];
-
         let table = block_on(XlsTable::from_value(Value::SparseTensor(sparse))).expect("table");
         let xml =
             writecell::build_sheet_xml(&table.into_cell_table().unwrap(), RangeStart::default());
@@ -1928,14 +1919,7 @@ mod tests {
 
     #[test]
     fn xlswrite_rejects_sparse_inputs_that_would_densify_too_large() {
-        let sparse = SparseTensor {
-            rows: MAX_XLSWRITE_CELLS + 1,
-            cols: 1,
-            col_ptrs: vec![0, 0],
-            row_indices: Vec::new(),
-            values: Vec::new(),
-            integer_data: None,
-        };
+        let sparse = SparseTensor::zeros(MAX_XLSWRITE_CELLS + 1, 1);
         let err = block_on(xlswrite_builtin(
             Value::from("out.xlsx"),
             Value::SparseTensor(sparse),

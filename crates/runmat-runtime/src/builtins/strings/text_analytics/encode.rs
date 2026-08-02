@@ -576,7 +576,7 @@ mod tests {
         assert_eq!((empty.rows, empty.cols), (1, 0));
         assert_eq!(empty.col_ptrs, vec![0]);
         assert!(empty.row_indices.is_empty());
-        assert!(empty.values.is_empty());
+        assert!(empty.materialize_f64().is_empty());
 
         let unknown = sparse(
             run_encode(vec![bag_of_words(&["alpha", "beta"]), Value::from("gamma")]).unwrap(),
@@ -584,7 +584,7 @@ mod tests {
         assert_eq!((unknown.rows, unknown.cols), (1, 2));
         assert_eq!(unknown.col_ptrs, vec![0, 0, 0]);
         assert!(unknown.row_indices.is_empty());
-        assert!(unknown.values.is_empty());
+        assert!(unknown.materialize_f64().is_empty());
     }
 
     #[test]

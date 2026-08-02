@@ -326,6 +326,8 @@ fn sparse_sparse_union(
     combine: impl Fn(f64, f64) -> f64,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
+    let lhs_values = lhs.materialize_f64();
+    let rhs_values = rhs.materialize_f64();
     let mut col_ptrs = Vec::with_capacity(lhs.cols.saturating_add(1));
     let mut row_indices = Vec::new();
     let mut values = Vec::new();
@@ -339,17 +341,17 @@ fn sparse_sparse_union(
             let (row, value) =
                 if r >= r_end || (l < l_end && lhs.row_indices[l] < rhs.row_indices[r]) {
                     let row = lhs.row_indices[l];
-                    let value = combine(lhs.values[l], 0.0);
+                    let value = combine(lhs_values[l], 0.0);
                     l += 1;
                     (row, value)
                 } else if l >= l_end || rhs.row_indices[r] < lhs.row_indices[l] {
                     let row = rhs.row_indices[r];
-                    let value = combine(0.0, rhs.values[r]);
+                    let value = combine(0.0, rhs_values[r]);
                     r += 1;
                     (row, value)
                 } else {
                     let row = lhs.row_indices[l];
-                    let value = combine(lhs.values[l], rhs.values[r]);
+                    let value = combine(lhs_values[l], rhs_values[r]);
                     l += 1;
                     r += 1;
                     (row, value)
@@ -372,6 +374,8 @@ fn sparse_sparse_intersection(
     combine: impl Fn(f64, f64) -> f64,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
+    let lhs_values = lhs.materialize_f64();
+    let rhs_values = rhs.materialize_f64();
     let mut col_ptrs = Vec::with_capacity(lhs.cols.saturating_add(1));
     let mut row_indices = Vec::new();
     let mut values = Vec::new();
@@ -387,7 +391,7 @@ fn sparse_sparse_intersection(
             } else if rhs.row_indices[r] < lhs.row_indices[l] {
                 r += 1;
             } else {
-                let value = combine(lhs.values[l], rhs.values[r]);
+                let value = combine(lhs_values[l], rhs_values[r]);
                 if value != 0.0 {
                     row_indices.push(lhs.row_indices[l]);
                     values.push(value);
@@ -539,13 +543,14 @@ fn scale_sparse(sparse: &SparseTensor, scalar: f64, builtin: &'static str) -> Bu
             sparse.cols,
         )));
     }
+    let stored_values = sparse.materialize_f64();
     let mut col_ptrs = Vec::with_capacity(sparse.cols.saturating_add(1));
     let mut row_indices = Vec::with_capacity(sparse.row_indices.len());
-    let mut values = Vec::with_capacity(sparse.values.len());
+    let mut values = Vec::with_capacity(stored_values.len());
     col_ptrs.push(0);
     for col in 0..sparse.cols {
         for entry in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
-            let value = sparse.values[entry] * scalar;
+            let value = stored_values[entry] * scalar;
             if value != 0.0 {
                 row_indices.push(sparse.row_indices[entry]);
                 values.push(value);
@@ -657,7 +662,12 @@ fn sparse_has_implicit_zeros(sparse: &SparseTensor) -> bool {
 }
 
 fn sparse_stored_values_are_finite(sparse: &SparseTensor) -> bool {
-    sparse.values.iter().all(|value| value.is_finite())
+    sparse.integer_storage().is_some()
+        || sparse
+            .as_f64_slice()
+            .expect("double sparse storage")
+            .iter()
+            .all(|value| value.is_finite())
 }
 
 fn dense_has_nonfinite_at_sparse_implicit_zero(sparse: &SparseTensor, dense: &Tensor) -> bool {
@@ -687,6 +697,7 @@ fn sparse_dense_times_preserve_sparse(
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
     let dense_values = tensor::tensor_values_f64_cow(dense);
+    let sparse_values = sparse.materialize_f64();
     let mut col_ptrs = Vec::with_capacity(sparse.cols.saturating_add(1));
     let mut row_indices = Vec::new();
     let mut values = Vec::new();
@@ -695,7 +706,7 @@ fn sparse_dense_times_preserve_sparse(
         for entry in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
             let row = sparse.row_indices[entry];
             let dense_idx = dense_index_for_sparse_position(dense, row, col);
-            let value = sparse.values[entry] * dense_values[dense_idx];
+            let value = sparse_values[entry] * dense_values[dense_idx];
             if value != 0.0 {
                 row_indices.push(row);
                 values.push(value);
@@ -809,13 +820,14 @@ pub(crate) fn map_sparse_real_values(
             .map_err(|err| map_internal_error(builtin, err));
     }
 
+    let stored_values = sparse.materialize_f64();
     let mut col_ptrs = Vec::with_capacity(sparse.cols.saturating_add(1));
     let mut row_indices = Vec::with_capacity(sparse.row_indices.len());
-    let mut values = Vec::with_capacity(sparse.values.len());
+    let mut values = Vec::with_capacity(stored_values.len());
     col_ptrs.push(0);
     for col in 0..sparse.cols {
         for entry in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
-            let value = map(sparse.values[entry])?;
+            let value = map(stored_values[entry])?;
             if value != 0.0 {
                 row_indices.push(sparse.row_indices[entry]);
                 values.push(value);
@@ -933,7 +945,7 @@ mod tests {
             .expect("sparse scale"),
         );
         assert_eq!(result.shape(), vec![3, 2]);
-        assert_eq!(result.values, vec![20.0, 60.0, 40.0]);
+        assert_eq!(result.materialize_f64(), vec![20.0, 60.0, 40.0]);
     }
 
     #[test]
@@ -982,7 +994,7 @@ mod tests {
                 .expect("zero-preserving map"),
         );
         assert_eq!(scaled.shape(), vec![3, 2]);
-        assert_eq!(scaled.values, vec![20.0, 60.0, 40.0]);
+        assert_eq!(scaled.materialize_f64(), vec![20.0, 60.0, 40.0]);
 
         let complemented = expect_tensor(
             map_sparse_real_values(&sparse, "test", |value| Ok(1.0 - value))
@@ -1191,7 +1203,7 @@ mod tests {
             )
             .expect("zero minus sparse"),
         );
-        assert_eq!(zero_minus.values, vec![-10.0, -30.0, -20.0]);
+        assert_eq!(zero_minus.materialize_f64(), vec![-10.0, -30.0, -20.0]);
 
         let times_zero = expect_sparse(
             sparse_binary(
@@ -1208,29 +1220,15 @@ mod tests {
 
     #[test]
     fn sparse_broadcast_overflow_returns_stable_limit_error_before_plan_len() {
-        let tall = SparseTensor {
-            rows: usize::MAX,
-            cols: 1,
-            col_ptrs: vec![0, 0],
-            row_indices: Vec::new(),
-            values: Vec::new(),
-            integer_data: None,
-        };
-        let wide = SparseTensor {
-            rows: 1,
-            cols: usize::MAX,
-            col_ptrs: vec![0],
-            row_indices: Vec::new(),
-            values: Vec::new(),
-            integer_data: None,
-        };
-        let err = sparse_binary(
-            &Value::SparseTensor(tall),
-            &Value::SparseTensor(wide),
-            SparseBinaryOp::Add,
+        let output_shape = checked_broadcast_shape(
+            &[usize::MAX, 1],
+            &[1, usize::MAX],
             "plus",
+            "sparse operands",
         )
-        .expect_err("overflowing broadcast should fail before planning");
+        .expect("broadcast shape");
+        let err = checked_sparse_result_len(&output_shape, "plus")
+            .expect_err("overflowing broadcast should fail before planning");
         assert_eq!(
             err.identifier.as_deref(),
             Some("RunMat:plus:SparseDensifyTooLarge")

@@ -560,7 +560,7 @@ mod tests {
                 assert_eq!(out.cols, 2);
                 assert_eq!(out.col_ptrs, vec![0, 1, 3]);
                 assert_eq!(out.row_indices, vec![1, 0, 2]);
-                assert_eq!(out.values, vec![5.0, 4.0, 6.0]);
+                assert_eq!(out.materialize_f64(), vec![5.0, 4.0, 6.0]);
             }
             other => panic!("expected sparse tensor, got {other:?}"),
         }

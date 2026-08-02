@@ -577,14 +577,7 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> BuiltinResult
         // transitional compatibility representation.
         Value::Tensor(t) => t.len().saturating_mul(t.numeric_dtype().byte_size()),
         Value::SparseTensor(t) => {
-            let value_bytes = t.integer_storage().map_or_else(
-                || t.values.len().saturating_mul(std::mem::size_of::<f64>()),
-                |storage| {
-                    storage
-                        .len()
-                        .saturating_mul(integer_storage_element_bytes(storage))
-                },
-            );
+            let value_bytes = t.nnz().saturating_mul(t.numeric_dtype().byte_size());
             value_bytes
                 .saturating_add(
                     t.row_indices
@@ -1303,7 +1296,7 @@ pub(crate) mod tests {
 
     #[test]
     fn whos_memory_bytes_use_native_width_for_typed_sparse_integer_values() {
-        let mut sparse = runmat_builtins::SparseTensor::new_integer(
+        let sparse = runmat_builtins::SparseTensor::new_integer(
             4,
             2,
             vec![0, 1, 2],
@@ -1311,7 +1304,6 @@ pub(crate) mod tests {
             IntegerStorage::U16(vec![1, u16::MAX]),
         )
         .expect("uint16 sparse");
-        sparse.values.clear();
         let expected = 2 * std::mem::size_of::<u16>()
             + 2 * std::mem::size_of::<usize>()
             + 3 * std::mem::size_of::<usize>();

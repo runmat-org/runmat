@@ -815,18 +815,22 @@ fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray
                 dims: canonical_dims(&la.shape),
                 data: MatData::Logical { data: la.data },
             }),
-            Value::SparseTensor(sparse) => Ok(MatArray {
-                class: MatClass::Sparse,
-                dims: vec![sparse.rows, sparse.cols],
-                data: MatData::Sparse {
-                    rows: sparse.rows,
-                    cols: sparse.cols,
-                    col_ptrs: sparse.col_ptrs,
-                    row_indices: sparse.row_indices,
-                    integer_data: sparse.integer_data,
-                    values: sparse.values,
-                },
-            }),
+            Value::SparseTensor(sparse) => {
+                let integer_data = sparse.integer_storage().cloned();
+                let values = sparse.materialize_f64();
+                Ok(MatArray {
+                    class: MatClass::Sparse,
+                    dims: vec![sparse.rows, sparse.cols],
+                    data: MatData::Sparse {
+                        rows: sparse.rows,
+                        cols: sparse.cols,
+                        col_ptrs: sparse.col_ptrs,
+                        row_indices: sparse.row_indices,
+                        integer_data,
+                        values,
+                    },
+                })
+            }
             Value::CharArray(ca) => Ok(MatArray {
                 class: MatClass::Char,
                 dims: vec![ca.rows, ca.cols],

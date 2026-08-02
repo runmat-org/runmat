@@ -102,7 +102,8 @@ pub fn approximate_size_bytes(value: &Value) -> Option<u64> {
 /// Rough estimate of the sparse tensor storage footprint, in bytes.
 pub fn sparse_tensor_memory_bytes(sparse: &SparseTensor) -> u64 {
     sparse_tensor_memory_bytes_from_lengths(
-        sparse.values.len(),
+        sparse.nnz(),
+        sparse.numeric_dtype().byte_size(),
         sparse.row_indices.len(),
         sparse.col_ptrs.len(),
     )
@@ -110,11 +111,12 @@ pub fn sparse_tensor_memory_bytes(sparse: &SparseTensor) -> u64 {
 
 fn sparse_tensor_memory_bytes_from_lengths(
     values_len: usize,
+    value_byte_size: usize,
     row_indices_len: usize,
     col_ptrs_len: usize,
 ) -> u64 {
     (values_len as u64)
-        .saturating_mul(std::mem::size_of::<f64>() as u64)
+        .saturating_mul(value_byte_size as u64)
         .saturating_add(
             (row_indices_len as u64).saturating_mul(std::mem::size_of::<usize>() as u64),
         )
@@ -248,7 +250,7 @@ mod tests {
 
         assert_eq!(sparse_tensor_memory_bytes(&sparse), expected as u64);
         assert_eq!(
-            sparse_tensor_memory_bytes_from_lengths(usize::MAX, usize::MAX, usize::MAX),
+            sparse_tensor_memory_bytes_from_lengths(usize::MAX, usize::MAX, usize::MAX, usize::MAX,),
             u64::MAX
         );
     }

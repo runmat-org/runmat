@@ -761,20 +761,11 @@ fn sparse_find_values(
     )
 }
 
-fn sparse_stored_value_is_nonzero(
-    sparse: &runmat_builtins::SparseTensor,
-    integer_storage: Option<&IntegerStorage>,
-    index: usize,
-) -> bool {
-    integer_storage.map_or_else(
-        || sparse.values[index] != 0.0,
-        |storage| {
-            !storage
-                .value_at(index)
-                .expect("SparseTensor integer storage is consistent")
-                .is_zero()
-        },
-    )
+fn sparse_stored_value_is_nonzero(sparse: &runmat_builtins::SparseTensor, index: usize) -> bool {
+    !sparse
+        .numeric_value_at(index)
+        .expect("SparseTensor value storage is consistent")
+        .is_zero()
 }
 
 fn compute_find_sparse(
@@ -787,6 +778,7 @@ fn compute_find_sparse(
     let mut indices = Vec::new();
     let mut values = Vec::new();
     let integer_storage = sparse.integer_storage();
+    let floating_values = sparse.as_f64_slice();
     let mut integer_value_indices = Vec::new();
 
     if matches!(limit, Some(0)) {
@@ -801,13 +793,13 @@ fn compute_find_sparse(
                 let col_end = sparse.col_ptrs[col + 1];
                 for idx in col_start..col_end {
                     let row = sparse.row_indices[idx];
-                    if sparse_stored_value_is_nonzero(sparse, integer_storage, idx) {
+                    if sparse_stored_value_is_nonzero(sparse, idx) {
                         let linear_idx = row + col * sparse.rows;
                         indices.push(linear_idx + 1);
                         if integer_storage.is_some() {
                             integer_value_indices.push(idx);
                         } else {
-                            values.push(sparse.values[idx]);
+                            values.push(floating_values.expect("double sparse storage")[idx]);
                         }
                         if limit.is_some_and(|k| indices.len() >= k) {
                             let values =
@@ -824,13 +816,13 @@ fn compute_find_sparse(
                 let col_end = sparse.col_ptrs[col + 1];
                 for idx in (col_start..col_end).rev() {
                     let row = sparse.row_indices[idx];
-                    if sparse_stored_value_is_nonzero(sparse, integer_storage, idx) {
+                    if sparse_stored_value_is_nonzero(sparse, idx) {
                         let linear_idx = row + col * sparse.rows;
                         indices.push(linear_idx + 1);
                         if integer_storage.is_some() {
                             integer_value_indices.push(idx);
                         } else {
-                            values.push(sparse.values[idx]);
+                            values.push(floating_values.expect("double sparse storage")[idx]);
                         }
                         if limit.is_some_and(|k| indices.len() >= k) {
                             let values =

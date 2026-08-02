@@ -1112,9 +1112,9 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn write_sparse_integer_payload_uses_exact_storage_not_f64_mirror() {
+    fn write_sparse_integer_payload_uses_exact_storage() {
         let wide = (1_u64 << 53) + 1;
-        let mut sparse = SparseTensor::new_integer(
+        let sparse = SparseTensor::new_integer(
             2,
             2,
             vec![0, 1, 2],
@@ -1122,7 +1122,6 @@ pub(crate) mod tests {
             IntegerStorage::U64(vec![wide, u64::MAX]),
         )
         .expect("typed sparse tensor");
-        sparse.values = vec![0.0, 0.0];
 
         let payload = prepare_payload(
             &Value::SparseTensor(sparse),
@@ -1138,7 +1137,7 @@ pub(crate) mod tests {
         assert_eq!(payload.elements, 4);
         assert_eq!(payload.bytes, expected);
 
-        let mut signed = SparseTensor::new_integer(
+        let signed = SparseTensor::new_integer(
             2,
             1,
             vec![0, 2],
@@ -1146,7 +1145,6 @@ pub(crate) mod tests {
             IntegerStorage::I16(vec![-7, 42]),
         )
         .expect("signed sparse tensor");
-        signed.values = vec![f64::NAN, f64::NAN];
         let payload = prepare_payload(
             &Value::SparseTensor(signed),
             DataType::Int16,

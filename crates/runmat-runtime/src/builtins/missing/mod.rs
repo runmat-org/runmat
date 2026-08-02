@@ -610,9 +610,10 @@ fn ismissing_value(value: &Value) -> BuiltinResult<Value> {
         Value::SparseTensor(tensor) => {
             let mut data = vec![0u8; tensor.rows * tensor.cols];
             if tensor.integer_storage().is_none() {
+                let values = tensor.as_f64_slice().expect("double sparse storage");
                 for col in 0..tensor.cols {
                     for idx in tensor.col_ptrs[col]..tensor.col_ptrs[col + 1] {
-                        if tensor.values[idx].is_nan() {
+                        if values[idx].is_nan() {
                             data[tensor.row_indices[idx] + col * tensor.rows] = 1;
                         }
                     }

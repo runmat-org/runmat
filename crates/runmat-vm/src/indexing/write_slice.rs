@@ -2080,7 +2080,7 @@ mod tests {
         };
         assert_eq!(output.col_ptrs, vec![0, 0, 1]);
         assert_eq!(output.row_indices, vec![0]);
-        assert_eq!(output.values, vec![3.0]);
+        assert_eq!(output.as_f64_slice(), Some(&[3.0][..]));
     }
 
     #[test]

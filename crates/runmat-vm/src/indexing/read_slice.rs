@@ -234,7 +234,7 @@ fn linear_sparse_slice(
     let total = checked_sparse_numel(sparse)?;
     let base_is_row_vector = sparse.rows == 1 && sparse.cols > 1;
     if matches!(selector, SliceSelector::Colon) {
-        let mut row_indices = Vec::with_capacity(sparse.values.len());
+        let mut row_indices = Vec::with_capacity(sparse.nnz());
         for col in 0..sparse.cols {
             for entry in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
                 row_indices.push(sparse.row_indices[entry] + col * sparse.rows);
@@ -252,9 +252,12 @@ fn linear_sparse_slice(
             SparseTensor::new(
                 total,
                 1,
-                vec![0, sparse.values.len()],
+                vec![0, sparse.nnz()],
                 row_indices,
-                sparse.values.clone(),
+                sparse
+                    .as_f64_slice()
+                    .expect("double sparse storage")
+                    .to_vec(),
             )
         }
         .map_err(map_slice_shape_error)?;
@@ -444,12 +447,13 @@ fn matrix_sparse_slice(
         return typed_sparse_from_column_entries(out_rows, out_cols, col_entries, storage);
     }
 
+    let values = sparse.as_f64_slice().expect("double sparse storage");
     let mut col_entries = vec![Vec::new(); out_cols];
     for (out_col, &col) in cols.iter().enumerate() {
         let base_col = col - 1;
         for entry in sparse.col_ptrs[base_col]..sparse.col_ptrs[base_col + 1] {
             let base_row = sparse.row_indices[entry];
-            let value = sparse.values[entry];
+            let value = values[entry];
             if all_rows {
                 col_entries[out_col].push((base_row, value));
             } else if let Some(output_rows) = row_positions.get(&base_row) {

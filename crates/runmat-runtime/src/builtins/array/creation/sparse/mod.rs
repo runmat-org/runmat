@@ -344,13 +344,14 @@ async fn nonzeros_builtin(value: Value) -> BuiltinResult<Value> {
 )]
 async fn spones_builtin(value: Value) -> BuiltinResult<Value> {
     let sparse = sparse_pattern_from_value(gpu_helpers::gather_value_async(&value).await?)?;
+    let nnz = sparse.nnz();
     Ok(Value::SparseTensor(
         SparseTensor::new(
             sparse.rows,
             sparse.cols,
             sparse.col_ptrs,
             sparse.row_indices,
-            vec![1.0; sparse.values.len()],
+            vec![1.0; nnz],
         )
         .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("spones: {err}")))?,
     ))
@@ -565,7 +566,13 @@ fn nonzeros_value(value: &Value) -> BuiltinResult<Value> {
     match value {
         Value::SparseTensor(sparse) => match sparse.integer_storage() {
             Some(storage) => integer_tensor_column(storage.clone(), "nonzeros"),
-            None => tensor_column(sparse.values.clone(), "nonzeros"),
+            None => tensor_column(
+                sparse
+                    .as_f64_slice()
+                    .expect("double sparse storage")
+                    .to_vec(),
+                "nonzeros",
+            ),
         },
         Value::Tensor(tensor) => nonzeros_dense_tensor(tensor),
         Value::ComplexTensor(tensor) => {
@@ -1255,9 +1262,10 @@ fn nonzero_diagonal_offsets(matrix: &ExtractionMatrix) -> Vec<isize> {
     let mut offsets = BTreeSet::new();
     match matrix {
         ExtractionMatrix::Sparse(sparse) => {
+            let values = sparse.materialize_f64();
             for col in 0..sparse.cols {
                 for idx in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
-                    if is_stored_value(sparse.values[idx]) {
+                    if is_stored_value(values[idx]) {
                         offsets.insert(col as isize - sparse.row_indices[idx] as isize);
                     }
                 }
@@ -1411,6 +1419,7 @@ fn replace_sparse_diagonals(
 ) -> BuiltinResult<SparseTensor> {
     let offsets = parse_diag_offsets(offsets, "spdiags")?;
     let target_sparse = sparse_from_value(target.clone())?;
+    let target_values = target_sparse.materialize_f64();
     let selected: BTreeSet<isize> = offsets.iter().copied().collect();
     let mut entries = BTreeMap::new();
     for col in 0..target_sparse.cols {
@@ -1418,16 +1427,17 @@ fn replace_sparse_diagonals(
             let row = target_sparse.row_indices[idx];
             let offset = col as isize - row as isize;
             if !selected.contains(&offset) {
-                entries.insert((col, row), target_sparse.values[idx]);
+                entries.insert((col, row), target_values[idx]);
             }
         }
     }
     let replacement =
         construct_sparse_diagonals(bin, &offsets, target_sparse.rows, target_sparse.cols)?;
+    let replacement_values = replacement.materialize_f64();
     for col in 0..replacement.cols {
         for idx in replacement.col_ptrs[col]..replacement.col_ptrs[col + 1] {
             let row = replacement.row_indices[idx];
-            let value = replacement.values[idx];
+            let value = replacement_values[idx];
             if is_stored_value(value) {
                 entries.insert((col, row), value);
             }
@@ -2564,7 +2574,7 @@ pub(crate) mod tests {
         let sparse = expect_sparse(sparse_builtin(vec![Value::Tensor(dense)]).expect("sparse"));
         assert_eq!(sparse.col_ptrs, vec![0, 1, 2]);
         assert_eq!(sparse.row_indices, vec![1, 0]);
-        assert_eq!(sparse.values, vec![4.0, 5.0]);
+        assert_eq!(sparse.materialize_f64(), vec![4.0, 5.0]);
     }
 
     #[test]
@@ -2621,7 +2631,7 @@ pub(crate) mod tests {
         assert_eq!(square.shape(), vec![3, 3]);
         assert_eq!(square.col_ptrs, vec![0, 1, 2, 3]);
         assert_eq!(square.row_indices, vec![0, 1, 2]);
-        assert_eq!(square.values, vec![1.0, 1.0, 1.0]);
+        assert_eq!(square.materialize_f64(), vec![1.0, 1.0, 1.0]);
 
         let rect = expect_sparse(
             super::speye_builtin(vec![Value::Num(2.0), Value::Num(4.0)]).expect("speye"),
@@ -2688,7 +2698,7 @@ pub(crate) mod tests {
         let ones = expect_sparse(spones_builtin(Value::SparseTensor(sparse)).expect("spones"));
         assert_eq!(ones.col_ptrs, vec![0, 1, 1, 3]);
         assert_eq!(ones.row_indices, vec![1, 0, 2]);
-        assert_eq!(ones.values, vec![1.0, 1.0, 1.0]);
+        assert_eq!(ones.materialize_f64(), vec![1.0, 1.0, 1.0]);
 
         test_support::with_test_provider(|provider| {
             let dense = Tensor::new(vec![0.0, 2.0, 3.0, 0.0], vec![2, 2]).unwrap();
@@ -2701,7 +2711,7 @@ pub(crate) mod tests {
                 .expect("upload");
             let sparse = expect_sparse(spones_builtin(Value::GpuTensor(handle)).expect("spones"));
             assert_eq!(sparse.shape(), vec![2, 2]);
-            assert_eq!(sparse.values, vec![1.0, 1.0]);
+            assert_eq!(sparse.materialize_f64(), vec![1.0, 1.0]);
             assert_eq!(sparse.get(1, 0), Some(1.0));
             assert_eq!(sparse.get(0, 1), Some(1.0));
         });
@@ -2715,9 +2725,9 @@ pub(crate) mod tests {
         assert_eq!(random.shape(), vec![3, 2]);
         assert_eq!(random.col_ptrs, vec![0, 2, 3]);
         assert_eq!(random.row_indices, vec![0, 2, 1]);
-        assert_eq!(random.values.len(), 3);
+        assert_eq!(random.materialize_f64().len(), 3);
         assert!(random
-            .values
+            .materialize_f64()
             .iter()
             .all(|value| *value >= 0.0 && *value < 1.0));
     }
@@ -2730,7 +2740,7 @@ pub(crate) mod tests {
         assert_eq!(random.shape(), vec![4, 5]);
         assert_eq!(random.nnz(), 5);
         assert!(random
-            .values
+            .materialize_f64()
             .iter()
             .all(|value| *value >= 0.0 && *value < 1.0));
     }

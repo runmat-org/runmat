@@ -79,7 +79,7 @@ fn zeros_like_sparse_proto_preserves_sparse_storage() {
             assert_eq!(sparse.nnz(), 0);
             assert_eq!(sparse.col_ptrs, vec![0, 0, 0, 0, 0]);
             assert!(sparse.row_indices.is_empty());
-            assert!(sparse.values.is_empty());
+            assert!(sparse.as_f64_slice().is_some_and(<[f64]>::is_empty));
         }
         other => panic!("expected sparse result, got {other:?}"),
     }
@@ -118,7 +118,7 @@ fn zeros_like_typed_sparse_proto_preserves_integer_class() {
                 assert_eq!(sparse.nnz(), 0);
                 assert_eq!(sparse.col_ptrs, vec![0, 0, 0, 0, 0]);
                 assert!(sparse.row_indices.is_empty());
-                assert!(sparse.values.is_empty());
+                assert_eq!(sparse.nnz(), 0);
                 assert_eq!(
                     sparse.integer_storage(),
                     Some(&storage.zeros_like(0)),

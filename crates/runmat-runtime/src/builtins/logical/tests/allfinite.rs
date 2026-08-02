@@ -184,7 +184,11 @@ fn sparse_all_finite(sparse: &SparseTensor) -> bool {
     if sparse.integer_storage().is_some() {
         return true;
     }
-    sparse.values.iter().all(|value| value.is_finite())
+    sparse
+        .as_f64_slice()
+        .expect("double sparse storage")
+        .iter()
+        .all(|value| value.is_finite())
 }
 
 fn complex_tensor_all_finite(tensor: &ComplexTensor) -> bool {
@@ -314,8 +318,8 @@ mod tests {
     }
 
     #[test]
-    fn typed_integer_sparse_tensor_checks_native_storage_not_f64_mirror() {
-        let mut sparse = SparseTensor::new_integer(
+    fn typed_integer_sparse_tensor_checks_native_storage() {
+        let sparse = SparseTensor::new_integer(
             3,
             2,
             vec![0, 1, 2],
@@ -323,7 +327,6 @@ mod tests {
             IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
         )
         .unwrap();
-        sparse.values.fill(f64::NAN);
         assert_eq!(
             call(Value::SparseTensor(sparse)).unwrap(),
             Value::Bool(true)

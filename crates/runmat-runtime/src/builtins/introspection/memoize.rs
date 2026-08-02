@@ -998,7 +998,7 @@ fn sparse_tensors_equal(a: &SparseTensor, b: &SparseTensor) -> bool {
         || a.cols != b.cols
         || a.col_ptrs != b.col_ptrs
         || a.row_indices != b.row_indices
-        || a.values.len() != b.values.len()
+        || a.nnz() != b.nnz()
     {
         return false;
     }
@@ -1007,9 +1007,10 @@ fn sparse_tensors_equal(a: &SparseTensor, b: &SparseTensor) -> bool {
         (Some(_), None) | (None, Some(_)) => return false,
         (None, None) => {}
     }
-    a.values
+    a.as_f64_slice()
+        .expect("double sparse storage")
         .iter()
-        .zip(b.values.iter())
+        .zip(b.as_f64_slice().expect("double sparse storage"))
         .all(|(x, y)| floats_equal_nan(*x, *y))
 }
 
@@ -1112,15 +1113,20 @@ fn value_fingerprint(value: &Value) -> String {
                 tensor.shape
             )
         }
-        Value::SparseTensor(tensor) => format!(
-            "sparse:{}x{}:{:?}:{:?}:{:?}:{:?}",
-            tensor.rows,
-            tensor.cols,
-            tensor.col_ptrs,
-            tensor.row_indices,
-            tensor.integer_storage(),
-            tensor.values
-        ),
+        Value::SparseTensor(tensor) => match tensor.integer_storage() {
+            Some(storage) => format!(
+                "sparse:{}x{}:{:?}:{:?}:{storage:?}",
+                tensor.rows, tensor.cols, tensor.col_ptrs, tensor.row_indices
+            ),
+            None => format!(
+                "sparse:{}x{}:{:?}:{:?}:{:?}",
+                tensor.rows,
+                tensor.cols,
+                tensor.col_ptrs,
+                tensor.row_indices,
+                tensor.as_f64_slice().expect("double sparse storage")
+            ),
+        },
         Value::ComplexTensor(tensor) => {
             let values = (0..tensor::complex_tensor_element_len(tensor))
                 .map(|index| {

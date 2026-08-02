@@ -280,14 +280,7 @@ pub(crate) mod tests {
 
     #[test]
     fn sparse_dense_size_overflow_returns_internal_error() {
-        let sparse = SparseTensor {
-            rows: usize::MAX,
-            cols: 2,
-            col_ptrs: vec![0, 0, 0],
-            row_indices: Vec::new(),
-            values: Vec::new(),
-            integer_data: None,
-        };
+        let sparse = SparseTensor::zeros(usize::MAX, 2);
         let err = run_full(Value::SparseTensor(sparse)).unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:full:Internal"));
         assert!(err.message().contains("overflow"));

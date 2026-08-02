@@ -2223,7 +2223,7 @@ pub(crate) mod tests {
             assert_eq!(actual.shape(), expected.shape());
             assert_eq!(actual.col_ptrs, expected.col_ptrs);
             assert_eq!(actual.row_indices, expected.row_indices);
-            assert_eq!(actual.integer_data, expected.integer_data);
+            assert_eq!(actual.integer_storage(), expected.integer_storage());
         }
     }
 
@@ -2250,7 +2250,10 @@ pub(crate) mod tests {
         };
         assert_eq!(actual.shape(), vec![0, 5]);
         assert_eq!(actual.col_ptrs, vec![0, 0, 0, 0, 0, 0]);
-        assert_eq!(actual.integer_data, Some(IntegerStorage::U64(Vec::new())));
+        assert_eq!(
+            actual.integer_storage(),
+            Some(&IntegerStorage::U64(Vec::new()))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

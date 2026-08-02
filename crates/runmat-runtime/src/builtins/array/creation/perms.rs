@@ -655,14 +655,7 @@ mod tests {
         let err = call(Value::Tensor(matrix)).unwrap_err();
         assert_eq!(err.identifier.as_deref(), Some("RunMat:perms:InvalidInput"));
 
-        let sparse = Value::SparseTensor(runmat_builtins::SparseTensor {
-            rows: 1,
-            cols: 1,
-            col_ptrs: vec![0, 0],
-            row_indices: Vec::new(),
-            values: Vec::new(),
-            integer_data: None,
-        });
+        let sparse = Value::SparseTensor(runmat_builtins::SparseTensor::zeros(1, 1));
         let err = call(sparse).unwrap_err();
         assert_eq!(err.identifier.as_deref(), Some("RunMat:perms:InvalidInput"));
     }

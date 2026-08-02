@@ -601,8 +601,11 @@ fn sparse_satisfies(sparse: &SparseTensor, predicate: StructurePredicate) -> boo
     for col in 0..sparse.cols {
         for idx in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
             let row = sparse.row_indices[idx];
-            let value = sparse.values[idx];
-            if is_forbidden_nonzero(row, col, predicate) && (value != 0.0 || value.is_nan()) {
+            let value = sparse
+                .numeric_value_at(idx)
+                .expect("sparse structure keeps value storage aligned");
+            if is_forbidden_nonzero(row, col, predicate) && (!value.is_zero() || !value.is_finite())
+            {
                 return false;
             }
         }

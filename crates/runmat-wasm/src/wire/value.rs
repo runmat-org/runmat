@@ -181,7 +181,7 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
                 "rowIndicesLength": st.row_indices.len(),
                 "rowIndicesTruncated": row_indices_truncated,
                 "valuesPreview": values_preview,
-                "valuesLength": st.integer_storage().map_or(st.values.len(), |storage| storage.len()),
+                "valuesLength": st.nnz(),
                 "valuesTruncated": values_truncated,
                 "preview": entry_preview,
                 "entryPreviewTruncated": entry_preview_truncated,
@@ -362,13 +362,18 @@ fn sparse_entry_preview(
             if entries.len() >= limit {
                 return (entries, true);
             }
-            let value = st
-                .integer_storage()
-                .and_then(|storage| storage.value_at(idx))
-                .map_or_else(
-                    || JsonValue::from(st.values[idx]),
-                    |value| integer_json_value(&value),
-                );
+            let value = if let Some(storage) = st.integer_storage() {
+                integer_json_value(
+                    &storage
+                        .value_at(idx)
+                        .expect("integer sparse storage index is valid"),
+                )
+            } else {
+                JsonValue::from(
+                    st.as_f64_slice()
+                        .expect("floating sparse storage is available")[idx],
+                )
+            };
             entries.push(json!({
                 "row": st.row_indices[idx] + 1,
                 "col": col + 1,
@@ -397,7 +402,11 @@ fn sparse_values_preview(
         return (preview, truncated);
     }
 
-    let (preview, truncated) = preview_slice(&st.values, limit);
+    let (preview, truncated) = preview_slice(
+        st.as_f64_slice()
+            .expect("floating sparse storage is available"),
+        limit,
+    );
     (
         preview.into_iter().map(JsonValue::from).collect(),
         truncated,
@@ -481,7 +490,7 @@ mod tests {
             json!([{"real": "18446744073709551615", "imag": "9007199254740993"}])
         );
 
-        let mut sparse = SparseTensor::new_integer(
+        let sparse = SparseTensor::new_integer(
             1,
             1,
             vec![0, 1],
@@ -489,7 +498,6 @@ mod tests {
             IntegerStorage::U64(vec![u64::MAX]),
         )
         .expect("sparse tensor");
-        sparse.values.clear();
         let sparse_json = value_to_json(&Value::SparseTensor(sparse), 0);
         assert_eq!(
             sparse_json["valuesPreview"],

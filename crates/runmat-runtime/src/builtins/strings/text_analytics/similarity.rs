@@ -320,9 +320,10 @@ fn nonzero_real_rows(rows: usize, cols: usize, values: &[f64]) -> Vec<Vec<(usize
 
 fn real_rows_from_sparse(sparse: &SparseTensor) -> BuiltinResult<RealRows> {
     let mut rows = vec![Vec::new(); sparse.rows];
+    let values = sparse.materialize_f64();
     for col in 0..sparse.cols {
         for idx in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
-            let value = sparse.values[idx];
+            let value = values[idx];
             if value != 0.0 || value.is_nan() {
                 rows[sparse.row_indices[idx]].push((col, value));
             }

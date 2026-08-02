@@ -1117,7 +1117,7 @@ pub(crate) mod tests {
                 assert_eq!(sparse.cols, 4);
                 assert_eq!(sparse.col_ptrs, vec![0, 0, 0, 0, 0]);
                 assert!(sparse.row_indices.is_empty());
-                assert!(sparse.values.is_empty());
+                assert!(sparse.materialize_f64().is_empty());
             }
             other => panic!("expected sparse tensor, got {other:?}"),
         }
@@ -1135,7 +1135,7 @@ pub(crate) mod tests {
                 assert_eq!(sparse.shape(), vec![2, 5]);
                 assert_eq!(sparse.col_ptrs, vec![0, 0, 0, 0, 0, 0]);
                 assert!(sparse.row_indices.is_empty());
-                assert!(sparse.values.is_empty());
+                assert!(sparse.materialize_f64().is_empty());
             }
             other => panic!("expected sparse tensor, got {other:?}"),
         }

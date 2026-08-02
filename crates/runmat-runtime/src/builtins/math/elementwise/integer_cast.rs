@@ -299,7 +299,8 @@ pub(crate) fn cast_sparse_value(
             .map(|value| target.cast_int(value))
             .collect(),
         None => sparse
-            .values
+            .as_f64_slice()
+            .expect("double sparse storage")
             .iter()
             .map(|&value| target.cast_scalar(value))
             .collect(),
@@ -484,7 +485,7 @@ mod tests {
             assert_eq!(output.shape(), vec![3, 2]);
             assert_eq!(output.col_ptrs, vec![0, 1, 2]);
             assert_eq!(output.row_indices, vec![0, 2]);
-            assert_eq!(output.values, expected);
+            assert_eq!(output.materialize_f64(), expected);
             assert_eq!(
                 output.integer_storage().map(IntegerStorage::class_name),
                 Some(class)

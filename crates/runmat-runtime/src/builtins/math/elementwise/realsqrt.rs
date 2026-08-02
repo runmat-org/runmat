@@ -256,7 +256,10 @@ fn realsqrt_sparse(sparse: SparseTensor) -> BuiltinResult<Value> {
             "expected real single or double input",
         ));
     }
-    let values = sparse.values.clone();
+    let values = sparse
+        .as_f64_slice()
+        .expect("integer sparse input rejected above")
+        .to_vec();
     ensure_nonnegative(&values)?;
     let values: Vec<f64> = values
         .into_iter()
@@ -511,7 +514,7 @@ mod tests {
                 assert_eq!(out.cols, 2);
                 assert_eq!(out.col_ptrs, vec![0, 2, 3]);
                 assert_eq!(out.row_indices, vec![0, 2, 1]);
-                assert_eq!(out.values, vec![2.0, 3.0, 4.0]);
+                assert_eq!(out.materialize_f64(), vec![2.0, 3.0, 4.0]);
             }
             other => panic!("expected sparse tensor, got {other:?}"),
         }
@@ -519,7 +522,7 @@ mod tests {
 
     #[test]
     fn sparse_typed_integer_values_are_rejected_by_class() {
-        let mut sparse = SparseTensor::new_integer(
+        let sparse = SparseTensor::new_integer(
             3,
             2,
             vec![0, 2, 3],
@@ -527,7 +530,6 @@ mod tests {
             IntegerStorage::U16(vec![4, 9, 16]),
         )
         .unwrap();
-        sparse.values.fill(f64::NAN);
 
         let err = call(Value::SparseTensor(sparse)).unwrap_err();
         assert_eq!(err.identifier(), ERROR_INVALID_INPUT.identifier);
@@ -535,10 +537,9 @@ mod tests {
 
     #[test]
     fn sparse_negative_typed_integer_is_rejected_by_class_before_domain() {
-        let mut sparse =
+        let sparse =
             SparseTensor::new_integer(2, 1, vec![0, 1], vec![1], IntegerStorage::I16(vec![-4]))
                 .unwrap();
-        sparse.values.fill(4.0);
 
         let err = call(Value::SparseTensor(sparse)).unwrap_err();
         assert_eq!(err.identifier(), ERROR_INVALID_INPUT.identifier);

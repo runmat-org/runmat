@@ -239,10 +239,7 @@ fn blkdiag_host(args: Vec<Value>) -> BuiltinResult<Value> {
 
 /// Assemble typed integer sparse blocks without reconstructing their stored values through f64.
 ///
-/// The general sparse path predates exact integer buffers and uses `SparseTensor::values`, which
-/// is only a compatibility view. Once a typed sparse input selects sparse output, every block
-/// must retain the same integer class until mixed-class sparse promotion has a MATLAB-validated
-/// policy.
+/// Once a typed sparse input selects sparse output, every block must retain the same integer class until mixed-class sparse promotion has a MATLAB-validated policy.
 fn assemble_typed_integer_sparse_blocks(args: &[Value]) -> Option<BuiltinResult<Value>> {
     if !args.iter().any(
         |value| matches!(value, Value::SparseTensor(sparse) if sparse.integer_storage().is_some()),
@@ -876,11 +873,12 @@ fn assemble_complex(blocks: Vec<Block>) -> BuiltinResult<Value> {
                 }
             }
             Block::Sparse(sparse) => {
+                let values = sparse.materialize_f64();
                 for col in 0..sparse.cols {
                     for idx in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
                         let row = sparse.row_indices[idx];
                         let dst = (row_offset + row) + (col_offset + col) * rows;
-                        data[dst] = (sparse.values[idx], 0.0);
+                        data[dst] = (values[idx], 0.0);
                     }
                 }
             }
@@ -914,7 +912,7 @@ fn assemble_sparse(blocks: Vec<Block>) -> BuiltinResult<Value> {
         .map_err(|_| allocation_error("sparse column pointer allocation failed"))?;
     let nnz = sparse_blocks
         .iter()
-        .try_fold(0usize, |acc, block| acc.checked_add(block.values.len()))
+        .try_fold(0usize, |acc, block| acc.checked_add(block.nnz()))
         .ok_or_else(size_overflow)?;
     row_indices
         .try_reserve_exact(nnz)
@@ -925,10 +923,11 @@ fn assemble_sparse(blocks: Vec<Block>) -> BuiltinResult<Value> {
     col_ptrs.push(0);
     let mut row_offset = 0usize;
     for block in sparse_blocks {
+        let block_values = block.materialize_f64();
         for col in 0..block.cols {
             for idx in block.col_ptrs[col]..block.col_ptrs[col + 1] {
                 row_indices.push(row_offset + block.row_indices[idx]);
-                values.push(block.values[idx]);
+                values.push(block_values[idx]);
             }
             col_ptrs.push(values.len());
         }
@@ -1105,12 +1104,13 @@ fn copy_sparse_to_real_block(
     col_offset: usize,
     sparse: &SparseTensor,
 ) -> BuiltinResult<()> {
+    let values = sparse.materialize_f64();
     for col in 0..sparse.cols {
         for idx in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
             let row = sparse.row_indices[idx];
             let dst = (row_offset + row) + (col_offset + col) * output_rows;
             output
-                .set_numeric_assignment_at(dst, NumericScalar::F64(sparse.values[idx]))
+                .set_numeric_assignment_at(dst, NumericScalar::F64(values[idx]))
                 .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail))?;
         }
     }
@@ -1525,7 +1525,7 @@ mod tests {
                 assert_eq!(out.cols, 3);
                 assert_eq!(out.col_ptrs, vec![0, 1, 2, 3]);
                 assert_eq!(out.row_indices, vec![1, 0, 3]);
-                assert_eq!(out.values, vec![4.0, 5.0, 6.0]);
+                assert_eq!(out.materialize_f64(), vec![4.0, 5.0, 6.0]);
             }
             other => panic!("expected sparse tensor, got {other:?}"),
         }
@@ -1540,7 +1540,7 @@ mod tests {
                 assert_eq!(out.cols, 2);
                 assert_eq!(out.col_ptrs, vec![0, 1, 2]);
                 assert_eq!(out.row_indices, vec![1, 2]);
-                assert_eq!(out.values, vec![4.0, 5.0]);
+                assert_eq!(out.materialize_f64(), vec![4.0, 5.0]);
             }
             other => panic!("expected sparse tensor, got {other:?}"),
         }
@@ -1573,7 +1573,7 @@ mod tests {
                 assert_eq!(out.cols, 2);
                 assert_eq!(out.col_ptrs, vec![0, 1, 2]);
                 assert_eq!(out.row_indices, vec![0, 512]);
-                assert_eq!(out.values, vec![2.0, 9.0]);
+                assert_eq!(out.materialize_f64(), vec![2.0, 9.0]);
             }
             other => panic!("expected sparse tensor, got {other:?}"),
         }
@@ -1588,7 +1588,7 @@ mod tests {
                 assert_eq!(out.cols, 1);
                 assert_eq!(out.col_ptrs, vec![0, 1]);
                 assert_eq!(out.row_indices, vec![2]);
-                assert_eq!(out.values, vec![7.0]);
+                assert_eq!(out.materialize_f64(), vec![7.0]);
             }
             other => panic!("expected sparse tensor, got {other:?}"),
         }

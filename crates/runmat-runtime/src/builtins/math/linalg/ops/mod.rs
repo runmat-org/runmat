@@ -24,10 +24,11 @@ pub(super) fn transpose_real_sparse_tensor(
     if let Some(storage) = sparse.integer_storage() {
         return transpose_integer_sparse_tensor(&sparse, storage);
     }
+    let values = sparse.as_f64_slice().expect("double sparse storage");
     let mut triplets = Vec::with_capacity(sparse.nnz());
     for col in 0..sparse.cols {
         for idx in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
-            triplets.push((col, sparse.row_indices[idx], sparse.values[idx]));
+            triplets.push((col, sparse.row_indices[idx], values[idx]));
         }
     }
     triplets.sort_by_key(|&(row, col, _)| (col, row));
@@ -100,7 +101,7 @@ mod tests {
         assert_eq!(transposed.cols, 3);
         assert_eq!(transposed.col_ptrs, vec![0, 1, 2, 3]);
         assert_eq!(transposed.row_indices, vec![0, 1, 0]);
-        assert_eq!(transposed.values, vec![10.0, 20.0, 30.0]);
+        assert_eq!(transposed.materialize_f64(), vec![10.0, 20.0, 30.0]);
     }
 
     #[test]

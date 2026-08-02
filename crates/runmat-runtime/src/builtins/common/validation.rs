@@ -449,7 +449,11 @@ pub fn value_is_finite(value: &Value) -> bool {
             .iter()
             .all(|v| v.is_finite()),
         Value::SparseTensor(t) if t.integer_storage().is_some() => true,
-        Value::SparseTensor(t) => t.values.iter().all(|v| v.is_finite()),
+        Value::SparseTensor(t) => t
+            .as_f64_slice()
+            .expect("double sparse storage")
+            .iter()
+            .all(|v| v.is_finite()),
         Value::ComplexTensor(t) if t.integer_data.is_some() => true,
         Value::ComplexTensor(t) => t
             .data
@@ -555,7 +559,11 @@ pub fn value_is_integer(value: &Value) -> bool {
             .iter()
             .all(|v| v.is_finite() && v.fract() == 0.0),
         Value::SparseTensor(t) if t.integer_storage().is_some() => true,
-        Value::SparseTensor(t) => t.values.iter().all(|v| v.is_finite() && v.fract() == 0.0),
+        Value::SparseTensor(t) => t
+            .as_f64_slice()
+            .expect("double sparse storage")
+            .iter()
+            .all(|v| v.is_finite() && v.fract() == 0.0),
         Value::Complex(re, im) => *im == 0.0 && re.is_finite() && re.fract() == 0.0,
         Value::ComplexTensor(t) if t.integer_data.is_some() => value_is_real(value),
         Value::ComplexTensor(t) => t
@@ -576,7 +584,11 @@ pub fn value_is_non_nan(value: &Value) -> bool {
         Value::Tensor(t) if t.integer_storage().is_some() => true,
         Value::Tensor(t) => tensor::tensor_values_f64_cow(t).iter().all(|v| !v.is_nan()),
         Value::SparseTensor(t) if t.integer_storage().is_some() => true,
-        Value::SparseTensor(t) => t.values.iter().all(|v| !v.is_nan()),
+        Value::SparseTensor(t) => t
+            .as_f64_slice()
+            .expect("double sparse storage")
+            .iter()
+            .all(|v| !v.is_nan()),
         Value::ComplexTensor(t) if t.integer_data.is_some() => true,
         Value::ComplexTensor(t) => t.data.iter().all(|(re, im)| !re.is_nan() && !im.is_nan()),
         Value::Cell(c) => c.data.iter().all(value_is_non_nan),
@@ -844,7 +856,7 @@ pub fn atoms(value: &Value) -> Result<Vec<ValidationAtom>, RuntimeError> {
 
 fn sparse_atoms(t: &SparseTensor) -> Result<Vec<ValidationAtom>, RuntimeError> {
     let numel = t.rows.saturating_mul(t.cols);
-    let mut out = Vec::with_capacity(numel.min(t.values.len().saturating_add(1)));
+    let mut out = Vec::with_capacity(numel.min(t.nnz().saturating_add(1)));
     if let Some(storage) = t.integer_storage() {
         out.extend(
             storage
@@ -861,8 +873,9 @@ fn sparse_atoms(t: &SparseTensor) -> Result<Vec<ValidationAtom>, RuntimeError> {
         }
         return Ok(out);
     }
-    out.extend(t.values.iter().copied().map(ValidationAtom::Number));
-    if t.values.len() < numel {
+    let values = t.as_f64_slice().expect("double sparse storage");
+    out.extend(values.iter().copied().map(ValidationAtom::Number));
+    if values.len() < numel {
         out.push(ValidationAtom::Number(0.0));
     }
     Ok(out)
@@ -985,7 +998,8 @@ fn numeric_values_all(value: &Value, pred: impl Fn(f64) -> bool) -> bool {
         }
         Value::SparseTensor(t) => {
             let numel = t.rows.saturating_mul(t.cols);
-            t.values.iter().copied().all(&pred) && (t.values.len() >= numel || pred(0.0))
+            let values = t.as_f64_slice().expect("double sparse storage");
+            values.iter().copied().all(&pred) && (values.len() >= numel || pred(0.0))
         }
         Value::Complex(re, im) => *im == 0.0 && pred(*re),
         Value::ComplexTensor(t) if t.integer_data.is_some() => {
@@ -1367,14 +1381,16 @@ mod tests {
         ok("mustBeInteger", vec![value.clone()]);
         ok("mustBeNonNan", vec![value]);
 
-        let sparse = Value::SparseTensor(SparseTensor {
-            rows: 2,
-            cols: 2,
-            col_ptrs: vec![0, 1, 2],
-            row_indices: vec![0, 1],
-            values: vec![f64::NAN, f64::INFINITY],
-            integer_data: Some(IntegerStorage::U8(vec![1, 2])),
-        });
+        let sparse = Value::SparseTensor(
+            SparseTensor::new_integer(
+                2,
+                2,
+                vec![0, 1, 2],
+                vec![0, 1],
+                IntegerStorage::U8(vec![1, 2]),
+            )
+            .unwrap(),
+        );
         assert!(value_is_finite(&sparse));
         assert!(value_is_integer(&sparse));
         assert!(value_is_non_nan(&sparse));
@@ -1412,14 +1428,9 @@ mod tests {
 
     #[test]
     fn threshold_validators_ignore_typed_sparse_and_complex_integer_mirrors() {
-        let sparse = SparseTensor {
-            rows: 1,
-            cols: 2,
-            col_ptrs: vec![0, 1, 1],
-            row_indices: vec![0],
-            values: vec![f64::NAN],
-            integer_data: Some(IntegerStorage::U8(vec![1])),
-        };
+        let sparse =
+            SparseTensor::new_integer(1, 2, vec![0, 1, 1], vec![0], IntegerStorage::U8(vec![1]))
+                .unwrap();
         ok("mustBeNonnegative", vec![Value::SparseTensor(sparse)]);
 
         let mut complex = ComplexTensor::new_integer(

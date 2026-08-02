@@ -327,11 +327,12 @@ fn count_nonzero_tensor(tensor: &Tensor) -> usize {
 }
 
 fn count_nonzero_sparse(sparse: &SparseTensor) -> usize {
-    sparse
-        .values
-        .iter()
-        .copied()
-        .filter(|value| is_nonzero_scalar(*value))
+    (0..sparse.nnz())
+        .filter(|&index| {
+            sparse
+                .numeric_value_at(index)
+                .is_some_and(|value| !value.is_zero())
+        })
         .count()
 }
 
@@ -559,16 +560,18 @@ fn reduce_sparse_columns(sparse: &SparseTensor) -> BuiltinResult<Tensor> {
         let end = sparse.col_ptrs.get(col + 1).copied().ok_or_else(|| {
             nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, "sparse col_ptr missing")
         })?;
-        if start > end || end > sparse.values.len() {
+        if start > end || end > sparse.nnz() {
             return Err(nnz_descriptor_error_with_detail(
                 &NNZ_ERROR_INTERNAL,
                 "sparse col_ptr out of bounds",
             ));
         }
-        *count = sparse.values[start..end]
-            .iter()
-            .copied()
-            .filter(|value| is_nonzero_scalar(*value))
+        *count = (start..end)
+            .filter(|&index| {
+                sparse
+                    .numeric_value_at(index)
+                    .is_some_and(|value| !value.is_zero())
+            })
             .count() as f64;
     }
     Tensor::new(output, vec![1, sparse.cols])
@@ -584,14 +587,17 @@ fn reduce_sparse_rows(sparse: &SparseTensor) -> BuiltinResult<Tensor> {
         let end = sparse.col_ptrs.get(col + 1).copied().ok_or_else(|| {
             nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, "sparse col_ptr missing")
         })?;
-        if start > end || end > sparse.values.len() || end > sparse.row_indices.len() {
+        if start > end || end > sparse.nnz() || end > sparse.row_indices.len() {
             return Err(nnz_descriptor_error_with_detail(
                 &NNZ_ERROR_INTERNAL,
                 "sparse col_ptr out of bounds",
             ));
         }
         for idx in start..end {
-            if !is_nonzero_scalar(sparse.values[idx]) {
+            if sparse
+                .numeric_value_at(idx)
+                .is_none_or(|value| value.is_zero())
+            {
                 continue;
             }
             let row = sparse.row_indices[idx];
@@ -630,7 +636,10 @@ fn mask_from_sparse(sparse: &SparseTensor) -> BuiltinResult<Mask> {
                 let bit_idx = col_off.checked_add(row).ok_or_else(|| {
                     nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, "sparse index overflow")
                 })?;
-                if is_nonzero_scalar(sparse.values[idx]) {
+                if sparse
+                    .numeric_value_at(idx)
+                    .is_some_and(|value| !value.is_zero())
+                {
                     bits[bit_idx] = 1;
                 }
             }
@@ -932,14 +941,7 @@ pub(crate) mod tests {
 
     #[test]
     fn mask_from_sparse_rejects_overflowing_logical_size() {
-        let sparse = SparseTensor {
-            rows: usize::MAX,
-            cols: 2,
-            col_ptrs: vec![0, 0, 0],
-            row_indices: Vec::new(),
-            values: Vec::new(),
-            integer_data: None,
-        };
+        let sparse = SparseTensor::zeros(usize::MAX, 2);
 
         let err = match mask_from_sparse(&sparse) {
             Ok(_) => panic!("expected sparse mask overflow error"),
