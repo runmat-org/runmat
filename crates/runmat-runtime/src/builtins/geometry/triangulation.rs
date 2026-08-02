@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ClassDef, MethodDef, ObjectInstance, PropertyDef, Tensor, Value,
+    ClassDef, IntegerStorage, MethodDef, NumericScalar, ObjectInstance, PropertyDef, Tensor, Value,
 };
 use runmat_geometry_ops::{boundary_edges, delaunay_2d, nearest_neighbor_indices, point_locations};
 use runmat_macros::runtime_builtin;
@@ -515,7 +515,7 @@ fn matrix_points(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<[f64
 fn vector_points(x: &Value, y: &Value, builtin: &'static str) -> BuiltinResult<Vec<[f64; 2]>> {
     let x = numeric_tensor(x, builtin)?;
     let y = numeric_tensor(y, builtin)?;
-    if !is_vector(&x) || !is_vector(&y) || x.data.len() != y.data.len() {
+    if !is_vector(&x) || !is_vector(&y) || x.len() != y.len() {
         return Err(invalid(format!(
             "{builtin}: x and y must be vectors with the same length"
         )));
@@ -537,18 +537,17 @@ fn vector_points(x: &Value, y: &Value, builtin: &'static str) -> BuiltinResult<V
 
 fn constraints_from_value(value: &Value) -> BuiltinResult<Vec<[usize; 2]>> {
     let tensor = numeric_tensor(value, BUILTIN_NAME)?;
-    if tensor.data.is_empty() || tensor.rows == 0 {
+    if tensor.is_empty() || tensor.rows == 0 {
         return Ok(Vec::new());
     }
     if tensor.cols != 2 {
         return Err(invalid("DelaunayTri: constraints must be an M-by-2 matrix"));
     }
-    let values = tensor_utils::tensor_values_f64_cow(&tensor);
     let mut constraints = Vec::with_capacity(tensor.rows);
     for row in 0..tensor.rows {
         constraints.push([
-            positive_index(values[row], usize::MAX)?,
-            positive_index(values[row + tensor.rows], usize::MAX)?,
+            tensor_positive_index(&tensor, row, usize::MAX)?,
+            tensor_positive_index(&tensor, row + tensor.rows, usize::MAX)?,
         ]);
     }
     Ok(constraints)
@@ -562,13 +561,12 @@ fn connectivity_from_value(
     if tensor.cols != 3 {
         return Err(invalid("DelaunayTri connectivity must be an M-by-3 matrix"));
     }
-    let values = tensor_utils::tensor_values_f64_cow(&tensor);
     let mut triangles = Vec::with_capacity(tensor.rows);
     for row in 0..tensor.rows {
         triangles.push([
-            positive_index(values[row], usize::MAX)? - 1,
-            positive_index(values[row + tensor.rows], usize::MAX)? - 1,
-            positive_index(values[row + 2 * tensor.rows], usize::MAX)? - 1,
+            tensor_positive_index(&tensor, row, usize::MAX)? - 1,
+            tensor_positive_index(&tensor, row + tensor.rows, usize::MAX)? - 1,
+            tensor_positive_index(&tensor, row + 2 * tensor.rows, usize::MAX)? - 1,
         ]);
     }
     if let Some(point_count) = point_count {
@@ -587,7 +585,10 @@ fn numeric_tensor(value: &Value, builtin: &'static str) -> BuiltinResult<Tensor>
     match value {
         Value::Tensor(tensor) => Ok(tensor.clone()),
         Value::Num(value) => Tensor::new(vec![*value], vec![1, 1]).map_err(invalid),
-        Value::Int(value) => Tensor::new(vec![value.to_f64()], vec![1, 1]).map_err(invalid),
+        Value::Int(value) => {
+            Tensor::new_integer(IntegerStorage::from_scalar(value.clone()), vec![1, 1])
+                .map_err(invalid)
+        }
         other => Err(invalid(format!(
             "{builtin}: expected numeric input, got {other:?}"
         ))),
@@ -670,6 +671,29 @@ fn positive_index(value: f64, max: usize) -> BuiltinResult<usize> {
     Ok(idx)
 }
 
+fn tensor_positive_index(tensor: &Tensor, index: usize, max: usize) -> BuiltinResult<usize> {
+    let value = tensor
+        .numeric_value_at(index)
+        .ok_or_else(|| invalid("index is out of range"))?;
+    if let Some(integer) = value.into_int_value() {
+        let idx = integer
+            .try_to_usize()
+            .ok_or_else(|| invalid("index is out of range"))?;
+        if idx == 0 {
+            return Err(invalid("indices must be positive finite integers"));
+        }
+        if idx > max {
+            return Err(invalid("index is out of range"));
+        }
+        return Ok(idx);
+    }
+    match value {
+        NumericScalar::F64(value) => positive_index(value, max),
+        NumericScalar::F32(value) => positive_index(f64::from(value), max),
+        _ => unreachable!("integer scalar returned by into_int_value"),
+    }
+}
+
 fn invalid(detail: impl AsRef<str>) -> crate::RuntimeError {
     error(&ERROR_INVALID_ARGUMENT, detail)
 }
@@ -692,16 +716,13 @@ fn error(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
 
     fn tensor(data: &[f64], rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new_2d(data.to_vec(), rows, cols).expect("test tensor"))
     }
 
-    fn poisoned_integer_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
-        Value::Tensor(tensor)
+    fn integer_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor"))
     }
 
     fn object(value: Value) -> ObjectInstance {
@@ -765,15 +786,15 @@ mod tests {
     #[test]
     fn point_parsers_read_typed_integer_storage_exactly() {
         let points = matrix_points(
-            &poisoned_integer_tensor(IntegerStorage::U16(vec![0, 1, 0, 0, 0, 1]), 3, 2),
+            &integer_tensor(IntegerStorage::U16(vec![0, 1, 0, 0, 0, 1]), 3, 2),
             BUILTIN_NAME,
         )
         .expect("matrix points");
         assert_eq!(points, vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]);
 
         let vector_points = vector_points(
-            &poisoned_integer_tensor(IntegerStorage::I16(vec![0, 1, 0]), 1, 3),
-            &poisoned_integer_tensor(IntegerStorage::I16(vec![0, 0, 1]), 1, 3),
+            &integer_tensor(IntegerStorage::I16(vec![0, 1, 0]), 1, 3),
+            &integer_tensor(IntegerStorage::I16(vec![0, 0, 1]), 1, 3),
             BUILTIN_NAME,
         )
         .expect("vector points");
@@ -782,20 +803,30 @@ mod tests {
 
     #[test]
     fn topology_parsers_read_typed_integer_storage_exactly() {
-        let constraints = constraints_from_value(&poisoned_integer_tensor(
-            IntegerStorage::U16(vec![1, 2, 2, 3]),
-            2,
-            2,
-        ))
-        .expect("constraints");
+        let constraints =
+            constraints_from_value(&integer_tensor(IntegerStorage::U16(vec![1, 2, 2, 3]), 2, 2))
+                .expect("constraints");
         assert_eq!(constraints, vec![[1, 2], [2, 3]]);
 
         let connectivity = connectivity_from_value(
-            &poisoned_integer_tensor(IntegerStorage::U16(vec![1, 2, 3]), 1, 3),
+            &integer_tensor(IntegerStorage::U16(vec![1, 2, 3]), 1, 3),
             Some(3),
         )
         .expect("connectivity");
         assert_eq!(connectivity, vec![[0, 1, 2]]);
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn topology_index_parser_preserves_wide_integer_values_exactly() {
+        let wide = (1_u64 << 53) + 1;
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("wide index");
+        assert_eq!(
+            tensor_positive_index(&tensor, 0, usize::MAX).expect("exact wide index"),
+            wide as usize
+        );
+        assert!(tensor_positive_index(&tensor, 0, (wide - 1) as usize).is_err());
     }
 
     #[test]
@@ -849,7 +880,7 @@ mod tests {
         .unwrap() else {
             panic!("expected nearest tensor")
         };
-        assert_eq!(nn.data, vec![3.0]);
+        assert_eq!(nn.materialize_f64(), vec![3.0]);
 
         let location = block_on(point_location_builtin(
             dt,
@@ -861,7 +892,7 @@ mod tests {
         };
         assert_eq!(ti.rows, 1);
         assert_eq!(ti.cols, 1);
-        assert_eq!(ti.data, vec![1.0]);
+        assert_eq!(ti.materialize_f64(), vec![1.0]);
     }
 
     #[test]
