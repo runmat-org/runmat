@@ -2,7 +2,7 @@
 
 use nalgebra::{linalg::SVD, DMatrix};
 use num_complex::Complex64;
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPinvOptions};
+use runmat_accelerate_api::{GpuTensorHandle, ProviderPinvOptions};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -207,10 +207,7 @@ async fn pinv_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Va
             .await
             .map_err(map_control_flow)?;
         let pinv = pinv_real_tensor(&gathered, tol)?;
-        if let Ok(uploaded) = provider.upload(&HostTensorView {
-            data: &pinv.data,
-            shape: &pinv.shape,
-        }) {
+        if let Ok(uploaded) = gpu_helpers::upload_tensor(provider, &pinv) {
             return Ok(Value::GpuTensor(uploaded));
         }
         return Ok(tensor::tensor_into_value(pinv));

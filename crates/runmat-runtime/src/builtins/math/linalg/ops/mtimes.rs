@@ -1,6 +1,6 @@
 //! MATLAB-compatible `mtimes` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{linalg, tensor};
+use crate::builtins::common::{gpu_helpers, linalg, tensor};
 use crate::builtins::math::elementwise::integer_arithmetic::{try_integer_binary, IntegerBinaryOp};
 use crate::builtins::math::linalg::type_resolvers::matmul_type;
 use crate::builtins::math::symbolic::{symbolic_binary, SymbolicBinaryOp};
@@ -434,12 +434,7 @@ fn upload_tensor(
     provider: &'static dyn AccelProvider,
     tensor: &Tensor,
 ) -> BuiltinResult<GpuTensorHandle> {
-    let view = HostTensorView {
-        data: &tensor.data,
-        shape: &tensor.shape,
-    };
-    let handle = provider
-        .upload(&view)
+    let handle = gpu_helpers::upload_tensor(provider, tensor)
         .map_err(|e| mtimes_internal_error(format!("mtimes: {e}")))?;
     Ok(handle)
 }

@@ -5,7 +5,6 @@
 //! provider-side `cross` hook when available and otherwise fall back to the
 //! host implementation with result re-upload for real-valued outputs.
 
-use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -18,7 +17,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::tensor;
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::linalg::type_resolvers::cross_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -485,11 +484,7 @@ fn promote_real_result_to_gpu(tensor: Tensor) -> BuiltinResult<Value> {
         Some(provider) => provider,
         None => return Ok(tensor::tensor_into_value(tensor)),
     };
-    let view = HostTensorView {
-        data: &tensor.data,
-        shape: &tensor.shape,
-    };
-    match provider.upload(&view) {
+    match gpu_helpers::upload_tensor(provider, &tensor) {
         Ok(handle) => Ok(Value::GpuTensor(handle)),
         Err(_) => Ok(tensor::tensor_into_value(tensor)),
     }
@@ -500,6 +495,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
         IntValue, IntegerStorage, LiteralValue, LogicalArray, ResolveContext, Type,
     };

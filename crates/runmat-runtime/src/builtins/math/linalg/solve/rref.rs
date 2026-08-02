@@ -1,7 +1,7 @@
 //! MATLAB-compatible `rref` builtin using Gauss-Jordan row reduction.
 
 use num_complex::Complex64;
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -243,11 +243,7 @@ async fn rref_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Rr
 
     if let Value::Tensor(matrix) = &eval.reduced {
         if let Some(provider) = runmat_accelerate_api::provider() {
-            let view = HostTensorView {
-                data: &matrix.data,
-                shape: &matrix.shape,
-            };
-            let uploaded = provider.upload(&view).map_err(|err| {
+            let uploaded = gpu_helpers::upload_tensor(provider, matrix).map_err(|err| {
                 internal_error(format!("{NAME}: failed to upload reduced matrix ({err})"))
             })?;
             eval.reduced = Value::GpuTensor(uploaded);
@@ -611,6 +607,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Type};
 
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {

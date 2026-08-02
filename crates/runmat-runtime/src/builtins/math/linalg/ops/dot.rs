@@ -5,7 +5,6 @@
 //! necessary and the result is re-uploaded to the active provider when possible so
 //! downstream consumers can remain device-resident.
 
-use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -18,7 +17,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::tensor;
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::linalg::type_resolvers::dot_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -504,16 +503,10 @@ fn promote_result_to_gpu(value: Value) -> BuiltinResult<Value> {
         None => return Ok(value),
     };
     match value {
-        Value::Tensor(tensor) => {
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            match provider.upload(&view) {
-                Ok(handle) => Ok(Value::GpuTensor(handle)),
-                Err(_) => Ok(Value::Tensor(tensor)),
-            }
-        }
+        Value::Tensor(tensor) => match gpu_helpers::upload_tensor(provider, &tensor) {
+            Ok(handle) => Ok(Value::GpuTensor(handle)),
+            Err(_) => Ok(Value::Tensor(tensor)),
+        },
         Value::Num(n) => {
             let tensor = Tensor::new(vec![n], vec![1, 1])
                 .map_err(|e| dot_internal_error(format!("{DOT_NAME}: {e}")))?;
@@ -533,6 +526,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
         IntValue, IntegerStorage, LiteralValue, LogicalArray, ResolveContext, Type,
     };

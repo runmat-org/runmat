@@ -2,7 +2,7 @@
 
 use nalgebra::{linalg::SVD, DMatrix};
 use num_complex::Complex64;
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -16,7 +16,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::tensor;
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::elementwise::integer_arithmetic::{try_integer_binary, IntegerBinaryOp};
 use crate::builtins::math::linalg::type_resolvers::left_divide_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -529,12 +529,7 @@ fn upload_tensor(
     provider: &'static dyn AccelProvider,
     tensor: &Tensor,
 ) -> BuiltinResult<GpuTensorHandle> {
-    let view = HostTensorView {
-        data: &tensor.data,
-        shape: &tensor.shape,
-    };
-    provider
-        .upload(&view)
+    gpu_helpers::upload_tensor(provider, tensor)
         .map_err(|e| mldivide_internal_error(format!("{NAME}: {e}")))
 }
 
@@ -550,7 +545,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_accelerate_api::ProviderTelemetry;
+    use runmat_accelerate_api::{HostTensorView, ProviderTelemetry};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }

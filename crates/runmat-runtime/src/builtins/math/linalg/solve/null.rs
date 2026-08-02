@@ -5,7 +5,7 @@ use std::mem::size_of;
 
 use nalgebra::{linalg::SVD, DMatrix};
 use num_complex::Complex64;
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -272,10 +272,7 @@ async fn null_gpu(handle: GpuTensorHandle, mode: NullMode) -> BuiltinResult<Valu
     let basis = null_real_tensor(&gathered, mode)?;
 
     if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Ok(uploaded) = provider.upload(&HostTensorView {
-            data: &basis.data,
-            shape: &basis.shape,
-        }) {
+        if let Ok(uploaded) = gpu_helpers::upload_tensor(provider, &basis) {
             return Ok(Value::GpuTensor(uploaded));
         }
     }
@@ -726,6 +723,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, IntValue, IntegerStorage, ResolveContext, StringArray, Type};
 
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {

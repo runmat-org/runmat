@@ -168,10 +168,7 @@ async fn inv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             .await
             .map_err(map_control_flow)?;
         let inv = inv_real_tensor(&gathered)?;
-        if let Ok(uploaded) = provider.upload(&runmat_accelerate_api::HostTensorView {
-            data: &inv.data,
-            shape: &inv.shape,
-        }) {
+        if let Ok(uploaded) = gpu_helpers::upload_tensor(provider, &inv) {
             return Ok(Value::GpuTensor(uploaded));
         }
         return Ok(tensor::tensor_into_value(inv));

@@ -663,11 +663,7 @@ fn maybe_upload_value(value: Value, prefer_gpu: bool) -> Value {
     match value {
         Value::Tensor(tensor) => {
             if let Some(provider) = runmat_accelerate_api::provider() {
-                let view = runmat_accelerate_api::HostTensorView {
-                    data: &tensor.data,
-                    shape: &tensor.shape,
-                };
-                if let Ok(handle) = provider.upload(&view) {
+                if let Ok(handle) = gpu_helpers::upload_tensor(provider, &tensor) {
                     return Value::GpuTensor(handle);
                 }
             }
