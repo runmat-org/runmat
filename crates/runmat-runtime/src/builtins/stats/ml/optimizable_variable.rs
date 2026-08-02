@@ -689,7 +689,7 @@ mod tests {
             range.integer_storage(),
             Some(&IntegerStorage::I16(vec![0, 1000]))
         );
-        assert_eq!(range.materialize_f64(), vec![-999.0, -999.0]);
+        assert_eq!(range.materialize_f64(), vec![0.0, 1000.0]);
     }
 
     #[test]

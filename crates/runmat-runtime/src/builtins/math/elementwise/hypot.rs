@@ -221,7 +221,11 @@ fn value_into_hypot_tensor(value: Value) -> BuiltinResult<Tensor> {
         Value::Complex(re, im) => Tensor::new(vec![complex_magnitude(re, im)], vec![1, 1])
             .map_err(|e| hypot_error_with_detail(&HYPOT_ERROR_INTERNAL, e)),
         Value::ComplexTensor(ct) => {
-            let data: Vec<f64> = ct.data.iter().map(|(re, im)| re.hypot(*im)).collect();
+            let data: Vec<f64> = ct
+                .materialize_f64()
+                .iter()
+                .map(|(re, im)| re.hypot(*im))
+                .collect();
             Tensor::new(data, ct.shape.clone())
                 .map_err(|e| hypot_error_with_detail(&HYPOT_ERROR_INTERNAL, e))
         }
@@ -292,8 +296,7 @@ pub(crate) mod tests {
         let storage =
             IntegerComplexStorage::new(IntegerStorage::I16(vec![3]), IntegerStorage::I16(vec![4]))
                 .expect("complex integer storage");
-        let mut tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
-        tensor.data.clear();
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
 
         assert_eq!(scalar_hypot_value(&Value::ComplexTensor(tensor)), Some(5.0));
     }

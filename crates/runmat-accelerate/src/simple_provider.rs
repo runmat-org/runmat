@@ -7910,7 +7910,8 @@ impl AccelProvider for InProcessProvider {
                 .map_err(|e| anyhow!("gradient_dim: {e}"))?;
             let gradiented = gradient_complex_tensor_host(tensor, dim + 1, spacing)
                 .map_err(|e| anyhow!("gradient_dim: {e}"))?;
-            let ComplexTensor { data, shape, .. } = gradiented;
+            let shape = gradiented.shape.clone();
+            let data = gradiented.materialize_f64();
             let mut interleaved = Vec::with_capacity(data.len() * 2);
             for (re, im) in data {
                 interleaved.push(re);
@@ -7977,7 +7978,8 @@ impl AccelProvider for InProcessProvider {
             let gradiented =
                 gradient_complex_tensor_host_with_coordinates(tensor, dim + 1, coordinate_data)
                     .map_err(|e| anyhow!("gradient_dim_with_coordinates: {e}"))?;
-            let ComplexTensor { data, shape, .. } = gradiented;
+            let shape = gradiented.shape.clone();
+            let data = gradiented.materialize_f64();
             let mut interleaved = Vec::with_capacity(data.len() * 2);
             for (re, im) in data {
                 interleaved.push(re);

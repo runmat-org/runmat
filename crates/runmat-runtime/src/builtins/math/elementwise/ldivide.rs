@@ -996,7 +996,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
-                assert_eq!(out.data, vec![(4.0, 0.0), (5.0, 0.0)]);
+                assert_eq!(out.materialize_f64(), vec![(4.0, 0.0), (5.0, 0.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -1007,8 +1007,7 @@ pub(crate) mod tests {
         let storage =
             IntegerComplexStorage::new(IntegerStorage::I16(vec![6]), IntegerStorage::I16(vec![-2]))
                 .expect("complex integer storage");
-        let mut tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
-        tensor.data.clear();
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
 
         assert_eq!(
             scalar_complex_value(&Value::ComplexTensor(tensor)),
@@ -1090,7 +1089,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
                 let expected = [(0.0, -1.0), (-0.28, -0.04)];
-                for (got, exp) in t.data.iter().zip(expected.iter()) {
+                for (got, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((got.0 - exp.0).abs() < 1e-10 && (got.1 - exp.1).abs() < 1e-10);
                 }
             }
@@ -1286,7 +1285,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![2, 1]);
                 let expected = [(0.5, 0.0), (0.5, 0.0)];
-                for (got, exp) in ct.data.iter().zip(expected.iter()) {
+                for (got, exp) in ct.materialize_f64().iter().zip(expected.iter()) {
                     assert!((got.0 - exp.0).abs() < EPS);
                     assert!((got.1 - exp.1).abs() < EPS);
                 }

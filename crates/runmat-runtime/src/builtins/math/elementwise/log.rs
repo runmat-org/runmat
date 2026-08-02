@@ -246,8 +246,8 @@ fn log_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
 }
 
 fn log_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let mut data = Vec::with_capacity(ct.data.len());
-    for &(re, im) in &ct.data {
+    let mut data = Vec::with_capacity(ct.materialize_f64().len());
+    for &(re, im) in &ct.materialize_f64() {
         let (mut real_part, mut imag_part) = log_complex_parts(re, im);
         if real_part.abs() < IMAG_EPS {
             real_part = 0.0;
@@ -433,10 +433,10 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![1, 2]);
-                assert!((ct.data[0].0 - 0.0).abs() < 1e-12);
-                assert!((ct.data[0].1 - std::f64::consts::PI).abs() < 1e-12);
-                assert!((ct.data[1].0 - 0.0).abs() < 1e-12);
-                assert!((ct.data[1].1).abs() < 1e-12);
+                assert!((ct.materialize_f64()[0].0 - 0.0).abs() < 1e-12);
+                assert!((ct.materialize_f64()[0].1 - std::f64::consts::PI).abs() < 1e-12);
+                assert!((ct.materialize_f64()[1].0 - 0.0).abs() < 1e-12);
+                assert!((ct.materialize_f64()[1].1).abs() < 1e-12);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -506,8 +506,8 @@ pub(crate) mod tests {
             match result {
                 Value::ComplexTensor(ct) => {
                     assert_eq!(ct.shape, vec![1, 2]);
-                    assert!((ct.data[0].0 - 0.0).abs() < 1e-12);
-                    assert!((ct.data[0].1 - std::f64::consts::PI).abs() < 1e-12);
+                    assert!((ct.materialize_f64()[0].0 - 0.0).abs() < 1e-12);
+                    assert!((ct.materialize_f64()[0].1 - std::f64::consts::PI).abs() < 1e-12);
                 }
                 other => panic!("expected complex tensor, got {other:?}"),
             }
@@ -554,9 +554,9 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
-                assert_eq!(out.data[0].0, 0.0);
-                assert!((out.data[0].1 - std::f64::consts::PI).abs() < 1e-12);
-                assert_eq!(out.data[1], (0.0, 0.0));
+                assert_eq!(out.materialize_f64()[0].0, 0.0);
+                assert!((out.materialize_f64()[0].1 - std::f64::consts::PI).abs() < 1e-12);
+                assert_eq!(out.materialize_f64()[1], (0.0, 0.0));
             }
             other => panic!("expected complex tensor result, got {other:?}"),
         }

@@ -324,7 +324,7 @@ fn vecnorm_complex_tensor(tensor: &ComplexTensor, args: VecnormArgs) -> BuiltinR
         dim,
         args.order,
         |index| {
-            let (re, im) = tensor.data[index];
+            let (re, im) = tensor.materialize_f64()[index];
             re.hypot(im)
         },
         NumericDType::F64,

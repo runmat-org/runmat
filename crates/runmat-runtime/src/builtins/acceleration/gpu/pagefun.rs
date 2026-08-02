@@ -739,7 +739,7 @@ impl PageInput {
 
     fn from_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Self> {
         let shape = canonical_matrix_shape(&tensor.shape);
-        if tensor.data.len() != shape.iter().copied().product::<usize>() {
+        if tensor.materialize_f64().len() != shape.iter().copied().product::<usize>() {
             return Err(pagefun_error_with_detail(
                 &PAGEFUN_ERROR_INTERNAL,
                 "tensor data does not match its shape",
@@ -756,7 +756,7 @@ impl PageInput {
             page_dims,
             rows,
             cols,
-            data: PageData::Complex(tensor.data),
+            data: PageData::Complex(tensor.materialize_f64()),
         })
     }
 
@@ -903,13 +903,13 @@ fn complex_matrix_data(value: Value) -> BuiltinResult<ComplexMatrixData> {
             let canonical = canonical_matrix_shape(&t.shape);
             let rows = canonical[0];
             let cols = canonical[1];
-            if rows * cols != t.data.len() {
+            if rows * cols != t.materialize_f64().len() {
                 return Err(pagefun_error_with_detail(
                     &PAGEFUN_ERROR_RESULT_SHAPE,
                     "result size mismatch",
                 ));
             }
-            Ok((t.data, rows, cols))
+            Ok((t.materialize_f64(), rows, cols))
         }
         Value::Complex(re, im) => Ok((vec![(re, im)], 1, 1)),
         other => Err(pagefun_error_with_detail(

@@ -836,7 +836,7 @@ mod tests {
         let out = qammod(tensor(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]), 4, vec![]);
         assert_eq!(out.shape, vec![1, 4]);
         assert_complex_close(
-            &out.data,
+            &out.materialize_f64(),
             &[(-1.0, 1.0), (-1.0, -1.0), (1.0, 1.0), (1.0, -1.0)],
         );
     }
@@ -850,7 +850,7 @@ mod tests {
         );
         assert_eq!(out.shape, vec![1, 4]);
         assert_complex_close(
-            &out.data,
+            &out.materialize_f64(),
             &[(-1.0, 1.0), (-1.0, -1.0), (1.0, 1.0), (1.0, -1.0)],
         );
     }
@@ -886,7 +886,7 @@ mod tests {
         let input: Vec<f64> = (0..16).map(|v| v as f64).collect();
         let out = qammod(tensor(input, vec![1, 16]), 16, vec![]);
         assert_complex_close(
-            &out.data,
+            &out.materialize_f64(),
             &[
                 (-3.0, 3.0),
                 (-3.0, 1.0),
@@ -916,7 +916,7 @@ mod tests {
             vec![],
         );
         assert_complex_close(
-            &out.data,
+            &out.materialize_f64(),
             &[
                 (-7.0, 7.0),
                 (-7.0, 5.0),
@@ -935,7 +935,7 @@ mod tests {
             vec![Value::from("bin")],
         );
         assert_complex_close(
-            &out.data,
+            &out.materialize_f64(),
             &[
                 (-3.0, 3.0),
                 (-3.0, 1.0),
@@ -960,7 +960,7 @@ mod tests {
             vec![Value::from("InputType"), Value::from("bit")],
         );
         assert_eq!(out.shape, vec![1, 2]);
-        assert_complex_close(&out.data, &[(-3.0, 3.0), (1.0, -1.0)]);
+        assert_complex_close(&out.materialize_f64(), &[(-3.0, 3.0), (1.0, -1.0)]);
     }
 
     #[test]
@@ -977,7 +977,7 @@ mod tests {
             vec![Value::from("InputType"), Value::from("bit")],
         );
         assert_eq!(out.shape, vec![1, 2]);
-        assert_complex_close(&out.data, &[(-3.0, 3.0), (1.0, -1.0)]);
+        assert_complex_close(&out.materialize_f64(), &[(-3.0, 3.0), (1.0, -1.0)]);
     }
 
     #[test]
@@ -992,7 +992,7 @@ mod tests {
             ],
         );
         assert_eq!(out.shape, vec![1, 1]);
-        assert_complex_close(&out.data, &[(-3.0, -3.0)]);
+        assert_complex_close(&out.materialize_f64(), &[(-3.0, -3.0)]);
     }
 
     #[test]
@@ -1004,7 +1004,7 @@ mod tests {
             vec![Value::from("InputType"), Value::from("bit")],
         );
         assert_eq!(out.shape, vec![1, 2]);
-        assert_complex_close(&out.data, &[(-1.0, 1.0), (1.0, -1.0)]);
+        assert_complex_close(&out.materialize_f64(), &[(-1.0, 1.0), (1.0, -1.0)]);
     }
 
     #[test]
@@ -1045,7 +1045,7 @@ mod tests {
                 panic!("expected gathered complex tensor");
             };
             assert_eq!(actual.shape, expected.shape);
-            assert_complex_close(&actual.data, &expected.data);
+            assert_complex_close(&actual.materialize_f64(), &expected.materialize_f64());
             provider.free(&input_handle).ok();
             provider.free(&output_handle).ok();
         });
@@ -1135,7 +1135,7 @@ mod tests {
             vec![mapping],
         );
         assert_complex_close(
-            &out.data,
+            &out.materialize_f64(),
             &[(-1.0, 1.0), (1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)],
         );
     }
@@ -1149,7 +1149,7 @@ mod tests {
             vec![mapping],
         );
         assert_complex_close(
-            &out.data,
+            &out.materialize_f64(),
             &[(-1.0, 1.0), (1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)],
         );
     }
@@ -1163,11 +1163,11 @@ mod tests {
             vec![Value::from("UnitAveragePower"), Value::Bool(true)],
         );
         let avg_power = out
-            .data
+            .materialize_f64()
             .iter()
             .map(|(re, im)| re * re + im * im)
             .sum::<f64>()
-            / out.data.len() as f64;
+            / out.materialize_f64().len() as f64;
         assert!((avg_power - 1.0).abs() < 1e-12, "{avg_power}");
     }
 
@@ -1184,8 +1184,8 @@ mod tests {
             ],
         );
         let expected = (-3.0 / 10.0_f64.sqrt()) as f32 as f64;
-        assert_eq!(out.data[0].0, expected);
-        assert_eq!(out.data[0].1, -expected);
+        assert_eq!(out.materialize_f64()[0].0, expected);
+        assert_eq!(out.materialize_f64()[0].1, -expected);
     }
 
     #[test]
@@ -1197,7 +1197,7 @@ mod tests {
             vec![Value::from("UnitAveragePower"), Value::Bool(true)],
         );
         let expected = (-3.0 / 10.0_f64.sqrt()) as f32 as f64;
-        assert_eq!(out.data[0], (expected, -expected));
+        assert_eq!(out.materialize_f64()[0], (expected, -expected));
     }
 
     #[test]
@@ -1248,7 +1248,7 @@ mod tests {
                     panic!("expected gathered complex tensor");
                 };
                 assert_eq!(actual.shape, expected.shape);
-                assert_complex_close(&actual.data, &expected.data);
+                assert_complex_close(&actual.materialize_f64(), &expected.materialize_f64());
                 provider.free(&input_handle).ok();
                 provider.free(&output_handle).ok();
             }
@@ -1300,7 +1300,7 @@ mod tests {
                     panic!("expected gathered complex tensor");
                 };
                 assert_eq!(actual.shape, expected.shape);
-                assert_complex_close(&actual.data, &expected.data);
+                assert_complex_close(&actual.materialize_f64(), &expected.materialize_f64());
                 provider.free(&input_handle).ok();
                 provider.free(&output_handle).ok();
             }
@@ -1357,7 +1357,7 @@ mod tests {
             vec![],
         );
         assert_complex_close(
-            &out.data,
+            &out.materialize_f64(),
             &[(-1.0, 1.0), (-1.0, -1.0), (1.0, 1.0), (1.0, -1.0)],
         );
 
@@ -1368,7 +1368,7 @@ mod tests {
             vec![custom],
         );
         assert_complex_close(
-            &out.data,
+            &out.materialize_f64(),
             &[(-1.0, 1.0), (1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)],
         );
 

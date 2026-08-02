@@ -4,8 +4,8 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, IntegerStorage, NumericStorage, ResolveContext, Tensor,
-    Type, Value,
+    CharArray, ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericStorage,
+    ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -234,13 +234,8 @@ async fn diff_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
             diff_tensor_host(tensor, order, dim).map(tensor::tensor_into_value)
         }
         Value::Complex(re, im) => {
-            let tensor = ComplexTensor {
-                data: vec![(re, im)],
-                integer_data: None,
-                shape: vec![1, 1],
-                rows: 1,
-                cols: 1,
-            };
+            let tensor =
+                ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(diff_invalid_input)?;
             diff_complex_tensor(tensor, order, dim).map(complex_tensor_into_value)
         }
         Value::ComplexTensor(tensor) => {
@@ -482,7 +477,7 @@ fn diff_complex_tensor(
     let mut working_dim = dim.unwrap_or_else(|| default_dimension(&current.shape));
     for _ in 0..order {
         current = diff_complex_tensor_once(current, working_dim)?;
-        if current.data.is_empty() {
+        if current.materialize_f64().is_empty() {
             break;
         }
         if dim.is_none() && dimension_length(&current.shape, working_dim) == 0 {
@@ -601,9 +596,13 @@ fn diff_integer_tensor_once(
 }
 
 fn diff_complex_tensor_once(tensor: ComplexTensor, dim: usize) -> BuiltinResult<ComplexTensor> {
-    let ComplexTensor {
-        data, mut shape, ..
-    } = tensor;
+    let output_dtype = if tensor.numeric_dtype() == NumericDType::F32 {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
+    };
+    let mut shape = tensor.shape.clone();
+    let data = tensor.materialize_f64();
     let dim_index = dim.saturating_sub(1);
     while shape.len() <= dim_index {
         shape.push(1);
@@ -612,7 +611,7 @@ fn diff_complex_tensor_once(tensor: ComplexTensor, dim: usize) -> BuiltinResult<
     let mut output_shape = shape.clone();
     if len_dim <= 1 || data.is_empty() {
         output_shape[dim_index] = output_shape[dim_index].saturating_sub(1);
-        return ComplexTensor::new(Vec::new(), output_shape)
+        return ComplexTensor::from_f64_values_with_dtype(Vec::new(), output_shape, output_dtype)
             .map_err(|e| diff_internal_error(format!("diff: {e}")));
     }
     output_shape[dim_index] = len_dim - 1;
@@ -633,7 +632,8 @@ fn diff_complex_tensor_once(tensor: ComplexTensor, dim: usize) -> BuiltinResult<
         }
     }
 
-    ComplexTensor::new(out, output_shape).map_err(|e| diff_internal_error(format!("diff: {e}")))
+    ComplexTensor::from_f64_values_with_dtype(out, output_shape, output_dtype)
+        .map_err(|e| diff_internal_error(format!("diff: {e}")))
 }
 
 fn default_dimension(shape: &[usize]) -> usize {
@@ -869,7 +869,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
-                assert_eq!(out.data, vec![(2.0, 1.0), (3.0, 3.0)]);
+                assert_eq!(out.materialize_f64(), vec![(2.0, 1.0), (3.0, 3.0)]);
             }
             other => panic!("expected complex tensor result, got {other:?}"),
         }

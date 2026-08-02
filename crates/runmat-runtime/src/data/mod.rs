@@ -469,7 +469,7 @@ fn data_values_from_value(value: &Value) -> BuiltinResult<(Vec<usize>, DataArray
         Value::Int(IntValue::U16(value)) => Ok((vec![1, 1], DataArrayValues::U16(vec![*value]))),
         Value::Int(IntValue::U32(value)) => Ok((vec![1, 1], DataArrayValues::U32(vec![*value]))),
         Value::Int(IntValue::U64(value)) => Ok((vec![1, 1], DataArrayValues::U64(vec![*value]))),
-        Value::ComplexTensor(tensor) if tensor.integer_data.is_some() => Err(data_error(
+        Value::ComplexTensor(tensor) if tensor.integer_storage().is_some() => Err(data_error(
             "data arrays do not support typed complex integer values; refusing lossy serialization",
         )),
         Value::ComplexTensor(_) | Value::Complex(_, _) => Err(data_error(

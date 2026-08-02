@@ -373,7 +373,7 @@ fn parse_complex_tensor_coeffs(tensor: &ComplexTensor) -> BuiltinResult<Polynomi
     ensure_vector_shape(&tensor.shape)?;
     Ok(Polynomial {
         coeffs: tensor
-            .data
+            .materialize_f64()
             .iter()
             .map(|&(re, im)| Complex64::new(re, im))
             .collect(),
@@ -406,12 +406,12 @@ async fn parse_constant(value: Value) -> BuiltinResult<Complex64> {
             Ok(Complex64::new(value, 0.0))
         }
         Value::ComplexTensor(tensor) => {
-            if tensor.data.len() != 1 {
+            if tensor.materialize_f64().len() != 1 {
                 return Err(polyint_error(
                     "polyint: constant of integration must be a scalar",
                 ));
             }
-            let (re, im) = tensor.data[0];
+            let (re, im) = tensor.materialize_f64()[0];
             Ok(Complex64::new(re, im))
         }
         Value::Num(n) => Ok(Complex64::new(n, 0.0)),
@@ -626,13 +626,11 @@ pub(crate) mod tests {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![1, 4]);
                 let expected = [(1.0 / 3.0, 2.0 / 3.0), (-1.5, 0.0), (0.0, 4.0), (0.0, -1.0)];
-                assert!(t
-                    .data
-                    .iter()
-                    .zip(expected.iter())
-                    .all(|((lre, lim), (rre, rim))| {
+                assert!(t.materialize_f64().iter().zip(expected.iter()).all(
+                    |((lre, lim), (rre, rim))| {
                         (lre - rre).abs() < 1e-12 && (lim - rim).abs() < 1e-12
-                    }));
+                    }
+                ));
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -694,8 +692,8 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![1, 1]);
-                assert_eq!(t.data.len(), 1);
-                let (re, im) = t.data[0];
+                assert_eq!(t.materialize_f64().len(), 1);
+                let (re, im) = t.materialize_f64()[0];
                 assert!((re - 1.5).abs() < 1e-12);
                 assert!((im + 2.0).abs() < 1e-12);
             }
@@ -770,13 +768,11 @@ pub(crate) mod tests {
                     };
                     assert_eq!(ct.shape, vec![1, 3]);
                     let expected = [(0.5, 0.0), (0.0, 0.0), (0.0, 2.0)];
-                    assert!(ct
-                        .data
-                        .iter()
-                        .zip(expected.iter())
-                        .all(|((lre, lim), (rre, rim))| {
+                    assert!(ct.materialize_f64().iter().zip(expected.iter()).all(
+                        |((lre, lim), (rre, rim))| {
                             (lre - rre).abs() < 1e-12 && (lim - rim).abs() < 1e-12
-                        }));
+                        }
+                    ));
                 }
                 other => panic!("expected complex gpu tensor, got {other:?}"),
             }
@@ -804,13 +800,11 @@ pub(crate) mod tests {
             };
             assert_eq!(ct.shape, vec![1, 3]);
             let expected = [(0.5, 0.5), (2.0, -1.0), (2.0, 0.0)];
-            assert!(ct
-                .data
-                .iter()
-                .zip(expected.iter())
-                .all(|((lre, lim), (rre, rim))| {
+            assert!(ct.materialize_f64().iter().zip(expected.iter()).all(
+                |((lre, lim), (rre, rim))| {
                     (lre - rre).abs() < 1e-12 && (lim - rim).abs() < 1e-12
-                }));
+                }
+            ));
         });
     }
 
@@ -916,9 +910,9 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        gpu.data
+        gpu.materialize_f64()
             .iter()
-            .zip(cpu.data.iter())
+            .zip(cpu.materialize_f64().iter())
             .for_each(|((lre, lim), (rre, rim))| {
                 assert!((lre - rre).abs() < tol);
                 assert!((lim - rim).abs() < tol);

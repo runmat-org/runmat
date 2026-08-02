@@ -151,9 +151,18 @@ mod tests {
             panic!("expected complex zeros");
         };
         assert_eq!(zeros.shape, vec![2, 1]);
-        assert!(zeros.data.iter().all(|(re, _)| re.abs() < 1.0e-8));
-        assert!(zeros.data.iter().any(|(_, im)| (*im - 1.0).abs() < 1.0e-8));
-        assert!(zeros.data.iter().any(|(_, im)| (*im + 1.0).abs() < 1.0e-8));
+        assert!(zeros
+            .materialize_f64()
+            .iter()
+            .all(|(re, _)| re.abs() < 1.0e-8));
+        assert!(zeros
+            .materialize_f64()
+            .iter()
+            .any(|(_, im)| (*im - 1.0).abs() < 1.0e-8));
+        assert!(zeros
+            .materialize_f64()
+            .iter()
+            .any(|(_, im)| (*im + 1.0).abs() < 1.0e-8));
     }
 
     #[test]

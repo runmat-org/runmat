@@ -335,13 +335,16 @@ mod tests {
         match &outputs[2] {
             Value::ComplexTensor(poles) => {
                 assert_eq!(poles.shape, vec![2, 1]);
-                assert!(poles.data.iter().all(|(re, _)| (*re + 0.25).abs() < 1.0e-8));
                 assert!(poles
-                    .data
+                    .materialize_f64()
+                    .iter()
+                    .all(|(re, _)| (*re + 0.25).abs() < 1.0e-8));
+                assert!(poles
+                    .materialize_f64()
                     .iter()
                     .any(|(_, im)| (*im - 1.984313483298443).abs() < 1.0e-8));
                 assert!(poles
-                    .data
+                    .materialize_f64()
                     .iter()
                     .any(|(_, im)| (*im + 1.984313483298443).abs() < 1.0e-8));
             }

@@ -338,7 +338,7 @@ fn complex_matrix_input(value: &Value, fn_name: &str) -> BuiltinResult<ComplexRo
         Value::ComplexTensor(tensor) => ComplexRows::new(
             tensor.rows,
             tensor.cols,
-            nonzero_complex_rows(tensor.rows, tensor.cols, &tensor.data),
+            nonzero_complex_rows(tensor.rows, tensor.cols, &tensor.materialize_f64()),
         ),
         Value::Num(value) => ComplexRows::new(1, 1, nonzero_complex_rows(1, 1, &[(*value, 0.0)])),
         Value::Bool(value) => {
@@ -936,8 +936,8 @@ mod tests {
         };
         assert_eq!(out.shape, vec![1, 1]);
         let inv = 1.0 / 2.0_f64.sqrt();
-        assert!((out.data[0].0 - inv).abs() < 1e-12);
-        assert!((out.data[0].1 + inv).abs() < 1e-12);
+        assert!((out.materialize_f64()[0].0 - inv).abs() < 1e-12);
+        assert!((out.materialize_f64()[0].1 + inv).abs() < 1e-12);
     }
 
     #[tokio::test]

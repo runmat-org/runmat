@@ -241,17 +241,11 @@ fn double_from_tensor(tensor: Tensor) -> BuiltinResult<Value> {
         .map_err(|error| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, error))
 }
 
-fn double_from_complex_tensor(mut tensor: ComplexTensor) -> BuiltinResult<Value> {
-    if let Some(storage) = tensor.integer_data.take() {
-        let real = storage.real.exact_values();
-        let imag = storage.imag.exact_values();
-        tensor.data = real
-            .into_iter()
-            .zip(imag)
-            .map(|(re, im)| (re.to_f64(), im.to_f64()))
-            .collect();
-    }
-    Ok(Value::ComplexTensor(tensor))
+fn double_from_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
+    let shape = tensor.shape.clone();
+    ComplexTensor::new(tensor.materialize_f64(), shape)
+        .map(Value::ComplexTensor)
+        .map_err(|error| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, error))
 }
 
 fn double_from_sparse_tensor(sparse: SparseTensor) -> BuiltinResult<Value> {
@@ -639,15 +633,14 @@ pub(crate) mod tests {
             IntegerStorage::I16(vec![5, -7]),
         )
         .unwrap();
-        let mut tensor = ComplexTensor::new_integer(storage, vec![1, 2]).unwrap();
-        tensor.data = vec![(0.0, 0.0), (0.0, 0.0)];
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).unwrap();
 
         let result = double_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("double");
         match result {
             Value::ComplexTensor(t) => {
-                assert!(t.integer_data.is_none());
+                assert!(t.integer_storage().is_none());
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data, vec![(-2.0, 5.0), (3.0, -7.0)]);
+                assert_eq!(t.materialize_f64(), vec![(-2.0, 5.0), (3.0, -7.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }

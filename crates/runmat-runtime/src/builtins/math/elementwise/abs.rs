@@ -223,7 +223,7 @@ fn abs_integer_storage(storage: &IntegerStorage) -> IntegerStorage {
 
 fn abs_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let data = ct
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| complex_magnitude(re, im))
         .collect::<Vec<_>>();

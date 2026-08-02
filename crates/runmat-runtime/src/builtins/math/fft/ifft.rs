@@ -626,7 +626,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![4]);
                 let expected = [(1.0, 0.0), (2.0, 0.0), (3.0, 0.0), (4.0, 0.0)];
-                for (idx, actual) in ct.data.iter().enumerate() {
+                for (idx, actual) in ct.materialize_f64().iter().enumerate() {
                     assert!(approx_eq(*actual, expected[idx], 1e-12));
                 }
             }
@@ -662,7 +662,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![0]);
-                assert!(ct.data.is_empty());
+                assert!(ct.materialize_f64().is_empty());
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -693,7 +693,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![2, 3]);
-                for (idx, (re, im)) in ct.data.iter().enumerate() {
+                for (idx, (re, im)) in ct.materialize_f64().iter().enumerate() {
                     assert!(approx_eq(
                         (*re, *im),
                         (original.materialize_f64()[idx], 0.0),
@@ -794,7 +794,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![4]);
-                for &(re, im) in &ct.data {
+                for &(re, im) in &ct.materialize_f64() {
                     assert!((re - 1.0).abs() < 1e-12);
                     assert!(im.abs() < 1e-12);
                 }
@@ -822,7 +822,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![2]);
-                for ((re, im), expected) in ct.data.iter().zip(expected.iter()) {
+                for ((re, im), expected) in ct.materialize_f64().iter().zip(expected.iter()) {
                     assert!(approx_eq((*re, *im), (expected.re, expected.im), 1e-12));
                 }
             }
@@ -875,7 +875,11 @@ pub(crate) mod tests {
             let gpu_ct = value_as_complex_tensor(gpu);
             let cpu_ct = value_as_complex_tensor(cpu);
             assert_eq!(gpu_ct.shape, cpu_ct.shape);
-            for (a, b) in gpu_ct.data.iter().zip(cpu_ct.data.iter()) {
+            for (a, b) in gpu_ct
+                .materialize_f64()
+                .iter()
+                .zip(cpu_ct.materialize_f64().iter())
+            {
                 assert!(approx_eq(*a, *b, 1e-12));
             }
             provider.free(&handle).ok();
@@ -961,7 +965,11 @@ pub(crate) mod tests {
                 runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
             };
             assert_eq!(gpu_ct.shape, cpu_ct.shape);
-            for (a, b) in gpu_ct.data.iter().zip(cpu_ct.data.iter()) {
+            for (a, b) in gpu_ct
+                .materialize_f64()
+                .iter()
+                .zip(cpu_ct.materialize_f64().iter())
+            {
                 assert!(approx_eq(*a, *b, tol), "{a:?} vs {b:?}");
             }
             provider.free(&handle).ok();

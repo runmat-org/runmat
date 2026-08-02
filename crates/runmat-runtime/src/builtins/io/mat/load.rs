@@ -2019,9 +2019,7 @@ pub(crate) mod tests {
         for (name, real, imag) in &cases {
             let storage =
                 IntegerComplexStorage::new(real.clone(), imag.clone()).expect("components");
-            let mut tensor =
-                ComplexTensor::new_integer(storage, vec![2, 1]).expect("typed complex");
-            tensor.data.clear();
+            let tensor = ComplexTensor::new_integer(storage, vec![2, 1]).expect("typed complex");
             entries.push(((*name).to_string(), Value::ComplexTensor(tensor)));
         }
 
@@ -2031,7 +2029,7 @@ pub(crate) mod tests {
         for (name, real, imag) in cases {
             match values.get(name).expect("loaded typed complex tensor") {
                 Value::ComplexTensor(tensor) => assert_eq!(
-                    tensor.integer_data,
+                    tensor.integer_storage().cloned(),
                     Some(IntegerComplexStorage::new(real, imag).expect("components"))
                 ),
                 other => panic!("expected typed complex tensor for {name}, got {other:?}"),

@@ -564,7 +564,7 @@ impl CoeffInput {
             }
             Value::Tensor(tensor) => Self::from_tensor(name, label, tensor),
             Value::ComplexTensor(tensor) => {
-                let len = tensor.data.len();
+                let len = tensor.materialize_f64().len();
                 if len == 0 {
                     return Err(filter_error_with_detail(
                         Self::empty_error(label),
@@ -573,7 +573,7 @@ impl CoeffInput {
                 }
                 ensure_vector_shape(name, label, &tensor.shape)?;
                 let data = tensor
-                    .data
+                    .materialize_f64()
                     .into_iter()
                     .map(|(re, im)| Complex::new(re, im))
                     .collect();
@@ -686,7 +686,7 @@ impl SignalInput {
             Value::ComplexTensor(tensor) => {
                 let shape = tensor.shape.clone();
                 let data = tensor
-                    .data
+                    .materialize_f64()
                     .into_iter()
                     .map(|(re, im)| Complex::new(re, im))
                     .collect();
@@ -879,7 +879,7 @@ impl InitialState {
             }
             Value::ComplexTensor(tensor) => (
                 tensor
-                    .data
+                    .materialize_f64()
                     .iter()
                     .map(|&(re, im)| Complex::new(re, im))
                     .collect::<Vec<_>>(),
@@ -1801,8 +1801,8 @@ pub(crate) mod tests {
         .expect("filter");
         let (y, _) = eval.into_pair();
 
-        let ComplexTensor { data, .. } = match y {
-            Value::ComplexTensor(t) => t,
+        let data = match y {
+            Value::ComplexTensor(t) => t.materialize_f64(),
             other => panic!("expected complex tensor, got {other:?}"),
         };
         let root_half = std::f64::consts::FRAC_1_SQRT_2;

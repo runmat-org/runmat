@@ -279,8 +279,8 @@ fn compute_mod_complex(a: &ComplexTensor, b: &ComplexTensor) -> BuiltinResult<Va
     }
     let mut result = vec![(0.0f64, 0.0f64); plan.len()];
     for (out_idx, idx_a, idx_b) in plan.iter() {
-        let (ar, ai) = a.data[idx_a];
-        let (br, bi) = b.data[idx_b];
+        let (ar, ai) = a.materialize_f64()[idx_a];
+        let (br, bi) = b.materialize_f64()[idx_b];
         result[out_idx] = mod_complex_scalar(ar, ai, br, bi);
     }
     let tensor = ComplexTensor::new(result, plan.output_shape().to_vec())
@@ -655,7 +655,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
                 let expected = [(0.0, 0.0), (0.0, 1.0)];
-                for ((re, im), (er, ei)) in out.data.iter().zip(expected.iter()) {
+                for ((re, im), (er, ei)) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((re - er).abs() < 1e-12);
                     assert!((im - ei).abs() < 1e-12);
                 }
@@ -666,7 +666,7 @@ pub(crate) mod tests {
 
     #[test]
     fn mod_complex_scalar_helpers_read_typed_integer_complex_storage_without_mirror() {
-        let mut complex = ComplexTensor::new_integer(
+        let complex = ComplexTensor::new_integer(
             runmat_builtins::IntegerComplexStorage::new(
                 IntegerStorage::I16(vec![9]),
                 IntegerStorage::I16(vec![-2]),
@@ -675,7 +675,6 @@ pub(crate) mod tests {
             vec![1, 1],
         )
         .expect("integer complex tensor");
-        complex.data.clear();
 
         assert_eq!(
             scalar_complex_value(&Value::ComplexTensor(complex.clone())),

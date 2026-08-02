@@ -719,7 +719,7 @@ fn keep_triangle(matrix: Value, flag: TriangularFlag) -> BuiltinResult<Value> {
             }
             Ok(Value::Tensor(tensor))
         }
-        Value::ComplexTensor(mut tensor) if tensor.integer_data.is_none() => {
+        Value::ComplexTensor(mut tensor) if tensor.integer_storage().is_none() => {
             for col in 0..tensor.cols {
                 for row in 0..tensor.rows {
                     let zero = match flag {
@@ -727,7 +727,9 @@ fn keep_triangle(matrix: Value, flag: TriangularFlag) -> BuiltinResult<Value> {
                         TriangularFlag::Lower => row < col,
                     };
                     if zero {
-                        tensor.data[row + col * tensor.rows] = (0.0, 0.0);
+                        tensor
+                            .set_f64_assignment_at(row + col * tensor.rows, 0.0, 0.0)
+                            .map_err(internal)?;
                     }
                 }
             }
@@ -776,25 +778,25 @@ fn symmetrize_from_triangle(matrix: Value, flag: TriangularFlag) -> BuiltinResul
             }
             Ok(Value::Tensor(tensor))
         }
-        Value::ComplexTensor(mut tensor) if tensor.integer_data.is_none() => {
+        Value::ComplexTensor(mut tensor) if tensor.integer_storage().is_none() => {
             for col in 0..tensor.cols {
                 for row in 0..tensor.rows {
                     if row == col {
                         continue;
                     }
                     let maybe_value = match flag {
-                        TriangularFlag::Upper if row > col => {
-                            let (re, im) = tensor.data[col + row * tensor.rows];
-                            Some((re, -im))
-                        }
-                        TriangularFlag::Lower if row < col => {
-                            let (re, im) = tensor.data[col + row * tensor.rows];
-                            Some((re, -im))
-                        }
+                        TriangularFlag::Upper if row > col => tensor
+                            .numeric_value_at(col + row * tensor.rows)
+                            .map(|(real, imag)| (real.materialize_f64(), -imag.materialize_f64())),
+                        TriangularFlag::Lower if row < col => tensor
+                            .numeric_value_at(col + row * tensor.rows)
+                            .map(|(real, imag)| (real.materialize_f64(), -imag.materialize_f64())),
                         _ => None,
                     };
                     if let Some(value) = maybe_value {
-                        tensor.data[row + col * tensor.rows] = value;
+                        tensor
+                            .set_f64_assignment_at(row + col * tensor.rows, value.0, value.1)
+                            .map_err(internal)?;
                     }
                 }
             }
@@ -1320,15 +1322,15 @@ fn matrix_is_real(matrix: &Value) -> bool {
 }
 
 fn complex_tensor_values_pair_cow(tensor: &ComplexTensor) -> Cow<'_, [(f64, f64)]> {
-    if tensor.integer_data.is_some() {
+    if let Some(values) = tensor.as_f64_slice() {
+        Cow::Borrowed(values)
+    } else {
         Cow::Owned(
             tensor::complex_tensor_values_complex64(tensor)
                 .into_iter()
                 .map(|value| (value.re, value.im))
                 .collect(),
         )
-    } else {
-        Cow::Borrowed(&tensor.data)
     }
 }
 
@@ -1354,7 +1356,7 @@ fn complex_scalar(value: &Value, label: &str) -> BuiltinResult<(f64, f64)> {
             Ok((tensor::tensor_value_f64(tensor, 0), 0.0))
         }
         Value::ComplexTensor(tensor) if complex_tensor_element_len(tensor) == 1 => {
-            if let Some(storage) = tensor.integer_data.as_ref() {
+            if let Some(storage) = tensor.integer_storage() {
                 let re = storage
                     .real
                     .value_at(0)
@@ -1367,7 +1369,7 @@ fn complex_scalar(value: &Value, label: &str) -> BuiltinResult<(f64, f64)> {
                     .to_f64();
                 return Ok((re, im));
             }
-            Ok(tensor.data[0])
+            Ok(tensor.materialize_f64()[0])
         }
         Value::LogicalArray(array) if array.data.len() == 1 => {
             Ok((if array.data[0] != 0 { 1.0 } else { 0.0 }, 0.0))
@@ -1384,9 +1386,9 @@ fn tensor_element_len(tensor: &Tensor) -> usize {
 
 fn complex_tensor_element_len(tensor: &ComplexTensor) -> usize {
     tensor
-        .integer_data
+        .integer_storage()
         .as_ref()
-        .map_or(tensor.data.len(), |storage| storage.real.len())
+        .map_or(tensor.materialize_f64().len(), |storage| storage.real.len())
 }
 
 fn real_scalar(value: &Value, label: &str) -> BuiltinResult<f64> {
@@ -1469,10 +1471,9 @@ mod tests {
         imag: IntegerStorage,
         shape: Vec<usize>,
     ) -> Value {
-        let mut tensor =
+        let tensor =
             ComplexTensor::new_integer(IntegerComplexStorage::new(real, imag).unwrap(), shape)
                 .unwrap();
-        tensor.data.clear();
         Value::ComplexTensor(tensor)
     }
 
@@ -1628,7 +1629,7 @@ mod tests {
             Value::ComplexTensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 2]);
                 assert_eq!(
-                    tensor.data,
+                    tensor.materialize_f64(),
                     vec![(1.0, -5.0), (3.0, -7.0), (2.0, -6.0), (4.0, -8.0)]
                 );
             }
@@ -1646,7 +1647,7 @@ mod tests {
         .expect("scale");
         match scaled {
             Value::ComplexTensor(tensor) => {
-                assert_eq!(tensor.data, vec![(2.0, 6.0), (4.0, 8.0)]);
+                assert_eq!(tensor.materialize_f64(), vec![(2.0, 6.0), (4.0, 8.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -1666,7 +1667,7 @@ mod tests {
         match upper_kept {
             Value::ComplexTensor(tensor) => {
                 assert_eq!(
-                    tensor.data,
+                    tensor.materialize_f64(),
                     vec![(1.0, 2.0), (0.0, 0.0), (0.0, 0.0), (4.0, 5.0)]
                 );
             }
@@ -1685,7 +1686,7 @@ mod tests {
         match symmetrized {
             Value::ComplexTensor(tensor) => {
                 assert_eq!(
-                    tensor.data,
+                    tensor.materialize_f64(),
                     vec![(1.0, 0.0), (2.0, 3.0), (2.0, -3.0), (4.0, 0.0)]
                 );
             }
@@ -1774,10 +1775,10 @@ mod tests {
 
         match result {
             Value::ComplexTensor(tensor) => {
-                assert!((tensor.data[0].0 - 4.0).abs() < 1e-12);
-                assert!((tensor.data[0].1 - 1.0).abs() < 1e-12);
-                assert!((tensor.data[1].0 - 1.0).abs() < 1e-12);
-                assert!((tensor.data[1].1 + 2.0).abs() < 1e-12);
+                assert!((tensor.materialize_f64()[0].0 - 4.0).abs() < 1e-12);
+                assert!((tensor.materialize_f64()[0].1 - 1.0).abs() < 1e-12);
+                assert!((tensor.materialize_f64()[1].0 - 1.0).abs() < 1e-12);
+                assert!((tensor.materialize_f64()[1].1 + 2.0).abs() < 1e-12);
             }
             other => panic!("expected complex result, got {other:?}"),
         }
@@ -1821,9 +1822,7 @@ mod tests {
             IntegerStorage::I16(vec![-2]),
         )
         .expect("typed complex storage");
-        let mut complex_scale =
-            ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex scale");
-        complex_scale.data.clear();
+        let complex_scale = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex scale");
         assert_eq!(
             complex_scalar(&Value::ComplexTensor(complex_scale), "scale").unwrap(),
             (4.0, -2.0)

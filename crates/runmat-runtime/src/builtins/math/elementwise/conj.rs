@@ -170,17 +170,21 @@ fn conj_complex_scalar(re: f64, im: f64) -> BuiltinResult<Value> {
 }
 
 fn conj_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    if let Some(storage) = ct.integer_data {
+    if let Some(storage) = ct.integer_storage() {
         let storage = IntegerComplexStorage::new(
-            storage.real,
-            conjugate_integer_imaginary_storage(storage.imag),
+            storage.real.clone(),
+            conjugate_integer_imaginary_storage(storage.imag.clone()),
         )
         .map_err(|e| builtin_error_with_detail(&CONJ_ERROR_INTERNAL, e))?;
         let tensor = ComplexTensor::new_integer(storage, ct.shape)
             .map_err(|e| builtin_error_with_detail(&CONJ_ERROR_INTERNAL, e))?;
         Ok(Value::ComplexTensor(tensor))
     } else {
-        let data = ct.data.into_iter().map(|(re, im)| (re, -im)).collect();
+        let data = ct
+            .materialize_f64()
+            .into_iter()
+            .map(|(re, im)| (re, -im))
+            .collect();
         let tensor = ComplexTensor::new(data, ct.shape)
             .map_err(|e| builtin_error_with_detail(&CONJ_ERROR_INTERNAL, e))?;
         Ok(Value::ComplexTensor(tensor))
@@ -346,8 +350,8 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![2, 1]);
-                assert_eq!(ct.data[0], (1.0, -2.0));
-                assert_eq!(ct.data[1], (-3.0, 4.0));
+                assert_eq!(ct.materialize_f64()[0], (1.0, -2.0));
+                assert_eq!(ct.materialize_f64()[1], (-3.0, 4.0));
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -362,7 +366,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                assert_eq!(t.data, vec![(1.0, -0.0), (2.0, 0.0)]);
+                assert_eq!(t.materialize_f64(), vec![(1.0, -0.0), (2.0, 0.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -411,7 +415,7 @@ pub(crate) mod tests {
 
     #[test]
     fn conj_complex_integer_tensor_reads_storage_without_mirror() {
-        let mut complex = ComplexTensor::new_integer(
+        let complex = ComplexTensor::new_integer(
             IntegerComplexStorage::new(
                 IntegerStorage::I16(vec![-10, 20]),
                 IntegerStorage::I16(vec![3, i16::MIN]),
@@ -420,7 +424,6 @@ pub(crate) mod tests {
             vec![1, 2],
         )
         .unwrap();
-        complex.data.clear();
 
         let result = conj_builtin(Value::ComplexTensor(complex)).expect("conj");
         let Value::ComplexTensor(output) = result else {
@@ -428,7 +431,7 @@ pub(crate) mod tests {
         };
         assert_eq!(output.shape, vec![1, 2]);
         assert_eq!(
-            output.integer_data,
+            output.integer_storage().cloned(),
             Some(
                 IntegerComplexStorage::new(
                     IntegerStorage::I16(vec![-10, 20]),
@@ -499,7 +502,7 @@ pub(crate) mod tests {
                 panic!("expected complex tensor");
             };
             assert_eq!(ct.shape, vec![2, 1]);
-            assert_eq!(ct.data, vec![(1.0, -2.0), (-3.0, 4.0)]);
+            assert_eq!(ct.materialize_f64(), vec![(1.0, -2.0), (-3.0, 4.0)]);
         });
     }
 
@@ -555,6 +558,6 @@ pub(crate) mod tests {
         let Value::ComplexTensor(ct) = gathered else {
             panic!("expected complex tensor");
         };
-        assert_eq!(ct.data, vec![(1.0, -2.0), (-3.0, 4.0)]);
+        assert_eq!(ct.materialize_f64(), vec![(1.0, -2.0), (-3.0, 4.0)]);
     }
 }

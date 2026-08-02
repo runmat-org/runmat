@@ -182,7 +182,7 @@ fn tensor_to_complex(tensor: Tensor) -> BuiltinResult<Vec<Complex64>> {
 fn complex_tensor_to_vec(tensor: ComplexTensor) -> BuiltinResult<Vec<Complex64>> {
     ensure_vector_shape("roots", &tensor.shape)?;
     Ok(tensor
-        .data
+        .materialize_f64()
         .into_iter()
         .map(|(re, im)| Complex64::new(re, im))
         .collect())
@@ -430,7 +430,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                let mut roots = t.data;
+                let mut roots = t.materialize_f64();
                 roots.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
                 assert!((roots[0].0).abs() < 1e-10);
                 assert!((roots[0].1 + 1.0).abs() < 1e-10);
@@ -456,7 +456,7 @@ pub(crate) mod tests {
             }
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![4, 1]);
-                for &(re, im) in &t.data {
+                for &(re, im) in &t.materialize_f64() {
                     assert!(re.abs() < 1e-7 && im.abs() < 1e-7);
                 }
             }
@@ -475,7 +475,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
                 // roots at i and -i
-                let mut roots = t.data;
+                let mut roots = t.materialize_f64();
                 roots.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
                 assert!(roots[0].0.abs() < 1e-10 && (roots[0].1 + 1.0).abs() < 1e-6);
                 assert!(roots[1].0.abs() < 1e-10 && (roots[1].1 - 1.0).abs() < 1e-6);

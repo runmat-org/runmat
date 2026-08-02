@@ -23,7 +23,7 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 /// them. Arithmetic builtins use this before selecting floating or provider
 /// execution paths so exact integer components are never coerced to `f64`.
 pub fn is_typed_complex_integer(value: &Value) -> bool {
-    matches!(value, Value::ComplexTensor(tensor) if tensor.integer_data.is_some())
+    matches!(value, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some())
 }
 
 /// Reject a value that would otherwise enter a floating complex operation.
@@ -44,7 +44,7 @@ pub fn reject_typed_complex_integer_tensor(
     tensor: &ComplexTensor,
     builtin: &str,
 ) -> BuiltinResult<()> {
-    if tensor.integer_data.is_some() {
+    if tensor.integer_storage().is_some() {
         return Err(build_runtime_error(format!(
             "{builtin}: operations involving complex numbers with integer types are not supported"
         ))
@@ -454,9 +454,9 @@ pub fn value_is_finite(value: &Value) -> bool {
             .expect("double sparse storage")
             .iter()
             .all(|v| v.is_finite()),
-        Value::ComplexTensor(t) if t.integer_data.is_some() => true,
+        Value::ComplexTensor(t) if t.integer_storage().is_some() => true,
         Value::ComplexTensor(t) => t
-            .data
+            .materialize_f64()
             .iter()
             .all(|(re, im)| re.is_finite() && im.is_finite()),
         Value::LogicalArray(_) | Value::CharArray(_) => true,
@@ -481,7 +481,7 @@ pub fn value_is_numeric(value: &Value) -> bool {
 pub fn value_is_float(value: &Value) -> bool {
     match value {
         Value::Num(_) | Value::Complex(_, _) => true,
-        Value::ComplexTensor(tensor) => tensor.integer_data.is_none(),
+        Value::ComplexTensor(tensor) => tensor.integer_storage().is_none(),
         Value::Tensor(t) => matches!(t.numeric_dtype(), NumericDType::F64 | NumericDType::F32),
         Value::SparseTensor(tensor) => tensor.integer_storage().is_none(),
         Value::GpuTensor(handle) => {
@@ -536,15 +536,15 @@ pub fn value_is_scalar_or_empty(value: &Value) -> bool {
 pub fn value_is_real(value: &Value) -> bool {
     match value {
         Value::Complex(_, im) => *im == 0.0,
-        Value::ComplexTensor(t) if t.integer_data.is_some() => t
-            .integer_data
+        Value::ComplexTensor(t) if t.integer_storage().is_some() => t
+            .integer_storage()
             .as_ref()
             .expect("checked integer complex storage")
             .imag
             .exact_values()
             .iter()
             .all(IntValue::is_zero),
-        Value::ComplexTensor(t) => t.data.iter().all(|(_, im)| *im == 0.0),
+        Value::ComplexTensor(t) => t.materialize_f64().iter().all(|(_, im)| *im == 0.0),
         _ => true,
     }
 }
@@ -565,9 +565,9 @@ pub fn value_is_integer(value: &Value) -> bool {
             .iter()
             .all(|v| v.is_finite() && v.fract() == 0.0),
         Value::Complex(re, im) => *im == 0.0 && re.is_finite() && re.fract() == 0.0,
-        Value::ComplexTensor(t) if t.integer_data.is_some() => value_is_real(value),
+        Value::ComplexTensor(t) if t.integer_storage().is_some() => value_is_real(value),
         Value::ComplexTensor(t) => t
-            .data
+            .materialize_f64()
             .iter()
             .all(|(re, im)| *im == 0.0 && re.is_finite() && re.fract() == 0.0),
         Value::GpuTensor(handle) => {
@@ -589,8 +589,11 @@ pub fn value_is_non_nan(value: &Value) -> bool {
             .expect("double sparse storage")
             .iter()
             .all(|v| !v.is_nan()),
-        Value::ComplexTensor(t) if t.integer_data.is_some() => true,
-        Value::ComplexTensor(t) => t.data.iter().all(|(re, im)| !re.is_nan() && !im.is_nan()),
+        Value::ComplexTensor(t) if t.integer_storage().is_some() => true,
+        Value::ComplexTensor(t) => t
+            .materialize_f64()
+            .iter()
+            .all(|(re, im)| !re.is_nan() && !im.is_nan()),
         Value::Cell(c) => c.data.iter().all(value_is_non_nan),
         _ => true,
     }
@@ -631,12 +634,12 @@ pub fn value_is_nonpositive(value: &Value) -> bool {
 pub fn value_is_nonzero(value: &Value) -> bool {
     match value {
         Value::Complex(re, im) => re.is_finite() && im.is_finite() && (*re != 0.0 || *im != 0.0),
-        Value::ComplexTensor(t) if t.integer_data.is_some() => {
-            let integer_data = t.integer_data.as_ref().expect("checked integer data");
+        Value::ComplexTensor(t) if t.integer_storage().is_some() => {
+            let integer_data = t.integer_storage().expect("checked integer data");
             (0..integer_data.len()).all(|index| integer_data.is_nonzero_at(index).unwrap_or(false))
         }
         Value::ComplexTensor(t) => t
-            .data
+            .materialize_f64()
             .iter()
             .all(|(re, im)| re.is_finite() && im.is_finite() && (*re != 0.0 || *im != 0.0)),
         _ => {
@@ -753,10 +756,11 @@ pub fn value_matches_class(value: &Value, class_name: &str) -> bool {
             matches!(value, Value::Num(_) | Value::Complex(_, _))
                 || matches!(value, Value::Tensor(t) if t.numeric_dtype() == NumericDType::F64)
                 || matches!(value, Value::SparseTensor(t) if t.integer_storage().is_none())
-                || matches!(value, Value::ComplexTensor(t) if t.integer_data.is_none())
+                || matches!(value, Value::ComplexTensor(t) if t.numeric_dtype() == NumericDType::F64)
         }
         "single" => {
             matches!(value, Value::Tensor(t) if t.numeric_dtype() == NumericDType::F32)
+                || matches!(value, Value::ComplexTensor(t) if t.numeric_dtype() == NumericDType::F32)
         }
         "gpuarray" => matches!(value, Value::GpuTensor(_)),
         _ => class_name_for_value(value).eq_ignore_ascii_case(requested),
@@ -768,7 +772,7 @@ fn value_has_native_integer_class(value: &Value) -> bool {
         Value::Int(_) => true,
         Value::Tensor(tensor) => tensor.integer_storage().is_some(),
         Value::SparseTensor(tensor) => tensor.integer_storage().is_some(),
-        Value::ComplexTensor(tensor) => tensor.integer_data.is_some(),
+        Value::ComplexTensor(tensor) => tensor.integer_storage().is_some(),
         Value::GpuTensor(handle) => handle_integer_type(handle).is_some(),
         _ => false,
     }
@@ -909,7 +913,7 @@ fn exact_integer_values_all(
             integer_storage_all(storage, pred)
                 && (storage.len() >= numel || integer_storage_zero_satisfies(storage, pred))
         }),
-        Value::ComplexTensor(tensor) => tensor.integer_data.as_ref().map(|storage| {
+        Value::ComplexTensor(tensor) => tensor.integer_storage().map(|storage| {
             (0..storage.len()).all(|index| {
                 let Some(real) = storage.real.value_at(index) else {
                     return false;
@@ -1002,10 +1006,9 @@ fn numeric_values_all(value: &Value, pred: impl Fn(f64) -> bool) -> bool {
             values.iter().copied().all(&pred) && (values.len() >= numel || pred(0.0))
         }
         Value::Complex(re, im) => *im == 0.0 && pred(*re),
-        Value::ComplexTensor(t) if t.integer_data.is_some() => {
+        Value::ComplexTensor(t) if t.integer_storage().is_some() => {
             let storage = t
-                .integer_data
-                .as_ref()
+                .integer_storage()
                 .expect("integer storage was checked above");
             (0..storage.len()).all(|index| {
                 let real = storage
@@ -1019,7 +1022,10 @@ fn numeric_values_all(value: &Value, pred: impl Fn(f64) -> bool) -> bool {
                 imag.is_zero() && pred(real.to_f64())
             })
         }
-        Value::ComplexTensor(t) => t.data.iter().all(|(re, im)| *im == 0.0 && pred(*re)),
+        Value::ComplexTensor(t) => t
+            .materialize_f64()
+            .iter()
+            .all(|(re, im)| *im == 0.0 && pred(*re)),
         _ => false,
     }
 }
@@ -1329,7 +1335,7 @@ mod tests {
             Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("wide");
         ok("mustBeNonzero", vec![Value::Tensor(wide_nonzero)]);
 
-        let mut complex_nonzero = ComplexTensor::new_integer(
+        let complex_nonzero = ComplexTensor::new_integer(
             IntegerComplexStorage::new(
                 IntegerStorage::U64(vec![0]),
                 IntegerStorage::U64(vec![wide]),
@@ -1338,7 +1344,6 @@ mod tests {
             vec![1, 1],
         )
         .expect("complex integer tensor");
-        complex_nonzero.data = vec![(0.0, 0.0)];
         ok("mustBeNonzero", vec![Value::ComplexTensor(complex_nonzero)]);
     }
 
@@ -1351,13 +1356,12 @@ mod tests {
             Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 0]).expect("empty tensor");
         assert!(value_is_empty(&Value::Tensor(empty)));
 
-        let mut complex = ComplexTensor::new_integer(
+        let complex = ComplexTensor::new_integer(
             IntegerComplexStorage::new(IntegerStorage::I16(vec![1]), IntegerStorage::I16(vec![0]))
                 .expect("complex integer storage"),
             vec![1, 1],
         )
         .expect("complex integer tensor");
-        complex.data.clear();
         assert!(!value_is_empty(&Value::ComplexTensor(complex)));
 
         let empty_complex = ComplexTensor::new_integer(
@@ -1397,49 +1401,44 @@ mod tests {
     }
 
     #[test]
-    fn real_and_integer_predicates_read_complex_integer_storage_exactly() {
+    fn real_and_integer_predicates_read_authoritative_complex_integer_storage() {
         let real_storage = IntegerStorage::I16(vec![1, -2]);
         let zero_imag = IntegerStorage::I16(vec![0, 0]);
-        let mut real_complex = ComplexTensor {
-            data: vec![(f64::NAN, 5.0), (f64::INFINITY, -7.0)],
-            integer_data: Some(IntegerComplexStorage::new(real_storage, zero_imag).unwrap()),
-            shape: vec![1, 2],
-            rows: 1,
-            cols: 2,
-        };
-        let value = Value::ComplexTensor(real_complex.clone());
+        let real_complex = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(real_storage, zero_imag).unwrap(),
+            vec![1, 2],
+        )
+        .unwrap();
+        let value = Value::ComplexTensor(real_complex);
         assert!(value_is_finite(&value));
         assert!(value_is_real(&value));
         assert!(value_is_integer(&value));
         assert!(value_is_non_nan(&value));
 
-        real_complex.integer_data = Some(
+        let nonreal_complex = ComplexTensor::new_integer(
             IntegerComplexStorage::new(IntegerStorage::I16(vec![1]), IntegerStorage::I16(vec![1]))
                 .unwrap(),
-        );
-        real_complex.data = vec![(1.0, 0.0)];
-        real_complex.shape = vec![1, 1];
-        real_complex.rows = 1;
-        real_complex.cols = 1;
-        let value = Value::ComplexTensor(real_complex);
+            vec![1, 1],
+        )
+        .unwrap();
+        let value = Value::ComplexTensor(nonreal_complex);
         assert!(!value_is_real(&value));
         assert!(!value_is_integer(&value));
     }
 
     #[test]
-    fn threshold_validators_ignore_typed_sparse_and_complex_integer_mirrors() {
+    fn threshold_validators_read_typed_sparse_and_complex_integer_storage() {
         let sparse =
             SparseTensor::new_integer(1, 2, vec![0, 1, 1], vec![0], IntegerStorage::U8(vec![1]))
                 .unwrap();
         ok("mustBeNonnegative", vec![Value::SparseTensor(sparse)]);
 
-        let mut complex = ComplexTensor::new_integer(
+        let complex = ComplexTensor::new_integer(
             IntegerComplexStorage::new(IntegerStorage::I16(vec![2]), IntegerStorage::I16(vec![0]))
                 .unwrap(),
             vec![1, 1],
         )
         .unwrap();
-        complex.data.clear();
         ok("mustBePositive", vec![Value::ComplexTensor(complex)]);
     }
 
@@ -1833,7 +1832,7 @@ mod tests {
             ],
         );
 
-        let mut complex_value = ComplexTensor::new_integer(
+        let complex_value = ComplexTensor::new_integer(
             IntegerComplexStorage::new(
                 IntegerStorage::U64(vec![wide]),
                 IntegerStorage::U64(vec![0]),
@@ -1842,7 +1841,6 @@ mod tests {
             vec![1, 1],
         )
         .expect("complex integer tensor");
-        complex_value.data = vec![(rounded, 0.0)];
         ok(
             "mustBeGreaterThan",
             vec![Value::ComplexTensor(complex_value), Value::Num(rounded)],

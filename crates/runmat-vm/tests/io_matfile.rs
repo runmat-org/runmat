@@ -63,7 +63,7 @@ fn save_load_roundtrip_preserves_typed_complex_uint64_components() {
         matches!(
             value,
             Value::ComplexTensor(tensor)
-                if tensor.integer_data.as_ref().map(|storage| (&storage.real, &storage.imag))
+                if tensor.integer_storage().map(|storage| (&storage.real, &storage.imag))
                     == Some((
                         &IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
                         &IntegerStorage::U64(vec![u64::MAX, 7]),

@@ -537,7 +537,7 @@ fn is_hermitian_complex(tensor: &ComplexTensor, mode: HermitianMode, tol: f64) -
     let rows = tensor.rows;
     let cols = tensor.cols;
     debug_assert_eq!(rows, cols, "is_hermitian_complex requires a square matrix");
-    let data = &tensor.data;
+    let data = &tensor.materialize_f64();
 
     for col in 0..cols {
         let (diag_re, diag_im) = data[col + col * rows];

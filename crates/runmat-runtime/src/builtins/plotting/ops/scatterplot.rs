@@ -505,7 +505,7 @@ fn extract_host_points(
 fn complex_samples(value: Value) -> BuiltinResult<Vec<(f64, f64)>> {
     match value {
         Value::Complex(re, im) => Ok(vec![(re, im)]),
-        Value::ComplexTensor(tensor) => Ok(tensor.data),
+        Value::ComplexTensor(tensor) => Ok(tensor.materialize_f64()),
         Value::Num(v) => Ok(vec![(v, 0.0)]),
         Value::Int(v) => Ok(vec![(v.to_f64(), 0.0)]),
         Value::Bool(v) => Ok(vec![(if v { 1.0 } else { 0.0 }, 0.0)]),

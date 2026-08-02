@@ -907,7 +907,7 @@ fn setxor_complex(
         let mut entries = Vec::<SymEntry<(f64, f64)>>::new();
         let mut map: HashMap<ComplexElementKey, usize> = HashMap::new();
         let mut order_counter = 0usize;
-        for (idx, &value) in a.data.iter().enumerate() {
+        for (idx, &value) in a.materialize_f64().iter().enumerate() {
             add_sym_entry(
                 &mut entries,
                 &mut map,
@@ -918,7 +918,7 @@ fn setxor_complex(
                 &mut order_counter,
             );
         }
-        for (idx, &value) in b.data.iter().enumerate() {
+        for (idx, &value) in b.materialize_f64().iter().enumerate() {
             add_sym_entry(
                 &mut entries,
                 &mut map,
@@ -1619,7 +1619,7 @@ fn numeric_row_from_values(values: &[f64], row: usize, rows: usize, cols: usize)
 
 fn complex_row(tensor: &ComplexTensor, row: usize, cols: usize) -> Vec<(f64, f64)> {
     (0..cols)
-        .map(|col| tensor.data[row + col * tensor.shape[0]])
+        .map(|col| tensor.materialize_f64()[row + col * tensor.shape[0]])
         .collect()
 }
 
@@ -2015,7 +2015,7 @@ mod tests {
         let Value::ComplexTensor(values) = eval.values_value() else {
             panic!("expected complex tensor");
         };
-        assert_eq!(values.data, vec![(1.0, 1.0), (3.0, 0.0)]);
+        assert_eq!(values.materialize_f64(), vec![(1.0, 1.0), (3.0, 0.0)]);
         let ia = tensor::value_into_tensor_for("setxor", eval.ia_value()).unwrap();
         assert_double(&ia, &[1.0]);
         let ib = tensor::value_into_tensor_for("setxor", eval.ib_value()).unwrap();
@@ -2030,7 +2030,7 @@ mod tests {
         let Value::ComplexTensor(values) = eval.values_value() else {
             panic!("expected complex tensor");
         };
-        assert_eq!(values.data, vec![(1.0, 1.0), (3.0, 0.0)]);
+        assert_eq!(values.materialize_f64(), vec![(1.0, 1.0), (3.0, 0.0)]);
         assert_eq!(values.shape, vec![1, 2]);
     }
 
@@ -2043,7 +2043,7 @@ mod tests {
         let Value::ComplexTensor(values) = eval.values_value() else {
             panic!("expected complex tensor");
         };
-        assert_eq!(values.data, vec![(1.0, 0.0), (0.0, 1.0)]);
+        assert_eq!(values.materialize_f64(), vec![(1.0, 0.0), (0.0, 1.0)]);
         assert_eq!(values.shape, vec![1, 2]);
     }
 
@@ -2184,7 +2184,7 @@ mod tests {
             let Value::ComplexTensor(values) = eval.values_value() else {
                 panic!("expected complex tensor");
             };
-            assert_eq!(values.data, vec![(1.0, 1.0), (3.0, 0.0)]);
+            assert_eq!(values.materialize_f64(), vec![(1.0, 1.0), (3.0, 0.0)]);
             assert_eq!(values.shape, vec![1, 2]);
             let ia = tensor::value_into_tensor_for("setxor", eval.ia_value()).unwrap();
             assert_double(&ia, &[2.0]);

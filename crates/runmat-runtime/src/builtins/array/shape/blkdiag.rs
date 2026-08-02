@@ -455,7 +455,7 @@ fn assemble_typed_integer_blocks(args: &[Value]) -> Option<BuiltinResult<Value>>
 /// conversion policy and are rejected before the legacy floating-point assembly path.
 fn assemble_typed_complex_integer_blocks(args: &[Value]) -> Option<BuiltinResult<Value>> {
     let has_typed_complex_integer = args.iter().any(
-        |value| matches!(value, Value::ComplexTensor(tensor) if tensor.integer_data.is_some()),
+        |value| matches!(value, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some()),
     );
     if !has_typed_complex_integer {
         return None;
@@ -470,7 +470,7 @@ fn assemble_typed_complex_integer_blocks(args: &[Value]) -> Option<BuiltinResult
                 "typed complex integer blkdiag inputs must all use the same integer class",
             )));
         };
-        let Some(storage) = tensor.integer_data.as_ref() else {
+        let Some(storage) = tensor.integer_storage() else {
             return Some(Err(error_with_detail(
                 &ERROR_INVALID_INPUT,
                 "typed complex integer blkdiag inputs must all use the same integer class",
@@ -517,8 +517,7 @@ fn assemble_typed_complex_integer_blocks(args: &[Value]) -> Option<BuiltinResult
     let mut col_offset = 0usize;
     for tensor in tensors {
         let storage = tensor
-            .integer_data
-            .as_ref()
+            .integer_storage()
             .expect("typed complex input was checked above");
         let source_real = storage.real.exact_values();
         let source_imag = storage.imag.exact_values();
@@ -611,7 +610,7 @@ impl Block {
             Value::ComplexTensor(tensor) => {
                 validate_matrix_shape(&tensor.shape)?;
                 if tensor.shape.is_empty() {
-                    return ComplexTensor::new(tensor.data, vec![1, 1])
+                    return ComplexTensor::new(tensor.materialize_f64(), vec![1, 1])
                         .map(Self::Complex)
                         .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail));
                 }
@@ -724,7 +723,7 @@ fn promoted_dense_dtype(blocks: &[Block]) -> NumericDType {
 
 fn complex_blocks_are_real(blocks: &[Block]) -> bool {
     blocks.iter().all(|block| match block {
-        Block::Complex(tensor) => tensor.data.iter().all(|&(_, im)| im == 0.0),
+        Block::Complex(tensor) => tensor.materialize_f64().iter().all(|&(_, im)| im == 0.0),
         _ => true,
     })
 }
@@ -843,7 +842,7 @@ fn assemble_complex(blocks: Vec<Block>) -> BuiltinResult<Value> {
                     for row in 0..tensor.rows {
                         let src = row + col * tensor.rows;
                         let dst = (row_offset + row) + (col_offset + col) * rows;
-                        data[dst] = tensor.data[src];
+                        data[dst] = tensor.materialize_f64()[src];
                     }
                 }
             }
@@ -1042,7 +1041,7 @@ fn complex_to_real_sparse(tensor: &ComplexTensor) -> BuiltinResult<SparseTensor>
     col_ptrs.push(0);
     for col in 0..tensor.cols {
         for row in 0..tensor.rows {
-            let (re, _) = tensor.data[row + col * tensor.rows];
+            let (re, _) = tensor.materialize_f64()[row + col * tensor.rows];
             if re != 0.0 {
                 row_indices.push(row);
                 values.push(re);
@@ -1126,7 +1125,7 @@ fn tensor_into_blkdiag_value(tensor: Tensor) -> Value {
 }
 
 fn complex_tensor_into_blkdiag_value(tensor: ComplexTensor) -> Value {
-    if tensor::is_scalar_complex_tensor(&tensor) && tensor.integer_data.is_none() {
+    if tensor::is_scalar_complex_tensor(&tensor) && tensor.integer_storage().is_none() {
         let value = tensor::complex_tensor_value_complex64(&tensor, 0);
         Value::Complex(value.re, value.im)
     } else {
@@ -1507,9 +1506,9 @@ mod tests {
         match call(vec![Value::Num(9.0), Value::ComplexTensor(complex)]).unwrap() {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![3, 2]);
-                assert_eq!(out.data[0], (9.0, 0.0));
-                assert_eq!(out.data[4], (1.0, 2.0));
-                assert_eq!(out.data[5], (3.0, -4.0));
+                assert_eq!(out.materialize_f64()[0], (9.0, 0.0));
+                assert_eq!(out.materialize_f64()[4], (1.0, 2.0));
+                assert_eq!(out.materialize_f64()[5], (3.0, -4.0));
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -1553,7 +1552,7 @@ mod tests {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
                 assert_eq!(
-                    out.data,
+                    out.materialize_f64(),
                     vec![(2.0, 0.0), (0.0, 0.0), (0.0, 0.0), (5.0, 1.0)]
                 );
             }
@@ -1608,9 +1607,9 @@ mod tests {
         {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![3, 3]);
-                assert_eq!(out.data[0], (7.0, 0.0));
-                assert_eq!(out.data[4], (1.0, 0.0));
-                assert_eq!(out.data[8], (2.0, -3.0));
+                assert_eq!(out.materialize_f64()[0], (7.0, 0.0));
+                assert_eq!(out.materialize_f64()[4], (1.0, 0.0));
+                assert_eq!(out.materialize_f64()[8], (2.0, -3.0));
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -1776,9 +1775,9 @@ mod tests {
             )
             .unwrap();
             assert_eq!(gathered.shape, vec![3, 2]);
-            assert_eq!(gathered.data[0], (9.0, 0.0));
-            assert_eq!(gathered.data[4], (1.0, 2.0));
-            assert_eq!(gathered.data[5], (3.0, -4.0));
+            assert_eq!(gathered.materialize_f64()[0], (9.0, 0.0));
+            assert_eq!(gathered.materialize_f64()[4], (1.0, 2.0));
+            assert_eq!(gathered.materialize_f64()[5], (3.0, -4.0));
         });
     }
 }

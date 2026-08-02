@@ -86,10 +86,7 @@ fn class_builtin(value: Value) -> crate::BuiltinResult<String> {
 pub(crate) fn class_name_for_value(value: &Value) -> String {
     match value {
         Value::Num(_) | Value::Complex(_, _) => "double".to_string(),
-        Value::ComplexTensor(tensor) => tensor.integer_data.as_ref().map_or_else(
-            || "double".to_string(),
-            |storage| storage.class_name().to_string(),
-        ),
+        Value::ComplexTensor(tensor) => tensor.numeric_dtype().class_name().to_string(),
         Value::Tensor(tensor) => tensor.numeric_dtype().class_name().to_string(),
         Value::SparseTensor(sparse) => sparse.class_name().to_string(),
         Value::Int(iv) => iv.class_name().to_string(),

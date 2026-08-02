@@ -764,7 +764,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(tensor) => {
                 assert_eq!(tensor.shape, vec![3, 3]);
                 assert!(tensor
-                    .data
+                    .materialize_f64()
                     .iter()
                     .all(|(re, im)| re.is_infinite() && re.is_sign_positive() && *im == 0.0));
             }

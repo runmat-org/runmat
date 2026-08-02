@@ -27,7 +27,7 @@ fn assert_same_complex_tensor(lhs: &Value, rhs: &Value) {
     match (lhs, rhs) {
         (Value::ComplexTensor(left), Value::ComplexTensor(right)) => {
             assert_eq!(left.shape, right.shape);
-            assert_eq!(left.data, right.data);
+            assert_eq!(left.materialize_f64(), right.materialize_f64());
         }
         (Value::Complex(lr, li), Value::Complex(rr, ri)) => {
             assert!((lr - rr).abs() < 1e-12, "re left={lr} right={rr}");

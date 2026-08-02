@@ -561,7 +561,7 @@ fn repmat_complex_tensor(
     tensor: &ComplexTensor,
     reps: &[usize],
 ) -> crate::BuiltinResult<ComplexTensor> {
-    if let Some(storage) = &tensor.integer_data {
+    if let Some(storage) = &tensor.integer_storage() {
         let (real, shape) = repmat_integer_storage(&storage.real, &tensor.shape, reps)?;
         let (imag, imag_shape) = repmat_integer_storage(&storage.imag, &tensor.shape, reps)?;
         debug_assert_eq!(shape, imag_shape);
@@ -569,7 +569,8 @@ fn repmat_complex_tensor(
             .and_then(|storage| ComplexTensor::new_integer(storage, shape))
             .map_err(|e| repmat_internal(format!("repmat: {e}")));
     }
-    let (data, shape) = repmat_column_major(&tensor.data, &tensor.shape, reps, "repmat")?;
+    let (data, shape) =
+        repmat_column_major(&tensor.materialize_f64(), &tensor.shape, reps, "repmat")?;
     ComplexTensor::new(data, shape).map_err(|e| repmat_internal(format!("repmat: {e}")))
 }
 
@@ -1112,7 +1113,10 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![2, 2]);
-                assert!(ct.data.iter().all(|&(re, im)| re == 1.0 && im == -2.0));
+                assert!(ct
+                    .materialize_f64()
+                    .iter()
+                    .all(|&(re, im)| re == 1.0 && im == -2.0));
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -1140,7 +1144,10 @@ pub(crate) mod tests {
                         let orig_row = row % base_rows;
                         let idx = row + col * rows;
                         let expected_idx = orig_row + orig_col * base_rows;
-                        assert_eq!(ct.data[idx], base.data[expected_idx]);
+                        assert_eq!(
+                            ct.materialize_f64()[idx],
+                            base.materialize_f64()[expected_idx]
+                        );
                     }
                 }
             }
@@ -1171,7 +1178,7 @@ pub(crate) mod tests {
         assert_eq!(output.shape, vec![2, 4]);
         assert_eq!(
             output
-                .integer_data
+                .integer_storage()
                 .as_ref()
                 .map(|storage| (&storage.real, &storage.imag)),
             Some((

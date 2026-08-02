@@ -249,7 +249,7 @@ fn atan_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 
 fn atan_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let mapped = ct
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| atan_complex_components(re, im))
         .collect::<Vec<_>>();
@@ -648,7 +648,7 @@ pub(crate) mod tests {
         };
         assert_eq!(out.shape, vec![3, 1]);
         let expected = [-3.0f64.atan(), 0.0f64.atan(), 5.0f64.atan()];
-        for (actual, expected) in out.data.iter().zip(expected) {
+        for (actual, expected) in out.materialize_f64().iter().zip(expected) {
             assert!((actual.0 - expected).abs() < 1e-12);
             assert_eq!(actual.1, 0.0);
         }
@@ -686,9 +686,9 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
-                for (value, expected) in out.data.iter().zip(
+                for (value, expected) in out.materialize_f64().iter().zip(
                     tensor
-                        .data
+                        .materialize_f64()
                         .iter()
                         .map(|&(r, i)| atan_complex_components(r, i)),
                 ) {

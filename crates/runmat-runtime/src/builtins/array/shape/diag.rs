@@ -879,7 +879,7 @@ fn evaluate_logical(array: LogicalArray, args: &ParsedDiagArgs) -> BuiltinResult
 }
 
 fn evaluate_complex(tensor: ComplexTensor, args: &ParsedDiagArgs) -> BuiltinResult<Value> {
-    if let Some(storage) = tensor.integer_data.as_ref() {
+    if let Some(storage) = tensor.integer_storage() {
         let zero = storage
             .real
             .zeros_like(1)
@@ -902,7 +902,8 @@ fn evaluate_complex(tensor: ComplexTensor, args: &ParsedDiagArgs) -> BuiltinResu
             .map(Value::ComplexTensor)
             .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")));
     }
-    let (data, shape) = evaluate_column_major_diag(&tensor.data, &tensor.shape, args, (0.0, 0.0))?;
+    let (data, shape) =
+        evaluate_column_major_diag(&tensor.materialize_f64(), &tensor.shape, args, (0.0, 0.0))?;
     ComplexTensor::new(data, shape)
         .map(Value::ComplexTensor)
         .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
@@ -1401,7 +1402,7 @@ fn logical_array_from_value(value: Value) -> BuiltinResult<LogicalArray> {
                 .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
         }
         Value::ComplexTensor(tensor) => {
-            let data: Vec<u8> = if let Some(storage) = &tensor.integer_data {
+            let data: Vec<u8> = if let Some(storage) = &tensor.integer_storage() {
                 storage
                     .real
                     .exact_values()
@@ -1411,7 +1412,7 @@ fn logical_array_from_value(value: Value) -> BuiltinResult<LogicalArray> {
                     .collect()
             } else {
                 tensor
-                    .data
+                    .materialize_f64()
                     .iter()
                     .map(|(re, im)| if *re != 0.0 || *im != 0.0 { 1 } else { 0 })
                     .collect()
@@ -1827,8 +1828,7 @@ mod tests {
             IntegerStorage::I16(vec![0, 0, 0, 5]),
         )
         .expect("complex integer storage");
-        let mut value = ComplexTensor::new_integer(storage, vec![2, 2]).expect("complex tensor");
-        value.data.clear();
+        let value = ComplexTensor::new_integer(storage, vec![2, 2]).expect("complex tensor");
 
         let out =
             run_diag(Value::ComplexTensor(value), vec![Value::from("logical")]).expect("diag");
@@ -1893,10 +1893,7 @@ mod tests {
             panic!("expected complex tensor output");
         };
         assert_eq!(tensor.shape, vec![2, 2]);
-        let storage = tensor
-            .integer_data
-            .as_ref()
-            .expect("complex integer storage");
+        let storage = tensor.integer_storage().expect("complex integer storage");
         assert_eq!(storage.real, IntegerStorage::U8(vec![2, 0, 0, u8::MAX]));
         assert_eq!(storage.imag, IntegerStorage::U8(vec![0, 0, 0, 5]));
     }
@@ -1954,7 +1951,7 @@ mod tests {
         };
         assert_eq!(tensor.shape, vec![2, 2]);
         assert_eq!(
-            tensor.data,
+            tensor.materialize_f64(),
             vec![(2.0, 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)]
         );
     }
@@ -1973,7 +1970,7 @@ mod tests {
         };
         assert_eq!(tensor.shape, vec![2, 2]);
         assert_eq!(
-            tensor.data,
+            tensor.materialize_f64(),
             vec![(-3.0, 0.0), (0.0, 0.0), (0.0, 0.0), (5.0, 0.0)]
         );
     }

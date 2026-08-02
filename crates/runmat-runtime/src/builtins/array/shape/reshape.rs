@@ -257,12 +257,12 @@ fn reshape_value(value: Value, dims: &[usize]) -> crate::BuiltinResult<Value> {
                 .map_err(|e| reshape_error(format!("reshape: {e}")))
         }
         Value::ComplexTensor(ct) => {
-            if let Some(storage) = ct.integer_data {
-                return ComplexTensor::new_integer(storage, dims.to_vec())
+            if let Some(storage) = ct.integer_storage() {
+                return ComplexTensor::new_integer(storage.clone(), dims.to_vec())
                     .map(Value::ComplexTensor)
                     .map_err(|e| reshape_error(format!("reshape: {e}")));
             }
-            ComplexTensor::new(ct.data, dims.to_vec())
+            ComplexTensor::new(ct.materialize_f64(), dims.to_vec())
                 .map(Value::ComplexTensor)
                 .map_err(|e| reshape_error(format!("reshape: {e}")))
         }
@@ -765,7 +765,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                assert_eq!(out.integer_data, Some(storage));
+                assert_eq!(out.integer_storage().cloned(), Some(storage));
             }
             other => panic!("expected typed complex integer tensor, got {other:?}"),
         }
@@ -885,7 +885,7 @@ pub(crate) mod tests {
             )
             .expect("gather complex");
             assert_eq!(gathered.shape, vec![3, 2]);
-            assert_eq!(gathered.data, complex.data);
+            assert_eq!(gathered.materialize_f64(), complex.materialize_f64());
         });
     }
 
@@ -1056,7 +1056,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![1, 1, 1]);
-                assert_eq!(ct.data, vec![(1.0, 2.0)]);
+                assert_eq!(ct.materialize_f64(), vec![(1.0, 2.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }

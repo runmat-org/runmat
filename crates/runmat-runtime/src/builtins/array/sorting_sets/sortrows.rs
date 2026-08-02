@@ -529,7 +529,7 @@ fn sortrows_complex_tensor_with_args(
     let rows = tensor.rows;
     let cols = tensor.cols;
 
-    if rows <= 1 || cols == 0 || tensor.data.is_empty() || args.columns.is_empty() {
+    if rows <= 1 || cols == 0 || tensor.materialize_f64().is_empty() || args.columns.is_empty() {
         let indices = identity_indices(rows)?;
         return Ok(SortRowsEvaluation {
             sorted: complex_tensor_into_value(tensor),
@@ -731,8 +731,8 @@ fn compare_complex_rows(
         }
         let idx_a = a + spec.index * rows;
         let idx_b = b + spec.index * rows;
-        let va = tensor.data[idx_a];
-        let vb = tensor.data[idx_b];
+        let va = tensor.materialize_f64()[idx_a];
+        let vb = tensor.materialize_f64()[idx_b];
         let missing = args.missing_for_direction(spec.direction);
         let ord = compare_complex_scalars(va, vb, spec.direction, args.comparison, missing);
         if ord != Ordering::Equal {
@@ -768,12 +768,12 @@ fn reorder_complex_rows(
     cols: usize,
     order: &[usize],
 ) -> crate::BuiltinResult<ComplexTensor> {
-    let mut data = vec![(0.0, 0.0); tensor.data.len()];
+    let mut data = vec![(0.0, 0.0); tensor.materialize_f64().len()];
     for col in 0..cols {
         for (dest_row, &src_row) in order.iter().enumerate() {
             let src_idx = src_row + col * rows;
             let dst_idx = dest_row + col * rows;
-            data[dst_idx] = tensor.data[src_idx];
+            data[dst_idx] = tensor.materialize_f64()[src_idx];
         }
     }
     ComplexTensor::new(data, tensor.shape.clone())
@@ -924,8 +924,8 @@ fn identity_indices(rows: usize) -> crate::BuiltinResult<Tensor> {
 }
 
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor.data.len() == 1 {
-        Value::Complex(tensor.data[0].0, tensor.data[0].1)
+    if tensor.materialize_f64().len() == 1 {
+        Value::Complex(tensor.materialize_f64()[0].0, tensor.materialize_f64()[0].1)
     } else {
         Value::ComplexTensor(tensor)
     }
@@ -1622,7 +1622,7 @@ pub(crate) mod tests {
         let (sorted, _) = eval.into_values();
         match sorted {
             Value::ComplexTensor(ct) => {
-                assert_eq!(ct.data, vec![(-2.0, 1.0), (1.0, 2.0)]);
+                assert_eq!(ct.materialize_f64(), vec![(-2.0, 1.0), (1.0, 2.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }

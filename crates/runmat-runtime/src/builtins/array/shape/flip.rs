@@ -528,7 +528,7 @@ pub(crate) fn flip_complex_tensor_with(
     if tensor::complex_tensor_element_len(&tensor) == 0 || dims.is_empty() {
         return Ok(tensor);
     }
-    if let Some(storage) = tensor.integer_data.as_ref() {
+    if let Some(storage) = tensor.integer_storage() {
         let storage = storage
             .reorder(|values| {
                 flip_generic(values, &tensor.shape, dims, builtin).map_err(|e| e.to_string())
@@ -537,7 +537,7 @@ pub(crate) fn flip_complex_tensor_with(
         return ComplexTensor::new_integer(storage, tensor.shape.clone())
             .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")));
     }
-    let data = flip_generic(&tensor.data, &tensor.shape, dims, builtin)?;
+    let data = flip_generic(&tensor.materialize_f64(), &tensor.shape, dims, builtin)?;
     ComplexTensor::new(data, tensor.shape.clone())
         .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))
 }
@@ -739,7 +739,7 @@ fn ravel_index(coords: &[usize], shape: &[usize]) -> usize {
 }
 
 pub(crate) fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor::is_scalar_complex_tensor(&tensor) && tensor.integer_data.is_none() {
+    if tensor::is_scalar_complex_tensor(&tensor) && tensor.integer_storage().is_none() {
         let value = tensor::complex_tensor_value_complex64(&tensor, 0);
         Value::Complex(value.re, value.im)
     } else {
@@ -843,18 +843,17 @@ pub(crate) mod tests {
         let storage =
             IntegerComplexStorage::new(IntegerStorage::I16(vec![7]), IntegerStorage::I16(vec![-3]))
                 .expect("matching complex integer storage");
-        let mut input = ComplexTensor::new_integer(storage.clone(), vec![1, 1])
+        let input = ComplexTensor::new_integer(storage.clone(), vec![1, 1])
             .expect("typed complex integer input");
-        input.data.clear();
 
         let flipped = flip_complex_tensor(input, &[1]).expect("flip typed complex scalar");
-        assert_eq!(flipped.integer_data, Some(storage.clone()));
+        assert_eq!(flipped.integer_storage().cloned(), Some(storage.clone()));
 
         let value = complex_tensor_into_value(flipped);
         let Value::ComplexTensor(output) = value else {
             panic!("typed complex integer scalar must not collapse to double complex");
         };
-        assert_eq!(output.integer_data, Some(storage));
+        assert_eq!(output.integer_storage().cloned(), Some(storage));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -977,7 +976,9 @@ pub(crate) mod tests {
         let expected = flip_complex_tensor(tensor.clone(), &[1]).expect("cpu complex flip");
         let value = flip_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("flip complex");
         match value {
-            Value::ComplexTensor(out) => assert_eq!(out.data, expected.data),
+            Value::ComplexTensor(out) => {
+                assert_eq!(out.materialize_f64(), expected.materialize_f64())
+            }
             other => panic!("expected complex tensor, got {other:?}"),
         }
     }

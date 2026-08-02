@@ -721,7 +721,7 @@ async fn parse_mu(value: Value) -> BuiltinResult<Mu> {
                 ));
             }
             let ((mean_re, mean_im), (scale_re, scale_im)) =
-                if let Some(storage) = tensor.integer_data.as_ref() {
+                if let Some(storage) = tensor.integer_storage() {
                     let mean_re = storage
                         .real
                         .value_at(0)
@@ -744,7 +744,7 @@ async fn parse_mu(value: Value) -> BuiltinResult<Mu> {
                         .to_f64();
                     ((mean_re, mean_im), (scale_re, scale_im))
                 } else {
-                    (tensor.data[0], tensor.data[1])
+                    (tensor.materialize_f64()[0], tensor.materialize_f64()[1])
                 };
             if mean_im.abs() > EPS || scale_im.abs() > EPS {
                 return Err(polyval_error("polyval: mu values must be real"));
@@ -1053,13 +1053,13 @@ fn tensor_element_len(tensor: &Tensor) -> usize {
 
 fn complex_tensor_element_len(tensor: &ComplexTensor) -> usize {
     tensor
-        .integer_data
+        .integer_storage()
         .as_ref()
-        .map_or(tensor.data.len(), |storage| storage.len())
+        .map_or(tensor.materialize_f64().len(), |storage| storage.len())
 }
 
 fn complex_tensor_values(tensor: &mut ComplexTensor) -> Vec<Complex64> {
-    if let Some(storage) = tensor.integer_data.take() {
+    if let Some(storage) = tensor.integer_storage().take() {
         return storage
             .real
             .exact_values()
@@ -1069,14 +1069,14 @@ fn complex_tensor_values(tensor: &mut ComplexTensor) -> Vec<Complex64> {
             .collect();
     }
     tensor
-        .data
+        .materialize_f64()
         .drain(..)
         .map(|(re, im)| Complex64::new(re, im))
         .collect()
 }
 
 fn complex_tensor_values_ref(tensor: &ComplexTensor) -> Vec<Complex64> {
-    if let Some(storage) = tensor.integer_data.as_ref() {
+    if let Some(storage) = tensor.integer_storage() {
         return storage
             .real
             .exact_values()
@@ -1086,21 +1086,24 @@ fn complex_tensor_values_ref(tensor: &ComplexTensor) -> Vec<Complex64> {
             .collect();
     }
     tensor
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect()
 }
 
 fn complex_tensor_values_are_real(tensor: &ComplexTensor) -> bool {
-    if let Some(storage) = tensor.integer_data.as_ref() {
+    if let Some(storage) = tensor.integer_storage() {
         return storage
             .imag
             .exact_values()
             .iter()
             .all(|value| value.is_zero());
     }
-    tensor.data.iter().all(|&(_, im)| im.abs() <= EPS)
+    tensor
+        .materialize_f64()
+        .iter()
+        .all(|&(_, im)| im.abs() <= EPS)
 }
 
 #[async_recursion::async_recursion(?Send)]
@@ -1211,7 +1214,7 @@ pub(crate) mod tests {
         match value {
             Value::ComplexTensor(tensor) => {
                 assert_eq!(tensor.shape, points.shape);
-                assert_eq!(tensor.data.len(), 3);
+                assert_eq!(tensor.materialize_f64().len(), 3);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -1273,8 +1276,7 @@ pub(crate) mod tests {
             IntegerStorage::I16(vec![0, 0]),
         )
         .expect("complex integer mu");
-        let mut mu = ComplexTensor::new_integer(storage, vec![1, 2]).expect("mu tensor");
-        mu.data.clear();
+        let mu = ComplexTensor::new_integer(storage, vec![1, 2]).expect("mu tensor");
 
         let value = polyval_builtin(
             Value::Tensor(coeffs),

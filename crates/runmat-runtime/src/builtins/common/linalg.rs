@@ -50,7 +50,7 @@ pub(crate) fn scalar_mul_complex(a: &Tensor, cr: f64, ci: f64) -> ComplexTensor 
 /// Multiply a complex tensor by a complex scalar.
 pub(crate) fn scalar_mul_complex_tensor(a: &ComplexTensor, cr: f64, ci: f64) -> ComplexTensor {
     let data: Vec<(f64, f64)> = a
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(ar, ai)| (ar * cr - ai * ci, ar * ci + ai * cr))
         .collect();
@@ -77,8 +77,8 @@ pub(crate) fn matmul_complex(
             let mut acc_re = 0.0;
             let mut acc_im = 0.0;
             for k in 0..kdim {
-                let (ar, ai) = a.data[i + k * rows];
-                let (br, bi) = b.data[k + j * b.rows];
+                let (ar, ai) = a.materialize_f64()[i + k * rows];
+                let (br, bi) = b.materialize_f64()[k + j * b.rows];
                 acc_re += ar * br - ai * bi;
                 acc_im += ar * bi + ai * br;
             }
@@ -109,7 +109,7 @@ pub(crate) fn matmul_complex_real(a: &ComplexTensor, b: &Tensor) -> Result<Compl
             let mut acc_re = 0.0;
             let mut acc_im = 0.0;
             for k in 0..kdim {
-                let (ar, ai) = a.data[i + k * rows];
+                let (ar, ai) = a.materialize_f64()[i + k * rows];
                 let br = b_values[k + j * b.rows()];
                 acc_re += ar * br;
                 acc_im += ai * br;
@@ -142,7 +142,7 @@ pub(crate) fn matmul_real_complex(a: &Tensor, b: &ComplexTensor) -> Result<Compl
             let mut acc_im = 0.0;
             for k in 0..kdim {
                 let ar = a_values[i + k * rows];
-                let (br, bi) = b.data[k + j * b.rows];
+                let (br, bi) = b.materialize_f64()[k + j * b.rows];
                 acc_re += ar * br;
                 acc_im += ar * bi;
             }
@@ -312,7 +312,7 @@ mod tests {
 
         let out = scalar_mul_complex(&tensor, 2.0, -0.5);
 
-        assert_eq!(out.data, vec![(-4.0, 1.0), (6.0, -1.5)]);
+        assert_eq!(out.materialize_f64(), vec![(-4.0, 1.0), (6.0, -1.5)]);
     }
 
     #[test]
@@ -342,11 +342,11 @@ mod tests {
         let right = matmul_complex_real(&complex, &real).expect("complex real");
 
         assert_eq!(
-            left.data,
+            left.materialize_f64(),
             vec![(7.0, 1.0), (10.0, 2.0), (9.0, -2.0), (12.0, -2.0)]
         );
         assert_eq!(
-            right.data,
+            right.materialize_f64(),
             vec![(1.0, 3.0), (8.0, -2.0), (3.0, 7.0), (18.0, -4.0)]
         );
     }

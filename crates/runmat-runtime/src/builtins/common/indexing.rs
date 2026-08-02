@@ -76,7 +76,7 @@ fn complex_tensor_scalar_value(
     tensor: &ComplexTensor,
     index: usize,
 ) -> Result<Value, RuntimeError> {
-    if let Some(storage) = &tensor.integer_data {
+    if let Some(storage) = &tensor.integer_storage() {
         let real = storage.real.value_at(index).ok_or_else(|| {
             indexing_error_with_identifier(
                 "Complex integer scalar index out of bounds",
@@ -105,7 +105,7 @@ fn complex_tensor_scalar_value(
         return Ok(Value::ComplexTensor(scalar));
     }
     tensor
-        .data
+        .materialize_f64()
         .get(index)
         .copied()
         .map(|(re, im)| Value::Complex(re, im))
@@ -774,7 +774,7 @@ mod tests {
 
     #[test]
     fn typed_complex_integer_scalar_indexing_preserves_exact_components() {
-        let mut tensor = ComplexTensor::new_integer(
+        let tensor = ComplexTensor::new_integer(
             IntegerComplexStorage::new(
                 IntegerStorage::U64(vec![9_223_372_036_854_775_809, u64::MAX]),
                 IntegerStorage::U64(vec![7, 8]),
@@ -783,7 +783,6 @@ mod tests {
             vec![1, 2],
         )
         .expect("tensor");
-        tensor.data.clear();
 
         let result = block_on(perform_indexing(&Value::ComplexTensor(tensor), &[2.0]))
             .expect("scalar index");
@@ -791,7 +790,7 @@ mod tests {
             panic!("typed complex integer scalar must retain exact storage");
         };
         assert_eq!(
-            result.integer_data,
+            result.integer_storage().cloned(),
             Some(
                 IntegerComplexStorage::new(
                     IntegerStorage::U64(vec![u64::MAX]),

@@ -288,7 +288,7 @@ fn is_empty_value(value: &Value) -> bool {
     match value {
         Value::Tensor(t) => tensor::tensor_element_len(t) == 0,
         Value::LogicalArray(l) => l.data.is_empty(),
-        Value::ComplexTensor(t) => t.data.is_empty(),
+        Value::ComplexTensor(t) => t.materialize_f64().is_empty(),
         _ => false,
     }
 }

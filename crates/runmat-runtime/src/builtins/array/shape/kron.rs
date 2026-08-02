@@ -624,9 +624,9 @@ fn kron_complex_tensor(
     let mut coords_b = vec![0usize; shape_out.len()];
     let mut data = vec![(0.0f64, 0.0f64); total_out];
 
-    for (idx_a, &(ar, ai)) in a.data.iter().enumerate() {
+    for (idx_a, &(ar, ai)) in a.materialize_f64().iter().enumerate() {
         unravel_index(idx_a, &shape_a, &mut coords_a);
-        for (idx_b, &(br, bi)) in b.data.iter().enumerate() {
+        for (idx_b, &(br, bi)) in b.materialize_f64().iter().enumerate() {
             unravel_index(idx_b, &shape_b, &mut coords_b);
             let out_index = combine_indices(&coords_a, &coords_b, &shape_b, &strides_out)?;
             let real = ar * br - ai * bi;
@@ -935,7 +935,10 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![2, 1]);
-                assert_eq!(ct.data, vec![(0.0, 0.0), (1.0, 2.0 * 1.0 + 1.0 * 0.0)]);
+                assert_eq!(
+                    ct.materialize_f64(),
+                    vec![(0.0, 0.0), (1.0, 2.0 * 1.0 + 1.0 * 0.0)]
+                );
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -953,7 +956,7 @@ pub(crate) mod tests {
             panic!("expected complex tensor result");
         };
         assert_eq!(out.shape, vec![1, 2]);
-        assert_eq!(out.data, vec![(-6.0, 3.0), (10.0, -5.0)]);
+        assert_eq!(out.materialize_f64(), vec![(-6.0, 3.0), (10.0, -5.0)]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

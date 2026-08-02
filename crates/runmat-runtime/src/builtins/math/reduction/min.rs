@@ -1132,7 +1132,7 @@ fn reduce_complex_tensor(
     args: &ReductionArgs,
 ) -> BuiltinResult<MinEvaluation> {
     let shape = tensor.shape.clone();
-    if tensor.data.is_empty() {
+    if tensor.materialize_f64().is_empty() {
         let output_shape = resolve_output_shape(&shape, &args.selection, &[])?;
         let values = ComplexTensor::new(Vec::new(), output_shape.clone())
             .map_err(|e| min_internal_error(format!("min: {e}")))?;
@@ -1167,7 +1167,7 @@ fn reduce_complex_tensor(
     let mut best = vec![BestComplex::new(); output_len];
     let mut coords = vec![0usize; shape.len()];
 
-    for &(re, im) in &tensor.data {
+    for &(re, im) in &tensor.materialize_f64() {
         let out_idx = map_output_index(&coords, &output_strides, &dims_mask);
         let reduce_idx = map_reduce_index(
             &coords,
@@ -2115,12 +2115,12 @@ fn elementwise_complex_min(
 
     for (offset, index_a, index_b) in plan.iter() {
         let a = lhs
-            .data
+            .materialize_f64()
             .get(index_a)
             .copied()
             .unwrap_or((f64::NAN, f64::NAN));
         let b = rhs
-            .data
+            .materialize_f64()
             .get(index_b)
             .copied()
             .unwrap_or((f64::NAN, f64::NAN));
@@ -2866,8 +2866,7 @@ pub(crate) mod tests {
         let storage =
             IntegerComplexStorage::new(IntegerStorage::I16(vec![5]), IntegerStorage::I16(vec![-1]))
                 .expect("complex integer storage");
-        let mut tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
-        tensor.data.clear();
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
 
         assert_eq!(
             scalar_complex_value(&Value::ComplexTensor(tensor)),

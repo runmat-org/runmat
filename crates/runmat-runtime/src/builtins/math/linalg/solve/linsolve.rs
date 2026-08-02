@@ -8,7 +8,7 @@ use runmat_accelerate_api::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, NumericDType, Tensor, Value,
+    ComplexStorage, ComplexTensor, IntValue, IntegerComplexStorage, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -21,6 +21,7 @@ use crate::builtins::common::{
     linalg::{diagonal_rcond, singular_value_rcond},
     tensor,
 };
+use crate::builtins::math::elementwise::conj::conjugate_integer_imaginary_storage;
 use crate::builtins::math::linalg::type_resolvers::left_divide_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -859,14 +860,14 @@ fn forward_substitution_complex(
     rhs: &ComplexTensor,
 ) -> BuiltinResult<(ComplexTensor, f64)> {
     let n = lhs.rows;
-    let nrhs = rhs.data.len() / n;
+    let nrhs = rhs.materialize_f64().len() / n;
     let lhs_data: Vec<Complex64> = lhs
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
     let mut solution: Vec<Complex64> = rhs
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
@@ -907,14 +908,14 @@ fn backward_substitution_complex(
     rhs: &ComplexTensor,
 ) -> BuiltinResult<(ComplexTensor, f64)> {
     let n = lhs.rows;
-    let nrhs = rhs.data.len() / n;
+    let nrhs = rhs.materialize_f64().len() / n;
     let lhs_data: Vec<Complex64> = lhs
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
     let mut solution: Vec<Complex64> = rhs
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
@@ -971,12 +972,12 @@ fn solve_general_complex(
     rhs: &ComplexTensor,
 ) -> BuiltinResult<(ComplexTensor, f64)> {
     let a_data: Vec<Complex64> = lhs
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
     let b_data: Vec<Complex64> = rhs
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
@@ -1012,10 +1013,10 @@ fn normalize_rhs_complex(rhs: ComplexTensor, expected_rows: usize) -> BuiltinRes
         return Ok(rhs);
     }
     if rhs.shape.len() == 1 && rhs.shape[0] == expected_rows {
-        return ComplexTensor::new(rhs.data, vec![expected_rows, 1])
+        return ComplexTensor::new(rhs.materialize_f64(), vec![expected_rows, 1])
             .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
-    if rhs.data.is_empty() && expected_rows == 0 {
+    if rhs.materialize_f64().is_empty() && expected_rows == 0 {
         return Ok(rhs);
     }
     Err(builtin_error("Matrix dimensions must agree."))
@@ -1140,10 +1141,10 @@ fn transpose_tensor(tensor: &Tensor) -> Tensor {
 fn transpose_complex(tensor: &ComplexTensor) -> ComplexTensor {
     let rows = tensor.rows;
     let cols = tensor.cols;
-    let mut data = vec![(0.0, 0.0); tensor.data.len()];
+    let mut data = vec![(0.0, 0.0); tensor.materialize_f64().len()];
     for r in 0..rows {
         for c in 0..cols {
-            data[c + r * cols] = tensor.data[r + c * rows];
+            data[c + r * cols] = tensor.materialize_f64()[r + c * rows];
         }
     }
     ComplexTensor::new(data, vec![cols, rows]).expect("transpose_complex valid")
@@ -1154,9 +1155,30 @@ fn conjugate_in_place(_tensor: &mut Tensor) {
 }
 
 fn conjugate_complex_in_place(tensor: &mut ComplexTensor) {
-    for value in &mut tensor.data {
-        value.1 = -value.1;
-    }
+    let shape = tensor.shape.clone();
+    let storage = match tensor.clone().into_complex_storage() {
+        ComplexStorage::F64(mut values) => {
+            for value in &mut values {
+                value.1 = -value.1;
+            }
+            ComplexStorage::F64(values)
+        }
+        ComplexStorage::F32(mut values) => {
+            for value in &mut values {
+                value.1 = -value.1;
+            }
+            ComplexStorage::F32(values)
+        }
+        ComplexStorage::Integer(storage) => ComplexStorage::Integer(
+            IntegerComplexStorage::new(
+                storage.real,
+                conjugate_integer_imaginary_storage(storage.imag),
+            )
+            .expect("complex integer component classes remain matched"),
+        ),
+    };
+    *tensor = ComplexTensor::from_complex_storage(storage, shape)
+        .expect("conjugated complex storage retains shape");
 }
 
 #[cfg(test)]
@@ -1349,10 +1371,10 @@ pub(crate) mod tests {
             panic!("expected complex tensor output");
         };
         assert_eq!(out.shape, vec![2, 1]);
-        approx_eq(out.data[0].0, 3.0);
-        approx_eq(out.data[0].1, 4.0);
-        approx_eq(out.data[1].0, 5.0);
-        approx_eq(out.data[1].1, -6.0);
+        approx_eq(out.materialize_f64()[0].0, 3.0);
+        approx_eq(out.materialize_f64()[0].1, 4.0);
+        approx_eq(out.materialize_f64()[1].0, 5.0);
+        approx_eq(out.materialize_f64()[1].1, -6.0);
 
         let complex_lhs = ComplexTensor::new(
             vec![(1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (1.0, 0.0)],
@@ -1371,10 +1393,10 @@ pub(crate) mod tests {
             panic!("expected complex tensor output");
         };
         assert_eq!(out.shape, vec![2, 1]);
-        approx_eq(out.data[0].0, 7.0);
-        approx_eq(out.data[0].1, 0.0);
-        approx_eq(out.data[1].0, 11.0);
-        approx_eq(out.data[1].1, 0.0);
+        approx_eq(out.materialize_f64()[0].0, 7.0);
+        approx_eq(out.materialize_f64()[0].1, 0.0);
+        approx_eq(out.materialize_f64()[1].0, 11.0);
+        approx_eq(out.materialize_f64()[1].1, 0.0);
     }
 
     #[test]
@@ -1543,17 +1565,17 @@ pub(crate) mod tests {
         };
 
         let mat_a: Vec<Complex64> = a
-            .data
+            .materialize_f64()
             .iter()
             .map(|&(re, im)| Complex64::new(re, im))
             .collect();
         let mat_b: Vec<Complex64> = b
-            .data
+            .materialize_f64()
             .iter()
             .map(|&(re, im)| Complex64::new(re, im))
             .collect();
         let mat_x: Vec<Complex64> = out
-            .data
+            .materialize_f64()
             .iter()
             .map(|&(re, im)| Complex64::new(re, im))
             .collect();
@@ -1602,7 +1624,11 @@ pub(crate) mod tests {
         };
 
         assert_eq!(out.shape, expected.shape);
-        for ((out_re, out_im), (exp_re, exp_im)) in out.data.iter().zip(expected.data.iter()) {
+        for ((out_re, out_im), (exp_re, exp_im)) in out
+            .materialize_f64()
+            .iter()
+            .zip(expected.materialize_f64().iter())
+        {
             assert!(
                 (out_re - exp_re).abs() < 1e-10,
                 "out_re={out_re} exp_re={exp_re}"

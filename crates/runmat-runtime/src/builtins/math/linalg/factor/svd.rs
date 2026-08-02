@@ -436,8 +436,8 @@ fn complex_tensor_to_matrix(tensor: &ComplexTensor) -> BuiltinResult<DMatrix<Com
     }
     let rows = tensor.rows;
     let cols = tensor.cols;
-    let mut data = Vec::with_capacity(tensor.data.len());
-    for &(re, im) in &tensor.data {
+    let mut data = Vec::with_capacity(tensor.materialize_f64().len());
+    for &(re, im) in &tensor.materialize_f64() {
         data.push(Complex64::new(re, im));
     }
     Ok(DMatrix::from_column_slice(rows, cols, &data))
@@ -945,7 +945,7 @@ pub(crate) mod tests {
         match value {
             Value::ComplexTensor(ct) => {
                 let data: Vec<Complex64> = ct
-                    .data
+                    .materialize_f64()
                     .iter()
                     .map(|(re, im)| Complex64::new(*re, *im))
                     .collect();
@@ -1042,7 +1042,7 @@ pub(crate) mod tests {
 
         let recon = &u * s_complex * v.adjoint();
         let original_data: Vec<Complex64> = complex
-            .data
+            .materialize_f64()
             .iter()
             .map(|(re, im)| Complex64::new(*re, *im))
             .collect();

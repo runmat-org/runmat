@@ -1,4 +1,4 @@
-use runmat_builtins::{IntValue, ObjectInstance, StructValue, Value};
+use runmat_builtins::{ComplexStorage, IntValue, ObjectInstance, StructValue, Value};
 use runmat_core::{matlab_class_name, value_shape};
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
 
@@ -102,11 +102,12 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
                     .collect::<Vec<_>>();
                 (preview, truncated, storage.len())
             } else {
-                let (preview, truncated) = preview_slice(&t.data, MAX_DATA_PREVIEW);
+                let values = t.materialize_f64();
+                let (preview, truncated) = preview_slice(&values, MAX_DATA_PREVIEW);
                 (
                     preview.into_iter().map(JsonValue::from).collect(),
                     truncated,
-                    t.data.len(),
+                    t.len(),
                 )
             };
             json!({
@@ -121,33 +122,44 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
             })
         }
         Value::ComplexTensor(t) => {
-            let (preview, truncated, length, dtype) = if let Some(storage) = &t.integer_data {
-                let length = storage.len();
-                let preview: Vec<JsonValue> = (0..length.min(MAX_DATA_PREVIEW))
-                    .map(|index| {
-                        json!({
-                            "real": integer_json_value(
-                                &storage.real.value_at(index).expect("integer storage index is valid"),
-                            ),
-                            "imag": integer_json_value(
-                                &storage.imag.value_at(index).expect("integer storage index is valid"),
-                            ),
+            let (preview, truncated, length, dtype) = match t.complex_storage() {
+                ComplexStorage::Integer(storage) => {
+                    let length = storage.len();
+                    let preview: Vec<JsonValue> = (0..length.min(MAX_DATA_PREVIEW))
+                        .map(|index| {
+                            json!({
+                                "real": integer_json_value(
+                                    &storage.real.value_at(index).expect("integer storage index is valid"),
+                                ),
+                                "imag": integer_json_value(
+                                    &storage.imag.value_at(index).expect("integer storage index is valid"),
+                                ),
+                            })
                         })
-                    })
-                    .collect();
-                (
-                    preview,
-                    length > MAX_DATA_PREVIEW,
-                    length,
-                    storage.class_name(),
-                )
-            } else {
-                let (preview, truncated) = preview_slice(&t.data, MAX_DATA_PREVIEW);
-                let preview: Vec<JsonValue> = preview
-                    .into_iter()
-                    .map(|(re, im)| json!({ "real": re, "imag": im }))
-                    .collect();
-                (preview, truncated, t.data.len(), "double")
+                        .collect();
+                    (
+                        preview,
+                        length > MAX_DATA_PREVIEW,
+                        length,
+                        storage.class_name(),
+                    )
+                }
+                ComplexStorage::F64(values) => {
+                    let (preview, truncated) = preview_slice(values, MAX_DATA_PREVIEW);
+                    let preview = preview
+                        .into_iter()
+                        .map(|(real, imag)| json!({ "real": real, "imag": imag }))
+                        .collect();
+                    (preview, truncated, values.len(), "double")
+                }
+                ComplexStorage::F32(values) => {
+                    let (preview, truncated) = preview_slice(values, MAX_DATA_PREVIEW);
+                    let preview = preview
+                        .into_iter()
+                        .map(|(real, imag)| json!({ "real": real, "imag": imag }))
+                        .collect();
+                    (preview, truncated, values.len(), "single")
+                }
             };
             json!({
                 "kind": "complex-tensor",
@@ -434,9 +446,8 @@ mod tests {
         let scalar = value_to_json(&Value::Int(IntValue::U64(u64::MAX)), 0);
         assert_eq!(scalar["value"], "18446744073709551615");
 
-        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![42, u64::MAX]), vec![1, 2])
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![42, u64::MAX]), vec![1, 2])
             .expect("tensor");
-        tensor.data.clear();
         let json = value_to_json(&Value::Tensor(tensor), 0);
         assert_eq!(json["dtype"], "uint64");
         assert_eq!(json["preview"], json!([42, "18446744073709551615"]));

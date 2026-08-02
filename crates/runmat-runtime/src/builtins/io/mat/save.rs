@@ -785,19 +785,19 @@ fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray
                 },
             }),
             Value::ComplexTensor(t) => {
-                if let Some(storage) = t.integer_data {
+                if let Some(storage) = t.integer_storage() {
                     return Ok(MatArray {
                         class: integer_storage_mat_class(&storage.real),
                         dims: canonical_dims(&t.shape),
                         data: MatData::Integer {
-                            storage: storage.real,
-                            imag: Some(storage.imag),
+                            storage: storage.real.clone(),
+                            imag: Some(storage.imag.clone()),
                         },
                     });
                 }
-                let mut real = Vec::with_capacity(t.data.len());
-                let mut imag = Vec::with_capacity(t.data.len());
-                for (re, im) in &t.data {
+                let mut real = Vec::with_capacity(t.materialize_f64().len());
+                let mut imag = Vec::with_capacity(t.materialize_f64().len());
+                for (re, im) in &t.materialize_f64() {
                     real.push(*re);
                     imag.push(*im);
                 }

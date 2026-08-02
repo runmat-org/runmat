@@ -717,17 +717,17 @@ fn parse_cell_entry(value: Value) -> BuiltinResult<CellEntry> {
         }),
         Value::ComplexTensor(ct) => {
             let shape = normalize_shape(ct.shape.clone());
-            if let Some(storage) = ct.integer_data {
+            if let Some(storage) = ct.integer_storage() {
                 Ok(CellEntry {
                     kind: ElementKind::TypedComplexInteger,
                     shape,
-                    data: EntryData::TypedComplexInteger(storage),
+                    data: EntryData::TypedComplexInteger(storage.clone()),
                 })
             } else {
                 Ok(CellEntry {
                     kind: ElementKind::Complex,
                     shape,
-                    data: EntryData::Complex(ct.data),
+                    data: EntryData::Complex(ct.materialize_f64()),
                 })
             }
         }
@@ -972,7 +972,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![1, 2]);
-                assert_eq!(ct.data, vec![(1.0, 2.0), (3.0, 4.0)]);
+                assert_eq!(ct.materialize_f64(), vec![(1.0, 2.0), (3.0, 4.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -1011,7 +1011,7 @@ pub(crate) mod tests {
             result,
             Value::ComplexTensor(tensor)
                 if tensor.shape == vec![1, 2]
-                    && tensor.integer_data.as_ref().is_some_and(|storage|
+                    && tensor.integer_storage().as_ref().is_some_and(|storage|
                         storage.real == IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63])
                             && storage.imag == IntegerStorage::U64(vec![5, 6]))
         ));

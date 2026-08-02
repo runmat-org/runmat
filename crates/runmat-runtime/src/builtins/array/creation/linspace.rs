@@ -292,7 +292,7 @@ fn tensor_scalar(name: &str, tensor: &Tensor) -> crate::BuiltinResult<Scalar> {
 }
 
 fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> crate::BuiltinResult<Scalar> {
-    if let Some(storage) = tensor.integer_data.as_ref() {
+    if let Some(storage) = tensor.integer_storage() {
         if storage.len() != 1 {
             return Err(builtin_error(format!("{name}: expected scalar input")));
         }
@@ -308,10 +308,10 @@ fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> crate::BuiltinRe
             .to_f64();
         return Ok(Scalar::Complex { re, im });
     }
-    if tensor.data.len() != 1 {
+    if tensor.materialize_f64().len() != 1 {
         return Err(builtin_error(format!("{name}: expected scalar input")));
     }
-    let (re, im) = tensor.data[0];
+    let (re, im) = tensor.materialize_f64()[0];
     Ok(Scalar::Complex { re, im })
 }
 
@@ -735,7 +735,7 @@ pub(crate) mod tests {
                     (-3.0, 2.0),
                 ];
                 for (idx, &(re, im)) in expected.iter().enumerate() {
-                    let (r, i) = t.data[idx];
+                    let (r, i) = t.materialize_f64()[idx];
                     assert!((r - re).abs() < 1e-9);
                     assert!((i - im).abs() < 1e-9);
                 }
@@ -749,14 +749,11 @@ pub(crate) mod tests {
         let start_storage =
             IntegerComplexStorage::new(IntegerStorage::I16(vec![1]), IntegerStorage::I16(vec![1]))
                 .expect("start storage");
-        let mut start =
-            ComplexTensor::new_integer(start_storage, vec![1, 1]).expect("start tensor");
-        start.data.clear();
+        let start = ComplexTensor::new_integer(start_storage, vec![1, 1]).expect("start tensor");
         let stop_storage =
             IntegerComplexStorage::new(IntegerStorage::I16(vec![-3]), IntegerStorage::I16(vec![2]))
                 .expect("stop storage");
-        let mut stop = ComplexTensor::new_integer(stop_storage, vec![1, 1]).expect("stop tensor");
-        stop.data.clear();
+        let stop = ComplexTensor::new_integer(stop_storage, vec![1, 1]).expect("stop tensor");
 
         let result = linspace_builtin(
             Value::ComplexTensor(start),
@@ -774,7 +771,7 @@ pub(crate) mod tests {
                     (-1.6666666666666667, 1.6666666666666667),
                     (-3.0, 2.0),
                 ];
-                for (actual, expected) in t.data.iter().zip(expected.iter()) {
+                for (actual, expected) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual.0 - expected.0).abs() < 1e-9);
                     assert!((actual.1 - expected.1).abs() < 1e-9);
                 }

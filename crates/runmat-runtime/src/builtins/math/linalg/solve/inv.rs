@@ -188,8 +188,8 @@ fn inv_real_value(tensor: Tensor) -> BuiltinResult<Value> {
 
 fn inv_complex_value(tensor: ComplexTensor) -> BuiltinResult<Value> {
     let inv = inv_complex_tensor(&tensor)?;
-    if inv.data.len() == 1 {
-        let (re, im) = inv.data[0];
+    if inv.materialize_f64().len() == 1 {
+        let (re, im) = inv.materialize_f64()[0];
         Ok(Value::Complex(re, im))
     } else {
         Ok(Value::ComplexTensor(inv))
@@ -243,7 +243,7 @@ fn inv_complex_tensor_impl(matrix: &ComplexTensor) -> BuiltinResult<ComplexTenso
             .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
     let data: Vec<Complex64> = matrix
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
@@ -457,7 +457,7 @@ pub(crate) mod tests {
                 let input: Vec<Complex64> =
                     raw.iter().map(|&(re, im)| Complex64::new(re, im)).collect();
                 let inv_vec: Vec<Complex64> = out
-                    .data
+                    .materialize_f64()
                     .iter()
                     .map(|&(re, im)| Complex64::new(re, im))
                     .collect();

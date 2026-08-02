@@ -211,9 +211,9 @@ fn transpose_complex_tensor(ct: ComplexTensor) -> BuiltinResult<ComplexTensor> {
         return Ok(ct);
     }
     if rank <= 2 {
-        if let Some(storage) = ct.integer_data {
-            let real = transpose_integer_storage(storage.real, ct.rows, ct.cols);
-            let imag = transpose_integer_storage(storage.imag, ct.rows, ct.cols);
+        if let Some(storage) = ct.integer_storage() {
+            let real = transpose_integer_storage(storage.real.clone(), ct.rows, ct.cols);
+            let imag = transpose_integer_storage(storage.imag.clone(), ct.rows, ct.cols);
             return IntegerComplexStorage::new(real, imag)
                 .and_then(|storage| ComplexTensor::new_integer(storage, vec![ct.cols, ct.rows]))
                 .map_err(|e| internal_error(format!("{NAME}: {e}")));
@@ -404,16 +404,16 @@ fn transpose_order(rank: usize) -> Vec<usize> {
 fn transpose_complex_matrix(ct: &ComplexTensor) -> Vec<(f64, f64)> {
     let rows = ct.rows;
     let cols = ct.cols;
-    if ct.data.is_empty() {
+    if ct.materialize_f64().is_empty() {
         return Vec::new();
     }
-    let mut out = vec![(0.0, 0.0); ct.data.len()];
+    let mut out = vec![(0.0, 0.0); ct.materialize_f64().len()];
     for r in 0..rows {
         for c in 0..cols {
             let src = r + c * rows;
             let dst = c + r * cols;
-            if src < ct.data.len() && dst < out.len() {
-                out[dst] = ct.data[src];
+            if src < ct.materialize_f64().len() && dst < out.len() {
+                out[dst] = ct.materialize_f64()[src];
             }
         }
     }
@@ -457,7 +457,7 @@ pub(crate) mod tests {
         else {
             panic!("expected complex tensor");
         };
-        let storage = result.integer_data.expect("exact integer storage");
+        let storage = result.integer_storage().expect("exact integer storage");
         assert_eq!(result.shape, vec![3, 2]);
         assert_eq!(
             storage.real,
@@ -610,7 +610,7 @@ pub(crate) mod tests {
         match value {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
-                assert_eq!(out.data, vec![(1.0, 2.0), (3.0, -4.0)]);
+                assert_eq!(out.materialize_f64(), vec![(1.0, 2.0), (3.0, -4.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }

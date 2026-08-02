@@ -947,9 +947,7 @@ mod tests {
         shape: Vec<usize>,
     ) -> ComplexTensor {
         let storage = IntegerComplexStorage::new(real, imag).expect("complex integer storage");
-        let mut tensor =
-            ComplexTensor::new_integer(storage, shape).expect("complex integer tensor");
-        tensor.data.fill((f64::NAN, f64::NAN));
+        let tensor = ComplexTensor::new_integer(storage, shape).expect("complex integer tensor");
         tensor
     }
 

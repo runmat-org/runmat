@@ -442,16 +442,15 @@ pub(crate) mod tests {
             IntegerStorage::I16(vec![5, 6, 7, 8]),
         )
         .expect("complex integer storage");
-        let mut tensor =
+        let tensor =
             ComplexTensor::new_integer(storage, vec![2, 2]).expect("complex integer tensor");
-        tensor.data.clear();
 
         let result = flipud_builtin(Value::ComplexTensor(tensor)).expect("flipud");
 
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                let storage = out.integer_data.expect("typed complex integer output");
+                let storage = out.integer_storage().expect("typed complex integer output");
                 assert_eq!(storage.real, IntegerStorage::I16(vec![2, 1, 4, 3]));
                 assert_eq!(storage.imag, IntegerStorage::I16(vec![6, 5, 8, 7]));
             }
@@ -480,7 +479,9 @@ pub(crate) mod tests {
         let expected = flip_complex_tensor(tensor.clone(), &UD_DIM).expect("expected");
         let result = flipud_builtin(Value::ComplexTensor(tensor)).expect("flipud");
         match result {
-            Value::ComplexTensor(out) => assert_eq!(out.data, expected.data),
+            Value::ComplexTensor(out) => {
+                assert_eq!(out.materialize_f64(), expected.materialize_f64())
+            }
             other => panic!("expected complex tensor, got {other:?}"),
         }
     }

@@ -180,7 +180,7 @@ fn expm1_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 
 fn expm1_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let mapped = ct
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| expm1_complex_parts(re, im))
         .collect::<Vec<_>>();

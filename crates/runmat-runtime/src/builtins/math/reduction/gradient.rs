@@ -312,13 +312,8 @@ fn evaluate_host_gradient_outputs(
             Ok(outputs)
         }
         Value::Complex(re, im) => {
-            let tensor = ComplexTensor {
-                data: vec![(re, im)],
-                integer_data: None,
-                shape: vec![1, 1],
-                rows: 1,
-                cols: 1,
-            };
+            let tensor =
+                ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(gradient_invalid_input)?;
             let mut outputs = Vec::with_capacity(requested_dims.len());
             for &dim in requested_dims {
                 let spacing = spacing_for_dim(dim, requested_dims, all_spacings);
@@ -564,7 +559,7 @@ fn value_len(value: &Value) -> usize {
     match value {
         Value::Tensor(tensor) => tensor_len(tensor),
         Value::LogicalArray(logical) => logical.data.len(),
-        Value::ComplexTensor(tensor) => tensor.data.len(),
+        Value::ComplexTensor(tensor) => tensor.materialize_f64().len(),
         Value::GpuTensor(handle) => product(&handle.shape),
         _ => 1,
     }
@@ -769,7 +764,13 @@ fn gradient_complex_tensor_host_with_spacing(
     dim: usize,
     spacing: &GradientSpacing,
 ) -> BuiltinResult<ComplexTensor> {
-    let ComplexTensor { data, shape, .. } = tensor;
+    let output_dtype = if tensor.numeric_dtype() == NumericDType::F32 {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
+    };
+    let shape = tensor.shape.clone();
+    let data = tensor.materialize_f64();
     let dim_index = dim.saturating_sub(1);
     let mut shape = matlab_gradient_shape(&shape, data.len());
 
@@ -777,7 +778,7 @@ fn gradient_complex_tensor_host_with_spacing(
         // Same fix as gradient_real_tensor_host: avoid padding the shape with 1s
         // before the early return, which would produce product ≠ 0 for empty data.
         let empty_shape = if shape.is_empty() { vec![0, 0] } else { shape };
-        return ComplexTensor::new(Vec::new(), empty_shape)
+        return ComplexTensor::from_f64_values_with_dtype(Vec::new(), empty_shape, output_dtype)
             .map_err(|e| gradient_internal_error(format!("gradient: {e}")));
     }
 
@@ -834,7 +835,8 @@ fn gradient_complex_tensor_host_with_spacing(
         }
     }
 
-    ComplexTensor::new(out, shape).map_err(|e| gradient_internal_error(format!("gradient: {e}")))
+    ComplexTensor::from_f64_values_with_dtype(out, shape, output_dtype)
+        .map_err(|e| gradient_internal_error(format!("gradient: {e}")))
 }
 
 fn spacing_denominator(spacing: &GradientSpacing, k: usize, len_dim: usize) -> f64 {
@@ -1042,7 +1044,10 @@ mod tests {
         let result = gradient_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("gradient");
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.data, vec![(3.0, 2.0), (4.0, 2.5), (5.0, 3.0)]);
+                assert_eq!(
+                    out.materialize_f64(),
+                    vec![(3.0, 2.0), (4.0, 2.5), (5.0, 3.0)]
+                );
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -1116,7 +1121,10 @@ mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![1, 3]);
-                assert_eq!(out.data, vec![(3.0, 2.0), (8.0 / 3.0, 2.0), (2.5, 2.0)]);
+                assert_eq!(
+                    out.materialize_f64(),
+                    vec![(3.0, 2.0), (8.0 / 3.0, 2.0), (2.5, 2.0)]
+                );
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -1365,7 +1373,7 @@ mod tests {
             )
             .expect("gather complex gradient");
             assert_eq!(gathered.shape, expected.shape);
-            assert_eq!(gathered.data, expected.data);
+            assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
         });
     }
 
@@ -1406,7 +1414,11 @@ mod tests {
         )
         .expect("gather complex gradient");
         assert_eq!(gathered.shape, expected.shape);
-        for (idx, (actual, expected)) in gathered.data.iter().zip(expected.data.iter()).enumerate()
+        for (idx, (actual, expected)) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(expected.materialize_f64().iter())
+            .enumerate()
         {
             assert!(
                 (actual.0 - expected.0).abs() <= 1.0e-5,

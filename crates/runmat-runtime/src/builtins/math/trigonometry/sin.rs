@@ -260,7 +260,7 @@ fn sin_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 
 fn sin_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let mapped = ct
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| (sin_complex_re(re, im), sin_complex_im(re, im)))
         .collect::<Vec<_>>();
@@ -619,7 +619,10 @@ pub(crate) mod tests {
             panic!("expected complex tensor result");
         };
         assert_eq!(out.shape, vec![3, 1]);
-        assert_eq!(out.data, vec![(-3.0, 0.0), (0.0, 0.0), (5.0, 0.0)]);
+        assert_eq!(
+            out.materialize_f64(),
+            vec![(-3.0, 0.0), (0.0, 0.0), (5.0, 0.0)]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -759,9 +762,9 @@ pub(crate) mod tests {
                 other => panic!("expected complex output, got {other:?}"),
             };
             assert_eq!(out.shape, vec![1, 2]);
-            for (idx, &(re, im)) in input.data.iter().enumerate() {
-                assert!((out.data[idx].0 - sin_complex_re(re, im)).abs() < 1e-12);
-                assert!((out.data[idx].1 - sin_complex_im(re, im)).abs() < 1e-12);
+            for (idx, &(re, im)) in input.materialize_f64().iter().enumerate() {
+                assert!((out.materialize_f64()[idx].0 - sin_complex_re(re, im)).abs() < 1e-12);
+                assert!((out.materialize_f64()[idx].1 - sin_complex_im(re, im)).abs() < 1e-12);
             }
         });
     }
@@ -792,8 +795,8 @@ pub(crate) mod tests {
             };
             assert_eq!(out.shape, vec![2, 1]);
             for (idx, &re) in input.materialize_f64().iter().enumerate() {
-                assert!((out.data[idx].0 - re.sin()).abs() < 1e-12);
-                assert!(out.data[idx].1.abs() < 1e-12);
+                assert!((out.materialize_f64()[idx].0 - re.sin()).abs() < 1e-12);
+                assert!(out.materialize_f64()[idx].1.abs() < 1e-12);
             }
         });
     }
@@ -829,8 +832,8 @@ pub(crate) mod tests {
             };
             assert_eq!(out.shape, vec![2, 1]);
             for (idx, &re) in input.materialize_f64().iter().enumerate() {
-                assert!((out.data[idx].0 - re.sin()).abs() < 1e-12);
-                assert!(out.data[idx].1.abs() < 1e-12);
+                assert!((out.materialize_f64()[idx].0 - re.sin()).abs() < 1e-12);
+                assert!(out.materialize_f64()[idx].1.abs() < 1e-12);
             }
         });
     }

@@ -553,7 +553,7 @@ fn is_symmetric_complex(tensor: &ComplexTensor, mode: SymmetryMode, tol: f64) ->
     let rows = tensor.rows;
     let cols = tensor.cols;
     debug_assert_eq!(rows, cols, "is_symmetric_complex requires a square matrix");
-    let data = &tensor.data;
+    let data = &tensor.materialize_f64();
 
     for col in 0..cols {
         if matches!(mode, SymmetryMode::Skew) {

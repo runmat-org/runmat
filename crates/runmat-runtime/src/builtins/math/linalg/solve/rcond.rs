@@ -331,13 +331,13 @@ fn rcond_complex_tensor_impl(matrix: &ComplexTensor) -> BuiltinResult<f64> {
     if rows == 0 {
         return Ok(f64::INFINITY);
     }
-    if matrix.data.len() == 1 {
-        let (re, im) = matrix.data[0];
+    if matrix.materialize_f64().len() == 1 {
+        let (re, im) = matrix.materialize_f64()[0];
         let magnitude = re.hypot(im);
         return Ok(if magnitude == 0.0 { 0.0 } else { 1.0 });
     }
     let data: Vec<Complex64> = matrix
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();

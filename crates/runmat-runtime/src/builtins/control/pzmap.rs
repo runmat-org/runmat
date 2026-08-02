@@ -492,9 +492,18 @@ mod tests {
             panic!("expected complex poles");
         };
         assert_eq!(poles.shape, vec![2, 1]);
-        assert!(poles.data.iter().all(|(re, _)| re.abs() < 1.0e-8));
-        assert!(poles.data.iter().any(|(_, im)| (*im - 1.0).abs() < 1.0e-8));
-        assert!(poles.data.iter().any(|(_, im)| (*im + 1.0).abs() < 1.0e-8));
+        assert!(poles
+            .materialize_f64()
+            .iter()
+            .all(|(re, _)| re.abs() < 1.0e-8));
+        assert!(poles
+            .materialize_f64()
+            .iter()
+            .any(|(_, im)| (*im - 1.0).abs() < 1.0e-8));
+        assert!(poles
+            .materialize_f64()
+            .iter()
+            .any(|(_, im)| (*im + 1.0).abs() < 1.0e-8));
         assert_eq!(tensor(&outputs[1]).shape, vec![0, 1]);
     }
 

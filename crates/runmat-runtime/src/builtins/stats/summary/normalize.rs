@@ -1396,10 +1396,9 @@ mod tests {
     }
 
     fn complex_int_tensor(real: IntegerStorage, imag: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor =
+        let tensor =
             ComplexTensor::new_integer(IntegerComplexStorage::new(real, imag).unwrap(), shape)
                 .unwrap();
-        tensor.data.clear();
         Value::ComplexTensor(tensor)
     }
 
@@ -1673,9 +1672,9 @@ mod tests {
         else {
             panic!("expected complex output");
         };
-        assert_close(out.data[0].0, 3.0 / 13.0);
-        assert_close(out.data[0].1, 4.0 / 13.0);
-        assert_close(out.data[1].1, 12.0 / 13.0);
+        assert_close(out.materialize_f64()[0].0, 3.0 / 13.0);
+        assert_close(out.materialize_f64()[0].1, 4.0 / 13.0);
+        assert_close(out.materialize_f64()[1].1, 12.0 / 13.0);
     }
 
     #[test]
@@ -1690,10 +1689,10 @@ mod tests {
         else {
             panic!("expected complex output");
         };
-        assert_close(out.data[0].0, 3.0 / 13.0);
-        assert_close(out.data[0].1, 4.0 / 13.0);
-        assert_close(out.data[1].0, 0.0);
-        assert_close(out.data[1].1, 12.0 / 13.0);
+        assert_close(out.materialize_f64()[0].0, 3.0 / 13.0);
+        assert_close(out.materialize_f64()[0].1, 4.0 / 13.0);
+        assert_close(out.materialize_f64()[1].0, 0.0);
+        assert_close(out.materialize_f64()[1].1, 12.0 / 13.0);
     }
 
     #[test]
@@ -1719,7 +1718,7 @@ mod tests {
             panic!("expected complex output");
         };
         assert_eq!(out.shape, vec![2, 1]);
-        assert_eq!(out.data, vec![(1.0, 1.0), (2.0, 3.0)]);
+        assert_eq!(out.materialize_f64(), vec![(1.0, 1.0), (2.0, 3.0)]);
     }
 
     #[test]

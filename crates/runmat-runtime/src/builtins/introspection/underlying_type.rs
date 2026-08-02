@@ -199,10 +199,7 @@ pub(crate) fn underlying_type_for_value(value: &Value) -> String {
     match value {
         Value::Tensor(tensor) => tensor.numeric_dtype().class_name().to_string(),
         Value::SparseTensor(sparse) => sparse.class_name().to_string(),
-        Value::ComplexTensor(tensor) => tensor.integer_data.as_ref().map_or_else(
-            || "double".to_string(),
-            |storage| storage.class_name().to_string(),
-        ),
+        Value::ComplexTensor(tensor) => tensor.numeric_dtype().class_name().to_string(),
         Value::Complex(_, _) | Value::Num(_) => "double".to_string(),
         Value::Int(iv) => iv.class_name().to_string(),
         Value::Bool(_) | Value::LogicalArray(_) => "logical".to_string(),

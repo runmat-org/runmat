@@ -648,7 +648,7 @@ impl RowMajorMatrix {
             for row in 0..rows {
                 let idx_col_major = row + col * rows;
                 let idx_row_major = row * cols + col;
-                let (re, im) = tensor.data[idx_col_major];
+                let (re, im) = tensor.materialize_f64()[idx_col_major];
                 data[idx_row_major] = Complex64::new(re, im);
             }
         }

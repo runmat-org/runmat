@@ -4,7 +4,8 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, Tensor, Type, Value,
+    ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, NumericDType, Tensor, Type,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -388,10 +389,12 @@ fn eye_logical(shape: &[usize]) -> Result<Value, String> {
     Ok(Value::LogicalArray(logical))
 }
 
-fn eye_complex(shape: &[usize]) -> Result<Value, String> {
+fn eye_complex(shape: &[usize], dtype: NumericDType) -> Result<Value, String> {
     let shape = shape.to_vec();
-    let mut tensor = ComplexTensor::zeros(shape.clone());
-    visit_identity_positions(&shape, |idx| tensor.data[idx] = (1.0, 0.0));
+    let len = shape.iter().product();
+    let mut data = vec![(0.0, 0.0); len];
+    visit_identity_positions(&shape, |idx| data[idx] = (1.0, 0.0));
+    let tensor = ComplexTensor::from_f64_values_with_dtype(data, shape, dtype)?;
     Ok(Value::ComplexTensor(tensor))
 }
 
@@ -413,14 +416,17 @@ fn integer_storage_prototype_from_keyword(keyword: &str) -> Option<IntegerStorag
 async fn eye_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
     match proto {
         Value::LogicalArray(_) | Value::Bool(_) => eye_logical(shape),
-        Value::ComplexTensor(tensor) if tensor.integer_data.is_some() => eye_complex_integer_like(
-            tensor
-                .integer_data
-                .as_ref()
-                .expect("guarded typed complex integer storage"),
-            shape,
-        ),
-        Value::ComplexTensor(_) | Value::Complex(_, _) => eye_complex(shape),
+        Value::ComplexTensor(tensor) if tensor.integer_storage().is_some() => {
+            eye_complex_integer_like(
+                tensor
+                    .integer_storage()
+                    .as_ref()
+                    .expect("guarded typed complex integer storage"),
+                shape,
+            )
+        }
+        Value::ComplexTensor(tensor) => eye_complex(shape, tensor.numeric_dtype()),
+        Value::Complex(_, _) => eye_complex(shape, NumericDType::F64),
         Value::GpuTensor(handle) => eye_like_gpu(handle, shape).await,
         Value::Tensor(tensor) => match tensor.integer_storage() {
             Some(storage) => eye_integer_like(storage, shape),
@@ -892,10 +898,10 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data[0], (1.0, 0.0));
-                assert_eq!(t.data[1], (0.0, 0.0));
-                assert_eq!(t.data[2], (0.0, 0.0));
-                assert_eq!(t.data[3], (1.0, 0.0));
+                assert_eq!(t.materialize_f64()[0], (1.0, 0.0));
+                assert_eq!(t.materialize_f64()[1], (0.0, 0.0));
+                assert_eq!(t.materialize_f64()[2], (0.0, 0.0));
+                assert_eq!(t.materialize_f64()[3], (1.0, 0.0));
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -922,7 +928,7 @@ pub(crate) mod tests {
             panic!("expected typed complex output");
         };
         assert_eq!(
-            output.integer_data,
+            output.integer_storage().cloned(),
             Some(
                 IntegerComplexStorage::new(
                     IntegerStorage::U64(vec![1, 0, 0, 1]),

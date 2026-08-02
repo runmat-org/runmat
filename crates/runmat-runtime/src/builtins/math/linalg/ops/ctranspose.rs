@@ -206,7 +206,7 @@ fn ctranspose_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 }
 
 fn ctranspose_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    if ct.integer_data.is_some() {
+    if ct.integer_storage().is_some() {
         return ctranspose_typed_complex_integer_tensor(ct).map(Value::ComplexTensor);
     }
     let rank = ct.shape.len();
@@ -230,18 +230,19 @@ fn ctranspose_typed_complex_integer_tensor(ct: ComplexTensor) -> BuiltinResult<C
     let rank = ct.shape.len();
     let (storage, shape) = if rank == 0 {
         (
-            ct.integer_data
-                .expect("typed complex tensor must retain exact storage"),
+            ct.integer_storage()
+                .expect("typed complex tensor must retain exact storage")
+                .clone(),
             ct.shape,
         )
     } else if rank <= 2 {
         let storage = ct
-            .integer_data
+            .integer_storage()
             .expect("typed complex tensor must retain exact storage");
         (
             IntegerComplexStorage::new(
-                transpose_integer_storage(storage.real, ct.rows, ct.cols),
-                transpose_integer_storage(storage.imag, ct.rows, ct.cols),
+                transpose_integer_storage(storage.real.clone(), ct.rows, ct.cols),
+                transpose_integer_storage(storage.imag.clone(), ct.rows, ct.cols),
             )
             .map_err(|e| internal_error(format!("{NAME}: {e}")))?,
             vec![ct.cols, ct.rows],
@@ -251,8 +252,9 @@ fn ctranspose_typed_complex_integer_tensor(ct: ComplexTensor) -> BuiltinResult<C
         let permuted = permute_complex_tensor(NAME, ct, &order)?;
         (
             permuted
-                .integer_data
-                .expect("typed complex permutation must retain exact storage"),
+                .integer_storage()
+                .expect("typed complex permutation must retain exact storage")
+                .clone(),
             permuted.shape,
         )
     };
@@ -278,7 +280,7 @@ fn ctranspose_complex_tensor_preserve_complex(ct: ComplexTensor) -> BuiltinResul
     };
     let shape = transposed.shape.clone();
     let data = transposed
-        .data
+        .materialize_f64()
         .into_iter()
         .map(|(re, im)| (re, -im))
         .collect();
@@ -287,7 +289,7 @@ fn ctranspose_complex_tensor_preserve_complex(ct: ComplexTensor) -> BuiltinResul
 
 fn ctranspose_complex_tensor_value(ct: ComplexTensor) -> BuiltinResult<Value> {
     let shape = ct.shape.clone();
-    let data = ct.data;
+    let data = ct.materialize_f64();
     let mut all_real = true;
     let mut conj_data = Vec::with_capacity(data.len());
     for (re, im) in data {
@@ -568,16 +570,16 @@ fn ctranspose_order(rank: usize) -> Vec<usize> {
 fn ctranspose_complex_matrix(ct: &ComplexTensor) -> Vec<(f64, f64)> {
     let rows = ct.rows;
     let cols = ct.cols;
-    if ct.data.is_empty() {
+    if ct.materialize_f64().is_empty() {
         return Vec::new();
     }
-    let mut out = vec![(0.0, 0.0); ct.data.len()];
+    let mut out = vec![(0.0, 0.0); ct.materialize_f64().len()];
     for r in 0..rows {
         for c in 0..cols {
             let src = r + c * rows;
             let dst = c + r * cols;
-            if src < ct.data.len() && dst < out.len() {
-                out[dst] = ct.data[src];
+            if src < ct.materialize_f64().len() && dst < out.len() {
+                out[dst] = ct.materialize_f64()[src];
             }
         }
     }
@@ -628,7 +630,7 @@ pub(crate) mod tests {
         else {
             panic!("expected complex tensor");
         };
-        let storage = result.integer_data.expect("exact integer storage");
+        let storage = result.integer_storage().expect("exact integer storage");
         assert_eq!(result.shape, vec![3, 2]);
         assert_eq!(
             storage.real,
@@ -748,7 +750,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
                 assert_eq!(
-                    out.data,
+                    out.materialize_f64(),
                     vec![(1.0, -2.0), (5.0, -0.0), (3.0, 4.0), (6.0, 7.0)]
                 );
             }
@@ -980,7 +982,7 @@ pub(crate) mod tests {
             )
             .expect("gather complex");
             assert_eq!(gathered.shape, expected.shape);
-            assert_eq!(gathered.data, expected.data);
+            assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
         });
     }
 
@@ -1007,7 +1009,7 @@ pub(crate) mod tests {
             .expect("gather complex");
             assert_eq!(gathered.shape, vec![2, 2]);
             assert_eq!(
-                gathered.data,
+                gathered.materialize_f64(),
                 vec![(1.0, -0.0), (3.0, -0.0), (2.0, 0.0), (4.0, 0.0)]
             );
         });
@@ -1045,7 +1047,7 @@ pub(crate) mod tests {
             .expect("gather complex");
             assert_eq!(gathered.shape, vec![2, 2, 2]);
             assert_eq!(
-                gathered.data,
+                gathered.materialize_f64(),
                 vec![
                     (1.0, 1.0),
                     (3.0, 3.0),
@@ -1130,7 +1132,7 @@ pub(crate) mod tests {
         )
         .expect("gather complex");
         assert_eq!(gathered.shape, expected.shape);
-        assert_eq!(gathered.data, expected.data);
+        assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 
     #[test]
@@ -1173,6 +1175,6 @@ pub(crate) mod tests {
         )
         .expect("gather complex");
         assert_eq!(gathered.shape, expected.shape);
-        assert_eq!(gathered.data, expected.data);
+        assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 }

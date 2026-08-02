@@ -476,13 +476,15 @@ fn ones_logical(shape: &[usize]) -> crate::BuiltinResult<Value> {
 async fn ones_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value> {
     match proto {
         Value::LogicalArray(_) | Value::Bool(_) => ones_logical(shape),
-        Value::ComplexTensor(tensor) if tensor.integer_data.is_some() => ones_complex_integer_like(
-            tensor
-                .integer_data
-                .as_ref()
-                .expect("guarded typed complex integer storage"),
-            shape,
-        ),
+        Value::ComplexTensor(tensor) if tensor.integer_storage().is_some() => {
+            ones_complex_integer_like(
+                tensor
+                    .integer_storage()
+                    .as_ref()
+                    .expect("guarded typed complex integer storage"),
+                shape,
+            )
+        }
         Value::ComplexTensor(_) | Value::Complex(_, _) => {
             let len = tensor::element_count(shape);
             let data = vec![(1.0, 0.0); len];
@@ -850,7 +852,10 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
-                assert!(t.data.iter().all(|&(re, im)| (re, im) == (1.0, 0.0)));
+                assert!(t
+                    .materialize_f64()
+                    .iter()
+                    .all(|&(re, im)| (re, im) == (1.0, 0.0)));
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -877,7 +882,7 @@ pub(crate) mod tests {
             panic!("expected typed complex output");
         };
         assert_eq!(
-            output.integer_data,
+            output.integer_storage().cloned(),
             Some(
                 IntegerComplexStorage::new(
                     IntegerStorage::I64(vec![1; 4]),

@@ -759,8 +759,8 @@ fn times_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinRes
     }
     let mut out = vec![(0.0f64, 0.0f64); plan.len()];
     for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
-        let (ar, ai) = lhs.data[idx_lhs];
-        let (br, bi) = rhs.data[idx_rhs];
+        let (ar, ai) = lhs.materialize_f64()[idx_lhs];
+        let (br, bi) = rhs.materialize_f64()[idx_rhs];
         let re = ar * br - ai * bi;
         let im = ar * bi + ai * br;
         out[out_idx] = (re, im);
@@ -783,7 +783,7 @@ fn times_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value>
     let rhs_values = tensor::tensor_values_f64_cow(rhs);
     let mut out = vec![(0.0f64, 0.0f64); plan.len()];
     for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
-        let (ar, ai) = lhs.data[idx_lhs];
+        let (ar, ai) = lhs.materialize_f64()[idx_lhs];
         let scalar = rhs_values[idx_rhs];
         out[out_idx] = (ar * scalar, ai * scalar);
     }
@@ -806,7 +806,7 @@ fn times_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> BuiltinResult<Value>
     let mut out = vec![(0.0f64, 0.0f64); plan.len()];
     for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
         let scalar = lhs_values[idx_lhs];
-        let (br, bi) = rhs.data[idx_rhs];
+        let (br, bi) = rhs.materialize_f64()[idx_rhs];
         out[out_idx] = (scalar * br, scalar * bi);
     }
     let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
@@ -926,8 +926,7 @@ pub(crate) mod tests {
             IntegerStorage::I16(vec![-3]),
         )
         .expect("complex integer storage");
-        let mut complex = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
-        complex.data.clear();
+        let complex = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
         assert_eq!(
             scalar_complex_value(&Value::ComplexTensor(complex)),
             Some((8.0, -3.0))
@@ -1053,7 +1052,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
-                assert_eq!(out.data, vec![(2.0, 0.0), (3.0, 0.0)]);
+                assert_eq!(out.materialize_f64(), vec![(2.0, 0.0), (3.0, 0.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -1149,7 +1148,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
                 let expected = [(4.0, 3.0), (1.0, 7.0)];
-                for (got, exp) in t.data.iter().zip(expected.iter()) {
+                for (got, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((got.0 - exp.0).abs() < EPS && (got.1 - exp.1).abs() < EPS);
                 }
             }
@@ -1359,7 +1358,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![2, 1]);
                 let expected = [(8.0, 0.0), (15.0, 0.0)];
-                for (got, exp) in ct.data.iter().zip(expected.iter()) {
+                for (got, exp) in ct.materialize_f64().iter().zip(expected.iter()) {
                     assert!((got.0 - exp.0).abs() < EPS);
                     assert!((got.1 - exp.1).abs() < EPS);
                 }

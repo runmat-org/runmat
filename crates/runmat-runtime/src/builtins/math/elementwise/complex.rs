@@ -9,7 +9,8 @@ use runmat_builtins::shape_rules::element_count_if_known;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntegerComplexStorage, IntegerStorage, ResolveContext, Tensor, Type, Value,
+    ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericDType, ResolveContext, Tensor,
+    Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -257,14 +258,13 @@ fn unary_complex_host(value: Value) -> BuiltinResult<Value> {
                     Ok(complex_tensor_into_value(complex))
                 }
                 Err(storage) => {
-                    // Floating ComplexTensor storage is currently double-only;
-                    // make the single-to-double component boundary explicit.
+                    let dtype = storage.numeric_dtype();
                     let values = storage.materialize_f64();
-                    if is_scalar {
+                    if is_scalar && dtype == NumericDType::F64 {
                         return Ok(Value::Complex(values[0], 0.0));
                     }
                     let data = values.into_iter().map(|value| (value, 0.0)).collect();
-                    let complex = ComplexTensor::new(data, shape)
+                    let complex = ComplexTensor::from_f64_values_with_dtype(data, shape, dtype)
                         .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?;
                     Ok(complex_tensor_into_value(complex))
                 }
@@ -434,8 +434,12 @@ fn compose_complex(real: &RealInput, imag: &RealInput) -> BuiltinResult<Value> {
 }
 
 fn compose_floating_complex(real: &Tensor, imag: &Tensor) -> BuiltinResult<Value> {
-    // Floating ComplexTensor storage is currently double-only. Components
-    // therefore enter this explicit floating materialization boundary.
+    let output_dtype =
+        if real.numeric_dtype() == NumericDType::F32 && imag.numeric_dtype() == NumericDType::F32 {
+            NumericDType::F32
+        } else {
+            NumericDType::F64
+        };
     let real_values = tensor::tensor_values_f64_cow(real);
     let imag_values = tensor::tensor_values_f64_cow(imag);
     let (shape, data) = if real.shape == imag.shape {
@@ -460,12 +464,7 @@ fn compose_floating_complex(real: &Tensor, imag: &Tensor) -> BuiltinResult<Value
         ));
     };
 
-    if data.is_empty() {
-        let empty = ComplexTensor::new(Vec::new(), shape)
-            .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?;
-        return Ok(complex_tensor_into_value(empty));
-    }
-    let ct = ComplexTensor::new(data, shape)
+    let ct = ComplexTensor::from_f64_values_with_dtype(data, shape, output_dtype)
         .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?;
     Ok(complex_tensor_into_value(ct))
 }
@@ -705,17 +704,34 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn complex_single_components_cross_the_current_double_complex_boundary_explicitly() {
+    fn complex_single_components_preserve_native_complex_single_storage() {
         let real = Tensor::from_f32(vec![0.1, 2.0], vec![1, 2]).unwrap();
         let imag = Tensor::from_f32(vec![0.2, -3.0], vec![1, 2]).unwrap();
         let result = complex_call(Value::Tensor(real), vec![Value::Tensor(imag)]).expect("complex");
         let Value::ComplexTensor(result) = result else {
             panic!("expected complex tensor");
         };
+        assert_eq!(result.numeric_dtype(), NumericDType::F32);
         assert_eq!(
-            result.data,
+            result.as_f32_slice(),
+            Some(&[(0.1_f32, 0.2_f32), (2.0_f32, -3.0_f32)][..])
+        );
+        assert_eq!(
+            result.materialize_f64(),
             vec![(f64::from(0.1_f32), f64::from(0.2_f32)), (2.0, -3.0)]
         );
+    }
+
+    #[test]
+    fn complex_single_scalar_retains_class_as_complex_tensor() {
+        let real = Tensor::from_f32(vec![0.1], vec![1, 1]).unwrap();
+        let imag = Tensor::from_f32(vec![0.2], vec![1, 1]).unwrap();
+        let result = complex_call(Value::Tensor(real), vec![Value::Tensor(imag)]).expect("complex");
+        let Value::ComplexTensor(result) = result else {
+            panic!("single complex scalar must retain its class");
+        };
+        assert_eq!(result.numeric_dtype(), NumericDType::F32);
+        assert_eq!(result.as_f32_slice(), Some(&[(0.1_f32, 0.2_f32)][..]));
     }
 
     #[test]
@@ -731,7 +747,7 @@ pub(crate) mod tests {
         };
         assert_eq!(complex.shape, vec![1, 2]);
         assert_eq!(
-            complex.integer_data,
+            complex.integer_storage().cloned(),
             Some(
                 IntegerComplexStorage::new(
                     IntegerStorage::U64(vec![9_223_372_036_854_775_809, u64::MAX]),
@@ -756,7 +772,7 @@ pub(crate) mod tests {
         };
         assert_eq!(output.shape, vec![3, 1]);
         assert_eq!(
-            output.integer_data,
+            output.integer_storage().cloned(),
             Some(
                 IntegerComplexStorage::new(
                     IntegerStorage::I32(vec![-3, -3, -3]),
@@ -779,7 +795,7 @@ pub(crate) mod tests {
         };
         assert_eq!(complex.shape, vec![1, 1]);
         assert_eq!(
-            complex.integer_data,
+            complex.integer_storage().cloned(),
             Some(
                 IntegerComplexStorage::new(
                     IntegerStorage::I64(vec![i64::MIN]),
@@ -815,7 +831,7 @@ pub(crate) mod tests {
                 panic!("expected gathered complex tensor");
             };
             assert_eq!(ct.shape, vec![1, 2]);
-            assert_eq!(ct.data, vec![(2.0, 10.0), (4.0, 20.0)]);
+            assert_eq!(ct.materialize_f64(), vec![(2.0, 10.0), (4.0, 20.0)]);
         });
     }
 
@@ -850,7 +866,10 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![1, 3]);
-                assert_eq!(ct.data, vec![(1.0, 4.0), (2.0, 5.0), (3.0, 6.0)]);
+                assert_eq!(
+                    ct.materialize_f64(),
+                    vec![(1.0, 4.0), (2.0, 5.0), (3.0, 6.0)]
+                );
             }
             other => panic!("expected ComplexTensor result, got {other:?}"),
         }
@@ -864,7 +883,10 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![1, 3]);
-                assert_eq!(ct.data, vec![(0.0, 1.0), (0.0, 2.0), (0.0, 3.0)]);
+                assert_eq!(
+                    ct.materialize_f64(),
+                    vec![(0.0, 1.0), (0.0, 2.0), (0.0, 3.0)]
+                );
             }
             other => panic!("expected ComplexTensor result, got {other:?}"),
         }
@@ -878,7 +900,10 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![1, 3]);
-                assert_eq!(ct.data, vec![(1.0, 0.0), (2.0, 0.0), (3.0, 0.0)]);
+                assert_eq!(
+                    ct.materialize_f64(),
+                    vec![(1.0, 0.0), (2.0, 0.0), (3.0, 0.0)]
+                );
             }
             other => panic!("expected ComplexTensor result, got {other:?}"),
         }
@@ -893,7 +918,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![2, 1]);
-                assert_eq!(ct.data, vec![(1.0, 3.0), (2.0, 4.0)]);
+                assert_eq!(ct.materialize_f64(), vec![(1.0, 3.0), (2.0, 4.0)]);
             }
             other => panic!("expected ComplexTensor result, got {other:?}"),
         }
@@ -977,7 +1002,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 1]);
                 assert_eq!(
-                    tensor.integer_data,
+                    tensor.integer_storage().cloned(),
                     Some(
                         IntegerComplexStorage::new(
                             IntegerStorage::I32(vec![3]),
@@ -1012,7 +1037,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![1, 2]);
-                assert_eq!(ct.data, vec![(1.0, 0.0), (2.0, 0.0)]);
+                assert_eq!(ct.materialize_f64(), vec![(1.0, 0.0), (2.0, 0.0)]);
             }
             other => panic!("expected ComplexTensor result, got {other:?}"),
         }
@@ -1061,7 +1086,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![2, 2]);
                 assert_eq!(
-                    ct.data,
+                    ct.materialize_f64(),
                     vec![(1.0, 10.0), (0.0, 20.0), (0.0, 30.0), (1.0, 40.0)]
                 );
             }
@@ -1100,7 +1125,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![0, 3]);
-                assert!(ct.data.is_empty());
+                assert!(ct.materialize_f64().is_empty());
             }
             other => panic!("expected empty ComplexTensor, got {other:?}"),
         }
@@ -1131,7 +1156,10 @@ pub(crate) mod tests {
                 panic!("expected gathered complex tensor");
             };
             assert_eq!(ct.shape, vec![3, 1]);
-            assert_eq!(ct.data, vec![(1.0, 0.0), (-2.0, 0.0), (3.5, 0.0)]);
+            assert_eq!(
+                ct.materialize_f64(),
+                vec![(1.0, 0.0), (-2.0, 0.0), (3.5, 0.0)]
+            );
         });
     }
 
@@ -1161,7 +1189,10 @@ pub(crate) mod tests {
                 panic!("expected gathered complex tensor");
             };
             assert_eq!(ct.shape, vec![1, 3]);
-            assert_eq!(ct.data, vec![(1.0, -4.0), (2.0, -4.0), (3.0, -4.0)]);
+            assert_eq!(
+                ct.materialize_f64(),
+                vec![(1.0, -4.0), (2.0, -4.0), (3.0, -4.0)]
+            );
         });
     }
 
@@ -1201,7 +1232,7 @@ pub(crate) mod tests {
                 panic!("expected gathered complex tensor");
             };
             assert_eq!(ct.shape, vec![0, 3]);
-            assert!(ct.data.is_empty());
+            assert!(ct.materialize_f64().is_empty());
         });
     }
 

@@ -281,7 +281,7 @@ fn pow2_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 
 fn pow2_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let mapped = ct
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| pow2_complex(re, im))
         .collect::<Vec<_>>();
@@ -436,7 +436,7 @@ fn complex_mul(ar: f64, ai: f64, br: f64, bi: f64) -> (f64, f64) {
 }
 
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor::is_scalar_complex_tensor(&tensor) && tensor.integer_data.is_none() {
+    if tensor::is_scalar_complex_tensor(&tensor) && tensor.integer_storage().is_none() {
         let value = tensor::complex_tensor_value_complex64(&tensor, 0);
         Value::Complex(value.re, value.im)
     } else {
@@ -698,10 +698,10 @@ pub(crate) mod tests {
                 assert_eq!(out.shape, vec![2, 1]);
                 let scale0 = 2.0f64.exp2();
                 let scale1 = (-1.0f64).exp2();
-                assert!((out.data[0].0 - (1.0 * scale0)).abs() < 1e-12);
-                assert!((out.data[0].1 - (1.0 * scale0)).abs() < 1e-12);
-                assert!((out.data[1].0 - (2.0 * scale1)).abs() < 1e-12);
-                assert!((out.data[1].1 - (-0.5 * scale1)).abs() < 1e-12);
+                assert!((out.materialize_f64()[0].0 - (1.0 * scale0)).abs() < 1e-12);
+                assert!((out.materialize_f64()[0].1 - (1.0 * scale0)).abs() < 1e-12);
+                assert!((out.materialize_f64()[1].0 - (2.0 * scale1)).abs() < 1e-12);
+                assert!((out.materialize_f64()[1].1 - (-0.5 * scale1)).abs() < 1e-12);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }

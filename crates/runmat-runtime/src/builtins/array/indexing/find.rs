@@ -683,7 +683,7 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
         DataStorage::Complex(tensor) => {
             let mut indices = Vec::new();
             let mut values = Vec::new();
-            let typed_storage = tensor.integer_data.as_ref();
+            let typed_storage = tensor.integer_storage();
 
             if matches!(limit, Some(0)) {
                 let values = find_values_for_complex_tensor(tensor, &indices, values);
@@ -692,13 +692,13 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
 
             let len = typed_storage
                 .map(|storage| storage.len())
-                .unwrap_or(tensor.data.len());
+                .unwrap_or(tensor.materialize_f64().len());
             match options.direction {
                 FindDirection::First => {
                     for idx in 0..len {
                         let nonzero = typed_storage.map_or_else(
                             || {
-                                let (re, im) = tensor.data[idx];
+                                let (re, im) = tensor.materialize_f64()[idx];
                                 re != 0.0 || im != 0.0
                             },
                             |storage| {
@@ -710,7 +710,7 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
                         if nonzero {
                             indices.push(idx + 1);
                             if typed_storage.is_none() {
-                                values.push(tensor.data[idx]);
+                                values.push(tensor.materialize_f64()[idx]);
                             }
                             if limit.is_some_and(|k| indices.len() >= k) {
                                 break;
@@ -722,7 +722,7 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
                     for idx in (0..len).rev() {
                         let nonzero = typed_storage.map_or_else(
                             || {
-                                let (re, im) = tensor.data[idx];
+                                let (re, im) = tensor.materialize_f64()[idx];
                                 re != 0.0 || im != 0.0
                             },
                             |storage| {
@@ -734,7 +734,7 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
                         if nonzero {
                             indices.push(idx + 1);
                             if typed_storage.is_none() {
-                                values.push(tensor.data[idx]);
+                                values.push(tensor.materialize_f64()[idx]);
                             }
                             if limit.is_some_and(|k| indices.len() >= k) {
                                 break;
@@ -924,7 +924,7 @@ fn find_values_for_complex_tensor(
     indices: &[usize],
     values: Vec<(f64, f64)>,
 ) -> FindValues {
-    let Some(storage) = tensor.integer_data.as_ref() else {
+    let Some(storage) = tensor.integer_storage() else {
         return FindValues::Complex(values);
     };
     let selected: Vec<usize> = indices.iter().map(|index| index - 1).collect();
@@ -1114,7 +1114,7 @@ pub(crate) mod tests {
             }
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![1, 1]);
-                assert_eq!(ct.data, vec![(1.0, 2.0)]);
+                assert_eq!(ct.materialize_f64(), vec![(1.0, 2.0)]);
             }
             other => panic!("expected complex result, got {other:?}"),
         }
@@ -1226,8 +1226,7 @@ pub(crate) mod tests {
             IntegerStorage::I16(vec![0, 0, 5, 0]),
         )
         .expect("complex integer storage");
-        let mut input = ComplexTensor::new_integer(storage, vec![2, 2]).expect("complex tensor");
-        input.data.clear();
+        let input = ComplexTensor::new_integer(storage, vec![2, 2]).expect("complex tensor");
 
         let eval = evaluate(Value::ComplexTensor(input), &[]).expect("find");
         let linear = tensor::value_into_tensor_for("find", eval.linear_value().expect("linear"))
@@ -1237,7 +1236,7 @@ pub(crate) mod tests {
         let Value::ComplexTensor(values) = values else {
             panic!("expected typed complex tensor values");
         };
-        let storage = values.integer_data.as_ref().expect("typed complex values");
+        let storage = values.integer_storage().expect("typed complex values");
         assert_eq!(storage.real, IntegerStorage::I16(vec![-7, 0, 9]));
         assert_eq!(storage.imag, IntegerStorage::I16(vec![0, 5, 0]));
     }

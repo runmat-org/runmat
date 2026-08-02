@@ -18,8 +18,8 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, LogicalArray, NumericStorage, ResolveContext, StringArray,
-    Tensor, Type, Value,
+    CharArray, ComplexStorage, ComplexTensor, IntValue, LogicalArray, NumericStorage,
+    ResolveContext, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 use std::collections::HashSet;
@@ -772,19 +772,11 @@ fn circshift_complex_tensor(
     dims: &[usize],
     shifts: &[isize],
 ) -> crate::BuiltinResult<ComplexTensor> {
-    let ComplexTensor {
-        data,
-        integer_data,
-        shape,
-        ..
-    } = tensor;
+    let shape = tensor.shape.clone();
+    let storage = tensor.into_complex_storage();
     let plan = build_shift_plan(&shape, dims, shifts)?;
-    if data.is_empty() || plan.is_noop() {
-        if let Some(storage) = integer_data {
-            return ComplexTensor::new_integer(storage, shape)
-                .map_err(|e| circshift_internal(format!("circshift: {e}")));
-        }
-        return ComplexTensor::new(data, shape)
+    if storage.is_empty() || plan.is_noop() {
+        return ComplexTensor::from_complex_storage(storage, shape)
             .map_err(|e| circshift_internal(format!("circshift: {e}")));
     }
     let ShiftPlan {
@@ -792,17 +784,22 @@ fn circshift_complex_tensor(
         positive,
         ..
     } = plan;
-    if let Some(storage) = integer_data {
-        let storage = storage
-            .reorder(|values| {
-                circshift_generic(values, &ext_shape, &positive).map_err(|e| e.to_string())
-            })
-            .map_err(|e| circshift_internal(format!("circshift: {e}")))?;
-        return ComplexTensor::new_integer(storage, ext_shape)
-            .map_err(|e| circshift_internal(format!("circshift: {e}")));
-    }
-    let rotated = circshift_generic(&data, &ext_shape, &positive)?;
-    ComplexTensor::new(rotated, ext_shape)
+    let rotated = match storage {
+        ComplexStorage::F64(values) => {
+            ComplexStorage::F64(circshift_generic(&values, &ext_shape, &positive)?)
+        }
+        ComplexStorage::F32(values) => {
+            ComplexStorage::F32(circshift_generic(&values, &ext_shape, &positive)?)
+        }
+        ComplexStorage::Integer(storage) => ComplexStorage::Integer(
+            storage
+                .reorder(|values| {
+                    circshift_generic(values, &ext_shape, &positive).map_err(|e| e.to_string())
+                })
+                .map_err(|e| circshift_internal(format!("circshift: {e}")))?,
+        ),
+    };
+    ComplexTensor::from_complex_storage(rotated, ext_shape)
         .map_err(|e| circshift_internal(format!("circshift: {e}")))
 }
 
@@ -1007,7 +1004,7 @@ fn circshift_generic<T: Clone>(
 }
 
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor::is_scalar_complex_tensor(&tensor) && tensor.integer_data.is_none() {
+    if tensor::is_scalar_complex_tensor(&tensor) && tensor.integer_storage().is_none() {
         let value = tensor::complex_tensor_value_complex64(&tensor, 0);
         Value::Complex(value.re, value.im)
     } else {

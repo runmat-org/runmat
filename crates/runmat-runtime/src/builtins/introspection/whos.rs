@@ -9,7 +9,7 @@ use runmat_accelerate_api::{handle_is_logical, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntegerStorage, StructValue, Value,
+    StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -591,14 +591,10 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> BuiltinResult
                 )
         }
         Value::Complex(_, _) => 16,
-        Value::ComplexTensor(t) => t.integer_data.as_ref().map_or_else(
-            || t.data.len().saturating_mul(16),
-            |storage| {
-                storage
-                    .len()
-                    .saturating_mul(integer_storage_element_bytes(&storage.real).saturating_mul(2))
-            },
-        ),
+        Value::ComplexTensor(t) => t
+            .len()
+            .saturating_mul(t.numeric_dtype().byte_size())
+            .saturating_mul(2),
         Value::Cell(ca) => {
             let mut total = 0usize;
             for handle in &ca.data {
@@ -710,15 +706,6 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> BuiltinResult
         }
     };
     Ok(bytes)
-}
-
-fn integer_storage_element_bytes(storage: &IntegerStorage) -> usize {
-    match storage {
-        IntegerStorage::I8(_) | IntegerStorage::U8(_) => 1,
-        IntegerStorage::I16(_) | IntegerStorage::U16(_) => 2,
-        IntegerStorage::I32(_) | IntegerStorage::U32(_) => 4,
-        IntegerStorage::I64(_) | IntegerStorage::U64(_) => 8,
-    }
 }
 
 fn gpu_element_size_bytes() -> usize {
@@ -1321,9 +1308,7 @@ pub(crate) mod tests {
             IntegerStorage::U16(vec![3, 4]),
         )
         .expect("typed complex storage");
-        let mut tensor =
-            ComplexTensor::new_integer(storage, vec![1, 2]).expect("typed complex tensor");
-        tensor.data.clear();
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).expect("typed complex tensor");
 
         assert_eq!(
             value_memory_bytes(&Value::ComplexTensor(tensor), &mut HashSet::new()).expect("bytes"),

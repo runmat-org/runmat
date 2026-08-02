@@ -321,7 +321,7 @@ impl ArrayData {
                 .map(|bit| Value::Bool(*bit != 0))
                 .ok_or_else(|| bsxfun_error(&BSXFUN_ERROR_INTERNAL)),
             Self::Complex(tensor) => tensor
-                .data
+                .materialize_f64()
                 .get(idx)
                 .copied()
                 .map(|(re, im)| Value::Complex(re, im))
@@ -868,7 +868,7 @@ mod tests {
             panic!("expected complex tensor");
         };
         assert_eq!(tensor.shape, vec![2, 1]);
-        assert_eq!(tensor.data, vec![(11.0, 2.0), (13.0, -1.0)]);
+        assert_eq!(tensor.materialize_f64(), vec![(11.0, 2.0), (13.0, -1.0)]);
     }
 
     #[test]
@@ -878,8 +878,7 @@ mod tests {
             runmat_builtins::IntegerStorage::I16(vec![-3]),
         )
         .expect("storage");
-        let mut complex = ComplexTensor::new_integer(storage, vec![1, 1]).expect("typed complex");
-        complex.data.clear();
+        let complex = ComplexTensor::new_integer(storage, vec![1, 1]).expect("typed complex");
 
         assert_eq!(
             classify_value(&Value::ComplexTensor(complex)).expect("classify"),

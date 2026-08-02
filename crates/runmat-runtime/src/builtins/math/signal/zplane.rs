@@ -352,7 +352,7 @@ async fn complex_matrix(value: Value) -> BuiltinResult<ComplexMatrixInput> {
             })
         }
         Value::ComplexTensor(tensor) => {
-            validate_sos_matrix_shape(&tensor.shape, tensor.data.len())?;
+            validate_sos_matrix_shape(&tensor.shape, tensor.materialize_f64().len())?;
             let rows = tensor.shape.first().copied().unwrap_or(0);
             let cols = tensor.shape.get(1).copied().unwrap_or(1);
             Ok(ComplexMatrixInput {
@@ -398,7 +398,9 @@ fn validate_gain(value: &Value) -> BuiltinResult<()> {
             Ok(())
         }
         Value::ComplexTensor(t)
-            if t.data.len() == 1 && t.data[0].0.is_finite() && t.data[0].1.is_finite() =>
+            if t.materialize_f64().len() == 1
+                && t.materialize_f64()[0].0.is_finite()
+                && t.materialize_f64()[0].1.is_finite() =>
         {
             Ok(())
         }

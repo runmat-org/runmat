@@ -710,7 +710,7 @@ fn intersect_complex_elements(
     opts: &IntersectOptions,
 ) -> crate::BuiltinResult<IntersectEvaluation> {
     let mut b_map: HashMap<ComplexKey, usize> = HashMap::new();
-    for (idx, &value) in b.data.iter().enumerate() {
+    for (idx, &value) in b.materialize_f64().iter().enumerate() {
         let key = ComplexKey::new(value);
         b_map.entry(key).or_insert(idx);
     }
@@ -719,7 +719,7 @@ fn intersect_complex_elements(
     let mut entries = Vec::<ComplexIntersectEntry>::new();
     let mut order_counter = 0usize;
 
-    for (idx, &value) in a.data.iter().enumerate() {
+    for (idx, &value) in a.materialize_f64().iter().enumerate() {
         let key = ComplexKey::new(value);
         if seen.contains(&key) {
             continue;
@@ -761,7 +761,7 @@ fn intersect_complex_rows(
         let mut row_keys = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_b;
-            row_keys.push(ComplexKey::new(b.data[idx]));
+            row_keys.push(ComplexKey::new(b.materialize_f64()[idx]));
         }
         b_map.entry(row_keys).or_insert(r);
     }
@@ -775,7 +775,7 @@ fn intersect_complex_rows(
         let mut row_keys = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_a;
-            let value = a.data[idx];
+            let value = a.materialize_f64()[idx];
             row_values.push(value);
             row_keys.push(ComplexKey::new(value));
         }
@@ -1891,7 +1891,7 @@ pub(crate) mod tests {
         .expect("intersect complex");
         match eval.values_value() {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.data, vec![(1.0, 0.0), (2.0, 0.0)]);
+                assert_eq!(t.materialize_f64(), vec![(1.0, 0.0), (2.0, 0.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }

@@ -159,8 +159,7 @@ pub(crate) mod tests {
             IntegerStorage::U64(vec![0, 0]),
         )
         .unwrap();
-        let mut tensor = runmat_builtins::ComplexTensor::new_integer(storage, vec![1, 2]).unwrap();
-        tensor.data.clear();
+        let tensor = runmat_builtins::ComplexTensor::new_integer(storage, vec![1, 2]).unwrap();
 
         assert_eq!(
             block_on(value_numel(&Value::ComplexTensor(tensor))).unwrap(),

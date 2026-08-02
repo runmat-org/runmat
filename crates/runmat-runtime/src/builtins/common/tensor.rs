@@ -156,7 +156,7 @@ pub fn tensor_into_host_f64_owned(tensor: Tensor) -> HostTensorOwned {
 /// real/imaginary storage exactly instead of using the compatibility buffer.
 pub fn complex_tensor_values_complex64(tensor: &ComplexTensor) -> Vec<Complex64> {
     tensor
-        .integer_data
+        .integer_storage()
         .as_ref()
         .map(|storage| {
             let real = storage.real.exact_values();
@@ -168,7 +168,7 @@ pub fn complex_tensor_values_complex64(tensor: &ComplexTensor) -> Vec<Complex64>
         })
         .unwrap_or_else(|| {
             tensor
-                .data
+                .materialize_f64()
                 .iter()
                 .map(|&(re, im)| Complex64::new(re, im))
                 .collect()
@@ -179,9 +179,9 @@ pub fn complex_tensor_values_complex64(tensor: &ComplexTensor) -> Vec<Complex64>
 /// storage instead of the floating compatibility buffer when present.
 pub fn complex_tensor_element_len(tensor: &ComplexTensor) -> usize {
     tensor
-        .integer_data
+        .integer_storage()
         .as_ref()
-        .map_or(tensor.data.len(), |storage| storage.len())
+        .map_or(tensor.materialize_f64().len(), |storage| storage.len())
 }
 
 /// Return true when a complex tensor contains exactly one scalar element.
@@ -192,7 +192,7 @@ pub fn is_scalar_complex_tensor(tensor: &ComplexTensor) -> bool {
 /// Return one complex tensor value as Complex64, reading typed integer-complex
 /// storage exactly instead of using the compatibility backing buffer.
 pub fn complex_tensor_value_complex64(tensor: &ComplexTensor, index: usize) -> Complex64 {
-    match tensor.integer_data.as_ref() {
+    match tensor.integer_storage() {
         Some(storage) => {
             let real = storage
                 .real
@@ -207,7 +207,7 @@ pub fn complex_tensor_value_complex64(tensor: &ComplexTensor, index: usize) -> C
             Complex64::new(real, imag)
         }
         None => {
-            let (real, imag) = tensor.data[index];
+            let (real, imag) = tensor.materialize_f64()[index];
             Complex64::new(real, imag)
         }
     }
@@ -216,11 +216,11 @@ pub fn complex_tensor_value_complex64(tensor: &ComplexTensor, index: usize) -> C
 /// Consume a complex tensor and return Complex64 values, preserving the fast
 /// path for ordinary complex double tensors.
 pub fn complex_tensor_into_values_complex64(tensor: ComplexTensor) -> Vec<Complex64> {
-    if tensor.integer_data.is_some() {
+    if tensor.integer_storage().is_some() {
         complex_tensor_values_complex64(&tensor)
     } else {
         tensor
-            .data
+            .materialize_f64()
             .into_iter()
             .map(|(re, im)| Complex64::new(re, im))
             .collect()

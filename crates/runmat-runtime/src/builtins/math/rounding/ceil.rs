@@ -183,7 +183,7 @@ fn ceil_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 
 fn ceil_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let data: Vec<(f64, f64)> = ct
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| (apply_ceil_scalar(re), apply_ceil_scalar(im)))
         .collect();

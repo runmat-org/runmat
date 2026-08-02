@@ -6,10 +6,9 @@ use runmat_runtime::RuntimeError;
 use std::future::Future;
 
 fn reject_typed_complex_integer_arithmetic(values: &[&Value]) -> Result<(), RuntimeError> {
-    if values
-        .iter()
-        .any(|value| matches!(value, Value::ComplexTensor(tensor) if tensor.integer_data.is_some()))
-    {
+    if values.iter().any(
+        |value| matches!(value, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some()),
+    ) {
         return Err(mex(
             "ComplexIntegerArithmetic",
             "complex integer arithmetic is not supported",

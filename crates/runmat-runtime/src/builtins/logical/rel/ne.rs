@@ -431,7 +431,7 @@ impl ComplexBuffer {
 
     fn from_tensor(tensor: ComplexTensor) -> Self {
         Self {
-            data: tensor.data,
+            data: tensor.materialize_f64(),
             shape: tensor.shape,
         }
     }

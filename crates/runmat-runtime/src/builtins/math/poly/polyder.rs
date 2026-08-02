@@ -633,7 +633,7 @@ pub(crate) mod tests {
 
     #[test]
     fn derivative_typed_complex_integer_coefficients_cross_double_boundary_exactly() {
-        let mut tensor = ComplexTensor::new_integer(
+        let tensor = ComplexTensor::new_integer(
             IntegerComplexStorage::new(
                 IntegerStorage::I16(vec![3, -2, 5, 7]),
                 IntegerStorage::I16(vec![1, 0, -1, 2]),
@@ -642,20 +642,19 @@ pub(crate) mod tests {
             vec![1, 4],
         )
         .expect("complex integer tensor");
-        tensor.data.clear();
 
         let result = derivative_single(Value::ComplexTensor(tensor)).expect("polyder");
         match result {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![1, 3]);
                 assert!(t
-                    .data
+                    .materialize_f64()
                     .iter()
                     .zip([(9.0, 3.0), (-4.0, 0.0), (5.0, -1.0)])
                     .all(|((re, im), (er, ei))| {
                         (re - er).abs() < 1e-12 && (im - ei).abs() < 1e-12
                     }));
-                assert!(t.integer_data.is_none());
+                assert!(t.integer_storage().is_none());
             }
             other => panic!("expected complex tensor result, got {other:?}"),
         }
@@ -790,13 +789,11 @@ pub(crate) mod tests {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
                 let expected = [Complex64::new(2.0, 4.0), Complex64::new(-3.0, 0.0)];
-                assert!(t
-                    .data
-                    .iter()
-                    .zip(expected.iter())
-                    .all(|((re, im), expected)| {
+                assert!(t.materialize_f64().iter().zip(expected.iter()).all(
+                    |((re, im), expected)| {
                         (re - expected.re).abs() < 1e-12 && (im - expected.im).abs() < 1e-12
-                    }));
+                    }
+                ));
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }

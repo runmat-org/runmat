@@ -1011,8 +1011,8 @@ fn complex_tensor_to_matrix(tensor: &ComplexTensor) -> BuiltinResult<DMatrix<Com
     }
     let rows = tensor.rows;
     let cols = tensor.cols;
-    let mut data = Vec::with_capacity(tensor.data.len());
-    for &(re, im) in &tensor.data {
+    let mut data = Vec::with_capacity(tensor.materialize_f64().len());
+    for &(re, im) in &tensor.materialize_f64() {
         data.push(Complex64::new(re, im));
     }
     Ok(DMatrix::from_column_slice(rows, cols, &data))
@@ -1188,7 +1188,7 @@ pub(crate) mod tests {
                 .map(|&v| Complex64::new(v, 0.0))
                 .collect::<Vec<_>>(),
             Value::ComplexTensor(ct) => ct
-                .data
+                .materialize_f64()
                 .iter()
                 .map(|&(re, im)| Complex64::new(re, im))
                 .collect::<Vec<_>>(),
@@ -1515,8 +1515,8 @@ pub(crate) mod tests {
             match result {
                 Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![2.0, 3.0]),
                 Value::ComplexTensor(ct) => {
-                    assert_eq!(ct.data[0], (2.0, 0.0));
-                    assert_eq!(ct.data[1], (3.0, 0.0));
+                    assert_eq!(ct.materialize_f64()[0], (2.0, 0.0));
+                    assert_eq!(ct.materialize_f64()[1], (3.0, 0.0));
                 }
                 other => panic!("expected tensor result, got {other:?}"),
             }

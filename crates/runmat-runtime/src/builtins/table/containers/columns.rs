@@ -37,7 +37,7 @@ pub(in crate::builtins::table) fn split_value_columns(value: Value) -> BuiltinRe
         Value::ComplexTensor(tensor) => {
             let mut out = Vec::with_capacity(tensor.cols);
             for col in 0..tensor.cols {
-                let value = if let Some(storage) = &tensor.integer_data {
+                let value = if let Some(storage) = &tensor.integer_storage() {
                     let mut real = Vec::with_capacity(tensor.rows);
                     let mut imag = Vec::with_capacity(tensor.rows);
                     for row in 0..tensor.rows {
@@ -73,7 +73,7 @@ pub(in crate::builtins::table) fn split_value_columns(value: Value) -> BuiltinRe
                 } else {
                     let mut data = Vec::with_capacity(tensor.rows);
                     for row in 0..tensor.rows {
-                        data.push(tensor.data[row + col * tensor.rows]);
+                        data.push(tensor.materialize_f64()[row + col * tensor.rows]);
                     }
                     ComplexTensor::new(data, vec![tensor.rows, 1]).map_err(invalid_variable)?
                 };
@@ -208,7 +208,7 @@ mod tests {
             panic!("expected second complex tensor column");
         };
         assert_eq!(
-            first.integer_data,
+            first.integer_storage().cloned(),
             Some(
                 runmat_builtins::IntegerComplexStorage::new(
                     IntegerStorage::I64(vec![large, i64::MIN]),
@@ -218,7 +218,7 @@ mod tests {
             )
         );
         assert_eq!(
-            second.integer_data,
+            second.integer_storage().cloned(),
             Some(
                 runmat_builtins::IntegerComplexStorage::new(
                     IntegerStorage::I64(vec![7, 0]),

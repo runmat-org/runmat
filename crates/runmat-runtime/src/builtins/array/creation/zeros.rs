@@ -579,10 +579,10 @@ async fn zeros_gpu(shape: &[usize]) -> crate::BuiltinResult<Value> {
 async fn zeros_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value> {
     match proto {
         Value::LogicalArray(_) | Value::Bool(_) => zeros_logical(shape),
-        Value::ComplexTensor(tensor) if tensor.integer_data.is_some() => {
+        Value::ComplexTensor(tensor) if tensor.integer_storage().is_some() => {
             zeros_complex_integer_like(
                 tensor
-                    .integer_data
+                    .integer_storage()
                     .as_ref()
                     .expect("guarded typed complex integer storage"),
                 shape,
@@ -960,7 +960,10 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
-                assert!(t.data.iter().all(|&(re, im)| re == 0.0 && im == 0.0));
+                assert!(t
+                    .materialize_f64()
+                    .iter()
+                    .all(|&(re, im)| re == 0.0 && im == 0.0));
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -987,7 +990,7 @@ pub(crate) mod tests {
             panic!("expected typed complex output");
         };
         assert_eq!(
-            output.integer_data,
+            output.integer_storage().cloned(),
             Some(
                 IntegerComplexStorage::new(
                     IntegerStorage::U64(vec![0; 4]),

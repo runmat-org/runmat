@@ -582,7 +582,7 @@ fn complex_tensor_value_to_json(
     offset: usize,
     options: &JsonEncodeOptions,
 ) -> BuiltinResult<JsonValue> {
-    if let Some(storage) = &ct.integer_data {
+    if let Some(storage) = &ct.integer_storage() {
         return Ok(JsonValue::Object(vec![
             (
                 "real".to_string(),
@@ -595,7 +595,7 @@ fn complex_tensor_value_to_json(
         ]));
     }
 
-    let (real, imag) = ct.data[offset];
+    let (real, imag) = ct.materialize_f64()[offset];
     complex_scalar_to_json(real, imag, options)
 }
 
@@ -1304,9 +1304,7 @@ pub(crate) mod tests {
         for (class, real, imag, expected) in cases {
             let storage = runmat_builtins::IntegerComplexStorage::new(real, imag)
                 .expect("matching integer components");
-            let mut tensor =
-                ComplexTensor::new_integer(storage, vec![1, 1]).expect("typed complex");
-            tensor.data.clear();
+            let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("typed complex");
             let encoded = block_on(jsonencode_builtin(Value::ComplexTensor(tensor), Vec::new()))
                 .expect("jsonencode typed complex integer");
             assert_eq!(as_string(encoded), expected, "{class}");

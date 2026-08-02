@@ -720,7 +720,7 @@ fn check_integer_slice(
 }
 
 fn issorted_complex(tensor: &ComplexTensor, args: &IssortedArgs) -> crate::BuiltinResult<bool> {
-    if tensor.data.is_empty() {
+    if tensor.materialize_f64().is_empty() {
         return Ok(true);
     }
     match args.mode {
@@ -798,7 +798,7 @@ fn check_complex_dimension(tensor: &ComplexTensor, dim: usize, args: &IssortedAr
             slice.clear();
             for k in 0..len_dim {
                 let idx = before_idx + k * before + after_idx * before * len_dim;
-                slice.push(tensor.data[idx]);
+                slice.push(tensor.materialize_f64()[idx]);
             }
             if !check_complex_slice(&slice, args.direction, effective_comp, args.missing) {
                 return false;
@@ -948,7 +948,7 @@ fn complex_rows_in_order(
     comparison: ComparisonMethod,
     missing: MissingPlacement,
 ) -> bool {
-    if order.strict && tensor.data.iter().any(|v| complex_is_nan(*v)) {
+    if order.strict && tensor.materialize_f64().iter().any(|v| complex_is_nan(*v)) {
         return false;
     }
     let missing_resolved = missing.resolve(order.direction);
@@ -1036,8 +1036,8 @@ fn compare_complex_row_pair(
         let idx_a = a + col * rows;
         let idx_b = b + col * rows;
         let ord = compare_complex_scalars(
-            tensor.data[idx_a],
-            tensor.data[idx_b],
+            tensor.materialize_f64()[idx_a],
+            tensor.materialize_f64()[idx_b],
             direction,
             comparison,
             missing,

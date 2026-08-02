@@ -386,8 +386,8 @@ fn dot_complex_tensor(
             let mut acc_im = 0.0;
             for k in 0..reduce_len {
                 let idx = before + k * stride_before + after * stride_before * reduce_len;
-                let (ar, ai) = a.data[idx];
-                let (br, bi) = b.data[idx];
+                let (ar, ai) = a.materialize_f64()[idx];
+                let (br, bi) = b.materialize_f64()[idx];
                 let real = ar * br + ai * bi;
                 let imag = ar * bi - ai * br;
                 acc_re += real;
@@ -437,8 +437,8 @@ fn elementwise_complex_product(
     a: &ComplexTensor,
     b: &ComplexTensor,
 ) -> BuiltinResult<ComplexTensor> {
-    let mut data = Vec::with_capacity(a.data.len());
-    for ((ar, ai), (br, bi)) in a.data.iter().zip(&b.data) {
+    let mut data = Vec::with_capacity(a.materialize_f64().len());
+    for ((ar, ai), (br, bi)) in a.materialize_f64().iter().zip(&b.materialize_f64()) {
         let real = ar * br + ai * bi;
         let imag = ar * bi - ai * br;
         data.push((real, imag));
@@ -458,7 +458,7 @@ fn ensure_same_size(a: &Tensor, b: &Tensor) -> BuiltinResult<()> {
 }
 
 fn ensure_same_size_complex(a: &ComplexTensor, b: &ComplexTensor) -> BuiltinResult<()> {
-    if a.data.len() != b.data.len() {
+    if a.materialize_f64().len() != b.materialize_f64().len() {
         return Err(dot_error(&DOT_ERROR_INVALID_INPUT));
     }
     if canonical_shape_complex(a) != canonical_shape_complex(b) {
@@ -699,7 +699,8 @@ pub(crate) mod tests {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
                 let expected = [(-4.0, 11.0), (4.0, 21.0)];
-                for (idx, (got, exp)) in t.data.iter().zip(expected.iter()).enumerate() {
+                for (idx, (got, exp)) in t.materialize_f64().iter().zip(expected.iter()).enumerate()
+                {
                     assert!(
                         (got.0 - exp.0).abs() < 1e-12,
                         "real mismatch at {idx}: got {}, expected {}",

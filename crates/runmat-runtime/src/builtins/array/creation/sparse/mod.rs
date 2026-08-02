@@ -577,7 +577,7 @@ fn nonzeros_value(value: &Value) -> BuiltinResult<Value> {
         Value::Tensor(tensor) => nonzeros_dense_tensor(tensor),
         Value::ComplexTensor(tensor) => {
             let data: Vec<(f64, f64)> = tensor
-                .data
+                .materialize_f64()
                 .iter()
                 .copied()
                 .filter(|(re, im)| is_stored_value(*re) || is_stored_value(*im))
@@ -2679,7 +2679,7 @@ pub(crate) mod tests {
         match out {
             Value::ComplexTensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 1]);
-                assert_eq!(tensor.data, vec![(1.0, 2.0), (0.0, 3.0)]);
+                assert_eq!(tensor.materialize_f64(), vec![(1.0, 2.0), (0.0, 3.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }

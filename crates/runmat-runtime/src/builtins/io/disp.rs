@@ -430,7 +430,7 @@ fn format_complex_tensor_nested(tensor: &ComplexTensor) -> Vec<String> {
     }
     let shape = canonical_dims(&tensor.shape);
     let class_name = tensor
-        .integer_data
+        .integer_storage()
         .as_ref()
         .map(|storage| storage.class_name())
         .unwrap_or("double");
@@ -606,7 +606,7 @@ fn summarize_for_cell(value: &Value) -> String {
                 format!("[{}]", tensor.format_element(0))
             } else {
                 let class_name = tensor
-                    .integer_data
+                    .integer_storage()
                     .as_ref()
                     .map(|storage| storage.class_name())
                     .unwrap_or("double");
@@ -1046,8 +1046,7 @@ pub(crate) mod tests {
             IntegerStorage::U64(vec![7, 0]),
         )
         .expect("matching components");
-        let mut tensor = ComplexTensor::new_integer(storage, vec![1, 2]).expect("typed complex");
-        tensor.data.clear();
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).expect("typed complex");
         assert_eq!(
             format_for_disp(&Value::ComplexTensor(tensor.clone())),
             vec![format!("{}+7i  {}", u64::MAX, 1_u64 << 63)]

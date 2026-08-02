@@ -317,11 +317,15 @@ async fn real_coordinate_data_from_value(
             Ok((vec![re], vec![1, 1]))
         }
         Value::ComplexTensor(tensor) => {
-            for &(_, im) in &tensor.data {
+            for &(_, im) in &tensor.materialize_f64() {
                 validate_real_coordinate(label, im)?;
             }
             Ok((
-                tensor.data.into_iter().map(|(re, _)| re).collect(),
+                tensor
+                    .materialize_f64()
+                    .into_iter()
+                    .map(|(re, _)| re)
+                    .collect(),
                 tensor.shape,
             ))
         }
@@ -373,11 +377,11 @@ async fn numeric_data_from_value(
         }
         Value::ComplexTensor(tensor) => {
             if label == "X" || label == "Xq" {
-                for &(_, im) in &tensor.data {
+                for &(_, im) in &tensor.materialize_f64() {
                     validate_real_coordinate(label, im)?;
                 }
             }
-            Ok((tensor.data, tensor.shape, true))
+            Ok((tensor.materialize_f64(), tensor.shape, true))
         }
         other => Err(error_with_detail(
             &ERROR_INVALID_INPUT,
@@ -597,7 +601,7 @@ mod tests {
             panic!("expected complex tensor");
         };
         assert_eq!(tensor.shape, vec![1, 2]);
-        assert_eq!(tensor.data, vec![(15.0, 2.0), (30.0, 5.0)]);
+        assert_eq!(tensor.materialize_f64(), vec![(15.0, 2.0), (30.0, 5.0)]);
     }
 
     #[test]
@@ -637,7 +641,7 @@ mod tests {
         };
         assert_eq!(tensor.shape, vec![2, 2]);
         assert_eq!(
-            tensor.data,
+            tensor.materialize_f64(),
             vec![(15.0, 2.0), (30.0, 5.0), (150.0, -2.0), (300.0, -5.0)]
         );
     }

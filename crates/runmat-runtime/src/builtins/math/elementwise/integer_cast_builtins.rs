@@ -424,7 +424,7 @@ mod tests {
         assert!(matches!(
             output,
             Value::ComplexTensor(tensor)
-                if tensor.integer_data.as_ref().map(|storage| (&storage.real, &storage.imag))
+                if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
                     == Some((
                         &IntegerStorage::U64(vec![1]),
                         &IntegerStorage::U64(vec![0]),

@@ -481,8 +481,7 @@ mod tests {
             IntegerStorage::I16(vec![4, -5]),
         )
         .unwrap();
-        let mut tensor = ComplexTensor::new(vec![(0.0, 0.0), (0.0, 0.0)], vec![1, 2]).unwrap();
-        tensor.integer_data = Some(storage);
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).unwrap();
 
         let input = complex_tensor_to_complex_vector("test", "x", tensor).expect("vector");
 

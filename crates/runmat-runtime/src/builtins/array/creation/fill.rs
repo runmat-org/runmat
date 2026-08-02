@@ -393,7 +393,7 @@ impl FillScalar {
             }
             Value::Complex(re, im) => Ok(FillScalar::Complex(*re, *im)),
             Value::ComplexTensor(tensor) => {
-                if let Some(storage) = tensor.integer_data.as_ref() {
+                if let Some(storage) = tensor.integer_storage() {
                     if storage.len() != 1 {
                         return Err("fill: fill value must be a scalar".to_string());
                     }
@@ -409,10 +409,13 @@ impl FillScalar {
                         .to_f64();
                     return Ok(FillScalar::Complex(re, im));
                 }
-                if tensor.data.len() != 1 {
+                if tensor.materialize_f64().len() != 1 {
                     return Err("fill: fill value must be a scalar".to_string());
                 }
-                Ok(FillScalar::Complex(tensor.data[0].0, tensor.data[0].1))
+                Ok(FillScalar::Complex(
+                    tensor.materialize_f64()[0].0,
+                    tensor.materialize_f64()[0].1,
+                ))
             }
             Value::CharArray(ca) => {
                 if ca.data.len() != 1 {
@@ -1136,7 +1139,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
                 assert!(t
-                    .data
+                    .materialize_f64()
                     .iter()
                     .all(|&(re, im)| (re - 1.0).abs() < 1e-12 && (im - 2.0).abs() < 1e-12));
             }
@@ -1151,8 +1154,7 @@ pub(crate) mod tests {
             IntegerStorage::I16(vec![-2]),
         )
         .expect("complex integer storage");
-        let mut scalar = ComplexTensor::new_integer(storage, vec![1, 1]).expect("typed complex");
-        scalar.data.clear();
+        let scalar = ComplexTensor::new_integer(storage, vec![1, 1]).expect("typed complex");
 
         let result = block_on(fill_builtin(
             Value::ComplexTensor(scalar),
@@ -1163,7 +1165,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![(3.0, -2.0); 4]);
+                assert_eq!(t.materialize_f64(), vec![(3.0, -2.0); 4]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }

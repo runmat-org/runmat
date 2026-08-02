@@ -180,7 +180,7 @@ fn exp_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 
 fn exp_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let mapped = ct
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| (exp_complex_re(re, im), exp_complex_im(re, im)))
         .collect::<Vec<_>>();
@@ -360,7 +360,7 @@ pub(crate) mod tests {
                     .into_iter()
                     .map(|(re, im)| (exp_complex_re(re, im), exp_complex_im(re, im)))
                     .collect();
-                for (idx, (re, im)) in t.data.iter().enumerate() {
+                for (idx, (re, im)) in t.materialize_f64().iter().enumerate() {
                     assert!((re - expected[idx].0).abs() < 1e-12);
                     assert!((im - expected[idx].1).abs() < 1e-12);
                 }

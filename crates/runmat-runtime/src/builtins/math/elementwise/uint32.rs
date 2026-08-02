@@ -197,7 +197,7 @@ pub(crate) mod tests {
             panic!("expected typed complex integer result");
         };
         assert_eq!(
-            tensor.integer_data,
+            tensor.integer_storage().cloned(),
             Some(
                 IntegerComplexStorage::new(
                     IntegerStorage::U32(vec![1]),

@@ -261,7 +261,7 @@ fn pinv_complex_tensor_impl(
             .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
     let data: Vec<Complex64> = matrix
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
@@ -477,7 +477,7 @@ pub(crate) mod tests {
                     (0.0, 0.0),
                     (0.23076923076923078, 0.15384615384615385),
                 ];
-                for (actual, expected) in out.data.iter().zip(expected.iter()) {
+                for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual.0 - expected.0).abs() < 1e-12);
                     assert!((actual.1 - expected.1).abs() < 1e-12);
                 }

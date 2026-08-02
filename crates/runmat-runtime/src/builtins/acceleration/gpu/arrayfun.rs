@@ -711,7 +711,7 @@ impl ArrayData {
         match self {
             ArrayData::Tensor(t) => t.len(),
             ArrayData::Logical(l) => l.data.len(),
-            ArrayData::Complex(c) => c.data.len(),
+            ArrayData::Complex(c) => c.materialize_f64().len(),
             ArrayData::Char(ca) => ca.rows * ca.cols,
             ArrayData::String(sa) => sa.data.len(),
             ArrayData::Scalar(_) => 1,
@@ -772,11 +772,13 @@ impl ArrayData {
                     != 0,
             )),
             ArrayData::Complex(c) => {
-                let (re, im) = c
-                    .data
-                    .get(idx)
+                let (real, imag) = c
+                    .numeric_value_at(idx)
                     .ok_or_else(|| arrayfun_flow("arrayfun: index out of bounds"))?;
-                Ok(Value::Complex(*re, *im))
+                Ok(Value::Complex(
+                    real.materialize_f64(),
+                    imag.materialize_f64(),
+                ))
             }
             ArrayData::Char(ca) => {
                 if ca.rows == 0 || ca.cols == 0 {

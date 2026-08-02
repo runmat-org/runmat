@@ -325,14 +325,14 @@ pub(crate) fn cast_complex_value(value: Value, target: IntegerTarget) -> Result<
             vec![1, 1],
         ),
         Value::ComplexTensor(tensor) => {
-            let shape = tensor.shape;
-            if let Some(storage) = tensor.integer_data {
+            let shape = tensor.shape.clone();
+            if let Some(storage) = tensor.integer_storage() {
                 (
-                    integer_values(storage.real)
+                    integer_values(storage.real.clone())
                         .iter()
                         .map(|value| target.cast_int(value))
                         .collect(),
-                    integer_values(storage.imag)
+                    integer_values(storage.imag.clone())
                         .iter()
                         .map(|value| target.cast_int(value))
                         .collect(),
@@ -340,7 +340,7 @@ pub(crate) fn cast_complex_value(value: Value, target: IntegerTarget) -> Result<
                 )
             } else {
                 let (real, imag): (Vec<_>, Vec<_>) = tensor
-                    .data
+                    .materialize_f64()
                     .into_iter()
                     .map(|(real, imag)| (target.cast_scalar(real), target.cast_scalar(imag)))
                     .unzip();
@@ -612,7 +612,7 @@ mod tests {
             )
             .expect("matching storage");
             assert_eq!(output.shape, vec![1, 2]);
-            assert_eq!(output.integer_data, Some(expected));
+            assert_eq!(output.integer_storage().cloned(), Some(expected));
         }
     }
 
@@ -633,7 +633,7 @@ mod tests {
             panic!("integer conversion must preserve complex storage");
         };
         assert_eq!(
-            output.integer_data,
+            output.integer_storage().cloned(),
             Some(
                 IntegerComplexStorage::new(
                     IntegerStorage::I64(vec![i64::MAX, i64::MAX]),

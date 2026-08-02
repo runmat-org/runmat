@@ -397,7 +397,7 @@ fn evaluate_tensor_condition(tensor: &Tensor) -> crate::BuiltinResult<ConditionO
 }
 
 fn evaluate_complex_tensor(tensor: &ComplexTensor) -> crate::BuiltinResult<ConditionOutcome> {
-    if let Some(storage) = tensor.integer_data.as_ref() {
+    if let Some(storage) = tensor.integer_storage() {
         if storage.is_empty() {
             return Ok(ConditionOutcome::Pass);
         }
@@ -412,10 +412,10 @@ fn evaluate_complex_tensor(tensor: &ComplexTensor) -> crate::BuiltinResult<Condi
         return Ok(ConditionOutcome::Pass);
     }
 
-    if tensor.data.is_empty() {
+    if tensor.materialize_f64().is_empty() {
         return Ok(ConditionOutcome::Pass);
     }
-    for &(re, im) in &tensor.data {
+    for &(re, im) in &tensor.materialize_f64() {
         if !complex_element_passes(re, im) {
             return Ok(ConditionOutcome::Fail);
         }
@@ -710,8 +710,7 @@ pub(crate) mod tests {
             IntegerStorage::U64(vec![5, 0]),
         )
         .expect("complex integer storage");
-        let mut passing = ComplexTensor::new_integer(storage, vec![2, 1]).unwrap();
-        passing.data.clear();
+        let passing = ComplexTensor::new_integer(storage, vec![2, 1]).unwrap();
         assert_builtin(vec![Value::ComplexTensor(passing)]).expect("assert should pass");
 
         let storage = IntegerComplexStorage::new(
@@ -719,8 +718,7 @@ pub(crate) mod tests {
             IntegerStorage::U64(vec![0, 0]),
         )
         .expect("complex integer storage");
-        let mut failing = ComplexTensor::new_integer(storage, vec![2, 1]).unwrap();
-        failing.data = vec![(1.0, 0.0), (1.0, 0.0)];
+        let failing = ComplexTensor::new_integer(storage, vec![2, 1]).unwrap();
         let err = unwrap_error(
             assert_builtin(vec![Value::ComplexTensor(failing)]).expect_err("assert should fail"),
         );

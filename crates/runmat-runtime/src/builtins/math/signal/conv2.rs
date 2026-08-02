@@ -670,8 +670,8 @@ fn matrix_to_value(matrix: Matrix) -> BuiltinResult<Value> {
     let complex_data: Vec<(f64, f64)> = matrix.data.into_iter().map(|c| (c.re, c.im)).collect();
     let tensor = ComplexTensor::new(complex_data, vec![rows, cols])
         .map_err(|e| conv2_error_with_detail(&CONV2_ERROR_BUILD_COMPLEX_OUTPUT, &e))?;
-    if tensor.data.len() == 1 {
-        let (re, im) = tensor.data[0];
+    if tensor.materialize_f64().len() == 1 {
+        let (re, im) = tensor.materialize_f64()[0];
         if im.abs() <= EPS {
             return Ok(Value::Num(re));
         }
@@ -889,7 +889,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                for (idx, &(re, im)) in t.data.iter().enumerate() {
+                for (idx, &(re, im)) in t.materialize_f64().iter().enumerate() {
                     assert!(re.abs() <= EPS);
                     assert!((im - 2.0 * expected_data[idx]).abs() <= 10.0 * EPS);
                 }

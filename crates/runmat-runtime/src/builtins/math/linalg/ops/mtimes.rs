@@ -632,7 +632,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, ct.shape);
                 assert_eq!(
-                    t.data,
+                    t.materialize_f64(),
                     vec![(3.0, 1.0), (-1.0, -7.0), (11.0, 1.0), (-1.0, -15.0)]
                 );
             }

@@ -589,11 +589,14 @@ fn complex_tensor_to_signal_columns(
     }
     let rows = tensor.rows;
     let cols = tensor.cols;
-    let is_complex = tensor.data.iter().any(|(_, im)| im.abs() > EPS);
+    let is_complex = tensor
+        .materialize_f64()
+        .iter()
+        .any(|(_, im)| im.abs() > EPS);
     if rows == 1 || cols == 1 {
         return Ok(SignalColumns {
             columns: vec![tensor
-                .data
+                .materialize_f64()
                 .into_iter()
                 .map(|(re, im)| Complex::new(re, im))
                 .collect()],
@@ -606,7 +609,7 @@ fn complex_tensor_to_signal_columns(
     for col in 0..cols {
         let mut column = Vec::with_capacity(rows);
         for row in 0..rows {
-            let (re, im) = tensor.data[row + col * rows];
+            let (re, im) = tensor.materialize_f64()[row + col * rows];
             column.push(Complex::new(re, im));
         }
         columns.push(column);
@@ -1249,9 +1252,8 @@ mod tests {
             IntegerStorage::I16(vec![0]),
         )
         .expect("complex integer storage");
-        let mut scalar =
+        let scalar =
             runmat_builtins::ComplexTensor::new_integer(storage, vec![1, 1]).expect("scalar");
-        scalar.data.clear();
 
         assert!(is_scalar_numeric(&Value::ComplexTensor(scalar)));
     }

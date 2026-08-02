@@ -199,7 +199,7 @@ fn is_float(value: &Value) -> bool {
     match value {
         Value::Num(_) | Value::Complex(_, _) => true,
         Value::Tensor(tensor) => tensor.integer_storage().is_none(),
-        Value::ComplexTensor(tensor) => tensor.integer_data.is_none(),
+        Value::ComplexTensor(tensor) => tensor.integer_storage().is_none(),
         Value::SparseTensor(sparse) => sparse.integer_storage().is_none(),
         Value::GpuTensor(handle) => {
             !handle_is_logical(handle) && handle_integer_type(handle).is_none()
@@ -212,7 +212,7 @@ fn is_integer(value: &Value) -> bool {
     match value {
         Value::Int(_) => true,
         Value::Tensor(tensor) => tensor.integer_storage().is_some(),
-        Value::ComplexTensor(tensor) => tensor.integer_data.is_some(),
+        Value::ComplexTensor(tensor) => tensor.integer_storage().is_some(),
         Value::SparseTensor(sparse) => sparse.integer_storage().is_some(),
         Value::GpuTensor(handle) => handle_integer_type(handle).is_some(),
         _ => false,

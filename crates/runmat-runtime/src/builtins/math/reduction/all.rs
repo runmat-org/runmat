@@ -597,7 +597,7 @@ impl TruthTensor {
     }
 
     fn from_complex_tensor(ct: ComplexTensor) -> Self {
-        let data = if let Some(storage) = ct.integer_data.as_ref() {
+        let data = if let Some(storage) = ct.integer_storage() {
             (0..storage.len())
                 .map(|index| {
                     TruthValue::from_bool(
@@ -608,7 +608,7 @@ impl TruthTensor {
                 })
                 .collect()
         } else {
-            ct.data
+            ct.materialize_f64()
                 .iter()
                 .map(|&(re, im)| TruthValue {
                     truthy: if re.is_nan() || im.is_nan() {

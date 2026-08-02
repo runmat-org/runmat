@@ -34,7 +34,7 @@ pub(in crate::builtins::table) fn row_value(value: &Value, row: usize) -> Builti
         Value::Tensor(_) => select_rows(value, &[row]),
         Value::ComplexTensor(tensor) if tensor.cols == 1 => {
             let value = tensor
-                .data
+                .materialize_f64()
                 .get(row)
                 .copied()
                 .ok_or_else(|| invalid_index("table2cell: complex row out of bounds"))?;

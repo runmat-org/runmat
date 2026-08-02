@@ -235,8 +235,8 @@ fn log10_tensor(tensor: Tensor) -> BuiltinResult<Value> {
 }
 
 fn log10_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let mut data = Vec::with_capacity(ct.data.len());
-    for &(re, im) in &ct.data {
+    let mut data = Vec::with_capacity(ct.materialize_f64().len());
+    for &(re, im) in &ct.materialize_f64() {
         data.push(log10_complex_parts(re, im));
     }
     if data.len() == 1 {
@@ -374,9 +374,11 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
-                assert!((out.data[0].0 - 1.0).abs() < 1e-12);
-                assert!((out.data[0].1 - std::f64::consts::PI * LOG10_E).abs() < 1e-12);
-                assert_eq!(out.data[1], (1.0, 0.0));
+                assert!((out.materialize_f64()[0].0 - 1.0).abs() < 1e-12);
+                assert!(
+                    (out.materialize_f64()[0].1 - std::f64::consts::PI * LOG10_E).abs() < 1e-12
+                );
+                assert_eq!(out.materialize_f64()[1], (1.0, 0.0));
             }
             other => panic!("expected complex tensor result, got {other:?}"),
         }
@@ -424,11 +426,11 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![1, 2]);
-                assert!((ct.data[0].0 - 1.0).abs() < 1e-12);
+                assert!((ct.materialize_f64()[0].0 - 1.0).abs() < 1e-12);
                 let expected_im = std::f64::consts::PI * LOG10_E;
-                assert!((ct.data[0].1 - expected_im).abs() < 1e-12);
-                assert!((ct.data[1].0 - 1.0).abs() < 1e-12);
-                assert!((ct.data[1].1).abs() < 1e-12);
+                assert!((ct.materialize_f64()[0].1 - expected_im).abs() < 1e-12);
+                assert!((ct.materialize_f64()[1].0 - 1.0).abs() < 1e-12);
+                assert!((ct.materialize_f64()[1].1).abs() < 1e-12);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -535,7 +537,7 @@ pub(crate) mod tests {
                 Value::ComplexTensor(ct) => {
                     assert_eq!(ct.shape, vec![1, 2]);
                     let expected_im = std::f64::consts::PI * LOG10_E;
-                    assert!((ct.data[0].1 - expected_im).abs() < 1e-12);
+                    assert!((ct.materialize_f64()[0].1 - expected_im).abs() < 1e-12);
                 }
                 other => panic!("expected complex tensor, got {other:?}"),
             }

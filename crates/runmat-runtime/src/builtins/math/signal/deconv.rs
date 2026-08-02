@@ -702,7 +702,7 @@ pub(crate) mod tests {
         let eval = evaluate(numerator, denominator).expect("evaluate");
         match eval.quotient() {
             Value::ComplexTensor(q) => {
-                assert_eq!(q.data.len(), 2);
+                assert_eq!(q.materialize_f64().len(), 2);
             }
             other => panic!("unexpected quotient {other:?}"),
         }
@@ -860,8 +860,8 @@ pub(crate) mod tests {
                 vec![re]
             }
             Value::ComplexTensor(t) => {
-                assert!(t.data.iter().all(|(_, im)| im.abs() <= 1e-9));
-                t.data.into_iter().map(|(re, _)| re).collect()
+                assert!(t.materialize_f64().iter().all(|(_, im)| im.abs() <= 1e-9));
+                t.materialize_f64().into_iter().map(|(re, _)| re).collect()
             }
             other => panic!("expected real-valued tensor, got {other:?}"),
         }

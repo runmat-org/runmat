@@ -496,7 +496,7 @@ mod tests {
         let freq = fft_complex_tensor(b, None, Some(3)).unwrap();
         let back = ifftn_complex_tensor(freq, None).unwrap();
         assert_eq!(back.shape, vec![2, 2, 2]);
-        for (idx, (re, im)) in back.data.iter().enumerate() {
+        for (idx, (re, im)) in back.materialize_f64().iter().enumerate() {
             assert!((*re - input.materialize_f64()[idx]).abs() < 1e-10);
             assert!(im.abs() < 1e-10);
         }

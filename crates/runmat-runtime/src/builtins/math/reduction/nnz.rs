@@ -337,7 +337,7 @@ fn count_nonzero_sparse(sparse: &SparseTensor) -> usize {
 }
 
 fn count_nonzero_complex_tensor(tensor: &ComplexTensor) -> usize {
-    if let Some(storage) = tensor.integer_data.as_ref() {
+    if let Some(storage) = tensor.integer_storage() {
         return (0..storage.len())
             .filter(|&index| {
                 storage
@@ -347,7 +347,7 @@ fn count_nonzero_complex_tensor(tensor: &ComplexTensor) -> usize {
             .count();
     }
     tensor
-        .data
+        .materialize_f64()
         .iter()
         .copied()
         .filter(|(re, im)| is_nonzero_complex(*re, *im))
@@ -389,8 +389,8 @@ fn mask_from_value(value: &Value) -> BuiltinResult<Mask> {
             Ok(Mask { bits, shape })
         }
         Value::ComplexTensor(tensor) => {
-            let shape = canonical_shape(&tensor.shape, tensor.data.len());
-            let bits = if let Some(storage) = tensor.integer_data.as_ref() {
+            let shape = canonical_shape(&tensor.shape, tensor.materialize_f64().len());
+            let bits = if let Some(storage) = tensor.integer_storage() {
                 (0..storage.len())
                     .map(|index| {
                         u8::from(
@@ -402,7 +402,7 @@ fn mask_from_value(value: &Value) -> BuiltinResult<Mask> {
                     .collect()
             } else {
                 tensor
-                    .data
+                    .materialize_f64()
                     .iter()
                     .map(|&(re, im)| if is_nonzero_complex(re, im) { 1u8 } else { 0u8 })
                     .collect()

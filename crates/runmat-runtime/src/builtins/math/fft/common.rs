@@ -57,7 +57,7 @@ fn zeroed_complex_vec(
 pub fn parse_length(value: &Value, builtin: &str) -> BuiltinResult<Option<usize>> {
     match value {
         Value::Tensor(t) if tensor_len(t) == 0 => Ok(None),
-        Value::ComplexTensor(t) if t.data.is_empty() => Ok(None),
+        Value::ComplexTensor(t) if t.materialize_f64().is_empty() => Ok(None),
         Value::Tensor(t) => {
             if tensor_len(t) != 1 {
                 return Err(builtin_error(
@@ -78,13 +78,13 @@ pub fn parse_length(value: &Value, builtin: &str) -> BuiltinResult<Option<usize>
             parse_length_scalar(tensor::tensor_value_f64(t, 0), builtin).map(Some)
         }
         Value::ComplexTensor(t) => {
-            if t.data.len() != 1 {
+            if t.materialize_f64().len() != 1 {
                 return Err(builtin_error(
                     builtin,
                     format!("{builtin}: length must be a scalar"),
                 ));
             }
-            let (re, im) = t.data[0];
+            let (re, im) = t.materialize_f64()[0];
             if im.abs() > f64::EPSILON {
                 return Err(builtin_error(
                     builtin,
@@ -212,7 +212,11 @@ pub fn tensor_to_complex_tensor(tensor: Tensor, builtin: &str) -> BuiltinResult<
 }
 
 pub fn complex_tensor_to_real_value(tensor: ComplexTensor, builtin: &str) -> BuiltinResult<Value> {
-    let data = tensor.data.iter().map(|(re, _)| *re).collect::<Vec<_>>();
+    let data = tensor
+        .materialize_f64()
+        .iter()
+        .map(|(re, _)| *re)
+        .collect::<Vec<_>>();
     let real = Tensor::new(data, tensor.shape.clone())
         .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?;
     Ok(Value::Tensor(real))
@@ -358,7 +362,7 @@ pub fn transform_complex_tensor(
     let num_slices = checked_mul(inner_stride, outer_stride, builtin, "slice count")?;
 
     let input = tensor
-        .data
+        .materialize_f64()
         .into_iter()
         .map(|(re, im)| Complex::new(re, im))
         .collect::<Vec<_>>();
@@ -963,7 +967,10 @@ mod tests {
     fn fft_single_inputs_materialize_at_the_current_double_complex_boundary() {
         let input = Tensor::from_f32(vec![0.1, -2.0], vec![1, 2]).unwrap();
         let complex = tensor_to_complex_tensor(input, "fft").expect("complex input");
-        assert_eq!(complex.data, vec![(f64::from(0.1_f32), 0.0), (-2.0, 0.0)]);
+        assert_eq!(
+            complex.materialize_f64(),
+            vec![(f64::from(0.1_f32), 0.0), (-2.0, 0.0)]
+        );
 
         let length = Tensor::from_f32(vec![4.0], vec![1, 1]).unwrap();
         assert_eq!(

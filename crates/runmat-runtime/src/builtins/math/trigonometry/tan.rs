@@ -263,7 +263,7 @@ fn tan_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 
 fn tan_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let mapped = ct
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| tan_complex_components(re, im))
         .collect::<Vec<_>>();
@@ -625,7 +625,10 @@ pub(crate) mod tests {
             panic!("expected complex tensor result");
         };
         assert_eq!(out.shape, vec![3, 1]);
-        assert_eq!(out.data, vec![(-3.0, 0.0), (0.0, 0.0), (5.0, 0.0)]);
+        assert_eq!(
+            out.materialize_f64(),
+            vec![(-3.0, 0.0), (0.0, 0.0), (5.0, 0.0)]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -774,10 +777,10 @@ pub(crate) mod tests {
                 other => panic!("expected complex output, got {other:?}"),
             };
             assert_eq!(out.shape, vec![1, 2]);
-            for (idx, &(re, im)) in input.data.iter().enumerate() {
+            for (idx, &(re, im)) in input.materialize_f64().iter().enumerate() {
                 let (expected_re, expected_im) = tan_complex_components(re, im);
-                assert!((out.data[idx].0 - expected_re).abs() < 1e-12);
-                assert!((out.data[idx].1 - expected_im).abs() < 1e-12);
+                assert!((out.materialize_f64()[idx].0 - expected_re).abs() < 1e-12);
+                assert!((out.materialize_f64()[idx].1 - expected_im).abs() < 1e-12);
             }
         });
     }
@@ -808,8 +811,8 @@ pub(crate) mod tests {
             };
             assert_eq!(out.shape, vec![2, 1]);
             for (idx, &re) in input.materialize_f64().iter().enumerate() {
-                assert!((out.data[idx].0 - re.tan()).abs() < 1e-12);
-                assert!(out.data[idx].1.abs() < 1e-12);
+                assert!((out.materialize_f64()[idx].0 - re.tan()).abs() < 1e-12);
+                assert!(out.materialize_f64()[idx].1.abs() < 1e-12);
             }
         });
     }
@@ -845,8 +848,8 @@ pub(crate) mod tests {
             };
             assert_eq!(out.shape, vec![2, 1]);
             for (idx, &re) in input.materialize_f64().iter().enumerate() {
-                assert!((out.data[idx].0 - re.tan()).abs() < 1e-12);
-                assert!(out.data[idx].1.abs() < 1e-12);
+                assert!((out.materialize_f64()[idx].0 - re.tan()).abs() < 1e-12);
+                assert!(out.materialize_f64()[idx].1.abs() < 1e-12);
             }
         });
     }

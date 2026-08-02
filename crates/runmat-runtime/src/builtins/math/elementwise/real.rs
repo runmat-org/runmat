@@ -169,12 +169,16 @@ fn real_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 }
 
 fn real_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    if let Some(storage) = ct.integer_data {
-        let tensor = Tensor::new_integer(storage.real, ct.shape)
+    if let Some(storage) = ct.integer_storage() {
+        let tensor = Tensor::new_integer(storage.real.clone(), ct.shape)
             .map_err(|e| builtin_error_with_detail(&REAL_ERROR_INTERNAL, e))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
-    let data = ct.data.iter().map(|&(re, _)| re).collect::<Vec<_>>();
+    let data = ct
+        .materialize_f64()
+        .iter()
+        .map(|&(re, _)| re)
+        .collect::<Vec<_>>();
     let tensor = Tensor::new(data, ct.shape.clone())
         .map_err(|e| builtin_error_with_detail(&REAL_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))
@@ -308,7 +312,7 @@ pub(crate) mod tests {
 
     #[test]
     fn real_integer_complex_tensor_reads_storage_without_mirror() {
-        let mut complex = ComplexTensor::new_integer(
+        let complex = ComplexTensor::new_integer(
             runmat_builtins::IntegerComplexStorage::new(
                 runmat_builtins::IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
                 runmat_builtins::IntegerStorage::I64(vec![7, -8]),
@@ -317,7 +321,6 @@ pub(crate) mod tests {
             vec![2, 1],
         )
         .unwrap();
-        complex.data.clear();
 
         let result = real_builtin(Value::ComplexTensor(complex)).expect("real");
         let Value::Tensor(tensor) = result else {

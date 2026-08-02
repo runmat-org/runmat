@@ -425,8 +425,8 @@ fn trapz_complex_tensor(
                     let idx0 = base + before + k * stride_before;
                     let idx1 = idx0 + stride_before;
                     let width = interval_width(spacing, idx0, idx1, k);
-                    let (re0, im0) = tensor.data[idx0];
-                    let (re1, im1) = tensor.data[idx1];
+                    let (re0, im0) = tensor.materialize_f64()[idx0];
+                    let (re1, im1) = tensor.materialize_f64()[idx1];
                     acc.0 += 0.5 * width * (re0 + re1);
                     acc.1 += 0.5 * width * (im0 + im1);
                 }

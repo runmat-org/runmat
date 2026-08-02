@@ -560,9 +560,12 @@ async fn complex_vector(
         }
         Value::ComplexTensor(tensor) => {
             ensure_vector_shape(context, label, &tensor.shape)?;
-            let is_complex = tensor.data.iter().any(|&(_, im)| im.abs() > EPS);
+            let is_complex = tensor
+                .materialize_f64()
+                .iter()
+                .any(|&(_, im)| im.abs() > EPS);
             let data = tensor
-                .data
+                .materialize_f64()
                 .into_iter()
                 .map(|(re, im)| Complex64::new(re, im))
                 .collect::<Vec<_>>();

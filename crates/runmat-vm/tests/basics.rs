@@ -598,7 +598,7 @@ fn complex_literal_matrix_executes() {
     match &vars[0] {
         Value::ComplexTensor(tensor) => {
             assert_eq!(tensor.shape, vec![1, 2]);
-            assert_eq!(tensor.data, vec![(1.0, 2.0), (3.0, -4.0)]);
+            assert_eq!(tensor.materialize_f64(), vec![(1.0, 2.0), (3.0, -4.0)]);
         }
         other => panic!("expected complex tensor, got {other:?}"),
     }
@@ -611,7 +611,7 @@ fn leading_dot_complex_literals_execute() {
     match &vars[0] {
         Value::ComplexTensor(tensor) => {
             assert_eq!(tensor.shape, vec![1, 2]);
-            assert_eq!(tensor.data, vec![(0.0, 0.1), (0.0, 0.005)]);
+            assert_eq!(tensor.materialize_f64(), vec![(0.0, 0.1), (0.0, 0.005)]);
         }
         other => panic!("expected complex tensor, got {other:?}"),
     }

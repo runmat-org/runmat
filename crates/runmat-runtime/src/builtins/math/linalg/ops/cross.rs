@@ -380,7 +380,7 @@ fn cross_complex_tensor(
     let stride_before = dim_product(&shape[..dim_index]);
     let stride_after = dim_product(&shape[dim_index + 1..]);
     let slice_stride = stride_before * 3;
-    let mut output = vec![(0.0f64, 0.0f64); a.data.len()];
+    let mut output = vec![(0.0f64, 0.0f64); a.materialize_f64().len()];
 
     for after in 0..stride_after {
         let slice_base = after * slice_stride;
@@ -389,12 +389,12 @@ fn cross_complex_tensor(
             let idx2 = idx1 + stride_before;
             let idx3 = idx2 + stride_before;
 
-            let a1 = a.data[idx1];
-            let a2 = a.data[idx2];
-            let a3 = a.data[idx3];
-            let b1 = b.data[idx1];
-            let b2 = b.data[idx2];
-            let b3 = b.data[idx3];
+            let a1 = a.materialize_f64()[idx1];
+            let a2 = a.materialize_f64()[idx2];
+            let a3 = a.materialize_f64()[idx3];
+            let b1 = b.materialize_f64()[idx1];
+            let b2 = b.materialize_f64()[idx2];
+            let b3 = b.materialize_f64()[idx3];
 
             output[idx1] = complex_sub(complex_mul(a2, b3), complex_mul(a3, b2));
             output[idx2] = complex_sub(complex_mul(a3, b1), complex_mul(a1, b3));
@@ -424,7 +424,9 @@ fn ensure_same_size(a: &Tensor, b: &Tensor) -> BuiltinResult<()> {
 }
 
 fn ensure_same_size_complex(a: &ComplexTensor, b: &ComplexTensor) -> BuiltinResult<()> {
-    if a.data.len() != b.data.len() || canonical_shape_complex(a) != canonical_shape_complex(b) {
+    if a.materialize_f64().len() != b.materialize_f64().len()
+        || canonical_shape_complex(a) != canonical_shape_complex(b)
+    {
         return Err(cross_error(&CROSS_ERROR_INVALID_INPUT));
     }
     Ok(())
@@ -693,9 +695,9 @@ pub(crate) mod tests {
         match value {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![1, 3]);
-                assert_eq!(t.data[0], (0.0, 0.0));
-                assert_eq!(t.data[1], (0.0, 0.0));
-                assert_eq!(t.data[2], (3.0, -1.0));
+                assert_eq!(t.materialize_f64()[0], (0.0, 0.0));
+                assert_eq!(t.materialize_f64()[1], (0.0, 0.0));
+                assert_eq!(t.materialize_f64()[2], (3.0, -1.0));
             }
             other => panic!("expected complex tensor result, got {other:?}"),
         }

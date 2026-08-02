@@ -397,7 +397,7 @@ fn combination_storage(
 fn combinations_complex_tensor(tensor: ComplexTensor, k: usize) -> BuiltinResult<Value> {
     let n = vector_len(&tensor.shape)?;
     let rows = checked_rows(n, k)?;
-    if let Some(storage) = tensor.integer_data {
+    if let Some(storage) = tensor.integer_storage() {
         let real = storage
             .real
             .from_exact_values_like(combination_columns(&storage.real.exact_values(), rows, k)?)
@@ -412,7 +412,7 @@ fn combinations_complex_tensor(tensor: ComplexTensor, k: usize) -> BuiltinResult
             .map(Value::ComplexTensor)
             .map_err(|error| nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {error}")));
     }
-    combinations_complex(tensor.data, tensor.shape, k)
+    combinations_complex(tensor.materialize_f64(), tensor.shape, k)
 }
 
 fn combinations_complex(
@@ -923,12 +923,11 @@ mod tests {
                 .expect("expected imaginary storage"),
             )
             .expect("expected complex storage");
-            let mut input = ComplexTensor::new_integer(
+            let input = ComplexTensor::new_integer(
                 IntegerComplexStorage::new(real, imag).expect("complex integer input"),
                 vec![1, 3],
             )
             .expect("complex integer tensor");
-            input.data.clear();
 
             let Value::ComplexTensor(output) =
                 call(Value::ComplexTensor(input), Value::Num(2.0)).expect("combinations")
@@ -936,7 +935,7 @@ mod tests {
                 panic!("expected exact complex integer combinations");
             };
             assert_eq!(output.shape, vec![3, 2]);
-            assert_eq!(output.integer_data, Some(expected));
+            assert_eq!(output.integer_storage().cloned(), Some(expected));
         }
     }
 
@@ -984,7 +983,7 @@ mod tests {
         };
         assert_eq!(complex_out.shape, vec![3, 2]);
         assert_eq!(
-            complex_out.data,
+            complex_out.materialize_f64(),
             vec![
                 (1.0, 1.0),
                 (1.0, 1.0),

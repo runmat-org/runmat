@@ -4,7 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntegerStorage, NumericStorage, Tensor, Value,
+    CharArray, ComplexTensor, IntegerStorage, NumericDType, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -472,14 +472,13 @@ async fn real_to_complex(value: Value) -> BuiltinResult<Value> {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(t) => {
-            // Floating ComplexTensor storage is currently double-only, so this
-            // output-template conversion is an explicit complex f64 boundary.
+            let dtype = t.numeric_dtype();
             let data: Vec<(f64, f64)> = t
                 .materialize_f64()
                 .into_iter()
                 .map(|value| (value, 0.0))
                 .collect();
-            let tensor = ComplexTensor::new(data, t.shape.clone())
+            let tensor = ComplexTensor::from_f64_values_with_dtype(data, t.shape.clone(), dtype)
                 .map_err(|e| builtin_error(format!("minus: {e}")))?;
             Ok(complex_tensor_into_value(tensor))
         }
@@ -810,64 +809,63 @@ fn minus_real_real(lhs: Tensor, rhs: Tensor) -> BuiltinResult<Value> {
 fn minus_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
         .map_err(|err| minus_error_with_detail(&MINUS_ERROR_SIZE_MISMATCH, &err))?;
-    if plan.is_empty() {
-        let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| builtin_error(format!("minus: {e}")))?;
-        return Ok(complex_tensor_into_value(tensor));
-    }
+    let dtype = complex_output_dtype(lhs.numeric_dtype(), rhs.numeric_dtype());
+    let lhs_values = lhs.materialize_f64();
+    let rhs_values = rhs.materialize_f64();
     let mut out = vec![(0.0f64, 0.0f64); plan.len()];
     for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
-        let (ar, ai) = lhs.data[idx_lhs];
-        let (br, bi) = rhs.data[idx_rhs];
+        let (ar, ai) = lhs_values[idx_lhs];
+        let (br, bi) = rhs_values[idx_rhs];
         out[out_idx] = (ar - br, ai - bi);
     }
-    let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
-        .map_err(|e| builtin_error(format!("minus: {e}")))?;
+    let tensor =
+        ComplexTensor::from_f64_values_with_dtype(out, plan.output_shape().to_vec(), dtype)
+            .map_err(|e| builtin_error(format!("minus: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
 fn minus_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
         .map_err(|err| minus_error_with_detail(&MINUS_ERROR_SIZE_MISMATCH, &err))?;
-    if plan.is_empty() {
-        let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| builtin_error(format!("minus: {e}")))?;
-        return Ok(complex_tensor_into_value(tensor));
-    }
-    // Floating ComplexTensor storage is currently double-only, so real
-    // operands enter this explicitly floating complex-arithmetic boundary.
+    let dtype = complex_output_dtype(lhs.numeric_dtype(), rhs.numeric_dtype());
+    let lhs_values = lhs.materialize_f64();
     let rhs_values = rhs.materialize_f64();
     let mut out = vec![(0.0f64, 0.0f64); plan.len()];
     for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
-        let (ar, ai) = lhs.data[idx_lhs];
+        let (ar, ai) = lhs_values[idx_lhs];
         let scalar = rhs_values[idx_rhs];
         out[out_idx] = (ar - scalar, ai);
     }
-    let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
-        .map_err(|e| builtin_error(format!("minus: {e}")))?;
+    let tensor =
+        ComplexTensor::from_f64_values_with_dtype(out, plan.output_shape().to_vec(), dtype)
+            .map_err(|e| builtin_error(format!("minus: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
 fn minus_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
         .map_err(|err| minus_error_with_detail(&MINUS_ERROR_SIZE_MISMATCH, &err))?;
-    if plan.is_empty() {
-        let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| builtin_error(format!("minus: {e}")))?;
-        return Ok(complex_tensor_into_value(tensor));
-    }
-    // Floating ComplexTensor storage is currently double-only, so real
-    // operands enter this explicitly floating complex-arithmetic boundary.
+    let dtype = complex_output_dtype(lhs.numeric_dtype(), rhs.numeric_dtype());
     let lhs_values = lhs.materialize_f64();
+    let rhs_values = rhs.materialize_f64();
     let mut out = vec![(0.0f64, 0.0f64); plan.len()];
     for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
         let scalar = lhs_values[idx_lhs];
-        let (br, bi) = rhs.data[idx_rhs];
+        let (br, bi) = rhs_values[idx_rhs];
         out[out_idx] = (scalar - br, -bi);
     }
-    let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
-        .map_err(|e| builtin_error(format!("minus: {e}")))?;
+    let tensor =
+        ComplexTensor::from_f64_values_with_dtype(out, plan.output_shape().to_vec(), dtype)
+            .map_err(|e| builtin_error(format!("minus: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
+}
+
+fn complex_output_dtype(lhs: NumericDType, rhs: NumericDType) -> NumericDType {
+    if lhs == NumericDType::F32 || rhs == NumericDType::F32 {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
+    }
 }
 
 fn char_array_to_tensor(chars: &CharArray) -> BuiltinResult<Tensor> {
@@ -951,8 +949,7 @@ pub(crate) mod tests {
             IntegerStorage::I16(vec![-3]),
         )
         .expect("complex integer storage");
-        let mut complex = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
-        complex.data.clear();
+        let complex = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
         assert_eq!(
             scalar_complex_value(&Value::ComplexTensor(complex)),
             Some((8.0, -3.0))
@@ -1042,7 +1039,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
-                assert_eq!(out.data, vec![(-2.0, 0.0), (3.0, 0.0)]);
+                assert_eq!(out.materialize_f64(), vec![(-2.0, 0.0), (3.0, 0.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -1140,6 +1137,22 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn minus_complex_arrays_preserve_native_single_class() {
+        let lhs = ComplexTensor::from_f32(vec![(1.25, -2.0), (3.0, 4.0)], vec![1, 2]).unwrap();
+        let rhs = Tensor::new(vec![0.5, 1.0], vec![1, 2]).unwrap();
+        let Value::ComplexTensor(result) =
+            minus_builtin(Value::ComplexTensor(lhs), Value::Tensor(rhs), Vec::new()).unwrap()
+        else {
+            panic!("expected complex single tensor");
+        };
+        assert_eq!(result.numeric_dtype(), NumericDType::F32);
+        assert_eq!(
+            result.as_f32_slice(),
+            Some(&[(0.75_f32, -2.0_f32), (2.0_f32, 4.0_f32)][..])
+        );
+    }
+
+    #[test]
     fn minus_rejects_real_integer_with_floating_complex() {
         let integer = Value::Tensor(
             Tensor::new_integer(
@@ -1197,7 +1210,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
                 let expected = [(-1.0, 3.0), (4.0, -5.0)];
-                for (got, exp) in t.data.iter().zip(expected.iter()) {
+                for (got, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((got.0 - exp.0).abs() < EPS && (got.1 - exp.1).abs() < EPS);
                 }
             }
@@ -1403,7 +1416,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
                 let expected = [(-2.0, 0.0), (-2.0, 0.0)];
-                for (got, exp) in t.data.iter().zip(expected.iter()) {
+                for (got, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((got.0 - exp.0).abs() < EPS && (got.1 - exp.1).abs() < EPS);
                 }
             }

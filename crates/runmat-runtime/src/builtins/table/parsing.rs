@@ -241,7 +241,6 @@ mod tests {
         assert!(!option_value_is_empty(&Value::Tensor(scalar)));
 
         let empty = Tensor::new_integer(IntegerStorage::U8(Vec::new()), vec![0, 0]).unwrap();
-        empty.materialize_f64().push(1.0);
         assert!(option_value_is_empty(&Value::Tensor(empty)));
     }
 

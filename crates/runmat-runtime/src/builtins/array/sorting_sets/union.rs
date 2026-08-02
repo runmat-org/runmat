@@ -746,7 +746,7 @@ fn union_complex_elements(
     let mut map: HashMap<ComplexKey, usize> = HashMap::new();
     let mut order_counter = 0usize;
 
-    for (idx, &value) in a.data.iter().enumerate() {
+    for (idx, &value) in a.materialize_f64().iter().enumerate() {
         let key = ComplexKey::new(value);
         match map.entry(key) {
             Entry::Occupied(_) => {}
@@ -764,7 +764,7 @@ fn union_complex_elements(
         }
     }
 
-    for (idx, &value) in b.data.iter().enumerate() {
+    for (idx, &value) in b.materialize_f64().iter().enumerate() {
         let key = ComplexKey::new(value);
         match map.entry(key) {
             Entry::Occupied(occ) => {
@@ -819,7 +819,7 @@ fn union_complex_rows(
         let mut key_row = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_a;
-            let value = a.data[idx];
+            let value = a.materialize_f64()[idx];
             row_values.push(value);
             key_row.push(ComplexKey::new(value));
         }
@@ -844,7 +844,7 @@ fn union_complex_rows(
         let mut key_row = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_b;
-            let value = b.data[idx];
+            let value = b.materialize_f64()[idx];
             row_values.push(value);
             key_row.push(ComplexKey::new(value));
         }

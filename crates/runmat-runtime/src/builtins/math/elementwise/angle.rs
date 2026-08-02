@@ -4,7 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, NumericStorage, ResolveContext, Tensor, Type, Value,
+    ComplexStorage, ComplexTensor, NumericStorage, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -203,12 +203,28 @@ fn angle_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 }
 
 fn angle_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let ComplexTensor { data, shape, .. } = ct;
-    let mapped: Vec<f64> = data
-        .into_iter()
-        .map(|(re, im)| angle_scalar(re, im))
-        .collect();
-    let tensor = Tensor::new(mapped, shape)
+    let shape = ct.shape.clone();
+    let storage = match ct.into_complex_storage() {
+        ComplexStorage::F64(values) => NumericStorage::F64(
+            values
+                .into_iter()
+                .map(|(real, imag)| angle_scalar(real, imag))
+                .collect(),
+        ),
+        ComplexStorage::F32(values) => NumericStorage::F32(
+            values
+                .into_iter()
+                .map(|(real, imag)| imag.atan2(real))
+                .collect(),
+        ),
+        ComplexStorage::Integer(_) => {
+            return Err(builtin_error_with_detail(
+                &ANGLE_ERROR_INVALID_INPUT,
+                "expected single or double input",
+            ))
+        }
+    };
+    let tensor = Tensor::from_numeric_storage(storage, shape)
         .map_err(|e| builtin_error_with_detail(&ANGLE_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))
 }
@@ -470,7 +486,11 @@ pub(crate) mod tests {
             let result = angle_builtin(Value::GpuTensor(handle)).expect("angle");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, complex.shape);
-            for (actual, (re, im)) in gathered.materialize_f64().iter().zip(complex.data.iter()) {
+            for (actual, (re, im)) in gathered
+                .materialize_f64()
+                .iter()
+                .zip(complex.materialize_f64().iter())
+            {
                 assert!((actual - im.atan2(*re)).abs() < 1e-12);
             }
         });
@@ -580,7 +600,11 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (actual, (re, im)) in gathered.materialize_f64().iter().zip(complex.data.iter()) {
+        for (actual, (re, im)) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(complex.materialize_f64().iter())
+        {
             assert!((actual - im.atan2(*re)).abs() < tol);
         }
     }

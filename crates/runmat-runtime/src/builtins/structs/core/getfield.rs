@@ -886,7 +886,7 @@ fn complex_tensor_dimension_length(
     dim_idx: usize,
 ) -> BuiltinResult<usize> {
     if dims == 1 {
-        let total = tensor.data.len();
+        let total = tensor.materialize_f64().len();
         if total == 0 {
             return Err(getfield_error_with_message(
                 "Index exceeds the number of array elements (0).",
@@ -972,12 +972,12 @@ fn index_complex_tensor(tensor: &ComplexTensor, indices: &[usize]) -> BuiltinRes
         ));
     }
     if indices.len() == 1 {
-        let total = tensor.data.len();
+        let total = tensor.materialize_f64().len();
         let idx = indices[0];
         if idx == 0 || idx > total {
             return Err(getfield_error(&GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS));
         }
-        let (re, im) = tensor.data[idx - 1];
+        let (re, im) = tensor.materialize_f64()[idx - 1];
         return Ok(Value::Complex(re, im));
     }
     if indices.len() == 2 {
@@ -988,7 +988,7 @@ fn index_complex_tensor(tensor: &ComplexTensor, indices: &[usize]) -> BuiltinRes
         }
         let pos = (row - 1) + (col - 1) * tensor.rows;
         let (re, im) = tensor
-            .data
+            .materialize_f64()
             .get(pos)
             .copied()
             .ok_or_else(|| getfield_error(&GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS))?;

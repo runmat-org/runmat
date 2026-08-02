@@ -178,12 +178,16 @@ fn imag_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 }
 
 fn imag_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    if let Some(storage) = ct.integer_data {
-        let tensor = Tensor::new_integer(storage.imag, ct.shape)
+    if let Some(storage) = ct.integer_storage() {
+        let tensor = Tensor::new_integer(storage.imag.clone(), ct.shape)
             .map_err(|e| builtin_error_with_detail(&IMAG_ERROR_INTERNAL, e))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
-    let data = ct.data.iter().map(|&(_, im)| im).collect::<Vec<_>>();
+    let data = ct
+        .materialize_f64()
+        .iter()
+        .map(|&(_, im)| im)
+        .collect::<Vec<_>>();
     let tensor = Tensor::new(data, ct.shape.clone())
         .map_err(|e| builtin_error_with_detail(&IMAG_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))

@@ -725,8 +725,7 @@ mod tests {
         let storage =
             IntegerComplexStorage::new(IntegerStorage::I16(vec![-4]), IntegerStorage::I16(vec![9]))
                 .expect("complex integer storage");
-        let mut tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
-        tensor.data.clear();
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
 
         match classify_uniform_value(&Value::ComplexTensor(tensor)).expect("classify") {
             ClassifiedValue::Complex(value) => assert_eq!(value, (-4.0, 9.0)),

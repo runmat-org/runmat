@@ -410,9 +410,9 @@ mod tests {
             panic!("expected complex response");
         };
         assert_eq!(h.shape, vec![4, 1]);
-        assert!((h.data[0].0 - 2.0).abs() < 1e-12);
-        assert!((h.data[2].0 - 1.0).abs() < 1e-12);
-        assert!((h.data[2].1 + 1.0).abs() < 1e-12);
+        assert!((h.materialize_f64()[0].0 - 2.0).abs() < 1e-12);
+        assert!((h.materialize_f64()[2].0 - 1.0).abs() < 1e-12);
+        assert!((h.materialize_f64()[2].1 + 1.0).abs() < 1e-12);
     }
 
     #[test]
@@ -433,7 +433,7 @@ mod tests {
         let Value::Tensor(w) = &values[1] else {
             panic!("expected w");
         };
-        assert!((h.data[0].0 - 1.0).abs() < 1e-12);
+        assert!((h.materialize_f64()[0].0 - 1.0).abs() < 1e-12);
         assert_eq!(w.shape, vec![8, 1]);
         assert!((w.materialize_f64()[1] - 62.5).abs() < 1e-12);
     }

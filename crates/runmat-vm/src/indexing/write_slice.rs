@@ -245,7 +245,8 @@ pub fn scatter_complex_with_plan(
                     p
                 };
                 let dst = plan.indices[lin_pos] as usize;
-                t.data[dst] = *val;
+                t.set_f64_assignment_at(dst, val.0, val.1)
+                    .map_err(|error| map_slice_shape_error("complex slice assign", error))?;
             }
             ComplexRhsView::Tensor {
                 data,
@@ -267,7 +268,8 @@ pub fn scatter_complex_with_plan(
                     p
                 };
                 let dst = plan.indices[lin_pos] as usize;
-                t.data[dst] = data[rlin];
+                t.set_f64_assignment_at(dst, data[rlin].0, data[rlin].1)
+                    .map_err(|error| map_slice_shape_error("complex slice assign", error))?;
             }
         }
         let mut d = 0usize;
@@ -564,7 +566,7 @@ async fn materialize_complex_integer_rhs_for_plan(
             plan.indices.len()
         ]),
         Value::ComplexTensor(tensor) => {
-            let values = if let Some(storage) = &tensor.integer_data {
+            let values = if let Some(storage) = &tensor.integer_storage() {
                 (0..storage.len())
                     .map(|index| ComplexIntegerAssignmentValue {
                         real: IntegerAssignmentValue::Exact(
@@ -583,7 +585,7 @@ async fn materialize_complex_integer_rhs_for_plan(
                     .collect()
             } else {
                 tensor
-                    .data
+                    .materialize_f64()
                     .iter()
                     .map(|&(real, imag)| ComplexIntegerAssignmentValue {
                         real: IntegerAssignmentValue::Float(real),
@@ -878,11 +880,11 @@ pub async fn assign_complex_with_plan(
     if plan.indices.is_empty() {
         return Ok(Value::ComplexTensor(tensor));
     }
-    if tensor.integer_data.is_some() {
+    if tensor.integer_storage().is_some() {
         let rhs_values = materialize_complex_integer_rhs_for_plan(rhs, plan).await?;
         let storage = tensor
-            .integer_data
-            .take()
+            .integer_storage()
+            .cloned()
             .expect("typed complex tensor must retain exact storage");
         let real_values: Vec<IntegerAssignmentValue> =
             rhs_values.iter().map(|value| value.real.clone()).collect();
@@ -938,7 +940,7 @@ pub fn delete_tensor_with_plan(
 }
 
 pub fn delete_complex_with_plan(
-    mut t: ComplexTensor,
+    t: ComplexTensor,
     plan: &IndexPlan,
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
@@ -958,21 +960,24 @@ pub fn delete_complex_with_plan(
         ));
     }
     let positions = sorted_unique_positions_desc(plan, complex_tensor_element_len(&t))?;
-    if let Some(storage) = t.integer_data.take() {
+    if let Some(storage) = t.integer_storage().cloned() {
         let storage = delete_integer_complex_storage_positions(storage, &positions);
         let shape = deleted_vector_shape(t.rows, t.cols, storage.len());
         return ComplexTensor::new_integer(storage, shape)
             .map(Value::ComplexTensor)
             .map_err(|error| map_slice_shape_error("complex slice deletion", error));
     }
+    let dtype = t.numeric_dtype();
+    let rows = t.rows;
+    let cols = t.cols;
+    let mut values = t.materialize_f64();
     for pos in positions {
-        t.data.remove(pos);
+        values.remove(pos);
     }
-    let shape = deleted_vector_shape(t.rows, t.cols, t.data.len());
-    t.rows = shape.first().copied().unwrap_or(0);
-    t.cols = shape.get(1).copied().unwrap_or(0);
-    t.shape = shape;
-    Ok(Value::ComplexTensor(t))
+    let shape = deleted_vector_shape(rows, cols, values.len());
+    ComplexTensor::from_f64_values_with_dtype(values, shape, dtype)
+        .map(Value::ComplexTensor)
+        .map_err(|error| map_slice_shape_error("complex slice deletion", error))
 }
 
 pub async fn assign_gpu_slice_with_plan(
@@ -1602,6 +1607,52 @@ mod tests {
     }
 
     #[test]
+    fn native_complex_single_plan_assignment_and_deletion_preserve_class() {
+        let tensor =
+            ComplexTensor::from_f32(vec![(1.0, -1.0), (2.0, -2.0), (3.0, -3.0)], vec![1, 3])
+                .unwrap();
+        let plan = IndexPlan::new(vec![0, 2], vec![1, 2], vec![2], 1, vec![1, 3]);
+        let Value::ComplexTensor(updated) = block_on(assign_complex_with_plan(
+            tensor,
+            &plan,
+            &Value::Complex(1.234_567_890_123, -9.876_543_210_987),
+        ))
+        .expect("complex single slice assignment") else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(updated.numeric_dtype(), NumericDType::F32);
+        assert_eq!(
+            updated.as_f32_slice(),
+            Some(
+                &[
+                    (1.234_567_890_123_f64 as f32, -9.876_543_210_987_f64 as f32,),
+                    (2.0, -2.0),
+                    (1.234_567_890_123_f64 as f32, -9.876_543_210_987_f64 as f32,),
+                ][..]
+            )
+        );
+
+        let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).expect("empty"));
+        let delete_plan = IndexPlan::new(vec![1], vec![1, 1], vec![1], 1, vec![1, 3]);
+        let Value::ComplexTensor(deleted) = delete_complex_with_plan(updated, &delete_plan, &empty)
+            .expect("complex single slice deletion")
+        else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(deleted.numeric_dtype(), NumericDType::F32);
+        assert_eq!(deleted.shape, vec![1, 2]);
+        assert_eq!(
+            deleted.as_f32_slice(),
+            Some(
+                &[
+                    (1.234_567_890_123_f64 as f32, -9.876_543_210_987_f64 as f32,),
+                    (1.234_567_890_123_f64 as f32, -9.876_543_210_987_f64 as f32,),
+                ][..]
+            )
+        );
+    }
+
+    #[test]
     fn typed_slice_deletion_uses_exact_storage_when_f64_mirrors_are_unavailable() {
         let tensor = Tensor::new_integer(IntegerStorage::U64(vec![1, u64::MAX, 3]), vec![1, 3])
             .expect("tensor");
@@ -1619,7 +1670,7 @@ mod tests {
             Some(&IntegerStorage::U64(vec![1, 3]))
         );
 
-        let mut complex = ComplexTensor::new_integer(
+        let complex = ComplexTensor::new_integer(
             IntegerComplexStorage::new(
                 IntegerStorage::I64(vec![i64::MIN, -2, i64::MAX]),
                 IntegerStorage::I64(vec![1, 2, 3]),
@@ -1628,7 +1679,6 @@ mod tests {
             vec![1, 3],
         )
         .expect("complex tensor");
-        complex.data = vec![(f64::NAN, f64::NAN)];
 
         let Value::ComplexTensor(output) = delete_complex_with_plan(complex, &plan, &empty)
             .expect("typed signed complex deletion")
@@ -1637,7 +1687,7 @@ mod tests {
         };
         assert_eq!(output.shape, vec![1, 2]);
         assert_eq!(
-            output.integer_data,
+            output.integer_storage().cloned(),
             Some(
                 IntegerComplexStorage::new(
                     IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
@@ -1802,7 +1852,7 @@ mod tests {
             ($storage:ident, $values:expr, $real:expr, $imag:expr) => {{
                 let tensor = Tensor::new_integer(IntegerStorage::$storage($values), vec![2, 2])
                     .expect("tensor");
-                let mut rhs_tensor = ComplexTensor::new_integer(
+                let rhs_tensor = ComplexTensor::new_integer(
                     IntegerComplexStorage::new(
                         IntegerStorage::$storage(vec![$real]),
                         IntegerStorage::$storage(vec![$imag]),
@@ -1811,7 +1861,6 @@ mod tests {
                     vec![1, 1],
                 )
                 .expect("rhs");
-                rhs_tensor.data.clear();
                 let plan = IndexPlan::new(vec![0, 1, 2, 3], vec![2, 2], vec![2, 2], 2, vec![2, 2]);
                 let result = block_on(assign_tensor_with_plan(
                     tensor,
@@ -1824,8 +1873,7 @@ mod tests {
                 };
                 assert_eq!(
                     output
-                        .integer_data
-                        .as_ref()
+                        .integer_storage()
                         .map(|storage| (&storage.real, &storage.imag)),
                     Some((
                         &IntegerStorage::$storage(vec![$real; 4]),
@@ -1902,7 +1950,7 @@ mod tests {
         assert_eq!(output.shape, vec![2, 1, 2]);
         assert_eq!(
             output
-                .integer_data
+                .integer_storage()
                 .as_ref()
                 .map(|storage| (&storage.real, &storage.imag)),
             Some((
@@ -1942,7 +1990,7 @@ mod tests {
         };
         assert_eq!(
             output
-                .integer_data
+                .integer_storage()
                 .as_ref()
                 .map(|storage| (&storage.real, &storage.imag)),
             Some((
@@ -2009,7 +2057,7 @@ mod tests {
         };
         assert_eq!(
             output
-                .integer_data
+                .integer_storage()
                 .as_ref()
                 .map(|storage| (&storage.real, &storage.imag)),
             Some((
@@ -2165,7 +2213,7 @@ mod tests {
     fn complex_rhs_view_reads_all_typed_integer_classes_without_f64_mirrors() {
         macro_rules! assert_typed_rhs {
             ($storage:ident, $real:expr, $imag:expr) => {{
-                let mut rhs = ComplexTensor::new_integer(
+                let rhs = ComplexTensor::new_integer(
                     IntegerComplexStorage::new(
                         IntegerStorage::$storage(vec![$real]),
                         IntegerStorage::$storage(vec![$imag]),
@@ -2174,7 +2222,6 @@ mod tests {
                     vec![1, 1],
                 )
                 .expect("typed complex rhs");
-                rhs.data = vec![(f64::NAN, f64::NAN)];
 
                 let ComplexRhsView::Tensor { data, .. } =
                     build_complex_rhs_view(&Value::ComplexTensor(rhs), &[1])

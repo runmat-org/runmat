@@ -339,7 +339,7 @@ fn null_complex_orthonormal_tensor(
     }
 
     let data: Vec<Complex64> = matrix
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
@@ -362,9 +362,9 @@ fn null_real_row_reduction_tensor(matrix: &Tensor) -> BuiltinResult<Tensor> {
 
 fn null_complex_row_reduction_tensor(matrix: &ComplexTensor) -> BuiltinResult<ComplexTensor> {
     let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape.as_slice()).map_err(input_error)?;
-    let tolerance = default_complex_tolerance(&matrix.data, rows, cols);
+    let tolerance = default_complex_tolerance(&matrix.materialize_f64(), rows, cols);
     let data: Vec<Complex64> = matrix
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
@@ -783,8 +783,8 @@ pub(crate) mod tests {
             for row in 0..rows {
                 let mut sum = Complex64::new(0.0, 0.0);
                 for k in 0..inner {
-                    let lhs = a.data[row + k * rows];
-                    let rhs = z.data[k + col * z.shape[0]];
+                    let lhs = a.materialize_f64()[row + k * rows];
+                    let rhs = z.materialize_f64()[k + col * z.shape[0]];
                     sum += Complex64::new(lhs.0, lhs.1) * Complex64::new(rhs.0, rhs.1);
                 }
                 assert!(
@@ -824,7 +824,7 @@ pub(crate) mod tests {
         for col in 0..cols {
             let norm = (0..rows)
                 .map(|row| {
-                    let value = z.data[row + col * rows];
+                    let value = z.materialize_f64()[row + col * rows];
                     value.0 * value.0 + value.1 * value.1
                 })
                 .sum::<f64>()
@@ -833,8 +833,8 @@ pub(crate) mod tests {
             for other in 0..col {
                 let dot = (0..rows)
                     .map(|row| {
-                        let lhs = z.data[row + other * rows];
-                        let rhs = z.data[row + col * rows];
+                        let lhs = z.materialize_f64()[row + other * rows];
+                        let rhs = z.materialize_f64()[row + col * rows];
                         Complex64::new(lhs.0, -lhs.1) * Complex64::new(rhs.0, rhs.1)
                     })
                     .sum::<Complex64>();
@@ -1057,7 +1057,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
-                assert_complex_close(&out.data, &[(-0.0, -1.0), (1.0, 0.0)], 1e-12);
+                assert_complex_close(&out.materialize_f64(), &[(-0.0, -1.0), (1.0, 0.0)], 1e-12);
             }
             other => panic!("expected complex tensor basis, got {other:?}"),
         }

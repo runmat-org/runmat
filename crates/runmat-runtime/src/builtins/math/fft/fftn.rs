@@ -340,7 +340,11 @@ mod tests {
         let expect = fft_complex_tensor(b, None, Some(3)).unwrap();
 
         assert_eq!(got.shape, expect.shape);
-        for (lhs, rhs) in got.data.iter().zip(expect.data.iter()) {
+        for (lhs, rhs) in got
+            .materialize_f64()
+            .iter()
+            .zip(expect.materialize_f64().iter())
+        {
             assert!((lhs.0 - rhs.0).abs() < 1e-12);
             assert!((lhs.1 - rhs.1).abs() < 1e-12);
         }

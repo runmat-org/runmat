@@ -16,7 +16,8 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, LogicalArray, NumericStorage, ResolveContext, Tensor, Type, Value,
+    ComplexStorage, ComplexTensor, LogicalArray, NumericStorage, ResolveContext, Tensor, Type,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -375,28 +376,41 @@ fn triu_logical_array(
 }
 
 fn triu_complex_tensor(
-    mut tensor: ComplexTensor,
+    tensor: ComplexTensor,
     offset: isize,
 ) -> crate::BuiltinResult<ComplexTensor> {
-    if let Some(storage) = tensor.integer_data.take() {
-        let zero = storage
-            .real
-            .zeros_like(1)
-            .value_at(0)
-            .expect("one typed integer zero");
-        let storage = storage
-            .reorder(|values| {
-                let mut values = values.to_vec();
-                apply_triu_inplace(&mut values, &tensor.shape, offset, zero.clone())
-                    .map_err(|e| e.to_string())?;
-                Ok(values)
-            })
-            .map_err(|e| triu_error_with_message(format!("triu: {e}"), &TRIU_ERROR_INTERNAL))?;
-        return ComplexTensor::new_integer(storage, tensor.shape)
-            .map_err(|e| triu_error_with_message(format!("triu: {e}"), &TRIU_ERROR_INTERNAL));
-    }
-    apply_triu_inplace(&mut tensor.data, &tensor.shape, offset, (0.0, 0.0))?;
-    Ok(tensor)
+    let shape = tensor.shape.clone();
+    let storage = match tensor.into_complex_storage() {
+        ComplexStorage::F64(mut values) => {
+            apply_triu_inplace(&mut values, &shape, offset, (0.0, 0.0))?;
+            ComplexStorage::F64(values)
+        }
+        ComplexStorage::F32(mut values) => {
+            apply_triu_inplace(&mut values, &shape, offset, (0.0, 0.0))?;
+            ComplexStorage::F32(values)
+        }
+        ComplexStorage::Integer(storage) => {
+            let zero = storage
+                .real
+                .zeros_like(1)
+                .value_at(0)
+                .expect("one typed integer zero");
+            ComplexStorage::Integer(
+                storage
+                    .reorder(|values| {
+                        let mut values = values.to_vec();
+                        apply_triu_inplace(&mut values, &shape, offset, zero.clone())
+                            .map_err(|e| e.to_string())?;
+                        Ok(values)
+                    })
+                    .map_err(|e| {
+                        triu_error_with_message(format!("triu: {e}"), &TRIU_ERROR_INTERNAL)
+                    })?,
+            )
+        }
+    };
+    ComplexTensor::from_complex_storage(storage, shape)
+        .map_err(|e| triu_error_with_message(format!("triu: {e}"), &TRIU_ERROR_INTERNAL))
 }
 
 async fn triu_gpu(handle: GpuTensorHandle, offset: isize) -> crate::BuiltinResult<Value> {
@@ -674,10 +688,10 @@ pub(crate) mod tests {
         match value {
             Value::ComplexTensor(result) => {
                 assert_eq!(result.shape, vec![2, 2]);
-                assert_eq!(result.data[0], (1.0, 2.0));
-                assert_eq!(result.data[1], (0.0, 0.0));
-                assert_eq!(result.data[2], (5.0, 6.0));
-                assert_eq!(result.data[3], (7.0, 8.0));
+                assert_eq!(result.materialize_f64()[0], (1.0, 2.0));
+                assert_eq!(result.materialize_f64()[1], (0.0, 0.0));
+                assert_eq!(result.materialize_f64()[2], (5.0, 6.0));
+                assert_eq!(result.materialize_f64()[3], (7.0, 8.0));
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }

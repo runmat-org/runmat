@@ -803,7 +803,7 @@ fn cummax_complex_tensor(
             "dimension must be >= 1",
         ));
     }
-    if tensor.data.is_empty() {
+    if tensor.materialize_f64().is_empty() {
         let indices =
             Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| cummax_internal_error(&e))?;
         return Ok((tensor.clone(), indices));
@@ -824,8 +824,8 @@ fn cummax_complex_tensor(
     let stride_before = dim_product(&tensor.shape[..dim_index]);
     let stride_after = dim_product(&tensor.shape[dim..]);
     let block = stride_before * segment_len;
-    let mut values_out = vec![(0.0f64, 0.0f64); tensor.data.len()];
-    let mut indices_out = vec![0.0f64; tensor.data.len()];
+    let mut values_out = vec![(0.0f64, 0.0f64); tensor.materialize_f64().len()];
+    let mut indices_out = vec![0.0f64; tensor.materialize_f64().len()];
 
     for after in 0..stride_after {
         let base = after * block;
@@ -839,7 +839,7 @@ fn cummax_complex_tensor(
                     let mut nan_index = 0usize;
                     for k in 0..segment_len {
                         let idx = base + before + k * stride_before;
-                        let value = tensor.data[idx];
+                        let value = tensor.materialize_f64()[idx];
                         let position = k + 1;
                         let value_is_nan = complex_is_nan(value);
                         match nan_mode {
@@ -894,7 +894,7 @@ fn cummax_complex_tensor(
                     let mut nan_index = 0usize;
                     for offset in (0..segment_len).rev() {
                         let idx = base + before + offset * stride_before;
-                        let value = tensor.data[idx];
+                        let value = tensor.materialize_f64()[idx];
                         let position = offset + 1;
                         let value_is_nan = complex_is_nan(value);
                         match nan_mode {
@@ -989,7 +989,7 @@ fn magnitude_squared(z: (f64, f64)) -> f64 {
 }
 
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor::is_scalar_complex_tensor(&tensor) && tensor.integer_data.is_none() {
+    if tensor::is_scalar_complex_tensor(&tensor) && tensor.integer_storage().is_none() {
         let value = tensor::complex_tensor_value_complex64(&tensor, 0);
         Value::Complex(value.re, value.im)
     } else {
@@ -1458,9 +1458,9 @@ pub(crate) mod tests {
         let (values, indices) = eval.into_pair();
         match values {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.data[0], (3.0, 0.0));
-                assert_eq!(out.data[1], (3.0, 0.0));
-                assert_eq!(out.data[2], (3.0, 0.0));
+                assert_eq!(out.materialize_f64()[0], (3.0, 0.0));
+                assert_eq!(out.materialize_f64()[1], (3.0, 0.0));
+                assert_eq!(out.materialize_f64()[2], (3.0, 0.0));
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }

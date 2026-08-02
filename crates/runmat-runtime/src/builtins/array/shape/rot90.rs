@@ -422,7 +422,7 @@ fn rot90_complex_tensor(
     if steps == 0 {
         return Ok(tensor);
     }
-    if let Some(storage) = tensor.integer_data.as_ref() {
+    if let Some(storage) = tensor.integer_storage() {
         let (_, shape) = rot90_generic(&storage.real.exact_values(), &tensor.shape, steps)?;
         let storage = storage
             .reorder(|values| {
@@ -434,7 +434,7 @@ fn rot90_complex_tensor(
         return ComplexTensor::new_integer(storage, shape)
             .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL));
     }
-    let (data, shape) = rot90_generic(&tensor.data, &tensor.shape, steps)?;
+    let (data, shape) = rot90_generic(&tensor.materialize_f64(), &tensor.shape, steps)?;
     ComplexTensor::new(data, shape)
         .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL))
 }
@@ -659,7 +659,7 @@ fn ravel_index(coords: &[usize], shape: &[usize]) -> usize {
 }
 
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor::is_scalar_complex_tensor(&tensor) && tensor.integer_data.is_none() {
+    if tensor::is_scalar_complex_tensor(&tensor) && tensor.integer_storage().is_none() {
         let value = tensor::complex_tensor_value_complex64(&tensor, 0);
         Value::Complex(value.re, value.im)
     } else {
@@ -784,8 +784,7 @@ pub(crate) mod tests {
             IntegerStorage::I16(vec![5, 6, 7, 8]),
         )
         .expect("typed complex storage");
-        let mut input = ComplexTensor::new_integer(storage, vec![2, 2]).expect("complex tensor");
-        input.data.clear();
+        let input = ComplexTensor::new_integer(storage, vec![2, 2]).expect("complex tensor");
 
         let Value::ComplexTensor(output) =
             rot90_builtin(Value::ComplexTensor(input), Vec::new()).expect("rot90")
@@ -794,7 +793,7 @@ pub(crate) mod tests {
         };
         assert_eq!(output.shape, vec![2, 2]);
         assert_eq!(
-            output.integer_data,
+            output.integer_storage().cloned(),
             Some(
                 IntegerComplexStorage::new(
                     IntegerStorage::I16(vec![3, 1, 4, 2]),

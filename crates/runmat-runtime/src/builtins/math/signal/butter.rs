@@ -1127,7 +1127,7 @@ mod tests {
                 .map(|value| Complex64::new(*value, 0.0))
                 .collect(),
             Value::ComplexTensor(tensor) => tensor
-                .data
+                .materialize_f64()
                 .iter()
                 .map(|(re, im)| Complex64::new(*re, *im))
                 .collect(),

@@ -170,7 +170,7 @@ fn tand_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 
 fn tand_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
     let data = tensor
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| tand_complex(re, im))
         .collect::<Vec<_>>();

@@ -412,7 +412,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![4]);
                 let expected = [(10.0, 0.0), (-2.0, 2.0), (-2.0, 0.0), (-2.0, -2.0)];
-                for (idx, val) in ct.data.iter().enumerate() {
+                for (idx, val) in ct.materialize_f64().iter().enumerate() {
                     assert!(
                         approx_eq(*val, expected[idx], 1e-12),
                         "idx {idx} {:?} ~= {:?}",
@@ -434,7 +434,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![1, 4]);
                 let expected = [(10.0, 0.0), (-2.0, 2.0), (-2.0, 0.0), (-2.0, -2.0)];
-                for (idx, val) in ct.data.iter().enumerate() {
+                for (idx, val) in ct.materialize_f64().iter().enumerate() {
                     assert!(
                         approx_eq(*val, expected[idx], 1e-12),
                         "idx {idx} {:?} ~= {:?}",
@@ -463,7 +463,7 @@ pub(crate) mod tests {
                     (9.0, 0.0),
                     (-3.0, 0.0),
                 ];
-                for (idx, val) in ct.data.iter().enumerate() {
+                for (idx, val) in ct.materialize_f64().iter().enumerate() {
                     assert!(approx_eq(*val, expected[idx], 1e-12));
                 }
             }
@@ -480,8 +480,8 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![5]);
-                assert!(approx_eq(ct.data[0], (6.0, 0.0), 1e-12));
-                assert_eq!(ct.data.len(), 5);
+                assert!(approx_eq(ct.materialize_f64()[0], (6.0, 0.0), 1e-12));
+                assert_eq!(ct.materialize_f64().len(), 5);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -502,8 +502,16 @@ pub(crate) mod tests {
         let base_ct = value_as_complex_tensor(baseline);
         let result_ct = value_as_complex_tensor(result);
         assert_eq!(base_ct.shape, result_ct.shape);
-        assert_eq!(base_ct.data.len(), result_ct.data.len());
-        for (idx, (a, b)) in base_ct.data.iter().zip(result_ct.data.iter()).enumerate() {
+        assert_eq!(
+            base_ct.materialize_f64().len(),
+            result_ct.materialize_f64().len()
+        );
+        for (idx, (a, b)) in base_ct
+            .materialize_f64()
+            .iter()
+            .zip(result_ct.materialize_f64().iter())
+            .enumerate()
+        {
             assert!(
                 approx_eq(*a, *b, 1e-12),
                 "mismatch at index {idx}: {:?} vs {:?}",
@@ -523,7 +531,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![2]);
                 let expected = [(3.0, 0.0), (-1.0, 0.0)];
-                for (idx, val) in ct.data.iter().enumerate() {
+                for (idx, val) in ct.materialize_f64().iter().enumerate() {
                     assert!(approx_eq(*val, expected[idx], 1e-12));
                 }
             }
@@ -539,7 +547,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![0]);
-                assert!(ct.data.is_empty());
+                assert!(ct.materialize_f64().is_empty());
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -553,7 +561,7 @@ pub(crate) mod tests {
         let result =
             fft_host(Value::ComplexTensor(tensor.clone()), None, None).expect("fft complex");
         let mut expected = tensor
-            .data
+            .materialize_f64()
             .iter()
             .map(|(re, im)| Complex::new(*re, *im))
             .collect::<Vec<_>>();
@@ -563,8 +571,8 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![3]);
-                assert_eq!(ct.data.len(), 3);
-                for (idx, val) in ct.data.iter().enumerate() {
+                assert_eq!(ct.materialize_f64().len(), 3);
+                for (idx, val) in ct.materialize_f64().iter().enumerate() {
                     let exp = expected[idx];
                     assert!(approx_eq(*val, (exp.re, exp.im), 1e-12));
                 }
@@ -582,7 +590,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![1, 4]);
                 let expected = [(10.0, 0.0), (-2.0, 2.0), (-2.0, 0.0), (-2.0, -2.0)];
-                for (idx, val) in ct.data.iter().enumerate() {
+                for (idx, val) in ct.materialize_f64().iter().enumerate() {
                     assert!(approx_eq(*val, expected[idx], 1e-12));
                 }
             }
@@ -600,8 +608,8 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![1, 4, 1]);
-                assert_eq!(ct.data.len(), original.materialize_f64().len());
-                for (idx, (re, im)) in ct.data.iter().enumerate() {
+                assert_eq!(ct.materialize_f64().len(), original.materialize_f64().len());
+                for (idx, (re, im)) in ct.materialize_f64().iter().enumerate() {
                     assert!(approx_eq(
                         (*re, *im),
                         (original.materialize_f64()[idx], 0.0),
@@ -629,8 +637,10 @@ pub(crate) mod tests {
                         expected.push((value, 0.0));
                     }
                 }
-                assert_eq!(ct.data.len(), expected.len());
-                for (idx, (actual, expected)) in ct.data.iter().zip(expected.iter()).enumerate() {
+                assert_eq!(ct.materialize_f64().len(), expected.len());
+                for (idx, (actual, expected)) in
+                    ct.materialize_f64().iter().zip(expected.iter()).enumerate()
+                {
                     assert!(
                         approx_eq(*actual, *expected, 1e-12),
                         "idx {idx}: {:?} != {:?}",
@@ -707,7 +717,11 @@ pub(crate) mod tests {
             let gpu_host = value_as_complex_tensor(gpu);
             let cpu_host = value_as_complex_tensor(cpu);
             assert_eq!(gpu_host.shape, cpu_host.shape);
-            for (a, b) in gpu_host.data.iter().zip(cpu_host.data.iter()) {
+            for (a, b) in gpu_host
+                .materialize_f64()
+                .iter()
+                .zip(cpu_host.materialize_f64().iter())
+            {
                 assert!(approx_eq(*a, *b, 1e-12));
             }
             provider.free(&handle).ok();
@@ -734,7 +748,11 @@ pub(crate) mod tests {
             let gpu_host = value_as_complex_tensor(gpu);
             let cpu_host = value_as_complex_tensor(cpu);
             assert_eq!(gpu_host.shape, cpu_host.shape);
-            for (a, b) in gpu_host.data.iter().zip(cpu_host.data.iter()) {
+            for (a, b) in gpu_host
+                .materialize_f64()
+                .iter()
+                .zip(cpu_host.materialize_f64().iter())
+            {
                 assert!(approx_eq(*a, *b, 1e-10));
             }
             provider.free(&handle).ok();
@@ -758,7 +776,11 @@ pub(crate) mod tests {
             let gpu_host = value_as_complex_tensor(gpu);
             let cpu_host = value_as_complex_tensor(cpu);
             assert_eq!(gpu_host.shape, cpu_host.shape);
-            for (a, b) in gpu_host.data.iter().zip(cpu_host.data.iter()) {
+            for (a, b) in gpu_host
+                .materialize_f64()
+                .iter()
+                .zip(cpu_host.materialize_f64().iter())
+            {
                 assert!(approx_eq(*a, *b, 1e-10), "{a:?} vs {b:?}");
             }
             provider.free(&handle).ok();
@@ -789,7 +811,11 @@ pub(crate) mod tests {
                 runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
             };
             assert_eq!(gpu_ct.shape, cpu_ct.shape);
-            for (a, b) in gpu_ct.data.iter().zip(cpu_ct.data.iter()) {
+            for (a, b) in gpu_ct
+                .materialize_f64()
+                .iter()
+                .zip(cpu_ct.materialize_f64().iter())
+            {
                 assert!(approx_eq(*a, *b, tol), "{a:?} vs {b:?}");
             }
             provider.free(&handle).ok();

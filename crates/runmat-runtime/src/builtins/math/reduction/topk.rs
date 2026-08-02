@@ -607,7 +607,7 @@ fn evaluate_complex(
     let axis_len = shape.get(axis).copied().unwrap_or(1);
     let take = args.k.min(axis_len);
     if axis >= shape.len() {
-        let indices = Tensor::new(vec![1.0; tensor.data.len()], shape)
+        let indices = Tensor::new(vec![1.0; tensor.materialize_f64().len()], shape)
             .map_err(|message| topk_internal(kind, message))?;
         return Ok(TopKEvaluation {
             values: complex_tensor_into_value(tensor),
@@ -615,7 +615,7 @@ fn evaluate_complex(
         });
     }
     let output_shape = output_shape_for_topk(&shape, axis, take);
-    if tensor.data.is_empty() || take == 0 {
+    if tensor.materialize_f64().is_empty() || take == 0 {
         let values = ComplexTensor::new(Vec::new(), output_shape.clone())
             .map_err(|message| topk_internal(kind, message))?;
         let indices = Tensor::new(Vec::new(), output_shape)
@@ -646,7 +646,7 @@ fn evaluate_complex(
             input_coords[axis] = reduce_idx;
             let input_index = map_linear_index(&input_coords, &input_strides);
             entries.push(ComplexEntry {
-                value: tensor.data[input_index],
+                value: tensor.materialize_f64()[input_index],
                 index: reduce_idx,
             });
         }
@@ -1228,7 +1228,7 @@ mod tests {
         let Value::ComplexTensor(values) = eval.values else {
             panic!("expected complex tensor");
         };
-        assert_eq!(values.data, vec![(3.0, -1.0), (2.0, 0.0)]);
+        assert_eq!(values.materialize_f64(), vec![(3.0, -1.0), (2.0, 0.0)]);
     }
 
     #[tokio::test]

@@ -667,7 +667,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
                 let expected = random::expected_complex_normal_sequence(2);
-                for ((re, im), (eref, eim)) in t.data.iter().zip(expected.iter()) {
+                for ((re, im), (eref, eim)) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((*re - *eref).abs() < 1e-12);
                     assert!((*im - *eim).abs() < 1e-12);
                 }

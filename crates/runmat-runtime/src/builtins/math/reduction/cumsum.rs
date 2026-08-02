@@ -657,7 +657,7 @@ fn cumsum_complex_tensor(
             "dimension must be >= 1",
         ));
     }
-    if tensor.data.is_empty() || dim > tensor.shape.len() {
+    if tensor.materialize_f64().is_empty() || dim > tensor.shape.len() {
         return Ok(tensor.clone());
     }
 
@@ -670,7 +670,7 @@ fn cumsum_complex_tensor(
     let stride_before = dim_product(&tensor.shape[..dim_index]);
     let stride_after = dim_product(&tensor.shape[dim..]);
     let block = stride_before * segment_len;
-    let mut output = vec![(0.0f64, 0.0f64); tensor.data.len()];
+    let mut output = vec![(0.0f64, 0.0f64); tensor.materialize_f64().len()];
 
     for after in 0..stride_after {
         let base = after * block;
@@ -681,7 +681,7 @@ fn cumsum_complex_tensor(
                     let mut sum_is_nan = false;
                     for k in 0..segment_len {
                         let idx = base + before + k * stride_before;
-                        let value = tensor.data[idx];
+                        let value = tensor.materialize_f64()[idx];
                         let value_is_nan = value.0.is_nan() || value.1.is_nan();
                         match nan_mode {
                             CumsumNanMode::Include => {
@@ -713,7 +713,7 @@ fn cumsum_complex_tensor(
                     let mut sum_is_nan = false;
                     for offset in (0..segment_len).rev() {
                         let idx = base + before + offset * stride_before;
-                        let value = tensor.data[idx];
+                        let value = tensor.materialize_f64()[idx];
                         let value_is_nan = value.0.is_nan() || value.1.is_nan();
                         match nan_mode {
                             CumsumNanMode::Include => {
@@ -748,7 +748,7 @@ fn cumsum_complex_tensor(
 }
 
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor::is_scalar_complex_tensor(&tensor) && tensor.integer_data.is_none() {
+    if tensor::is_scalar_complex_tensor(&tensor) && tensor.integer_storage().is_none() {
         let value = tensor::complex_tensor_value_complex64(&tensor, 0);
         Value::Complex(value.re, value.im)
     } else {
@@ -808,16 +808,14 @@ pub(crate) mod tests {
         let storage =
             IntegerComplexStorage::new(IntegerStorage::U32(vec![11]), IntegerStorage::U32(vec![5]))
                 .expect("matching complex integer storage");
-        let mut input = ComplexTensor::new_integer(storage.clone(), vec![1, 1])
+        let input = ComplexTensor::new_integer(storage.clone(), vec![1, 1])
             .expect("typed complex integer input");
-        input.data.clear();
 
         let value = complex_tensor_into_value(input);
         let Value::ComplexTensor(output) = value else {
             panic!("typed complex integer scalar must not collapse to double complex");
         };
-        assert_eq!(output.integer_data, Some(storage));
-        assert!(output.data.is_empty());
+        assert_eq!(output.integer_storage().cloned(), Some(storage));
     }
 
     fn cumsum_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -1059,10 +1057,10 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
-                assert!((out.data[0].0 - 1.0).abs() < 1e-12);
-                assert!((out.data[0].1 - 2.0).abs() < 1e-12);
-                assert!((out.data[1].0 - 4.0).abs() < 1e-12);
-                assert!((out.data[1].1 - 1.0).abs() < 1e-12);
+                assert!((out.materialize_f64()[0].0 - 1.0).abs() < 1e-12);
+                assert!((out.materialize_f64()[0].1 - 2.0).abs() < 1e-12);
+                assert!((out.materialize_f64()[1].0 - 4.0).abs() < 1e-12);
+                assert!((out.materialize_f64()[1].1 - 1.0).abs() < 1e-12);
             }
             other => panic!("expected complex tensor result, got {other:?}"),
         }
@@ -1212,12 +1210,12 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![3, 1]);
-                assert!((out.data[0].0 - 1.0).abs() < 1e-12);
-                assert!((out.data[0].1 - 0.5).abs() < 1e-12);
-                assert!((out.data[1].0 - 1.0).abs() < 1e-12);
-                assert!((out.data[1].1 - 0.5).abs() < 1e-12);
-                assert!((out.data[2].0 - 4.0).abs() < 1e-12);
-                assert!((out.data[2].1 - (-0.5)).abs() < 1e-12);
+                assert!((out.materialize_f64()[0].0 - 1.0).abs() < 1e-12);
+                assert!((out.materialize_f64()[0].1 - 0.5).abs() < 1e-12);
+                assert!((out.materialize_f64()[1].0 - 1.0).abs() < 1e-12);
+                assert!((out.materialize_f64()[1].1 - 0.5).abs() < 1e-12);
+                assert!((out.materialize_f64()[2].0 - 4.0).abs() < 1e-12);
+                assert!((out.materialize_f64()[2].1 - (-0.5)).abs() < 1e-12);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }

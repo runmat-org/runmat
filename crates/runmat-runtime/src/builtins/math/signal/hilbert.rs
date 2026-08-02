@@ -349,16 +349,18 @@ fn checked_product(dims: &[usize]) -> BuiltinResult<usize> {
 }
 
 fn apply_analytic_signal_mask(
-    mut spectrum: ComplexTensor,
+    spectrum: ComplexTensor,
     dim_index: usize,
 ) -> BuiltinResult<ComplexTensor> {
+    let dtype = spectrum.numeric_dtype();
     let mut shape = spectrum.shape.clone();
+    let mut data = spectrum.materialize_f64();
     while shape.len() <= dim_index {
         shape.push(1);
     }
 
     let len = shape[dim_index];
-    if len == 0 || spectrum.data.is_empty() {
+    if len == 0 || data.is_empty() {
         return Ok(spectrum);
     }
 
@@ -376,7 +378,7 @@ fn apply_analytic_signal_mask(
         for inner in 0..inner_stride {
             for freq in 0..len {
                 let idx = base + inner + freq * inner_stride;
-                let Some(slot) = spectrum.data.get_mut(idx) else {
+                let Some(slot) = data.get_mut(idx) else {
                     return Err(hilbert_error_with_detail(
                         &HILBERT_ERROR_INTERNAL,
                         "frequency mask index out of bounds",
@@ -389,7 +391,8 @@ fn apply_analytic_signal_mask(
         }
     }
 
-    Ok(spectrum)
+    ComplexTensor::from_f64_values_with_dtype(data, spectrum.shape, dtype)
+        .map_err(|error| hilbert_error_with_detail(&HILBERT_ERROR_INTERNAL, error))
 }
 
 fn analytic_signal_multiplier(freq: usize, len: usize) -> f64 {
@@ -471,7 +474,7 @@ pub(crate) mod tests {
         let out = as_complex_tensor(hilbert_call(Value::Tensor(input), Vec::new()).unwrap());
         assert_eq!(out.shape, vec![1, 4]);
         let expected = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)];
-        for (actual, expected) in out.data.iter().copied().zip(expected) {
+        for (actual, expected) in out.materialize_f64().iter().copied().zip(expected) {
             assert_complex_close(actual, expected);
         }
     }
@@ -482,7 +485,7 @@ pub(crate) mod tests {
         let out = as_complex_tensor(hilbert_call(Value::Tensor(input), Vec::new()).unwrap());
         assert_eq!(out.shape, vec![4, 1]);
         let expected = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)];
-        for (actual, expected) in out.data.iter().copied().zip(expected) {
+        for (actual, expected) in out.materialize_f64().iter().copied().zip(expected) {
             assert_complex_close(actual, expected);
         }
     }
@@ -503,7 +506,7 @@ pub(crate) mod tests {
             (0.0, 1.0),
             (-1.0, 0.0),
         ];
-        for (actual, expected) in out.data.iter().copied().zip(expected) {
+        for (actual, expected) in out.materialize_f64().iter().copied().zip(expected) {
             assert_complex_close(actual, expected);
         }
     }
@@ -514,8 +517,8 @@ pub(crate) mod tests {
         let out =
             as_complex_tensor(hilbert_call(Value::Tensor(input), vec![Value::Num(6.0)]).unwrap());
         assert_eq!(out.shape, vec![1, 6]);
-        assert_eq!(out.data.len(), 6);
-        assert_complex_close(out.data[0], (1.0, 0.0));
+        assert_eq!(out.materialize_f64().len(), 6);
+        assert_complex_close(out.materialize_f64()[0], (1.0, 0.0));
     }
 
     #[test]
@@ -525,7 +528,7 @@ pub(crate) mod tests {
             hilbert_call(Value::Tensor(input), vec![Value::Int(IntValue::I32(0))]).unwrap(),
         );
         assert_eq!(out.shape, vec![1, 0]);
-        assert!(out.data.is_empty());
+        assert!(out.materialize_f64().is_empty());
     }
 
     #[test]
@@ -569,7 +572,7 @@ pub(crate) mod tests {
                 as_complex_tensor(hilbert_call(Value::GpuTensor(handle), Vec::new()).unwrap());
             assert_eq!(out.shape, vec![1, 4]);
             let expected = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)];
-            for (actual, expected) in out.data.iter().copied().zip(expected) {
+            for (actual, expected) in out.materialize_f64().iter().copied().zip(expected) {
                 assert_complex_close(actual, expected);
             }
         });
@@ -612,7 +615,7 @@ pub(crate) mod tests {
         .expect("gather complex output");
         assert_eq!(gathered.shape, vec![1, 4]);
         let expected = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)];
-        for (actual, expected) in gathered.data.iter().copied().zip(expected) {
+        for (actual, expected) in gathered.materialize_f64().iter().copied().zip(expected) {
             assert!((actual.0 - expected.0).abs() <= 1.0e-5);
             assert!((actual.1 - expected.1).abs() <= 1.0e-5);
         }
@@ -659,8 +662,12 @@ pub(crate) mod tests {
         )
         .expect("gather complex output");
         assert_eq!(gathered.shape, expected.shape);
-        for (idx, (actual, expected)) in
-            gathered.data.iter().copied().zip(expected.data).enumerate()
+        for (idx, (actual, expected)) in gathered
+            .materialize_f64()
+            .iter()
+            .copied()
+            .zip(expected.materialize_f64())
+            .enumerate()
         {
             assert!(
                 (actual.0 - expected.0).abs() <= 1.0e-5,

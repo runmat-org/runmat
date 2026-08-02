@@ -170,7 +170,7 @@ fn cosd_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 
 fn cosd_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
     let data = tensor
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| cosd_complex(re, im))
         .collect::<Vec<_>>();

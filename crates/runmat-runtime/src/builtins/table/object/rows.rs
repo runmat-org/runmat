@@ -91,7 +91,7 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
                 .map_err(invalid_variable)
         }
         Value::ComplexTensor(tensor) => {
-            if let Some(storage) = &tensor.integer_data {
+            if let Some(storage) = &tensor.integer_storage() {
                 let mut real = Vec::with_capacity(rows.len() * tensor.cols);
                 let mut imag = Vec::with_capacity(rows.len() * tensor.cols);
                 for col in 0..tensor.cols {
@@ -126,7 +126,7 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
             for col in 0..tensor.cols {
                 for &row in rows {
                     let idx = row + col * tensor.rows;
-                    data.push(*tensor.data.get(idx).ok_or_else(|| {
+                    data.push(*tensor.materialize_f64().get(idx).ok_or_else(|| {
                         invalid_index("table: complex variable row index out of bounds")
                     })?);
                 }
@@ -390,7 +390,7 @@ mod tests {
             panic!("expected complex tensor row selection");
         };
         assert_eq!(
-            selected.integer_data,
+            selected.integer_storage().cloned(),
             Some(
                 runmat_builtins::IntegerComplexStorage::new(
                     IntegerStorage::I64(vec![i64::MIN, large]),

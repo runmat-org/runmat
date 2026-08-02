@@ -288,7 +288,7 @@ fn sign_char_array(ca: CharArray) -> BuiltinResult<Value> {
 
 fn sign_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let mapped = ct
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| sign_complex(re, im))
         .collect::<Vec<_>>();
@@ -464,8 +464,8 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
-                assert_eq!(out.data[0], (0.0, 0.0));
-                let (re, im) = out.data[1];
+                assert_eq!(out.materialize_f64()[0], (0.0, 0.0));
+                let (re, im) = out.materialize_f64()[1];
                 assert!((re - 0.7071067811865475).abs() < 1e-12);
                 assert!((im + 0.7071067811865475).abs() < 1e-12);
             }
@@ -654,7 +654,11 @@ pub(crate) mod tests {
                 other => panic!("expected complex tensor, got {other:?}"),
             };
             assert_eq!(actual.shape, expected.shape);
-            for (got, want) in actual.data.iter().zip(expected.data.iter()) {
+            for (got, want) in actual
+                .materialize_f64()
+                .iter()
+                .zip(expected.materialize_f64().iter())
+            {
                 assert_complex_close(*got, *want, 1e-12);
             }
         });
@@ -787,7 +791,11 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (got, want) in actual.data.iter().zip(expected.data.iter()) {
+        for (got, want) in actual
+            .materialize_f64()
+            .iter()
+            .zip(expected.materialize_f64().iter())
+        {
             assert_complex_close(*got, *want, tol);
         }
     }

@@ -255,11 +255,11 @@ fn acosh_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
 }
 
 fn acosh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    if ct.data.is_empty() {
+    if ct.materialize_f64().is_empty() {
         return Ok(Value::ComplexTensor(ct));
     }
-    let mut mapped = Vec::with_capacity(ct.data.len());
-    for &(re, im) in &ct.data {
+    let mut mapped = Vec::with_capacity(ct.materialize_f64().len());
+    for &(re, im) in &ct.materialize_f64() {
         let result = Complex64::new(re, im).acosh();
         mapped.push((zero_small(result.re), zero_small(result.im)));
     }
@@ -388,7 +388,7 @@ pub(crate) mod tests {
                     (0.0, 0.0),
                     (1.3169578969248166, 0.0),
                 ];
-                for (actual, exp) in t.data.iter().zip(expected.iter()) {
+                for (actual, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual.0 - exp.0).abs() < 1e-12);
                     assert!((actual.1 - exp.1).abs() < 1e-12);
                 }
@@ -429,9 +429,9 @@ pub(crate) mod tests {
         match acosh_builtin(Value::Tensor(tensor)).expect("acosh") {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
-                assert_eq!(out.data[0], (0.0, std::f64::consts::FRAC_PI_2));
-                assert!((out.data[1].0 - 2.0f64.acosh()).abs() < 1e-12);
-                assert_eq!(out.data[1].1, 0.0);
+                assert_eq!(out.materialize_f64()[0], (0.0, std::f64::consts::FRAC_PI_2));
+                assert!((out.materialize_f64()[1].0 - 2.0f64.acosh()).abs() < 1e-12);
+                assert_eq!(out.materialize_f64()[1].1, 0.0);
             }
             other => panic!("expected complex tensor result, got {other:?}"),
         }
@@ -451,7 +451,7 @@ pub(crate) mod tests {
                     (0.0, 0.0),
                     (0.0, std::f64::consts::FRAC_PI_2),
                 ];
-                for (actual, exp) in t.data.iter().zip(expected.iter()) {
+                for (actual, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual.0 - exp.0).abs() < 1e-12);
                     assert!((actual.1 - exp.1).abs() < 1e-12);
                 }
@@ -480,7 +480,7 @@ pub(crate) mod tests {
                     .chars()
                     .map(|ch| Complex64::new(ch as u32 as f64, 0.0).acosh())
                     .collect();
-                for ((re, im), exp) in t.data.iter().zip(expected.iter()) {
+                for ((re, im), exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((re - exp.re).abs() < 1e-12);
                     assert!((im - exp.im).abs() < 1e-12);
                 }
@@ -501,7 +501,7 @@ pub(crate) mod tests {
             }
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![1, 1]);
-                let (re, im) = t.data[0];
+                let (re, im) = t.materialize_f64()[0];
                 assert!(re.abs() < 1e-12);
                 assert!((im - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
             }
@@ -519,7 +519,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                for (actual, input) in t.data.iter().zip(inputs.iter()) {
+                for (actual, input) in t.materialize_f64().iter().zip(inputs.iter()) {
                     let expected = input.acosh();
                     assert!((actual.0 - expected.re).abs() < 1e-12);
                     assert!((actual.1 - expected.im).abs() < 1e-12);
@@ -638,7 +638,7 @@ pub(crate) mod tests {
                         Complex64::new(0.5, 0.0).acosh(),
                         Complex64::new(2.0, 0.0).acosh(),
                     ];
-                    for (actual, exp) in t.data.iter().zip(expected.iter()) {
+                    for (actual, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                         assert!((actual.0 - exp.re).abs() < 1e-12);
                         assert!((actual.1 - exp.im).abs() < 1e-12);
                     }

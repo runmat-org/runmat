@@ -1454,8 +1454,9 @@ impl NumericDType {
 #[cfg(test)]
 mod integer_storage_tests {
     use super::{
-        ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericDType,
-        NumericScalar, NumericStorage, NumericStorageView, NumericStorageViewMut, Tensor,
+        ComplexStorage, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
+        NumericDType, NumericScalar, NumericStorage, NumericStorageView, NumericStorageViewMut,
+        Tensor,
     };
 
     #[test]
@@ -2020,14 +2021,55 @@ mod integer_storage_tests {
     }
 
     #[test]
-    fn integer_complex_display_uses_storage_when_mirror_is_missing() {
+    fn single_complex_tensor_keeps_one_native_f32_payload() {
+        let values = vec![(1.25_f32, -2.5_f32), (f32::MAX, f32::MIN_POSITIVE)];
+        let mut tensor =
+            ComplexTensor::from_f32(values.clone(), vec![1, 2]).expect("single complex tensor");
+
+        assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
+        assert_eq!(tensor.as_f32_slice(), Some(values.as_slice()));
+        assert!(tensor.as_f64_slice().is_none());
+        assert!(tensor.integer_storage().is_none());
+
+        tensor
+            .set_f64_assignment_at(0, 3.75, -4.5)
+            .expect("single complex assignment");
+        assert_eq!(
+            tensor.complex_storage(),
+            &ComplexStorage::F32(vec![(3.75_f32, -4.5_f32), values[1]])
+        );
+    }
+
+    #[test]
+    fn complex_floating_reconstruction_preserves_requested_class() {
+        let values = vec![(1.0, -2.0), (3.5, 4.25)];
+        let single = ComplexTensor::from_f64_values_with_dtype(
+            values.clone(),
+            vec![2, 1],
+            NumericDType::F32,
+        )
+        .expect("single reconstruction");
+        let double = ComplexTensor::from_f64_values_with_dtype(
+            values.clone(),
+            vec![2, 1],
+            NumericDType::F64,
+        )
+        .expect("double reconstruction");
+
+        assert_eq!(single.numeric_dtype(), NumericDType::F32);
+        assert_eq!(single.materialize_f64(), values);
+        assert_eq!(double.numeric_dtype(), NumericDType::F64);
+        assert_eq!(double.as_f64_slice(), Some(values.as_slice()));
+    }
+
+    #[test]
+    fn integer_complex_display_uses_authoritative_storage() {
         let storage = IntegerComplexStorage::new(
             IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
             IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
         )
         .expect("matching storage");
-        let mut tensor = ComplexTensor::new_integer(storage, vec![2]).expect("complex tensor");
-        tensor.data.clear();
+        let tensor = ComplexTensor::new_integer(storage, vec![2]).expect("complex tensor");
 
         assert_eq!(
             tensor.to_string(),
@@ -2087,11 +2129,17 @@ type SparseCscParts<T> = (Vec<usize>, Vec<usize>, Vec<T>);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComplexTensor {
-    pub data: Vec<(f64, f64)>,
-    pub integer_data: Option<IntegerComplexStorage>,
+    storage: ComplexStorage,
     pub shape: Vec<usize>,
     pub rows: usize,
     pub cols: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ComplexStorage {
+    F64(Vec<(f64, f64)>),
+    F32(Vec<(f32, f32)>),
+    Integer(IntegerComplexStorage),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -3297,15 +3345,39 @@ mod sparse_tensor_tests {
 
 impl ComplexTensor {
     pub fn new(data: Vec<(f64, f64)>, shape: Vec<usize>) -> Result<Self, String> {
-        let expected: usize = shape.iter().product();
-        if data.len() != expected {
-            return Err(format!(
-                "ComplexTensor data length {} doesn't match shape {:?} ({} elements)",
-                data.len(),
+        Self::from_complex_storage(ComplexStorage::F64(data), shape)
+    }
+
+    pub fn from_f32(data: Vec<(f32, f32)>, shape: Vec<usize>) -> Result<Self, String> {
+        Self::from_complex_storage(ComplexStorage::F32(data), shape)
+    }
+
+    /// Reconstructs floating complex values in the requested floating class.
+    pub fn from_f64_values_with_dtype(
+        data: Vec<(f64, f64)>,
+        shape: Vec<usize>,
+        dtype: NumericDType,
+    ) -> Result<Self, String> {
+        match dtype {
+            NumericDType::F64 => Self::new(data, shape),
+            NumericDType::F32 => Self::from_f32(
+                data.into_iter()
+                    .map(|(real, imag)| (real as f32, imag as f32))
+                    .collect(),
                 shape,
-                expected
-            ));
+            ),
+            _ => Err(format!(
+                "complex floating reconstruction requires single or double, got {}",
+                dtype.class_name()
+            )),
         }
+    }
+
+    pub fn from_complex_storage(
+        storage: ComplexStorage,
+        shape: Vec<usize>,
+    ) -> Result<Self, String> {
+        storage.validate_shape(&shape)?;
         let (rows, cols) = if shape.len() >= 2 {
             (shape[0], shape[1])
         } else if shape.len() == 1 {
@@ -3314,51 +3386,73 @@ impl ComplexTensor {
             (0, 0)
         };
         Ok(ComplexTensor {
-            data,
-            integer_data: None,
+            storage,
             shape,
             rows,
             cols,
         })
     }
     pub fn new_integer(storage: IntegerComplexStorage, shape: Vec<usize>) -> Result<Self, String> {
-        let expected: usize = shape.iter().product();
-        if storage.len() != expected {
-            return Err("complex integer storage length does not match shape".into());
-        }
-        let data = storage
-            .real
-            .to_f64_vec()
-            .into_iter()
-            .zip(storage.imag.to_f64_vec())
-            .collect();
-        let mut tensor = Self::new(data, shape)?;
-        tensor.integer_data = Some(storage);
-        Ok(tensor)
+        Self::from_complex_storage(ComplexStorage::Integer(storage), shape)
     }
     pub fn new_2d(data: Vec<(f64, f64)>, rows: usize, cols: usize) -> Result<Self, String> {
         Self::new(data, vec![rows, cols])
     }
     pub fn zeros(shape: Vec<usize>) -> Self {
-        let size: usize = shape.iter().product();
-        let (rows, cols) = if shape.len() >= 2 {
-            (shape[0], shape[1])
-        } else if shape.len() == 1 {
-            (1, shape[0])
-        } else {
-            (0, 0)
-        };
-        ComplexTensor {
-            data: vec![(0.0, 0.0); size],
-            integer_data: None,
-            shape,
-            rows,
-            cols,
+        let size = shape
+            .iter()
+            .try_fold(1usize, |count, &dimension| count.checked_mul(dimension))
+            .expect("complex zero shape must fit usize");
+        Self::from_complex_storage(ComplexStorage::F64(vec![(0.0, 0.0); size]), shape)
+            .expect("complex zero storage length matches shape")
+    }
+
+    pub fn complex_storage(&self) -> &ComplexStorage {
+        &self.storage
+    }
+
+    pub fn into_complex_storage(self) -> ComplexStorage {
+        self.storage
+    }
+
+    pub fn len(&self) -> usize {
+        self.storage.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.storage.is_empty()
+    }
+
+    pub fn numeric_dtype(&self) -> NumericDType {
+        self.storage.numeric_dtype()
+    }
+
+    pub fn as_f64_slice(&self) -> Option<&[(f64, f64)]> {
+        match &self.storage {
+            ComplexStorage::F64(values) => Some(values),
+            ComplexStorage::F32(_) | ComplexStorage::Integer(_) => None,
         }
     }
 
+    pub fn as_f32_slice(&self) -> Option<&[(f32, f32)]> {
+        match &self.storage {
+            ComplexStorage::F32(values) => Some(values),
+            ComplexStorage::F64(_) | ComplexStorage::Integer(_) => None,
+        }
+    }
+
+    /// Explicitly materializes complex values in the `f64` computation domain.
+    ///
+    /// Integer components outside the exact binary64 range may lose precision.
+    pub fn materialize_f64(&self) -> Vec<(f64, f64)> {
+        self.storage.materialize_f64()
+    }
+
     pub fn integer_storage(&self) -> Option<&IntegerComplexStorage> {
-        self.integer_data.as_ref()
+        match &self.storage {
+            ComplexStorage::Integer(storage) => Some(storage),
+            ComplexStorage::F64(_) | ComplexStorage::F32(_) => None,
+        }
     }
 
     /// Read one complex element without routing integer components through floating point.
@@ -3369,32 +3463,128 @@ impl ComplexTensor {
                 NumericScalar::from(storage.imag.value_at(index)?),
             ));
         }
-        self.data
-            .get(index)
-            .copied()
-            .map(|(real, imag)| (NumericScalar::F64(real), NumericScalar::F64(imag)))
+        match &self.storage {
+            ComplexStorage::F64(values) => values
+                .get(index)
+                .copied()
+                .map(|(real, imag)| (NumericScalar::F64(real), NumericScalar::F64(imag))),
+            ComplexStorage::F32(values) => values
+                .get(index)
+                .copied()
+                .map(|(real, imag)| (NumericScalar::F32(real), NumericScalar::F32(imag))),
+            ComplexStorage::Integer(_) => unreachable!("integer storage returned above"),
+        }
+    }
+
+    /// Assigns one complex floating scalar using the destination component class.
+    pub fn set_f64_assignment_at(
+        &mut self,
+        index: usize,
+        real: f64,
+        imag: f64,
+    ) -> Result<(), String> {
+        match &mut self.storage {
+            ComplexStorage::F64(values) => {
+                let destination = values
+                    .get_mut(index)
+                    .ok_or_else(|| format!("ComplexTensor index {index} out of bounds"))?;
+                *destination = (real, imag);
+            }
+            ComplexStorage::F32(values) => {
+                let destination = values
+                    .get_mut(index)
+                    .ok_or_else(|| format!("ComplexTensor index {index} out of bounds"))?;
+                *destination = (real as f32, imag as f32);
+            }
+            ComplexStorage::Integer(storage) => {
+                storage.real.set_f64_assignment(index, real)?;
+                storage.imag.set_f64_assignment(index, imag)?;
+            }
+        }
+        Ok(())
     }
 
     /// Formats one element using its exact integer components when present.
     ///
-    /// `data` remains a floating compatibility view during the integer-dtype
-    /// migration, so it must not be used to render typed values such as
-    /// `uint64` above the exact IEEE-754 range.
     pub fn format_element(&self, index: usize) -> String {
-        if let Some(storage) = &self.integer_data {
-            let real = storage
-                .real
-                .value_at(index)
-                .expect("complex integer real storage must match tensor shape");
-            let imag = storage
-                .imag
-                .value_at(index)
-                .expect("complex integer imaginary storage must match tensor shape");
-            return format_integer_complex_value(&real, &imag);
+        match &self.storage {
+            ComplexStorage::Integer(storage) => {
+                let real = storage
+                    .real
+                    .value_at(index)
+                    .expect("complex integer real storage must match tensor shape");
+                let imag = storage
+                    .imag
+                    .value_at(index)
+                    .expect("complex integer imaginary storage must match tensor shape");
+                format_integer_complex_value(&real, &imag)
+            }
+            ComplexStorage::F64(values) => {
+                let (real, imag) = values[index];
+                Value::Complex(real, imag).to_string()
+            }
+            ComplexStorage::F32(values) => {
+                let (real, imag) = values[index];
+                Value::Complex(f64::from(real), f64::from(imag)).to_string()
+            }
         }
+    }
+}
 
-        let (real, imag) = self.data[index];
-        Value::Complex(real, imag).to_string()
+impl ComplexStorage {
+    pub fn len(&self) -> usize {
+        match self {
+            Self::F64(values) => values.len(),
+            Self::F32(values) => values.len(),
+            Self::Integer(storage) => storage.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn numeric_dtype(&self) -> NumericDType {
+        match self {
+            Self::F64(_) => NumericDType::F64,
+            Self::F32(_) => NumericDType::F32,
+            Self::Integer(storage) => storage.real.numeric_dtype(),
+        }
+    }
+
+    pub fn validate_shape(&self, shape: &[usize]) -> Result<(), String> {
+        let expected = shape
+            .iter()
+            .try_fold(1usize, |count, &dimension| count.checked_mul(dimension));
+        let Some(expected) = expected else {
+            return Err(format!("complex tensor shape {shape:?} overflows usize"));
+        };
+        if self.len() != expected {
+            return Err(format!(
+                "complex {} storage length {} doesn't match shape {:?} ({} elements)",
+                self.numeric_dtype().class_name(),
+                self.len(),
+                shape,
+                expected
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn materialize_f64(&self) -> Vec<(f64, f64)> {
+        match self {
+            Self::F64(values) => values.clone(),
+            Self::F32(values) => values
+                .iter()
+                .map(|&(real, imag)| (f64::from(real), f64::from(imag)))
+                .collect(),
+            Self::Integer(storage) => storage
+                .real
+                .to_f64_vec()
+                .into_iter()
+                .zip(storage.imag.to_f64_vec())
+                .collect(),
+        }
     }
 }
 
@@ -5106,11 +5296,7 @@ impl fmt::Display for ComplexTensor {
         match self.shape.len() {
             0 | 1 => {
                 write!(f, "[")?;
-                let len = self
-                    .integer_data
-                    .as_ref()
-                    .map_or(self.data.len(), IntegerComplexStorage::len);
-                for i in 0..len {
+                for i in 0..self.len() {
                     if i > 0 {
                         write!(f, " ")?;
                     }

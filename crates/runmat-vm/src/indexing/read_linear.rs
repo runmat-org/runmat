@@ -22,7 +22,7 @@ pub async fn generic_index(base: &Value, indices: &[usize]) -> Result<Value, Run
                 let plan = build_index_plan(&selectors, indices.len(), &tensor.shape)?;
                 return read_tensor_slice_from_plan(tensor, &plan);
             }
-            Value::ComplexTensor(tensor) if tensor.integer_data.is_some() => {
+            Value::ComplexTensor(tensor) if tensor.integer_storage().is_some() => {
                 let plan = build_index_plan(&selectors, indices.len(), &tensor.shape)?;
                 return read_complex_slice_from_plan(tensor, &plan);
             }
@@ -82,7 +82,7 @@ mod tests {
 
     #[test]
     fn typed_complex_and_sparse_linear_reads_preserve_wide_storage() {
-        let mut complex = ComplexTensor::new_integer(
+        let complex = ComplexTensor::new_integer(
             IntegerComplexStorage::new(
                 IntegerStorage::I64(vec![0, i64::MIN]),
                 IntegerStorage::I64(vec![0, i64::MAX]),
@@ -91,14 +91,13 @@ mod tests {
             vec![1, 2],
         )
         .expect("complex tensor");
-        complex.data.clear();
         let Value::ComplexTensor(result) =
             block_on(generic_index(&Value::ComplexTensor(complex), &[2])).expect("complex read")
         else {
             panic!("typed complex read must remain typed");
         };
         assert_eq!(
-            result.integer_data,
+            result.integer_storage().cloned(),
             Some(
                 IntegerComplexStorage::new(
                     IntegerStorage::I64(vec![i64::MIN]),

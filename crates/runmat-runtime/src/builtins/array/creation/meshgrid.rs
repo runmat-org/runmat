@@ -807,33 +807,33 @@ fn axis_from_tensor(tensor: Tensor, index: usize) -> crate::BuiltinResult<AxisDa
 fn axis_from_complex_tensor(tensor: ComplexTensor, index: usize) -> crate::BuiltinResult<AxisData> {
     if is_vector_shape(&tensor.shape) {
         let len = tensor::complex_tensor_element_len(&tensor);
-        let is_complex = match tensor.integer_data.as_ref() {
+        let is_complex = match tensor.integer_storage() {
             Some(storage) => storage
                 .imag
                 .exact_values()
                 .into_iter()
                 .any(|value| !value.is_zero()),
             None => tensor
-                .data
+                .materialize_f64()
                 .iter()
                 .any(|&(_, imag)| !imag.is_nan() && imag != 0.0),
         };
-        let values = if tensor.integer_data.is_some() {
+        let values = if tensor.integer_storage().is_some() {
             Vec::new()
         } else {
-            tensor.data
+            tensor.materialize_f64()
         };
         return Ok(AxisData {
             len,
             values,
             is_complex,
             real_storage: None,
-            integer_data: tensor.integer_data,
+            integer_data: tensor.integer_storage().cloned(),
             gpu_real: None,
         });
     }
 
-    if tensor.integer_data.is_some() {
+    if tensor.integer_storage().is_some() {
         return Err(builtin_error(format!(
             "meshgrid: input argument {} must be a vector (1xN or Nx1), got shape {:?}",
             index + 1,
@@ -935,7 +935,7 @@ fn axis_from_meshgrid_matrix_complex(
         let mut values = Vec::with_capacity(cols);
         for col in 0..cols {
             let idx = rows * col;
-            values.push(tensor.data[idx]);
+            values.push(tensor.materialize_f64()[idx]);
         }
         let is_complex = values.iter().any(|&(_, im)| !im.is_nan() && im != 0.0);
         return Ok(Some(AxisData {
@@ -953,7 +953,7 @@ fn axis_from_meshgrid_matrix_complex(
     }
     let mut values = Vec::with_capacity(rows);
     for row in 0..rows {
-        values.push(tensor.data[row]);
+        values.push(tensor.materialize_f64()[row]);
     }
     let is_complex = values.iter().any(|&(_, im)| !im.is_nan() && im != 0.0);
     Ok(Some(AxisData {
@@ -971,7 +971,7 @@ fn matrix_rows_are_identical_complex(tensor: &ComplexTensor, rows: usize, cols: 
         for col in 0..cols {
             let idx0 = rows * col;
             let idx = row + rows * col;
-            if tensor.data[idx] != tensor.data[idx0] {
+            if tensor.materialize_f64()[idx] != tensor.materialize_f64()[idx0] {
                 return false;
             }
         }
@@ -984,7 +984,7 @@ fn matrix_cols_are_identical_complex(tensor: &ComplexTensor, rows: usize, cols: 
         for row in 0..rows {
             let idx0 = row;
             let idx = row + rows * col;
-            if tensor.data[idx] != tensor.data[idx0] {
+            if tensor.materialize_f64()[idx] != tensor.materialize_f64()[idx0] {
                 return false;
             }
         }
@@ -1692,8 +1692,7 @@ pub(crate) mod tests {
             IntegerStorage::I16(vec![7, -11]),
         )
         .unwrap();
-        let mut axis = ComplexTensor::new_integer(storage, vec![1, 2]).expect("axis");
-        axis.data.clear();
+        let axis = ComplexTensor::new_integer(storage, vec![1, 2]).expect("axis");
 
         let eval = evaluate(&[Value::ComplexTensor(axis)]).expect("meshgrid");
         let Value::ComplexTensor(x) = eval_first(&eval).expect("X") else {
@@ -1701,7 +1700,7 @@ pub(crate) mod tests {
         };
         assert_eq!(x.shape, vec![2, 2]);
         assert_eq!(
-            x.integer_data,
+            x.integer_storage().cloned(),
             Some(
                 IntegerComplexStorage::new(
                     IntegerStorage::I16(vec![-3, -3, 5, 5]),
@@ -1773,9 +1772,9 @@ pub(crate) mod tests {
 
         let out = tensor_to_complex_tensor(tensor).expect("complex tensor");
         assert_eq!(out.shape, vec![1, 2]);
-        assert_eq!(out.data, vec![(-3.0, 0.0), (5.0, 0.0)]);
+        assert_eq!(out.materialize_f64(), vec![(-3.0, 0.0), (5.0, 0.0)]);
         assert_eq!(
-            out.integer_data,
+            out.integer_storage().cloned(),
             Some(
                 IntegerComplexStorage::new(
                     IntegerStorage::I64(vec![-3, 5]),
@@ -2054,7 +2053,7 @@ pub(crate) mod tests {
             };
             assert_eq!(tensor.shape, vec![2, 2]);
             assert_eq!(
-                tensor.data,
+                tensor.materialize_f64(),
                 vec![(1.0, 0.0), (1.0, 0.0), (2.0, 0.0), (2.0, 0.0)]
             );
         });
@@ -2082,7 +2081,7 @@ pub(crate) mod tests {
             };
             assert_eq!(tensor.shape, vec![2, 2]);
             assert_eq!(
-                tensor.data,
+                tensor.materialize_f64(),
                 vec![(1.0, 1.0), (1.0, 1.0), (2.0, -1.0), (2.0, -1.0)]
             );
         });
@@ -2121,7 +2120,7 @@ pub(crate) mod tests {
             panic!("expected complex tensor");
         };
         assert_eq!(gpu_tensor.shape, cpu_x.shape);
-        assert_eq!(gpu_tensor.data, cpu_x.data);
+        assert_eq!(gpu_tensor.materialize_f64(), cpu_x.materialize_f64());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

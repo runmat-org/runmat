@@ -304,7 +304,7 @@ fn sinc_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 
 fn sinc_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
     let data = tensor
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| sinc_complex_value(re, im))
         .collect::<Vec<_>>();
@@ -665,8 +665,8 @@ mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
-                assert_complex_close(out.data[0], (1.0, 0.0));
-                assert_complex_close(out.data[1], sinc_complex_value(0.5, 0.25));
+                assert_complex_close(out.materialize_f64()[0], (1.0, 0.0));
+                assert_complex_close(out.materialize_f64()[1], sinc_complex_value(0.5, 0.25));
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -736,8 +736,8 @@ mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
-                assert_complex_close(out.data[0], (1.0, 0.0));
-                assert_complex_close(out.data[1], sinc_complex_value(0.5, 0.25));
+                assert_complex_close(out.materialize_f64()[0], (1.0, 0.0));
+                assert_complex_close(out.materialize_f64()[1], sinc_complex_value(0.5, 0.25));
             }
             other => panic!("expected complex tensor fallback, got {other:?}"),
         }
@@ -805,8 +805,8 @@ mod tests {
                 panic!("expected complex tensor");
             };
             assert_eq!(out.shape, complex.shape);
-            assert_complex_close(out.data[0], (1.0, 0.0));
-            assert_complex_close(out.data[1], sinc_complex_value(0.5, 0.25));
+            assert_complex_close(out.materialize_f64()[0], (1.0, 0.0));
+            assert_complex_close(out.materialize_f64()[1], sinc_complex_value(0.5, 0.25));
         });
     }
 
@@ -890,7 +890,11 @@ mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (got, want) in actual.data.iter().zip(expected.data.iter()) {
+        for (got, want) in actual
+            .materialize_f64()
+            .iter()
+            .zip(expected.materialize_f64().iter())
+        {
             assert!(
                 (got.0 - want.0).abs() < tol && (got.1 - want.1).abs() < tol,
                 "got {got:?}, expected {want:?}, tol {tol}"

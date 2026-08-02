@@ -332,7 +332,7 @@ impl Mat2CellInput {
                 Ok(tensor::tensor_into_value(tensor))
             }
             Mat2CellKind::Complex(t) => {
-                if let Some(storage) = &t.integer_data {
+                if let Some(storage) = &t.integer_storage() {
                     return extract_typed_complex_integer_block(
                         storage,
                         &self.base_shape,
@@ -340,7 +340,7 @@ impl Mat2CellInput {
                         sizes,
                     );
                 }
-                let data = copy_block(&t.data, &self.base_shape, start, sizes)?;
+                let data = copy_block(&t.materialize_f64(), &self.base_shape, start, sizes)?;
                 let shape = adjust_output_shape(sizes);
                 if data.len() == 1 {
                     let (re, im) = data[0];

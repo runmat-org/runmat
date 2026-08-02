@@ -313,7 +313,7 @@ fn round_tensor(tensor: Tensor, strategy: RoundStrategy) -> BuiltinResult<Tensor
 
 fn round_complex_tensor(ct: ComplexTensor, strategy: RoundStrategy) -> BuiltinResult<Value> {
     let data = ct
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| (round_scalar(re, strategy), round_scalar(im, strategy)))
         .collect::<Vec<_>>();

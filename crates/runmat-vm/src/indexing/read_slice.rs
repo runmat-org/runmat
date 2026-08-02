@@ -622,7 +622,7 @@ pub fn read_complex_slice_from_plan(
     tensor: &ComplexTensor,
     plan: &IndexPlan,
 ) -> Result<Value, RuntimeError> {
-    if let Some(storage) = tensor.integer_data.as_ref() {
+    if let Some(storage) = tensor.integer_storage().as_ref() {
         return read_integer_complex_slice_from_plan(storage, plan);
     }
     if plan.indices.is_empty() {
@@ -632,7 +632,7 @@ pub fn read_complex_slice_from_plan(
     }
     if plan.indices.len() == 1 {
         let lin = plan.indices[0] as usize;
-        let (re, im) = tensor.data.get(lin).copied().ok_or_else(|| {
+        let (re, im) = tensor.materialize_f64().get(lin).copied().ok_or_else(|| {
             crate::interpreter::errors::mex(
                 "IndexOutOfBounds",
                 "Slice error: complex index out of bounds",
@@ -643,7 +643,7 @@ pub fn read_complex_slice_from_plan(
     let mut out = Vec::with_capacity(plan.indices.len());
     for &lin in &plan.indices {
         let idx = lin as usize;
-        let value = tensor.data.get(idx).copied().ok_or_else(|| {
+        let value = tensor.materialize_f64().get(idx).copied().ok_or_else(|| {
             crate::interpreter::errors::mex(
                 "IndexOutOfBounds",
                 "Slice error: complex index out of bounds",
@@ -1065,7 +1065,7 @@ mod tests {
         };
         assert_eq!(result.shape, vec![1, 2]);
         assert_eq!(
-            result.integer_data,
+            result.integer_storage().cloned(),
             Some(
                 IntegerComplexStorage::new(
                     IntegerStorage::U64(vec![u64::MAX, 1]),
@@ -1082,7 +1082,7 @@ mod tests {
             panic!("typed complex scalar must retain exact complex storage");
         };
         assert_eq!(
-            result.integer_data,
+            result.integer_storage().cloned(),
             Some(
                 IntegerComplexStorage::new(
                     IntegerStorage::U64(vec![9_223_372_036_854_775_809]),
@@ -1099,7 +1099,7 @@ mod tests {
             panic!("empty typed complex selection must retain its class");
         };
         assert_eq!(
-            result.integer_data,
+            result.integer_storage().cloned(),
             Some(
                 IntegerComplexStorage::new(
                     IntegerStorage::U64(Vec::new()),

@@ -922,9 +922,20 @@ fn cat_complex_arrays(
     }
 
     let shapes: Vec<Vec<usize>> = tensors.iter().map(|t| t.shape.clone()).collect();
-    let data_refs: Vec<&[(f64, f64)]> = tensors.iter().map(|t| t.data.as_slice()).collect();
+    let output_dtype = if tensors
+        .iter()
+        .all(|tensor| tensor.numeric_dtype() == NumericDType::F32)
+    {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
+    };
+    let materialized: Vec<Vec<(f64, f64)>> =
+        tensors.iter().map(ComplexTensor::materialize_f64).collect();
+    let data_refs: Vec<&[(f64, f64)]> = materialized.iter().map(Vec::as_slice).collect();
     let (data, shape) = concat_column_major(dim_zero, &shapes, &data_refs, "cat")?;
-    let tensor = ComplexTensor::new(data, shape).map_err(|e| cat_err(format!("cat: {e}")))?;
+    let tensor = ComplexTensor::from_f64_values_with_dtype(data, shape, output_dtype)
+        .map_err(|e| cat_err(format!("cat: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
@@ -934,7 +945,7 @@ fn leftmost_complex_integer_target(values: &[Value]) -> Option<IntegerTarget> {
         let Value::ComplexTensor(tensor) = value else {
             continue;
         };
-        let Some(storage) = &tensor.integer_data else {
+        let Some(storage) = tensor.integer_storage() else {
             continue;
         };
         let target = IntegerTarget::from_storage(&storage.real);
@@ -993,28 +1004,28 @@ fn typed_complex_integer_concat_input(
     let zero = || target.cast_scalar(0.0);
     match value {
         Value::ComplexTensor(tensor) => {
-            if let Some(storage) = tensor.integer_data {
+            if let Some(storage) = tensor.integer_storage() {
                 return Ok((
-                    tensor.shape,
-                    integer_values(storage.real)
+                    tensor.shape.clone(),
+                    integer_values(storage.real.clone())
                         .iter()
                         .map(|value| target.cast_int(value))
                         .collect(),
-                    integer_values(storage.imag)
+                    integer_values(storage.imag.clone())
                         .iter()
                         .map(|value| target.cast_int(value))
                         .collect(),
                 ));
             }
+            let shape = tensor.shape.clone();
+            let values = tensor.materialize_f64();
             Ok((
-                tensor.shape,
-                tensor
-                    .data
+                shape,
+                values
                     .iter()
                     .map(|&(real, _)| target.cast_scalar(real))
                     .collect(),
-                tensor
-                    .data
+                values
                     .iter()
                     .map(|&(_, imag)| target.cast_scalar(imag))
                     .collect(),

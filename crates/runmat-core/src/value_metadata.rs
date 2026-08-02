@@ -13,9 +13,10 @@ pub enum NumericPreviewValue {
 /// MATLAB-style class name for a runtime value.
 pub fn matlab_class_name(value: &Value) -> String {
     match value {
-        Value::Num(_) | Value::ComplexTensor(_) | Value::Complex(_, _) => "double".to_string(),
+        Value::Num(_) | Value::Complex(_, _) => "double".to_string(),
         Value::Tensor(tensor) => tensor.numeric_dtype().class_name().to_string(),
-        Value::SparseTensor(_) => "double".to_string(),
+        Value::SparseTensor(tensor) => tensor.numeric_dtype().class_name().to_string(),
+        Value::ComplexTensor(tensor) => tensor.numeric_dtype().class_name().to_string(),
         Value::Int(iv) => iv.class_name().to_string(),
         Value::Bool(_) | Value::LogicalArray(_) => "logical".to_string(),
         Value::String(_) | Value::StringArray(_) => "string".to_string(),
@@ -91,7 +92,9 @@ pub fn approximate_size_bytes(value: &Value) -> Option<u64> {
         Value::LogicalArray(arr) => arr.data.len() as u64,
         Value::Tensor(t) => (t.len() as u64).saturating_mul(t.numeric_dtype().byte_size() as u64),
         Value::SparseTensor(s) => sparse_tensor_memory_bytes(s),
-        Value::ComplexTensor(t) => (t.data.len() * 16) as u64,
+        Value::ComplexTensor(t) => (t.len() as u64)
+            .saturating_mul(t.numeric_dtype().byte_size() as u64)
+            .saturating_mul(2),
         Value::String(s) => s.len() as u64,
         Value::StringArray(sa) => sa.data.iter().map(|s| s.len() as u64).sum(),
         Value::CharArray(ca) => (ca.rows * ca.cols) as u64,
@@ -212,7 +215,7 @@ fn preview_logical_slice(arr: &LogicalArray, limit: usize) -> (Vec<NumericPrevie
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntegerStorage, NumericDType, ObjectInstance, Tensor};
+    use runmat_builtins::{ComplexTensor, IntegerStorage, NumericDType, ObjectInstance, Tensor};
 
     #[test]
     fn approximate_size_bytes_uses_authoritative_native_storage() {
@@ -238,6 +241,17 @@ mod tests {
         let f32_tensor = Tensor::new_with_dtype(vec![1.0, 2.0, 3.0], vec![3, 1], NumericDType::F32)
             .expect("tensor");
         assert_eq!(approximate_size_bytes(&Value::Tensor(f32_tensor)), Some(12));
+
+        let complex_single =
+            ComplexTensor::from_f32(vec![(1.0, -1.0), (2.0, -2.0)], vec![2, 1]).unwrap();
+        assert_eq!(
+            matlab_class_name(&Value::ComplexTensor(complex_single.clone())),
+            "single"
+        );
+        assert_eq!(
+            approximate_size_bytes(&Value::ComplexTensor(complex_single)),
+            Some(16)
+        );
     }
 
     #[test]

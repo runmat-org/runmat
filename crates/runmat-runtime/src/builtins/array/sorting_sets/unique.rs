@@ -863,7 +863,7 @@ fn unique_complex_elements(
     tensor: ComplexTensor,
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
-    let len = tensor.data.len();
+    let len = tensor.materialize_f64().len();
     if len == 0 {
         let values = ComplexTensor::new(Vec::new(), vec![0, 1])
             .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
@@ -882,7 +882,7 @@ fn unique_complex_elements(
     let mut map: HashMap<ComplexKey, usize> = HashMap::new();
     let mut element_entry_index = Vec::with_capacity(len);
 
-    for (idx, &value) in tensor.data.iter().enumerate() {
+    for (idx, &value) in tensor.materialize_f64().iter().enumerate() {
         let key = ComplexKey::new(value);
         match map.get(&key) {
             Some(&entry_idx) => {
@@ -980,7 +980,7 @@ fn unique_complex_rows(
         let mut key_row = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows;
-            let value = tensor.data[idx];
+            let value = tensor.materialize_f64()[idx];
             row_values.push(value);
             key_row.push(ComplexKey::new(value));
         }
@@ -2015,10 +2015,10 @@ pub(crate) mod tests {
         let (values, ..) = eval.into_triple();
         match values {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.data.len(), 3);
-                assert_eq!(t.data[0], (1.0, -1.0));
-                assert_eq!(t.data[1], (1.0, 1.0));
-                assert_eq!(t.data[2], (0.0, 2.0));
+                assert_eq!(t.materialize_f64().len(), 3);
+                assert_eq!(t.materialize_f64()[0], (1.0, -1.0));
+                assert_eq!(t.materialize_f64()[1], (1.0, 1.0));
+                assert_eq!(t.materialize_f64()[2], (0.0, 2.0));
             }
             other => panic!("unexpected values {other:?}"),
         }

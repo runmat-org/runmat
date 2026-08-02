@@ -1250,12 +1250,11 @@ mod tests {
     }
 
     fn complex_int_tensor(real: IntegerStorage, imag: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = runmat_builtins::ComplexTensor::new_integer(
+        let tensor = runmat_builtins::ComplexTensor::new_integer(
             IntegerComplexStorage::new(real, imag).unwrap(),
             shape,
         )
         .unwrap();
-        tensor.data.clear();
         Value::ComplexTensor(tensor)
     }
 

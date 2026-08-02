@@ -118,20 +118,27 @@ fn num2cell_value(value: Value, grouped_dims: &[usize]) -> BuiltinResult<Value> 
             num2cell_numeric(shape, storage, grouped_dims)
         }
         Value::ComplexTensor(tensor) => {
-            if let Some(storage) = tensor.integer_data {
-                return num2cell_typed_complex_integer(tensor.shape, storage, grouped_dims);
+            if let Some(storage) = tensor.integer_storage() {
+                return num2cell_typed_complex_integer(
+                    tensor.shape.clone(),
+                    storage.clone(),
+                    grouped_dims,
+                );
             }
             num2cell_array(
                 tensor.shape.clone(),
                 grouped_dims,
                 |coords| {
-                    let (re, im) = tensor.data[linear_col_major(coords, &tensor.shape)];
+                    let (re, im) =
+                        tensor.materialize_f64()[linear_col_major(coords, &tensor.shape)];
                     Value::Complex(re, im)
                 },
                 |shape, coords| {
                     let data = coords
                         .iter()
-                        .map(|coord| tensor.data[linear_col_major(coord, &tensor.shape)])
+                        .map(|coord| {
+                            tensor.materialize_f64()[linear_col_major(coord, &tensor.shape)]
+                        })
                         .collect();
                     ComplexTensor::new(data, shape.to_vec())
                         .map(Value::ComplexTensor)

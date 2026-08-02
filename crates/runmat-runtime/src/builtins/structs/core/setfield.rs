@@ -906,10 +906,12 @@ fn assign_complex_tensor_element(
     match resolved.len() {
         1 => {
             let idx = resolved[0];
-            if idx == 0 || idx > tensor.data.len() {
+            if idx == 0 || idx > tensor.len() {
                 return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
-            tensor.data[idx - 1] = (re, im);
+            tensor
+                .set_f64_assignment_at(idx - 1, re, im)
+                .map_err(setfield_flow)?;
             Ok(())
         }
         2 => {
@@ -919,10 +921,12 @@ fn assign_complex_tensor_element(
                 return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             let pos = (row - 1) + (col - 1) * tensor.rows;
-            if pos >= tensor.data.len() {
+            if pos >= tensor.len() {
                 return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
-            tensor.data[pos] = (re, im);
+            tensor
+                .set_f64_assignment_at(pos, re, im)
+                .map_err(setfield_flow)?;
             Ok(())
         }
         _ => Err(setfield_flow(
@@ -1402,7 +1406,7 @@ fn complex_tensor_dimension_length(
     dim_idx: usize,
 ) -> BuiltinResult<usize> {
     if dims == 1 {
-        let total = tensor.data.len();
+        let total = tensor.materialize_f64().len();
         if total == 0 {
             return Err(setfield_flow(
                 "Index exceeds the number of array elements (0).",

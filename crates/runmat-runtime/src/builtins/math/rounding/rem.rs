@@ -278,8 +278,8 @@ fn compute_rem_complex(a: &ComplexTensor, b: &ComplexTensor) -> BuiltinResult<Va
     }
     let mut result = vec![(0.0f64, 0.0f64); plan.len()];
     for (out_idx, idx_a, idx_b) in plan.iter() {
-        let (ar, ai) = a.data[idx_a];
-        let (br, bi) = b.data[idx_b];
+        let (ar, ai) = a.materialize_f64()[idx_a];
+        let (br, bi) = b.materialize_f64()[idx_b];
         result[out_idx] = rem_complex_scalar(ar, ai, br, bi);
     }
     let tensor = ComplexTensor::new(result, plan.output_shape().to_vec())
@@ -386,7 +386,7 @@ fn complex_div(ar: f64, ai: f64, br: f64, bi: f64) -> (f64, f64) {
 }
 
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor::is_scalar_complex_tensor(&tensor) && tensor.integer_data.is_none() {
+    if tensor::is_scalar_complex_tensor(&tensor) && tensor.integer_storage().is_none() {
         let value = tensor::complex_tensor_value_complex64(&tensor, 0);
         Value::Complex(value.re, value.im)
     } else {
@@ -656,7 +656,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data, vec![(0.0, 0.0), (0.0, 1.0)]);
+                assert_eq!(t.materialize_f64(), vec![(0.0, 0.0), (0.0, 1.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }

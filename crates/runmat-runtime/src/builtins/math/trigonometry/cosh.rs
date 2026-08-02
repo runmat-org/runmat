@@ -170,7 +170,7 @@ fn cosh_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 
 fn cosh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let mapped = ct
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| (cosh_complex_re(re, im), cosh_complex_im(re, im)))
         .collect::<Vec<_>>();

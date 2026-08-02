@@ -170,7 +170,7 @@ fn sinh_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 
 fn sinh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let mapped = ct
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| (sinh_complex_re(re, im), sinh_complex_im(re, im)))
         .collect::<Vec<_>>();

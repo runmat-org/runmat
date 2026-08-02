@@ -645,7 +645,7 @@ fn tensor_to_numeric_data(tensor: Tensor) -> BuiltinResult<NumericData> {
         .map_err(|_| num2str_error(&NUM2STR_ERROR_INVALID_INPUT))?;
     match storage.into_integer_storage() {
         Ok(storage) => Ok(NumericData::Integer {
-            storage,
+            storage: storage.clone(),
             rows,
             cols,
         }),
@@ -666,15 +666,15 @@ fn complex_tensor_to_data(tensor: ComplexTensor) -> BuiltinResult<NumericData> {
     }
     let rows = tensor.rows;
     let cols = tensor.cols;
-    if let Some(storage) = tensor.integer_data {
+    if let Some(storage) = tensor.integer_storage() {
         return Ok(NumericData::IntegerComplex {
-            storage,
+            storage: storage.clone(),
             rows,
             cols,
         });
     }
     Ok(NumericData::Complex {
-        data: tensor.data,
+        data: tensor.materialize_f64(),
         rows,
         cols,
     })
@@ -1500,9 +1500,8 @@ pub(crate) mod tests {
             IntegerStorage::U64(vec![7, 0]),
         )
         .expect("complex integer storage");
-        let mut tensor =
+        let tensor =
             ComplexTensor::new_integer(storage, vec![1, 2]).expect("complex integer tensor");
-        tensor.data.clear();
 
         let out = num2str_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("num2str");
         match out {
@@ -1522,9 +1521,8 @@ pub(crate) mod tests {
             IntegerStorage::U64(vec![7, 0]),
         )
         .expect("complex integer storage");
-        let mut tensor =
+        let tensor =
             ComplexTensor::new_integer(storage, vec![1, 2]).expect("complex integer tensor");
-        tensor.data.clear();
 
         let out = num2str_builtin(
             Value::ComplexTensor(tensor),

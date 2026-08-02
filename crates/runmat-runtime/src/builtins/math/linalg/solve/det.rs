@@ -254,11 +254,11 @@ fn det_complex_tensor(matrix: &ComplexTensor) -> BuiltinResult<(f64, f64)> {
     if rows == 0 && cols == 0 {
         return Ok((1.0, 0.0));
     }
-    if matrix.data.len() == 1 {
-        return Ok(matrix.data[0]);
+    if matrix.materialize_f64().len() == 1 {
+        return Ok(matrix.materialize_f64()[0]);
     }
     let data: Vec<Complex64> = matrix
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
@@ -466,7 +466,7 @@ fn diagonal_product_complex(upper: &ComplexTensor, dimension: usize) -> BuiltinR
     for i in 0..dimension {
         let idx = i + i * rows;
         let (re, im) = *upper
-            .data
+            .materialize_f64()
             .get(idx)
             .ok_or_else(|| builtin_error(format!("{NAME}: upper factor diagonal out of range")))?;
         product *= Complex64::new(re, im);

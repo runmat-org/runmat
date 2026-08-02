@@ -1160,7 +1160,7 @@ fn sum_complex_tensor(
         }
     }
 
-    for (linear, &(re, im)) in tensor.data.iter().enumerate() {
+    for (linear, &(re, im)) in tensor.materialize_f64().iter().enumerate() {
         linear_to_multi(linear, &shape, &mut coords);
         for (i, coord) in coords.iter().enumerate() {
             out_coords[i] = if reduce_mask[i] { 0 } else { *coord };

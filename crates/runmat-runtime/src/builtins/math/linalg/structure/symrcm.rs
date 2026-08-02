@@ -214,7 +214,7 @@ pub fn symrcm_host_real_tensor(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
 
 /// Compute the symmetric reverse Cuthill-McKee ordering for a complex tensor.
 pub fn symrcm_host_complex_tensor(tensor: &ComplexTensor) -> BuiltinResult<Vec<usize>> {
-    symrcm_host_complex_data(&tensor.shape, &tensor.data)
+    symrcm_host_complex_data(&tensor.shape, &tensor.materialize_f64())
 }
 
 /// Host implementation for dense real data.

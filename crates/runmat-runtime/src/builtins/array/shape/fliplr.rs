@@ -396,16 +396,15 @@ pub(crate) mod tests {
             IntegerStorage::I16(vec![5, 6, 7, 8]),
         )
         .expect("complex integer storage");
-        let mut tensor =
+        let tensor =
             ComplexTensor::new_integer(storage, vec![2, 2]).expect("complex integer tensor");
-        tensor.data.clear();
 
         let result = fliplr_builtin(Value::ComplexTensor(tensor)).expect("fliplr");
 
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                let storage = out.integer_data.expect("typed complex integer output");
+                let storage = out.integer_storage().expect("typed complex integer output");
                 assert_eq!(storage.real, IntegerStorage::I16(vec![3, 4, 1, 2]));
                 assert_eq!(storage.imag, IntegerStorage::I16(vec![7, 8, 5, 6]));
             }

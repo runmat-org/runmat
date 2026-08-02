@@ -302,8 +302,8 @@ fn cond_complex_tensor(matrix: &ComplexTensor, norm: CondNorm) -> BuiltinResult<
     if rows == 0 || cols == 0 {
         return Ok(0.0);
     }
-    if matrix.data.len() == 1 {
-        let (re, im) = matrix.data[0];
+    if matrix.materialize_f64().len() == 1 {
+        let (re, im) = matrix.materialize_f64()[0];
         let magnitude = re.hypot(im);
         return Ok(if magnitude == 0.0 { f64::INFINITY } else { 1.0 });
     }
@@ -329,7 +329,7 @@ fn cond_two_norm_real(values: &[f64], rows: usize, cols: usize) -> BuiltinResult
 
 fn cond_two_norm_complex(matrix: &ComplexTensor, rows: usize, cols: usize) -> BuiltinResult<f64> {
     let data: Vec<Complex64> = matrix
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
@@ -360,7 +360,7 @@ fn cond_inverse_based_complex(
     norm: CondNorm,
 ) -> BuiltinResult<f64> {
     let data: Vec<Complex64> = matrix
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();

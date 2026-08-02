@@ -102,7 +102,7 @@ async fn rhs_to_complex_integer_assignment_scalar(
     match rhs {
         Value::Complex(real, imag) => Ok(scalar(*real, *imag)),
         Value::ComplexTensor(tensor) if complex_tensor_element_len(tensor) == 1 => {
-            if let Some(storage) = &tensor.integer_data {
+            if let Some(storage) = &tensor.integer_storage() {
                 return Ok(ComplexIntegerAssignmentValue {
                     real: IntegerAssignmentValue::Exact(
                         storage.real.value_at(0).expect("scalar component"),
@@ -112,7 +112,7 @@ async fn rhs_to_complex_integer_assignment_scalar(
                     ),
                 });
             }
-            let (real, imag) = tensor.data[0];
+            let (real, imag) = tensor.materialize_f64()[0];
             Ok(scalar(real, imag))
         }
         _ => Ok(ComplexIntegerAssignmentValue {
@@ -222,7 +222,7 @@ fn delete_tensor_linear(t: Tensor, idx: usize) -> Result<Value, RuntimeError> {
         .map_err(map_assignment_shape_error)
 }
 
-fn delete_complex_linear(mut t: ComplexTensor, idx: usize) -> Result<Value, RuntimeError> {
+fn delete_complex_linear(t: ComplexTensor, idx: usize) -> Result<Value, RuntimeError> {
     let total = t.rows * t.cols;
     if idx == 0 || idx > total {
         return Err(mex("IndexOutOfBounds", "Index out of bounds"));
@@ -233,26 +233,22 @@ fn delete_complex_linear(mut t: ComplexTensor, idx: usize) -> Result<Value, Runt
             "Linear deletion is only supported for vectors",
         ));
     }
-    if let Some(storage) = t.integer_data.take() {
+    if let Some(storage) = t.integer_storage().cloned() {
         let storage = delete_integer_complex_storage_positions(storage, &[idx - 1]);
         let shape = deleted_vector_shape(t.rows, t.cols, storage.len());
         return ComplexTensor::new_integer(storage, shape)
             .map(Value::ComplexTensor)
             .map_err(map_assignment_shape_error);
     }
-    t.data.remove(idx - 1);
-    if t.data.is_empty() {
-        t.rows = 0;
-        t.cols = 0;
-        t.shape = vec![0, 0];
-    } else if t.rows == 1 {
-        t.cols = t.data.len();
-        t.shape = vec![1, t.cols];
-    } else {
-        t.rows = t.data.len();
-        t.shape = vec![t.rows, 1];
-    }
-    Ok(Value::ComplexTensor(t))
+    let dtype = t.numeric_dtype();
+    let rows = t.rows;
+    let cols = t.cols;
+    let mut values = t.materialize_f64();
+    values.remove(idx - 1);
+    let shape = deleted_vector_shape(rows, cols, values.len());
+    ComplexTensor::from_f64_values_with_dtype(values, shape, dtype)
+        .map(Value::ComplexTensor)
+        .map_err(map_assignment_shape_error)
 }
 
 pub async fn rhs_to_real_scalar(rhs: &Value) -> Result<f64, RuntimeError> {
@@ -582,27 +578,31 @@ pub async fn assign_complex_scalar(
             }
             return delete_complex_linear(t, idx);
         }
-        if t.integer_data.is_some() {
+        if t.integer_storage().is_some() {
             return assign_typed_complex_integer_scalar(t, idx, rhs).await;
         }
         let val = rhs_to_complex_scalar(rhs).await?;
+        let dtype = t.numeric_dtype();
+        let mut values = t.materialize_f64();
         if idx > total {
             if !(t.rows == 1 || t.cols == 1) {
                 return Err(mex("IndexOutOfBounds", "Index out of bounds"));
             }
             let target_len = idx;
             if t.rows == 1 {
-                t.data.resize(target_len, (0.0, 0.0));
+                values.resize(target_len, (0.0, 0.0));
                 t.cols = target_len;
                 t.shape = vec![1, t.cols];
             } else {
-                t.data.resize(target_len, (0.0, 0.0));
+                values.resize(target_len, (0.0, 0.0));
                 t.rows = target_len;
                 t.shape = vec![t.rows, 1];
             }
         }
-        t.data[idx - 1] = val;
-        Ok(Value::ComplexTensor(t))
+        values[idx - 1] = val;
+        ComplexTensor::from_f64_values_with_dtype(values, t.shape, dtype)
+            .map(Value::ComplexTensor)
+            .map_err(map_assignment_shape_error)
     } else if indices.len() == 2 {
         let i = indices[0];
         let mut j = indices[1];
@@ -624,11 +624,12 @@ pub async fn assign_complex_scalar(
             ));
         }
         let idx = (i - 1) + (j - 1) * rows;
-        if t.integer_data.is_some() {
+        if t.integer_storage().is_some() {
             return assign_typed_complex_integer_scalar(t, idx + 1, rhs).await;
         }
         let val = rhs_to_complex_scalar(rhs).await?;
-        t.data[idx] = val;
+        t.set_f64_assignment_at(idx, val.0, val.1)
+            .map_err(map_assignment_shape_error)?;
         Ok(Value::ComplexTensor(t))
     } else {
         Err(mex(
@@ -661,8 +662,8 @@ async fn assign_typed_complex_integer_scalar(
     }
     let rhs = rhs_to_complex_integer_assignment_scalar(rhs).await?;
     let storage = tensor
-        .integer_data
-        .take()
+        .integer_storage()
+        .cloned()
         .expect("typed complex assignment requires exact storage");
     let real = assign_integer_storage(
         storage.real,
@@ -724,7 +725,7 @@ pub async fn assign_gpu_scalar(
 #[cfg(test)]
 mod tests {
     use super::{
-        assign_sparse_scalar, assign_tensor_scalar, map_acceleration_error,
+        assign_complex_scalar, assign_sparse_scalar, assign_tensor_scalar, map_acceleration_error,
         map_assignment_shape_error,
     };
     use futures::executor::block_on;
@@ -797,6 +798,53 @@ mod tests {
     }
 
     #[test]
+    fn native_complex_single_linear_growth_assignment_and_deletion_preserve_class() {
+        let tensor = ComplexTensor::from_f32(vec![(1.0, -1.0), (2.0, -2.0)], vec![1, 2]).unwrap();
+        let Value::ComplexTensor(grown) = block_on(assign_complex_scalar(
+            tensor,
+            &[4],
+            &Value::Complex(1.234_567_890_123, -9.876_543_210_987),
+            false,
+        ))
+        .expect("complex single growth assignment") else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(grown.numeric_dtype(), NumericDType::F32);
+        assert_eq!(grown.shape, vec![1, 4]);
+        assert_eq!(
+            grown.as_f32_slice(),
+            Some(
+                &[
+                    (1.0, -1.0),
+                    (2.0, -2.0),
+                    (0.0, 0.0),
+                    (1.234_567_890_123_f64 as f32, -9.876_543_210_987_f64 as f32,),
+                ][..]
+            )
+        );
+
+        let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).expect("empty"));
+        let Value::ComplexTensor(deleted) =
+            block_on(assign_complex_scalar(grown, &[2], &empty, true))
+                .expect("complex single deletion")
+        else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(deleted.numeric_dtype(), NumericDType::F32);
+        assert_eq!(deleted.shape, vec![1, 3]);
+        assert_eq!(
+            deleted.as_f32_slice(),
+            Some(
+                &[
+                    (1.0, -1.0),
+                    (0.0, 0.0),
+                    (1.234_567_890_123_f64 as f32, -9.876_543_210_987_f64 as f32,),
+                ][..]
+            )
+        );
+    }
+
+    #[test]
     fn integer_scalar_complex_assignment_promotes_without_losing_wide_components() {
         let tensor = Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![1, 2])
             .expect("tensor");
@@ -820,7 +868,7 @@ mod tests {
         };
         assert_eq!(
             output
-                .integer_data
+                .integer_storage()
                 .as_ref()
                 .map(|storage| (&storage.real, &storage.imag)),
             Some((

@@ -251,17 +251,17 @@ fn complex_tensors_equal(a: &ComplexTensor, b: &ComplexTensor, nan_equal: bool) 
     if a.shape != b.shape {
         return false;
     }
-    if a.data.len() != b.data.len() {
+    if a.materialize_f64().len() != b.materialize_f64().len() {
         return false;
     }
-    match (&a.integer_data, &b.integer_data) {
+    match (&a.integer_storage(), &b.integer_storage()) {
         (Some(a), Some(b)) => return a == b,
         (Some(_), None) | (None, Some(_)) => return false,
         (None, None) => {}
     }
-    a.data
+    a.materialize_f64()
         .iter()
-        .zip(b.data.iter())
+        .zip(b.materialize_f64().iter())
         .all(|((ar, ai), (br, bi))| {
             floats_equal(*ar, *br, nan_equal) && floats_equal(*ai, *bi, nan_equal)
         })

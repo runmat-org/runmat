@@ -560,7 +560,7 @@ fn repelem_complex_tensor(
     factors: &[RepFactor],
     single_arg: bool,
 ) -> crate::BuiltinResult<ComplexTensor> {
-    if let Some(storage) = tensor.integer_data.as_ref() {
+    if let Some(storage) = tensor.integer_storage() {
         let (_, shape) = repelem_column_major(
             &storage.real.exact_values(),
             &tensor.shape,
@@ -577,7 +577,12 @@ fn repelem_complex_tensor(
         return ComplexTensor::new_integer(storage, shape)
             .map_err(|e| repelem_internal(format!("repelem: {e}")));
     }
-    let (data, shape) = repelem_column_major(&tensor.data, &tensor.shape, factors, single_arg)?;
+    let (data, shape) = repelem_column_major(
+        &tensor.materialize_f64(),
+        &tensor.shape,
+        factors,
+        single_arg,
+    )?;
     ComplexTensor::new(data, shape).map_err(|e| repelem_internal(format!("repelem: {e}")))
 }
 
@@ -1471,9 +1476,7 @@ pub(crate) mod tests {
             IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
         )
         .expect("typed complex storage");
-        let mut tensor =
-            ComplexTensor::new_integer(storage, vec![1, 2]).expect("typed complex tensor");
-        tensor.data.clear();
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).expect("typed complex tensor");
 
         let Value::ComplexTensor(output) = repelem_builtin(
             Value::ComplexTensor(tensor),
@@ -1485,7 +1488,7 @@ pub(crate) mod tests {
 
         assert_eq!(output.shape, vec![1, 4]);
         assert_eq!(
-            output.integer_data,
+            output.integer_storage().cloned(),
             Some(
                 IntegerComplexStorage::new(
                     IntegerStorage::U64(vec![
@@ -1610,7 +1613,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![1, 4]);
                 assert_eq!(
-                    out.data,
+                    out.materialize_f64(),
                     vec![(1.0, -1.0), (1.0, -1.0), (0.0, 2.0), (0.0, 2.0)]
                 );
             }

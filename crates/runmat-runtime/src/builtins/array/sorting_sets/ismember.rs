@@ -569,14 +569,14 @@ fn ismember_complex_elements(
     b: ComplexTensor,
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
     let mut map: HashMap<ComplexKey, usize> = HashMap::new();
-    for (idx, &value) in b.data.iter().enumerate() {
+    for (idx, &value) in b.materialize_f64().iter().enumerate() {
         map.entry(ComplexKey::new(value)).or_insert(idx + 1);
     }
 
-    let mut mask_data = Vec::<u8>::with_capacity(a.data.len());
-    let mut loc_data = Vec::<f64>::with_capacity(a.data.len());
+    let mut mask_data = Vec::<u8>::with_capacity(a.materialize_f64().len());
+    let mut loc_data = Vec::<f64>::with_capacity(a.materialize_f64().len());
 
-    for &value in &a.data {
+    for &value in &a.materialize_f64() {
         let key = ComplexKey::new(value);
         if let Some(&pos) = map.get(&key) {
             mask_data.push(1);
@@ -609,7 +609,7 @@ fn ismember_complex_rows(
         let mut row_keys = Vec::with_capacity(cols_b);
         for c in 0..cols_b {
             let idx = r + c * rows_b;
-            row_keys.push(ComplexKey::new(b.data[idx]));
+            row_keys.push(ComplexKey::new(b.materialize_f64()[idx]));
         }
         map.entry(row_keys).or_insert(r + 1);
     }
@@ -621,7 +621,7 @@ fn ismember_complex_rows(
         let mut row_keys = Vec::with_capacity(cols_a);
         for c in 0..cols_a {
             let idx = r + c * rows_a;
-            row_keys.push(ComplexKey::new(a.data[idx]));
+            row_keys.push(ComplexKey::new(a.materialize_f64()[idx]));
         }
         if let Some(&pos) = map.get(&row_keys) {
             mask_data[r] = 1;

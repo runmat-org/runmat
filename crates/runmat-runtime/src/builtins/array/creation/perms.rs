@@ -214,7 +214,7 @@ fn permute_numeric_storage(
 fn perms_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
     let elements = vector_len(&tensor.shape)?;
     let rows = checked_output_rows(elements)?;
-    if let Some(storage) = tensor.integer_data {
+    if let Some(storage) = tensor.integer_storage() {
         let storage = storage
             .reorder(|values| {
                 permuted_columns(values, rows, elements).map_err(|error| error.to_string())
@@ -224,7 +224,7 @@ fn perms_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
             .map(Value::ComplexTensor)
             .map_err(|error| perms_error_with(&ERROR_INTERNAL, format!("perms: {error}")));
     }
-    let data = permuted_columns(&tensor.data, rows, elements)?;
+    let data = permuted_columns(&tensor.materialize_f64(), rows, elements)?;
     ComplexTensor::new(data, vec![rows, elements])
         .map(Value::ComplexTensor)
         .map_err(|e| perms_error_with(&ERROR_INTERNAL, format!("perms: {e}")))
@@ -417,7 +417,7 @@ mod tests {
         (0..tensor.rows)
             .map(|row| {
                 (0..tensor.cols)
-                    .map(|col| tensor.data[col * tensor.rows + row])
+                    .map(|col| tensor.materialize_f64()[col * tensor.rows + row])
                     .collect()
             })
             .collect()

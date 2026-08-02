@@ -439,8 +439,7 @@ mod tests {
         let storage =
             IntegerComplexStorage::new(IntegerStorage::I16(vec![3]), IntegerStorage::I16(vec![4]))
                 .expect("complex storage");
-        let mut scalar = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex scalar");
-        scalar.data.clear();
+        let scalar = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex scalar");
 
         assert!(is_scalar_like(&Value::ComplexTensor(scalar)));
     }
@@ -453,6 +452,6 @@ mod tests {
         let complex = value_into_complex_tensor("trapz", Value::Tensor(real)).expect("complex");
 
         assert_eq!(complex.shape, vec![1, 2]);
-        assert_eq!(complex.data, vec![(-2.0, 0.0), (5.0, 0.0)]);
+        assert_eq!(complex.materialize_f64(), vec![(-2.0, 0.0), (5.0, 0.0)]);
     }
 }

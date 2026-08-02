@@ -376,7 +376,7 @@ impl SampleInput {
                         Self::from_tensor(tensor, builtin)
                     }
                     Value::ComplexTensor(tensor) => Ok(Self::Complex {
-                        data: tensor.data,
+                        data: tensor.materialize_f64(),
                         shape: tensor.shape,
                     }),
                     other => Err(sample_error_with_detail(
@@ -394,7 +394,7 @@ impl SampleInput {
                 Self::from_tensor(tensor, builtin)
             }
             Value::ComplexTensor(tensor) => Ok(Self::Complex {
-                data: tensor.data,
+                data: tensor.materialize_f64(),
                 shape: tensor.shape,
             }),
             Value::Num(value) => Ok(Self::Real {
@@ -1046,8 +1046,8 @@ fn apply_resample(
             let tensor = ComplexTensor::new(output, shape).map_err(|err| {
                 sample_error_with_detail(RESAMPLE_NAME, &SAMPLE_ERROR_BUILD_OUTPUT, err)
             })?;
-            let y = if tensor.data.len() == 1 {
-                let (re, im) = tensor.data[0];
+            let y = if tensor.materialize_f64().len() == 1 {
+                let (re, im) = tensor.materialize_f64()[0];
                 Value::Complex(re, im)
             } else {
                 Value::ComplexTensor(tensor)
@@ -1180,8 +1180,8 @@ fn apply_sample_rate(
             let tensor = ComplexTensor::new(output, shape).map_err(|err| {
                 sample_error_with_detail(builtin, &SAMPLE_ERROR_BUILD_OUTPUT, err)
             })?;
-            if tensor.data.len() == 1 {
-                let (re, im) = tensor.data[0];
+            if tensor.materialize_f64().len() == 1 {
+                let (re, im) = tensor.materialize_f64()[0];
                 Ok(Value::Complex(re, im))
             } else {
                 Ok(Value::ComplexTensor(tensor))
@@ -2109,7 +2109,7 @@ mod tests {
         };
         assert_eq!(tensor.shape, vec![1, 4]);
         assert_eq!(
-            tensor.data,
+            tensor.materialize_f64(),
             vec![(1.0, 2.0), (0.0, 0.0), (3.0, 4.0), (0.0, 0.0)]
         );
     }
@@ -2482,7 +2482,7 @@ mod tests {
         };
         assert_eq!(tensor.shape, vec![1, 4]);
         assert_eq!(
-            tensor.data,
+            tensor.materialize_f64(),
             vec![(1.0, 2.0), (0.0, 0.0), (3.0, 4.0), (0.0, 0.0)]
         );
     }

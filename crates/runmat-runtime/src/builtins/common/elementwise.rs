@@ -75,10 +75,10 @@ impl ComplexTensorValues<'_> {
 }
 
 fn complex_tensor_values(tensor: &runmat_builtins::ComplexTensor) -> ComplexTensorValues<'_> {
-    if tensor.integer_data.is_some() {
-        ComplexTensorValues::Exact(tensor_utils::complex_tensor_values_complex64(tensor))
+    if let Some(values) = tensor.as_f64_slice() {
+        ComplexTensorValues::Raw(values)
     } else {
-        ComplexTensorValues::Raw(&tensor.data)
+        ComplexTensorValues::Exact(tensor_utils::complex_tensor_values_complex64(tensor))
     }
 }
 
@@ -881,9 +881,8 @@ mod tests {
             IntegerStorage::I16(vec![4]),
         )
         .expect("complex integer storage");
-        let mut tensor = runmat_builtins::ComplexTensor::new_integer(storage, vec![1, 1])
+        let tensor = runmat_builtins::ComplexTensor::new_integer(storage, vec![1, 1])
             .expect("complex tensor");
-        tensor.data.clear();
 
         let result = scalar_power_value(&Value::ComplexTensor(tensor), &Value::Num(1.0))
             .expect("scalar power");
@@ -906,9 +905,8 @@ mod tests {
             IntegerStorage::I16(imag),
         )
         .expect("complex integer storage");
-        let mut tensor =
+        let tensor =
             runmat_builtins::ComplexTensor::new_integer(storage, shape).expect("complex tensor");
-        tensor.data.clear();
         tensor
     }
 
@@ -925,7 +923,7 @@ mod tests {
             panic!("expected complex tensor");
         };
         assert_eq!(result.shape, vec![1, 2]);
-        assert_eq!(result.data, vec![(11.0, -2.0), (-17.0, 28.0)]);
+        assert_eq!(result.materialize_f64(), vec![(11.0, -2.0), (-17.0, 28.0)]);
     }
 
     #[test]
@@ -940,7 +938,7 @@ mod tests {
             panic!("expected complex tensor");
         };
         assert_eq!(result.shape, vec![1, 2]);
-        assert_eq!(result.data, vec![(1.5, 2.0), (-1.0, 2.5)]);
+        assert_eq!(result.materialize_f64(), vec![(1.5, 2.0), (-1.0, 2.5)]);
     }
 
     #[test]
@@ -953,10 +951,10 @@ mod tests {
             panic!("expected complex tensor");
         };
         assert_eq!(result.shape, vec![1, 2]);
-        assert!((result.data[0].0 + 7.0).abs() < 1e-12);
-        assert!((result.data[0].1 - 24.0).abs() < 1e-12);
-        assert!((result.data[1].0 + 3.0).abs() < 1e-12);
-        assert!((result.data[1].1 + 4.0).abs() < 1e-12);
+        assert!((result.materialize_f64()[0].0 + 7.0).abs() < 1e-12);
+        assert!((result.materialize_f64()[0].1 - 24.0).abs() < 1e-12);
+        assert!((result.materialize_f64()[1].0 + 3.0).abs() < 1e-12);
+        assert!((result.materialize_f64()[1].1 + 4.0).abs() < 1e-12);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

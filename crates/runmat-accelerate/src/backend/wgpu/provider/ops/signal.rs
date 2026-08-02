@@ -3004,7 +3004,7 @@ mod tests {
             2.0,
         )
         .expect("host gradient");
-        assert_complex_slices_close(&out, &expected.data, 1.0e-5);
+        assert_complex_slices_close(&out, &expected.materialize_f64(), 1.0e-5);
     }
 
     #[test]

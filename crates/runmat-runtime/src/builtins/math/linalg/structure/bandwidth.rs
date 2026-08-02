@@ -340,7 +340,7 @@ pub fn bandwidth_host_real_tensor(tensor: &Tensor) -> BuiltinResult<(usize, usiz
 }
 
 pub fn bandwidth_host_complex_tensor(tensor: &ComplexTensor) -> BuiltinResult<(usize, usize)> {
-    bandwidth_host_complex_data(&tensor.shape, &tensor.data)
+    bandwidth_host_complex_data(&tensor.shape, &tensor.materialize_f64())
 }
 
 fn compute_real_bandwidth(rows: usize, cols: usize, data: &[f64]) -> (usize, usize) {

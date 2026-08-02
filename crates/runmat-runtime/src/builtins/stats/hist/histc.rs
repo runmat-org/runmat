@@ -410,7 +410,7 @@ fn host_to_real_tensor(value: Value) -> BuiltinResult<Tensor> {
 }
 
 fn complex_real_tensor(tensor: ComplexTensor) -> BuiltinResult<Tensor> {
-    if let Some(storage) = tensor.integer_data {
+    if let Some(storage) = tensor.integer_storage() {
         let data = storage
             .real
             .exact_values()
@@ -420,7 +420,11 @@ fn complex_real_tensor(tensor: ComplexTensor) -> BuiltinResult<Tensor> {
         return Tensor::new(data, tensor.shape)
             .map_err(|err| internal_error(format!("histc: {err}")));
     }
-    let data = tensor.data.into_iter().map(|(re, _)| re).collect();
+    let data = tensor
+        .materialize_f64()
+        .into_iter()
+        .map(|(re, _)| re)
+        .collect();
     Tensor::new(data, tensor.shape).map_err(|err| internal_error(format!("histc: {err}")))
 }
 

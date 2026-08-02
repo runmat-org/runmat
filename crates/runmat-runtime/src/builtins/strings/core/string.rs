@@ -557,7 +557,7 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
         }),
         Value::ComplexTensor(t) => Ok(ArgumentData {
             values: t
-                .data
+                .materialize_f64()
                 .into_iter()
                 .map(|(re, im)| Value::String(complex_to_string(re, im)))
                 .collect(),
@@ -1054,8 +1054,7 @@ pub(crate) mod tests {
         )
         .expect("matching integer complex storage");
         let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).expect("complex integer");
-        let mut tensor = tensor;
-        tensor.data.clear();
+        let tensor = tensor;
         let out = string_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("string");
         match out {
             Value::StringArray(sa) => {
@@ -1160,8 +1159,7 @@ pub(crate) mod tests {
         )
         .expect("matching integer complex storage");
         let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex integer");
-        let mut tensor = tensor;
-        tensor.data.clear();
+        let tensor = tensor;
         let cell = CellArray::new(vec![Value::ComplexTensor(tensor)], 1, 1)
             .expect("cell with scalar complex integer tensor");
         let out = string_builtin(Value::Cell(cell), Vec::new()).expect("string");

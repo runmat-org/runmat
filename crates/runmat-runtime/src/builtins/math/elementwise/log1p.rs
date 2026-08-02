@@ -254,8 +254,8 @@ fn log1p_tensor(tensor: Tensor) -> BuiltinResult<Value> {
 }
 
 fn log1p_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let mut data = Vec::with_capacity(ct.data.len());
-    for &(re, im) in &ct.data {
+    let mut data = Vec::with_capacity(ct.materialize_f64().len());
+    for &(re, im) in &ct.materialize_f64() {
         let (mut real_part, mut imag_part) = log1p_complex_parts(re, im);
         if real_part.abs() < IMAG_EPS {
             real_part = 0.0;
@@ -346,9 +346,9 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
-                assert_eq!(out.data[0].0, 0.0);
-                assert!((out.data[0].1 - std::f64::consts::PI).abs() < 1e-12);
-                assert_eq!(out.data[1], (0.0, 0.0));
+                assert_eq!(out.materialize_f64()[0].0, 0.0);
+                assert!((out.materialize_f64()[0].1 - std::f64::consts::PI).abs() < 1e-12);
+                assert_eq!(out.materialize_f64()[1], (0.0, 0.0));
             }
             other => panic!("expected complex tensor result, got {other:?}"),
         }
@@ -434,7 +434,7 @@ pub(crate) mod tests {
                     (0.0, PI),
                     ((4.0f64).ln(), 0.0),
                 ];
-                for ((re, im), (er, ei)) in ct.data.iter().zip(expected.iter()) {
+                for ((re, im), (er, ei)) in ct.materialize_f64().iter().zip(expected.iter()) {
                     assert!((re - er).abs() < 1e-12);
                     assert!((im - ei).abs() < 1e-12);
                 }
@@ -548,7 +548,7 @@ pub(crate) mod tests {
                 Value::ComplexTensor(ct) => {
                     assert_eq!(ct.shape, vec![2, 1]);
                     let expected = [(0.0, PI), ((2.0f64).ln(), PI)];
-                    for ((re, im), (er, ei)) in ct.data.iter().zip(expected.iter()) {
+                    for ((re, im), (er, ei)) in ct.materialize_f64().iter().zip(expected.iter()) {
                         assert!((re - er).abs() < 1e-12);
                         assert!((im - ei).abs() < 1e-12);
                     }

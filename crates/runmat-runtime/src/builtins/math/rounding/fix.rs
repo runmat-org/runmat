@@ -191,7 +191,7 @@ fn fix_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 
 fn fix_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let data = ct
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| (fix_scalar(re), fix_scalar(im)))
         .collect::<Vec<_>>();
@@ -445,7 +445,7 @@ pub(crate) mod tests {
             panic!("expected complex tensor result");
         };
         assert_eq!(out.shape, vec![2, 1]);
-        assert_eq!(out.data, vec![(1.0, -2.0), (-3.0, 0.0)]);
+        assert_eq!(out.materialize_f64(), vec![(1.0, -2.0), (-3.0, 0.0)]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

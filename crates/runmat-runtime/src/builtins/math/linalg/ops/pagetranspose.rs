@@ -354,7 +354,7 @@ mod tests {
         else {
             panic!("expected complex tensor");
         };
-        let storage = result.integer_data.expect("exact integer storage");
+        let storage = result.integer_storage().expect("exact integer storage");
         assert_eq!(result.shape, vec![3, 2, 2]);
         assert_eq!(
             storage.real,
@@ -476,7 +476,7 @@ mod tests {
         match value {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
-                assert_eq!(out.data, vec![(1.0, 2.0), (3.0, -4.0)]);
+                assert_eq!(out.materialize_f64(), vec![(1.0, 2.0), (3.0, -4.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }

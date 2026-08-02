@@ -305,9 +305,10 @@ fn rref_real_eval(matrix: Tensor, tol: Option<f64>) -> BuiltinResult<RrefEval> {
 
 fn rref_complex_eval(matrix: ComplexTensor, tol: Option<f64>) -> BuiltinResult<RrefEval> {
     let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape.as_slice()).map_err(input_error)?;
-    let tolerance = tol.unwrap_or_else(|| default_complex_tolerance(&matrix.data, rows, cols));
+    let tolerance =
+        tol.unwrap_or_else(|| default_complex_tolerance(&matrix.materialize_f64(), rows, cols));
     let data: Vec<Complex64> = matrix
-        .data
+        .materialize_f64()
         .into_iter()
         .map(|(re, im)| Complex64::new(re, im))
         .collect();
@@ -884,7 +885,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
                 assert_complex_close(
-                    &out.data,
+                    &out.materialize_f64(),
                     &[(1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (1.0, 0.0)],
                     1e-12,
                 );
@@ -906,7 +907,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
                 assert_complex_close(
-                    &out.data,
+                    &out.materialize_f64(),
                     &[(1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (1.0, 0.0)],
                     1e-12,
                 );

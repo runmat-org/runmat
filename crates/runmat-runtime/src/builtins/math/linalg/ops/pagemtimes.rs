@@ -393,7 +393,7 @@ impl PageInput {
     fn from_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Self> {
         let shape = canonical_matrix_shape(&tensor.shape);
         let expected = checked_product(&shape)?;
-        if tensor.data.len() != expected {
+        if tensor.materialize_f64().len() != expected {
             return Err(pagemtimes_internal(
                 "pagemtimes: complex tensor data length does not match shape",
             ));
@@ -403,7 +403,7 @@ impl PageInput {
             cols: shape[1],
             page_dims: shape.get(2..).unwrap_or(&[]).to_vec(),
             dtype: NumericDType::F64,
-            data: PageData::Complex(tensor.data),
+            data: PageData::Complex(tensor.materialize_f64()),
         })
     }
 
@@ -1202,7 +1202,7 @@ mod tests {
                 }
                 Value::ComplexTensor(tensor) => {
                     assert_eq!(tensor.shape, vec![1, 1]);
-                    let (re, im) = tensor.data[0];
+                    let (re, im) = tensor.materialize_f64()[0];
                     assert!((re - 5.0).abs() < 1e-12);
                     assert!((im - 5.0).abs() < 1e-12);
                 }

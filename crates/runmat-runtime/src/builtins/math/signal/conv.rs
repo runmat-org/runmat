@@ -536,8 +536,8 @@ fn convert_output(data: Vec<Complex<f64>>, orientation: Orientation) -> BuiltinR
     let complex_data: Vec<(f64, f64)> = data.into_iter().map(|c| (c.re, c.im)).collect();
     let tensor = ComplexTensor::new(complex_data, shape)
         .map_err(|e| conv_error_with_detail(&CONV_ERROR_BUILD_COMPLEX_OUTPUT, &e))?;
-    if tensor.data.len() == 1 {
-        let (re, im) = tensor.data[0];
+    if tensor.materialize_f64().len() == 1 {
+        let (re, im) = tensor.materialize_f64()[0];
         if im.abs() <= EPS {
             return Ok(Value::Num(re));
         }

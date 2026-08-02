@@ -593,17 +593,17 @@ fn axis_from_complex_tensor(tensor: ComplexTensor, index: usize) -> BuiltinResul
         ));
     }
     let len = tensor::complex_tensor_element_len(&tensor);
-    let values = if tensor.integer_data.is_some() {
+    let values = if tensor.integer_storage().is_some() {
         Vec::new()
     } else {
-        tensor.data
+        tensor.materialize_f64()
     };
     Ok(AxisData {
         len,
         values,
         class: OutputClass::Complex,
         numeric_storage: None,
-        integer_data: tensor.integer_data,
+        integer_data: tensor.integer_storage().cloned(),
         gpu_real: None,
     })
 }
@@ -1140,7 +1140,7 @@ mod tests {
             panic!("expected complex tensor");
         };
         assert_eq!(out.shape, vec![2, 1]);
-        assert_eq!(out.data, vec![(1.0, 2.0), (3.0, -4.0)]);
+        assert_eq!(out.materialize_f64(), vec![(1.0, 2.0), (3.0, -4.0)]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1279,8 +1279,7 @@ mod tests {
             IntegerStorage::I16(vec![7, -11]),
         )
         .unwrap();
-        let mut axis = ComplexTensor::new_integer(storage, vec![1, 2]).expect("axis");
-        axis.data.clear();
+        let axis = ComplexTensor::new_integer(storage, vec![1, 2]).expect("axis");
 
         let eval = eval(&[Value::ComplexTensor(axis)], Some(2)).expect("ndgrid");
         let Value::ComplexTensor(first) = output(&eval, 0).expect("first grid") else {
@@ -1288,7 +1287,7 @@ mod tests {
         };
         assert_eq!(first.shape, vec![2, 2]);
         assert_eq!(
-            first.integer_data,
+            first.integer_storage().cloned(),
             Some(
                 IntegerComplexStorage::new(
                     IntegerStorage::I16(vec![-3, 5, -3, 5]),
@@ -1360,7 +1359,7 @@ mod tests {
             panic!("expected complex tensor");
         };
         assert_eq!(out.shape, vec![2, 1]);
-        assert_eq!(out.data, vec![(1.0, 0.0), (2.0, 0.0)]);
+        assert_eq!(out.materialize_f64(), vec![(1.0, 0.0), (2.0, 0.0)]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

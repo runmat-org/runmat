@@ -755,7 +755,10 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(tensor) => {
                 assert_eq!(tensor.shape, vec![3, 3]);
-                assert!(tensor.data.iter().all(|(re, im)| re.is_nan() && *im == 0.0));
+                assert!(tensor
+                    .materialize_f64()
+                    .iter()
+                    .all(|(re, im)| re.is_nan() && *im == 0.0));
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }

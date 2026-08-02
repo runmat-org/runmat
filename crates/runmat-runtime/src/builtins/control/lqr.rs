@@ -1066,7 +1066,7 @@ mod tests {
             Value::ComplexTensor(poles) => {
                 assert_eq!(poles.shape, vec![2, 1]);
                 assert!(poles
-                    .data
+                    .materialize_f64()
                     .iter()
                     .all(|(re, im)| (re * re + im * im).sqrt() < 1.0));
             }

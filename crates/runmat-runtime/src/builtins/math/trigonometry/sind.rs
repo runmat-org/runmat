@@ -170,7 +170,7 @@ fn sind_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 
 fn sind_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
     let data = tensor
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| sind_complex(re, im))
         .collect::<Vec<_>>();

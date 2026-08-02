@@ -204,7 +204,7 @@ fn coefficients(value: &Value, label: &str) -> BuiltinResult<Vec<Complex64>> {
             finite_complex_values(
                 label,
                 tensor
-                    .data
+                    .materialize_f64()
                     .iter()
                     .map(|&(re, im)| Complex64::new(re, im))
                     .collect(),

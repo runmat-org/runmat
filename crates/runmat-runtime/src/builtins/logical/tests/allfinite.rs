@@ -192,11 +192,11 @@ fn sparse_all_finite(sparse: &SparseTensor) -> bool {
 }
 
 fn complex_tensor_all_finite(tensor: &ComplexTensor) -> bool {
-    if tensor.integer_data.is_some() {
+    if tensor.integer_storage().is_some() {
         return true;
     }
     tensor
-        .data
+        .materialize_f64()
         .iter()
         .all(|(re, im)| re.is_finite() && im.is_finite())
 }
@@ -335,25 +335,14 @@ mod tests {
 
     #[test]
     fn complex_tensor_checks_real_and_imaginary_parts() {
-        let finite = ComplexTensor {
-            data: vec![(1.0, 0.0), (2.0, -3.0)],
-            integer_data: None,
-            shape: vec![1, 2],
-            rows: 1,
-            cols: 2,
-        };
+        let finite = ComplexTensor::new(vec![(1.0, 0.0), (2.0, -3.0)], vec![1, 2]).unwrap();
         assert_eq!(
             call(Value::ComplexTensor(finite)).unwrap(),
             Value::Bool(true)
         );
 
-        let nonfinite = ComplexTensor {
-            data: vec![(1.0, 0.0), (2.0, f64::INFINITY)],
-            integer_data: None,
-            shape: vec![1, 2],
-            rows: 1,
-            cols: 2,
-        };
+        let nonfinite =
+            ComplexTensor::new(vec![(1.0, 0.0), (2.0, f64::INFINITY)], vec![1, 2]).unwrap();
         assert_eq!(
             call(Value::ComplexTensor(nonfinite)).unwrap(),
             Value::Bool(false)
@@ -367,13 +356,7 @@ mod tests {
             IntegerStorage::U64(vec![0, 7]),
         )
         .unwrap();
-        let tensor = ComplexTensor {
-            data: vec![(f64::NAN, f64::INFINITY), (f64::NEG_INFINITY, f64::NAN)],
-            integer_data: Some(storage),
-            shape: vec![1, 2],
-            rows: 1,
-            cols: 2,
-        };
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).unwrap();
         assert_eq!(
             call(Value::ComplexTensor(tensor)).unwrap(),
             Value::Bool(true)

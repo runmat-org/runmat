@@ -350,7 +350,7 @@ fn mldivide_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResult<C
     ensure_matrix_shape(NAME, &rhs.shape)?;
 
     if complex_tensor_is_scalar(lhs) {
-        let divisor = Complex64::new(lhs.data[0].0, lhs.data[0].1);
+        let divisor = Complex64::new(lhs.materialize_f64()[0].0, lhs.materialize_f64()[0].1);
         let inv = Complex64::new(1.0, 0.0) / divisor;
         let scaled = linalg::scalar_mul_complex_tensor(rhs, inv.re, inv.im);
         return Ok(scaled);
@@ -367,12 +367,12 @@ fn mldivide_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResult<C
     }
 
     let lhs_data: Vec<Complex64> = lhs
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
     let rhs_data: Vec<Complex64> = rhs
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
@@ -460,7 +460,7 @@ fn contains_complex(value: &Value) -> bool {
 }
 
 fn complex_tensor_is_scalar(tensor: &ComplexTensor) -> bool {
-    tensor.data.len() == 1
+    tensor.materialize_f64().len() == 1
 }
 
 fn is_scalar_handle(handle: &GpuTensorHandle) -> bool {
@@ -670,10 +670,10 @@ pub(crate) mod tests {
             panic!("expected complex tensor result");
         };
         assert_eq!(out.shape, vec![2, 1]);
-        assert!((out.data[0].0 - 3.0).abs() < 1e-12);
-        assert!((out.data[0].1 - 2.0).abs() < 1e-12);
-        assert!((out.data[1].0 - 1.0).abs() < 1e-12);
-        assert!((out.data[1].1 + 4.0).abs() < 1e-12);
+        assert!((out.materialize_f64()[0].0 - 3.0).abs() < 1e-12);
+        assert!((out.materialize_f64()[0].1 - 2.0).abs() < 1e-12);
+        assert!((out.materialize_f64()[1].0 - 1.0).abs() < 1e-12);
+        assert!((out.materialize_f64()[1].1 + 4.0).abs() < 1e-12);
     }
 
     #[test]
@@ -752,17 +752,17 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 let mat_a: Vec<Complex64> = a
-                    .data
+                    .materialize_f64()
                     .iter()
                     .map(|&(re, im)| Complex64::new(re, im))
                     .collect();
                 let mat_b: Vec<Complex64> = b
-                    .data
+                    .materialize_f64()
                     .iter()
                     .map(|&(re, im)| Complex64::new(re, im))
                     .collect();
                 let mat_x: Vec<Complex64> = out
-                    .data
+                    .materialize_f64()
                     .iter()
                     .map(|&(re, im)| Complex64::new(re, im))
                     .collect();

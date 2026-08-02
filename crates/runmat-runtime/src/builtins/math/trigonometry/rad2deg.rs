@@ -154,7 +154,7 @@ fn rad2deg_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 
 fn rad2deg_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
     let data = tensor
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| (re * RAD_TO_DEG, im * RAD_TO_DEG))
         .collect::<Vec<_>>();

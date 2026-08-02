@@ -307,25 +307,15 @@ fn single_tensor_to_host(tensor: Tensor) -> BuiltinResult<Tensor> {
         .map_err(|error| single_error_with_detail(&SINGLE_ERROR_INTERNAL, error))
 }
 
-fn single_complex_tensor_to_host(mut tensor: ComplexTensor) -> BuiltinResult<ComplexTensor> {
-    if let Some(storage) = tensor.integer_data.take() {
-        let real = storage.real.exact_values();
-        let imag = storage.imag.exact_values();
-        tensor.data = real
-            .into_iter()
-            .zip(imag)
-            .map(|(re, im)| (re.to_f64(), im.to_f64()))
-            .collect();
-    }
-    cast_complex_slice_to_single(&mut tensor.data);
-    Ok(tensor)
-}
-
-fn cast_complex_slice_to_single(data: &mut [(f64, f64)]) {
-    for (re, im) in data.iter_mut() {
-        *re = (*re as f32) as f64;
-        *im = (*im as f32) as f64;
-    }
+fn single_complex_tensor_to_host(tensor: ComplexTensor) -> BuiltinResult<ComplexTensor> {
+    let shape = tensor.shape.clone();
+    let data = tensor
+        .materialize_f64()
+        .into_iter()
+        .map(|(real, imag)| (real as f32, imag as f32))
+        .collect();
+    ComplexTensor::from_f32(data, shape)
+        .map_err(|error| single_error_with_detail(&SINGLE_ERROR_INTERNAL, error))
 }
 
 fn cast_f64_to_single(value: f64) -> f64 {
@@ -594,7 +584,7 @@ pub(crate) mod tests {
                     ((1.234567f32) as f64, (-9.876543f32) as f64),
                     ((0.3333333f32) as f64, (0.6666667f32) as f64),
                 ];
-                assert_eq!(t.data, expected);
+                assert_eq!(t.materialize_f64(), expected);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -608,15 +598,14 @@ pub(crate) mod tests {
             IntegerStorage::I16(vec![3, -4]),
         )
         .expect("complex integer storage");
-        let mut tensor = ComplexTensor::new_integer(storage, vec![1, 2]).unwrap();
-        tensor.data.fill((f64::NAN, f64::NAN));
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).unwrap();
 
         let result = single_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("single");
         match result {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.integer_data, None);
-                assert_eq!(t.data, vec![(1.0, 3.0), (-2.0, -4.0)]);
+                assert_eq!(t.integer_storage(), None);
+                assert_eq!(t.materialize_f64(), vec![(1.0, 3.0), (-2.0, -4.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }

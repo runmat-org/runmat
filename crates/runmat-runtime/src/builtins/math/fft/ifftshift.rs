@@ -17,7 +17,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, LogicalArray, Tensor, Value,
+    ComplexStorage, ComplexTensor, LogicalArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -231,8 +231,8 @@ async fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResu
             })?;
             let dims = compute_ifftshift_dims(&tensor.shape, dims_arg)?;
             Ok(ifftshift_complex_tensor(tensor, &dims).map(|result| {
-                if result.data.len() == 1 {
-                    let (r, i) = result.data[0];
+                if result.materialize_f64().len() == 1 {
+                    let (r, i) = result.materialize_f64()[0];
                     Value::Complex(r, i)
                 } else {
                     Value::ComplexTensor(result)
@@ -293,42 +293,45 @@ fn ifftshift_tensor(tensor: Tensor, dims: &[usize]) -> BuiltinResult<Tensor> {
 }
 
 fn ifftshift_complex_tensor(tensor: ComplexTensor, dims: &[usize]) -> BuiltinResult<ComplexTensor> {
-    let ComplexTensor {
-        data,
-        integer_data,
-        shape,
-        ..
-    } = tensor;
+    let shape = tensor.shape.clone();
+    let storage = tensor.into_complex_storage();
     let plan = build_shift_plan(&shape, dims, ShiftKind::Ifft);
-    if let Some(storage) = integer_data {
-        let rotated = storage
-            .reorder(|values| {
-                apply_shift(BUILTIN_NAME, values, &plan.ext_shape, &plan.positive)
-                    .map_err(|error| error.to_string())
-            })
-            .map_err(|source| {
-                ifftshift_error_with_detail(
-                    &IFFTSHIFT_ERROR_INTERNAL,
-                    format!("complex integer shift failed: {source}"),
-                )
-            })?;
-        return ComplexTensor::new_integer(rotated, shape).map_err(|source| {
-            ifftshift_error_with_detail(
-                &IFFTSHIFT_ERROR_INTERNAL,
-                format!("complex integer tensor reconstruction failed: {source}"),
-            )
-        });
-    }
-    if data.is_empty() || plan.is_noop() {
-        return ComplexTensor::new(data, shape).map_err(|source| {
+    if storage.is_empty() || plan.is_noop() {
+        return ComplexTensor::from_complex_storage(storage, shape).map_err(|source| {
             ifftshift_error_with_detail(
                 &IFFTSHIFT_ERROR_INTERNAL,
                 format!("complex tensor reconstruction failed: {source}"),
             )
         });
     }
-    let rotated = apply_shift(BUILTIN_NAME, &data, &plan.ext_shape, &plan.positive)?;
-    ComplexTensor::new(rotated, shape).map_err(|source| {
+    let rotated = match storage {
+        ComplexStorage::F64(values) => ComplexStorage::F64(apply_shift(
+            BUILTIN_NAME,
+            &values,
+            &plan.ext_shape,
+            &plan.positive,
+        )?),
+        ComplexStorage::F32(values) => ComplexStorage::F32(apply_shift(
+            BUILTIN_NAME,
+            &values,
+            &plan.ext_shape,
+            &plan.positive,
+        )?),
+        ComplexStorage::Integer(storage) => ComplexStorage::Integer(
+            storage
+                .reorder(|values| {
+                    apply_shift(BUILTIN_NAME, values, &plan.ext_shape, &plan.positive)
+                        .map_err(|error| error.to_string())
+                })
+                .map_err(|source| {
+                    ifftshift_error_with_detail(
+                        &IFFTSHIFT_ERROR_INTERNAL,
+                        format!("complex integer shift failed: {source}"),
+                    )
+                })?,
+        ),
+    };
+    ComplexTensor::from_complex_storage(rotated, shape).map_err(|source| {
         ifftshift_error_with_detail(
             &IFFTSHIFT_ERROR_INTERNAL,
             format!("complex tensor reconstruction failed: {source}"),
@@ -644,7 +647,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![4, 1]);
                 assert_eq!(
-                    out.data,
+                    out.materialize_f64(),
                     vec![(2.0, 2.0), (3.0, 3.0), (0.0, 0.0), (1.0, 1.0)]
                 );
             }
@@ -669,7 +672,7 @@ pub(crate) mod tests {
         else {
             panic!("expected complex tensor");
         };
-        let storage = result.integer_data.expect("exact integer storage");
+        let storage = result.integer_storage().expect("exact integer storage");
         assert_eq!(
             storage.real,
             IntegerStorage::I64(vec![3, 4, i64::MAX, i64::MIN, 2])

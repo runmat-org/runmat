@@ -1018,7 +1018,7 @@ fn angular_frequency(frequency: f64, units: FrequencyUnits) -> f64 {
 fn is_empty(value: &Value) -> bool {
     match value {
         Value::Tensor(t) => t.len() == 0,
-        Value::ComplexTensor(t) => t.data.is_empty(),
+        Value::ComplexTensor(t) => t.materialize_f64().is_empty(),
         _ => false,
     }
 }

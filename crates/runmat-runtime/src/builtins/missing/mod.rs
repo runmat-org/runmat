@@ -602,7 +602,7 @@ fn ismissing_value(value: &Value) -> BuiltinResult<Value> {
         }
         Value::ComplexTensor(tensor) => logical_from_iter(
             tensor
-                .data
+                .materialize_f64()
                 .iter()
                 .map(|(re, im)| re.is_nan() || im.is_nan()),
             tensor.shape.clone(),
@@ -2570,7 +2570,7 @@ mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.integer_storage(), Some(&expected));
-                assert_eq!(tensor.materialize_f64(), vec![0.0, 2.0]);
+                assert_eq!(tensor.materialize_f64(), vec![-99.0, 2.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }

@@ -161,9 +161,9 @@ impl InputVector {
                     &tensor.shape,
                     tensor_utils::complex_tensor_element_len(&tensor),
                 )?;
-                Ok(match tensor.integer_data {
-                    Some(storage) => Self::TypedComplex(storage),
-                    None => Self::Complex(tensor.data),
+                Ok(match tensor.integer_storage() {
+                    Some(storage) => Self::TypedComplex(storage.clone()),
+                    None => Self::Complex(tensor.materialize_f64()),
                 })
             }
             other => Err(error_with_detail(
@@ -528,7 +528,7 @@ mod tests {
         };
         assert_eq!(tensor.shape, vec![2, 2]);
         assert_eq!(
-            tensor.data,
+            tensor.materialize_f64(),
             vec![(1.0, 2.0), (3.0, -4.0), (3.0, 4.0), (1.0, 2.0)]
         );
     }
@@ -628,8 +628,7 @@ mod tests {
             IntegerStorage::I16(vec![4, 5, 6]),
         )
         .expect("complex integer storage");
-        let mut input = ComplexTensor::new_integer(storage, vec![1, 3]).expect("complex vector");
-        input.data.clear();
+        let input = ComplexTensor::new_integer(storage, vec![1, 3]).expect("complex vector");
 
         let Value::ComplexTensor(output) =
             block_on(toeplitz_builtin(vec![Value::ComplexTensor(input)])).expect("toeplitz")
@@ -638,7 +637,7 @@ mod tests {
         };
 
         assert_eq!(output.shape, vec![3, 3]);
-        let storage = output.integer_data.expect("typed complex storage");
+        let storage = output.integer_storage().expect("typed complex storage");
         assert_eq!(
             storage.real,
             IntegerStorage::I16(vec![1, 2, 3, 2, 1, 2, 3, 2, 1])

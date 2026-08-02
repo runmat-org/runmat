@@ -811,14 +811,14 @@ mod tests {
     fn pskmod_bpsk_gray_matches_binary() {
         let out = pskmod(tensor(vec![0.0, 1.0], vec![1, 2]), 2, vec![]);
         assert_eq!(out.shape, vec![1, 2]);
-        assert_complex_close(&out.data, &[(1.0, 0.0), (-1.0, 0.0)]);
+        assert_complex_close(&out.materialize_f64(), &[(1.0, 0.0), (-1.0, 0.0)]);
     }
 
     #[test]
     fn pskmod_qpsk_gray_mapping() {
         let out = pskmod(tensor(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]), 4, vec![]);
         assert_complex_close(
-            &out.data,
+            &out.materialize_f64(),
             &[(1.0, 0.0), (0.0, 1.0), (0.0, -1.0), (-1.0, 0.0)],
         );
     }
@@ -832,7 +832,7 @@ mod tests {
         );
         assert_eq!(out.shape, vec![1, 4]);
         assert_complex_close(
-            &out.data,
+            &out.materialize_f64(),
             &[(1.0, 0.0), (0.0, 1.0), (0.0, -1.0), (-1.0, 0.0)],
         );
     }
@@ -880,7 +880,7 @@ mod tests {
                 (theta.cos(), theta.sin())
             })
             .collect::<Vec<_>>();
-        assert_complex_close(&out.data, &expected);
+        assert_complex_close(&out.materialize_f64(), &expected);
     }
 
     #[test]
@@ -891,7 +891,7 @@ mod tests {
             vec![Value::Num(0.0), Value::from("bin")],
         );
         assert_complex_close(
-            &out.data,
+            &out.materialize_f64(),
             &[(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)],
         );
     }
@@ -903,7 +903,7 @@ mod tests {
             2,
             vec![Value::Num(std::f64::consts::FRAC_PI_2), Value::from("bin")],
         );
-        assert_complex_close(&out.data, &[(0.0, 1.0), (0.0, -1.0)]);
+        assert_complex_close(&out.materialize_f64(), &[(0.0, 1.0), (0.0, -1.0)]);
     }
 
     #[test]
@@ -915,7 +915,7 @@ mod tests {
             vec![Value::Num(0.0), mapping],
         );
         assert_complex_close(
-            &out.data,
+            &out.materialize_f64(),
             &[(1.0, 0.0), (-1.0, 0.0), (0.0, -1.0), (0.0, 1.0)],
         );
     }
@@ -929,7 +929,7 @@ mod tests {
             vec![Value::Num(0.0), mapping],
         );
         assert_complex_close(
-            &out.data,
+            &out.materialize_f64(),
             &[(1.0, 0.0), (-1.0, 0.0), (0.0, -1.0), (0.0, 1.0)],
         );
     }
@@ -940,7 +940,7 @@ mod tests {
         let out = pskmod(bits, 4, vec![Value::from("InputType"), Value::from("bit")]);
         assert_eq!(out.shape, vec![2, 2]);
         assert_complex_close(
-            &out.data,
+            &out.materialize_f64(),
             &[(1.0, 0.0), (0.0, 1.0), (0.0, -1.0), (-1.0, 0.0)],
         );
     }
@@ -951,7 +951,7 @@ mod tests {
         let out = pskmod(bits, 4, vec![Value::from("InputType"), Value::from("bit")]);
         assert_eq!(out.shape, vec![2, 2]);
         assert_complex_close(
-            &out.data,
+            &out.materialize_f64(),
             &[(1.0, 0.0), (0.0, 1.0), (0.0, -1.0), (-1.0, 0.0)],
         );
     }
@@ -964,8 +964,8 @@ mod tests {
             vec![Value::from("OutputDataType"), Value::from("single")],
         );
         let theta = TAU / 8.0;
-        assert_eq!(out.data[0].0, (theta.cos() as f32) as f64);
-        assert_eq!(out.data[0].1, (theta.sin() as f32) as f64);
+        assert_eq!(out.materialize_f64()[0].0, (theta.cos() as f32) as f64);
+        assert_eq!(out.materialize_f64()[0].1, (theta.sin() as f32) as f64);
     }
 
     #[test]
@@ -976,9 +976,9 @@ mod tests {
             vec![],
         );
         let theta = TAU / 8.0;
-        assert_eq!(out.data[0].0, theta.cos());
-        assert_eq!(out.data[0].1, theta.sin());
-        assert_ne!(out.data[0].0, (theta.cos() as f32) as f64);
+        assert_eq!(out.materialize_f64()[0].0, theta.cos());
+        assert_eq!(out.materialize_f64()[0].1, theta.sin());
+        assert_ne!(out.materialize_f64()[0].0, (theta.cos() as f32) as f64);
     }
 
     #[test]
@@ -1017,7 +1017,7 @@ mod tests {
             vec![Value::from("InputType"), Value::from("bit")],
         );
         assert_eq!(out.shape, vec![1, 2]);
-        assert_complex_close(&out.data, &[(1.0, 0.0), (-1.0, 0.0)]);
+        assert_complex_close(&out.materialize_f64(), &[(1.0, 0.0), (-1.0, 0.0)]);
     }
 
     #[test]
@@ -1058,7 +1058,7 @@ mod tests {
                 panic!("expected gathered complex tensor");
             };
             assert_eq!(actual.shape, expected.shape);
-            assert_complex_close(&actual.data, &expected.data);
+            assert_complex_close(&actual.materialize_f64(), &expected.materialize_f64());
             provider.free(&input_handle).ok();
             provider.free(&output_handle).ok();
         });
@@ -1156,7 +1156,7 @@ mod tests {
                     panic!("expected gathered complex tensor");
                 };
                 assert_eq!(actual.shape, expected.shape);
-                assert_complex_close(&actual.data, &expected.data);
+                assert_complex_close(&actual.materialize_f64(), &expected.materialize_f64());
                 provider.free(&input_handle).ok();
                 provider.free(&output_handle).ok();
             }
@@ -1208,7 +1208,7 @@ mod tests {
                     panic!("expected gathered complex tensor");
                 };
                 assert_eq!(actual.shape, expected.shape);
-                assert_complex_close(&actual.data, &expected.data);
+                assert_complex_close(&actual.materialize_f64(), &expected.materialize_f64());
                 provider.free(&input_handle).ok();
                 provider.free(&output_handle).ok();
             }
@@ -1273,7 +1273,7 @@ mod tests {
             vec![],
         );
         assert_complex_close(
-            &out.data,
+            &out.materialize_f64(),
             &[(1.0, 0.0), (0.0, 1.0), (0.0, -1.0), (-1.0, 0.0)],
         );
 
@@ -1284,7 +1284,7 @@ mod tests {
             vec![Value::Num(0.0), custom],
         );
         assert_complex_close(
-            &out.data,
+            &out.materialize_f64(),
             &[(1.0, 0.0), (-1.0, 0.0), (0.0, -1.0), (0.0, 1.0)],
         );
 

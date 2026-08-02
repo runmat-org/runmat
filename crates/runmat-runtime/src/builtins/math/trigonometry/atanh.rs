@@ -285,11 +285,11 @@ fn atanh_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
 }
 
 fn atanh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    if ct.data.is_empty() {
+    if ct.materialize_f64().is_empty() {
         return Ok(Value::ComplexTensor(ct));
     }
-    let mut mapped = Vec::with_capacity(ct.data.len());
-    for &(re, im) in &ct.data {
+    let mut mapped = Vec::with_capacity(ct.materialize_f64().len());
+    for &(re, im) in &ct.materialize_f64() {
         let result = Complex64::new(re, im).atanh();
         mapped.push((zero_small(result.re), zero_small(result.im)));
     }
@@ -477,9 +477,9 @@ pub(crate) mod tests {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
                 let expected = atanh_real_outside_domain(2.0);
-                assert!((out.data[0].0 - expected.0).abs() < 1e-12);
-                assert!((out.data[0].1 - expected.1).abs() < 1e-12);
-                assert_eq!(out.data[1], (0.0, 0.0));
+                assert!((out.materialize_f64()[0].0 - expected.0).abs() < 1e-12);
+                assert!((out.materialize_f64()[0].1 - expected.1).abs() < 1e-12);
+                assert_eq!(out.materialize_f64()[1], (0.0, 0.0));
             }
             other => panic!("expected complex tensor result, got {other:?}"),
         }
@@ -514,7 +514,8 @@ pub(crate) mod tests {
                     (0.5_f64.atanh(), 0.0),
                     ((-0.5_f64).atanh(), 0.0),
                 ];
-                for ((re, im), (exp_re, exp_im)) in t.data.iter().zip(expected.iter()) {
+                for ((re, im), (exp_re, exp_im)) in t.materialize_f64().iter().zip(expected.iter())
+                {
                     assert!((re - exp_re).abs() < 1e-12);
                     assert!((im - exp_im).abs() < 1e-12);
                 }
@@ -533,7 +534,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                for (actual, input) in t.data.iter().zip(inputs.iter()) {
+                for (actual, input) in t.materialize_f64().iter().zip(inputs.iter()) {
                     let expected = input.atanh();
                     assert!((actual.0 - expected.re).abs() < 1e-12);
                     assert!((actual.1 - expected.im).abs() < 1e-12);
@@ -576,7 +577,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
                 // 'A' = 65, 'B' = 66 -> complex outputs
-                for (idx, (re, im)) in t.data.iter().enumerate() {
+                for (idx, (re, im)) in t.materialize_f64().iter().enumerate() {
                     let value = (65 + idx) as f64;
                     let (exp_re, exp_im) = atanh_real_outside_domain(value);
                     assert!((re - exp_re).abs() < 1e-12);
@@ -687,7 +688,9 @@ pub(crate) mod tests {
                         .iter()
                         .map(|&x| matlab_atanh(x))
                         .collect();
-                    for ((re, im), (exp_re, exp_im)) in t.data.iter().zip(expected.iter()) {
+                    for ((re, im), (exp_re, exp_im)) in
+                        t.materialize_f64().iter().zip(expected.iter())
+                    {
                         assert!((re - exp_re).abs() < 1e-12);
                         assert!((im - exp_im).abs() < 1e-12);
                     }

@@ -686,7 +686,7 @@ pub(crate) mod tests {
         match value {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, tensor.shape);
-                for (idx, (re, im)) in out.data.iter().enumerate() {
+                for (idx, (re, im)) in out.materialize_f64().iter().enumerate() {
                     assert!(approx_eq(
                         (*re, *im),
                         (tensor.materialize_f64()[idx], 0.0),
@@ -729,7 +729,7 @@ pub(crate) mod tests {
         .expect("ifft2 nonsymmetric");
         let result = value_to_complex_tensor(value, "ifft2").expect("complex output");
         assert_eq!(result.shape, tensor.shape);
-        for (idx, (re, im)) in result.data.iter().enumerate() {
+        for (idx, (re, im)) in result.materialize_f64().iter().enumerate() {
             assert!(approx_eq(
                 (*re, *im),
                 (tensor.materialize_f64()[idx], 0.0),
@@ -798,7 +798,7 @@ pub(crate) mod tests {
         match value {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, tensor.shape);
-                for (idx, (re, im)) in out.data.iter().enumerate() {
+                for (idx, (re, im)) in out.materialize_f64().iter().enumerate() {
                     assert!(approx_eq(
                         (*re, *im),
                         (tensor.materialize_f64()[idx], 0.0),
@@ -854,7 +854,7 @@ pub(crate) mod tests {
         .expect("ifft2");
         match value {
             Value::ComplexTensor(out) => {
-                assert!(out.data.is_empty());
+                assert!(out.materialize_f64().is_empty());
                 assert_eq!(out.shape, vec![0, 0]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
@@ -869,7 +869,7 @@ pub(crate) mod tests {
             let spectrum = fft2_of_tensor(&tensor);
             let view = HostTensorView {
                 data: &spectrum
-                    .data
+                    .materialize_f64()
                     .iter()
                     .flat_map(|(re, im)| [*re, *im])
                     .collect::<Vec<_>>(),
@@ -894,7 +894,7 @@ pub(crate) mod tests {
             let g = value_to_host_complex(gpu);
             let c = value_to_host_complex(cpu);
             assert_eq!(g.shape, c.shape);
-            for (lhs, rhs) in g.data.iter().zip(c.data.iter()) {
+            for (lhs, rhs) in g.materialize_f64().iter().zip(c.materialize_f64().iter()) {
                 assert!(approx_eq(*lhs, *rhs, 1e-10), "{lhs:?} vs {rhs:?}");
             }
             provider.free(&raw).ok();
@@ -960,7 +960,7 @@ pub(crate) mod tests {
         let tensor = HostTensor::new((0..16).map(|v| v as f64).collect(), vec![4, 4]).unwrap();
         let spectrum = fft2_of_tensor(&tensor);
         let host_real_imag = spectrum
-            .data
+            .materialize_f64()
             .iter()
             .flat_map(|(re, im)| [*re, *im])
             .collect::<Vec<_>>();
@@ -991,7 +991,11 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-10,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (lhs, rhs) in gpu_ct.data.iter().zip(cpu_ct.data.iter()) {
+        for (lhs, rhs) in gpu_ct
+            .materialize_f64()
+            .iter()
+            .zip(cpu_ct.materialize_f64().iter())
+        {
             assert!(approx_eq(*lhs, *rhs, tol), "{lhs:?} vs {rhs:?}");
         }
         provider.free(&raw).ok();

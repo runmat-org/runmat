@@ -345,7 +345,7 @@ fn real_gain_vector(value: Value) -> BuiltinResult<Vec<f64>> {
         Value::ComplexTensor(tensor) => {
             ensure_vector_shape(&tensor.shape)?;
             tensor
-                .data
+                .materialize_f64()
                 .into_iter()
                 .map(|(re, im)| {
                     if im.abs() <= EPS {
@@ -1255,13 +1255,7 @@ mod tests {
             IntegerStorage::I16(vec![3, -4]),
         )
         .expect("complex integer storage");
-        let tensor = ComplexTensor {
-            data: vec![(f64::NAN, f64::NAN), (f64::INFINITY, 1.5)],
-            integer_data: Some(storage),
-            shape: vec![1, 2],
-            rows: 1,
-            cols: 2,
-        };
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).unwrap();
 
         assert_eq!(
             numeric_values(&Value::ComplexTensor(tensor), "A").expect("numeric values"),
@@ -1293,8 +1287,7 @@ mod tests {
             IntegerStorage::I16(vec![-1, -3, -2, -4]),
         )
         .expect("complex integer storage");
-        let mut matrix = ComplexTensor::new(vec![(f64::NAN, f64::NAN); 4], vec![2, 2]).unwrap();
-        matrix.integer_data = Some(storage);
+        let matrix = ComplexTensor::new_integer(storage, vec![2, 2]).unwrap();
         let mut object = ObjectInstance::new("ss".to_string());
         object
             .properties
@@ -1430,11 +1423,11 @@ mod tests {
         };
         assert_eq!(roots.shape, vec![2, 1]);
         assert!(roots
-            .data
+            .materialize_f64()
             .iter()
             .any(|(re, im)| (*re + 1.0).abs() < 1.0e-8 && (*im - 1.0).abs() < 1.0e-8));
         assert!(roots
-            .data
+            .materialize_f64()
             .iter()
             .any(|(re, im)| (*re + 1.0).abs() < 1.0e-8 && (*im + 1.0).abs() < 1.0e-8));
     }

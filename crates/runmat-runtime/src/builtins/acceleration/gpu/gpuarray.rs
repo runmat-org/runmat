@@ -765,7 +765,7 @@ struct PreparedHandle {
 }
 
 fn upload_host_value(value: Value, dtype: DataClass) -> BuiltinResult<PreparedHandle> {
-    if matches!(&value, Value::ComplexTensor(tensor) if tensor.integer_data.is_some()) {
+    if matches!(&value, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some()) {
         return Err(gpu_array_error(&GPUARRAY_ERROR_TYPED_COMPLEX_INTEGER));
     }
 
@@ -902,21 +902,24 @@ fn integer_tensor_view<'a>(
 
 fn upload_complex_host_value(
     provider: &dyn runmat_accelerate_api::AccelProvider,
-    mut tensor: ComplexTensor,
+    tensor: ComplexTensor,
     dtype: DataClass,
 ) -> BuiltinResult<PreparedHandle> {
-    if tensor.integer_data.is_some() {
+    if tensor.integer_storage().is_some() {
         return Err(gpu_array_error(&GPUARRAY_ERROR_TYPED_COMPLEX_INTEGER));
     }
 
-    match dtype {
-        DataClass::Double => {}
-        DataClass::Single => {
-            for (re, im) in &mut tensor.data {
-                *re = (*re as f32) as f64;
-                *im = (*im as f32) as f64;
-            }
-        }
+    let shape = tensor.shape.clone();
+    let tensor = match dtype {
+        DataClass::Double => ComplexTensor::new(tensor.materialize_f64(), shape),
+        DataClass::Single => ComplexTensor::from_f32(
+            tensor
+                .materialize_f64()
+                .into_iter()
+                .map(|(real, imag)| (real as f32, imag as f32))
+                .collect(),
+            shape,
+        ),
         _ => {
             return Err(gpu_array_error_with_message(
                 "gpuArray: complex inputs can only be uploaded as double or single precision",
@@ -924,6 +927,7 @@ fn upload_complex_host_value(
             ));
         }
     }
+    .map_err(|error| gpu_array_error_with_message(error, &GPUARRAY_ERROR_INPUT_TYPE))?;
 
     let handle = gpu_helpers::upload_complex_tensor(provider, &tensor).map_err(|err| {
         gpu_array_error_with_message(err.to_string(), &GPUARRAY_ERROR_PROVIDER_IO)
@@ -1480,7 +1484,7 @@ pub(crate) mod tests {
             );
             let gathered = gather_complex(Value::GpuTensor(handle.clone()));
             assert_eq!(gathered.shape, complex.shape);
-            assert_complex_close(&gathered.data, &complex.data);
+            assert_complex_close(&gathered.materialize_f64(), &complex.materialize_f64());
         });
     }
 
@@ -1607,7 +1611,7 @@ pub(crate) mod tests {
                 GpuTensorStorage::ComplexInterleaved
             );
             let gathered = gather_complex(Value::GpuTensor(returned.clone()));
-            assert_complex_close(&gathered.data, &complex.data);
+            assert_complex_close(&gathered.materialize_f64(), &complex.materialize_f64());
         });
     }
 
@@ -1640,11 +1644,11 @@ pub(crate) mod tests {
             );
             let gathered = gather_complex(Value::GpuTensor(returned.clone()));
             let expected = complex
-                .data
+                .materialize_f64()
                 .iter()
                 .map(|(re, im)| ((*re as f32) as f64, (*im as f32) as f64))
                 .collect::<Vec<_>>();
-            assert_complex_close(&gathered.data, &expected);
+            assert_complex_close(&gathered.materialize_f64(), &expected);
         });
     }
 
@@ -1979,7 +1983,7 @@ pub(crate) mod tests {
                 );
                 let gathered = gather_complex(Value::GpuTensor(handle.clone()));
                 assert_eq!(gathered.shape, vec![1, 2]);
-                assert_complex_close(&gathered.data, &complex.data);
+                assert_complex_close(&gathered.materialize_f64(), &complex.materialize_f64());
                 provider.free(&handle).ok();
             }
             Err(err) => {

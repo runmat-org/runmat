@@ -347,7 +347,7 @@ impl LogicalBuffer {
     }
 
     fn from_complex_tensor(tensor: &ComplexTensor) -> Self {
-        let bits: Vec<u8> = if let Some(storage) = tensor.integer_data.as_ref() {
+        let bits: Vec<u8> = if let Some(storage) = tensor.integer_storage() {
             (0..storage.len())
                 .map(|index| {
                     u8::from(
@@ -359,7 +359,7 @@ impl LogicalBuffer {
                 .collect()
         } else {
             tensor
-                .data
+                .materialize_f64()
                 .iter()
                 .map(|&(re, im)| if !complex_is_zero(re, im) { 1 } else { 0 })
                 .collect()

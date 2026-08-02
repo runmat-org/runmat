@@ -925,7 +925,7 @@ impl ColMajorMatrix {
         for col in 0..cols {
             for row in 0..rows {
                 let idx = row + col * rows;
-                let (re, im) = tensor.data[idx];
+                let (re, im) = tensor.materialize_f64()[idx];
                 data[idx] = Complex64::new(re, im);
             }
         }

@@ -755,7 +755,7 @@ fn eigenvalue_list(value: &Value) -> BuiltinResult<Vec<Complex64>> {
             .map(|&re| Complex64::new(re, 0.0))
             .collect()),
         Value::ComplexTensor(tensor) => Ok(tensor
-            .data
+            .materialize_f64()
             .iter()
             .map(|&(re, im)| Complex64::new(re, im))
             .collect()),
@@ -881,7 +881,7 @@ fn select_columns(matrix: &Value, selected: &[usize]) -> BuiltinResult<Value> {
                     ));
                 }
                 for row in 0..rows {
-                    let (re, im) = tensor.data[row + col * rows];
+                    let (re, im) = tensor.materialize_f64()[row + col * rows];
                     data.push(Complex64::new(re, im));
                 }
             }
@@ -981,7 +981,7 @@ fn dense_complex_matrix(value: Value) -> BuiltinResult<DenseComplexMatrix> {
             rows: tensor.rows,
             cols: tensor.cols,
             data: tensor
-                .data
+                .materialize_f64()
                 .into_iter()
                 .map(|(re, im)| Complex64::new(re, im))
                 .collect(),
@@ -1246,9 +1246,9 @@ fn tensor_element_len(tensor: &Tensor) -> usize {
 
 fn complex_tensor_element_len(tensor: &ComplexTensor) -> usize {
     tensor
-        .integer_data
+        .integer_storage()
         .as_ref()
-        .map_or(tensor.data.len(), |storage| storage.real.len())
+        .map_or(tensor.materialize_f64().len(), |storage| storage.real.len())
 }
 
 #[cfg(test)]
@@ -1282,8 +1282,7 @@ mod tests {
         let storage =
             IntegerComplexStorage::new(IntegerStorage::I16(vec![3]), IntegerStorage::I16(vec![-2]))
                 .expect("storage");
-        let mut tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("tensor");
-        tensor.data.clear();
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("tensor");
 
         match parse_sigma(&Value::ComplexTensor(tensor)).expect("sigma") {
             Some(Sigma::Near(value)) => assert_eq!(value, Complex64::new(3.0, -2.0)),

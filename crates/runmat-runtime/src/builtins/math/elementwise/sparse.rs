@@ -749,7 +749,7 @@ fn sparse_complex(
     let mut out = vec![(0.0, 0.0); plan.len()];
     for (out_idx, sparse_idx, complex_idx) in plan.iter() {
         let sparse_value = sparse_value_by_linear(sparse, sparse_idx);
-        let (cr, ci) = complex.data[complex_idx];
+        let (cr, ci) = complex.materialize_f64()[complex_idx];
         out[out_idx] = if sparse_is_lhs {
             apply_real_complex_op(sparse_value, (cr, ci), op)
         } else {
@@ -1142,8 +1142,8 @@ mod tests {
             .expect("sparse plus complex"),
         );
         assert_eq!(result.shape, vec![3, 2]);
-        assert_eq!(result.data[0], (11.0, 2.0));
-        assert_eq!(result.data[1], (1.0, 2.0));
+        assert_eq!(result.materialize_f64()[0], (11.0, 2.0));
+        assert_eq!(result.materialize_f64()[1], (1.0, 2.0));
     }
 
     #[test]
@@ -1159,8 +1159,8 @@ mod tests {
             .expect("complex times sparse"),
         );
         assert_eq!(result.shape, vec![3, 2]);
-        assert_eq!(result.data[0], (10.0, -10.0));
-        assert_eq!(result.data[1], (0.0, -0.0));
+        assert_eq!(result.materialize_f64()[0], (10.0, -10.0));
+        assert_eq!(result.materialize_f64()[1], (0.0, -0.0));
     }
 
     #[test]

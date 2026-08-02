@@ -350,7 +350,7 @@ fn mrdivide_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResult<C
     ensure_matrix_shape(NAME, &rhs.shape)?;
 
     if complex_tensor_is_scalar(rhs) {
-        let divisor = Complex64::new(rhs.data[0].0, rhs.data[0].1);
+        let divisor = Complex64::new(rhs.materialize_f64()[0].0, rhs.materialize_f64()[0].1);
         let inv = Complex64::new(1.0, 0.0) / divisor;
         let scaled = linalg::scalar_mul_complex_tensor(lhs, inv.re, inv.im);
         return Ok(scaled);
@@ -367,12 +367,12 @@ fn mrdivide_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResult<C
     }
 
     let lhs_data: Vec<Complex64> = lhs
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
     let rhs_data: Vec<Complex64> = rhs
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
@@ -468,7 +468,7 @@ fn contains_complex(value: &Value) -> bool {
 }
 
 fn complex_tensor_is_scalar(tensor: &ComplexTensor) -> bool {
-    tensor.data.len() == 1
+    tensor.materialize_f64().len() == 1
 }
 
 fn is_scalar_handle(handle: &GpuTensorHandle) -> bool {
@@ -676,10 +676,10 @@ pub(crate) mod tests {
             panic!("expected complex tensor result");
         };
         assert_eq!(out.shape, vec![1, 2]);
-        assert!((out.data[0].0 - 3.0).abs() < 1e-12);
-        assert!((out.data[0].1 - 2.0).abs() < 1e-12);
-        assert!((out.data[1].0 - 1.0).abs() < 1e-12);
-        assert!((out.data[1].1 + 4.0).abs() < 1e-12);
+        assert!((out.materialize_f64()[0].0 - 3.0).abs() < 1e-12);
+        assert!((out.materialize_f64()[0].1 - 2.0).abs() < 1e-12);
+        assert!((out.materialize_f64()[1].0 - 1.0).abs() < 1e-12);
+        assert!((out.materialize_f64()[1].1 + 4.0).abs() < 1e-12);
     }
 
     #[test]
@@ -758,7 +758,7 @@ pub(crate) mod tests {
                     (0.48780488, -1.6097561),
                     (2.0097561, -2.31219512),
                 ];
-                for (value, (er, ei)) in out.data.iter().zip(expected.into_iter()) {
+                for (value, (er, ei)) in out.materialize_f64().iter().zip(expected.into_iter()) {
                     let (vr, vi) = *value;
                     assert!((vr - er).abs() < 1e-6);
                     assert!((vi - ei).abs() < 1e-6);

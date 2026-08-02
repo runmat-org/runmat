@@ -146,7 +146,7 @@ fn cospi_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 
 fn cospi_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
     let data = tensor
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| cospi_complex(re, im))
         .collect::<Vec<_>>();

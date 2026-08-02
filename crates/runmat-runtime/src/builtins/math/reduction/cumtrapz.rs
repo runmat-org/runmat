@@ -411,7 +411,7 @@ fn cumtrapz_complex_tensor(
     let stride_before = dim_product(&shape[..dim_index]);
     let stride_after = dim_product(&shape[dim..]);
     let block = stride_before * len_dim;
-    let mut output = vec![(0.0f64, 0.0f64); tensor.data.len()];
+    let mut output = vec![(0.0f64, 0.0f64); tensor.materialize_f64().len()];
 
     if len_dim > 0 {
         for after in 0..stride_after {
@@ -424,8 +424,8 @@ fn cumtrapz_complex_tensor(
                     let idx0 = base + before + k * stride_before;
                     let idx1 = idx0 + stride_before;
                     let width = interval_width(spacing, idx0, idx1, k);
-                    let (re0, im0) = tensor.data[idx0];
-                    let (re1, im1) = tensor.data[idx1];
+                    let (re0, im0) = tensor.materialize_f64()[idx0];
+                    let (re1, im1) = tensor.materialize_f64()[idx1];
                     acc.0 += 0.5 * width * (re0 + re1);
                     acc.1 += 0.5 * width * (im0 + im1);
                     output[idx1] = acc;

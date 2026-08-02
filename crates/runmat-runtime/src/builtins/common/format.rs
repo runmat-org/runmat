@@ -1087,12 +1087,12 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
             }
         }
         Value::ComplexTensor(tensor) => {
-            if tensor.integer_data.is_some() {
+            if tensor.integer_storage().is_some() {
                 for index in 0..tensor::complex_tensor_element_len(&tensor) {
                     output.push(Value::String(tensor.format_element(index)));
                 }
             } else {
-                for &(re, im) in &tensor.data {
+                for &(re, im) in &tensor.materialize_f64() {
                     output.push(Value::Complex(re, im));
                 }
             }
@@ -1270,8 +1270,7 @@ mod tests {
         .expect("matching complex integer storage");
         let tensor = runmat_builtins::ComplexTensor::new_integer(storage, vec![1, 2])
             .expect("complex integer tensor");
-        let mut tensor = tensor;
-        tensor.data.clear();
+        let tensor = tensor;
         let flattened = futures::executor::block_on(flatten_arguments(
             &[Value::ComplexTensor(tensor)],
             "sprintf",

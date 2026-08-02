@@ -1118,11 +1118,15 @@ fn complex_matrix_value(
     let tensor = ComplexTensor::new(data, vec![rows, cols])
         .map_err(|err| internal(format!("lscov: failed to construct {label}: {err}")))?;
     if tensor
-        .data
+        .materialize_f64()
         .iter()
         .all(|(_, im)| im.abs() <= EPS || im.is_nan())
     {
-        let real = tensor.data.iter().map(|(re, _)| *re).collect::<Vec<_>>();
+        let real = tensor
+            .materialize_f64()
+            .iter()
+            .map(|(re, _)| *re)
+            .collect::<Vec<_>>();
         return real_tensor_value(real, vec![rows, cols], label);
     }
     Ok(complex_tensor_into_value(tensor))
@@ -1364,7 +1368,7 @@ mod tests {
         let x = complex_ref(&out[0]);
         assert_eq!(x.shape, vec![2, 1]);
         assert!(x
-            .data
+            .materialize_f64()
             .iter()
             .all(|(re, im)| re.is_finite() && im.is_finite()));
         assert_eq!(tensor_ref(&out[1]).shape, vec![2, 1]);

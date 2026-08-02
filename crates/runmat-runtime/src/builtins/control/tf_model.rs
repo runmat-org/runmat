@@ -1245,12 +1245,9 @@ mod tests {
     ) -> Value {
         let is_scalar = shape.iter().product::<usize>() == 1;
         let storage = IntegerComplexStorage::new(real, imag).expect("complex integer storage");
-        let mut tensor =
-            ComplexTensor::new_integer(storage, shape).expect("complex integer tensor");
+        let tensor = ComplexTensor::new_integer(storage, shape).expect("complex integer tensor");
         if is_scalar {
-            tensor.data.clear();
         } else {
-            tensor.data.fill((f64::NAN, f64::NAN));
         }
         Value::ComplexTensor(tensor)
     }

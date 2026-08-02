@@ -648,7 +648,7 @@ fn setdiff_complex_elements(
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
     let mut b_keys: HashSet<ComplexKey> = HashSet::new();
-    for &value in &b.data {
+    for &value in &b.materialize_f64() {
         b_keys.insert(ComplexKey::new(value));
     }
 
@@ -656,7 +656,7 @@ fn setdiff_complex_elements(
     let mut entries = Vec::<ComplexDiffEntry>::new();
     let mut order_counter = 0usize;
 
-    for (idx, &value) in a.data.iter().enumerate() {
+    for (idx, &value) in a.materialize_f64().iter().enumerate() {
         let key = ComplexKey::new(value);
         if b_keys.contains(&key) {
             continue;
@@ -698,7 +698,7 @@ fn setdiff_complex_rows(
         let mut key_row = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_b;
-            key_row.push(ComplexKey::new(b.data[idx]));
+            key_row.push(ComplexKey::new(b.materialize_f64()[idx]));
         }
         b_keys.insert(key_row);
     }
@@ -712,7 +712,7 @@ fn setdiff_complex_rows(
         let mut key_row = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_a;
-            let value = a.data[idx];
+            let value = a.materialize_f64()[idx];
             row_values.push(value);
             key_row.push(ComplexKey::new(value));
         }

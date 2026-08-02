@@ -1069,8 +1069,7 @@ pub(crate) mod tests {
         let storage =
             IntegerComplexStorage::new(IntegerStorage::I16(vec![8]), IntegerStorage::I16(vec![-3]))
                 .expect("complex integer storage");
-        let mut tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
-        tensor.data.clear();
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
 
         match classify_value(&Value::ComplexTensor(tensor)).expect("classify") {
             ClassifiedValue::Complex(value) => assert_eq!(value, (8.0, -3.0)),
@@ -1536,7 +1535,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![1, 2]);
-                assert_eq!(ct.data, vec![(2.0, 0.0), (0.0, 1.0)]);
+                assert_eq!(ct.materialize_f64(), vec![(2.0, 0.0), (0.0, 1.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }

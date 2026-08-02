@@ -878,7 +878,7 @@ fn moving_complex(
                 if let Some(positions) = sample_positions.as_ref() {
                     for &pos in positions {
                         let idx = before + pos * stride_before + after * stride_before * axis_len;
-                        let value = tensor.data[idx];
+                        let value = tensor.materialize_f64()[idx];
                         if value.0.is_nan() || value.1.is_nan() {
                             if parsed.nan_mode == NanMode::Include {
                                 saw_nan = true;
@@ -896,7 +896,7 @@ fn moving_complex(
                 let window = count_window.expect("count window computed");
                 for pos in window.start..window.end {
                     let idx = before + pos * stride_before + after * stride_before * axis_len;
-                    let value = tensor.data[idx];
+                    let value = tensor.materialize_f64()[idx];
                     if value.0.is_nan() || value.1.is_nan() {
                         if parsed.nan_mode == NanMode::Include {
                             saw_nan = true;
@@ -923,7 +923,7 @@ fn moving_complex(
 }
 
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor::is_scalar_complex_tensor(&tensor) && tensor.integer_data.is_none() {
+    if tensor::is_scalar_complex_tensor(&tensor) && tensor.integer_storage().is_none() {
         let value = tensor::complex_tensor_value_complex64(&tensor, 0);
         Value::Complex(value.re, value.im)
     } else {
@@ -2618,9 +2618,9 @@ mod tests {
             panic!("expected complex tensor");
         };
         assert_eq!(out.shape, vec![1, 3]);
-        assert!((out.data[0].0 - 2.0).abs() < 1e-12);
-        assert_eq!(out.data[0].1, 0.0);
-        assert!((out.data[1].0 - 20.0 / 3.0).abs() < 1e-12);
+        assert!((out.materialize_f64()[0].0 - 2.0).abs() < 1e-12);
+        assert_eq!(out.materialize_f64()[0].1, 0.0);
+        assert!((out.materialize_f64()[1].0 - 20.0 / 3.0).abs() < 1e-12);
     }
 
     #[test]
@@ -2646,7 +2646,10 @@ mod tests {
         let Value::ComplexTensor(out) = result else {
             panic!("expected complex tensor");
         };
-        assert_eq!(out.data, vec![(3.0, 0.0), (6.0, 0.0), (5.0, -1.0)]);
+        assert_eq!(
+            out.materialize_f64(),
+            vec![(3.0, 0.0), (6.0, 0.0), (5.0, -1.0)]
+        );
     }
 
     #[test]
@@ -2724,9 +2727,9 @@ mod tests {
         let Value::ComplexTensor(median) = median else {
             panic!("expected complex movmedian");
         };
-        assert_eq!(min.data[1], (1.0, 1.0));
-        assert_eq!(max.data[1], (3.0, 0.0));
-        assert_eq!(median.data[1], (-2.0, 0.0));
+        assert_eq!(min.materialize_f64()[1], (1.0, 1.0));
+        assert_eq!(max.materialize_f64()[1], (3.0, 0.0));
+        assert_eq!(median.materialize_f64()[1], (-2.0, 0.0));
     }
 
     #[test]

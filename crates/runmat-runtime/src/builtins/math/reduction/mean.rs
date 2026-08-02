@@ -1364,7 +1364,11 @@ fn reduce_complex_tensor_mean_dim(
     };
 
     if is_scalar_shape(&shape) {
-        let (re, im) = tensor.data.first().copied().unwrap_or((f64::NAN, f64::NAN));
+        let (re, im) = tensor
+            .materialize_f64()
+            .first()
+            .copied()
+            .unwrap_or((f64::NAN, f64::NAN));
         let result = match nan_mode {
             ReductionNaN::Include => (re, im),
             ReductionNaN::Omit => {
@@ -1383,7 +1387,7 @@ fn reduce_complex_tensor_mean_dim(
         return Ok(tensor.clone());
     };
 
-    if tensor.data.is_empty() {
+    if tensor.materialize_f64().is_empty() {
         let fill = vec![(f64::NAN, f64::NAN); tensor::element_count(&output_shape)];
         return ComplexTensor::new(fill, output_shape)
             .map_err(|e| mean_internal_error(format!("mean: {e}")));
@@ -1409,7 +1413,7 @@ fn reduce_complex_tensor_mean_dim(
 
             for k in 0..reduce_len {
                 let idx = before + k * stride_before + after * stride_before * reduce_len;
-                let (re, im) = tensor.data[idx];
+                let (re, im) = tensor.materialize_f64()[idx];
                 let is_nan = re.is_nan() || im.is_nan();
                 match nan_mode {
                     ReductionNaN::Include => {
@@ -2148,7 +2152,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
                 let expected = [(3.0, 0.0), (4.0, 0.0)];
-                for (got, exp) in out.data.iter().zip(expected.iter()) {
+                for (got, exp) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((got.0 - exp.0).abs() < 1e-12);
                     assert!((got.1 - exp.1).abs() < 1e-12);
                 }
@@ -2176,7 +2180,7 @@ pub(crate) mod tests {
                 assert!(im.is_nan());
             }
             Value::ComplexTensor(out) => {
-                let (re, im) = out.data[0];
+                let (re, im) = out.materialize_f64()[0];
                 assert!(re.is_nan());
                 assert!(im.is_nan());
             }

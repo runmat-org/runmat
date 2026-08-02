@@ -477,7 +477,11 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, sequential.shape);
-                for (lhs, rhs) in out.data.iter().zip(sequential.data.iter()) {
+                for (lhs, rhs) in out
+                    .materialize_f64()
+                    .iter()
+                    .zip(sequential.materialize_f64().iter())
+                {
                     assert!(approx_eq(*lhs, *rhs, 1e-12));
                 }
             }
@@ -497,7 +501,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![4, 4]);
-                assert_eq!(out.data.len(), 16);
+                assert_eq!(out.materialize_f64().len(), 16);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -554,7 +558,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![0, 3]);
-                assert!(out.data.is_empty());
+                assert!(out.materialize_f64().is_empty());
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -576,7 +580,7 @@ pub(crate) mod tests {
             let c = value_to_host_complex(cpu);
             assert_eq!(g.shape, c.shape);
             let tol = 1e-10;
-            for (lhs, rhs) in g.data.iter().zip(c.data.iter()) {
+            for (lhs, rhs) in g.materialize_f64().iter().zip(c.materialize_f64().iter()) {
                 assert!(approx_eq(*lhs, *rhs, tol), "{lhs:?} vs {rhs:?}");
             }
         });
@@ -664,7 +668,11 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-10,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (lhs, rhs) in gpu_ct.data.iter().zip(cpu_ct.data.iter()) {
+        for (lhs, rhs) in gpu_ct
+            .materialize_f64()
+            .iter()
+            .zip(cpu_ct.materialize_f64().iter())
+        {
             assert!(approx_eq(*lhs, *rhs, tol), "{lhs:?} vs {rhs:?}");
         }
         provider.free(&handle).ok();

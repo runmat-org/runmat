@@ -819,7 +819,7 @@ fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> crate::BuiltinRe
             &COLON_ERROR_NON_SCALAR_INPUT,
         ));
     }
-    if let Some(storage) = tensor.integer_data.as_ref() {
+    if let Some(storage) = tensor.integer_storage() {
         let re = storage
             .real
             .value_at(0)
@@ -832,15 +832,15 @@ fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> crate::BuiltinRe
             .to_f64();
         return complex_to_real(name, re, im);
     }
-    let (re, im) = tensor.data[0];
+    let (re, im) = tensor.materialize_f64()[0];
     complex_to_real(name, re, im)
 }
 
 fn complex_tensor_element_len(tensor: &ComplexTensor) -> usize {
     tensor
-        .integer_data
+        .integer_storage()
         .as_ref()
-        .map_or(tensor.data.len(), |storage| storage.real.len())
+        .map_or(tensor.materialize_f64().len(), |storage| storage.real.len())
 }
 
 fn char_scalar(name: &str, array: &CharArray) -> crate::BuiltinResult<f64> {
@@ -1161,20 +1161,18 @@ pub(crate) mod tests {
 
     #[test]
     fn colon_complex_integer_scalar_tensors_read_exact_storage() {
-        let mut start = ComplexTensor::new_integer(
+        let start = ComplexTensor::new_integer(
             IntegerComplexStorage::new(IntegerStorage::I16(vec![1]), IntegerStorage::I16(vec![0]))
                 .expect("complex storage"),
             vec![1, 1],
         )
         .expect("start");
-        start.data.clear();
-        let mut stop = ComplexTensor::new_integer(
+        let stop = ComplexTensor::new_integer(
             IntegerComplexStorage::new(IntegerStorage::I16(vec![3]), IntegerStorage::I16(vec![0]))
                 .expect("complex storage"),
             vec![1, 1],
         )
         .expect("stop");
-        stop.data.clear();
 
         let result = colon_builtin(
             Value::ComplexTensor(start),
@@ -1187,13 +1185,12 @@ pub(crate) mod tests {
             other => panic!("expected tensor, got {other:?}"),
         }
 
-        let mut nonzero_imag = ComplexTensor::new_integer(
+        let nonzero_imag = ComplexTensor::new_integer(
             IntegerComplexStorage::new(IntegerStorage::I16(vec![1]), IntegerStorage::I16(vec![1]))
                 .expect("complex storage"),
             vec![1, 1],
         )
         .expect("nonzero imag");
-        nonzero_imag.data.clear();
         let err = colon_builtin(
             Value::ComplexTensor(nonzero_imag),
             Value::Num(3.0),

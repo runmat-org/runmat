@@ -303,7 +303,7 @@ fn rank_complex_tensor_impl(matrix: &ComplexTensor, tol: Option<f64>) -> Builtin
         return Ok(0);
     }
     let data: Vec<Complex64> = matrix
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();

@@ -171,7 +171,7 @@ fn tanh_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 
 fn tanh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let mapped = ct
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| tanh_complex_parts(re, im))
         .collect::<Vec<_>>();

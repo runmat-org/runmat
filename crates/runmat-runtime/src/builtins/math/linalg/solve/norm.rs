@@ -291,7 +291,11 @@ fn norm_complex_tensor_impl(tensor: &ComplexTensor, order: NormOrder) -> Builtin
     };
     match kind {
         TensorKind::Vector => {
-            let magnitudes: Vec<f64> = tensor.data.iter().map(|&(re, im)| re.hypot(im)).collect();
+            let magnitudes: Vec<f64> = tensor
+                .materialize_f64()
+                .iter()
+                .map(|&(re, im)| re.hypot(im))
+                .collect();
             vector_norm_from_magnitudes(&magnitudes, resolved)
         }
         TensorKind::Matrix { rows, cols } => matrix_norm_complex(tensor, rows, cols, resolved),
@@ -459,7 +463,7 @@ fn matrix_norm_complex(
     order: NormOrder,
 ) -> BuiltinResult<f64> {
     if tensor
-        .data
+        .materialize_f64()
         .iter()
         .any(|&(re, im)| re.is_nan() || im.is_nan())
     {
@@ -471,16 +475,16 @@ fn matrix_norm_complex(
     match order {
         NormOrder::Default => unreachable!("resolved in caller"),
         NormOrder::One => {
-            let magnitudes: Vec<f64> = tensor.data.iter().map(|&(re, im)| re.hypot(im)).collect();
+            let magnitudes: Vec<f64> = tensor.materialize_f64().iter().map(|&(re, im)| re.hypot(im)).collect();
             Ok(max_column_sum(&magnitudes, rows, cols))
         }
         NormOrder::Two => spectral_norm_complex(tensor, rows, cols),
         NormOrder::Inf => {
-            let magnitudes: Vec<f64> = tensor.data.iter().map(|&(re, im)| re.hypot(im)).collect();
+            let magnitudes: Vec<f64> = tensor.materialize_f64().iter().map(|&(re, im)| re.hypot(im)).collect();
             Ok(max_row_sum(&magnitudes, rows, cols))
         }
         NormOrder::Fro => {
-            let magnitudes: Vec<f64> = tensor.data.iter().map(|&(re, im)| re.hypot(im)).collect();
+            let magnitudes: Vec<f64> = tensor.materialize_f64().iter().map(|&(re, im)| re.hypot(im)).collect();
             Ok(root_sum_of_squares(&magnitudes))
         }
         NormOrder::Nuc => nuclear_norm_complex(tensor, rows, cols),
@@ -547,7 +551,7 @@ fn spectral_norm_complex(tensor: &ComplexTensor, rows: usize, cols: usize) -> Bu
         return Ok(0.0);
     }
     let data: Vec<Complex64> = tensor
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
@@ -573,7 +577,7 @@ fn nuclear_norm_complex(tensor: &ComplexTensor, rows: usize, cols: usize) -> Bui
         return Ok(0.0);
     }
     let data: Vec<Complex64> = tensor
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();

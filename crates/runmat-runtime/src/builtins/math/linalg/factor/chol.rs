@@ -554,7 +554,7 @@ impl RowMajorMatrix {
             for row in 0..rows {
                 let idx_col_major = row + col * rows;
                 let idx_row_major = row * cols + col;
-                let (re, im) = tensor.data[idx_col_major];
+                let (re, im) = tensor.materialize_f64()[idx_col_major];
                 data[idx_row_major] = Complex64::new(re, im);
             }
         }
@@ -753,13 +753,13 @@ pub(crate) mod tests {
                 let mut sum = Complex64::new(0.0, 0.0);
                 for k in 0..rows {
                     let rik = if k <= i {
-                        let (re, im) = matrix.data[k + i * rows];
+                        let (re, im) = matrix.materialize_f64()[k + i * rows];
                         Complex64::new(re, im)
                     } else {
                         Complex64::new(0.0, 0.0)
                     };
                     let rjk = if k <= j {
-                        let (re, im) = matrix.data[k + j * rows];
+                        let (re, im) = matrix.materialize_f64()[k + j * rows];
                         Complex64::new(re, im)
                     } else {
                         Complex64::new(0.0, 0.0)
@@ -782,13 +782,13 @@ pub(crate) mod tests {
                 let mut sum = Complex64::new(0.0, 0.0);
                 for k in 0..rows {
                     let lik = if i >= k {
-                        let (re, im) = matrix.data[i + k * rows];
+                        let (re, im) = matrix.materialize_f64()[i + k * rows];
                         Complex64::new(re, im)
                     } else {
                         Complex64::new(0.0, 0.0)
                     };
                     let ljk = if j >= k {
-                        let (re, im) = matrix.data[j + k * rows];
+                        let (re, im) = matrix.materialize_f64()[j + k * rows];
                         Complex64::new(re, im)
                     } else {
                         Complex64::new(0.0, 0.0)
@@ -803,7 +803,11 @@ pub(crate) mod tests {
 
     fn complex_tensor_close(lhs: &ComplexTensor, rhs: &ComplexTensor, tol: f64) {
         assert_eq!(lhs.shape, rhs.shape, "shape mismatch");
-        for ((ar, ai), (br, bi)) in lhs.data.iter().zip(rhs.data.iter()) {
+        for ((ar, ai), (br, bi)) in lhs
+            .materialize_f64()
+            .iter()
+            .zip(rhs.materialize_f64().iter())
+        {
             let a = Complex64::new(*ar, *ai);
             let b = Complex64::new(*br, *bi);
             assert!(

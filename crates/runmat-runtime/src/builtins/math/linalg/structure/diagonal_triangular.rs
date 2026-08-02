@@ -891,8 +891,7 @@ mod tests {
             IntegerStorage::I16(vec![0, 2, 0, 0]),
         )
         .unwrap();
-        let mut tensor = ComplexTensor::new_integer(storage, vec![2, 2]).unwrap();
-        tensor.data.clear();
+        let tensor = ComplexTensor::new_integer(storage, vec![2, 2]).unwrap();
 
         assert!(!expect_bool(
             call_isdiag(Value::ComplexTensor(tensor.clone())).unwrap()

@@ -568,8 +568,8 @@ fn sort_complex_tensor(
     }
 
     let dim_len = dimension_length(&tensor.shape, dim);
-    if tensor.data.is_empty() || dim_len <= 1 {
-        let indices = vec![1.0; tensor.data.len()];
+    if tensor.materialize_f64().is_empty() || dim_len <= 1 {
+        let indices = vec![1.0; tensor.materialize_f64().len()];
         let index_tensor = Tensor::new(indices, tensor.shape.clone())
             .map_err(|e| sort_internal(format!("sort: {e}")))?;
         return Ok(SortEvaluation {
@@ -580,8 +580,8 @@ fn sort_complex_tensor(
 
     let stride_before = stride_before(&tensor.shape, dim);
     let stride_after = stride_after(&tensor.shape, dim);
-    let mut sorted = tensor.data.clone();
-    let mut indices = vec![0.0f64; tensor.data.len()];
+    let mut sorted = tensor.materialize_f64().clone();
+    let mut indices = vec![0.0f64; tensor.materialize_f64().len()];
     let mut buffer: Vec<(usize, (f64, f64))> = Vec::with_capacity(dim_len);
 
     for after in 0..stride_after {
@@ -589,7 +589,7 @@ fn sort_complex_tensor(
             buffer.clear();
             for k in 0..dim_len {
                 let idx = before + k * stride_before + after * stride_before * dim_len;
-                let value = tensor.data[idx];
+                let value = tensor.materialize_f64()[idx];
                 buffer.push((k, value));
             }
             buffer.sort_by(|a, b| compare_complex_values(a.1, b.1, args));
@@ -613,8 +613,8 @@ fn sort_complex_tensor(
 }
 
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor.data.len() == 1 {
-        let (re, im) = tensor.data[0];
+    if tensor.materialize_f64().len() == 1 {
+        let (re, im) = tensor.materialize_f64()[0];
         Value::Complex(re, im)
     } else {
         Value::ComplexTensor(tensor)
@@ -1376,7 +1376,10 @@ pub(crate) mod tests {
         let (sorted, indices) = eval.into_values();
         match sorted {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.data, vec![(0.0, -1.0), (1.0, 2.0), (-3.0, 0.5)])
+                assert_eq!(
+                    t.materialize_f64(),
+                    vec![(0.0, -1.0), (1.0, 2.0), (-3.0, 0.5)]
+                )
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -1403,7 +1406,10 @@ pub(crate) mod tests {
         let (sorted, _) = eval.into_values();
         match sorted {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.data, vec![(1.0, 2.0), (1.0, -1.0), (-3.0, 0.0)]);
+                assert_eq!(
+                    t.materialize_f64(),
+                    vec![(1.0, 2.0), (1.0, -1.0), (-3.0, 0.0)]
+                );
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }

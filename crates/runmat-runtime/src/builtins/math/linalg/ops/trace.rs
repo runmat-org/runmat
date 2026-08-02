@@ -189,7 +189,7 @@ fn trace_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let mut sum_im = 0.0;
     for idx in 0..diag_len {
         let linear = idx + idx * rows;
-        let (re, im) = ct.data[linear];
+        let (re, im) = ct.materialize_f64()[linear];
         sum_re += re;
         sum_im += im;
     }

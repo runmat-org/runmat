@@ -317,7 +317,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             output
-                .integer_data
+                .integer_storage()
                 .as_ref()
                 .map(|storage| (&storage.real, &storage.imag)),
             Some((

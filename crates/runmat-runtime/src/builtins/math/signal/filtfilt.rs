@@ -738,7 +738,7 @@ mod tests {
             panic!("expected complex output");
         };
         assert_eq!(out.shape, vec![1, 2]);
-        assert_eq!(out.data, vec![(1.0, 1.0), (2.0, -1.0)]);
+        assert_eq!(out.materialize_f64(), vec![(1.0, 1.0), (2.0, -1.0)]);
     }
 
     #[test]

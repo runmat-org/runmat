@@ -409,8 +409,8 @@ fn power_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinRes
     }
     let mut out = vec![(0.0f64, 0.0f64); plan.len()];
     for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
-        let (ar, ai) = lhs.data[idx_lhs];
-        let (br, bi) = rhs.data[idx_rhs];
+        let (ar, ai) = lhs.materialize_f64()[idx_lhs];
+        let (br, bi) = rhs.materialize_f64()[idx_rhs];
         out[out_idx] = complex_pow_scalar(ar, ai, br, bi);
     }
     let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
@@ -429,7 +429,7 @@ fn power_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value>
     let rhs_values = rhs.materialize_f64();
     let mut out = vec![(0.0f64, 0.0f64); plan.len()];
     for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
-        let (ar, ai) = lhs.data[idx_lhs];
+        let (ar, ai) = lhs.materialize_f64()[idx_lhs];
         let exponent = rhs_values[idx_rhs];
         out[out_idx] = complex_pow_scalar(ar, ai, exponent, 0.0);
     }
@@ -450,7 +450,7 @@ fn power_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> BuiltinResult<Value>
     let mut out = vec![(0.0f64, 0.0f64); plan.len()];
     for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
         let base = lhs_values[idx_lhs];
-        let (br, bi) = rhs.data[idx_rhs];
+        let (br, bi) = rhs.materialize_f64()[idx_rhs];
         out[out_idx] = complex_pow_scalar(base, 0.0, br, bi);
     }
     let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
@@ -1067,7 +1067,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
-                assert_eq!(out.data, vec![(-4.0, 0.0), (5.0, 0.0)]);
+                assert_eq!(out.materialize_f64(), vec![(-4.0, 0.0), (5.0, 0.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -1078,8 +1078,7 @@ pub(crate) mod tests {
         let storage =
             IntegerComplexStorage::new(IntegerStorage::I16(vec![2]), IntegerStorage::I16(vec![3]))
                 .expect("complex integer storage");
-        let mut tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
-        tensor.data.clear();
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
 
         assert_eq!(
             scalar_complex_value(&Value::ComplexTensor(tensor)),
