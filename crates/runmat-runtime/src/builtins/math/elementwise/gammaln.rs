@@ -8,7 +8,7 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, NumericDType, Tensor, Value,
+    CharArray, NumericDType, NumericScalar, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -216,28 +216,43 @@ fn gammaln_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn gammaln_tensor(tensor: Tensor) -> BuiltinResult<Value> {
-    let values = tensor::tensor_values_f64_cow(&tensor);
-    ensure_nonnegative(&values)?;
-    let dtype = if tensor.dtype == NumericDType::F32 {
-        NumericDType::F32
-    } else {
-        NumericDType::F64
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|detail| error_with_detail(&ERROR_INTERNAL, detail))?;
+    let output = match storage {
+        NumericStorage::F32(values) => {
+            if values.iter().any(|&value| value < 0.0) {
+                return Err(error_with_detail(
+                    &ERROR_DOMAIN,
+                    "input values must be nonnegative",
+                ));
+            }
+            NumericStorage::F32(
+                values
+                    .into_iter()
+                    .map(|value| gammaln_nonnegative_scalar(f64::from(value)) as f32)
+                    .collect(),
+            )
+        }
+        storage => {
+            let values = storage.materialize_f64();
+            ensure_nonnegative(&values)?;
+            NumericStorage::F64(values.into_iter().map(gammaln_nonnegative_scalar).collect())
+        }
     };
-    let data = values
-        .iter()
-        .map(|&value| cast_output(gammaln_nonnegative_scalar(value), dtype))
-        .collect::<Vec<_>>();
-    let out = Tensor::new_with_dtype(data, tensor.shape.clone(), dtype)
+    let out = Tensor::from_numeric_storage(output, shape)
         .map_err(|detail| error_with_detail(&ERROR_INTERNAL, detail))?;
     Ok(gammaln_tensor_into_value(out))
 }
 
 fn gammaln_tensor_into_value(tensor: Tensor) -> Value {
-    if tensor.data.len() == 1 && tensor.dtype == NumericDType::F64 {
-        Value::Num(tensor.data[0])
-    } else {
-        Value::Tensor(tensor)
+    if tensor.len() == 1 && tensor.numeric_dtype() == NumericDType::F64 {
+        if let Some(NumericScalar::F64(value)) = tensor.numeric_value_at(0) {
+            return Value::Num(value);
+        }
     }
+    Value::Tensor(tensor)
 }
 
 fn gammaln_char_array(chars: CharArray) -> BuiltinResult<Value> {
@@ -291,14 +306,6 @@ fn ensure_nonnegative(data: &[f64]) -> BuiltinResult<()> {
     }
 }
 
-fn cast_output(value: f64, dtype: NumericDType) -> f64 {
-    if dtype == NumericDType::F32 {
-        value as f32 as f64
-    } else {
-        value
-    }
-}
-
 fn is_unsupported_provider_hook(err: &anyhow::Error) -> bool {
     err.to_string().contains("unary_gammaln not supported")
 }
@@ -338,6 +345,10 @@ pub(crate) mod tests {
             (got - expected).abs() <= tol,
             "got {got}, expected {expected}, tol {tol}"
         );
+    }
+
+    fn values_f64(tensor: &Tensor) -> Vec<f64> {
+        tensor.materialize_f64()
     }
 
     #[test]
@@ -415,11 +426,12 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.dtype, NumericDType::F32);
-                approx_eq(t.data[0], std::f32::consts::PI.sqrt().ln() as f64, 1e-7);
-                approx_eq(t.data[1], 0.0, 1e-7);
-                approx_eq(t.data[2], 0.0, 1e-7);
-                approx_eq(t.data[3], 24.0_f32.ln() as f64, 1e-6);
+                assert_eq!(t.numeric_dtype(), NumericDType::F32);
+                let values = values_f64(&t);
+                approx_eq(values[0], std::f32::consts::PI.sqrt().ln() as f64, 1e-7);
+                approx_eq(values[1], 0.0, 1e-7);
+                approx_eq(values[2], 0.0, 1e-7);
+                approx_eq(values[3], 24.0_f32.ln() as f64, 1e-6);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -441,8 +453,9 @@ pub(crate) mod tests {
         match call(Value::LogicalArray(logical)).expect("gammaln") {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                approx_eq(t.data[0], 0.0, 1e-14);
-                assert_eq!(t.data[1], f64::INFINITY);
+                let values = values_f64(&t);
+                approx_eq(values[0], 0.0, 1e-14);
+                assert_eq!(values[1], f64::INFINITY);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -451,8 +464,9 @@ pub(crate) mod tests {
         match call(Value::CharArray(chars)).expect("gammaln") {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data[0], f64::INFINITY);
-                approx_eq(t.data[1], 0.0, 1e-14);
+                let values = values_f64(&t);
+                assert_eq!(values[0], f64::INFINITY);
+                approx_eq(values[1], 0.0, 1e-14);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -460,24 +474,23 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn gammaln_read_typed_integer_storage_exactly() {
-        let mut scalar =
+    fn gammaln_reads_typed_integer_storage() {
+        let scalar =
             Tensor::new_integer(IntegerStorage::U16(vec![5]), vec![1, 1]).expect("int tensor");
-        scalar.data.fill(f64::NAN);
         match call(Value::Tensor(scalar)).expect("gammaln") {
             Value::Num(v) => approx_eq(v, 24.0_f64.ln(), 1e-13),
             other => panic!("expected scalar result, got {other:?}"),
         }
 
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U16(vec![5, 1]), vec![1, 2]).expect("int tensor");
-        tensor.data.fill(f64::NAN);
         match call(Value::Tensor(tensor)).expect("gammaln") {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.dtype, NumericDType::F64);
-                approx_eq(t.data[0], 24.0_f64.ln(), 1e-13);
-                approx_eq(t.data[1], 0.0, 1e-14);
+                assert_eq!(t.numeric_dtype(), NumericDType::F64);
+                let values = values_f64(&t);
+                approx_eq(values[0], 24.0_f64.ln(), 1e-13);
+                approx_eq(values[1], 0.0, 1e-14);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -527,14 +540,18 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.5, 1.0, 2.0, 5.0, 171.0], vec![1, 5]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: tensor.as_f64_slice().expect("double input"),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = call(Value::GpuTensor(handle)).expect("gammaln");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 5]);
-            for (got, input) in gathered.data.iter().zip(tensor.data.iter()) {
+            for (got, input) in gathered
+                .data
+                .iter()
+                .zip(tensor.as_f64_slice().expect("double input"))
+            {
                 approx_eq(*got, gammaln_nonnegative_scalar(*input), 1e-10);
             }
         });
@@ -546,7 +563,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, -0.5], vec![1, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: tensor.as_f64_slice().expect("double input"),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -575,7 +592,7 @@ pub(crate) mod tests {
             return;
         };
         let view = HostTensorView {
-            data: &tensor.data,
+            data: tensor.as_f64_slice().expect("double input"),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
@@ -586,7 +603,11 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-9,
             runmat_accelerate_api::ProviderPrecision::F32 => 2e-4,
         };
-        for (got, expected) in gathered.data.iter().zip(cpu.data.iter()) {
+        for (got, expected) in gathered
+            .data
+            .iter()
+            .zip(cpu.as_f64_slice().expect("double cpu result"))
+        {
             approx_eq(*got, *expected, tol);
         }
     }
