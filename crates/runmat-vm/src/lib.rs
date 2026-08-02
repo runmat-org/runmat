@@ -42,6 +42,21 @@ pub use runtime::workspace::{
 };
 
 #[doc(hidden)]
+pub fn expand_cell_indices_for_call(
+    cell: &runmat_builtins::CellArray,
+    indices: &[runmat_builtins::Value],
+) -> Result<Vec<runmat_builtins::Value>, runmat_runtime::RuntimeError> {
+    ops::cells::expand_cell_indices(cell, indices)
+}
+
+#[doc(hidden)]
+pub fn expand_all_cell_for_call(
+    cell: &runmat_builtins::CellArray,
+) -> Result<Vec<runmat_builtins::Value>, runmat_runtime::RuntimeError> {
+    ops::cells::expand_all_cell_values(cell)
+}
+
+#[doc(hidden)]
 pub fn reset_thread_state_for_tests() {
     runtime::call_stack::reset_thread_state_for_tests();
     runmat_runtime::debug_context::reset_for_tests();

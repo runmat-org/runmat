@@ -1242,79 +1242,11 @@ fn read_turbine_arg_specs(
         .collect()
 }
 
-fn row_major_pos_from_linear(cell: &runmat_builtins::CellArray, idx: usize) -> Result<usize> {
-    if idx == 0 || idx > cell.data.len() {
-        return Err(execution_error("Cell index out of bounds"));
-    }
-    if cell.rows <= 1 || cell.cols <= 1 {
-        return Ok(idx - 1);
-    }
-    let zero = idx - 1;
-    let row = zero % cell.rows;
-    let col = zero / cell.rows;
-    Ok(row * cell.cols + col)
-}
-
-fn turbine_index_cell_value(cell: &runmat_builtins::CellArray, indices: &[usize]) -> Result<Value> {
-    match indices.len() {
-        1 => Ok(cell.data[row_major_pos_from_linear(cell, indices[0])?].clone()),
-        2 => {
-            let row = indices[0];
-            let col = indices[1];
-            if row == 0 || row > cell.rows || col == 0 || col > cell.cols {
-                return Err(execution_error("Cell subscript out of bounds"));
-            }
-            Ok(cell.data[(row - 1) * cell.cols + (col - 1)].clone())
-        }
-        _ => Err(execution_error("Unsupported number of cell indices")),
-    }
-}
-
 fn turbine_expand_cell_indices(
     cell: &runmat_builtins::CellArray,
     indices: &[Value],
 ) -> Result<Vec<Value>> {
-    match indices.len() {
-        1 => match &indices[0] {
-            Value::Num(n) if *n == 0.0 && n.is_sign_negative() => {
-                Ok(vec![turbine_index_cell_value(cell, &[cell.data.len()])?])
-            }
-            Value::Num(n) if *n < 0.0 => {
-                let idx = cell.data.len() as isize + *n as isize;
-                if idx < 1 || idx as usize > cell.data.len() {
-                    return Err(execution_error("Cell index out of bounds"));
-                }
-                Ok(vec![turbine_index_cell_value(cell, &[idx as usize])?])
-            }
-            Value::Num(n) => Ok(vec![turbine_index_cell_value(cell, &[*n as usize])?]),
-            Value::Int(i) => Ok(vec![turbine_index_cell_value(
-                cell,
-                &[i.to_i64() as usize],
-            )?]),
-            Value::Tensor(t) => t
-                .data
-                .iter()
-                .map(|&value| turbine_index_cell_value(cell, &[value as usize]))
-                .collect(),
-            _ => Err(execution_error("Unsupported cell index type")),
-        },
-        2 => {
-            let row = value_to_usize_index(&indices[0])?;
-            let col = value_to_usize_index(&indices[1])?;
-            Ok(vec![turbine_index_cell_value(cell, &[row, col])?])
-        }
-        _ => Err(execution_error("Unsupported cell index type")),
-    }
-}
-
-fn value_to_usize_index(value: &Value) -> Result<usize> {
-    match value {
-        Value::Num(value) => Ok(*value as usize),
-        Value::Int(value) => Ok(value.to_i64() as usize),
-        other => Err(execution_error(format!(
-            "Unsupported cell index value: {other:?}"
-        ))),
-    }
+    runmat_vm::expand_cell_indices_for_call(cell, indices).map_err(TurbineError::ExecutionError)
 }
 
 fn expand_turbine_args(args: Vec<Value>, specs: &[ArgSpec]) -> Result<Vec<Value>> {
@@ -1343,9 +1275,8 @@ fn expand_turbine_args(args: Vec<Value>, specs: &[ArgSpec]) -> Result<Vec<Value>
         let values = if spec.expand_all {
             match value {
                 Value::OutputList(values) => values,
-                Value::Cell(cell) => (1..=cell.data.len())
-                    .map(|idx| turbine_index_cell_value(&cell, &[idx]))
-                    .collect::<Result<Vec<_>>>()?,
+                Value::Cell(cell) => runmat_vm::expand_all_cell_for_call(&cell)
+                    .map_err(TurbineError::ExecutionError)?,
                 other => {
                     return Err(execution_error(format!(
                         "expanded Turbine call requires cell or output list for expand_all, got {other:?}"
@@ -1841,6 +1772,7 @@ pub extern "C" fn runtime_builtin_f64_dispatch(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::{CellArray, IntegerStorage, Tensor};
     use runmat_hir::FunctionId;
     use runmat_vm::FunctionBytecode;
     use std::collections::HashMap;
@@ -1894,6 +1826,34 @@ mod tests {
                 .matches(&["Self::", "hash_named_function_call("].concat())
                 .count(),
             1
+        );
+    }
+
+    #[test]
+    fn turbine_cell_expansion_uses_authoritative_vm_index_semantics() {
+        let cell = CellArray::new(
+            vec![
+                Value::String("first".into()),
+                Value::String("second".into()),
+            ],
+            1,
+            2,
+        )
+        .expect("cell");
+        let exact = Tensor::new_integer(IntegerStorage::U64(vec![2, 1]), vec![1, 2])
+            .expect("exact indices");
+        assert_eq!(
+            turbine_expand_cell_indices(&cell, &[Value::Tensor(exact)]).expect("expansion"),
+            vec![
+                Value::String("second".into()),
+                Value::String("first".into())
+            ]
+        );
+
+        let fractional = Tensor::from_f32(vec![1.5], vec![1, 1]).expect("single index");
+        assert!(
+            turbine_expand_cell_indices(&cell, &[Value::Tensor(fractional)]).is_err(),
+            "fractional single indices must not be truncated"
         );
     }
 
