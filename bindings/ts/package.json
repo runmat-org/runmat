@@ -75,6 +75,14 @@
       "types": "./dist/package-cache/*.d.ts",
       "import": "./dist/package-cache/*.js"
     },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js"
+    },
+    "./testing/*": {
+      "types": "./dist/testing/*.d.ts",
+      "import": "./dist/testing/*.js"
+    },
     "./pkg/*": "./dist/pkg/*",
     "./pkg-web/*": "./dist/pkg-web/*",
     "./lsp/*": "./dist/lsp/*"
