@@ -342,7 +342,7 @@ fn collect_file_ids(value: &Value) -> BuiltinResult<Vec<i32>> {
                     .map(parse_integer_fid)
                     .collect();
             }
-            let mut ids = Vec::with_capacity(t.data.len());
+            let mut ids = Vec::with_capacity(t.len());
             for n in tensor::tensor_values_f64(t) {
                 ids.push(parse_fid_from_f64(n)?);
             }

@@ -518,23 +518,34 @@ fn tensor_value_to_json(
     offset: usize,
     options: &JsonEncodeOptions,
 ) -> BuiltinResult<JsonValue> {
-    match tensor.integer_storage() {
-        Some(storage) => Ok(JsonValue::Number(integer_storage_number(storage, offset))),
-        None => number_to_json(tensor.data[offset], options),
+    let value = tensor
+        .numeric_value_at(offset)
+        .expect("index within authoritative numeric storage");
+    match value.into_int_value() {
+        Some(value) => Ok(JsonValue::Number(integer_value_number(&value))),
+        None => number_to_json(value.materialize_f64(), options),
+    }
+}
+
+fn integer_value_number(value: &IntValue) -> JsonNumber {
+    match value {
+        IntValue::I8(value) => JsonNumber::I64(*value as i64),
+        IntValue::I16(value) => JsonNumber::I64(*value as i64),
+        IntValue::I32(value) => JsonNumber::I64(*value as i64),
+        IntValue::I64(value) => JsonNumber::I64(*value),
+        IntValue::U8(value) => JsonNumber::U64(*value as u64),
+        IntValue::U16(value) => JsonNumber::U64(*value as u64),
+        IntValue::U32(value) => JsonNumber::U64(*value as u64),
+        IntValue::U64(value) => JsonNumber::U64(*value),
     }
 }
 
 fn integer_storage_number(storage: &IntegerStorage, offset: usize) -> JsonNumber {
-    match storage {
-        IntegerStorage::I8(values) => JsonNumber::I64(values[offset] as i64),
-        IntegerStorage::I16(values) => JsonNumber::I64(values[offset] as i64),
-        IntegerStorage::I32(values) => JsonNumber::I64(values[offset] as i64),
-        IntegerStorage::I64(values) => JsonNumber::I64(values[offset]),
-        IntegerStorage::U8(values) => JsonNumber::U64(values[offset] as u64),
-        IntegerStorage::U16(values) => JsonNumber::U64(values[offset] as u64),
-        IntegerStorage::U32(values) => JsonNumber::U64(values[offset] as u64),
-        IntegerStorage::U64(values) => JsonNumber::U64(values[offset]),
-    }
+    integer_value_number(
+        &storage
+            .value_at(offset)
+            .expect("index within authoritative integer storage"),
+    )
 }
 
 fn complex_scalar_to_json(

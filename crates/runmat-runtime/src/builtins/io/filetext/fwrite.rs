@@ -712,23 +712,17 @@ impl WriteElement {
 
 fn flatten_elements(value: &Value) -> Result<Vec<WriteElement>, String> {
     match value {
-        Value::Tensor(tensor) => Ok(tensor.integer_storage().map_or_else(
-            || {
-                tensor
-                    .data
-                    .iter()
-                    .copied()
-                    .map(WriteElement::Floating)
-                    .collect()
-            },
-            |storage| {
-                storage
-                    .exact_values()
-                    .into_iter()
-                    .map(WriteElement::Integer)
-                    .collect()
-            },
-        )),
+        Value::Tensor(tensor) => Ok((0..tensor.len())
+            .map(|index| {
+                let value = tensor
+                    .numeric_value_at(index)
+                    .expect("index within authoritative numeric storage");
+                value.into_int_value().map_or_else(
+                    || WriteElement::Floating(value.materialize_f64()),
+                    WriteElement::Integer,
+                )
+            })
+            .collect()),
         Value::Num(n) => Ok(vec![WriteElement::Floating(*n)]),
         Value::Int(int) => Ok(vec![WriteElement::Integer(int.clone())]),
         Value::Bool(b) => Ok(vec![WriteElement::Floating(if *b { 1.0 } else { 0.0 })]),

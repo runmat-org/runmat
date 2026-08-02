@@ -717,7 +717,10 @@ fn parse_count(value: &Value) -> BuiltinResult<usize> {
     let numeric = match value {
         Value::Num(n) => *n,
         Value::Tensor(t) if crate::builtins::common::tensor::is_scalar_tensor(t) => {
-            if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+            let value = t
+                .numeric_value_at(0)
+                .expect("scalar tensor has authoritative numeric value");
+            if let Some(int) = value.into_int_value() {
                 return int.try_to_usize().ok_or_else(|| {
                     let (error, detail) = if int.try_to_u64().is_some() {
                         (
@@ -733,7 +736,7 @@ fn parse_count(value: &Value) -> BuiltinResult<usize> {
                     read_flow(error, detail)
                 });
             }
-            t.data[0]
+            value.materialize_f64()
         }
         _ => {
             return Err(read_flow(

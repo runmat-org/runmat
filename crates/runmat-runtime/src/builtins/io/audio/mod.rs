@@ -637,18 +637,18 @@ fn parse_audioread_datatype(value: &str) -> BuiltinResult<bool> {
 fn parse_sample_range(value: &Value) -> BuiltinResult<(usize, usize)> {
     let parsed = match value {
         Value::Tensor(t) => {
-            if let Some(storage) = t.integer_storage() {
-                storage
-                    .exact_values()
-                    .iter()
-                    .map(|value| parse_positive_integer_value(value, "sample range"))
-                    .collect::<BuiltinResult<Vec<_>>>()?
-            } else {
-                t.data
-                    .iter()
-                    .map(|value| parse_positive_integer(*value, "sample range"))
-                    .collect::<BuiltinResult<Vec<_>>>()?
+            let mut values = Vec::with_capacity(t.len());
+            for index in 0..t.len() {
+                let value = t
+                    .numeric_value_at(index)
+                    .expect("index within authoritative numeric storage");
+                values.push(if let Some(value) = value.into_int_value() {
+                    parse_positive_integer_value(&value, "sample range")?
+                } else {
+                    parse_positive_integer(value.materialize_f64(), "sample range")?
+                });
             }
+            values
         }
         Value::Num(n) => vec![parse_positive_integer(*n, "sample range")?],
         Value::Int(i) => vec![parse_positive_integer_value(i, "sample range")?],

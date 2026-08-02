@@ -550,16 +550,17 @@ fn string_payload(data: &Value) -> BuiltinResult<Payload> {
 
 fn flatten_numeric(value: &Value) -> BuiltinResult<Vec<WriteElement>> {
     match value {
-        Value::Tensor(t) => Ok(t.integer_storage().map_or_else(
-            || t.data.iter().copied().map(WriteElement::Floating).collect(),
-            |storage| {
-                storage
-                    .exact_values()
-                    .into_iter()
-                    .map(WriteElement::Integer)
-                    .collect()
-            },
-        )),
+        Value::Tensor(t) => Ok((0..t.len())
+            .map(|index| {
+                let value = t
+                    .numeric_value_at(index)
+                    .expect("index within authoritative numeric storage");
+                value.into_int_value().map_or_else(
+                    || WriteElement::Floating(value.materialize_f64()),
+                    WriteElement::Integer,
+                )
+            })
+            .collect()),
         Value::SparseTensor(s) => {
             let total_elements = s.rows.checked_mul(s.cols).ok_or_else(|| {
                 write_error_with_message(
@@ -576,14 +577,17 @@ fn flatten_numeric(value: &Value) -> BuiltinResult<Vec<WriteElement>> {
             let dense = s.to_dense().map_err(|err| {
                 write_error_with_message(format!("write: {err}"), &WRITE_ERROR_INTERNAL)
             })?;
-            if let Some(storage) = dense.integer_storage() {
-                return Ok(storage
-                    .exact_values()
-                    .into_iter()
-                    .map(WriteElement::Integer)
-                    .collect());
-            }
-            Ok(dense.data.into_iter().map(WriteElement::Floating).collect())
+            Ok((0..dense.len())
+                .map(|index| {
+                    let value = dense
+                        .numeric_value_at(index)
+                        .expect("index within authoritative numeric storage");
+                    value.into_int_value().map_or_else(
+                        || WriteElement::Floating(value.materialize_f64()),
+                        WriteElement::Integer,
+                    )
+                })
+                .collect())
         }
         Value::Num(n) => Ok(vec![WriteElement::Floating(*n)]),
         Value::Int(iv) => Ok(vec![WriteElement::Integer(iv.clone())]),

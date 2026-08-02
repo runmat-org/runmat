@@ -337,30 +337,18 @@ fn format_numeric_tensor_nested(tensor: &Tensor) -> Vec<String> {
         return vec![format_tensor_value(tensor, 0)];
     }
     let shape = canonical_dims(&tensor.shape);
-    let class_name = tensor
-        .integer_storage()
-        .map(IntegerStorage::class_name)
-        .unwrap_or("double");
+    let class_name = tensor.numeric_dtype().class_name();
     vec![format!("[{} {class_name}]", dims_to_string(&shape))]
 }
 
 fn format_tensor_value(tensor: &Tensor, index: usize) -> String {
-    tensor
-        .integer_storage()
-        .map(|storage| format_integer_storage_value(storage, index))
-        .unwrap_or_else(|| format_scalar_number(tensor.data[index]))
-}
-
-fn format_integer_storage_value(storage: &IntegerStorage, index: usize) -> String {
-    match storage {
-        IntegerStorage::I8(values) => values[index].to_string(),
-        IntegerStorage::I16(values) => values[index].to_string(),
-        IntegerStorage::I32(values) => values[index].to_string(),
-        IntegerStorage::I64(values) => values[index].to_string(),
-        IntegerStorage::U8(values) => values[index].to_string(),
-        IntegerStorage::U16(values) => values[index].to_string(),
-        IntegerStorage::U32(values) => values[index].to_string(),
-        IntegerStorage::U64(values) => values[index].to_string(),
+    let value = tensor
+        .numeric_value_at(index)
+        .expect("index within authoritative numeric storage");
+    if let Some(value) = value.into_int_value() {
+        value.decimal_string()
+    } else {
+        format_scalar_number(value.materialize_f64())
     }
 }
 
@@ -1008,6 +996,22 @@ pub(crate) mod tests {
         let lines = render_value(&Value::Struct(fields), RenderMode::TopLevel);
 
         assert_eq!(lines, vec!["    values: [1x2 int16]".to_string()]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn native_single_tensor_nested_summary_preserves_class() {
+        let tensor = Tensor::from_numeric_storage(
+            runmat_builtins::NumericStorage::F32(vec![1.0, 2.0]),
+            vec![1, 2],
+        )
+        .expect("single tensor");
+        let mut fields = StructValue::new();
+        fields.insert("values", Value::Tensor(tensor));
+
+        let lines = render_value(&Value::Struct(fields), RenderMode::TopLevel);
+
+        assert_eq!(lines, vec!["    values: [1x2 single]".to_string()]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

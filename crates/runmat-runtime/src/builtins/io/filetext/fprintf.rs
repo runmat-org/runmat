@@ -314,8 +314,11 @@ fn try_tensor_char_row_as_string(value: &Value) -> Option<Result<String, String>
                 || (t.shape.len() == 1 && len == t.shape[0]);
             if is_row {
                 let mut out = String::with_capacity(len);
-                if let Some(storage) = t.integer_storage() {
-                    for code in storage.exact_values() {
+                for index in 0..len {
+                    let code = t
+                        .numeric_value_at(index)
+                        .expect("index within authoritative numeric storage");
+                    if let Some(code) = code.into_int_value() {
                         if let Some(ch) = char_from_int_value(&code) {
                             out.push(ch);
                         } else {
@@ -323,9 +326,8 @@ fn try_tensor_char_row_as_string(value: &Value) -> Option<Result<String, String>
                                 "fprintf: formatSpec contains invalid character code".to_string(),
                             ));
                         }
-                    }
-                } else {
-                    for &code in &t.data {
+                    } else {
+                        let code = code.materialize_f64();
                         if !code.is_finite() || code.fract().abs() > f64::EPSILON || code < 0.0 {
                             return Some(Err(
                                 "fprintf: formatSpec must be a character row vector or string scalar"
