@@ -11,16 +11,17 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::tensor;
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{
     build_runtime_error, gather_if_needed_async, make_cell_with_shape, user_functions,
     BuiltinResult, RuntimeError,
 };
-use runmat_accelerate_api::{set_handle_logical, GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{set_handle_logical, GpuTensorHandle};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, Closure, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
+    CharArray, Closure, ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericScalar,
+    StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -586,12 +587,7 @@ fn maybe_upload_uniform(
 
     match value {
         Value::Tensor(tensor) => {
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider
-                .upload(&view)
+            let handle = gpu_helpers::upload_tensor(provider, &tensor)
                 .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?;
             Ok(Value::GpuTensor(handle))
         }
@@ -603,12 +599,7 @@ fn maybe_upload_uniform(
                 .collect();
             let tensor = Tensor::new(data, logical.shape.clone())
                 .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?;
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider
-                .upload(&view)
+            let handle = gpu_helpers::upload_tensor(provider, &tensor)
                 .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?;
             set_handle_logical(&handle, true);
             Ok(Value::GpuTensor(handle))
@@ -718,7 +709,7 @@ impl ArrayData {
 
     fn len(&self) -> usize {
         match self {
-            ArrayData::Tensor(t) => t.data.len(),
+            ArrayData::Tensor(t) => t.len(),
             ArrayData::Logical(l) => l.data.len(),
             ArrayData::Complex(c) => c.data.len(),
             ArrayData::Char(ca) => ca.rows * ca.cols,
@@ -764,16 +755,16 @@ impl ArrayData {
 
     fn value_at(&self, idx: usize) -> BuiltinResult<Value> {
         match self {
-            ArrayData::Tensor(t) if t.integer_storage().is_none() => {
-                Ok(Value::Num(*t.data.get(idx).ok_or_else(|| {
-                    arrayfun_flow("arrayfun: index out of bounds")
-                })?))
-            }
-            ArrayData::Tensor(t) => Ok(Value::Int(
-                t.integer_storage()
-                    .and_then(|storage| storage.value_at(idx))
-                    .ok_or_else(|| arrayfun_flow("arrayfun: index out of bounds"))?,
-            )),
+            ArrayData::Tensor(t) => match t
+                .numeric_value_at(idx)
+                .ok_or_else(|| arrayfun_flow("arrayfun: index out of bounds"))?
+            {
+                NumericScalar::F64(value) => Ok(Value::Num(value)),
+                NumericScalar::F32(value) => Ok(Value::Num(f64::from(value))),
+                value => Ok(Value::Int(value.into_int_value().ok_or_else(|| {
+                    arrayfun_internal("arrayfun: integer scalar classification failed")
+                })?)),
+            },
             ArrayData::Logical(l) => Ok(Value::Bool(
                 *l.data
                     .get(idx)
@@ -1069,9 +1060,20 @@ async fn try_gpu_fast_path(
 enum UniformCollector {
     Pending,
     Double(Vec<f64>),
+    Integer {
+        prototype: IntegerStorage,
+        values: Vec<IntValue>,
+    },
     Logical(Vec<u8>),
     Complex(Vec<(f64, f64)>),
     Char(Vec<char>),
+}
+
+fn heterogeneous_integer_output() -> RuntimeError {
+    arrayfun_error_with_detail(
+        &ARRAYFUN_ERROR_UNIFORM_OUTPUT_TYPE,
+        "integer callback outputs with UniformOutput=true must all have the same integer class",
+    )
 }
 
 impl UniformCollector {
@@ -1084,6 +1086,13 @@ impl UniformCollector {
                 }
                 ClassifiedValue::Double(d) => {
                     *self = UniformCollector::Double(vec![d]);
+                    Ok(())
+                }
+                ClassifiedValue::Integer(value) => {
+                    *self = UniformCollector::Integer {
+                        prototype: IntegerStorage::from_scalar(value.clone()),
+                        values: vec![value],
+                    };
                     Ok(())
                 }
                 ClassifiedValue::Complex(c) => {
@@ -1109,6 +1118,7 @@ impl UniformCollector {
                     *self = UniformCollector::Double(data);
                     Ok(())
                 }
+                ClassifiedValue::Integer(_) => Err(heterogeneous_integer_output()),
                 ClassifiedValue::Complex(c) => {
                     let mut data: Vec<(f64, f64)> = bits
                         .iter()
@@ -1137,6 +1147,7 @@ impl UniformCollector {
                     data.push(d);
                     Ok(())
                 }
+                ClassifiedValue::Integer(_) => Err(heterogeneous_integer_output()),
                 ClassifiedValue::Complex(c) => {
                     let promoted: Vec<(f64, f64)> = data.iter().map(|&v| (v, 0.0)).collect();
                     let mut complex = promoted;
@@ -1149,6 +1160,20 @@ impl UniformCollector {
                     Ok(())
                 }
             },
+            UniformCollector::Integer { prototype, values } => match classify_value(value)? {
+                ClassifiedValue::Integer(value) => {
+                    let candidate = IntegerStorage::from_scalar(value.clone());
+                    if candidate.numeric_dtype() != prototype.numeric_dtype() {
+                        return Err(heterogeneous_integer_output());
+                    }
+                    values.push(value);
+                    Ok(())
+                }
+                ClassifiedValue::Logical(_)
+                | ClassifiedValue::Double(_)
+                | ClassifiedValue::Complex(_)
+                | ClassifiedValue::Char(_) => Err(heterogeneous_integer_output()),
+            },
             UniformCollector::Complex(data) => match classify_value(value)? {
                 ClassifiedValue::Logical(b) => {
                     data.push((if b { 1.0 } else { 0.0 }, 0.0));
@@ -1158,6 +1183,7 @@ impl UniformCollector {
                     data.push((d, 0.0));
                     Ok(())
                 }
+                ClassifiedValue::Integer(_) => Err(heterogeneous_integer_output()),
                 ClassifiedValue::Complex(c) => {
                     data.push(c);
                     Ok(())
@@ -1184,6 +1210,7 @@ impl UniformCollector {
                     *self = UniformCollector::Double(data);
                     Ok(())
                 }
+                ClassifiedValue::Integer(_) => Err(heterogeneous_integer_output()),
                 ClassifiedValue::Complex(c) => {
                     let mut promoted: Vec<(f64, f64)> =
                         chars.iter().map(|&ch| (ch as u32 as f64, 0.0)).collect();
@@ -1205,6 +1232,14 @@ impl UniformCollector {
             }
             UniformCollector::Double(data) => {
                 let tensor = Tensor::new(data, shape.to_vec())
+                    .map_err(|e| arrayfun_internal(format!("arrayfun: {e}")))?;
+                Ok(Value::Tensor(tensor))
+            }
+            UniformCollector::Integer { prototype, values } => {
+                let storage = prototype
+                    .from_same_class_values(values)
+                    .map_err(|e| arrayfun_internal(format!("arrayfun: {e}")))?;
+                let tensor = Tensor::new_integer(storage, shape.to_vec())
                     .map_err(|e| arrayfun_internal(format!("arrayfun: {e}")))?;
                 Ok(Value::Tensor(tensor))
             }
@@ -1265,6 +1300,7 @@ impl UniformCollector {
 enum ClassifiedValue {
     Logical(bool),
     Double(f64),
+    Integer(IntValue),
     Complex((f64, f64)),
     Char(char),
 }
@@ -1273,19 +1309,20 @@ fn classify_value(value: &Value) -> BuiltinResult<ClassifiedValue> {
     match value {
         Value::Bool(b) => Ok(ClassifiedValue::Logical(*b)),
         Value::LogicalArray(la) if la.len() == 1 => Ok(ClassifiedValue::Logical(la.data[0] != 0)),
-        Value::Int(_) => Err(arrayfun_error_with_detail(
-            &ARRAYFUN_ERROR_UNIFORM_OUTPUT_TYPE,
-            "native integer scalar output requires a typed uniform collector; refusing f64 fallback",
-        )),
+        Value::Int(value) => Ok(ClassifiedValue::Integer(value.clone())),
         Value::Num(n) => Ok(ClassifiedValue::Double(*n)),
-        Value::Tensor(t) if t.integer_storage().is_some() && tensor::is_scalar_tensor(t) => {
-            Err(arrayfun_error_with_detail(
-                &ARRAYFUN_ERROR_UNIFORM_OUTPUT_TYPE,
-                "native integer tensor output requires a typed uniform collector; refusing f64 fallback",
-            ))
-        }
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
-            Ok(ClassifiedValue::Double(tensor::tensor_value_f64(t, 0)))
+            match t.numeric_value_at(0).ok_or_else(|| {
+                arrayfun_internal("arrayfun: scalar tensor has no numeric storage value")
+            })? {
+                NumericScalar::F64(value) => Ok(ClassifiedValue::Double(value)),
+                NumericScalar::F32(value) => Ok(ClassifiedValue::Double(f64::from(value))),
+                value => Ok(ClassifiedValue::Integer(
+                    value.into_int_value().ok_or_else(|| {
+                        arrayfun_internal("arrayfun: integer scalar classification failed")
+                    })?,
+                )),
+            }
         }
         Value::Complex(re, im) => Ok(ClassifiedValue::Complex((*re, *im))),
         Value::ComplexTensor(t) if tensor::is_scalar_complex_tensor(t) => {
@@ -1382,7 +1419,6 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
         ComplexTensor, IntegerComplexStorage, IntegerStorage, ResolveContext, Tensor, Type, Value,
     };
@@ -1392,12 +1428,15 @@ pub(crate) mod tests {
         block_on(arrayfun_builtin(func, rest))
     }
 
+    fn values(tensor: &Tensor) -> Vec<f64> {
+        tensor.materialize_f64()
+    }
+
     #[test]
     fn typed_integer_input_elements_are_extracted_from_exact_storage() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
                 .expect("integer tensor");
-        tensor.data.clear();
         let input = ArrayInput {
             data: ArrayData::Tensor(tensor),
             is_scalar: false,
@@ -1410,26 +1449,96 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn uniform_classifier_rejects_poisoned_typed_integer_tensor_storage() {
-        let mut tensor =
+    fn uniform_classifier_preserves_typed_integer_tensor_storage() {
+        let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
                 .expect("integer tensor");
-        tensor.data.clear();
 
-        let error = match classify_value(&Value::Tensor(tensor)) {
-            Ok(_) => panic!("typed integer output must not use f64"),
-            Err(error) => error,
-        };
-        assert!(error.to_string().contains("typed uniform collector"));
+        match classify_value(&Value::Tensor(tensor)).expect("classify") {
+            ClassifiedValue::Integer(value) => {
+                assert_eq!(value, IntValue::U64(9_007_199_254_740_993));
+            }
+            _ => panic!("expected integer classification"),
+        }
     }
 
     #[test]
-    fn uniform_classifier_rejects_wide_integer_scalar_before_float_materialization() {
-        let error = match classify_value(&Value::Int(runmat_builtins::IntValue::I64(i64::MIN))) {
-            Ok(_) => panic!("wide integer scalar must not use f64"),
-            Err(error) => error,
-        };
-        assert!(error.to_string().contains("typed uniform collector"));
+    fn uniform_classifier_preserves_wide_integer_scalar() {
+        match classify_value(&Value::Int(IntValue::I64(i64::MIN))).expect("classify") {
+            ClassifiedValue::Integer(value) => assert_eq!(value, IntValue::I64(i64::MIN)),
+            _ => panic!("expected integer classification"),
+        }
+    }
+
+    #[test]
+    fn uniform_collector_preserves_every_integer_class() {
+        let cases = [
+            (
+                IntValue::I8(i8::MIN),
+                IntValue::I8(i8::MAX),
+                IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+            ),
+            (
+                IntValue::I16(i16::MIN),
+                IntValue::I16(i16::MAX),
+                IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+            ),
+            (
+                IntValue::I32(i32::MIN),
+                IntValue::I32(i32::MAX),
+                IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            ),
+            (
+                IntValue::I64(i64::MIN),
+                IntValue::I64(i64::MAX),
+                IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            ),
+            (
+                IntValue::U8(u8::MIN),
+                IntValue::U8(u8::MAX),
+                IntegerStorage::U8(vec![u8::MIN, u8::MAX]),
+            ),
+            (
+                IntValue::U16(u16::MIN),
+                IntValue::U16(u16::MAX),
+                IntegerStorage::U16(vec![u16::MIN, u16::MAX]),
+            ),
+            (
+                IntValue::U32(u32::MIN),
+                IntValue::U32(u32::MAX),
+                IntegerStorage::U32(vec![u32::MIN, u32::MAX]),
+            ),
+            (
+                IntValue::U64(9_007_199_254_740_993),
+                IntValue::U64(u64::MAX),
+                IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            ),
+        ];
+
+        for (first, second, expected) in cases {
+            let mut collector = UniformCollector::Pending;
+            collector.push(&Value::Int(first)).expect("first value");
+            collector.push(&Value::Int(second)).expect("second value");
+            let Value::Tensor(tensor) = collector.finish(&[1, 2]).expect("finish") else {
+                panic!("expected integer tensor");
+            };
+            assert_eq!(tensor.integer_storage(), Some(&expected));
+        }
+    }
+
+    #[test]
+    fn uniform_collector_rejects_mixed_integer_classes() {
+        let mut collector = UniformCollector::Pending;
+        collector
+            .push(&Value::Int(IntValue::U8(1)))
+            .expect("first value");
+        let error = collector
+            .push(&Value::Int(IntValue::U16(2)))
+            .expect_err("mixed integer classes must fail");
+        assert_eq!(
+            error.identifier(),
+            ARRAYFUN_ERROR_UNIFORM_OUTPUT_TYPE.identifier
+        );
     }
 
     #[test]
@@ -1439,8 +1548,7 @@ pub(crate) mod tests {
             IntegerStorage::I64(vec![-9_007_199_254_740_993]),
         )
         .expect("complex integer storage");
-        let mut tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
-        tensor.data.clear();
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
 
         match classify_value(&Value::ComplexTensor(tensor)).expect("classify") {
             ClassifiedValue::Complex((re, im)) => {
@@ -1455,7 +1563,7 @@ pub(crate) mod tests {
     #[test]
     fn arrayfun_basic_sin() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
-        let expected: Vec<f64> = tensor.data.iter().map(|&x| x.sin()).collect();
+        let expected: Vec<f64> = values(&tensor).into_iter().map(f64::sin).collect();
         let result = call(
             Value::FunctionHandle("sin".to_string()),
             vec![Value::Tensor(tensor.clone())],
@@ -1464,7 +1572,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 3]);
-                assert_eq!(out.data, expected);
+                assert_eq!(values(&out), expected);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1493,7 +1601,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
-                assert_eq!(out.data, vec![11.0, 12.0]);
+                assert_eq!(values(&out), vec![11.0, 12.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1526,7 +1634,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
-                assert_eq!(out.data, vec![21.0, 22.0]);
+                assert_eq!(values(&out), vec![21.0, 22.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1569,7 +1677,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
-                assert_eq!(out.data, vec![31.0, 32.0]);
+                assert_eq!(values(&out), vec![31.0, 32.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1602,7 +1710,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
-                assert_eq!(out.data, vec![41.0, 42.0]);
+                assert_eq!(values(&out), vec![41.0, 42.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1765,7 +1873,7 @@ pub(crate) mod tests {
     #[test]
     fn arrayfun_additional_scalar_argument() {
         let tensor = Tensor::new(vec![0.5, 1.0, -1.0], vec![3, 1]).unwrap();
-        let expected: Vec<f64> = tensor.data.iter().map(|&y| y.atan2(1.0)).collect();
+        let expected: Vec<f64> = values(&tensor).into_iter().map(|y| y.atan2(1.0)).collect();
         let result = call(
             Value::FunctionHandle("atan2".to_string()),
             vec![Value::Tensor(tensor), Value::Num(1.0)],
@@ -1773,7 +1881,7 @@ pub(crate) mod tests {
         .expect("arrayfun");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.data, expected);
+                assert_eq!(values(&out), expected);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1783,7 +1891,10 @@ pub(crate) mod tests {
     #[test]
     fn arrayfun_uniform_false_returns_cell() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let expected: Vec<Value> = tensor.data.iter().map(|&x| Value::Num(x.sin())).collect();
+        let expected: Vec<Value> = values(&tensor)
+            .into_iter()
+            .map(|x| Value::Num(x.sin()))
+            .collect();
         let result = call(
             Value::FunctionHandle("sin".to_string()),
             vec![
@@ -1876,7 +1987,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 1]);
-                assert_eq!(out.data, vec![42.0, 42.0, 42.0]);
+                assert_eq!(values(&out), vec![42.0, 42.0, 42.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1941,11 +2052,7 @@ pub(crate) mod tests {
     fn arrayfun_uniform_false_gpu_returns_cell() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result = call(
                 Value::FunctionHandle("sin".to_string()),
                 vec![
@@ -1979,11 +2086,7 @@ pub(crate) mod tests {
     fn arrayfun_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result = call(
                 Value::FunctionHandle("sin".to_string()),
                 vec![Value::GpuTensor(handle)],
@@ -1992,8 +2095,8 @@ pub(crate) mod tests {
             match result {
                 Value::GpuTensor(gpu) => {
                     let gathered = test_support::gather(Value::GpuTensor(gpu.clone())).unwrap();
-                    let expected: Vec<f64> = tensor.data.iter().map(|&x| x.sin()).collect();
-                    assert_eq!(gathered.data, expected);
+                    let expected: Vec<f64> = values(&tensor).into_iter().map(f64::sin).collect();
+                    assert_eq!(values(&gathered), expected);
                     let _ = provider.free(&gpu);
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
@@ -2011,11 +2114,7 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
 
         let tensor = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap();
-        let view = HostTensorView {
-            data: &tensor.data,
-            shape: &tensor.shape,
-        };
-        let handle = provider.upload(&view).expect("upload");
+        let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
         let result = call(
             Value::FunctionHandle("sin".into()),
             vec![Value::GpuTensor(handle.clone())],
@@ -2025,13 +2124,13 @@ pub(crate) mod tests {
             panic!("expected GPU tensor result");
         };
         let gathered = test_support::gather(Value::GpuTensor(out_handle.clone())).unwrap();
-        let expected: Vec<f64> = tensor.data.iter().map(|v| v.sin()).collect();
+        let expected: Vec<f64> = values(&tensor).into_iter().map(f64::sin).collect();
         assert_eq!(gathered.shape, tensor.shape);
         let tol = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (actual, expect) in gathered.data.iter().zip(expected.iter()) {
+        for (actual, expect) in values(&gathered).iter().zip(expected.iter()) {
             assert!(
                 (actual - expect).abs() < tol,
                 "expected {expect}, got {actual}"
@@ -2052,16 +2151,8 @@ pub(crate) mod tests {
 
         let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![4.0, 3.0, 2.0, 1.0], vec![2, 2]).unwrap();
-        let view_a = HostTensorView {
-            data: &a.data,
-            shape: &a.shape,
-        };
-        let view_b = HostTensorView {
-            data: &b.data,
-            shape: &b.shape,
-        };
-        let handle_a = provider.upload(&view_a).expect("upload a");
-        let handle_b = provider.upload(&view_b).expect("upload b");
+        let handle_a = gpu_helpers::upload_tensor(provider, &a).expect("upload a");
+        let handle_b = gpu_helpers::upload_tensor(provider, &b).expect("upload b");
         let result = call(
             Value::FunctionHandle("plus".into()),
             vec![
@@ -2075,10 +2166,9 @@ pub(crate) mod tests {
             panic!("expected GPU tensor result");
         };
         let gathered = test_support::gather(Value::GpuTensor(out_handle.clone())).unwrap();
-        let expected: Vec<f64> = a
-            .data
+        let expected: Vec<f64> = values(&a)
             .iter()
-            .zip(b.data.iter())
+            .zip(values(&b).iter())
             .map(|(x, y)| x + y)
             .collect();
         assert_eq!(gathered.shape, a.shape);
@@ -2086,7 +2176,7 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (actual, expect) in gathered.data.iter().zip(expected.iter()) {
+        for (actual, expect) in values(&gathered).iter().zip(expected.iter()) {
             assert!(
                 (actual - expect).abs() < tol,
                 "expected {expect}, got {actual}"
