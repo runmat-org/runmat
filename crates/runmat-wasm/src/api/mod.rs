@@ -5,3 +5,4 @@ pub(crate) mod plot;
 pub(crate) mod project;
 pub(crate) mod session;
 pub(crate) mod streams;
+pub(crate) mod testing;

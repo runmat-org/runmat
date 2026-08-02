@@ -70,16 +70,16 @@ use crate::wire::value::MAX_DATA_PREVIEW;
 
 #[wasm_bindgen]
 pub struct RunMatWasm {
-    session: RefCell<RunMatSession>,
+    pub(crate) session: RefCell<RunMatSession>,
     config: RefCell<SessionConfig>,
     gpu_status: GpuStatus,
     disposed: Cell<bool>,
-    active_interrupt: RefCell<Option<Arc<AtomicBool>>>,
+    pub(crate) active_interrupt: RefCell<Option<Arc<AtomicBool>>>,
     telemetry_sink: Option<Arc<dyn TelemetrySink>>,
     package_cache: Option<Arc<dyn runmat_package_cache::CacheBackend>>,
 }
 
-struct WasmInterruptGuard<'a> {
+pub(crate) struct WasmInterruptGuard<'a> {
     slot: &'a RefCell<Option<Arc<AtomicBool>>>,
     _runtime_guard: runmat_runtime::interrupt::InterruptGuard,
 }
@@ -90,7 +90,7 @@ impl Drop for WasmInterruptGuard<'_> {
     }
 }
 
-fn install_wasm_interrupt(
+pub(crate) fn install_wasm_interrupt(
     slot: &RefCell<Option<Arc<AtomicBool>>>,
     handle: Arc<AtomicBool>,
 ) -> WasmInterruptGuard<'_> {
@@ -144,7 +144,7 @@ impl RunMatWasm {
         }
     }
 
-    fn ensure_not_disposed(&self) -> Result<(), JsValue> {
+    pub(crate) fn ensure_not_disposed(&self) -> Result<(), JsValue> {
         if self.disposed.get() {
             return Err(js_error("RunMat session has been disposed"));
         }
