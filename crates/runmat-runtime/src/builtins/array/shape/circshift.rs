@@ -436,8 +436,7 @@ fn value_to_shift_vector(value: &Value) -> crate::BuiltinResult<Vec<isize>> {
             if let Some(parsed) = integer_tensor_shift_vector(tensor) {
                 return parsed;
             }
-            tensor
-                .data
+            tensor::tensor_values_f64_cow(tensor)
                 .iter()
                 .map(|val| numeric_to_isize(*val))
                 .collect::<Result<Vec<_>, _>>()
@@ -526,7 +525,7 @@ fn value_to_dims_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
                 });
             }
             let mut dims = Vec::with_capacity(tensor_element_len(tensor));
-            for &val in &tensor.data {
+            for &val in tensor::tensor_values_f64_cow(tensor).iter() {
                 if !val.is_finite() {
                     return Err(circshift_invalid_dims(
                         "circshift: dimensions must be finite integers",
@@ -598,9 +597,7 @@ fn value_to_dims_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
 }
 
 fn tensor_element_len(tensor: &Tensor) -> usize {
-    tensor
-        .integer_storage()
-        .map_or(tensor.data.len(), |storage| storage.len())
+    tensor.len()
 }
 
 fn integer_tensor_shift_vector(tensor: &Tensor) -> Option<crate::BuiltinResult<Vec<isize>>> {
