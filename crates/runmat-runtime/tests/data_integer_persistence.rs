@@ -1,4 +1,6 @@
-use runmat_builtins::{CellArray, IntValue, IntegerStorage, StructValue, Tensor, Value};
+use runmat_builtins::{
+    CellArray, IntValue, IntegerStorage, NumericDType, StructValue, Tensor, Value,
+};
 use runmat_runtime::data::{DataArrayPayload, DataArrayValues};
 
 fn empty_cell() -> Value {
@@ -107,6 +109,27 @@ fn data_arrays_keep_exact_integer_storage_through_chunked_api_paths() {
         };
         assert_eq!(read_back.integer_storage(), Some(&storage), "{dtype}");
     }
+}
+
+#[test]
+fn data_arrays_keep_native_single_storage_through_chunked_api_paths() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let array = create_array(
+        dir.path().join("f32.data").display().to_string(),
+        "f32",
+        vec![2, 1],
+        vec![1, 1],
+    );
+    let input = Tensor::from_f32(vec![0.1, -2.5], vec![2, 1]).expect("single tensor");
+    runmat_runtime::call_builtin("DataArray.write", &[array.clone(), Value::Tensor(input)])
+        .expect("write single array");
+    let Value::Tensor(read_back) =
+        runmat_runtime::call_builtin("DataArray.read", &[array]).expect("read single array")
+    else {
+        panic!("expected tensor");
+    };
+    assert_eq!(read_back.numeric_dtype(), NumericDType::F32);
+    assert_eq!(read_back.materialize_f64(), vec![f64::from(0.1_f32), -2.5]);
 }
 
 #[test]
