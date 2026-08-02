@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
+use runmat_accelerate_api::{GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -493,7 +493,7 @@ impl InputMeta {
 
 fn numeric_dtype_from_value(value: &Value) -> Option<NumericDType> {
     match value {
-        Value::Tensor(t) => Some(t.dtype),
+        Value::Tensor(t) => Some(t.numeric_dtype()),
         Value::GpuTensor(handle) => {
             let precision = runmat_accelerate_api::handle_precision(handle).or_else(|| {
                 runmat_accelerate_api::provider_for_handle(handle)
@@ -1138,12 +1138,7 @@ fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
         ));
     };
 
-    let view = HostTensorView {
-        data: &tensor.data,
-        shape: &tensor.shape,
-    };
-    let handle = provider
-        .upload(&view)
+    let handle = gpu_helpers::upload_tensor(provider, &tensor)
         .map_err(|e| prod_internal_error(format!("failed to upload GPU result: {e}")))?;
     Ok(Value::GpuTensor(handle))
 }
@@ -1167,7 +1162,11 @@ fn real_to_complex(value: Value) -> BuiltinResult<Value> {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(t) => {
-            let data: Vec<(f64, f64)> = t.data.iter().map(|&v| (v, 0.0)).collect();
+            let data: Vec<(f64, f64)> = t
+                .materialize_f64()
+                .into_iter()
+                .map(|value| (value, 0.0))
+                .collect();
             let tensor =
                 ComplexTensor::new(data, t.shape.clone()).map_err(|e| prod_internal_error(&e))?;
             Ok(complex_tensor_into_value(tensor))
@@ -1237,6 +1236,10 @@ pub(crate) mod tests {
         block_on(super::prod_builtin(value, rest))
     }
 
+    fn values(tensor: &Tensor) -> Vec<f64> {
+        tensor.materialize_f64()
+    }
+
     fn error_identifier(error: &crate::RuntimeError) -> Option<&str> {
         error.identifier()
     }
@@ -1301,7 +1304,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 3]);
-                assert_eq!(out.data, vec![4.0, 10.0, 18.0]);
+                assert_eq!(values(&out), vec![4.0, 10.0, 18.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1316,7 +1319,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
-                assert_eq!(out.data, vec![6.0, 120.0]);
+                assert_eq!(values(&out), vec![6.0, 120.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1324,16 +1327,14 @@ pub(crate) mod tests {
 
     #[test]
     fn prod_double_path_reads_typed_integer_storage_exactly() {
-        let mut tensor =
-            Tensor::new_integer(IntegerStorage::I16(vec![1, 4, 2, 5, 3, 6]), vec![2, 3])
-                .expect("tensor");
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, 4, 2, 5, 3, 6]), vec![2, 3])
+            .expect("tensor");
 
         let result = prod_builtin(Value::Tensor(tensor), Vec::new()).expect("prod");
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 3]);
-                assert_eq!(out.data, vec![4.0, 10.0, 18.0]);
+                assert_eq!(values(&out), vec![4.0, 10.0, 18.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1361,7 +1362,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 4, 1]);
-                assert_eq!(out.data, vec![16380.0, 587520.0, 4021920.0, 16030080.0]);
+                assert_eq!(values(&out), vec![16380.0, 587520.0, 4021920.0, 16030080.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1410,10 +1411,8 @@ pub(crate) mod tests {
 
     #[test]
     fn prod_native_integer_tensor_forms_read_typed_storage_exactly() {
-        let mut tensor =
-            Tensor::new_integer(IntegerStorage::I16(vec![1, 4, 2, 5, 3, 6]), vec![2, 3])
-                .expect("tensor");
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, 4, 2, 5, 3, 6]), vec![2, 3])
+            .expect("tensor");
 
         let result =
             prod_builtin(Value::Tensor(tensor), vec![Value::from("native")]).expect("prod");
@@ -1428,9 +1427,8 @@ pub(crate) mod tests {
             other => panic!("expected tensor result, got {other:?}"),
         }
 
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::I16(vec![2, 3, 4]), vec![3, 1]).expect("tensor");
-        tensor.data.clear();
         let result = prod_builtin(
             Value::Tensor(tensor),
             vec![Value::from("all"), Value::from("native")],
@@ -1438,15 +1436,12 @@ pub(crate) mod tests {
         .expect("prod all");
         assert_eq!(result, Value::Int(IntValue::I16(24)));
 
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             IntegerStorage::I32((1..=12).collect::<Vec<i32>>()),
             vec![2, 3, 2],
         )
         .expect("tensor");
-        tensor.data.clear();
-        let mut dims =
-            Tensor::new_integer(IntegerStorage::U8(vec![1, 3]), vec![1, 2]).expect("dims");
-        dims.data.clear();
+        let dims = Tensor::new_integer(IntegerStorage::U8(vec![1, 3]), vec![1, 2]).expect("dims");
 
         let result = prod_builtin(
             Value::Tensor(tensor),
@@ -1467,9 +1462,8 @@ pub(crate) mod tests {
 
     #[test]
     fn prod_native_template_reads_typed_integer_scalar_storage_exactly() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U32(vec![77]), vec![1, 1]).expect("tensor");
-        tensor.data.clear();
         let meta = InputMeta {
             class: InputClass::Integer(IntClass::U32),
             device: DevicePreference::Host,
@@ -1481,9 +1475,8 @@ pub(crate) mod tests {
 
         assert_eq!(result, Value::Int(IntValue::U32(77)));
 
-        let mut logical_tensor =
+        let logical_tensor =
             Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("logical tensor");
-        logical_tensor.data.clear();
         let meta = InputMeta {
             class: InputClass::Bool,
             device: DevicePreference::Host,
@@ -1555,15 +1548,11 @@ pub(crate) mod tests {
     fn prod_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result = prod_builtin(Value::GpuTensor(handle), Vec::new()).expect("prod");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 3]);
-            assert_eq!(gathered.data, vec![4.0, 10.0, 18.0]);
+            assert_eq!(values(&gathered), vec![4.0, 10.0, 18.0]);
         });
     }
 
@@ -1572,11 +1561,7 @@ pub(crate) mod tests {
     fn prod_gpu_all_reduction() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.5, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result = prod_builtin(Value::GpuTensor(handle.clone()), vec![Value::from("all")])
                 .expect("prod");
             let gathered = test_support::gather(result).expect("gather");
@@ -1603,7 +1588,7 @@ pub(crate) mod tests {
                 Value::GpuTensor(h) => {
                     let gathered = test_support::gather(Value::GpuTensor(h)).expect("gather");
                     assert_eq!(gathered.shape, vec![1, 2]);
-                    assert_eq!(gathered.data, vec![2.0, 12.0]);
+                    assert_eq!(values(&gathered), vec![2.0, 12.0]);
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
             }
@@ -1704,16 +1689,12 @@ pub(crate) mod tests {
     fn prod_gpu_omit_nan_falls_back_to_host() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![f64::NAN, 2.0, f64::NAN, 4.0], vec![2, 2]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result =
                 prod_builtin(Value::GpuTensor(handle), vec![Value::from("omitnan")]).expect("prod");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 2]);
-            assert_eq!(gathered.data, vec![2.0, 4.0]);
+            assert_eq!(values(&gathered), vec![2.0, 4.0]);
         });
     }
 
@@ -1734,13 +1715,7 @@ pub(crate) mod tests {
             },
         )
         .unwrap();
-        let view = HostTensorView {
-            data: &tensor.data,
-            shape: &tensor.shape,
-        };
-        let h = runmat_accelerate_api::provider()
-            .unwrap()
-            .upload(&view)
+        let h = gpu_helpers::upload_tensor(runmat_accelerate_api::provider().unwrap(), &tensor)
             .unwrap();
         let gpu = block_on(prod_gpu(
             h,
@@ -1755,7 +1730,7 @@ pub(crate) mod tests {
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
                 assert_eq!(gt.shape, ct.shape);
-                for (a, b) in gt.data.iter().zip(ct.data.iter()) {
+                for (a, b) in values(&gt).iter().zip(values(&ct).iter()) {
                     assert!((a - b).abs() < 1e-8);
                 }
             }
