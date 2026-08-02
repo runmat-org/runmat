@@ -8,13 +8,13 @@
     "developer tools",
     "matlab.unittest"
   ],
-  "summary": "Discover and run MATLAB-style test files through the RunMat VM.",
+  "summary": "Discover and run MATLAB-style tests through RunMat's shared test engine.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "`runtests` is a host-side discovery and VM execution boundary. Test bodies may call GPU-capable builtins normally, but `runtests` itself has no provider kernel."
+    "notes": "`runtests` delegates semantic discovery and lifecycle execution to Core. Test bodies may call GPU-capable builtins normally, but `runtests` itself has no provider kernel."
   },
   "fusion": {
     "elementwise": false,
@@ -36,18 +36,19 @@
       "runtests_rejects_parallel_execution_option"
     ]
   },
-  "description": "`runtests` discovers `.m` files that look like MATLAB test files, executes each test through the normal RunMat compiler/VM path, and returns RunMat `matlab.unittest.TestResult`-compatible result objects. Until RunMat has first-class MATLAB object arrays, zero or multiple results are represented as a 1-by-N cell row of result objects rather than a MATLAB object array.",
+  "description": "`runtests` freezes the selected sources, uses Core's semantic test discovery, executes exact test procedures through the shared lifecycle engine, and returns homogeneous `matlab.unittest.TestResult`-compatible object arrays.",
   "behaviors": [
     "`results = runtests` discovers tests in the current folder.",
     "`results = runtests(target)` accepts a test file, folder, function name, string array, or cell array of string targets. Bare names are resolved like MATLAB `.m` files on the active search path.",
     "`BaseFolder` constrains relative explicit targets to one or more base folders. When no explicit target is supplied, the base folders act as discovery roots.",
     "Folder discovery includes files whose stem starts with `test` or ends with `Test`. `IncludeSubfolders` recursively includes subfolders.",
-    "Script-style tests run as isolated test workspaces. Variables assigned by a test file do not leak into the caller workspace.",
-    "Function-style files with local zero-argument `test*` or `*Test` functions are split into one test case per function by running the file source plus that function call. Full `functiontests(localfunctions)`, `testCase` arguments, setup/teardown fixtures, class-based tests, and shared fixture semantics require broader `matlab.unittest` infrastructure and are not implemented by this slice.",
-    "Each result object includes `Name`, `TestFile`, `Passed`, `Failed`, `Incomplete`, `Duration`, and `Details` properties. A single result is returned as a scalar object; zero or multiple results are returned as a cell row of result objects.",
+    "Script, `functiontests(localfunctions)`, and class-based tests use semantic procedure identities rather than generated source calls. Function, method, class, and shared fixtures retain declared setup/teardown ordering.",
+    "Each test executes in an isolated Core test context. Variables assigned by a test do not leak into the caller workspace.",
+    "Each result object includes `Name`, `TestFile`, `Passed`, `Failed`, `Incomplete`, `Duration`, `Details`, and qualification data. Multiple results use a homogeneous TestResult object array.",
     "A failing test is captured as a failed result rather than as a `runtests` call failure. Discovery, invalid option, and unsupported infrastructure errors still surface as diagnostics.",
     "`Name` and `ProcedureName` filters currently keep cases whose generated test name contains the supplied text. They do not yet implement the full MATLAB selector model. `OutputDetail` and `LoggingLevel` are accepted for compatibility but do not affect execution output yet.",
-    "`UseParallel=false` is accepted. `UseParallel=true`, coverage collection, and tag metadata filtering are explicitly rejected because they require separate parallel or `matlab.unittest` infrastructure."
+    "`Coverage=true` enables the shared interpreter/JIT/WASM coverage collector. `CodeCoveragePlugin.forFolder` selects recursive or non-recursive coverage roots through the same policy.",
+    "`UseParallel=false` is accepted. Product and CLI runners provide parallel process or Web Worker execution; in-function `UseParallel=true` remains unsupported."
   ],
   "examples": [
     {
@@ -70,15 +71,15 @@
     },
     {
       "question": "Does `runtests` support coverage?",
-      "answer": "No. Coverage collection is explicitly rejected because RunMat does not yet have the source instrumentation layer required for MATLAB-compatible coverage reports."
+      "answer": "Yes. Use `Coverage=true` or `matlab.unittest.plugins.CodeCoveragePlugin.forFolder`; RunMat collects stable function and statement sites across interpreter, JIT, and WASM execution."
     },
     {
       "question": "Does `runtests` return MATLAB object arrays?",
-      "answer": "Not yet. A single result is a `matlab.unittest.TestResult` object, while zero or multiple results are returned as a cell row until RunMat has first-class MATLAB object-array support."
+      "answer": "Yes. Results are projected as homogeneous `matlab.unittest.TestResult`-compatible object arrays."
     },
     {
       "question": "Does `runtests` support the full `matlab.unittest` framework?",
-      "answer": "No. This slice covers script tests, simple zero-argument function tests, discovery, filtering, isolation, and result objects. Full `functiontests(localfunctions)`, `testCase` fixtures, setup/teardown, class-based tests, tags, and coverage need additional shared testing/object infrastructure."
+      "answer": "RunMat supports script, function, and class suites; `functiontests(localfunctions)`; common TestCase qualifications; fixtures; parameters; tags; plugins; and coverage. Unsupported MATLAB APIs fail explicitly rather than selecting a different execution path."
     },
     {
       "question": "Do test variables leak into the caller workspace?",
@@ -108,6 +109,6 @@
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/diagnostics/runtests.rs"
   },
   "gpu_behavior": [
-    "`runtests` is a host-side filesystem discovery and VM execution boundary. It does not create GPU kernels and does not participate in fusion. Individual test bodies may exercise GPU-capable operations normally."
+    "`runtests` is a Core test-service boundary. It does not create GPU kernels and does not participate in fusion. Individual test bodies may exercise GPU-capable operations normally."
   ]
 }

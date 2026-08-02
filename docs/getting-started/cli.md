@@ -183,6 +183,21 @@ runmat package cache prune
 
 `resolve` creates or refreshes `runmat.lock`; `fetch` fills missing immutable cache content without selecting a newer locked commit; and `update` is the explicit operation that may advance a branch or tag. `tree` and `why` project the same resolved graph used by execution and static analysis. `vendor` writes project-local dependency copies plus a workspace-root `runmat-vendor.json`; frozen execution requires and verifies that record for live path dependencies. See [Projects](/docs/runtime/getting-started/projects) for Git syntax, lock modes, browser behavior, cache recovery, and vendoring.
 
+## Test Projects
+
+`runmat test` discovers MATLAB-style script, function, and class tests semantically, selects them without executing test bodies, freezes the package graph and source revision, and runs the resulting immutable plan:
+
+```bash
+runmat test
+runmat test tests/solver --name convergence --tag fast
+runmat test --jobs 4 --isolation process --report junit
+runmat test --coverage --coverage-format lcov
+```
+
+Runtime and test dependency groups are resolved together before discovery. The default native isolation is a fresh killable process; `session` and `none` are explicit weaker modes. Reports, captured output, diagnostics, artifacts, retries, cancellation, and coverage are projections of one deterministic event/result stream. Human, JSON, JUnit, and TAP reports are supported, as are JSON, LCOV, Cobertura, and HTML coverage reports. Exact options and defaults are available from `runmat test --help`.
+
+The same portable discovery, plan, coordinator, result, and coverage authorities back `runtests`, browser Web Worker execution, and Desktop. Browser hosts use fresh dedicated Web Workers as their strongest available isolation and preserve selected source and fixture bytes in an immutable worker-local filesystem snapshot.
+
 ## Color and Terminal Output
 
 RunMat uses restrained ANSI styling for human-readable diagnostics, help, headings, status messages, and summaries. The default `--color=auto` mode checks stdout and stderr independently, styles only streams connected to capable interactive terminals, and stays plain when output is redirected, `TERM=dumb`, or a non-empty `NO_COLOR` value is present.
