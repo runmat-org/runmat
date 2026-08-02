@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use runmat_builtins::{NumericDType, Tensor, Type, Value};
+use runmat_builtins::{NumericDType, NumericScalar, Tensor, Type, Value};
 
 use crate::builtins::common::{map_control_flow_with_builtin, tensor};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -55,21 +55,18 @@ pub(crate) fn tensor_values_f64(tensor: &Tensor) -> Cow<'_, [f64]> {
 }
 
 pub(crate) fn image_value_from_tensor(tensor: Tensor) -> Value {
-    if tensor.data.len() == 1 {
-        if let Some(storage) = tensor.integer_storage() {
-            return Value::Int(storage.value_at(0).expect("integer image scalar"));
-        }
-        match tensor.dtype {
-            NumericDType::F32
-            | NumericDType::F64
-            | NumericDType::I8
-            | NumericDType::I16
-            | NumericDType::I32
-            | NumericDType::I64
-            | NumericDType::U8
-            | NumericDType::U16
-            | NumericDType::U32
-            | NumericDType::U64 => Value::Num(tensor.data[0]),
+    if tensor.len() == 1 {
+        match tensor
+            .numeric_value_at(0)
+            .expect("one-element image tensor has one numeric value")
+        {
+            NumericScalar::F64(value) => Value::Num(value),
+            NumericScalar::F32(value) => Value::Num(f64::from(value)),
+            value => Value::Int(
+                value
+                    .into_int_value()
+                    .expect("non-floating numeric scalar is integer"),
+            ),
         }
     } else {
         Value::Tensor(tensor)
@@ -218,5 +215,34 @@ pub(crate) fn same_shape_type(args: &[Type]) -> Type {
         },
         Some(Type::Num) | Some(Type::Int) | Some(Type::Bool) => Type::Num,
         _ => Type::tensor(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::{IntValue, IntegerStorage};
+
+    #[test]
+    fn image_scalar_collapse_reads_authoritative_storage() {
+        let single = Tensor::from_f32(vec![0.25], vec![1, 1]).unwrap();
+        assert_eq!(image_value_from_tensor(single), Value::Num(0.25));
+
+        let wide = u64::MAX - 1;
+        let integer = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).unwrap();
+        assert_eq!(
+            image_value_from_tensor(integer),
+            Value::Int(IntValue::U64(wide))
+        );
+    }
+
+    #[test]
+    fn image_arrays_remain_tensors() {
+        let tensor = Tensor::from_f32(vec![0.25, 0.5], vec![1, 2]).unwrap();
+        let Value::Tensor(output) = image_value_from_tensor(tensor) else {
+            panic!("expected tensor output");
+        };
+        assert_eq!(output.numeric_dtype(), NumericDType::F32);
+        assert_eq!(output.materialize_f64(), vec![0.25, 0.5]);
     }
 }
