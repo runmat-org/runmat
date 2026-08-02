@@ -5,7 +5,8 @@ use crate::indexing::plan::IndexPlan;
 use crate::interpreter::errors::mex;
 use runmat_accelerate_api::{HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView};
 use runmat_builtins::{
-    ComplexTensor, IntegerComplexStorage, IntegerStorage, SparseTensor, StringArray, Tensor, Value,
+    ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericDType, NumericScalar,
+    NumericStorage, SparseTensor, StringArray, Tensor, Value,
 };
 use runmat_runtime::builtins::common::tensor::{
     self, complex_tensor_element_len, complex_tensor_values_complex64, is_scalar_tensor,
@@ -31,6 +32,34 @@ fn is_empty_delete_rhs(value: &Value) -> bool {
         Value::ComplexTensor(t)
             if complex_tensor_element_len(t) == 0 || t.rows == 0 || t.cols == 0
     ) || matches!(value, Value::OutputList(values) if values.is_empty())
+}
+
+pub(crate) fn real_tensor_to_complex(
+    tensor: Tensor,
+    context: &str,
+) -> Result<ComplexTensor, RuntimeError> {
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|error| map_slice_shape_error(context, error))?;
+    match storage.into_integer_storage() {
+        Ok(real) => {
+            let imag = real.zeros_like(real.len());
+            let storage = IntegerComplexStorage::new(real, imag)
+                .expect("same-class real and imaginary integer storage must be valid");
+            ComplexTensor::new_integer(storage, shape)
+                .map_err(|error| map_slice_shape_error(context, error))
+        }
+        Err(storage) => ComplexTensor::new(
+            storage
+                .materialize_f64()
+                .into_iter()
+                .map(|real| (real, 0.0))
+                .collect(),
+            shape,
+        )
+        .map_err(|error| map_slice_shape_error(context, error)),
+    }
 }
 
 pub(crate) fn deleted_vector_shape(rows: usize, _cols: usize, len: usize) -> Vec<usize> {
@@ -107,12 +136,15 @@ fn scalar_integer_value(value: &Value) -> Result<IntegerAssignmentValue, Runtime
         } else {
             0.0
         })),
-        Value::Tensor(tensor) if is_scalar_tensor(tensor) => match tensor.integer_storage() {
-            Some(storage) => Ok(IntegerAssignmentValue::Exact(
-                integer_assignment::values(storage)[0].clone(),
-            )),
-            None => Ok(IntegerAssignmentValue::Float(tensor.data[0])),
-        },
+        Value::Tensor(tensor) if is_scalar_tensor(tensor) => {
+            let value = tensor
+                .numeric_value_at(0)
+                .expect("scalar tensor must contain one numeric value");
+            Ok(match value.into_int_value() {
+                Some(value) => IntegerAssignmentValue::Exact(value),
+                None => IntegerAssignmentValue::Float(value.materialize_f64()),
+            })
+        }
         Value::LogicalArray(array) if array.data.len() == 1 => {
             Ok(IntegerAssignmentValue::Float(if array.data[0] == 0 {
                 0.0
@@ -642,7 +674,7 @@ fn materialize_complex_integer_values_for_plan(
 }
 
 pub fn scatter_real_with_plan(
-    t: &mut Tensor,
+    storage: &mut NumericStorage,
     plan: &IndexPlan,
     rhs_values: &[f64],
 ) -> Result<(), RuntimeError> {
@@ -650,7 +682,14 @@ pub fn scatter_real_with_plan(
         return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
     }
     for (&dst, &value) in plan.indices.iter().zip(rhs_values.iter()) {
-        t.data[dst as usize] = value;
+        let value = match storage.numeric_dtype() {
+            NumericDType::F64 => NumericScalar::F64(value),
+            NumericDType::F32 => NumericScalar::F32(value as f32),
+            _ => unreachable!("real floating scatter requires floating storage"),
+        };
+        storage
+            .set_value(dst as usize, value)
+            .map_err(|error| map_slice_shape_error("slice assign", error))?;
     }
     Ok(())
 }
@@ -799,7 +838,7 @@ pub fn delete_sparse_with_plan(
 }
 
 pub async fn assign_tensor_with_plan(
-    mut t: Tensor,
+    t: Tensor,
     plan: &IndexPlan,
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
@@ -807,44 +846,28 @@ pub async fn assign_tensor_with_plan(
         return Ok(Value::Tensor(t));
     }
     if matches!(rhs, Value::Complex(_, _) | Value::ComplexTensor(_)) {
-        if let Some(real) = t.integer_data.take() {
-            let imag = real.zeros_like(real.len());
-            let storage = IntegerComplexStorage::new(real, imag)
-                .expect("same-class real and imaginary integer storage must be valid");
-            let tensor = ComplexTensor::new_integer(storage, t.shape)
-                .map_err(|error| map_slice_shape_error("typed complex integer promotion", error))?;
-            return assign_complex_with_plan(tensor, plan, rhs).await;
+        let tensor = real_tensor_to_complex(t, "slice complex promotion")?;
+        return assign_complex_with_plan(tensor, plan, rhs).await;
+    }
+    let shape = t.shape.clone();
+    let storage = t
+        .into_numeric_storage()
+        .map_err(|error| map_slice_shape_error("slice assign", error))?;
+    let storage = match storage.into_integer_storage() {
+        Ok(mut storage) => {
+            let rhs_values = materialize_integer_rhs_for_plan(rhs, plan).await?;
+            integer_assignment::scatter(&mut storage, plan, &rhs_values)?;
+            NumericStorage::from_integer_storage(storage)
         }
-        let mut ct = ComplexTensor {
-            data: t.data.into_iter().map(|re| (re, 0.0)).collect(),
-            integer_data: None,
-            shape: t.shape,
-            rows: t.rows,
-            cols: t.cols,
-        };
-        let rhs_view = build_complex_rhs_view(rhs, &plan.selection_lengths)?;
-        scatter_complex_with_plan(&mut ct, plan, &rhs_view)?;
-        return Ok(Value::ComplexTensor(ct));
-    }
-    if t.integer_storage().is_some() {
-        let rhs_values = materialize_integer_rhs_for_plan(rhs, plan).await?;
-        let storage = t
-            .integer_data
-            .as_mut()
-            .expect("integer tensor must retain exact storage");
-        integer_assignment::scatter(storage, plan, &rhs_values)?;
-        return Tensor::new_integer(
-            t.integer_data
-                .take()
-                .expect("integer tensor must retain exact storage"),
-            t.shape,
-        )
+        Err(mut storage) => {
+            let rhs_values = materialize_rhs_real_for_plan(rhs, plan).await?;
+            scatter_real_with_plan(&mut storage, plan, &rhs_values)?;
+            storage
+        }
+    };
+    Tensor::from_numeric_storage(storage, shape)
         .map(Value::Tensor)
-        .map_err(|error| map_slice_shape_error("slice assign", error));
-    }
-    let rhs_values = materialize_rhs_real_for_plan(rhs, plan).await?;
-    scatter_real_with_plan(&mut t, plan, &rhs_values)?;
-    Ok(Value::Tensor(t))
+        .map_err(|error| map_slice_shape_error("slice assign", error))
 }
 
 pub async fn assign_complex_with_plan(
@@ -880,7 +903,7 @@ pub async fn assign_complex_with_plan(
 }
 
 pub fn delete_tensor_with_plan(
-    mut t: Tensor,
+    t: Tensor,
     plan: &IndexPlan,
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
@@ -900,39 +923,18 @@ pub fn delete_tensor_with_plan(
         ));
     }
     let positions = sorted_unique_positions_desc(plan, tensor_element_len(&t))?;
-    if let Some(storage) = t.integer_data.take() {
-        macro_rules! delete_positions {
-            ($values:expr, $variant:ident) => {{
-                let mut values = $values;
-                for &position in &positions {
-                    values.remove(position);
-                }
-                IntegerStorage::$variant(values)
-            }};
-        }
-        let storage = match storage {
-            IntegerStorage::I8(values) => delete_positions!(values, I8),
-            IntegerStorage::I16(values) => delete_positions!(values, I16),
-            IntegerStorage::I32(values) => delete_positions!(values, I32),
-            IntegerStorage::I64(values) => delete_positions!(values, I64),
-            IntegerStorage::U8(values) => delete_positions!(values, U8),
-            IntegerStorage::U16(values) => delete_positions!(values, U16),
-            IntegerStorage::U32(values) => delete_positions!(values, U32),
-            IntegerStorage::U64(values) => delete_positions!(values, U64),
-        };
-        let shape = deleted_vector_shape(t.rows, t.cols, storage.len());
-        return Tensor::new_integer(storage, shape)
-            .map(Value::Tensor)
-            .map_err(|error| map_slice_shape_error("slice deletion", error));
-    }
-    for pos in positions {
-        t.data.remove(pos);
-    }
-    let shape = deleted_vector_shape(t.rows, t.cols, t.data.len());
-    t.rows = shape.first().copied().unwrap_or(0);
-    t.cols = shape.get(1).copied().unwrap_or(0);
-    t.shape = shape;
-    Ok(Value::Tensor(t))
+    let rows = t.rows;
+    let cols = t.cols;
+    let mut storage = t
+        .into_numeric_storage()
+        .map_err(|error| map_slice_shape_error("slice deletion", error))?;
+    storage
+        .remove_positions(&positions)
+        .map_err(|error| map_slice_shape_error("slice deletion", error))?;
+    let shape = deleted_vector_shape(rows, cols, storage.len());
+    Tensor::from_numeric_storage(storage, shape)
+        .map(Value::Tensor)
+        .map_err(|error| map_slice_shape_error("slice deletion", error))
 }
 
 pub fn delete_complex_with_plan(
@@ -1082,9 +1084,15 @@ pub async fn assign_gpu_slice_with_plan(
         .download(handle)
         .await
         .map_err(|e| map_acceleration_error("gather for slice assign", e))?;
-    let mut t =
+    let t =
         Tensor::new(host.data, host.shape).map_err(|e| map_slice_shape_error("slice assign", e))?;
-    scatter_real_with_plan(&mut t, plan, &rhs_values)?;
+    let shape = t.shape.clone();
+    let mut storage = t
+        .into_numeric_storage()
+        .map_err(|error| map_slice_shape_error("slice assign", error))?;
+    scatter_real_with_plan(&mut storage, plan, &rhs_values)?;
+    let t = Tensor::from_numeric_storage(storage, shape)
+        .map_err(|error| map_slice_shape_error("slice assign", error))?;
     upload_tensor_to_gpu(&t)
 }
 
@@ -1462,8 +1470,9 @@ pub fn upload_tensor_to_gpu(t: &Tensor) -> Result<Value, RuntimeError> {
             .upload_integer(&view)
             .map_err(|e| map_acceleration_error("exact integer reupload after slice assign", e))?
     } else {
+        let data = t.materialize_f64();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &t.data,
+            data: &data,
             shape: &t.shape,
         };
         provider
@@ -1529,8 +1538,8 @@ mod tests {
     use crate::indexing::plan::IndexPlan;
     use futures::executor::block_on;
     use runmat_builtins::{
-        CellArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, SparseTensor, StringArray,
-        Tensor, Value,
+        CellArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericDType,
+        NumericStorage, SparseTensor, StringArray, Tensor, Value,
     };
 
     #[test]
@@ -1550,6 +1559,46 @@ mod tests {
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::U64(vec![u64::MAX, 9, 3]))
+        );
+    }
+
+    #[test]
+    fn native_single_plan_assignment_and_deletion_preserve_class() {
+        let tensor = Tensor::from_f32(vec![1.0, 2.0, 3.0], vec![1, 3]).expect("single tensor");
+        let plan = IndexPlan::new(vec![0, 2], vec![1, 2], vec![2], 1, vec![1, 3]);
+        let Value::Tensor(updated) = block_on(assign_tensor_with_plan(
+            tensor,
+            &plan,
+            &Value::Num(1.234_567_890_123),
+        ))
+        .expect("single slice assignment") else {
+            panic!("expected tensor");
+        };
+        assert_eq!(updated.numeric_dtype(), NumericDType::F32);
+        assert_eq!(
+            updated.clone().into_numeric_storage(),
+            Ok(NumericStorage::F32(vec![
+                1.234_567_890_123_f64 as f32,
+                2.0,
+                1.234_567_890_123_f64 as f32,
+            ]))
+        );
+
+        let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).expect("empty"));
+        let delete_plan = IndexPlan::new(vec![1], vec![1, 1], vec![1], 1, vec![1, 3]);
+        let Value::Tensor(deleted) =
+            delete_tensor_with_plan(updated, &delete_plan, &empty).expect("single slice deletion")
+        else {
+            panic!("expected tensor");
+        };
+        assert_eq!(deleted.numeric_dtype(), NumericDType::F32);
+        assert_eq!(deleted.shape, vec![1, 2]);
+        assert_eq!(
+            deleted.into_numeric_storage(),
+            Ok(NumericStorage::F32(vec![
+                1.234_567_890_123_f64 as f32,
+                1.234_567_890_123_f64 as f32,
+            ]))
         );
     }
 

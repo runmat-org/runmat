@@ -1034,6 +1034,60 @@ impl NumericStorage {
         Self::ones(self.numeric_dtype(), len)
     }
 
+    /// Resizes storage in class, filling new elements with exact zero.
+    pub fn resize_zeroed(&mut self, len: usize) {
+        match self {
+            Self::F64(values) => values.resize(len, 0.0),
+            Self::F32(values) => values.resize(len, 0.0),
+            Self::I8(values) => values.resize(len, 0),
+            Self::I16(values) => values.resize(len, 0),
+            Self::I32(values) => values.resize(len, 0),
+            Self::I64(values) => values.resize(len, 0),
+            Self::U8(values) => values.resize(len, 0),
+            Self::U16(values) => values.resize(len, 0),
+            Self::U32(values) => values.resize(len, 0),
+            Self::U64(values) => values.resize(len, 0),
+        }
+    }
+
+    /// Removes zero-based positions while preserving class and relative order.
+    pub fn remove_positions(&mut self, positions: &[usize]) -> Result<(), String> {
+        let mut positions = positions.to_vec();
+        positions.sort_unstable();
+        positions.dedup();
+        if let Some(&position) = positions.last() {
+            if position >= self.len() {
+                return Err(format!(
+                    "{} numeric storage removal index {} is out of bounds for {} elements",
+                    self.class_name(),
+                    position,
+                    self.len()
+                ));
+            }
+        }
+        positions.reverse();
+        macro_rules! remove_positions {
+            ($values:expr) => {
+                for &position in &positions {
+                    $values.remove(position);
+                }
+            };
+        }
+        match self {
+            Self::F64(values) => remove_positions!(values),
+            Self::F32(values) => remove_positions!(values),
+            Self::I8(values) => remove_positions!(values),
+            Self::I16(values) => remove_positions!(values),
+            Self::I32(values) => remove_positions!(values),
+            Self::I64(values) => remove_positions!(values),
+            Self::U8(values) => remove_positions!(values),
+            Self::U16(values) => remove_positions!(values),
+            Self::U32(values) => remove_positions!(values),
+            Self::U64(values) => remove_positions!(values),
+        }
+        Ok(())
+    }
+
     /// Clones storage for a new shape after validating its element count.
     ///
     /// Shape remains container metadata rather than duplicated storage state.
@@ -1697,6 +1751,50 @@ mod integer_storage_tests {
             );
             assert!(storage.gather(&[3]).is_err());
             assert!(storage.reorder(&[0]).is_err());
+        }
+    }
+
+    #[test]
+    fn numeric_storage_resize_and_removal_preserve_every_native_class() {
+        let cases = [
+            NumericStorage::F64(vec![1.0, 2.0, 3.0]),
+            NumericStorage::F32(vec![1.0, 2.0, 3.0]),
+            NumericStorage::I8(vec![1, 2, 3]),
+            NumericStorage::I16(vec![1, 2, 3]),
+            NumericStorage::I32(vec![1, 2, 3]),
+            NumericStorage::I64(vec![1, 2, 3]),
+            NumericStorage::U8(vec![1, 2, 3]),
+            NumericStorage::U16(vec![1, 2, 3]),
+            NumericStorage::U32(vec![1, 2, 3]),
+            NumericStorage::U64(vec![1, 9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for mut storage in cases {
+            let dtype = storage.numeric_dtype();
+            let first = storage.value_at(0);
+            let third = storage.value_at(2);
+            storage.resize_zeroed(5);
+            assert_eq!(storage.numeric_dtype(), dtype);
+            assert_eq!(storage.len(), 5);
+            assert_eq!(storage.value_at(0), first);
+            assert_eq!(storage.value_at(2), third);
+            assert_eq!(
+                storage.value_at(3).map(NumericScalar::materialize_f64),
+                Some(0.0)
+            );
+
+            storage
+                .remove_positions(&[3, 1, 3])
+                .expect("in-class removal");
+            assert_eq!(storage.numeric_dtype(), dtype);
+            assert_eq!(storage.len(), 3);
+            assert_eq!(storage.value_at(0), first);
+            assert_eq!(storage.value_at(1), third);
+            assert_eq!(
+                storage.value_at(2).map(NumericScalar::materialize_f64),
+                Some(0.0)
+            );
+            assert!(storage.remove_positions(&[3]).is_err());
         }
     }
 
