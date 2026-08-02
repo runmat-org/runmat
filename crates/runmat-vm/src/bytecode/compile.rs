@@ -102,6 +102,7 @@ pub fn compile(
         instructions: c.instructions,
         instr_spans: c.instr_spans,
         call_arg_spans: c.call_arg_spans,
+        coverage_sites: Vec::new(),
         source_id,
         var_count: c.var_count,
         bound_functions,
@@ -797,6 +798,7 @@ fn compile_semantic_functions(
                 instructions: compiler.instructions,
                 instr_spans: compiler.instr_spans,
                 call_arg_spans: compiler.call_arg_spans,
+                coverage_sites: Vec::new(),
                 var_count: compiler.var_count,
                 input_slots: function_layout
                     .frame_abi

@@ -6,6 +6,7 @@ use std::sync::{
 use runmat_core::{
     ExecutableSource, InvocationControl, ProcedureInvocation, RunError, RunMatSession,
 };
+use runmat_test::coverage::CoverageMetric;
 use runmat_test::descriptor::TestSelector;
 use runmat_test::discovery::{FrozenTestRunSnapshot, SavedRunSource};
 use runmat_test::event::TestEventPayload;
@@ -164,6 +165,102 @@ async fn executable_invocation_observes_cancellation_and_deadlines() {
         runtime_identifier(&deadline_error),
         Some("RunMat:ExecutionDeadline")
     );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+async fn coverage_sites_are_source_stable_and_record_missed_statements() {
+    let mut session = RunMatSession::with_options(false, false).unwrap();
+    let unit = session
+        .compile_executable_unit(
+            ExecutableSource::new(
+                "path:conformance",
+                "covered.m",
+                "function y = covered(x)\n y = 1;\n if x > 0\n  y = 2;\n else\n  y = 3;\n end\nend\n",
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+    let (_, fragment) = session
+        .invoke_executable_with_coverage(
+            &unit,
+            ProcedureInvocation::function("covered", vec![runmat_builtins::Value::Num(1.0)]),
+            &InvocationControl::default(),
+        )
+        .await
+        .unwrap();
+
+    assert!(fragment
+        .sites
+        .iter()
+        .any(|site| site.metric == CoverageMetric::Function
+            && fragment.counts.get(&site.counter_key).copied().unwrap_or(0) == 1));
+    let statements = fragment
+        .sites
+        .iter()
+        .filter(|site| site.metric == CoverageMetric::Statement && site.instrumented)
+        .collect::<Vec<_>>();
+    assert!(statements.len() >= 3, "{statements:#?}");
+    assert!(statements.iter().any(|site| fragment
+        .counts
+        .get(&site.counter_key)
+        .copied()
+        .unwrap_or(0)
+        > 0));
+    assert!(statements.iter().any(|site| fragment
+        .counts
+        .get(&site.counter_key)
+        .copied()
+        .unwrap_or(0)
+        == 0));
+    assert!(fragment
+        .sites
+        .iter()
+        .all(|site| site.relative_path == "covered.m"
+            && site.start_line > 0
+            && site.start_column > 0));
+}
+
+#[cfg(all(feature = "jit", not(target_arch = "wasm32")))]
+#[tokio::test]
+async fn jit_and_interpreter_hit_the_same_coverage_sites() {
+    let source = ExecutableSource::new(
+        "path:conformance",
+        "coveredJit.m",
+        "function y = coveredJit(x)\n y = x + 1;\n if y > 0\n  y = y * 2;\n end\nend\n",
+    );
+    let mut interpreter = RunMatSession::with_options(false, false).unwrap();
+    let interpreter_unit = interpreter
+        .compile_executable_unit(source.clone(), None)
+        .await
+        .unwrap();
+    let (_, expected) = interpreter
+        .invoke_executable_with_coverage(
+            &interpreter_unit,
+            ProcedureInvocation::function("coveredJit", vec![runmat_builtins::Value::Num(1.0)]),
+            &InvocationControl::default(),
+        )
+        .await
+        .unwrap();
+
+    let mut jit = RunMatSession::with_options(true, false).unwrap();
+    let jit_unit = jit.compile_executable_unit(source, None).await.unwrap();
+    let mut actual = None;
+    for _ in 0..12 {
+        actual = Some(
+            jit.invoke_executable_with_coverage(
+                &jit_unit,
+                ProcedureInvocation::function("coveredJit", vec![runmat_builtins::Value::Num(1.0)]),
+                &InvocationControl::default(),
+            )
+            .await
+            .unwrap()
+            .1,
+        );
+    }
+    assert!(jit.stats().jit_compiled > 0, "{:?}", jit.stats());
+    assert_eq!(actual.unwrap(), expected);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

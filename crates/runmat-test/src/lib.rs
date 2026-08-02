@@ -1,6 +1,7 @@
 //! Portable test-domain and lifecycle authority for RunMat.
 
 pub mod context;
+pub mod coverage;
 pub mod descriptor;
 pub mod discovery;
 pub mod error;

@@ -4,6 +4,7 @@ pub mod accel;
 pub(crate) mod bytecode;
 pub(crate) mod call;
 pub(crate) mod compiler;
+pub mod coverage;
 pub mod indexing;
 pub(crate) mod instr {
     pub use crate::bytecode::instr::{ArgSpec, EndExpr, Instr};

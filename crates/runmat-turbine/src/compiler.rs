@@ -23,6 +23,7 @@ struct CompileContext<'a> {
     runmat_call_feval_expanded_values_id: FuncId,
     runmat_call_builtin_expanded_values_id: FuncId,
     runmat_call_method_member_expanded_values_id: FuncId,
+    runmat_coverage_hit_id: FuncId,
 }
 
 #[derive(Clone, Copy)]
@@ -33,10 +34,12 @@ pub(crate) struct RuntimeCallIds {
     pub runmat_call_feval_expanded_values_id: FuncId,
     pub runmat_call_builtin_expanded_values_id: FuncId,
     pub runmat_call_method_member_expanded_values_id: FuncId,
+    pub runmat_coverage_hit_id: FuncId,
 }
 
 pub(crate) struct CompileInstructionParams<'a> {
     pub instructions: &'a [Instr],
+    pub coverage_sites: &'a [Vec<u64>],
     pub func: &'a mut codegen::ir::Function,
     pub var_count: usize,
     pub function_registry: &'a FunctionRegistry,
@@ -260,6 +263,7 @@ impl BytecodeCompiler {
     ) -> Result<()> {
         let CompileInstructionParams {
             instructions,
+            coverage_sites,
             func,
             var_count: _var_count,
             function_registry,
@@ -309,9 +313,17 @@ impl BytecodeCompiler {
                 .runmat_call_builtin_expanded_values_id,
             runmat_call_method_member_expanded_values_id: runtime_call_ids
                 .runmat_call_method_member_expanded_values_id,
+            runmat_coverage_hit_id: runtime_call_ids.runmat_coverage_hit_id,
         };
 
-        Self::compile_with_cfg(&mut builder, &mut stack, instructions, &cfg, &mut ctx)?;
+        Self::compile_with_cfg(
+            &mut builder,
+            &mut stack,
+            instructions,
+            coverage_sites,
+            &cfg,
+            &mut ctx,
+        )?;
 
         // Seal all blocks (including entry block which is in cfg.blocks)
         for (&_pc, basic_block) in &cfg.blocks {
@@ -326,6 +338,7 @@ impl BytecodeCompiler {
         builder: &mut FunctionBuilder,
         _stack: &mut StackSimulator,
         instructions: &[Instr],
+        coverage_sites: &[Vec<u64>],
         cfg: &ControlFlowGraph,
         ctx: &mut CompileContext,
     ) -> Result<()> {
@@ -354,6 +367,15 @@ impl BytecodeCompiler {
 
             while pc < basic_block.end_pc && pc < instructions.len() && !block_terminated {
                 let instr = &instructions[pc];
+                if let Some(sites) = coverage_sites.get(pc) {
+                    for site in sites {
+                        let function = ctx
+                            .module
+                            .declare_func_in_func(ctx.runmat_coverage_hit_id, builder.func);
+                        let site = builder.ins().iconst(types::I64, *site as i64);
+                        builder.ins().call(function, &[site]);
+                    }
+                }
 
                 match instr {
                     &Instr::PackToRow(_) | &Instr::PackToCol(_) | &Instr::Unpack(_) => {

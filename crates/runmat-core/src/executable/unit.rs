@@ -18,14 +18,15 @@ impl ExecutableUnit {
         source: ExecutableSource,
         revision: ExecutableRevision,
         source_map: ExecutableSourceMap,
-        bytecode: runmat_vm::Bytecode,
+        mut bytecode: runmat_vm::Bytecode,
     ) -> Self {
+        let coverage = CoveragePlan::instrument(&source, &revision, &source_map, &mut bytecode);
         let functions = Rc::new(bytecode.function_registry.clone());
         Self {
             source,
             revision,
             source_map,
-            coverage: CoveragePlan::default(),
+            coverage,
             bytecode: Rc::new(bytecode),
             functions,
         }

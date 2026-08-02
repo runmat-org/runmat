@@ -255,6 +255,7 @@ async fn invoke_semantic_function_value_with_input_residency(
     let mut bytecode = Bytecode::with_instructions(func.instructions.clone(), func.var_count);
     bytecode.instr_spans = func.instr_spans.clone();
     bytecode.call_arg_spans = func.call_arg_spans.clone();
+    bytecode.coverage_sites = func.coverage_sites.clone();
     bytecode.source_id = func.source_id;
     bytecode.var_names = func.var_names.clone();
     let mut initially_unassigned_slots = func.initially_unassigned_slots.clone();
@@ -1076,6 +1077,9 @@ async fn run_interpreter_inner(
     let debug_stack = interp_engine::debug_stack_enabled();
     let mut interpreter_timing = InterpreterTiming::new();
     while pc < bytecode.instructions.len() {
+        if let Some(sites) = bytecode.coverage_sites.get(pc) {
+            crate::coverage::hit_sites(sites);
+        }
         set_vm_pc(pc);
         #[cfg(feature = "native-accel")]
         set_current_pc(pc);
@@ -1543,6 +1547,7 @@ mod tests {
             instructions: vec![Instr::Return],
             instr_spans: Vec::new(),
             call_arg_spans: Vec::new(),
+            coverage_sites: Vec::new(),
             var_count: 1,
             input_slots: Vec::new(),
             varargin_slot: None,

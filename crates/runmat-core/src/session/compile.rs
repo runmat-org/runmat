@@ -817,11 +817,23 @@ impl RunMatSession {
         let source_map = crate::ExecutableSourceMap::new(
             self.source_pool
                 .entries()
-                .map(|(source_id, entry)| crate::SourceMapEntry {
-                    source_id: source_id.0,
-                    display_name: entry.name.to_string(),
-                    full_path: entry.fullpath_name.as_ref().map(ToString::to_string),
-                    text: entry.text.to_string(),
+                .map(|(source_id, entry)| {
+                    let display_name = entry.name.to_string();
+                    let full_path = entry.fullpath_name.as_ref().map(ToString::to_string);
+                    let (owner_identity, relative_path) = executable_source_identity(
+                        &source,
+                        self.project_handoff.as_ref(),
+                        &display_name,
+                        full_path.as_deref(),
+                    );
+                    crate::SourceMapEntry {
+                        source_id: source_id.0,
+                        owner_identity,
+                        relative_path,
+                        display_name,
+                        full_path,
+                        text: entry.text.to_string(),
+                    }
                 })
                 .collect(),
         );
@@ -1216,6 +1228,33 @@ impl RunMatSession {
         // Update our variable array and mapping
         self.variable_array = new_variable_array;
     }
+}
+
+fn executable_source_identity(
+    root: &crate::ExecutableSource,
+    handoff: Option<&runmat_package::FrozenProjectHandoff>,
+    display_name: &str,
+    full_path: Option<&str>,
+) -> (String, String) {
+    if display_name.replace('\\', "/") == root.relative_path.replace('\\', "/")
+        || full_path.is_some_and(|path| path.replace('\\', "/").ends_with(&root.relative_path))
+    {
+        return (root.owner_identity.clone(), root.relative_path.clone());
+    }
+    if let Some(handoff) = handoff {
+        for (descriptor, access_path) in handoff.project.all_sources() {
+            let relative_path = descriptor.id.relative_path.to_string();
+            let same_relative = display_name.replace('\\', "/") == relative_path.replace('\\', "/");
+            let same_access = full_path.is_some_and(|path| {
+                std::path::Path::new(path) == access_path
+                    || path.replace('\\', "/") == access_path.to_string_lossy().replace('\\', "/")
+            });
+            if same_relative || same_access {
+                return (descriptor.id.package_instance.to_string(), relative_path);
+            }
+        }
+    }
+    (root.owner_identity.clone(), display_name.replace('\\', "/"))
 }
 
 fn remap_semantic_function_instr(

@@ -279,6 +279,14 @@ fn declare_host_method_member_expanded_value_outputs_in_module(module: &mut JITM
         .expect("Failed to declare runmat_call_method_member_expanded_values")
 }
 
+fn declare_host_coverage_hit_in_module(module: &mut JITModule) -> FuncId {
+    let mut sig = module.make_signature();
+    sig.params.push(AbiParam::new(types::I64));
+    module
+        .declare_function("runmat_coverage_hit", Linkage::Import, &sig)
+        .expect("Failed to declare runmat_coverage_hit")
+}
+
 /// The main JIT compilation engine
 pub struct TurbineEngine {
     module: JITModule,
@@ -293,6 +301,7 @@ pub struct TurbineEngine {
     runmat_call_feval_expanded_values_id: FuncId,
     runmat_call_builtin_expanded_values_id: FuncId,
     runmat_call_method_member_expanded_values_id: FuncId,
+    runmat_coverage_hit_id: FuncId,
 }
 
 /// A compiled function ready for execution
@@ -442,6 +451,10 @@ impl TurbineEngine {
             "runmat_call_method_member_expanded_values",
             runmat_call_method_member_expanded_values as *const u8,
         );
+        builder.symbol(
+            "runmat_coverage_hit",
+            runmat_vm::coverage::hit_site_from_jit as *const u8,
+        );
 
         // Create the JIT module
         let mut module = JITModule::new(builder);
@@ -463,6 +476,7 @@ impl TurbineEngine {
             declare_host_builtin_expanded_value_outputs_in_module(&mut module);
         let runmat_call_method_member_expanded_values_id =
             declare_host_method_member_expanded_value_outputs_in_module(&mut module);
+        let runmat_coverage_hit_id = declare_host_coverage_hit_in_module(&mut module);
 
         let ctx = module.make_context();
 
@@ -479,6 +493,7 @@ impl TurbineEngine {
             runmat_call_feval_expanded_values_id,
             runmat_call_builtin_expanded_values_id,
             runmat_call_method_member_expanded_values_id,
+            runmat_coverage_hit_id,
         };
 
         info!("Turbine JIT engine initialized successfully for {target_triple}");
@@ -548,6 +563,7 @@ impl TurbineEngine {
         self.compiler
             .compile_instructions(CompileInstructionParams {
                 instructions: &bytecode.instructions,
+                coverage_sites: &bytecode.coverage_sites,
                 func: &mut func,
                 var_count: bytecode.var_count,
                 function_registry: &bytecode.function_registry(),
@@ -564,6 +580,7 @@ impl TurbineEngine {
                         .runmat_call_builtin_expanded_values_id,
                     runmat_call_method_member_expanded_values_id: self
                         .runmat_call_method_member_expanded_values_id,
+                    runmat_coverage_hit_id: self.runmat_coverage_hit_id,
                 },
             })?;
 
@@ -833,6 +850,7 @@ impl TurbineEngine {
 
         // Hash the instructions and variable count
         bytecode.var_count.hash(&mut hasher);
+        bytecode.coverage_sites.hash(&mut hasher);
         if let Some(layout) = &bytecode.layout {
             let mut functions: Vec<_> = layout.functions.iter().collect();
             functions.sort_by_key(|(id, _)| id.0);

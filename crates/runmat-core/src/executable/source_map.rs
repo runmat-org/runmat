@@ -6,6 +6,8 @@ pub struct ExecutableSourceMap {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SourceMapEntry {
     pub source_id: usize,
+    pub owner_identity: String,
+    pub relative_path: String,
     pub display_name: String,
     pub full_path: Option<String>,
     pub text: String,

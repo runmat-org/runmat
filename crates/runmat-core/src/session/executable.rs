@@ -1,6 +1,28 @@
 use super::*;
 
 impl RunMatSession {
+    /// Invoke one immutable unit while collecting its backend-independent
+    /// function and statement coverage sites.
+    pub async fn invoke_executable_with_coverage(
+        &mut self,
+        unit: &crate::ExecutableUnit,
+        invocation: crate::ProcedureInvocation,
+        control: &crate::InvocationControl,
+    ) -> std::result::Result<(Value, crate::CoverageFragment), RunError> {
+        let coverage = runmat_vm::coverage::CoverageSession::start();
+        let value = self.invoke_executable(unit, invocation, control).await?;
+        let program_revision = unit
+            .revision()
+            .program_revision
+            .as_ref()
+            .map(runmat_test::plan::ProgramRevision::canonical_identity)
+            .unwrap_or_else(|| unit.revision().source_digest.clone());
+        let fragment = unit
+            .coverage_plan()
+            .fragment(program_revision, coverage.counts());
+        Ok((value, fragment))
+    }
+
     /// Invoke an immutable executable entrypoint or exact semantic procedure.
     ///
     /// This path does not synthesize or append source and does not publish the

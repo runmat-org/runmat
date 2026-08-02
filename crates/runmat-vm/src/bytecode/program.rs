@@ -44,6 +44,8 @@ pub struct FunctionBytecode {
     pub instr_spans: Vec<runmat_hir::Span>,
     #[serde(default)]
     pub call_arg_spans: Vec<Option<Vec<runmat_hir::Span>>>,
+    #[serde(default)]
+    pub coverage_sites: Vec<Vec<u64>>,
     pub var_count: usize,
     pub input_slots: Vec<usize>,
     #[serde(default)]
@@ -74,6 +76,7 @@ impl Default for FunctionBytecode {
             instructions: Vec::new(),
             instr_spans: Vec::new(),
             call_arg_spans: Vec::new(),
+            coverage_sites: Vec::new(),
             var_count: 0,
             input_slots: Vec::new(),
             varargin_slot: None,
@@ -283,6 +286,8 @@ pub struct Bytecode {
     #[serde(default)]
     pub call_arg_spans: Vec<Option<Vec<runmat_hir::Span>>>,
     #[serde(default)]
+    pub coverage_sites: Vec<Vec<u64>>,
+    #[serde(default)]
     pub source_id: Option<runmat_hir::SourceId>,
     pub var_count: usize,
     #[serde(default)]
@@ -415,6 +420,7 @@ impl Bytecode {
             instructions: Vec::new(),
             instr_spans: Vec::new(),
             call_arg_spans: Vec::new(),
+            coverage_sites: Vec::new(),
             source_id: None,
             var_count: 0,
             bound_functions: HashMap::new(),
@@ -436,10 +442,12 @@ impl Bytecode {
     pub fn with_instructions(instructions: Vec<Instr>, var_count: usize) -> Self {
         let instr_spans = vec![runmat_hir::Span::default(); instructions.len()];
         let call_arg_spans = vec![None; instructions.len()];
+        let coverage_sites = vec![Vec::new(); instructions.len()];
         Self {
             instructions,
             instr_spans,
             call_arg_spans,
+            coverage_sites,
             var_count,
             ..Self::empty()
         }
@@ -547,6 +555,7 @@ mod function_registry_tests {
             instructions: vec![Instr::Return],
             instr_spans: Vec::new(),
             call_arg_spans: Vec::new(),
+            coverage_sites: Vec::new(),
             var_count: 0,
             input_slots: Vec::new(),
             varargin_slot: None,
