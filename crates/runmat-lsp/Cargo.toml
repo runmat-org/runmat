@@ -35,6 +35,7 @@ runmat-package = { workspace = true }
 runmat-filesystem = { workspace = true }
 runmat-runtime = { workspace = true }
 runmat-static-analysis = { workspace = true }
+runmat-test = { workspace = true }
 runmat-thread-local = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

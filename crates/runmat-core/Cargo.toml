@@ -17,6 +17,7 @@ runmat-vm = { workspace = true }
 runmat-config = { workspace = true }
 runmat-package = { workspace = true }
 runmat-static-analysis = { workspace = true }
+runmat-test = { workspace = true }
 runmat-accelerate = { workspace = true }
 runmat-accelerate-api = { workspace = true }
 runmat-turbine = { workspace = true, optional = true }

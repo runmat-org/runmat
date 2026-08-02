@@ -12,6 +12,7 @@ mod profiling;
 mod session;
 mod source_pool;
 mod telemetry;
+pub mod testing;
 mod value_metadata;
 mod workspace;
 

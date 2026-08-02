@@ -139,6 +139,21 @@ pub fn clear_project_handoff() {
     crate::core::project::ProjectContext::clear_installed_handoff();
 }
 
+/// Discover tests from the exact frozen run snapshot supplied by the browser
+/// coordinator. This intentionally does not consult the installed project or
+/// mutable editor store, so runtime and LSP consumers cannot observe different
+/// graph/source revisions.
+#[wasm_bindgen(js_name = "discoverTests")]
+pub fn discover_tests(value: JsValue) -> Result<JsValue, JsValue> {
+    ensure_builtins_registered();
+    let snapshot: runmat_test::discovery::FrozenTestRunSnapshot =
+        serde_wasm_bindgen::from_value(value)
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let compat = COMPAT_MODE.with(|mode| mode.get());
+    let discovery = runmat_static_analysis::testing::discover_frozen_tests(&snapshot, compat);
+    to_js(&discovery)
+}
+
 #[wasm_bindgen]
 pub async fn open_document(uri: String, text: String) {
     let version = DOCS.with(|d| {

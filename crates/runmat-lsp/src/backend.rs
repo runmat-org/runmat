@@ -96,6 +96,19 @@ impl RunMatLanguageServer {
         }
     }
 
+    /// Revision-bound semantic test discovery. The request carries the exact
+    /// frozen sources, including any intentionally selected editor overlays;
+    /// the language server never re-resolves the project for this operation.
+    pub async fn discover_tests(
+        &self,
+        snapshot: runmat_test::discovery::FrozenTestRunSnapshot,
+    ) -> RpcResult<runmat_test::discovery::TestDiscovery> {
+        let compat = self.state.read().await.compat_mode;
+        Ok(runmat_static_analysis::testing::discover_frozen_tests(
+            &snapshot, compat,
+        ))
+    }
+
     async fn update_document(&self, uri: Url, text: String, version: Option<i32>) {
         {
             let mut state = self.state.write().await;

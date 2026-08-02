@@ -1274,6 +1274,24 @@ impl RunMatWasm {
             .map_err(|err| js_error(&format!("Project revision serialization failed: {err}")))
     }
 
+    /// Return semantic discovery for the exact caller-frozen run snapshot.
+    /// The Core session verifies it against the installed project handoff
+    /// before static analysis; no browser filesystem rediscovery occurs.
+    #[wasm_bindgen(js_name = discoverTests)]
+    pub fn discover_tests_js(&self, value: JsValue) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let snapshot: runmat_test::discovery::FrozenTestRunSnapshot =
+            serde_wasm_bindgen::from_value(value)
+                .map_err(|err| js_error(&format!("Test snapshot parse failed: {err}")))?;
+        let discovery = self
+            .session
+            .borrow()
+            .discover_tests(&snapshot)
+            .map_err(|err| js_error(&format!("Test discovery failed: {err}")))?;
+        serde_wasm_bindgen::to_value(&discovery)
+            .map_err(|err| js_error(&format!("Test discovery serialization failed: {err}")))
+    }
+
     #[wasm_bindgen(js_name = cancelExecution)]
     pub fn cancel_execution(&self) {
         if let Some(flag) = self.active_interrupt.borrow().as_ref() {

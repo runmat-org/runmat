@@ -1478,6 +1478,7 @@ impl LoweringCtx {
             id: class_id,
             module: self.module,
             name: qualified,
+            declared_super_class: super_class.map(ToOwned::to_owned),
             super_class: resolved_super,
             builtin_super_class,
             kind,

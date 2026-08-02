@@ -5906,6 +5906,7 @@ dependencies = [
  "runmat-runtime",
  "runmat-static-analysis",
  "runmat-telemetry",
+ "runmat-test",
  "runmat-time",
  "runmat-turbine",
  "runmat-vm",
@@ -6017,7 +6018,11 @@ version = "0.6.1"
 dependencies = [
  "runmat-builtins",
  "runmat-parser",
+ "runmat-test",
  "serde",
+ "serde_json",
+ "sha2",
+ "wasm-bindgen-test",
 ]
 
 [[package]]
@@ -6064,6 +6069,7 @@ dependencies = [
  "runmat-parser",
  "runmat-runtime",
  "runmat-static-analysis",
+ "runmat-test",
  "runmat-thread-local",
  "runmat-vm",
  "serde",
@@ -6432,6 +6438,7 @@ dependencies = [
  "runmat-package",
  "runmat-parser",
  "runmat-runtime",
+ "runmat-test",
  "runmat-vm",
  "serde",
 ]
@@ -6544,6 +6551,7 @@ dependencies = [
  "runmat-plot",
  "runmat-runtime",
  "runmat-telemetry",
+ "runmat-test",
  "runmat-thread-local",
  "runmat-vm",
  "serde",

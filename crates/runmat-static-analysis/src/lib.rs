@@ -1,5 +1,6 @@
 pub mod frontend;
 pub mod lints;
+pub mod testing;
 
 pub use lints::shape::{
     infer_binding_shapes, infer_binding_shapes_from_mir, lint_shapes, lint_shapes_from_mir,

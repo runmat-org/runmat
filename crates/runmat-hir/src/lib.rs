@@ -7,6 +7,7 @@ mod ids;
 pub(crate) mod lowering;
 mod lowering_context;
 mod span;
+pub mod testing;
 
 pub use diagnostic::{
     HirDiagnostic, HirDiagnosticNote, HirDiagnosticSeverity, HirDiagnosticSpan,

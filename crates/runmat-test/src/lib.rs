@@ -2,6 +2,7 @@
 
 pub mod context;
 pub mod descriptor;
+pub mod discovery;
 pub mod error;
 pub mod event;
 pub mod executor;
