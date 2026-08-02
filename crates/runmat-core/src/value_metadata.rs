@@ -1,4 +1,4 @@
-use runmat_builtins::{IntValue, LogicalArray, SparseTensor, Value};
+use runmat_builtins::{IntValue, LogicalArray, NumericScalar, SparseTensor, Tensor, Value};
 
 /// A scalar value in a workspace numeric preview.
 ///
@@ -14,7 +14,7 @@ pub enum NumericPreviewValue {
 pub fn matlab_class_name(value: &Value) -> String {
     match value {
         Value::Num(_) | Value::ComplexTensor(_) | Value::Complex(_, _) => "double".to_string(),
-        Value::Tensor(tensor) => tensor.dtype.class_name().to_string(),
+        Value::Tensor(tensor) => tensor.numeric_dtype().class_name().to_string(),
         Value::SparseTensor(_) => "double".to_string(),
         Value::Int(iv) => iv.class_name().to_string(),
         Value::Bool(_) | Value::LogicalArray(_) => "logical".to_string(),
@@ -76,7 +76,7 @@ pub fn value_shape(value: &Value) -> Option<Vec<usize>> {
 pub fn numeric_dtype_label(value: &Value) -> Option<&'static str> {
     match value {
         Value::Num(_) | Value::Complex(_, _) => Some("double"),
-        Value::Tensor(t) => Some(t.dtype.class_name()),
+        Value::Tensor(t) => Some(t.numeric_dtype().class_name()),
         Value::LogicalArray(_) => Some("logical"),
         Value::Int(iv) => Some(iv.class_name()),
         _ => None,
@@ -89,13 +89,7 @@ pub fn approximate_size_bytes(value: &Value) -> Option<u64> {
         Value::Num(_) | Value::Int(_) | Value::Complex(_, _) => 8,
         Value::Bool(_) => 1,
         Value::LogicalArray(arr) => arr.data.len() as u64,
-        Value::Tensor(t) => {
-            let compatibility_view = (t.data.len() as u64).saturating_mul(8);
-            let native_integer_storage = t.integer_storage().map_or(0, |storage| {
-                (storage.len() as u64).saturating_mul(t.dtype.byte_size() as u64)
-            });
-            compatibility_view.saturating_add(native_integer_storage)
-        }
+        Value::Tensor(t) => (t.len() as u64).saturating_mul(t.numeric_dtype().byte_size() as u64),
         Value::SparseTensor(s) => sparse_tensor_memory_bytes(s),
         Value::ComplexTensor(t) => (t.data.len() * 16) as u64,
         Value::String(s) => s.len() as u64,
@@ -139,10 +133,7 @@ pub fn preview_numeric_values(
             vec![NumericPreviewValue::Float(if *flag { 1.0 } else { 0.0 })],
             false,
         )),
-        Value::Tensor(t) => match t.integer_storage() {
-            Some(storage) => Some(preview_integer_slice(storage, limit)),
-            None => Some(preview_f64_slice(&t.data, limit)),
-        },
+        Value::Tensor(t) => Some(preview_tensor(t, limit)),
         Value::SparseTensor(s) => Some(preview_sparse_tensor(s, limit)),
         Value::LogicalArray(arr) => Some(preview_logical_slice(arr, limit)),
         Value::StringArray(_) | Value::String(_) | Value::CharArray(_) => None,
@@ -165,42 +156,25 @@ pub fn preview_numeric_values(
     }
 }
 
-fn preview_f64_slice(data: &[f64], limit: usize) -> (Vec<NumericPreviewValue>, bool) {
-    if data.len() > limit {
-        (
-            data[..limit]
-                .iter()
-                .copied()
-                .map(NumericPreviewValue::Float)
-                .collect(),
-            true,
-        )
-    } else {
-        (
-            data.iter()
-                .copied()
-                .map(NumericPreviewValue::Float)
-                .collect(),
-            false,
-        )
-    }
-}
-
-fn preview_integer_slice(
-    storage: &runmat_builtins::IntegerStorage,
-    limit: usize,
-) -> (Vec<NumericPreviewValue>, bool) {
-    let preview_len = storage.len().min(limit);
+fn preview_tensor(tensor: &Tensor, limit: usize) -> (Vec<NumericPreviewValue>, bool) {
+    let preview_len = tensor.len().min(limit);
     let values = (0..preview_len)
         .map(|index| {
-            NumericPreviewValue::Integer(
-                storage
-                    .value_at(index)
-                    .expect("integer storage index is valid"),
-            )
+            let value = tensor
+                .numeric_value_at(index)
+                .expect("preview index is within authoritative tensor storage");
+            match value {
+                NumericScalar::F64(value) => NumericPreviewValue::Float(value),
+                NumericScalar::F32(value) => NumericPreviewValue::Float(f64::from(value)),
+                value => NumericPreviewValue::Integer(
+                    value
+                        .into_int_value()
+                        .expect("non-floating numeric scalar must be an integer"),
+                ),
+            }
         })
         .collect();
-    (values, storage.len() > limit)
+    (values, tensor.len() > limit)
 }
 
 fn preview_sparse_tensor(sparse: &SparseTensor, limit: usize) -> (Vec<NumericPreviewValue>, bool) {
@@ -239,16 +213,16 @@ mod tests {
     use runmat_builtins::{IntegerStorage, NumericDType, ObjectInstance, Tensor};
 
     #[test]
-    fn approximate_size_bytes_includes_exact_integer_storage() {
+    fn approximate_size_bytes_uses_authoritative_native_storage() {
         let cases = [
-            (NumericDType::I8, 27),
-            (NumericDType::I16, 30),
-            (NumericDType::I32, 36),
-            (NumericDType::I64, 48),
-            (NumericDType::U8, 27),
-            (NumericDType::U16, 30),
-            (NumericDType::U32, 36),
-            (NumericDType::U64, 48),
+            (NumericDType::I8, 3),
+            (NumericDType::I16, 6),
+            (NumericDType::I32, 12),
+            (NumericDType::I64, 24),
+            (NumericDType::U8, 3),
+            (NumericDType::U16, 6),
+            (NumericDType::U32, 12),
+            (NumericDType::U64, 24),
         ];
         for (dtype, expected_bytes) in cases {
             let tensor =
@@ -261,7 +235,7 @@ mod tests {
 
         let f32_tensor = Tensor::new_with_dtype(vec![1.0, 2.0, 3.0], vec![3, 1], NumericDType::F32)
             .expect("tensor");
-        assert_eq!(approximate_size_bytes(&Value::Tensor(f32_tensor)), Some(24));
+        assert_eq!(approximate_size_bytes(&Value::Tensor(f32_tensor)), Some(12));
     }
 
     #[test]
@@ -344,6 +318,23 @@ mod tests {
             Some((
                 vec![NumericPreviewValue::Integer(IntValue::U64(u64::MAX))],
                 false
+            ))
+        );
+    }
+
+    #[test]
+    fn native_single_preview_reads_authoritative_f32_values() {
+        let values = vec![0.1_f32, f32::MAX, -0.0];
+        let tensor = Tensor::from_f32(values.clone(), vec![3, 1]).expect("single tensor");
+
+        assert_eq!(
+            preview_numeric_values(&Value::Tensor(tensor), 2),
+            Some((
+                vec![
+                    NumericPreviewValue::Float(f64::from(values[0])),
+                    NumericPreviewValue::Float(f64::from(values[1])),
+                ],
+                true
             ))
         );
     }
