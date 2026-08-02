@@ -283,7 +283,7 @@ pub fn lapack_determinant(matrix: &Matrix) -> Result<f64, String> {
 
     // Product of diagonal elements
     for i in 0..n {
-        det *= lu.lu_matrix.data[i * n + i];
+        det *= tensor::tensor_value_f64(&lu.lu_matrix, i * n + i);
     }
 
     // Count number of row swaps to determine sign

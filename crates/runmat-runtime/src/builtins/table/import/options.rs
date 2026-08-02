@@ -1,5 +1,6 @@
 use super::*;
 use crate::builtins::common::tensor;
+use runmat_builtins::NumericScalar;
 #[derive(Clone)]
 pub(in crate::builtins::table) struct ReadTableOptions {
     pub(super) file_type: ImportFileType,
@@ -1095,17 +1096,22 @@ impl RangeSpec {
             Value::Tensor(t) if tensor_len(t) == 2 || tensor_len(t) == 4 => {
                 let len = tensor_len(t);
                 let mut indices = Vec::with_capacity(len);
-                if let Some(storage) = t.integer_storage() {
-                    for idx in 0..len {
-                        let value = storage
-                            .value_at(idx)
-                            .ok_or_else(|| invalid_index("table: Range index out of bounds"))?;
-                        indices.push(one_based_integer_to_zero(&value, "Range")?);
-                    }
-                } else {
-                    for value in &t.data {
-                        indices.push(one_based_to_zero(*value, usize::MAX, "Range")?);
-                    }
+                for idx in 0..len {
+                    let value = t
+                        .numeric_value_at(idx)
+                        .ok_or_else(|| invalid_index("table: Range index out of bounds"))?;
+                    indices.push(match value {
+                        NumericScalar::F64(value) => one_based_to_zero(value, usize::MAX, "Range")?,
+                        NumericScalar::F32(value) => {
+                            one_based_to_zero(f64::from(value), usize::MAX, "Range")?
+                        }
+                        value => one_based_integer_to_zero(
+                            &value
+                                .into_int_value()
+                                .expect("non-floating numeric scalar is integer"),
+                            "Range",
+                        )?,
+                    });
                 }
                 Ok(Self {
                     start_row: indices[0],
@@ -1147,9 +1153,7 @@ impl RangeSpec {
 }
 
 fn tensor_len(tensor: &runmat_builtins::Tensor) -> usize {
-    tensor
-        .integer_storage()
-        .map_or(tensor.data.len(), |storage| storage.len())
+    tensor.len()
 }
 
 fn one_based_integer_to_zero(

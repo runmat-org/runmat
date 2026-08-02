@@ -1,6 +1,7 @@
 use super::*;
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::stats::summary::distribution_math::student_t_inv;
+use runmat_builtins::NumericScalar;
 
 pub(in crate::builtins::table) fn grpstats_impl(
     value: Value,
@@ -560,16 +561,22 @@ fn grouping_atoms(value: &Value, rows: usize) -> BuiltinResult<Vec<GroupAtom>> {
         )));
     }
     match value {
-        Value::Tensor(tensor) => {
-            if let Some(storage) = tensor.integer_storage() {
-                return Ok(storage
-                    .exact_values()
-                    .into_iter()
-                    .map(GroupAtom::Integer)
-                    .collect());
-            }
-            Ok(tensor.data.iter().copied().map(GroupAtom::Number).collect())
-        }
+        Value::Tensor(tensor) => Ok((0..tensor.len())
+            .map(|index| {
+                match tensor
+                    .numeric_value_at(index)
+                    .expect("validated grouping tensor storage")
+                {
+                    NumericScalar::F64(value) => GroupAtom::Number(value),
+                    NumericScalar::F32(value) => GroupAtom::Number(f64::from(value)),
+                    value => GroupAtom::Integer(
+                        value
+                            .into_int_value()
+                            .expect("non-floating numeric scalar is integer"),
+                    ),
+                }
+            })
+            .collect()),
         Value::LogicalArray(array) => Ok(array
             .data
             .iter()

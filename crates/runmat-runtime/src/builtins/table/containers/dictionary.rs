@@ -1,4 +1,5 @@
 use super::*;
+use runmat_builtins::NumericScalar;
 
 pub(in crate::builtins::table) fn dictionary_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     let (keys, values) = match args.as_slice() {
@@ -159,12 +160,15 @@ pub(in crate::builtins::table) fn value_elements(value: &Value) -> BuiltinResult
     match value {
         Value::Cell(cell) => Ok(cell.data.clone()),
         Value::StringArray(array) => Ok(array.data.iter().cloned().map(Value::String).collect()),
-        Value::Tensor(tensor) => {
-            if let Some(storage) = tensor.integer_storage() {
-                return Ok(storage.exact_values().into_iter().map(Value::Int).collect());
-            }
-            Ok(tensor.data.iter().copied().map(Value::Num).collect())
-        }
+        Value::Tensor(tensor) => Ok((0..tensor.len())
+            .map(|index| {
+                numeric_scalar_value(
+                    tensor
+                        .numeric_value_at(index)
+                        .expect("validated dictionary tensor storage"),
+                )
+            })
+            .collect()),
         Value::LogicalArray(array) => Ok(array
             .data
             .iter()
@@ -172,6 +176,18 @@ pub(in crate::builtins::table) fn value_elements(value: &Value) -> BuiltinResult
             .collect()),
         Value::CharArray(array) => Ok(char_rows(array).into_iter().map(Value::String).collect()),
         other => Ok(vec![other.clone()]),
+    }
+}
+
+fn numeric_scalar_value(value: NumericScalar) -> Value {
+    match value {
+        NumericScalar::F64(value) => Value::Num(value),
+        NumericScalar::F32(value) => Value::Num(f64::from(value)),
+        value => Value::Int(
+            value
+                .into_int_value()
+                .expect("non-floating numeric scalar is integer"),
+        ),
     }
 }
 

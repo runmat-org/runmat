@@ -1,5 +1,5 @@
 use super::*;
-use runmat_builtins::{IntValue, IntegerStorage};
+use runmat_builtins::{IntValue, IntegerStorage, NumericScalar};
 
 #[derive(Clone, Default)]
 pub(in crate::builtins::table) struct ParquetReadOptions {
@@ -760,22 +760,31 @@ fn one_based_indices(value: &Value, context: &str) -> BuiltinResult<Vec<usize>> 
         Value::Tensor(tensor) => {
             let len = crate::builtins::common::tensor::tensor_element_len(tensor);
             let mut out = Vec::with_capacity(len);
-            if let Some(storage) = tensor.integer_storage() {
-                for idx in 0..len {
-                    let Some(parsed) = storage
-                        .value_at(idx)
-                        .and_then(|value| value.try_to_usize())
+            for idx in 0..len {
+                let value = tensor.numeric_value_at(idx).ok_or_else(|| {
+                    invalid_argument(format!(
+                        "parquetread: {context} entries must be positive integers"
+                    ))
+                })?;
+                match value {
+                    NumericScalar::F64(value) => {
+                        out.push(one_based_index_from_number(value, context)?)
+                    }
+                    NumericScalar::F32(value) => {
+                        out.push(one_based_index_from_number(f64::from(value), context)?)
+                    }
+                    value => {
+                        let Some(parsed) = value
+                            .into_int_value()
+                            .and_then(|value| value.try_to_usize())
                         .and_then(|index| index.checked_sub(1))
-                    else {
-                        return Err(invalid_argument(format!(
-                            "parquetread: {context} entries must be positive integers"
-                        )));
-                    };
-                    out.push(parsed);
-                }
-            } else {
-                for value in &tensor.data {
-                    out.push(one_based_index_from_number(*value, context)?);
+                        else {
+                            return Err(invalid_argument(format!(
+                                "parquetread: {context} entries must be positive integers"
+                            )));
+                        };
+                        out.push(parsed);
+                    }
                 }
             }
             Ok(out)
