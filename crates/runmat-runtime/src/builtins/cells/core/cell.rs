@@ -386,7 +386,7 @@ fn parse_size_scalar(value: &Value, context: &str) -> BuiltinResult<usize> {
             if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
                 parse_intvalue(&int, context)
             } else {
-                parse_numeric(t.data[0], context)
+                parse_numeric(tensor::tensor_value_f64(t, 0), context)
             }
         }
         Value::LogicalArray(arr) => {
@@ -433,9 +433,8 @@ fn parse_size_tensor(t: &Tensor) -> BuiltinResult<Vec<usize>> {
                 .collect::<Result<Vec<_>, _>>()
         })
         .unwrap_or_else(|| {
-            t.data
-                .iter()
-                .map(|&value| parse_numeric(value, "cell"))
+            (0..t.len())
+                .map(|index| parse_numeric(tensor::tensor_value_f64(t, index), "cell"))
                 .collect::<Result<Vec<_>, _>>()
         })?;
     if dims.len() == 1 {
@@ -689,6 +688,18 @@ pub(crate) mod tests {
 
         assert!(parse_size_scalar(&Value::Num(usize::MAX as f64), "cell").is_err());
         assert!(parse_size_scalar(&Value::Num((usize::MAX as f64) + 1.0), "cell").is_err());
+    }
+
+    #[test]
+    fn cell_size_tensor_reads_native_single_storage() {
+        let dims = Tensor::from_f32(vec![2.0, 3.0], vec![1, 2]).expect("single dims");
+        assert_eq!(parse_size_tensor(&dims).unwrap(), vec![2, 3]);
+
+        let scalar = Tensor::from_f32(vec![4.0], vec![1, 1]).expect("single scalar");
+        assert_eq!(
+            parse_size_scalar(&Value::Tensor(scalar), "cell").unwrap(),
+            4
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -4,7 +4,7 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
-    StringArray, Tensor, Value,
+    NumericDType, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -302,9 +302,31 @@ impl Mat2CellInput {
                 if let Some(storage) = t.integer_storage() {
                     return extract_typed_integer_block(storage, &self.base_shape, start, sizes);
                 }
-                let data = copy_block(&t.data, &self.base_shape, start, sizes)?;
                 let shape = adjust_output_shape(sizes);
-                let tensor = Tensor::new(data, shape).map_err(|e| {
+                let tensor = match t.numeric_dtype() {
+                    NumericDType::F64 => {
+                        let data = copy_block(
+                            t.as_f64_slice()
+                                .expect("double tensor has native double storage"),
+                            &self.base_shape,
+                            start,
+                            sizes,
+                        )?;
+                        Tensor::new(data, shape)
+                    }
+                    NumericDType::F32 => {
+                        let values: Vec<f32> = (0..t.len())
+                            .map(|index| match t.numeric_value_at(index) {
+                                Some(runmat_builtins::NumericScalar::F32(value)) => value,
+                                _ => unreachable!("single tensor has native single storage"),
+                            })
+                            .collect();
+                        let data = copy_block(&values, &self.base_shape, start, sizes)?;
+                        Tensor::from_f32(data, shape)
+                    }
+                    _ => unreachable!("integer tensor returned through exact block path"),
+                }
+                .map_err(|e| {
                     mat2cell_error_with_message(format!("mat2cell: {e}"), &MAT2CELL_ERROR_INTERNAL)
                 })?;
                 Ok(tensor::tensor_into_value(tensor))
@@ -577,7 +599,11 @@ fn extract_partition_entries(value: &Value) -> Option<Vec<PartitionEntry>> {
                             .collect(),
                     )
                 } else {
-                    Some(t.data.iter().copied().map(PartitionEntry::Float).collect())
+                    Some(
+                        (0..t.len())
+                            .map(|index| PartitionEntry::Float(tensor::tensor_value_f64(t, index)))
+                            .collect(),
+                    )
                 }
             } else {
                 None
@@ -834,7 +860,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::LogicalArray;
+    use runmat_builtins::{LogicalArray, NumericStorage};
 
     fn mat2cell_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::mat2cell_builtin(value, rest))
@@ -884,6 +910,31 @@ pub(crate) mod tests {
         let gathered = test_support::gather(bottom_right).expect("gather");
         assert_eq!(gathered.shape, vec![2, 3]);
         assert_eq!(gathered.data, vec![7.0, 8.0, 11.0, 12.0, 15.0, 16.0]);
+    }
+
+    #[test]
+    fn native_single_data_and_partition_vectors_remain_typed() {
+        let input = Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let rows = Tensor::from_f32(vec![2.0], vec![1, 1]).unwrap();
+        let columns = Tensor::from_f32(vec![1.0, 1.0], vec![1, 2]).unwrap();
+        let Value::Cell(cells) = mat2cell_builtin(
+            Value::Tensor(input),
+            vec![Value::Tensor(rows), Value::Tensor(columns)],
+        )
+        .expect("mat2cell") else {
+            panic!("expected cell array");
+        };
+        assert_eq!(cells.shape, vec![1, 2]);
+        let expected = [vec![1.0_f32, 2.0], vec![3.0_f32, 4.0]];
+        for (value, expected) in cells.data.into_iter().zip(expected) {
+            let Value::Tensor(tensor) = value else {
+                panic!("expected single tensor block");
+            };
+            assert_eq!(
+                tensor.into_numeric_storage().unwrap(),
+                NumericStorage::F32(expected)
+            );
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
