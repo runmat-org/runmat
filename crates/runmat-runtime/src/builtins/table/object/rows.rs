@@ -86,7 +86,7 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
                     data.push(tensor.get2(row, col).map_err(invalid_index)?);
                 }
             }
-            Tensor::new_with_dtype(data, vec![rows.len(), cols], tensor.dtype)
+            Tensor::new_with_dtype(data, vec![rows.len(), cols], tensor.numeric_dtype())
                 .map(Value::Tensor)
                 .map_err(invalid_variable)
         }
@@ -337,7 +337,20 @@ pub(super) fn concatenate_numeric_columns(values: &[&Value]) -> BuiltinResult<Va
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::IntegerStorage;
+    use runmat_builtins::{IntegerStorage, NumericStorage};
+
+    #[test]
+    fn select_rows_preserves_native_single_storage() {
+        let value = Value::Tensor(Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
+
+        let Value::Tensor(selected) = select_rows(&value, &[1, 0]).unwrap() else {
+            panic!("expected tensor row selection");
+        };
+        assert_eq!(
+            selected.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![2.0, 1.0, 4.0, 3.0])
+        );
+    }
 
     #[test]
     fn select_rows_preserves_exact_integer_storage() {

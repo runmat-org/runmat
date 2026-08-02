@@ -1971,6 +1971,29 @@ fn crossentropy_supports_multilabel_reduction_none_and_mask_normalization() {
 }
 
 #[test]
+fn crossentropy_unreduced_output_preserves_native_single_storage() {
+    let out = block_on(crossentropy_builtin(
+        Value::Tensor(Tensor::from_f32(vec![0.8, 0.2], vec![1, 2]).unwrap()),
+        Value::Tensor(Tensor::from_f32(vec![1.0, 0.0], vec![1, 2]).unwrap()),
+        vec![
+            Value::String("ClassificationMode".into()),
+            Value::String("multi-label".into()),
+            Value::String("Reduction".into()),
+            Value::String("none".into()),
+        ],
+    ))
+    .expect("single unreduced crossentropy");
+    let Value::Tensor(losses) = out else {
+        panic!("expected tensor");
+    };
+    assert_eq!(losses.numeric_dtype(), NumericDType::F32);
+    assert!(matches!(
+        losses.into_numeric_storage().unwrap(),
+        NumericStorage::F32(_)
+    ));
+}
+
+#[test]
 fn crossentropy_mask_reads_typed_integer_storage_exactly() {
     let masked = block_on(crossentropy_builtin(
         Value::Tensor(Tensor::new(vec![0.8, 0.2], vec![1, 2]).unwrap()),

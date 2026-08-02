@@ -27,7 +27,7 @@ pub(in crate::builtins::table) fn split_value_columns(value: Value) -> BuiltinRe
                     for row in 0..rows {
                         data.push(tensor.get2(row, col).map_err(invalid_index)?);
                     }
-                    Tensor::new_with_dtype(data, vec![rows, 1], tensor.dtype)
+                    Tensor::new_with_dtype(data, vec![rows, 1], tensor.numeric_dtype())
                         .map_err(invalid_variable)?
                 };
                 out.push(Value::Tensor(value));
@@ -133,7 +133,30 @@ pub(in crate::builtins::table) fn split_value_columns(value: Value) -> BuiltinRe
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::IntegerStorage;
+    use runmat_builtins::{IntegerStorage, NumericStorage};
+
+    #[test]
+    fn split_value_columns_preserves_native_single_storage() {
+        let columns = split_value_columns(Value::Tensor(
+            Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap(),
+        ))
+        .unwrap();
+
+        let Value::Tensor(first) = columns[0].clone() else {
+            panic!("expected first tensor column");
+        };
+        let Value::Tensor(second) = columns[1].clone() else {
+            panic!("expected second tensor column");
+        };
+        assert_eq!(
+            first.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![1.0, 2.0])
+        );
+        assert_eq!(
+            second.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![3.0, 4.0])
+        );
+    }
 
     #[test]
     fn split_value_columns_preserves_exact_integer_storage() {

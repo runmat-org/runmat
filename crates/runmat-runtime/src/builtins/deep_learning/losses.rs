@@ -364,7 +364,7 @@ impl LossPayload {
                 dlarray: false,
             }),
             Value::Tensor(tensor) => {
-                let output_dtype = match tensor.dtype {
+                let output_dtype = match tensor.numeric_dtype() {
                     NumericDType::F64 => NumericDType::F64,
                     NumericDType::F32 => NumericDType::F32,
                     NumericDType::I8
