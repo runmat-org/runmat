@@ -12,11 +12,12 @@ use runmat_accelerate_api::{GpuTensorHandle, UnionOptions, UnionOrder, UnionResu
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, IntegerStorage, StringArray, Tensor, Value,
+    CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericStorage,
+    StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
-use super::{integer_order, type_resolvers::set_values_output_type};
+use super::{float_order::SetFloat, integer_order, type_resolvers::set_values_output_type};
 use crate::build_runtime_error;
 use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::gpu_helpers;
@@ -481,10 +482,52 @@ fn union_numeric(
             };
         }
     }
+    let a_shape = a.shape.clone();
+    let b_shape = b.shape.clone();
+    let a_storage = a
+        .into_numeric_storage()
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
+    let b_storage = b
+        .into_numeric_storage()
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
+    match (a_storage, b_storage) {
+        (NumericStorage::F64(a), NumericStorage::F64(b)) => {
+            union_floating(a, a_shape, b, b_shape, opts)
+        }
+        (NumericStorage::F32(a), NumericStorage::F32(b)) => {
+            union_floating(a, a_shape, b, b_shape, opts)
+        }
+        (a, b) => union_promoted_f64(a, a_shape, b, b_shape, opts),
+    }
+}
+
+fn union_promoted_f64(
+    a: NumericStorage,
+    a_shape: Vec<usize>,
+    b: NumericStorage,
+    b_shape: Vec<usize>,
+    opts: &UnionOptions,
+) -> crate::BuiltinResult<UnionEvaluation> {
+    union_floating(
+        a.materialize_f64(),
+        a_shape,
+        b.materialize_f64(),
+        b_shape,
+        opts,
+    )
+}
+
+fn union_floating<T: SetFloat>(
+    a: Vec<T>,
+    a_shape: Vec<usize>,
+    b: Vec<T>,
+    b_shape: Vec<usize>,
+    opts: &UnionOptions,
+) -> crate::BuiltinResult<UnionEvaluation> {
     if opts.rows {
-        union_numeric_rows(a, b, opts)
+        union_floating_rows(a, a_shape, b, b_shape, opts)
     } else {
-        union_numeric_elements(a, b, opts)
+        union_floating_elements(a, b, opts)
     }
 }
 
@@ -588,26 +631,24 @@ fn union_integer_rows(
     assemble_integer_row_union(entries, a_storage, opts, cols)
 }
 
-fn union_numeric_elements(
-    a: Tensor,
-    b: Tensor,
+fn union_floating_elements<T: SetFloat>(
+    a_values: Vec<T>,
+    b_values: Vec<T>,
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
-    let a_values = tensor::tensor_values_f64_cow(&a);
-    let b_values = tensor::tensor_values_f64_cow(&b);
-    let mut entries = Vec::<NumericUnionEntry>::new();
+    let mut entries = Vec::<FloatingUnionEntry<T>>::new();
     let mut map: HashMap<u64, usize> = HashMap::new();
     let mut order_counter = 0usize;
 
     for (idx, &value) in a_values.iter().enumerate() {
-        let key = canonicalize_f64(value);
+        let key = value.canonical_key();
         match map.entry(key) {
             Entry::Occupied(_) => {
                 // Already recorded from A; keep first occurrence only.
             }
             Entry::Vacant(v) => {
                 let entry_idx = entries.len();
-                entries.push(NumericUnionEntry {
+                entries.push(FloatingUnionEntry {
                     value,
                     a_index: Some(idx),
                     b_index: None,
@@ -620,7 +661,7 @@ fn union_numeric_elements(
     }
 
     for (idx, &value) in b_values.iter().enumerate() {
-        let key = canonicalize_f64(value);
+        let key = value.canonical_key();
         match map.entry(key) {
             Entry::Occupied(occ) => {
                 let entry = &mut entries[*occ.get()];
@@ -630,7 +671,7 @@ fn union_numeric_elements(
             }
             Entry::Vacant(v) => {
                 let entry_idx = entries.len();
-                entries.push(NumericUnionEntry {
+                entries.push(FloatingUnionEntry {
                     value,
                     a_index: None,
                     b_index: Some(idx),
@@ -642,33 +683,33 @@ fn union_numeric_elements(
         }
     }
 
-    assemble_numeric_union(entries, opts)
+    assemble_floating_union(entries, opts)
 }
 
-fn union_numeric_rows(
-    a: Tensor,
-    b: Tensor,
+fn union_floating_rows<T: SetFloat>(
+    a_values: Vec<T>,
+    a_shape: Vec<usize>,
+    b_values: Vec<T>,
+    b_shape: Vec<usize>,
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
-    if a.shape.len() != 2 || b.shape.len() != 2 {
+    if a_shape.len() != 2 || b_shape.len() != 2 {
         return Err(union_internal_error(
             "union: 'rows' option requires 2-D numeric matrices",
         ));
     }
-    if a.shape[1] != b.shape[1] {
+    if a_shape[1] != b_shape[1] {
         return Err(union_error_with(
             &UNION_ERROR_ROWS_COLUMN_MISMATCH,
             UNION_ERROR_ROWS_COLUMN_MISMATCH.message,
         ));
     }
-    let rows_a = a.shape[0];
-    let cols = a.shape[1];
-    let rows_b = b.shape[0];
-    let a_values = tensor::tensor_values_f64_cow(&a);
-    let b_values = tensor::tensor_values_f64_cow(&b);
+    let rows_a = a_shape[0];
+    let cols = a_shape[1];
+    let rows_b = b_shape[0];
 
-    let mut entries = Vec::<NumericRowUnionEntry>::new();
-    let mut map: HashMap<NumericRowKey, usize> = HashMap::new();
+    let mut entries = Vec::<FloatingRowUnionEntry<T>>::new();
+    let mut map: HashMap<FloatingRowKey, usize> = HashMap::new();
     let mut order_counter = 0usize;
 
     for r in 0..rows_a {
@@ -677,12 +718,12 @@ fn union_numeric_rows(
             let idx = r + c * rows_a;
             row_values.push(a_values[idx]);
         }
-        let key = NumericRowKey::from_slice(&row_values);
+        let key = FloatingRowKey::from_slice(&row_values);
         match map.entry(key) {
             Entry::Occupied(_) => {}
             Entry::Vacant(v) => {
                 let entry_idx = entries.len();
-                entries.push(NumericRowUnionEntry {
+                entries.push(FloatingRowUnionEntry {
                     row_data: row_values,
                     a_row: Some(r),
                     b_row: None,
@@ -700,7 +741,7 @@ fn union_numeric_rows(
             let idx = r + c * rows_b;
             row_values.push(b_values[idx]);
         }
-        let key = NumericRowKey::from_slice(&row_values);
+        let key = FloatingRowKey::from_slice(&row_values);
         match map.entry(key) {
             Entry::Occupied(occ) => {
                 let entry = &mut entries[*occ.get()];
@@ -710,7 +751,7 @@ fn union_numeric_rows(
             }
             Entry::Vacant(v) => {
                 let entry_idx = entries.len();
-                entries.push(NumericRowUnionEntry {
+                entries.push(FloatingRowUnionEntry {
                     row_data: row_values,
                     a_row: None,
                     b_row: Some(r),
@@ -722,7 +763,7 @@ fn union_numeric_rows(
         }
     }
 
-    assemble_numeric_row_union(entries, opts, cols)
+    assemble_floating_row_union(entries, opts, cols)
 }
 
 fn union_complex(
@@ -730,23 +771,59 @@ fn union_complex(
     b: ComplexTensor,
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
+    let a_shape = a.shape.clone();
+    let b_shape = b.shape.clone();
+    match (a.into_complex_storage(), b.into_complex_storage()) {
+        (ComplexStorage::F64(a), ComplexStorage::F64(b)) => {
+            union_floating_complex(a, a_shape, b, b_shape, opts)
+        }
+        (ComplexStorage::F32(a), ComplexStorage::F32(b)) => {
+            union_floating_complex(a, a_shape, b, b_shape, opts)
+        }
+        (a, b) => union_promoted_complex_f64(a, a_shape, b, b_shape, opts),
+    }
+}
+
+fn union_promoted_complex_f64(
+    a: ComplexStorage,
+    a_shape: Vec<usize>,
+    b: ComplexStorage,
+    b_shape: Vec<usize>,
+    opts: &UnionOptions,
+) -> crate::BuiltinResult<UnionEvaluation> {
+    union_floating_complex(
+        a.materialize_f64(),
+        a_shape,
+        b.materialize_f64(),
+        b_shape,
+        opts,
+    )
+}
+
+fn union_floating_complex<T: SetFloat>(
+    a: Vec<(T, T)>,
+    a_shape: Vec<usize>,
+    b: Vec<(T, T)>,
+    b_shape: Vec<usize>,
+    opts: &UnionOptions,
+) -> crate::BuiltinResult<UnionEvaluation> {
     if opts.rows {
-        union_complex_rows(a, b, opts)
+        union_complex_rows(a, a_shape, b, b_shape, opts)
     } else {
         union_complex_elements(a, b, opts)
     }
 }
 
-fn union_complex_elements(
-    a: ComplexTensor,
-    b: ComplexTensor,
+fn union_complex_elements<T: SetFloat>(
+    a: Vec<(T, T)>,
+    b: Vec<(T, T)>,
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
-    let mut entries = Vec::<ComplexUnionEntry>::new();
+    let mut entries = Vec::<ComplexUnionEntry<T>>::new();
     let mut map: HashMap<ComplexKey, usize> = HashMap::new();
     let mut order_counter = 0usize;
 
-    for (idx, &value) in a.materialize_f64().iter().enumerate() {
+    for (idx, &value) in a.iter().enumerate() {
         let key = ComplexKey::new(value);
         match map.entry(key) {
             Entry::Occupied(_) => {}
@@ -764,7 +841,7 @@ fn union_complex_elements(
         }
     }
 
-    for (idx, &value) in b.materialize_f64().iter().enumerate() {
+    for (idx, &value) in b.iter().enumerate() {
         let key = ComplexKey::new(value);
         match map.entry(key) {
             Entry::Occupied(occ) => {
@@ -790,27 +867,29 @@ fn union_complex_elements(
     assemble_complex_union(entries, opts)
 }
 
-fn union_complex_rows(
-    a: ComplexTensor,
-    b: ComplexTensor,
+fn union_complex_rows<T: SetFloat>(
+    a: Vec<(T, T)>,
+    a_shape: Vec<usize>,
+    b: Vec<(T, T)>,
+    b_shape: Vec<usize>,
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
-    if a.shape.len() != 2 || b.shape.len() != 2 {
+    if a_shape.len() != 2 || b_shape.len() != 2 {
         return Err(union_internal_error(
             "union: 'rows' option requires 2-D complex matrices",
         ));
     }
-    if a.shape[1] != b.shape[1] {
+    if a_shape[1] != b_shape[1] {
         return Err(union_error_with(
             &UNION_ERROR_ROWS_COLUMN_MISMATCH,
             UNION_ERROR_ROWS_COLUMN_MISMATCH.message,
         ));
     }
-    let rows_a = a.shape[0];
-    let cols = a.shape[1];
-    let rows_b = b.shape[0];
+    let rows_a = a_shape[0];
+    let cols = a_shape[1];
+    let rows_b = b_shape[0];
 
-    let mut entries = Vec::<ComplexRowUnionEntry>::new();
+    let mut entries = Vec::<ComplexRowUnionEntry<T>>::new();
     let mut map: HashMap<Vec<ComplexKey>, usize> = HashMap::new();
     let mut order_counter = 0usize;
 
@@ -819,7 +898,7 @@ fn union_complex_rows(
         let mut key_row = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_a;
-            let value = a.materialize_f64()[idx];
+            let value = a[idx];
             row_values.push(value);
             key_row.push(ComplexKey::new(value));
         }
@@ -844,7 +923,7 @@ fn union_complex_rows(
         let mut key_row = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_b;
-            let value = b.materialize_f64()[idx];
+            let value = b[idx];
             row_values.push(value);
             key_row.push(ComplexKey::new(value));
         }
@@ -1228,8 +1307,8 @@ impl UnionEvaluation {
 }
 
 #[derive(Debug)]
-struct NumericUnionEntry {
-    value: f64,
+struct FloatingUnionEntry<T> {
+    value: T,
     a_index: Option<usize>,
     b_index: Option<usize>,
     order_rank: usize,
@@ -1244,8 +1323,8 @@ struct IntegerUnionEntry {
 }
 
 #[derive(Debug)]
-struct NumericRowUnionEntry {
-    row_data: Vec<f64>,
+struct FloatingRowUnionEntry<T> {
+    row_data: Vec<T>,
     a_row: Option<usize>,
     b_row: Option<usize>,
     order_rank: usize,
@@ -1260,16 +1339,16 @@ struct IntegerRowUnionEntry {
 }
 
 #[derive(Debug)]
-struct ComplexUnionEntry {
-    value: (f64, f64),
+struct ComplexUnionEntry<T> {
+    value: (T, T),
     a_index: Option<usize>,
     b_index: Option<usize>,
     order_rank: usize,
 }
 
 #[derive(Debug)]
-struct ComplexRowUnionEntry {
-    row_data: Vec<(f64, f64)>,
+struct ComplexRowUnionEntry<T> {
+    row_data: Vec<(T, T)>,
     a_row: Option<usize>,
     b_row: Option<usize>,
     order_rank: usize,
@@ -1308,11 +1387,11 @@ struct StringRowUnionEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct NumericRowKey(Vec<u64>);
+struct FloatingRowKey(Vec<u64>);
 
-impl NumericRowKey {
-    fn from_slice(values: &[f64]) -> Self {
-        NumericRowKey(values.iter().map(|&v| canonicalize_f64(v)).collect())
+impl FloatingRowKey {
+    fn from_slice<T: SetFloat>(values: &[T]) -> Self {
+        Self(values.iter().map(|&value| value.canonical_key()).collect())
     }
 }
 
@@ -1323,10 +1402,10 @@ struct ComplexKey {
 }
 
 impl ComplexKey {
-    fn new(value: (f64, f64)) -> Self {
+    fn new<T: SetFloat>(value: (T, T)) -> Self {
         Self {
-            re: canonicalize_f64(value.0),
-            im: canonicalize_f64(value.1),
+            re: value.0.canonical_key(),
+            im: value.1.canonical_key(),
         }
     }
 }
@@ -1343,14 +1422,14 @@ impl RowCharKey {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct RowStringKey(Vec<String>);
 
-fn assemble_numeric_union(
-    entries: Vec<NumericUnionEntry>,
+fn assemble_floating_union<T: SetFloat>(
+    entries: Vec<FloatingUnionEntry<T>>,
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
     let mut order: Vec<usize> = (0..entries.len()).collect();
     match opts.order {
         UnionOrder::Sorted => {
-            order.sort_by(|&lhs, &rhs| compare_f64(entries[lhs].value, entries[rhs].value));
+            order.sort_by(|&lhs, &rhs| entries[lhs].value.compare(entries[rhs].value));
         }
         UnionOrder::Stable => {
             order.sort_by_key(|&idx| entries[idx].order_rank);
@@ -1370,8 +1449,9 @@ fn assemble_numeric_union(
         }
     }
 
-    let value_tensor = Tensor::new(values, vec![order.len(), 1])
-        .map_err(|e| union_internal_error(format!("union: {e}")))?;
+    let value_tensor =
+        Tensor::from_numeric_storage(T::numeric_storage(values), vec![order.len(), 1])
+            .map_err(|e| union_internal_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
     let ia_tensor = Tensor::new(ia, vec![ia_len, 1])
@@ -1428,8 +1508,8 @@ fn assemble_integer_union(
     Ok(UnionEvaluation::new(Value::Tensor(values), ia, ib))
 }
 
-fn assemble_numeric_row_union(
-    entries: Vec<NumericRowUnionEntry>,
+fn assemble_floating_row_union<T: SetFloat>(
+    entries: Vec<FloatingRowUnionEntry<T>>,
     opts: &UnionOptions,
     cols: usize,
 ) -> crate::BuiltinResult<UnionEvaluation> {
@@ -1437,7 +1517,7 @@ fn assemble_numeric_row_union(
     match opts.order {
         UnionOrder::Sorted => {
             order.sort_by(|&lhs, &rhs| {
-                compare_numeric_rows(&entries[lhs].row_data, &entries[rhs].row_data)
+                compare_floating_rows(&entries[lhs].row_data, &entries[rhs].row_data)
             });
         }
         UnionOrder::Stable => {
@@ -1446,7 +1526,7 @@ fn assemble_numeric_row_union(
     }
 
     let unique_rows = order.len();
-    let mut values = vec![0.0f64; unique_rows * cols];
+    let mut values = vec![T::default(); unique_rows * cols];
     let mut ia = Vec::new();
     let mut ib = Vec::new();
 
@@ -1463,8 +1543,9 @@ fn assemble_numeric_row_union(
         }
     }
 
-    let value_tensor = Tensor::new(values, vec![unique_rows, cols])
-        .map_err(|e| union_internal_error(format!("union: {e}")))?;
+    let value_tensor =
+        Tensor::from_numeric_storage(T::numeric_storage(values), vec![unique_rows, cols])
+            .map_err(|e| union_internal_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
     let ia_tensor = Tensor::new(ia, vec![ia_len, 1])
@@ -1531,8 +1612,8 @@ fn assemble_integer_row_union(
     Ok(UnionEvaluation::new(Value::Tensor(values), ia, ib))
 }
 
-fn assemble_complex_union(
-    entries: Vec<ComplexUnionEntry>,
+fn assemble_complex_union<T: SetFloat>(
+    entries: Vec<ComplexUnionEntry<T>>,
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
     let mut order: Vec<usize> = (0..entries.len()).collect();
@@ -1558,8 +1639,9 @@ fn assemble_complex_union(
         }
     }
 
-    let value_tensor = ComplexTensor::new(values, vec![order.len(), 1])
-        .map_err(|e| union_internal_error(format!("union: {e}")))?;
+    let value_tensor =
+        ComplexTensor::from_complex_storage(T::complex_storage(values), vec![order.len(), 1])
+            .map_err(|e| union_internal_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
     let ia_tensor = Tensor::new(ia, vec![ia_len, 1])
@@ -1567,15 +1649,16 @@ fn assemble_complex_union(
     let ib_tensor = Tensor::new(ib, vec![ib_len, 1])
         .map_err(|e| union_internal_error(format!("union: {e}")))?;
 
-    Ok(UnionEvaluation::new(
-        complex_tensor_into_value(value_tensor),
-        ia_tensor,
-        ib_tensor,
-    ))
+    let value = if value_tensor.as_f32_slice().is_some() {
+        Value::ComplexTensor(value_tensor)
+    } else {
+        complex_tensor_into_value(value_tensor)
+    };
+    Ok(UnionEvaluation::new(value, ia_tensor, ib_tensor))
 }
 
-fn assemble_complex_row_union(
-    entries: Vec<ComplexRowUnionEntry>,
+fn assemble_complex_row_union<T: SetFloat>(
+    entries: Vec<ComplexRowUnionEntry<T>>,
     opts: &UnionOptions,
     cols: usize,
 ) -> crate::BuiltinResult<UnionEvaluation> {
@@ -1592,7 +1675,7 @@ fn assemble_complex_row_union(
     }
 
     let unique_rows = order.len();
-    let mut values = vec![(0.0, 0.0); unique_rows * cols];
+    let mut values = vec![(T::default(), T::default()); unique_rows * cols];
     let mut ia = Vec::new();
     let mut ib = Vec::new();
 
@@ -1609,8 +1692,9 @@ fn assemble_complex_row_union(
         }
     }
 
-    let value_tensor = ComplexTensor::new(values, vec![unique_rows, cols])
-        .map_err(|e| union_internal_error(format!("union: {e}")))?;
+    let value_tensor =
+        ComplexTensor::from_complex_storage(T::complex_storage(values), vec![unique_rows, cols])
+            .map_err(|e| union_internal_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
     let ia_tensor = Tensor::new(ia, vec![ia_len, 1])
@@ -1618,11 +1702,12 @@ fn assemble_complex_row_union(
     let ib_tensor = Tensor::new(ib, vec![ib_len, 1])
         .map_err(|e| union_internal_error(format!("union: {e}")))?;
 
-    Ok(UnionEvaluation::new(
-        complex_tensor_into_value(value_tensor),
-        ia_tensor,
-        ib_tensor,
-    ))
+    let value = if value_tensor.as_f32_slice().is_some() {
+        Value::ComplexTensor(value_tensor)
+    } else {
+        complex_tensor_into_value(value_tensor)
+    };
+    Ok(UnionEvaluation::new(value, ia_tensor, ib_tensor))
 }
 
 fn assemble_char_union(
@@ -1813,33 +1898,9 @@ fn assemble_string_row_union(
     ))
 }
 
-fn canonicalize_f64(value: f64) -> u64 {
-    if value.is_nan() {
-        0x7ff8_0000_0000_0000u64
-    } else if value == 0.0 {
-        0u64
-    } else {
-        value.to_bits()
-    }
-}
-
-fn compare_f64(a: f64, b: f64) -> Ordering {
-    if a.is_nan() {
-        if b.is_nan() {
-            Ordering::Equal
-        } else {
-            Ordering::Greater
-        }
-    } else if b.is_nan() {
-        Ordering::Less
-    } else {
-        a.partial_cmp(&b).unwrap_or(Ordering::Equal)
-    }
-}
-
-fn compare_numeric_rows(a: &[f64], b: &[f64]) -> Ordering {
+fn compare_floating_rows<T: SetFloat>(a: &[T], b: &[T]) -> Ordering {
     for (lhs, rhs) in a.iter().zip(b.iter()) {
-        let ord = compare_f64(*lhs, *rhs);
+        let ord = lhs.compare(*rhs);
         if ord != Ordering::Equal {
             return ord;
         }
@@ -1847,11 +1908,11 @@ fn compare_numeric_rows(a: &[f64], b: &[f64]) -> Ordering {
     Ordering::Equal
 }
 
-fn complex_is_nan(value: (f64, f64)) -> bool {
+fn complex_is_nan<T: SetFloat>(value: (T, T)) -> bool {
     value.0.is_nan() || value.1.is_nan()
 }
 
-fn compare_complex(a: (f64, f64), b: (f64, f64)) -> Ordering {
+fn compare_complex<T: SetFloat>(a: (T, T), b: (T, T)) -> Ordering {
     match (complex_is_nan(a), complex_is_nan(b)) {
         (true, true) => Ordering::Equal,
         (true, false) => Ordering::Greater,
@@ -1859,20 +1920,20 @@ fn compare_complex(a: (f64, f64), b: (f64, f64)) -> Ordering {
         (false, false) => {
             let mag_a = a.0.hypot(a.1);
             let mag_b = b.0.hypot(b.1);
-            let mag_cmp = compare_f64(mag_a, mag_b);
+            let mag_cmp = mag_a.compare(mag_b);
             if mag_cmp != Ordering::Equal {
                 return mag_cmp;
             }
-            let re_cmp = compare_f64(a.0, b.0);
+            let re_cmp = a.0.compare(b.0);
             if re_cmp != Ordering::Equal {
                 return re_cmp;
             }
-            compare_f64(a.1, b.1)
+            a.1.compare(b.1)
         }
     }
 }
 
-fn compare_complex_rows(a: &[(f64, f64)], b: &[(f64, f64)]) -> Ordering {
+fn compare_complex_rows<T: SetFloat>(a: &[(T, T)], b: &[(T, T)]) -> Ordering {
     for (lhs, rhs) in a.iter().zip(b.iter()) {
         let ord = compare_complex(*lhs, *rhs);
         if ord != Ordering::Equal {
@@ -1932,6 +1993,91 @@ pub(crate) mod tests {
         let ib = tensor::value_into_tensor_for("union", eval.ib_value()).expect("ib tensor");
         assert_eq!(ib.materialize_f64(), vec![1.0]);
         assert_eq!(ib.shape, vec![1, 1]);
+    }
+
+    #[test]
+    fn union_preserves_native_single_elements_and_rows() {
+        let a = Tensor::from_f32(vec![5.0, 7.0, 1.0], vec![3, 1]).unwrap();
+        let b = Tensor::from_f32(vec![3.0, 1.0, 1.0], vec![3, 1]).unwrap();
+        let values = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
+            .expect("single union")
+            .into_values_value();
+        let Value::Tensor(values) = values else {
+            panic!("expected native single values");
+        };
+        assert_eq!(
+            values.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![1.0, 3.0, 5.0, 7.0])
+        );
+
+        let a = Tensor::from_f32(vec![1.0, 3.0, 1.0, 2.0, 4.0, 2.0], vec![3, 2]).unwrap();
+        let b = Tensor::from_f32(vec![3.0, 5.0, 4.0, 6.0], vec![2, 2]).unwrap();
+        let values = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
+            .expect("single row union")
+            .into_values_value();
+        let Value::Tensor(values) = values else {
+            panic!("expected native single rows");
+        };
+        assert_eq!(values.shape, vec![3, 2]);
+        assert_eq!(
+            values.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0])
+        );
+    }
+
+    #[test]
+    fn union_preserves_native_complex_single_elements_and_rows() {
+        let a = ComplexTensor::from_f32(vec![(1.0, 1.0)], vec![1, 1]).unwrap();
+        let b = ComplexTensor::from_f32(vec![(1.0, 1.0)], vec![1, 1]).unwrap();
+        let values = evaluate_sync(Value::ComplexTensor(a), Value::ComplexTensor(b), &[])
+            .expect("complex single union")
+            .into_values_value();
+        let Value::ComplexTensor(values) = values else {
+            panic!("expected native complex single value");
+        };
+        assert_eq!(values.as_f32_slice(), Some(&[(1.0, 1.0)][..]));
+
+        let a = ComplexTensor::from_f32(
+            vec![
+                (1.0, 0.0),
+                (3.0, 0.0),
+                (1.0, 0.0),
+                (2.0, 1.0),
+                (4.0, 1.0),
+                (2.0, 1.0),
+            ],
+            vec![3, 2],
+        )
+        .unwrap();
+        let b = ComplexTensor::from_f32(
+            vec![(3.0, 0.0), (5.0, 0.0), (4.0, 1.0), (6.0, 1.0)],
+            vec![2, 2],
+        )
+        .unwrap();
+        let values = evaluate_sync(
+            Value::ComplexTensor(a),
+            Value::ComplexTensor(b),
+            &[Value::from("rows")],
+        )
+        .expect("complex single row union")
+        .into_values_value();
+        let Value::ComplexTensor(values) = values else {
+            panic!("expected native complex single rows");
+        };
+        assert_eq!(values.shape, vec![3, 2]);
+        assert_eq!(
+            values.as_f32_slice(),
+            Some(
+                &[
+                    (1.0, 0.0),
+                    (3.0, 0.0),
+                    (5.0, 0.0),
+                    (2.0, 1.0),
+                    (4.0, 1.0),
+                    (6.0, 1.0),
+                ][..]
+            )
+        );
     }
 
     #[test]
