@@ -491,9 +491,7 @@ fn parse_host_spacing_argument(value: &Value, dim_len: usize) -> BuiltinResult<G
 }
 
 fn tensor_len(tensor: &Tensor) -> usize {
-    tensor
-        .integer_storage()
-        .map_or(tensor.data.len(), |storage| storage.len())
+    tensor.len()
 }
 
 fn validate_scalar_spacing(spacing: f64) -> BuiltinResult<()> {

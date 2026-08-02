@@ -571,7 +571,7 @@ async fn axis_from_value(
     if let Ok(t) = tensor_value {
         if is_vector_shape(&t.shape) {
             let expected = if is_x { cols } else { rows };
-            if t.data.len() != expected {
+            if t.len() != expected {
                 return Err(interp2_invalid_argument(
                     "axis vector length must match Z dimensions",
                 ));

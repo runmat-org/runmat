@@ -94,9 +94,7 @@ pub(crate) fn is_empty_value(value: &Value) -> bool {
 }
 
 fn tensor_len(tensor: &Tensor) -> usize {
-    tensor
-        .integer_storage()
-        .map_or(tensor.data.len(), |storage| storage.len())
+    tensor.len()
 }
 
 pub(crate) fn is_scalar_like(value: &Value) -> bool {
@@ -296,10 +294,9 @@ pub(crate) fn real_tensor_values(tensor: &Tensor) -> Vec<f64> {
 
 fn real_tensor_value_at(tensor: &Tensor, index: usize) -> f64 {
     tensor
-        .integer_storage()
-        .and_then(|storage| storage.value_at(index))
-        .map(|value| value.to_f64())
-        .unwrap_or(tensor.data[index])
+        .numeric_value_at(index)
+        .expect("index within authoritative numeric storage")
+        .materialize_f64()
 }
 
 pub(crate) fn value_into_complex_tensor(name: &str, value: Value) -> BuiltinResult<ComplexTensor> {

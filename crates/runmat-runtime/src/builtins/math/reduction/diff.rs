@@ -421,9 +421,7 @@ fn is_empty_array(value: &Value) -> bool {
 }
 
 fn tensor_element_len(tensor: &Tensor) -> usize {
-    tensor
-        .integer_storage()
-        .map_or(tensor.data.len(), |storage| storage.len())
+    tensor.len()
 }
 
 async fn diff_gpu(

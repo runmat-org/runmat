@@ -187,7 +187,12 @@ fn reshape_matrix_output(
     } else {
         shape.extend(series.trailing_shape.iter().copied());
     }
-    Tensor::new(tensor.data, shape)
+    let storage = tensor.into_numeric_storage().map_err(|err| {
+        build_runtime_error(format!("interp1q: {err}"))
+            .with_builtin(NAME)
+            .build()
+    })?;
+    Tensor::from_numeric_storage(storage, shape)
         .map(Value::Tensor)
         .map_err(|err| {
             build_runtime_error(format!("interp1q: {err}"))
