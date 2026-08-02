@@ -800,7 +800,7 @@ impl NativeAutoOffload {
                 // a provider that does not implement it simply leaves the value on
                 // the host rather than coercing it through f64.
                 if t.integer_storage().is_none()
-                    && ensure_provider_supports_dtype(self.provider, t.dtype).is_err()
+                    && ensure_provider_supports_dtype(self.provider, t.numeric_dtype()).is_err()
                 {
                     return Ok(value.clone());
                 }
@@ -851,8 +851,9 @@ impl NativeAutoOffload {
                 .map_err(|e| anyhow!(e.to_string()))?;
             return Ok(Value::GpuTensor(handle));
         }
+        let data = tensor.materialize_f64();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &data,
             shape: &tensor.shape,
         };
         let handle = self
@@ -1433,55 +1434,29 @@ mod tests {
             HostIntegerDataOwned::U64(vec![1_u64 << 63, u64::MAX])
         );
         provider.free(&handle).expect("free integer handle");
-
-        let mut mirrorless =
-            Tensor::new_integer(expected, vec![1, 2]).expect("mirrorless integer tensor");
-        mirrorless.data.clear();
-        let promoted = auto
-            .promote_tensor_if_large(&Value::Tensor(mirrorless), 1)
-            .expect("mirrorless exact integer promotion");
-        let Value::GpuTensor(handle) = promoted else {
-            panic!("expected mirrorless integer tensor to stay eligible for GPU residency");
-        };
-        assert_eq!(
-            runmat_accelerate_api::handle_integer_type(&handle),
-            Some(runmat_accelerate_api::IntegerElementType::U64)
-        );
-        assert_eq!(
-            futures::executor::block_on(provider.download_integer(&handle))
-                .expect("mirrorless exact integer download")
-                .data,
-            HostIntegerDataOwned::U64(vec![1_u64 << 63, u64::MAX])
-        );
-        provider
-            .free(&handle)
-            .expect("free mirrorless integer handle");
     }
 
     #[test]
     fn native_auto_uses_integer_storage_for_lengths_and_empty_placeholders() {
-        let mut wide = Tensor::new_integer(
+        let wide = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 7]),
             vec![1, 2],
         )
         .expect("wide integer tensor");
-        wide.data.fill(f64::NAN);
         assert_eq!(value_len(&Value::Tensor(wide.clone())), Some(2));
         assert!(!is_empty_placeholder_value(&Value::Tensor(wide)));
 
-        let mut signed = Tensor::new_integer(
+        let signed = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I64(vec![i64::MIN, -1, i64::MAX]),
             vec![1, 3],
         )
         .expect("signed integer tensor");
-        signed.data.clear();
         assert_eq!(value_len(&Value::Tensor(signed.clone())), Some(3));
         assert!(!is_empty_placeholder_value(&Value::Tensor(signed)));
 
-        let mut empty =
+        let empty =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U64(Vec::new()), vec![0, 0])
                 .expect("empty integer placeholder");
-        empty.data.push(f64::NAN);
         assert_eq!(value_len(&Value::Tensor(empty.clone())), Some(0));
         assert!(is_empty_placeholder_value(&Value::Tensor(empty)));
     }
@@ -1814,8 +1789,9 @@ fn compare_elemwise(
             return Ok(Some(gpu_time < cpu_time));
         }
     }
+    let template_data = template.materialize_f64();
     let view = HostTensorView {
-        data: template.data.as_slice(),
+        data: template_data.as_slice(),
         shape: template.shape.as_slice(),
     };
     let ha = provider.upload(&view).map_err(|e| anyhow!(e.to_string()))?;
@@ -1883,8 +1859,9 @@ fn compare_reduction(
             return Ok(Some(gpu_time < cpu_time));
         }
     }
+    let template_data = template.materialize_f64();
     let view = HostTensorView {
-        data: template.data.as_slice(),
+        data: template_data.as_slice(),
         shape: template.shape.as_slice(),
     };
     let h = provider.upload(&view).map_err(|e| anyhow!(e.to_string()))?;
@@ -1963,12 +1940,14 @@ fn compare_matmul(
             return Ok(Some(gpu_time < cpu_time));
         }
     }
+    let data_a = ta.materialize_f64();
+    let data_b = tb.materialize_f64();
     let view_a = HostTensorView {
-        data: ta.data.as_slice(),
+        data: data_a.as_slice(),
         shape: ta.shape.as_slice(),
     };
     let view_b = HostTensorView {
-        data: tb.data.as_slice(),
+        data: data_b.as_slice(),
         shape: tb.shape.as_slice(),
     };
     let ha = provider
