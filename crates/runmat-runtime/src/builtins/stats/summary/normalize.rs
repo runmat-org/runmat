@@ -367,9 +367,11 @@ async fn value_to_input(value: Value) -> BuiltinResult<NumericInput> {
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)
                 .map_err(|err| normalize_internal(format!("normalize: {err}")))?;
+            let len = tensor.len();
+            let shape = normalize_shape_for(&tensor.shape, len);
             Ok(NumericInput::Real {
-                shape: normalize_shape_for(&tensor.shape, tensor.data.len()),
-                data: tensor.data,
+                shape,
+                data: tensor::tensor_into_values_f64(tensor),
             })
         }
         Value::Num(n) => Ok(NumericInput::Real {

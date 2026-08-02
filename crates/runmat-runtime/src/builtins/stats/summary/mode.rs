@@ -1445,8 +1445,8 @@ pub(crate) mod tests {
 
     #[test]
     fn mode_uint16_tensor_preserves_value_class() {
-        let mut tensor = Tensor::new(vec![9.0, 10.0, 2.0, 10.0], vec![1, 4]).unwrap();
-        tensor.dtype = NumericDType::U16;
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U16(vec![9, 10, 2, 10]), vec![1, 4]).unwrap();
         let outputs = mode_outputs(Value::Tensor(tensor), Vec::new(), 3).expect("mode");
         assert_eq!(outputs[0], Value::Int(IntValue::U16(10)));
         assert_eq!(outputs[1], Value::Num(2.0));
@@ -1455,9 +1455,9 @@ pub(crate) mod tests {
                 let entry = &cell.data[0];
                 match entry {
                     Value::Tensor(t) => {
-                        assert_eq!(t.dtype, NumericDType::U16);
+                        assert_eq!(t.numeric_dtype(), NumericDType::U16);
                         assert_eq!(t.shape, vec![1, 1]);
-                        assert_eq!(t.data, vec![10.0]);
+                        assert_eq!(t.integer_storage(), Some(&IntegerStorage::U16(vec![10])));
                     }
                     other => panic!("expected uint16 tensor inside cell, got {other:?}"),
                 }
@@ -1467,9 +1467,9 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn mode_dtype_only_integer_outputs_materialize_typed_integer_storage_exactly() {
-        let mut unsigned = Tensor::new(vec![2.0, 2.0, 1.0, 3.0, 3.0, 1.0], vec![3, 2]).unwrap();
-        unsigned.dtype = NumericDType::U16;
+    fn mode_integer_outputs_preserve_authoritative_typed_storage_exactly() {
+        let unsigned =
+            Tensor::new_integer(IntegerStorage::U16(vec![2, 2, 1, 3, 3, 1]), vec![3, 2]).unwrap();
         let outputs = mode_outputs(Value::Tensor(unsigned), Vec::new(), 3).expect("mode");
         match &outputs[0] {
             Value::Tensor(values) => {
@@ -1495,8 +1495,9 @@ pub(crate) mod tests {
             other => panic!("expected tied-value cell array, got {other:?}"),
         }
 
-        let mut signed = Tensor::new(vec![-5.0, -5.0, 3.0, -2.0, -2.0, 1.0], vec![3, 2]).unwrap();
-        signed.dtype = NumericDType::I16;
+        let signed =
+            Tensor::new_integer(IntegerStorage::I16(vec![-5, -5, 3, -2, -2, 1]), vec![3, 2])
+                .unwrap();
         let outputs = mode_outputs(Value::Tensor(signed), Vec::new(), 3).expect("mode");
         match &outputs[0] {
             Value::Tensor(values) => assert_eq!(

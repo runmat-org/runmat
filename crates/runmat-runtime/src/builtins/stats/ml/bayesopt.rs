@@ -1638,7 +1638,7 @@ fn option_unit_f64(value: &Value, name: &str) -> BuiltinResult<f64> {
 
 fn is_empty_option(value: &Value) -> bool {
     match value {
-        Value::Tensor(tensor) => tensor.data.is_empty(),
+        Value::Tensor(tensor) => tensor.is_empty(),
         Value::Cell(cell) => cell.data.is_empty(),
         Value::String(text) => text.is_empty() || text.eq_ignore_ascii_case("none"),
         Value::StringArray(array) => array.data.is_empty(),

@@ -1172,9 +1172,10 @@ pub(crate) fn predict_classification_linear_object(
     let score_transform = score_transform_property(&object)?;
     let mut label_indices = Vec::with_capacity(x.rows * beta.cols);
     let mut score_data = Vec::with_capacity(x.rows * 2 * beta.cols);
+    let beta_values = beta.materialize_f64();
     for model_idx in 0..beta.cols {
         let model_beta = (0..beta.rows)
-            .map(|row| beta.data[row + model_idx * beta.rows])
+            .map(|row| beta_values[row + model_idx * beta.rows])
             .collect::<Vec<_>>();
         for row in 0..x.rows {
             let margin = dot_row(&x, row, &model_beta) + bias[model_idx];

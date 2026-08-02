@@ -191,8 +191,9 @@ async fn linkage_builtin(input: Value, rest: Vec<Value>) -> BuiltinResult<Value>
             options.metric_args,
         )
         .await?;
-        validate_distances(&distances.data)?;
-        (tensor.rows, distances.data)
+        let distances = distances.materialize_f64();
+        validate_distances(&distances)?;
+        (tensor.rows, distances)
     };
     let output = compute_linkage(observations, distances, options.method)?;
     Ok(Value::Tensor(output))

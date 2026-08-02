@@ -764,9 +764,9 @@ fn group_labels(value: &Value, expected_len: usize) -> BuiltinResult<Vec<Option<
                     .collect());
             }
             Ok(tensor
-                .data
-                .iter()
-                .map(|value| value.is_finite().then(|| number_label(*value)))
+                .materialize_f64()
+                .into_iter()
+                .map(|value| value.is_finite().then(|| number_label(value)))
                 .collect())
         }
         Value::StringArray(array) if array.data.len() == expected_len => {

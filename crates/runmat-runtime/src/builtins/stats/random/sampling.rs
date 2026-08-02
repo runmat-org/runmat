@@ -581,7 +581,7 @@ fn indices_value(indices: &[usize]) -> BuiltinResult<Value> {
 }
 
 fn sample_tensor_axis(
-    data: &[f64],
+    tensor: Tensor,
     shape: &[usize],
     axis: usize,
     indices: &[usize],
@@ -590,7 +590,7 @@ fn sample_tensor_axis(
     let mut out_shape = shape.to_vec();
     out_shape[axis] = indices.len();
     let out_len = tensor::element_count(&out_shape);
-    let mut out = vec![0.0; out_len];
+    let mut source_indices = vec![0; out_len];
     let pre: usize = shape[..axis].iter().product();
     let axis_len = shape[axis];
     let post: usize = shape[axis + 1..].iter().product();
@@ -605,11 +605,15 @@ fn sample_tensor_axis(
                 }
                 let src = prefix + src_axis * pre + suffix * pre * axis_len;
                 let dst = prefix + dst_axis * pre + suffix * pre * indices.len();
-                out[dst] = data[src];
+                source_indices[dst] = src;
             }
         }
     }
-    Tensor::new(out, out_shape)
+    let storage = tensor
+        .into_numeric_storage()
+        .and_then(|storage| storage.gather(&source_indices))
+        .map_err(|err| sampling_error(name, format!("{name}: {err}")))?;
+    Tensor::from_numeric_storage(storage, out_shape)
         .map(tensor::tensor_into_value)
         .map_err(|err| sampling_error(name, format!("{name}: {err}")))
 }
@@ -761,10 +765,22 @@ fn sample_value_axis(
 ) -> BuiltinResult<Value> {
     match data {
         Value::Tensor(t) => {
-            sample_tensor_axis(&t.data, &normalize_shape(t.shape), axis, indices, name)
+            let shape = normalize_shape(t.shape.clone());
+            sample_tensor_axis(t, &shape, axis, indices, name)
         }
-        Value::Num(value) => sample_tensor_axis(&[value], &[1, 1], axis, indices, name),
-        Value::Int(value) => sample_tensor_axis(&[value.to_f64()], &[1, 1], axis, indices, name),
+        Value::Num(value) => {
+            let tensor = Tensor::new(vec![value], vec![1, 1])
+                .map_err(|err| sampling_error(name, format!("{name}: {err}")))?;
+            sample_tensor_axis(tensor, &[1, 1], axis, indices, name)
+        }
+        Value::Int(value) => {
+            let tensor = Tensor::new_integer(
+                runmat_builtins::IntegerStorage::from_scalar(value),
+                vec![1, 1],
+            )
+            .map_err(|err| sampling_error(name, format!("{name}: {err}")))?;
+            sample_tensor_axis(tensor, &[1, 1], axis, indices, name)
+        }
         Value::Bool(value) => {
             let byte = if value { 1 } else { 0 };
             sample_logical_axis(&[byte], &[1, 1], axis, indices, name)
@@ -1715,7 +1731,7 @@ pub mod bootstrp {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_builtins::{IntegerStorage, NumericStorage};
 
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, poison: f64) -> Value {
         let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
@@ -1745,6 +1761,34 @@ mod tests {
                 "Replace"
             )
             .unwrap());
+        }
+    }
+
+    #[test]
+    fn sampling_tensor_axis_preserves_every_native_numeric_class() {
+        let storages = [
+            NumericStorage::F64(vec![1.0, 2.0, 3.0, 4.0]),
+            NumericStorage::F32(vec![1.0, 2.0, 3.0, 4.0]),
+            NumericStorage::I8(vec![1, 2, 3, 4]),
+            NumericStorage::I16(vec![1, 2, 3, 4]),
+            NumericStorage::I32(vec![1, 2, 3, 4]),
+            NumericStorage::I64(vec![1, 2, 3, 4]),
+            NumericStorage::U8(vec![1, 2, 3, 4]),
+            NumericStorage::U16(vec![1, 2, 3, 4]),
+            NumericStorage::U32(vec![1, 2, 3, 4]),
+            NumericStorage::U64(vec![1, 2, 3, 4]),
+        ];
+
+        for storage in storages {
+            let expected = storage.gather(&[1, 0, 3, 2]).unwrap();
+            let tensor = Tensor::from_numeric_storage(storage, vec![2, 2]).unwrap();
+            let sampled =
+                sample_value_axis(Value::Tensor(tensor), 0, &[1, 0], "datasample").expect("sample");
+            let Value::Tensor(sampled) = sampled else {
+                panic!("expected sampled tensor");
+            };
+            assert_eq!(sampled.shape, vec![2, 2]);
+            assert_eq!(sampled.into_numeric_storage(), Ok(expected));
         }
     }
 

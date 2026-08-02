@@ -868,14 +868,16 @@ fn evaluate(x: &Tensor, y: &Tensor, options: Options) -> BuiltinResult<Evaluatio
     let mut sd_equal_data = Vec::with_capacity(tests);
     let mut sd_x_data = Vec::with_capacity(tests);
     let mut sd_y_data = Vec::with_capacity(tests);
+    let x_values = x.materialize_f64();
+    let y_values = y.materialize_f64();
 
     for linear in 0..tests {
         let result = if vector_collapse {
-            evaluate_pair(&x.data, &y.data, options)
+            evaluate_pair(&x_values, &y_values, options)
         } else {
             let coords = coords_from_linear(linear, &out_shape);
-            let xs = sample_along_dim(x, &x_shape, &coords, dim);
-            let ys = sample_along_dim(y, &y_shape, &coords, dim);
+            let xs = sample_along_dim(&x_values, &x_shape, &coords, dim);
+            let ys = sample_along_dim(&y_values, &y_shape, &coords, dim);
             evaluate_pair(&xs, &ys, options)
         };
         h_data.push(u8::from(result.h));
@@ -1095,21 +1097,13 @@ fn is_nonempty_vector_shape(shape: &[usize]) -> bool {
     shape.iter().all(|dim| *dim > 0) && shape.iter().filter(|dim| **dim > 1).count() <= 1
 }
 
-fn sample_along_dim(
-    tensor: &Tensor,
-    shape: &[usize],
-    out_coords: &[usize],
-    dim: usize,
-) -> Vec<f64> {
+fn sample_along_dim(data: &[f64], shape: &[usize], out_coords: &[usize], dim: usize) -> Vec<f64> {
     let mut values = Vec::with_capacity(shape[dim]);
     let mut coords = out_coords.to_vec();
     coords.resize(shape.len(), 0);
     for idx in 0..shape[dim] {
         coords[dim] = idx;
-        values.push(tensor::tensor_value_f64(
-            tensor,
-            linear_index(&coords, shape),
-        ));
+        values.push(data[linear_index(&coords, shape)]);
     }
     values
 }

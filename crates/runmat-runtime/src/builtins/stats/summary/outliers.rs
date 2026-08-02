@@ -1023,21 +1023,10 @@ fn logical_mask(builtin: &'static str, value: &Value) -> BuiltinResult<Vec<u8>> 
             Ok(mask.data.iter().map(|flag| u8::from(*flag != 0)).collect())
         }
         Value::Tensor(tensor) => Ok(tensor
-            .integer_storage()
-            .map(|storage| {
-                storage
-                    .exact_values()
-                    .into_iter()
-                    .map(|value| u8::from(!value.is_zero()))
-                    .collect()
-            })
-            .unwrap_or_else(|| {
-                tensor
-                    .data
-                    .iter()
-                    .map(|value| u8::from(*value != 0.0 && !value.is_nan()))
-                    .collect()
-            })),
+            .materialize_f64()
+            .into_iter()
+            .map(|value| u8::from(value != 0.0 && !value.is_nan()))
+            .collect()),
         Value::Num(value) => Ok(vec![u8::from(*value != 0.0 && !value.is_nan())]),
         Value::Int(value) => Ok(vec![u8::from(!value.is_zero())]),
         other => Err(invalid_argument(

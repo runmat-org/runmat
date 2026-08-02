@@ -262,9 +262,7 @@ async fn value_to_tensor(value: Value) -> BuiltinResult<Tensor> {
 }
 
 fn matrix_shape(tensor: &Tensor) -> (usize, usize) {
-    let len = tensor
-        .integer_storage()
-        .map_or(tensor.data.len(), |storage| storage.len());
+    let len = tensor.len();
     let shape = tensor::default_shape_for(&tensor.shape, len);
     match shape.as_slice() {
         [] => (1, 1),
