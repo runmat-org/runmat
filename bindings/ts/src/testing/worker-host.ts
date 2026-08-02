@@ -1,6 +1,6 @@
 import type {
-  FrozenTestSubmission,
   RunMatTestSession,
+  WorkerSpawnInput,
   WorkerExecution
 } from "./types.js";
 
@@ -18,8 +18,9 @@ interface HostResponse {
 }
 
 export interface TestWorkerHostOptions {
-  createSession(): Promise<RunMatTestSession> | RunMatTestSession;
-  projectHandoff?: unknown;
+  createSession(
+    input: WorkerSpawnInput
+  ): Promise<RunMatTestSession> | RunMatTestSession;
 }
 
 export interface TestWorkerScope {
@@ -39,7 +40,7 @@ export function installRunMatTestWorkerHost(
   options: TestWorkerHostOptions
 ): void {
   let session: RunMatTestSession | undefined;
-  let submission: FrozenTestSubmission | undefined;
+  let submission: WorkerSpawnInput | undefined;
   let active: Promise<WorkerExecution> | undefined;
 
   scope.addEventListener("message", (event: MessageEvent<HostRequest>) => {
@@ -48,13 +49,12 @@ export function installRunMatTestWorkerHost(
       switch (request.type) {
         case "install": {
           session?.dispose?.();
-          session = await options.createSession();
-          if (options.projectHandoff !== undefined) {
-            session.installProjectHandoff?.(options.projectHandoff);
+          const frozen = request.payload as WorkerSpawnInput;
+          session = await options.createSession(frozen);
+          if (frozen.projectHandoff !== undefined) {
+            session.installProjectHandoff?.(frozen.projectHandoff);
           }
-          submission = deepFreeze(
-            structuredClone(request.payload as FrozenTestSubmission)
-          );
+          submission = deepFreeze(structuredClone(frozen));
           return null;
         }
         case "execute": {

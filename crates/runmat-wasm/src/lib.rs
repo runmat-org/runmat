@@ -25,7 +25,9 @@ pub use api::plot::{
 pub use api::project::{project_handoff, project_revision, validate_project_handoff};
 // Stateful session wrapper.
 pub use api::session::RunMatWasm;
-pub use api::testing::{run_tests, run_tests_with_events};
+pub use api::testing::{
+    freeze_test_snapshot, project_test_layout, run_tests, run_tests_with_events,
+};
 // Log and trace streams.
 pub use api::streams::{
     set_log_filter, subscribe_runtime_log, subscribe_stdout, subscribe_trace_events,

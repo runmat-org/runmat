@@ -79,7 +79,7 @@ pub const RUNTESTS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDes
 pub const RUNTESTS_ERROR_UNSUPPORTED_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.RUNTESTS.UNSUPPORTED_OPTION",
     identifier: Some("RunMat:runtests:UnsupportedOption"),
-    when: "A documented option requires infrastructure not implemented by this slice.",
+    when: "A documented option requires an execution mode not available through the in-program adapter.",
     message: "runtests: unsupported option",
 };
 
@@ -136,7 +136,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: None,
     emits_nan: false,
-    notes: "Test execution is a VM and filesystem boundary and is excluded from fusion.",
+    notes: "Test execution is a Core service and filesystem boundary and is excluded from fusion.",
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

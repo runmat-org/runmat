@@ -1,6 +1,7 @@
 export { BrowserWorkerBackend } from "./browser-worker-backend.js";
 export type { BrowserWorkerBackendOptions } from "./browser-worker-backend.js";
 export { BrowserTestRunner } from "./runner.js";
+export { BrowserTestSnapshotPreparer } from "./snapshot-preparer.js";
 export type {
   BrowserTestArtifactStore,
   BrowserTestRunnerOptions
@@ -25,6 +26,8 @@ export type {
   BrowserTestRunInput,
   BrowserTestRunOptions,
   BrowserTestRunOutput,
+  BrowserPreparedTestRun,
+  BrowserTestPrepareRequest,
   BrowserTestEvent,
   BrowserWorkerBackendPort,
   BrowserWorkerHandle,
@@ -35,7 +38,12 @@ export type {
   FrozenTestSubmission,
   RenderedTestReport,
   RunMatTestNative,
+  RunMatTestPreparationNative,
+  RunMatTestPreparationSession,
   RunMatTestSession,
+  SavedRunSource,
+  UnsavedRunBuffer,
+  ProjectTestLayout,
   TestIsolation,
   TestReportFormat,
   WorkerCancellationInput,

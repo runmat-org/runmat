@@ -10,8 +10,11 @@ import type {
 
 export interface BrowserWorkerBackendOptions {
   workerFactory?: () => Worker;
-  sessionFactory: () => Promise<RunMatTestSession> | RunMatTestSession;
+  sessionFactory: (
+    input: WorkerSpawnInput
+  ) => Promise<RunMatTestSession> | RunMatTestSession;
   projectHandoff?: unknown;
+  filesystemSnapshot?: import("./types.js").BrowserTestFilesystemEntry[];
   maxWorkers?: number;
   signal?: AbortSignal;
   /** Narrows capacity when the caller explicitly selects shared-session isolation. */
@@ -67,22 +70,28 @@ export class BrowserWorkerBackend implements BrowserWorkerBackendPort {
 
   async spawn(input: WorkerSpawnInput): Promise<BrowserWorkerHandle> {
     const id = `browser-test-${this.nextId++}`;
+    const submission: WorkerSpawnInput = {
+      ...input,
+      ...(this.options.projectHandoff === undefined
+        ? {}
+        : { projectHandoff: this.options.projectHandoff }),
+      ...(this.options.filesystemSnapshot === undefined
+        ? {}
+        : { filesystemSnapshot: this.options.filesystemSnapshot })
+    };
     let handle: InternalHandle;
     if (input.isolation === "worker") {
       if (!this.options.workerFactory) {
         throw new Error("dedicated Web Worker isolation is unavailable");
       }
       const client = new WorkerClient(this.options.workerFactory());
-      await client.request("install", {
-        plan: input.plan,
-        snapshot: input.snapshot
-      });
+      await client.request("install", submission);
       handle = { id, kind: "worker", client };
     } else {
       const session =
         input.isolation === "none"
-          ? await this.noneSession()
-          : await this.options.sessionFactory();
+          ? await this.noneSession(submission)
+          : await this.options.sessionFactory(submission);
       if (this.options.projectHandoff !== undefined) {
         session.installProjectHandoff?.(this.options.projectHandoff);
       }
@@ -90,7 +99,7 @@ export class BrowserWorkerBackend implements BrowserWorkerBackendPort {
         id,
         kind: input.isolation,
         session,
-        submission: input
+        submission
       };
     }
     this.handles.set(id, handle);
@@ -182,8 +191,8 @@ export class BrowserWorkerBackend implements BrowserWorkerBackendPort {
     return handle;
   }
 
-  private async noneSession(): Promise<RunMatTestSession> {
-    this.sharedSession ??= await this.options.sessionFactory();
+  private async noneSession(input: WorkerSpawnInput): Promise<RunMatTestSession> {
+    this.sharedSession ??= await this.options.sessionFactory(input);
     return this.sharedSession;
   }
 }

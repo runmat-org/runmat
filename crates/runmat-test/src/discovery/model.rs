@@ -4,6 +4,15 @@ use serde_json::Value;
 use crate::descriptor::{FixtureDescriptor, SourceDescriptor, TestDescriptor, TestSelector};
 use crate::identity::{FixtureGroupId, SuiteId};
 use crate::plan::{FixtureGroupPlan, ProgramRevision, SuitePlan, TestPlan, TestPlanBuilder};
+
+use super::FrozenTestRunSnapshot;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PreparedTestRun {
+    pub snapshot: FrozenTestRunSnapshot,
+    pub discovery: TestDiscovery,
+    pub plan: TestPlan,
+}
 use crate::TestDomainError;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

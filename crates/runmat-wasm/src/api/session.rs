@@ -1292,6 +1292,30 @@ impl RunMatWasm {
             .map_err(|err| js_error(&format!("Test discovery serialization failed: {err}")))
     }
 
+    /// Discover and construct the selected immutable plan through the same
+    /// Core authority used by native hosts.
+    #[wasm_bindgen(js_name = prepareTests)]
+    pub fn prepare_tests_js(
+        &self,
+        snapshot: JsValue,
+        selector: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let snapshot: runmat_test::discovery::FrozenTestRunSnapshot =
+            serde_wasm_bindgen::from_value(snapshot)
+                .map_err(|err| js_error(&format!("Test snapshot parse failed: {err}")))?;
+        let selector: runmat_test::descriptor::TestSelector =
+            serde_wasm_bindgen::from_value(selector)
+                .map_err(|err| js_error(&format!("Test selector parse failed: {err}")))?;
+        let prepared = self
+            .session
+            .borrow()
+            .prepare_tests(&snapshot, &selector)
+            .map_err(|err| js_error(&format!("Test preparation failed: {err}")))?;
+        serde_wasm_bindgen::to_value(&prepared)
+            .map_err(|err| js_error(&format!("Test preparation serialization failed: {err}")))
+    }
+
     #[wasm_bindgen(js_name = cancelExecution)]
     pub fn cancel_execution(&self) {
         if let Some(flag) = self.active_interrupt.borrow().as_ref() {

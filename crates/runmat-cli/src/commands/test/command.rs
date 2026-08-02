@@ -48,10 +48,10 @@ async fn execute_inner(args: TestArgs, cli: &Cli) -> Result<()> {
             .install_project_handoff(project)
             .context("failed to install frozen project for test discovery")?;
     }
-    let discovery = session
-        .discover_tests(&prepared.snapshot)
-        .context("test discovery failed")?;
-    for diagnostic in &discovery.diagnostics {
+    let prepared_run = session
+        .prepare_tests(&prepared.snapshot, &prepared.selector)
+        .context("test discovery and plan preparation failed")?;
+    for diagnostic in &prepared_run.discovery.diagnostics {
         let source = diagnostic
             .source
             .as_ref()
@@ -75,22 +75,18 @@ async fn execute_inner(args: TestArgs, cli: &Cli) -> Result<()> {
             }
         }
     }
-    if discovery
+    if prepared_run
+        .discovery
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.severity == DiscoveryDiagnosticSeverity::Error)
     {
         anyhow::bail!("test discovery produced errors");
     }
-    let selected = discovery.select(&prepared.selector);
-    if selected.suites.iter().all(|suite| suite.tests.is_empty()) {
+    if prepared_run.plan.tests().next().is_none() {
         anyhow::bail!("no tests matched the requested selection");
     }
-    let invocation = serde_json::to_string(&prepared.selector)
-        .context("failed to encode deterministic test selection")?;
-    let plan = selected
-        .into_plan(invocation)
-        .context("failed to materialize the selected test plan")?;
+    let plan = prepared_run.plan;
     if args.list {
         for test in plan.tests() {
             println!(

@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
@@ -7,7 +6,10 @@ use runmat_config::project::{
 };
 use runmat_package::FrozenProjectHandoff;
 use runmat_test::descriptor::TestSelector;
-use runmat_test::discovery::{FrozenTestRunSnapshot, SavedRunSource};
+use runmat_test::discovery::FrozenTestRunSnapshot;
+use runmat_test_runner_native::snapshot::{
+    freeze_native_snapshot, source_prefix, NativeSnapshotInput,
+};
 use sha2::{Digest, Sha256};
 
 use crate::cli::{Cli, TestArgs};
@@ -69,11 +71,6 @@ pub(super) async fn prepare(args: &TestArgs, cli: &Cli) -> Result<PreparedDiscov
             .map(|path| resolve_from(&project_root, path)),
     );
     deduplicate_paths(&mut catalog_roots);
-    let sources = collect_sources(&project_root, &catalog_roots)?;
-    if sources.is_empty() {
-        bail!("no MATLAB source files were found in the selected test inputs");
-    }
-    let base_source_digest = source_catalog_digest(&sources);
     let resolved_project = if let Some(manifest) = &canonical_manifest {
         Some(
             resolve_for_test_manifest(manifest.clone(), cli)
@@ -95,6 +92,7 @@ pub(super) async fn prepare(args: &TestArgs, cli: &Cli) -> Result<PreparedDiscov
                 revision.source_revision.to_string(),
             )
         })
+        .map(|(graph_digest, base_source_digest)| (graph_digest, Some(base_source_digest)))
         .unwrap_or_else(|| {
             (
                 if manifest_bytes.is_empty() {
@@ -102,26 +100,25 @@ pub(super) async fn prepare(args: &TestArgs, cli: &Cli) -> Result<PreparedDiscov
                 } else {
                     format!("sha256:{:x}", Sha256::digest(&manifest_bytes))
                 },
-                base_source_digest,
+                None,
             )
         });
     let test_config_digest = format!(
         "sha256:{:x}",
         Sha256::digest(serde_json::to_vec(&test_config).context("failed to encode test config")?)
     );
-    let snapshot = FrozenTestRunSnapshot::freeze(
+    let snapshot = freeze_native_snapshot(NativeSnapshotInput {
+        project_root: project_root.clone(),
+        catalog_roots,
         graph_digest,
         base_source_digest,
-        1,
-        1,
         test_config_digest,
-        sources,
-        Vec::new(),
-    )
+        unsaved_buffers: Vec::new(),
+    })
     .context("failed to freeze test source snapshot")?;
     let source_prefixes = targets
         .iter()
-        .filter_map(|target| snapshot_prefix(&project_root, target))
+        .filter_map(|target| source_prefix(&project_root, target))
         .collect();
     Ok(PreparedDiscovery {
         snapshot,
@@ -166,96 +163,6 @@ fn execution_targets(
         }
     }
     Ok(targets)
-}
-
-fn collect_sources(project_root: &Path, roots: &[PathBuf]) -> Result<Vec<SavedRunSource>> {
-    let mut files = BTreeSet::new();
-    for root in roots {
-        collect_matlab_files(root, &mut files)?;
-    }
-    files
-        .into_iter()
-        .map(|path| {
-            let content = std::fs::read_to_string(&path)
-                .with_context(|| format!("failed to read test source {}", path.display()))?;
-            let (owner_identity, relative_path) = source_identity(project_root, &path);
-            Ok(SavedRunSource {
-                owner_identity,
-                relative_path,
-                content,
-            })
-        })
-        .collect()
-}
-
-fn collect_matlab_files(path: &Path, files: &mut BTreeSet<PathBuf>) -> Result<()> {
-    let metadata = std::fs::symlink_metadata(path)
-        .with_context(|| format!("failed to inspect {}", path.display()))?;
-    if metadata.file_type().is_symlink() {
-        return Ok(());
-    }
-    if metadata.is_file() {
-        if path
-            .extension()
-            .and_then(|extension| extension.to_str())
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("m"))
-        {
-            files.insert(std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()));
-        }
-        return Ok(());
-    }
-    let mut entries = std::fs::read_dir(path)
-        .with_context(|| format!("failed to read test directory {}", path.display()))?
-        .collect::<std::io::Result<Vec<_>>>()?;
-    entries.sort_by_key(std::fs::DirEntry::file_name);
-    for entry in entries {
-        collect_matlab_files(&entry.path(), files)?;
-    }
-    Ok(())
-}
-
-fn source_identity(project_root: &Path, path: &Path) -> (String, String) {
-    if let Ok(relative) = path.strip_prefix(project_root) {
-        return (
-            "path:workspace".into(),
-            relative.to_string_lossy().replace('\\', "/"),
-        );
-    }
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    (
-        format!(
-            "path:external:{:x}",
-            Sha256::digest(parent.to_string_lossy().as_bytes())
-        ),
-        path.file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .into_owned(),
-    )
-}
-
-fn snapshot_prefix(project_root: &Path, target: &Path) -> Option<String> {
-    let relative = target.strip_prefix(project_root).ok()?;
-    let mut prefix = relative.to_string_lossy().replace('\\', "/");
-    if target.is_dir() && !prefix.is_empty() {
-        prefix.push('/');
-    }
-    Some(prefix)
-}
-
-fn source_catalog_digest(sources: &[SavedRunSource]) -> String {
-    let mut hasher = Sha256::new();
-    for source in sources {
-        for field in [
-            source.owner_identity.as_bytes(),
-            source.relative_path.as_bytes(),
-            source.content.as_bytes(),
-        ] {
-            hasher.update((field.len() as u64).to_be_bytes());
-            hasher.update(field);
-        }
-    }
-    format!("sha256:{:x}", hasher.finalize())
 }
 
 fn resolve_from(root: &Path, path: &Path) -> PathBuf {

@@ -2,6 +2,7 @@
 
 pub mod artifact;
 pub mod host;
+pub mod snapshot;
 pub mod telemetry;
 pub mod transport;
 pub mod worker;

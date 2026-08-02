@@ -952,6 +952,24 @@ export interface RunMatSessionHandle {
   installProjectHandoff(handoff: unknown): Promise<unknown>;
   clearProjectHandoff(): Promise<void>;
   projectRevision(): Promise<unknown | null>;
+  prepareTests(
+    snapshot: Record<string, unknown>,
+    selector: Record<string, unknown>
+  ): Promise<{
+    snapshot: Record<string, unknown>;
+    discovery: Record<string, unknown>;
+    plan: Record<string, unknown>;
+  }>;
+  executeTestAttempt(input: {
+    plan: Record<string, unknown>;
+    snapshot: Record<string, unknown>;
+    testId: string;
+    attempt: number;
+  }): Promise<{
+    result: unknown;
+    events: unknown[];
+    coverage?: unknown[];
+  }>;
 }
 
 interface NativeInitOptions {
@@ -1034,6 +1052,24 @@ interface RunMatNativeSession {
   installProjectHandoff?: (handoff: unknown) => unknown;
   clearProjectHandoff?: () => void;
   projectRevision?: () => unknown | null;
+  prepareTests?: (
+    snapshot: Record<string, unknown>,
+    selector: Record<string, unknown>
+  ) => {
+    snapshot: Record<string, unknown>;
+    discovery: Record<string, unknown>;
+    plan: Record<string, unknown>;
+  };
+  executeTestAttempt?: (input: {
+    plan: Record<string, unknown>;
+    snapshot: Record<string, unknown>;
+    testId: string;
+    attempt: number;
+  }) => Promise<{
+    result: unknown;
+    events: unknown[];
+    coverage?: unknown[];
+  }>;
 }
 
 type WorkspaceMaterializeSelectorWire =
@@ -1146,6 +1182,14 @@ interface RunMatNativeModule {
   ) => GitSnapshotWire;
   planGitAcquisition?: (request: GitAcquisitionPlanRequest) => GitAcquisitionPlan;
   validateGitSnapshot?: (snapshot: GitSnapshotWire) => GitSnapshotWire;
+  projectTestLayout?: (input: unknown) => unknown;
+  freezeTestSnapshot?: (input: unknown) => Record<string, unknown>;
+  runTests?: (input: unknown, backend: unknown) => Promise<unknown>;
+  runTestsWithEvents?: (
+    input: unknown,
+    backend: unknown,
+    observer: (event: Record<string, unknown>) => void
+  ) => Promise<unknown>;
   decodePackageLock?: (input: string) => unknown;
   encodePackageLock?: (value: unknown) => string;
   handoffFromFrozenProject?: (project: unknown) => unknown;
@@ -1333,6 +1377,37 @@ export async function planGitAcquisition(
   const native = await loadNativeModule();
   requireNativeFunction(native, "planGitAcquisition");
   return native.planGitAcquisition(request);
+}
+
+export async function projectTestLayout(input: {
+  manifestPath: string;
+  manifestContent: string;
+}): Promise<unknown> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "projectTestLayout");
+  return native.projectTestLayout(input);
+}
+
+export async function freezeTestSnapshot(input: unknown): Promise<Record<string, unknown>> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "freezeTestSnapshot");
+  return native.freezeTestSnapshot(input);
+}
+
+export async function runTests(input: unknown, backend: unknown): Promise<unknown> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "runTests");
+  return native.runTests(input, backend);
+}
+
+export async function runTestsWithEvents(
+  input: unknown,
+  backend: unknown,
+  observer: (event: Record<string, unknown>) => void
+): Promise<unknown> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "runTestsWithEvents");
+  return native.runTestsWithEvents(input, backend, observer);
 }
 
 export async function createBrowserProjectResolver(
@@ -2197,6 +2272,38 @@ class WebRunMatSession implements RunMatSessionHandle {
       return null;
     }
     return this.native.projectRevision() ?? null;
+  }
+
+  async prepareTests(
+    snapshot: Record<string, unknown>,
+    selector: Record<string, unknown>
+  ): Promise<{
+    snapshot: Record<string, unknown>;
+    discovery: Record<string, unknown>;
+    plan: Record<string, unknown>;
+  }> {
+    this.ensureActive();
+    if (typeof this.native.prepareTests !== "function") {
+      throw new Error("The loaded runmat-wasm module does not expose prepareTests yet.");
+    }
+    return this.native.prepareTests(snapshot, selector);
+  }
+
+  async executeTestAttempt(input: {
+    plan: Record<string, unknown>;
+    snapshot: Record<string, unknown>;
+    testId: string;
+    attempt: number;
+  }): Promise<{
+    result: unknown;
+    events: unknown[];
+    coverage?: unknown[];
+  }> {
+    this.ensureActive();
+    if (typeof this.native.executeTestAttempt !== "function") {
+      throw new Error("The loaded runmat-wasm module does not expose executeTestAttempt yet.");
+    }
+    return this.native.executeTestAttempt(input);
   }
 }
 

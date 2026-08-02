@@ -7,6 +7,65 @@ export interface FrozenTestSubmission {
   snapshot: Record<string, unknown>;
 }
 
+export interface SavedRunSource {
+  owner_identity: string;
+  relative_path: string;
+  content: string;
+}
+
+export interface UnsavedRunBuffer extends SavedRunSource {}
+
+export interface BrowserTestPrepareRequest {
+  manifestPath: string;
+  projectRevision: unknown;
+  targets?: string[];
+  names?: string[];
+  tags?: string[];
+  excludedTags?: string[];
+  unsavedBuffers?: UnsavedRunBuffer[];
+}
+
+export interface BrowserPreparedTestRun {
+  snapshot: Record<string, unknown>;
+  discovery: Record<string, unknown>;
+  plan: Record<string, unknown>;
+  filesystemSnapshot?: BrowserTestFilesystemEntry[];
+  projectHandoff?: unknown;
+}
+
+export interface BrowserTestFilesystemEntry {
+  path: string;
+  bytes: Uint8Array;
+}
+
+export interface ProjectTestLayout {
+  sourceRoots: string[];
+  testRoots: string[];
+  testPaths: string[];
+  testConfigDigest: string;
+}
+
+export interface RunMatTestPreparationNative {
+  projectTestLayout(input: {
+    manifestPath: string;
+    manifestContent: string;
+  }): ProjectTestLayout | Promise<ProjectTestLayout>;
+  freezeTestSnapshot(input: {
+    graphDigest: string;
+    baseSourceDigest: string;
+    testConfigDigest: string;
+    savedSources: SavedRunSource[];
+    unsavedBuffers: UnsavedRunBuffer[];
+  }): Record<string, unknown> | Promise<Record<string, unknown>>;
+}
+
+export interface RunMatTestPreparationSession {
+  prepareTests(
+    snapshot: Record<string, unknown>,
+    selector: Record<string, unknown>
+  ): BrowserPreparedTestRun | Promise<BrowserPreparedTestRun>;
+}
+
 export interface BrowserTestRunOptions {
   isolation?: TestIsolation;
   jobs?: number;
@@ -27,6 +86,8 @@ export interface BrowserTestRunOptions {
 }
 
 export interface BrowserTestRunInput extends FrozenTestSubmission {
+  projectHandoff?: unknown;
+  filesystemSnapshot?: BrowserTestFilesystemEntry[];
   options?: BrowserTestRunOptions;
 }
 
@@ -68,7 +129,7 @@ export interface RunMatTestNative {
   ): Promise<BrowserTestRunOutput>;
 }
 
-export interface RunMatTestSession {
+export interface RunMatTestSession extends RunMatTestPreparationSession {
   installProjectHandoff?(handoff: unknown): unknown;
   executeTestAttempt(input: {
     plan: Record<string, unknown>;
@@ -140,6 +201,8 @@ export interface BrowserWorkerBackendPort {
 
 export interface WorkerSpawnInput extends FrozenTestSubmission {
   isolation: Exclude<TestIsolation, "auto">;
+  projectHandoff?: unknown;
+  filesystemSnapshot?: BrowserTestFilesystemEntry[];
 }
 
 export interface WorkerExecutionInput {

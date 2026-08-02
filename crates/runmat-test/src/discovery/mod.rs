@@ -6,7 +6,7 @@ pub use materialize::{materialize_metadata, validate_response, IsolatedMetadataM
 pub use model::{
     DiscoveredSuite, DiscoveryDiagnostic, DiscoveryDiagnosticSeverity, MaterializationKind,
     MaterializationLimits, MaterializationRecord, MaterializationRequest, MaterializationResponse,
-    MaterializationStatus, MaterializedValue, TestDiscovery,
+    MaterializationStatus, MaterializedValue, PreparedTestRun, TestDiscovery,
 };
 pub use snapshot::{
     FrozenRunSource, FrozenTestRunSnapshot, RunSourceOrigin, SavedRunSource, UnsavedRunBuffer,

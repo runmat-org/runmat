@@ -29,7 +29,9 @@ export class BrowserTestRunner {
   async run(input: BrowserTestRunInput): Promise<BrowserTestRunOutput> {
     const backend = new BrowserWorkerBackend({
       ...this.options,
-      requestedIsolation: input.options?.isolation
+      requestedIsolation: input.options?.isolation,
+      projectHandoff: input.projectHandoff ?? this.options.projectHandoff,
+      filesystemSnapshot: input.filesystemSnapshot ?? this.options.filesystemSnapshot
     });
     try {
       const output =

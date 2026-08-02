@@ -1,4 +1,5 @@
-use runmat_test::discovery::{FrozenTestRunSnapshot, TestDiscovery};
+use runmat_test::descriptor::TestSelector;
+use runmat_test::discovery::{FrozenTestRunSnapshot, PreparedTestRun, TestDiscovery};
 use runmat_test::TestDomainError;
 
 use crate::RunMatSession;
@@ -34,6 +35,32 @@ impl RunMatSession {
             self.compat_mode(),
         ))
     }
+
+    /// Discover and materialize the canonical plan for one immutable snapshot.
+    ///
+    /// Hosts retain the unfiltered discovery for their test explorer while the
+    /// selected plan is derived by the shared Rust domain model.
+    pub fn prepare_tests(
+        &self,
+        snapshot: &FrozenTestRunSnapshot,
+        selector: &TestSelector,
+    ) -> Result<PreparedTestRun, TestDomainError> {
+        let discovery = self.discover_tests(snapshot)?;
+        let invocation_identity =
+            serde_json::to_string(selector).map_err(|error| TestDomainError::InvalidField {
+                field: "selector",
+                reason: format!("failed to encode deterministic test selection: {error}"),
+            })?;
+        let plan = discovery
+            .clone()
+            .select(selector)
+            .into_plan(invocation_identity)?;
+        Ok(PreparedTestRun {
+            snapshot: snapshot.clone(),
+            discovery,
+            plan,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -65,5 +92,37 @@ mod tests {
         assert_eq!(discovery.suites.len(), 1);
         assert_eq!(discovery.suites[0].tests.len(), 1);
         assert_eq!(discovery.program_revision, snapshot.program_revision);
+    }
+
+    #[test]
+    fn core_prepares_the_selected_plan_and_preserves_full_discovery() {
+        let snapshot = FrozenTestRunSnapshot::freeze(
+            "sha256:graph",
+            "sha256:base-sources",
+            1,
+            1,
+            "sha256:config",
+            vec![SavedRunSource {
+                owner_identity: "path:workspace".into(),
+                relative_path: "tests/core_test.m".into(),
+                content: "%% first\nassert(1 == 1)\n%% second\nassert(2 == 2)\n".into(),
+            }],
+            Vec::new(),
+        )
+        .unwrap();
+        let session = RunMatSession::with_options(false, false).unwrap();
+        let prepared = session
+            .prepare_tests(
+                &snapshot,
+                &runmat_test::descriptor::TestSelector {
+                    names: vec!["first".into()],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        assert_eq!(prepared.discovery.suites[0].tests.len(), 2);
+        assert_eq!(prepared.plan.tests().count(), 1);
+        assert_eq!(prepared.snapshot, snapshot);
     }
 }
