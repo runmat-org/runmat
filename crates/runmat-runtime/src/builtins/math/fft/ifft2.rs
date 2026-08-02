@@ -549,12 +549,13 @@ fn parse_ifft2_single(value: &Value) -> BuiltinResult<(Option<usize>, Option<usi
                     format!("logical size-vector conversion failed: {source}"),
                 )
             })?;
-            parse_2d_lengths_from_data(&tensor.data, BUILTIN_NAME).map_err(|source| {
-                ifft2_error_with_detail(
-                    &IFFT2_ERROR_INVALID_SIZE_VECTOR,
-                    format!("size vector parse failed: {source}"),
-                )
-            })
+            parse_2d_lengths_from_data(&tensor::tensor_into_values_f64(tensor), BUILTIN_NAME)
+                .map_err(|source| {
+                    ifft2_error_with_detail(
+                        &IFFT2_ERROR_INVALID_SIZE_VECTOR,
+                        format!("size vector parse failed: {source}"),
+                    )
+                })
         }
         Value::Num(_) | Value::Int(_) => {
             let len = parse_length(value, BUILTIN_NAME).map_err(|source| {

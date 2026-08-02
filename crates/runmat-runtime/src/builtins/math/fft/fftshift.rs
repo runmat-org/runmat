@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::fft::type_resolvers::fftshift_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -394,12 +394,7 @@ async fn fftshift_gpu_fallback(handle: GpuTensorHandle, dims: &[usize]) -> Built
         })?;
     let shifted = fftshift_tensor(host_tensor, dims)?;
     if let Some(provider) = runmat_accelerate_api::provider() {
-        let view = HostTensorView {
-            data: &shifted.data,
-            shape: &shifted.shape,
-        };
-        return provider
-            .upload(&view)
+        return gpu_helpers::upload_tensor(provider, &shifted)
             .map(Value::GpuTensor)
             .map_err(|source| {
                 fftshift_error_with_detail(
