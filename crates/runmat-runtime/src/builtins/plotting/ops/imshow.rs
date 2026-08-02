@@ -7,7 +7,7 @@ use std::rc::Rc;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, NumericDType, StringArray, Tensor, Value,
+    CharArray, IntegerStorage, NumericDType, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode, SurfacePlot};
@@ -188,6 +188,11 @@ pub async fn imshow_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         return render_truecolor_tensor(tensor).await;
     }
 
+    if is_logical_truecolor_value(&image_value) {
+        return Err(imshow_error(
+            "imshow: truecolor image data must be single, double, uint8, or uint16",
+        ));
+    }
     let image_value = normalize_image_value(image_value).map_err(map_imshow_invalid)?;
     if is_truecolor_value(&image_value) {
         if range != DisplayRange::Default {
@@ -270,11 +275,19 @@ fn normalize_image_value(value: Value) -> crate::BuiltinResult<Value> {
         Value::Num(value) => Tensor::new(vec![value], vec![1, 1])
             .map(Value::Tensor)
             .map_err(|err| imshow_error(format!("imshow: {err}"))),
-        Value::Int(value) => Tensor::new(vec![value.to_f64()], vec![1, 1])
+        Value::Int(value) => Tensor::new_integer(IntegerStorage::from_scalar(value), vec![1, 1])
             .map(Value::Tensor)
             .map_err(|err| imshow_error(format!("imshow: {err}"))),
         other => Ok(other),
     }
+}
+
+fn is_logical_truecolor_value(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::LogicalArray(array)
+            if array.shape.get(2).is_some_and(|&channels| channels == 3 || channels == 4)
+    )
 }
 
 fn is_truecolor_value(value: &Value) -> bool {
@@ -376,8 +389,8 @@ async fn display_range_for_input(
     match range {
         DisplayRange::Default => {
             let limits = match input {
-                SurfaceDataInput::Host(tensor) => dtype_default_limits(tensor.dtype),
-                SurfaceDataInput::Gpu(_) => (0.0, 1.0),
+                SurfaceDataInput::Host(tensor) => dtype_default_limits(tensor.numeric_dtype()),
+                SurfaceDataInput::Gpu(handle) => gpu_default_limits(handle),
             };
             Ok(limits)
         }
@@ -394,6 +407,23 @@ async fn display_range_for_input(
             Ok(expand_degenerate_limits(lo, hi))
         }
     }
+}
+
+fn gpu_default_limits(handle: &runmat_accelerate_api::GpuTensorHandle) -> (f64, f64) {
+    let Some(element_type) = runmat_accelerate_api::handle_integer_type(handle) else {
+        return (0.0, 1.0);
+    };
+    let dtype = match element_type {
+        runmat_accelerate_api::IntegerElementType::I8 => NumericDType::I8,
+        runmat_accelerate_api::IntegerElementType::I16 => NumericDType::I16,
+        runmat_accelerate_api::IntegerElementType::I32 => NumericDType::I32,
+        runmat_accelerate_api::IntegerElementType::I64 => NumericDType::I64,
+        runmat_accelerate_api::IntegerElementType::U8 => NumericDType::U8,
+        runmat_accelerate_api::IntegerElementType::U16 => NumericDType::U16,
+        runmat_accelerate_api::IntegerElementType::U32 => NumericDType::U32,
+        runmat_accelerate_api::IntegerElementType::U64 => NumericDType::U64,
+    };
+    dtype_default_limits(dtype)
 }
 
 fn finite_tensor_bounds(tensor: &Tensor) -> (f64, f64) {
@@ -477,7 +507,8 @@ fn build_truecolor_image_surface(
         ));
     }
     let channels = tensor.shape.get(2).copied().unwrap_or(3);
-    let scale = match tensor.dtype {
+    let dtype = tensor.numeric_dtype();
+    let scale = match dtype {
         NumericDType::U8 => 1.0f32 / 255.0,
         NumericDType::U16 => 1.0f32 / 65535.0,
         NumericDType::F32 | NumericDType::F64 => 1.0,
@@ -489,7 +520,7 @@ fn build_truecolor_image_surface(
         | NumericDType::U64 => {
             return Err(imshow_error(format!(
                 "imshow: truecolor image data does not support {} values",
-                tensor.dtype.class_name()
+                dtype.class_name()
             )));
         }
     };
@@ -755,7 +786,7 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
-    use runmat_builtins::{IntegerStorage, LogicalArray};
+    use runmat_builtins::{IntValue, IntegerStorage, LogicalArray};
     use runmat_plot::plots::PlotElement;
 
     fn matrix(data: Vec<f64>, rows: usize, cols: usize) -> Tensor {
@@ -832,11 +863,43 @@ mod tests {
     }
 
     #[test]
+    fn gpu_integer_grayscale_uses_underlying_class_display_range() {
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![2, 2],
+            device_id: 0,
+            buffer_id: u64::MAX - 155,
+        };
+        runmat_accelerate_api::set_handle_integer_type(
+            &handle,
+            runmat_accelerate_api::IntegerElementType::I32,
+        );
+        assert_eq!(
+            gpu_default_limits(&handle),
+            (i32::MIN as f64, i32::MAX as f64)
+        );
+        runmat_accelerate_api::clear_handle_integer_type(&handle);
+        assert_eq!(gpu_default_limits(&handle), (0.0, 1.0));
+    }
+
+    #[test]
+    fn normalize_integer_scalar_preserves_exact_class() {
+        let normalized =
+            normalize_image_value(Value::Int(IntValue::U64(u64::MAX))).expect("normalize");
+        let Value::Tensor(tensor) = normalized else {
+            panic!("expected tensor");
+        };
+        assert_eq!(tensor.numeric_dtype(), NumericDType::U64);
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX]))
+        );
+    }
+
+    #[test]
     fn display_range_reads_typed_integer_storage_exactly() {
-        let mut range =
+        let range =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U8(vec![1, 7]), vec![1, 2])
                 .expect("typed range");
-        range.data.clear();
 
         let parsed =
             futures::executor::block_on(parse_display_range(Value::Tensor(range))).unwrap();
@@ -925,10 +988,9 @@ mod tests {
     #[test]
     fn imshow_grayscale_reads_typed_integer_storage_exactly() {
         let _guard = reset();
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U16(vec![0, 1000, 40000, 65535]), vec![2, 2])
                 .expect("typed grayscale image");
-        tensor.data.clear();
 
         futures::executor::block_on(imshow_builtin(vec![Value::Tensor(tensor)])).unwrap();
         let fig = clone_figure(current_figure_handle()).unwrap();
@@ -985,12 +1047,11 @@ mod tests {
     #[test]
     fn imshow_truecolor_reads_typed_integer_storage_exactly() {
         let _guard = reset();
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             IntegerStorage::U8(vec![255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255]),
             vec![2, 2, 3],
         )
         .expect("typed truecolor image");
-        tensor.data.clear();
 
         futures::executor::block_on(imshow_builtin(vec![Value::Tensor(tensor)])).unwrap();
         let fig = clone_figure(current_figure_handle()).unwrap();
@@ -1003,6 +1064,44 @@ mod tests {
         assert_eq!(grid[0][1], glam::Vec4::new(0.0, 1.0, 0.0, 1.0));
         assert_eq!(grid[1][0], glam::Vec4::new(0.0, 0.0, 1.0, 1.0));
         assert_eq!(grid[1][1], glam::Vec4::new(1.0, 1.0, 1.0, 1.0));
+    }
+
+    #[test]
+    fn truecolor_accepts_only_documented_numeric_classes() {
+        let single = Tensor::from_f32(vec![0.0, 0.5, 1.0], vec![1, 1, 3]).expect("single RGB");
+        build_truecolor_image_surface(single, vec![1.0], vec![1.0]).expect("single truecolor");
+        let uint16 = Tensor::new_integer(IntegerStorage::U16(vec![0, 32768, 65535]), vec![1, 1, 3])
+            .expect("uint16 RGB");
+        build_truecolor_image_surface(uint16, vec![1.0], vec![1.0]).expect("uint16 truecolor");
+
+        let unsupported = [
+            IntegerStorage::I8(vec![0, 1, 2]),
+            IntegerStorage::I16(vec![0, 1, 2]),
+            IntegerStorage::I32(vec![0, 1, 2]),
+            IntegerStorage::I64(vec![0, 1, 2]),
+            IntegerStorage::U32(vec![0, 1, 2]),
+            IntegerStorage::U64(vec![0, 1, 2]),
+        ];
+        for storage in unsupported {
+            let class_name = storage.class_name();
+            let tensor = Tensor::new_integer(storage, vec![1, 1, 3]).expect("unsupported RGB");
+            let err = build_truecolor_image_surface(tensor, vec![1.0], vec![1.0])
+                .expect_err("unsupported truecolor class");
+            assert!(
+                err.to_string().contains(class_name),
+                "missing {class_name} in {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn imshow_rejects_logical_truecolor_before_numeric_normalization() {
+        let logical = LogicalArray::new(vec![1; 12], vec![2, 2, 3]).expect("logical RGB");
+        let err = futures::executor::block_on(imshow_builtin(vec![Value::LogicalArray(logical)]))
+            .expect_err("logical truecolor must be rejected");
+        assert!(err
+            .to_string()
+            .contains("must be single, double, uint8, or uint16"));
     }
 
     #[test]
