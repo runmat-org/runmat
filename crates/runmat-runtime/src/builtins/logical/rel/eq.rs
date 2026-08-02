@@ -389,9 +389,10 @@ impl NumericBuffer {
     }
 
     fn from_tensor(tensor: Tensor) -> Self {
+        let shape = tensor.shape.clone();
         Self {
-            data: tensor.data,
-            shape: tensor.shape,
+            data: tensor::tensor_into_values_f64(tensor),
+            shape,
         }
     }
 
