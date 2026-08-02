@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, ResolveContext, Tensor, Type, Value,
+    ComplexTensor, IntValue, IntegerStorage, NumericScalar, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -19,7 +19,9 @@ fn topk_type(args: &[Type], ctx: &ResolveContext) -> Type {
         Some(Type::Tensor { shape }) | Some(Type::Logical { shape }) => Type::Tensor {
             shape: topk_output_shape(shape.clone(), ctx),
         },
-        Some(Type::Num | Type::Int | Type::Bool) => Type::Num,
+        Some(Type::Num) => Type::Num,
+        Some(Type::Int) => Type::Int,
+        Some(Type::Bool) => Type::Bool,
         Some(Type::Unknown) => Type::Unknown,
         _ => Type::Unknown,
     }
@@ -495,7 +497,7 @@ async fn gather_topk_input(kind: TopKKind, value: Value) -> BuiltinResult<TopKIn
             Tensor::new(vec![value], vec![1, 1]).map_err(|message| topk_internal(kind, message))?,
         )),
         Value::Int(value) => Ok(TopKInput::Real(
-            Tensor::new(vec![value.to_f64()], vec![1, 1])
+            Tensor::new_integer(IntegerStorage::from_scalar(value), vec![1, 1])
                 .map_err(|message| topk_internal(kind, message))?,
         )),
         Value::Bool(value) => Ok(TopKInput::Real(
@@ -521,7 +523,7 @@ fn evaluate_real(kind: TopKKind, tensor: Tensor, args: &TopKArgs) -> BuiltinResu
     let axis_len = shape.get(axis).copied().unwrap_or(1);
     let take = args.k.min(axis_len);
     if axis >= shape.len() {
-        let indices = Tensor::new(vec![1.0; tensor.data.len()], shape)
+        let indices = Tensor::new(vec![1.0; tensor.len()], shape)
             .map_err(|message| topk_internal(kind, message))?;
         return Ok(TopKEvaluation {
             values: tensor::tensor_into_value(tensor),
@@ -529,8 +531,11 @@ fn evaluate_real(kind: TopKKind, tensor: Tensor, args: &TopKArgs) -> BuiltinResu
         });
     }
     let output_shape = output_shape_for_topk(&shape, axis, take);
-    if tensor.data.is_empty() || take == 0 {
-        let values = Tensor::new(Vec::new(), output_shape.clone())
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|message| topk_internal(kind, message))?;
+    if storage.is_empty() || take == 0 {
+        let values = Tensor::from_numeric_storage(storage.zeros_like(0), output_shape.clone())
             .map_err(|message| topk_internal(kind, message))?;
         let indices = Tensor::new(Vec::new(), output_shape)
             .map_err(|message| topk_internal(kind, message))?;
@@ -543,7 +548,7 @@ fn evaluate_real(kind: TopKKind, tensor: Tensor, args: &TopKArgs) -> BuiltinResu
     let input_strides = compute_strides(&shape);
     let output_strides = compute_strides(&output_shape);
     let output_len = checked_element_count(kind, &output_shape)?;
-    let mut values = vec![0.0; output_len];
+    let mut selected = vec![0usize; output_len];
     let mut indices = vec![0.0; output_len];
     let mut coords = vec![0usize; output_shape.len()];
     for out_base in 0..output_len {
@@ -560,8 +565,11 @@ fn evaluate_real(kind: TopKKind, tensor: Tensor, args: &TopKArgs) -> BuiltinResu
             input_coords[axis] = reduce_idx;
             let input_index = map_linear_index(&input_coords, &input_strides);
             entries.push(RealEntry {
-                value: tensor.data[input_index],
+                value: storage.value_at(input_index).ok_or_else(|| {
+                    topk_internal(kind, format!("input index {input_index} is out of bounds"))
+                })?,
                 index: reduce_idx,
+                source_index: input_index,
             });
         }
         entries.sort_by(|a, b| compare_real_entries(kind, args.comparison, a, b));
@@ -569,14 +577,16 @@ fn evaluate_real(kind: TopKKind, tensor: Tensor, args: &TopKArgs) -> BuiltinResu
             let mut out_coords = coords.clone();
             out_coords[axis] = rank;
             let out_idx = map_linear_index(&out_coords, &output_strides);
-            values[out_idx] = entry.value;
+            selected[out_idx] = entry.source_index;
             indices[out_idx] = (entry.index + 1) as f64;
         }
         let _ = out_base;
         increment_coords(&mut coords, &output_shape);
     }
 
-    let values = Tensor::new(values, output_shape.clone())
+    let values = storage
+        .gather(&selected)
+        .and_then(|values| Tensor::from_numeric_storage(values, output_shape.clone()))
         .map_err(|message| topk_internal(kind, message))?;
     let indices =
         Tensor::new(indices, output_shape).map_err(|message| topk_internal(kind, message))?;
@@ -664,8 +674,9 @@ fn evaluate_complex(
 
 #[derive(Clone, Copy)]
 struct RealEntry {
-    value: f64,
+    value: NumericScalar,
     index: usize,
+    source_index: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -680,7 +691,7 @@ fn compare_real_entries(
     a: &RealEntry,
     b: &RealEntry,
 ) -> Ordering {
-    let ordering = compare_real_values(method, a.value, b.value);
+    let ordering = compare_numeric_scalars(method, a.value, b.value);
     let ordering = match kind {
         TopKKind::Max => ordering.reverse(),
         TopKKind::Min => ordering,
@@ -688,7 +699,70 @@ fn compare_real_entries(
     ordering.then_with(|| a.index.cmp(&b.index))
 }
 
-fn compare_real_values(method: ComparisonMethod, a: f64, b: f64) -> Ordering {
+fn compare_numeric_scalars(
+    method: ComparisonMethod,
+    a: NumericScalar,
+    b: NumericScalar,
+) -> Ordering {
+    macro_rules! compare_signed {
+        ($left:expr, $right:expr) => {{
+            match method {
+                ComparisonMethod::Auto | ComparisonMethod::Real => $left.cmp(&$right),
+                ComparisonMethod::Abs => u128::from($left.unsigned_abs())
+                    .cmp(&u128::from($right.unsigned_abs()))
+                    .then_with(|| $left.cmp(&$right)),
+            }
+        }};
+    }
+    macro_rules! compare_unsigned {
+        ($left:expr, $right:expr) => {{
+            match method {
+                ComparisonMethod::Auto | ComparisonMethod::Real => $left.cmp(&$right),
+                ComparisonMethod::Abs => $left.cmp(&$right),
+            }
+        }};
+    }
+    match (a, b) {
+        (NumericScalar::F64(left), NumericScalar::F64(right)) => {
+            compare_f64_values(method, left, right)
+        }
+        (NumericScalar::F32(left), NumericScalar::F32(right)) => {
+            compare_f32_values(method, left, right)
+        }
+        (NumericScalar::I8(left), NumericScalar::I8(right)) => compare_signed!(left, right),
+        (NumericScalar::I16(left), NumericScalar::I16(right)) => compare_signed!(left, right),
+        (NumericScalar::I32(left), NumericScalar::I32(right)) => compare_signed!(left, right),
+        (NumericScalar::I64(left), NumericScalar::I64(right)) => compare_signed!(left, right),
+        (NumericScalar::U8(left), NumericScalar::U8(right)) => compare_unsigned!(left, right),
+        (NumericScalar::U16(left), NumericScalar::U16(right)) => compare_unsigned!(left, right),
+        (NumericScalar::U32(left), NumericScalar::U32(right)) => compare_unsigned!(left, right),
+        (NumericScalar::U64(left), NumericScalar::U64(right)) => compare_unsigned!(left, right),
+        (left, right) => left
+            .numeric_dtype()
+            .class_name()
+            .cmp(right.numeric_dtype().class_name()),
+    }
+}
+
+fn compare_f64_values(method: ComparisonMethod, a: f64, b: f64) -> Ordering {
+    match (a.is_nan(), b.is_nan()) {
+        (true, true) => Ordering::Equal,
+        (true, false) => Ordering::Greater,
+        (false, true) => Ordering::Less,
+        (false, false) => match method {
+            ComparisonMethod::Auto | ComparisonMethod::Real => {
+                a.partial_cmp(&b).unwrap_or(Ordering::Equal)
+            }
+            ComparisonMethod::Abs => a
+                .abs()
+                .partial_cmp(&b.abs())
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| a.partial_cmp(&b).unwrap_or(Ordering::Equal)),
+        },
+    }
+}
+
+fn compare_f32_values(method: ComparisonMethod, a: f32, b: f32) -> Ordering {
     match (a.is_nan(), b.is_nan()) {
         (true, true) => Ordering::Equal,
         (true, false) => Ordering::Greater,
@@ -846,10 +920,14 @@ fn topk_internal(kind: TopKKind, detail: impl AsRef<str>) -> RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntegerComplexStorage, IntegerStorage};
+    use runmat_builtins::{IntegerComplexStorage, IntegerStorage, NumericStorage};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
+    }
+
+    fn values(tensor: &Tensor) -> Vec<f64> {
+        tensor.materialize_f64()
     }
 
     #[tokio::test]
@@ -888,11 +966,11 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(values.shape, vec![2, 2]);
-        assert_eq!(values.data, vec![4.0, 3.0, 6.0, 5.0]);
+        assert_eq!(self::values(&values), vec![4.0, 3.0, 6.0, 5.0]);
         let Value::Tensor(indices) = eval.indices else {
             panic!("expected indices");
         };
-        assert_eq!(indices.data, vec![2.0, 3.0, 2.0, 3.0]);
+        assert_eq!(self::values(&indices), vec![2.0, 3.0, 2.0, 3.0]);
     }
 
     #[tokio::test]
@@ -905,11 +983,11 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(values.shape, vec![2, 2]);
-        assert_eq!(values.data, vec![1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(self::values(&values), vec![1.0, 2.0, 3.0, 4.0]);
         let Value::Tensor(indices) = eval.indices else {
             panic!("expected indices");
         };
-        assert_eq!(indices.data, vec![2.0, 2.0, 1.0, 1.0]);
+        assert_eq!(self::values(&indices), vec![2.0, 2.0, 1.0, 1.0]);
     }
 
     #[tokio::test]
@@ -922,7 +1000,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(values.shape, vec![3, 1]);
-        assert_eq!(values.data, vec![3.0, 2.0, 1.0]);
+        assert_eq!(self::values(&values), vec![3.0, 2.0, 1.0]);
     }
 
     #[tokio::test]
@@ -935,11 +1013,11 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(values.shape, vec![3, 1]);
-        assert_eq!(values.data, vec![2.0, 1.0, 3.0]);
+        assert_eq!(self::values(&values), vec![2.0, 1.0, 3.0]);
         let Value::Tensor(indices) = eval.indices else {
             panic!("expected indices");
         };
-        assert_eq!(indices.data, vec![1.0, 1.0, 1.0]);
+        assert_eq!(self::values(&indices), vec![1.0, 1.0, 1.0]);
     }
 
     #[tokio::test]
@@ -964,13 +1042,11 @@ mod tests {
             IntegerStorage::U64(vec![1]),
         ];
         for storage in storages {
-            let mut k = Tensor::new_integer(storage, vec![1, 1]).expect("k");
-            k.data = vec![f64::NAN];
+            let k = Tensor::new_integer(storage, vec![1, 1]).expect("k");
             assert_eq!(parse_k(TopKKind::Max, &Value::Tensor(k)).await.unwrap(), 1);
         }
-        let mut wide =
+        let wide =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("wide k");
-        wide.data = vec![1.0];
         if usize::BITS == 64 {
             assert_eq!(
                 parse_k(TopKKind::Max, &Value::Tensor(wide)).await.unwrap(),
@@ -991,7 +1067,128 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(values.shape, vec![0, 1]);
-        assert!(values.data.is_empty());
+        assert!(values.is_empty());
+    }
+
+    #[tokio::test]
+    async fn topk_preserves_every_integer_class_and_returns_double_indices() {
+        let cases = vec![
+            (
+                IntegerStorage::I8(vec![i8::MIN, 0, i8::MAX]),
+                NumericStorage::I8(vec![i8::MAX, 0]),
+                NumericStorage::I8(vec![i8::MIN, 0]),
+            ),
+            (
+                IntegerStorage::I16(vec![i16::MIN, 0, i16::MAX]),
+                NumericStorage::I16(vec![i16::MAX, 0]),
+                NumericStorage::I16(vec![i16::MIN, 0]),
+            ),
+            (
+                IntegerStorage::I32(vec![i32::MIN, 0, i32::MAX]),
+                NumericStorage::I32(vec![i32::MAX, 0]),
+                NumericStorage::I32(vec![i32::MIN, 0]),
+            ),
+            (
+                IntegerStorage::I64(vec![i64::MIN, 0, i64::MAX]),
+                NumericStorage::I64(vec![i64::MAX, 0]),
+                NumericStorage::I64(vec![i64::MIN, 0]),
+            ),
+            (
+                IntegerStorage::U8(vec![0, u8::MAX - 1, u8::MAX]),
+                NumericStorage::U8(vec![u8::MAX, u8::MAX - 1]),
+                NumericStorage::U8(vec![0, u8::MAX - 1]),
+            ),
+            (
+                IntegerStorage::U16(vec![0, u16::MAX - 1, u16::MAX]),
+                NumericStorage::U16(vec![u16::MAX, u16::MAX - 1]),
+                NumericStorage::U16(vec![0, u16::MAX - 1]),
+            ),
+            (
+                IntegerStorage::U32(vec![0, u32::MAX - 1, u32::MAX]),
+                NumericStorage::U32(vec![u32::MAX, u32::MAX - 1]),
+                NumericStorage::U32(vec![0, u32::MAX - 1]),
+            ),
+            (
+                IntegerStorage::U64(vec![0, u64::MAX - 1, u64::MAX]),
+                NumericStorage::U64(vec![u64::MAX, u64::MAX - 1]),
+                NumericStorage::U64(vec![0, u64::MAX - 1]),
+            ),
+        ];
+        for (input, expected_max, expected_min) in cases {
+            for (kind, expected_values, expected_indices) in [
+                (TopKKind::Max, expected_max, vec![3.0, 2.0]),
+                (TopKKind::Min, expected_min, vec![1.0, 2.0]),
+            ] {
+                let input = Value::Tensor(
+                    Tensor::new_integer(input.clone(), vec![3, 1]).expect("integer input"),
+                );
+                let evaluation = evaluate_topk(kind, input, &[Value::Num(2.0)])
+                    .await
+                    .expect("topk");
+                let Value::Tensor(output) = evaluation.values else {
+                    panic!("expected typed tensor output");
+                };
+                assert_eq!(output.into_numeric_storage().unwrap(), expected_values);
+                let Value::Tensor(indices) = evaluation.indices else {
+                    panic!("expected double index tensor");
+                };
+                assert_eq!(values(&indices), expected_indices);
+                assert!(matches!(
+                    indices.into_numeric_storage().unwrap(),
+                    NumericStorage::F64(_)
+                ));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn topk_preserves_native_single_storage() {
+        let input =
+            Value::Tensor(Tensor::from_f32(vec![1.0, 3.0, 2.0], vec![3, 1]).expect("single input"));
+        let evaluation = evaluate_topk(TopKKind::Max, input, &[Value::Num(2.0)])
+            .await
+            .expect("topk");
+        let Value::Tensor(output) = evaluation.values else {
+            panic!("expected single tensor");
+        };
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![3.0, 2.0])
+        );
+    }
+
+    #[tokio::test]
+    async fn topk_preserves_wide_integer_scalar_exactly() {
+        let evaluation = evaluate_topk(
+            TopKKind::Max,
+            Value::Int(IntValue::U64(u64::MAX)),
+            &[Value::Num(1.0)],
+        )
+        .await
+        .expect("topk");
+        assert_eq!(evaluation.values, Value::Int(IntValue::U64(u64::MAX)));
+        assert_eq!(evaluation.indices, Value::Num(1.0));
+    }
+
+    #[tokio::test]
+    async fn topk_abs_comparison_handles_signed_min_without_overflow() {
+        let input = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I64(vec![i64::MAX, i64::MIN]), vec![2, 1])
+                .expect("integer input"),
+        );
+        let evaluation = evaluate_topk(
+            TopKKind::Max,
+            input,
+            &[
+                Value::Num(1.0),
+                Value::from("ComparisonMethod"),
+                Value::from("abs"),
+            ],
+        )
+        .await
+        .expect("topk");
+        assert_eq!(evaluation.values, Value::Int(IntValue::I64(i64::MIN)));
+        assert_eq!(evaluation.indices, Value::Num(2.0));
     }
 
     #[tokio::test]
@@ -1044,10 +1241,10 @@ mod tests {
         let Value::Tensor(selected) = &values[0] else {
             panic!("expected tensor");
         };
-        assert_eq!(selected.data, vec![3.0, 2.0]);
+        assert_eq!(self::values(selected), vec![3.0, 2.0]);
         let Value::Tensor(indices) = &values[1] else {
             panic!("expected indices");
         };
-        assert_eq!(indices.data, vec![2.0, 3.0]);
+        assert_eq!(self::values(indices), vec![2.0, 3.0]);
     }
 }
