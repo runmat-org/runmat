@@ -12,7 +12,7 @@ use crate::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, IntValue, StringArray, Value,
+    CharArray, IntValue, NumericScalar, StringArray, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -856,21 +856,20 @@ impl BoundaryPositions {
                 shape: vec![1, 1],
             }),
             Value::Tensor(t) => {
-                let mut data = Vec::with_capacity(
-                    t.integer_storage()
-                        .map_or(t.data.len(), |storage| storage.len()),
-                );
-                if let Some(storage) = t.integer_storage() {
-                    for idx in 0..storage.len() {
-                        let entry = storage.value_at(idx).ok_or_else(|| {
-                            extract_between_error(&EXTRACT_BETWEEN_ERROR_POSITION_TYPE)
-                        })?;
-                        data.push(parse_position_int(entry)?);
-                    }
-                } else {
-                    for &entry in &t.data {
-                        data.push(parse_position(entry)?);
-                    }
+                let mut data = Vec::with_capacity(t.len());
+                for idx in 0..t.len() {
+                    let entry = t.numeric_value_at(idx).ok_or_else(|| {
+                        extract_between_error(&EXTRACT_BETWEEN_ERROR_POSITION_TYPE)
+                    })?;
+                    data.push(match entry {
+                        NumericScalar::F64(value) => parse_position(value)?,
+                        NumericScalar::F32(value) => parse_position(f64::from(value))?,
+                        value => parse_position_int(
+                            value
+                                .into_int_value()
+                                .expect("non-floating numeric scalar is integer"),
+                        )?,
+                    });
                 }
                 Ok(Self {
                     data,
@@ -915,7 +914,9 @@ pub(crate) mod tests {
     #![allow(non_snake_case)]
 
     use super::*;
-    use runmat_builtins::{CellArray, IntegerStorage, ResolveContext, Tensor, Type};
+    use runmat_builtins::{
+        CellArray, IntegerStorage, NumericStorage, ResolveContext, Tensor, Type,
+    };
 
     fn extract_between_builtin(
         text: Value,
@@ -935,6 +936,15 @@ pub(crate) mod tests {
         let parsed = BoundaryPositions::from_value(Value::Tensor(positions)).unwrap();
         assert_eq!(parsed.data, vec![2, 4]);
         assert_eq!(parsed.shape, vec![1, 2]);
+    }
+
+    #[test]
+    fn extractBetween_position_vectors_read_native_single_storage() {
+        let positions =
+            Tensor::from_numeric_storage(NumericStorage::F32(vec![2.0, 4.0]), vec![1, 2])
+                .expect("positions");
+        let parsed = BoundaryPositions::from_value(Value::Tensor(positions)).unwrap();
+        assert_eq!(parsed.data, vec![2, 4]);
     }
 
     #[test]

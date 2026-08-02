@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, LogicalArray, StringArray, Tensor, Value,
+    IntValue, LogicalArray, NumericScalar, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -412,9 +412,7 @@ fn parse_size_scalar(value: &Value) -> BuiltinResult<usize> {
 }
 
 fn parse_size_tensor(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
-    let len = tensor
-        .integer_storage()
-        .map_or(tensor.data.len(), |storage| storage.len());
+    let len = tensor.len();
     if len == 0 {
         return Ok(vec![0, 0]);
     }
@@ -424,20 +422,21 @@ fn parse_size_tensor(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
             &STRINGS_ERROR_INVALID_SIZE,
         ));
     }
-    if let Some(storage) = tensor.integer_storage() {
-        return (0..storage.len())
-            .map(|index| {
-                let value = storage
-                    .value_at(index)
-                    .expect("integer tensor storage length matches tensor data");
-                parse_integer_dimension(&value)
-            })
-            .collect();
-    }
-    tensor
-        .data
-        .iter()
-        .map(|&value| parse_numeric_dimension(value))
+    (0..len)
+        .map(|index| {
+            let value = tensor
+                .numeric_value_at(index)
+                .expect("tensor storage length matches shape");
+            match value {
+                NumericScalar::F64(value) => parse_numeric_dimension(value),
+                NumericScalar::F32(value) => parse_numeric_dimension(f64::from(value)),
+                value => parse_integer_dimension(
+                    &value
+                        .into_int_value()
+                        .expect("non-floating numeric scalar is integer"),
+                ),
+            }
+        })
         .collect()
 }
 
@@ -509,7 +508,7 @@ pub(crate) mod tests {
 
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntegerStorage, ResolveContext, Type};
+    use runmat_builtins::{IntegerStorage, NumericStorage, ResolveContext, Type};
 
     fn strings_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::strings_builtin(rest))
@@ -571,6 +570,20 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![2, 3, 1]);
+                assert_eq!(array.data.len(), 6);
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn strings_native_single_size_vector_reads_authoritative_storage() {
+        let dims = Tensor::from_numeric_storage(NumericStorage::F32(vec![2.0, 3.0]), vec![1, 2])
+            .expect("single dimensions");
+        let result = strings_builtin(vec![Value::Tensor(dims)]).expect("strings");
+        match result {
+            Value::StringArray(array) => {
+                assert_eq!(array.shape, vec![2, 3]);
                 assert_eq!(array.data.len(), 6);
             }
             other => panic!("expected string array, got {other:?}"),

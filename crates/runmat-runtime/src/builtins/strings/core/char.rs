@@ -3,8 +3,8 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, IntValue, IntegerStorage, LogicalArray, SparseTensor, StringArray,
-    Tensor, Value,
+    CellArray, CharArray, IntValue, LogicalArray, NumericScalar, SparseTensor, StringArray, Tensor,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -296,10 +296,7 @@ fn string_array_rows(sa: &StringArray) -> BuiltinResult<Vec<Vec<char>>> {
 
 fn tensor_rows(t: &Tensor) -> BuiltinResult<Vec<Vec<char>>> {
     ensure_two_dimensional(&t.shape, "char")?;
-    let integer_storage = t.integer_storage();
-    let element_len = integer_storage
-        .map(IntegerStorage::len)
-        .unwrap_or(t.data.len());
+    let element_len = t.len();
     let (rows, cols) = infer_rows_cols(&t.shape, element_len);
     if rows == 0 {
         return Ok(Vec::new());
@@ -312,9 +309,20 @@ fn tensor_rows(t: &Tensor) -> BuiltinResult<Vec<Vec<char>>> {
                 continue;
             }
             let idx = r + c * rows;
-            let ch = match integer_storage {
-                Some(storage) => integer_storage_to_char(storage, idx)?,
-                None => number_to_char(t.data[idx])?,
+            let value = t.numeric_value_at(idx).ok_or_else(|| {
+                char_error_with_message(
+                    "char: numeric storage length does not match tensor shape",
+                    &CHAR_ERROR_INTERNAL,
+                )
+            })?;
+            let ch = match value {
+                NumericScalar::F64(value) => number_to_char(value)?,
+                NumericScalar::F32(value) => number_to_char(f64::from(value))?,
+                value => integer_value_to_char(
+                    &value
+                        .into_int_value()
+                        .expect("non-floating numeric scalar is integer"),
+                )?,
             };
             row.push(ch);
         }
@@ -421,16 +429,6 @@ fn number_to_char(value: f64) -> BuiltinResult<char> {
     })
 }
 
-fn integer_storage_to_char(storage: &IntegerStorage, index: usize) -> BuiltinResult<char> {
-    let value = storage.value_at(index).ok_or_else(|| {
-        char_error_with_message(
-            "char: integer storage length does not match tensor shape",
-            &CHAR_ERROR_INTERNAL,
-        )
-    })?;
-    integer_value_to_char(&value)
-}
-
 fn integer_value_to_char(value: &IntValue) -> BuiltinResult<char> {
     let code = match value {
         IntValue::I8(value) => signed_integer_to_codepoint(*value as i128)?,
@@ -506,7 +504,7 @@ fn infer_rows_cols(shape: &[usize], len: usize) -> (usize, usize) {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{IntegerStorage, NumericStorage, ResolveContext, Type};
 
     fn char_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::char_builtin(rest))
@@ -558,6 +556,18 @@ pub(crate) mod tests {
                 assert_eq!(ca.cols, 6);
                 assert_eq!(ca.data, "RUNMAT".chars().collect::<Vec<_>>());
             }
+            other => panic!("expected char array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn char_from_native_single_tensor_reads_authoritative_storage() {
+        let tensor =
+            Tensor::from_numeric_storage(NumericStorage::F32(vec![82.0, 77.0]), vec![1, 2])
+                .expect("single tensor");
+        let result = char_builtin(vec![Value::Tensor(tensor)]).expect("char");
+        match result {
+            Value::CharArray(array) => assert_eq!(array.data, vec!['R', 'M']),
             other => panic!("expected char array, got {other:?}"),
         }
     }
