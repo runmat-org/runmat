@@ -4,7 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
+    CharArray, ComplexTensor, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -168,14 +168,25 @@ fn fix_numeric(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn fix_tensor(mut tensor: Tensor) -> BuiltinResult<Tensor> {
-    if tensor.integer_storage().is_some() {
-        return Ok(tensor);
-    }
-    for value in &mut tensor.data {
-        *value = fix_scalar(*value);
-    }
-    Ok(tensor)
+fn fix_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| builtin_error_with_detail(&FIX_ERROR_INTERNAL, e))?;
+    let output = match storage {
+        NumericStorage::F64(values) => {
+            NumericStorage::F64(values.into_iter().map(fix_scalar).collect())
+        }
+        NumericStorage::F32(values) => NumericStorage::F32(
+            values
+                .into_iter()
+                .map(|value| fix_scalar(f64::from(value)) as f32)
+                .collect(),
+        ),
+        integer => integer,
+    };
+    Tensor::from_numeric_storage(output, shape)
+        .map_err(|e| builtin_error_with_detail(&FIX_ERROR_INTERNAL, e))
 }
 
 fn fix_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
@@ -224,6 +235,16 @@ pub(crate) mod tests {
 
     fn fix_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::fix_builtin(value))
+    }
+
+    #[test]
+    fn fix_preserves_native_single_storage() {
+        let input = Tensor::from_f32(vec![-1.75, -0.0, 2.25], vec![1, 3]).unwrap();
+        let output = fix_tensor(input).unwrap();
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![-1.0, 0.0, 2.0])
+        );
     }
 
     fn assert_error_contains(error: &RuntimeError, needle: &str) {

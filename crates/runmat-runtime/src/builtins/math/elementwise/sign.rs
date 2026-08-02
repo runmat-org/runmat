@@ -4,7 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, IntegerStorage, Tensor, Value,
+    CharArray, ComplexTensor, IntValue, IntegerStorage, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -209,12 +209,27 @@ fn sign_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn sign_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    if let Some(storage) = tensor.integer_storage() {
-        return Tensor::new_integer(sign_integer_storage(storage), tensor.shape.clone())
-            .map_err(|e| sign_error_with_detail(&SIGN_ERROR_INTERNAL, e));
-    }
-    let data = tensor.data.iter().map(|&x| sign_real_scalar(x)).collect();
-    Tensor::new(data, tensor.shape.clone())
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| sign_error_with_detail(&SIGN_ERROR_INTERNAL, e))?;
+    let output = match storage {
+        NumericStorage::F64(values) => {
+            NumericStorage::F64(values.into_iter().map(sign_real_scalar).collect())
+        }
+        NumericStorage::F32(values) => NumericStorage::F32(
+            values
+                .into_iter()
+                .map(|value| sign_real_scalar(f64::from(value)) as f32)
+                .collect(),
+        ),
+        integer => NumericStorage::from_integer_storage(sign_integer_storage(
+            &integer
+                .into_integer_storage()
+                .expect("integer NumericStorage variant"),
+        )),
+    };
+    Tensor::from_numeric_storage(output, shape)
         .map_err(|e| sign_error_with_detail(&SIGN_ERROR_INTERNAL, e))
 }
 
@@ -336,6 +351,17 @@ pub(crate) mod tests {
 
     fn sign_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::sign_builtin(value))
+    }
+
+    #[test]
+    fn sign_preserves_native_single_storage() {
+        let input = Tensor::from_f32(vec![-2.0, 0.0, 3.0, f32::NAN], vec![1, 4]).unwrap();
+        let output = sign_tensor(input).unwrap();
+        let NumericStorage::F32(values) = output.into_numeric_storage().unwrap() else {
+            panic!("expected single storage");
+        };
+        assert_eq!(&values[..3], &[-1.0, 0.0, 1.0]);
+        assert!(values[3].is_nan());
     }
 
     fn assert_complex_close(got: (f64, f64), want: (f64, f64), tol: f64) {

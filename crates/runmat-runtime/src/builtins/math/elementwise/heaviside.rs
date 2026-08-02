@@ -4,7 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, Tensor, Value,
+    CharArray, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -230,12 +230,29 @@ fn heaviside_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn heaviside_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let data = tensor
-        .data
-        .iter()
-        .map(|&value| heaviside_scalar(value))
-        .collect();
-    Tensor::new(data, tensor.shape.clone())
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| heaviside_error_with_detail(&HEAVISIDE_ERROR_INTERNAL, e))?;
+    let output = match storage {
+        NumericStorage::F64(values) => {
+            NumericStorage::F64(values.into_iter().map(heaviside_scalar).collect())
+        }
+        NumericStorage::F32(values) => NumericStorage::F32(
+            values
+                .into_iter()
+                .map(|value| heaviside_scalar(f64::from(value)) as f32)
+                .collect(),
+        ),
+        integer => NumericStorage::F64(
+            integer
+                .materialize_f64()
+                .into_iter()
+                .map(heaviside_scalar)
+                .collect(),
+        ),
+    };
+    Tensor::from_numeric_storage(output, shape)
         .map_err(|e| heaviside_error_with_detail(&HEAVISIDE_ERROR_INTERNAL, e))
 }
 
@@ -279,6 +296,16 @@ pub(crate) mod tests {
 
     fn heaviside_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::heaviside_builtin(value))
+    }
+
+    #[test]
+    fn heaviside_preserves_native_single_storage() {
+        let input = Tensor::from_f32(vec![-1.0, 0.0, 2.0], vec![1, 3]).unwrap();
+        let output = heaviside_tensor(input).unwrap();
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![0.0, 0.5, 1.0])
+        );
     }
 
     struct UnsupportedHeavisideProvider;
