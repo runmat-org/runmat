@@ -2,11 +2,10 @@
 
 use log::{trace, warn};
 use num_complex::Complex64;
-use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
+    ComplexTensor, NumericDType, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -79,7 +78,7 @@ const POLYINT_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescr
 const POLYINT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.POLYINT.INVALID_INPUT",
     identifier: Some("RunMat:polyint:InvalidInput"),
-    when: "Input polynomial cannot be interpreted as a numeric coefficient vector.",
+    when: "Inputs are not single- or double-precision coefficient/constant values, or coefficients do not form a vector.",
     message: "polyint: invalid input",
 };
 
@@ -162,9 +161,9 @@ async fn polyint_builtin(coeffs: Value, rest: Vec<Value>) -> crate::BuiltinResul
     if rest.len() > 1 {
         return Err(polyint_argument_error("polyint: too many input arguments"));
     }
-    crate::builtins::common::validation::reject_typed_complex_integer(&coeffs, BUILTIN_NAME)?;
+    reject_unsupported_numeric_class(&coeffs, "coefficient")?;
     for value in &rest {
-        crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
+        reject_unsupported_numeric_class(value, "constant")?;
     }
 
     let constant = match rest.into_iter().next() {
@@ -197,8 +196,30 @@ async fn polyint_host_value(
     } else if let Some(last) = integrated.last_mut() {
         *last += constant;
     }
-    let value = coeffs_to_value(&integrated, polynomial.orientation)?;
+    let value = coeffs_to_value(&integrated, polynomial.class)?;
     maybe_return_gpu(value, source_gpu.as_ref())
+}
+
+fn reject_unsupported_numeric_class(value: &Value, role: &str) -> BuiltinResult<()> {
+    let unsupported = match value {
+        Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_) => true,
+        Value::Tensor(tensor) => !matches!(
+            tensor.numeric_dtype(),
+            NumericDType::F64 | NumericDType::F32
+        ),
+        Value::ComplexTensor(tensor) => tensor.integer_storage().is_some(),
+        Value::GpuTensor(handle) => {
+            runmat_accelerate_api::handle_integer_type(handle).is_some()
+                || runmat_accelerate_api::handle_is_logical(handle)
+        }
+        _ => false,
+    };
+    if unsupported {
+        return Err(polyint_error(format!(
+            "polyint: {role} input must be single or double"
+        )));
+    }
+    Ok(())
 }
 
 fn try_polyint_gpu(
@@ -251,11 +272,7 @@ fn maybe_return_gpu(
     match value {
         Value::Tensor(tensor) => {
             if let Some(provider) = provider {
-                let view = HostTensorView {
-                    data: &tensor.data,
-                    shape: &tensor.shape,
-                };
-                match provider.upload(&view) {
+                match gpu_helpers::upload_tensor(provider, &tensor) {
                     Ok(handle) => return Ok(Value::GpuTensor(handle)),
                     Err(err) => {
                         warn!("polyint: provider upload failed, keeping result on host: {err}");
@@ -285,16 +302,23 @@ fn maybe_return_gpu(
     }
 }
 
-fn coeffs_to_value(coeffs: &[Complex64], orientation: Orientation) -> BuiltinResult<Value> {
+fn coeffs_to_value(coeffs: &[Complex64], class: FloatingClass) -> BuiltinResult<Value> {
+    let shape = vec![1, coeffs.len()];
     if coeffs.iter().all(|c| c.im.abs() <= EPS) {
-        let data: Vec<f64> = coeffs.iter().map(|c| c.re).collect();
-        let shape = orientation.shape_for_len(data.len());
-        let tensor =
-            Tensor::new(data, shape).map_err(|e| polyint_error(format!("polyint: {e}")))?;
+        let tensor = match class {
+            FloatingClass::Double => {
+                let data = coeffs.iter().map(|c| c.re).collect();
+                Tensor::new(data, shape)
+            }
+            FloatingClass::Single => {
+                let data = coeffs.iter().map(|c| c.re as f32).collect();
+                Tensor::from_f32(data, shape)
+            }
+        }
+        .map_err(|e| polyint_error(format!("polyint: {e}")))?;
         Ok(tensor::tensor_into_value(tensor))
     } else {
         let data: Vec<(f64, f64)> = coeffs.iter().map(|c| (c.re, c.im)).collect();
-        let shape = orientation.shape_for_len(data.len());
         let tensor =
             ComplexTensor::new(data, shape).map_err(|e| polyint_error(format!("polyint: {e}")))?;
         Ok(Value::ComplexTensor(tensor))
@@ -304,27 +328,15 @@ fn coeffs_to_value(coeffs: &[Complex64], orientation: Orientation) -> BuiltinRes
 async fn parse_polynomial(value: Value) -> BuiltinResult<Polynomial> {
     let gathered = dispatcher::gather_if_needed_async(&value).await?;
     match gathered {
-        Value::Tensor(tensor) => parse_tensor_coeffs(&tensor),
+        Value::Tensor(tensor) => parse_tensor_coeffs(tensor),
         Value::ComplexTensor(tensor) => parse_complex_tensor_coeffs(&tensor),
-        Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(polyint_error)?;
-            parse_tensor_coeffs(&tensor)
-        }
         Value::Num(n) => Ok(Polynomial {
             coeffs: vec![Complex64::new(n, 0.0)],
-            orientation: Orientation::Scalar,
-        }),
-        Value::Int(i) => Ok(Polynomial {
-            coeffs: vec![Complex64::new(i.to_f64(), 0.0)],
-            orientation: Orientation::Scalar,
-        }),
-        Value::Bool(b) => Ok(Polynomial {
-            coeffs: vec![Complex64::new(if b { 1.0 } else { 0.0 }, 0.0)],
-            orientation: Orientation::Scalar,
+            class: FloatingClass::Double,
         }),
         Value::Complex(re, im) => Ok(Polynomial {
             coeffs: vec![Complex64::new(re, im)],
-            orientation: Orientation::Scalar,
+            class: FloatingClass::Double,
         }),
         other => Err(polyint_error(format!(
             "polyint: expected a numeric coefficient vector, got {:?}",
@@ -333,28 +345,39 @@ async fn parse_polynomial(value: Value) -> BuiltinResult<Polynomial> {
     }
 }
 
-fn parse_tensor_coeffs(tensor: &Tensor) -> BuiltinResult<Polynomial> {
+fn parse_tensor_coeffs(tensor: Tensor) -> BuiltinResult<Polynomial> {
     ensure_vector_shape(&tensor.shape)?;
-    let orientation = orientation_from_shape(&tensor.shape);
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|error| polyint_error(format!("polyint: {error}")))?;
+    let (coeffs, class) = match storage {
+        NumericStorage::F64(values) => (values, FloatingClass::Double),
+        NumericStorage::F32(values) => (
+            values.into_iter().map(f64::from).collect(),
+            FloatingClass::Single,
+        ),
+        storage => {
+            return Err(polyint_error(format!(
+                "polyint: coefficient input must be single or double, got {}",
+                storage.class_name()
+            )))
+        }
+    };
     Ok(Polynomial {
-        coeffs: tensor::tensor_values_f64(tensor)
-            .into_iter()
-            .map(|v| Complex64::new(v, 0.0))
-            .collect(),
-        orientation,
+        coeffs: coeffs.into_iter().map(|v| Complex64::new(v, 0.0)).collect(),
+        class,
     })
 }
 
 fn parse_complex_tensor_coeffs(tensor: &ComplexTensor) -> BuiltinResult<Polynomial> {
     ensure_vector_shape(&tensor.shape)?;
-    let orientation = orientation_from_shape(&tensor.shape);
     Ok(Polynomial {
         coeffs: tensor
             .data
             .iter()
             .map(|&(re, im)| Complex64::new(re, im))
             .collect(),
-        orientation,
+        class: FloatingClass::Double,
     })
 }
 
@@ -367,7 +390,20 @@ async fn parse_constant(value: Value) -> BuiltinResult<Complex64> {
                     "polyint: constant of integration must be a scalar",
                 ));
             }
-            Ok(Complex64::new(tensor::tensor_value_f64(&tensor, 0), 0.0))
+            let value = match tensor
+                .into_numeric_storage()
+                .map_err(|error| polyint_error(format!("polyint: {error}")))?
+            {
+                NumericStorage::F64(values) => values[0],
+                NumericStorage::F32(values) => f64::from(values[0]),
+                storage => {
+                    return Err(polyint_error(format!(
+                        "polyint: constant input must be single or double, got {}",
+                        storage.class_name()
+                    )))
+                }
+            };
+            Ok(Complex64::new(value, 0.0))
         }
         Value::ComplexTensor(tensor) => {
             if tensor.data.len() != 1 {
@@ -379,18 +415,7 @@ async fn parse_constant(value: Value) -> BuiltinResult<Complex64> {
             Ok(Complex64::new(re, im))
         }
         Value::Num(n) => Ok(Complex64::new(n, 0.0)),
-        Value::Int(i) => Ok(Complex64::new(i.to_f64(), 0.0)),
-        Value::Bool(b) => Ok(Complex64::new(if b { 1.0 } else { 0.0 }, 0.0)),
         Value::Complex(re, im) => Ok(Complex64::new(re, im)),
-        Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(polyint_error)?;
-            if tensor.data.len() != 1 {
-                return Err(polyint_error(
-                    "polyint: constant of integration must be a scalar",
-                ));
-            }
-            Ok(Complex64::new(tensor.data[0], 0.0))
-        }
         other => Err(polyint_error(format!(
             "polyint: constant of integration must be numeric, got {:?}",
             other
@@ -407,42 +432,16 @@ fn ensure_vector_shape(shape: &[usize]) -> BuiltinResult<()> {
     }
 }
 
-fn orientation_from_shape(shape: &[usize]) -> Orientation {
-    for (idx, &dim) in shape.iter().enumerate() {
-        if dim != 1 {
-            return match idx {
-                0 => Orientation::Column,
-                1 => Orientation::Row,
-                _ => Orientation::Column,
-            };
-        }
-    }
-    Orientation::Scalar
-}
-
 #[derive(Clone)]
 struct Polynomial {
     coeffs: Vec<Complex64>,
-    orientation: Orientation,
+    class: FloatingClass,
 }
 
 #[derive(Clone, Copy)]
-enum Orientation {
-    Scalar,
-    Row,
-    Column,
-}
-
-impl Orientation {
-    fn shape_for_len(self, len: usize) -> Vec<usize> {
-        if len <= 1 {
-            return vec![1, 1];
-        }
-        match self {
-            Orientation::Scalar | Orientation::Row => vec![1, len],
-            Orientation::Column => vec![len, 1],
-        }
-    }
+enum FloatingClass {
+    Double,
+    Single,
 }
 
 #[cfg(test)]
@@ -495,8 +494,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 5]);
                 let expected = [0.75, -2.0 / 3.0, 2.5, 7.0, 0.0];
-                assert!(t
-                    .data
+                assert!(tensor::tensor_values_f64(&t)
                     .iter()
                     .zip(expected.iter())
                     .all(|(lhs, rhs)| (lhs - rhs).abs() < 1e-12));
@@ -515,8 +513,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 4]);
                 let expected = [4.0 / 3.0, 0.0, -8.0, 3.0];
-                assert!(t
-                    .data
+                assert!(tensor::tensor_values_f64(&t)
                     .iter()
                     .zip(expected.iter())
                     .all(|(lhs, rhs)| (lhs - rhs).abs() < 1e-12));
@@ -526,25 +523,45 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn polyint_typed_integer_coefficients_and_constant_cross_double_boundary_exactly() {
-        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![4, 0, -8]), vec![1, 3]).unwrap();
-        let mut constant = Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).unwrap();
-        constant.data.clear();
+    fn polyint_rejects_every_integer_class_for_coefficients_and_constant() {
+        let cases = [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+        for storage in cases {
+            let integer = Tensor::new_integer(storage, vec![1, 1]).unwrap();
+            let err = polyint_builtin(Value::Tensor(integer.clone()), Vec::new())
+                .expect_err("integer coefficients must be rejected");
+            assert_error_contains(err, "must be single or double");
+
+            let coefficients = Tensor::new(vec![4.0, 0.0, -8.0], vec![1, 3]).unwrap();
+            let err = polyint_builtin(Value::Tensor(coefficients), vec![Value::Tensor(integer)])
+                .expect_err("integer constant must be rejected");
+            assert_error_contains(err, "must be single or double");
+        }
+    }
+
+    #[test]
+    fn polyint_preserves_native_single_output_storage() {
+        let tensor = Tensor::from_f32(vec![3.0, -2.0, 5.0], vec![3, 1]).unwrap();
+        let constant = Tensor::from_f32(vec![2.0], vec![1, 1]).unwrap();
         let result =
             polyint_builtin(Value::Tensor(tensor), vec![Value::Tensor(constant)]).expect("polyint");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 4]);
-                let expected = [4.0 / 3.0, 0.0, -8.0, 3.0];
-                assert!(t
-                    .data
-                    .iter()
-                    .zip(expected.iter())
-                    .all(|(lhs, rhs)| (lhs - rhs).abs() < 1e-12));
-                assert!(t.integer_storage().is_none());
-            }
-            other => panic!("expected tensor result, got {other:?}"),
-        }
+        let Value::Tensor(tensor) = result else {
+            panic!("expected native-single tensor");
+        };
+        assert_eq!(tensor.shape, vec![1, 4]);
+        assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
+        assert_eq!(
+            tensor.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![1.0, -1.0, 5.0, 2.0])
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -554,8 +571,9 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert!((t.data[0] - 5.0).abs() < 1e-12);
-                assert!(t.data[1].abs() < 1e-12);
+                let values = tensor::tensor_values_f64(&t);
+                assert!((values[0] - 5.0).abs() < 1e-12);
+                assert!(values[1].abs() < 1e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -563,40 +581,37 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn integrates_logical_coefficients() {
+    fn rejects_logical_coefficients_and_constant() {
         let logical = LogicalArray::new(vec![1, 0, 1], vec![1, 3]).unwrap();
-        let result =
-            polyint_builtin(Value::LogicalArray(logical), Vec::new()).expect("polyint logical");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 4]);
-                let expected = [1.0 / 3.0, 0.0, 1.0, 0.0];
-                assert!(t
-                    .data
-                    .iter()
-                    .zip(expected.iter())
-                    .all(|(lhs, rhs)| (lhs - rhs).abs() < 1e-12));
-            }
-            other => panic!("expected tensor result, got {other:?}"),
-        }
+        let err = polyint_builtin(Value::LogicalArray(logical), Vec::new())
+            .expect_err("logical coefficients must be rejected");
+        assert_error_contains(err, "must be single or double");
+
+        let coefficients = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
+        let constant = LogicalArray::new(vec![1], vec![1, 1]).unwrap();
+        let err = polyint_builtin(
+            Value::Tensor(coefficients),
+            vec![Value::LogicalArray(constant)],
+        )
+        .expect_err("logical constant must be rejected");
+        assert_error_contains(err, "must be single or double");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn preserves_column_vector_orientation() {
+    fn returns_row_vector_for_column_input() {
         let tensor = Tensor::new(vec![2.0, 0.0, -6.0], vec![3, 1]).unwrap();
         let result = polyint_builtin(Value::Tensor(tensor), Vec::new()).expect("polyint");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![4, 1]);
+                assert_eq!(t.shape, vec![1, 4]);
                 let expected = [2.0 / 3.0, 0.0, -6.0, 0.0];
-                assert!(t
-                    .data
+                assert!(tensor::tensor_values_f64(&t)
                     .iter()
                     .zip(expected.iter())
                     .all(|(lhs, rhs)| (lhs - rhs).abs() < 1e-12));
             }
-            other => panic!("expected column tensor, got {other:?}"),
+            other => panic!("expected row tensor, got {other:?}"),
         }
     }
 
@@ -663,8 +678,8 @@ pub(crate) mod tests {
             Value::Num(v) => assert!(v.abs() < 1e-12),
             Value::Tensor(t) => {
                 // Allow tensor fallback if scalar auto-boxing changes in future
-                assert_eq!(t.data.len(), 1);
-                assert!(t.data[0].abs() < 1e-12);
+                assert_eq!(t.len(), 1);
+                assert!(tensor::tensor_value_f64(&t, 0).abs() < 1e-12);
             }
             other => panic!("expected numeric result, got {other:?}"),
         }
@@ -693,19 +708,14 @@ pub(crate) mod tests {
     fn polyint_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, -4.0, 6.0], vec![1, 3]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result = polyint_builtin(Value::GpuTensor(handle), Vec::new()).expect("polyint");
             match result {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
                     assert_eq!(gathered.shape, vec![1, 4]);
                     let expected = [1.0 / 3.0, -2.0, 6.0, 0.0];
-                    assert!(gathered
-                        .data
+                    assert!(tensor::tensor_values_f64(&gathered)
                         .iter()
                         .zip(expected.iter())
                         .all(|(lhs, rhs)| (lhs - rhs).abs() < 1e-12));
@@ -715,16 +725,35 @@ pub(crate) mod tests {
         });
     }
 
+    #[test]
+    fn polyint_gpu_rejects_every_integer_class_before_dispatch() {
+        test_support::with_test_provider(|provider| {
+            let cases = [
+                IntegerStorage::I8(vec![1]),
+                IntegerStorage::I16(vec![1]),
+                IntegerStorage::I32(vec![1]),
+                IntegerStorage::I64(vec![1]),
+                IntegerStorage::U8(vec![1]),
+                IntegerStorage::U16(vec![1]),
+                IntegerStorage::U32(vec![1]),
+                IntegerStorage::U64(vec![1]),
+            ];
+            for storage in cases {
+                let tensor = Tensor::new_integer(storage, vec![1, 1]).unwrap();
+                let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
+                let err = polyint_builtin(Value::GpuTensor(handle), Vec::new())
+                    .expect_err("integer gpuArray coefficients must be rejected");
+                assert_error_contains(err, "must be single or double");
+            }
+        });
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn polyint_gpu_complex_constant_reuploads_complex_result() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result = polyint_builtin(Value::GpuTensor(handle), vec![Value::Complex(0.0, 2.0)])
                 .expect("polyint");
             match result {
@@ -790,17 +819,11 @@ pub(crate) mod tests {
     fn polyint_gpu_with_gpu_constant() {
         test_support::with_test_provider(|provider| {
             let coeffs = Tensor::new(vec![2.0, 0.0], vec![1, 2]).unwrap();
-            let coeff_view = HostTensorView {
-                data: &coeffs.data,
-                shape: &coeffs.shape,
-            };
-            let coeff_handle = provider.upload(&coeff_view).expect("upload coeffs");
+            let coeff_handle =
+                gpu_helpers::upload_tensor(provider, &coeffs).expect("upload coeffs");
             let constant = Tensor::new(vec![3.0], vec![1, 1]).unwrap();
-            let constant_view = HostTensorView {
-                data: &constant.data,
-                shape: &constant.shape,
-            };
-            let constant_handle = provider.upload(&constant_view).expect("upload constant");
+            let constant_handle =
+                gpu_helpers::upload_tensor(provider, &constant).expect("upload constant");
             let result = polyint_builtin(
                 Value::GpuTensor(coeff_handle),
                 vec![Value::GpuTensor(constant_handle)],
@@ -812,8 +835,7 @@ pub(crate) mod tests {
                         test_support::gather(Value::GpuTensor(handle)).expect("gather result");
                     assert_eq!(gathered.shape, vec![1, 3]);
                     let expected = [1.0, 0.0, 3.0];
-                    assert!(gathered
-                        .data
+                    assert!(tensor::tensor_values_f64(&gathered)
                         .iter()
                         .zip(expected.iter())
                         .all(|(lhs, rhs)| (lhs - rhs).abs() < 1e-12));
@@ -834,11 +856,7 @@ pub(crate) mod tests {
             return;
         };
         let tensor = Tensor::new(vec![3.0, -2.0, 5.0, 7.0], vec![1, 4]).unwrap();
-        let view = HostTensorView {
-            data: &tensor.data,
-            shape: &tensor.shape,
-        };
-        let handle = provider.upload(&view).expect("upload");
+        let handle = gpu_helpers::upload_tensor(provider.as_ref(), &tensor).expect("upload");
         let gpu_value = polyint_builtin(Value::GpuTensor(handle), Vec::new()).expect("polyint gpu");
         let gathered = test_support::gather(gpu_value).expect("gather");
         let cpu_value =
@@ -853,10 +871,9 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        gathered
-            .data
+        tensor::tensor_values_f64(&gathered)
             .iter()
-            .zip(expected.data.iter())
+            .zip(tensor::tensor_values_f64(&expected).iter())
             .for_each(|(lhs, rhs)| assert!((lhs - rhs).abs() < tol));
     }
 
