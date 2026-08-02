@@ -1520,21 +1520,19 @@ pub(crate) mod tests {
 
     #[test]
     fn issorted_reads_mirrorless_integer_storage_before_empty_data_fast_path() {
-        let mut unsorted = Tensor::new_integer(
+        let unsorted = Tensor::new_integer(
             IntegerStorage::U64(vec![0, u64::MAX, 9_007_199_254_740_993]),
             vec![3, 1],
         )
         .expect("input");
-        unsorted.data.clear();
         assert_eq!(
             issorted_builtin(Value::Tensor(unsorted), Vec::new()).expect("issorted"),
             Value::Bool(false)
         );
 
-        let mut descending_rows =
+        let descending_rows =
             Tensor::new_integer(IntegerStorage::I64(vec![10, 3, 2, 9, 4, 1]), vec![3, 2])
                 .expect("input");
-        descending_rows.data.clear();
         assert_eq!(
             issorted_builtin(
                 Value::Tensor(descending_rows),
@@ -1775,7 +1773,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1794,7 +1792,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let cpu = issorted_builtin(Value::Tensor(tensor.clone()), vec![]).expect("cpu issorted");
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()

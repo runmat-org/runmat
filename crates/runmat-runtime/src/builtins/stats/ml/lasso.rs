@@ -1159,14 +1159,12 @@ mod tests {
     }
 
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
         Value::Tensor(tensor)
     }
 
     fn cleared_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
         Value::Tensor(tensor)
     }
 
@@ -1209,8 +1207,8 @@ mod tests {
             panic!("expected coefficient tensor");
         };
         assert_eq!(coeffs.shape, vec![2, 1]);
-        assert!((coeffs.data[0] - 2.0).abs() < 1.0e-8);
-        assert!(coeffs.data[1].abs() < 1.0e-8);
+        assert!((coeffs.materialize_f64()[0] - 2.0).abs() < 1.0e-8);
+        assert!(coeffs.materialize_f64()[1].abs() < 1.0e-8);
     }
 
     #[test]
@@ -1281,7 +1279,7 @@ mod tests {
             panic!("expected coefficient tensor");
         };
         assert_eq!(coeffs.shape, vec![1, 1]);
-        assert!((coeffs.data[0] - 2.0).abs() < 1.0e-8);
+        assert!((coeffs.materialize_f64()[0] - 2.0).abs() < 1.0e-8);
     }
 
     #[test]
@@ -1377,17 +1375,17 @@ mod tests {
         let lambda = row_field(&info, "Lambda");
         let mse = row_field(&info, "MSE");
         let se = row_field(&info, "SE");
-        assert_eq!(coeffs.cols, lambda.data.len());
-        assert_eq!(mse.data.len(), lambda.data.len());
-        assert_eq!(se.data.len(), lambda.data.len());
+        assert_eq!(coeffs.cols, lambda.materialize_f64().len());
+        assert_eq!(mse.materialize_f64().len(), lambda.materialize_f64().len());
+        assert_eq!(se.materialize_f64().len(), lambda.materialize_f64().len());
         let Some(Value::Num(index_min_mse)) = info.fields.get("IndexMinMSE") else {
             panic!("expected IndexMinMSE");
         };
         let Some(Value::Num(index_1se)) = info.fields.get("Index1SE") else {
             panic!("expected Index1SE");
         };
-        assert!(*index_min_mse >= 1.0 && *index_min_mse <= lambda.data.len() as f64);
-        assert!(*index_1se >= 1.0 && *index_1se <= lambda.data.len() as f64);
+        assert!(*index_min_mse >= 1.0 && *index_min_mse <= lambda.materialize_f64().len() as f64);
+        assert!(*index_1se >= 1.0 && *index_1se <= lambda.materialize_f64().len() as f64);
     }
 
     #[test]

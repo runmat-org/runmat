@@ -71,15 +71,14 @@ mod tests {
         else {
             panic!("expected host tensor")
         };
-        assert_eq!(tensor.data, vec![2.5]);
+        assert_eq!(tensor.materialize_f64(), vec![2.5]);
         assert_eq!(tensor.shape, vec![1]);
     }
 
     #[test]
     fn numeric_input_len_reads_typed_integer_storage_without_mirror() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3]), vec![1, 3]).expect("tensor");
-        tensor.data.clear();
 
         let input = NumericInput::from_value(Value::Tensor(tensor), "plot").unwrap();
 

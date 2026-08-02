@@ -440,8 +440,7 @@ mod tests {
     }
 
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         Value::Tensor(tensor)
     }
 
@@ -451,10 +450,13 @@ mod tests {
         let out = block_on(lhsdesign_builtin(vec![Value::Num(6.0), Value::Num(3.0)])).unwrap();
         let tensor = tensor(out);
         assert_eq!(tensor.shape, vec![6, 3]);
-        assert!(tensor.data.iter().all(|value| *value > 0.0 && *value < 1.0));
+        assert!(tensor
+            .materialize_f64()
+            .iter()
+            .all(|value| *value > 0.0 && *value < 1.0));
         for col in 0..3 {
             let mut bins = (0..6)
-                .map(|row| (tensor.data[row + col * 6] * 6.0).floor() as usize)
+                .map(|row| (tensor.materialize_f64()[row + col * 6] * 6.0).floor() as usize)
                 .collect::<Vec<_>>();
             bins.sort_unstable();
             assert_eq!(bins, vec![0, 1, 2, 3, 4, 5]);
@@ -474,7 +476,7 @@ mod tests {
         ]))
         .unwrap();
         let tensor = tensor(out);
-        for value in tensor.data {
+        for value in tensor.materialize_f64() {
             let scaled = value * 4.0;
             assert!((scaled.fract() - 0.5).abs() < 1.0e-12);
         }
@@ -494,7 +496,7 @@ mod tests {
         .unwrap();
         let tensor = tensor(out);
         assert_eq!(tensor.shape, vec![8, 3]);
-        for value in tensor.data {
+        for value in tensor.materialize_f64() {
             let scaled = value * 8.0;
             assert!((scaled.fract() - 0.5).abs() < 1.0e-12);
         }
@@ -516,7 +518,7 @@ mod tests {
         .expect("lhsdesign");
         let tensor = tensor(out);
         assert_eq!(tensor.shape, vec![4, 2]);
-        for value in tensor.data {
+        for value in tensor.materialize_f64() {
             let scaled = value * 4.0;
             assert!((scaled.fract() - 0.5).abs() < 1.0e-12);
         }

@@ -738,9 +738,7 @@ mod tests {
         builtin_path = "crate::builtins::math::optim::integral::tests"
     )]
     async fn integer_tensor_helper(_x: Value) -> crate::BuiltinResult<Value> {
-        let mut tensor =
-            Tensor::new_integer(IntegerStorage::I16(vec![3]), vec![1, 1]).expect("tensor");
-        tensor.data = vec![0.0];
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![3]), vec![1, 1]).expect("tensor");
         Ok(Value::Tensor(tensor))
     }
 
@@ -763,12 +761,8 @@ mod tests {
 
     #[test]
     fn integral_bounds_read_typed_integer_storage_exactly() {
-        let mut lower =
-            Tensor::new_integer(IntegerStorage::I16(vec![1]), vec![1, 1]).expect("lower");
-        lower.data = vec![0.0];
-        let mut upper =
-            Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).expect("upper");
-        upper.data = vec![0.0];
+        let lower = Tensor::new_integer(IntegerStorage::I16(vec![1]), vec![1, 1]).expect("lower");
+        let upper = Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).expect("upper");
 
         let result = block_on(integral_builtin(
             Value::FunctionHandle("__integral_square".to_string()),
@@ -902,9 +896,8 @@ mod tests {
 
     #[test]
     fn max_fun_evals_option_reads_typed_integer_storage_exactly() {
-        let mut max_fun_evals =
+        let max_fun_evals =
             Tensor::new_integer(IntegerStorage::U16(vec![50]), vec![1, 1]).expect("MaxFunEvals");
-        max_fun_evals.data = vec![5.0];
 
         let result = block_on(integral_builtin(
             Value::FunctionHandle("sin".into()),
@@ -918,9 +911,8 @@ mod tests {
 
     #[test]
     fn max_fun_evals_option_rejects_negative_typed_integer_storage_exactly() {
-        let mut max_fun_evals =
+        let max_fun_evals =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("MaxFunEvals");
-        max_fun_evals.data = vec![50.0];
 
         let err = block_on(integral_builtin(
             Value::FunctionHandle("sin".into()),

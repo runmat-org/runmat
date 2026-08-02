@@ -608,17 +608,15 @@ pub(crate) mod tests {
     #[test]
     fn strings_typed_integer_scalar_tensor_parser_is_exact() {
         let large = 9_007_199_254_740_993_u64;
-        let mut scalar =
+        let scalar =
             Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).expect("scalar");
-        scalar.data.clear();
         assert_eq!(
             parse_size_scalar(&Value::Tensor(scalar)).expect("parse scalar"),
             large as usize
         );
 
-        let mut vector =
+        let vector =
             Tensor::new_integer(IntegerStorage::U64(vec![large, 1]), vec![1, 2]).expect("vector");
-        vector.data.clear();
         assert_eq!(
             parse_size_tensor(&vector).expect("parse vector"),
             vec![large as usize, 1]
@@ -799,7 +797,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, tensor.shape);
-                assert_eq!(array.data.len(), tensor.data.len());
+                assert_eq!(array.data.len(), tensor.materialize_f64().len());
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -853,7 +851,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let dims = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
             let view = HostTensorView {
-                data: &dims.data,
+                data: &dims.materialize_f64(),
                 shape: &dims.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -874,7 +872,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -907,7 +905,7 @@ pub(crate) mod tests {
         );
         let dims = Tensor::new(vec![1.0, 4.0], vec![1, 2]).unwrap();
         let view = HostTensorView {
-            data: &dims.data,
+            data: &dims.materialize_f64(),
             shape: &dims.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");

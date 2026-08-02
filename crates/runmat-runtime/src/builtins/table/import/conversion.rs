@@ -769,7 +769,7 @@ mod tests {
             panic!("expected tensor, got {out:?}");
         };
         assert_eq!(tensor.shape, vec![4, 1]);
-        assert_eq!(tensor.dtype, NumericDType::U8);
+        assert_eq!(tensor.numeric_dtype(), NumericDType::U8);
         assert_eq!(
             tensor.integer_storage(),
             Some(&IntegerStorage::U8(vec![0, 42, u8::MAX, 0]))
@@ -790,7 +790,7 @@ mod tests {
             panic!("expected tensor, got {out:?}");
         };
         assert_eq!(tensor.shape, vec![4, 1]);
-        assert_eq!(tensor.dtype, NumericDType::I16);
+        assert_eq!(tensor.numeric_dtype(), NumericDType::I16);
         assert_eq!(
             tensor.integer_storage(),
             Some(&IntegerStorage::I16(vec![i16::MIN, -8, 1, i16::MAX]))

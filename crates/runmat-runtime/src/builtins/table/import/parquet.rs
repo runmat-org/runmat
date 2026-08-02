@@ -841,9 +841,8 @@ mod tests {
     #[test]
     fn parquet_one_based_indices_read_typed_integer_storage_exactly() {
         let exact = (1_u64 << 53) + 1;
-        let mut row_groups =
+        let row_groups =
             Tensor::new_integer(IntegerStorage::U64(vec![exact]), vec![1, 1]).expect("groups");
-        row_groups.data.fill(f64::NAN);
 
         let parsed = one_based_indices(&Value::Tensor(row_groups), "RowGroups");
         if usize::BITS == 64 {
@@ -852,17 +851,15 @@ mod tests {
             assert!(parsed.is_err());
         }
 
-        let mut invalid =
+        let invalid =
             Tensor::new_integer(IntegerStorage::I16(vec![0]), vec![1, 1]).expect("groups");
-        invalid.data.clear();
         assert!(one_based_indices(&Value::Tensor(invalid), "RowGroups").is_err());
     }
 
     #[test]
     fn parquet_index_parser_ignores_poisoned_mirrors_for_every_integer_class() {
         for storage in integer_storages(&[1, 2]) {
-            let mut indices = Tensor::new_integer(storage, vec![1, 2]).unwrap();
-            indices.data.fill(f64::NAN);
+            let indices = Tensor::new_integer(storage, vec![1, 2]).unwrap();
             assert_eq!(
                 one_based_indices(&Value::Tensor(indices), "RowGroups").unwrap(),
                 vec![0, 1]

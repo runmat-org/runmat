@@ -1083,10 +1083,8 @@ pub(crate) mod tests {
 
     #[test]
     fn median_reads_typed_integer_storage_without_mirror() {
-        let mut tensor =
-            Tensor::new_integer(IntegerStorage::I16(vec![9, 1, 4, 8, 6, 3]), vec![3, 2])
-                .expect("typed input");
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![9, 1, 4, 8, 6, 3]), vec![3, 2])
+            .expect("typed input");
 
         let Value::Tensor(result) =
             median_builtin(Value::Tensor(tensor), Vec::new()).expect("median by column")
@@ -1125,7 +1123,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
-                assert_eq!(out.data, vec![2.0, 9.0]);
+                assert_eq!(out.materialize_f64(), vec![2.0, 9.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1140,7 +1138,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 1]);
-                assert_eq!(out.data, vec![4.0, 6.0, 8.0]);
+                assert_eq!(out.materialize_f64(), vec![4.0, 6.0, 8.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1169,9 +1167,9 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 2, 1]);
-                assert_eq!(out.data.len(), 2);
-                assert!((out.data[0] - 3.5).abs() < 1e-12);
-                assert!((out.data[1] - 5.5).abs() < 1e-12);
+                assert_eq!(out.materialize_f64().len(), 2);
+                assert!((out.materialize_f64()[0] - 3.5).abs() < 1e-12);
+                assert!((out.materialize_f64()[1] - 5.5).abs() < 1e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1217,7 +1215,7 @@ pub(crate) mod tests {
             .expect("median");
         match result {
             Value::Tensor(out) => assert_eq!(out, original),
-            Value::Num(n) => assert_eq!(n, original.data[0]),
+            Value::Num(n) => assert_eq!(n, original.materialize_f64()[0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -1246,14 +1244,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 4.0, 9.0, 16.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = median_builtin(Value::GpuTensor(handle), Vec::new()).expect("median");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 1]);
-            assert_eq!(gathered.data[0], 6.5);
+            assert_eq!(gathered.materialize_f64()[0], 6.5);
         });
     }
 
@@ -1263,7 +1261,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![f64::NAN, 2.0, f64::NAN, 4.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1271,7 +1269,7 @@ pub(crate) mod tests {
                 .expect("median");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 1]);
-            assert_eq!(gathered.data[0], 3.0);
+            assert_eq!(gathered.materialize_f64()[0], 3.0);
         });
     }
 
@@ -1289,7 +1287,7 @@ pub(crate) mod tests {
         };
         let cpu = median_host(Value::Tensor(tensor.clone()), &args_dim1).expect("cpu median");
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()
@@ -1305,7 +1303,7 @@ pub(crate) mod tests {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 5e-5,
                 };
-                for (a, b) in ct.data.iter().zip(gt.data.iter()) {
+                for (a, b) in ct.materialize_f64().iter().zip(gt.materialize_f64().iter()) {
                     assert!((a - b).abs() < tol, "|{} - {}| >= {}", a, b, tol);
                 }
             }
@@ -1323,7 +1321,7 @@ pub(crate) mod tests {
             runmat_accelerate_api::provider()
                 .unwrap()
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &tensor.data,
+                    data: &tensor.materialize_f64(),
                     shape: &tensor.shape,
                 })
                 .expect("upload"),
@@ -1333,12 +1331,19 @@ pub(crate) mod tests {
         let gathered_all = test_support::gather(gpu_all).expect("gather");
         match cpu_all {
             Value::Num(a) => {
-                assert_eq!(gathered_all.data.len(), 1);
-                assert!((a - gathered_all.data[0]).abs() < 1e-12);
+                assert_eq!(gathered_all.materialize_f64().len(), 1);
+                assert!((a - gathered_all.materialize_f64()[0]).abs() < 1e-12);
             }
             Value::Tensor(t) => {
-                assert_eq!(t.data.len(), gathered_all.data.len());
-                for (a, b) in t.data.iter().zip(gathered_all.data.iter()) {
+                assert_eq!(
+                    t.materialize_f64().len(),
+                    gathered_all.materialize_f64().len()
+                );
+                for (a, b) in t
+                    .materialize_f64()
+                    .iter()
+                    .zip(gathered_all.materialize_f64().iter())
+                {
                     assert!((a - b).abs() < 1e-12);
                 }
             }

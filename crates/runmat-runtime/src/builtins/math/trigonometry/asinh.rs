@@ -277,7 +277,7 @@ pub(crate) mod tests {
                     0.881373587019543,
                     1.8184464592320668,
                 ];
-                for (actual, exp) in t.data.iter().zip(expected.iter()) {
+                for (actual, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - exp).abs() < 1e-12);
                 }
             }
@@ -288,18 +288,17 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn asinh_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I16(vec![-1, 0, 1]),
             vec![3, 1],
         )
         .expect("integer tensor");
-        tensor.data.fill(0.0);
 
         match asinh_builtin(Value::Tensor(tensor)).expect("asinh") {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 1]);
                 let expected = [-1.0f64.asinh(), 0.0, 1.0f64.asinh()];
-                for (actual, expected) in out.data.iter().zip(expected.iter()) {
+                for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expected).abs() < 1e-12);
                 }
                 assert!(out.integer_storage().is_none());
@@ -337,7 +336,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
                 let expected = [(('a' as u32) as f64).asinh(), (('z' as u32) as f64).asinh()];
-                for (actual, exp) in t.data.iter().zip(expected.iter()) {
+                for (actual, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - exp).abs() < 1e-12);
                 }
             }
@@ -352,15 +351,19 @@ pub(crate) mod tests {
             let tensor =
                 Tensor::new(vec![0.0, 0.5, 1.0, 2.0], vec![2, 2]).expect("tensor construction");
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = asinh_builtin(Value::GpuTensor(handle)).expect("asinh");
             let gathered = test_support::gather(result).expect("gather");
-            let expected = tensor.data.iter().map(|&v| v.asinh()).collect::<Vec<_>>();
+            let expected = tensor
+                .materialize_f64()
+                .iter()
+                .map(|&v| v.asinh())
+                .collect::<Vec<_>>();
             assert_eq!(gathered.shape, vec![2, 2]);
-            for (actual, exp) in gathered.data.iter().zip(expected.iter()) {
+            for (actual, exp) in gathered.materialize_f64().iter().zip(expected.iter()) {
                 assert!((actual - exp).abs() < 1e-12);
             }
         });
@@ -381,7 +384,7 @@ pub(crate) mod tests {
                     1.0f64.asinh(),
                     1.0f64.asinh(),
                 ];
-                for (actual, exp) in t.data.iter().zip(expected.iter()) {
+                for (actual, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - exp).abs() < 1e-12);
                 }
             }
@@ -411,7 +414,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![-3.0, -1.0, 0.0, 1.0, 3.0], vec![5, 1]).unwrap();
         let cpu = asinh_real(Value::Tensor(tensor.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()
@@ -427,7 +430,11 @@ pub(crate) mod tests {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
                 };
-                for (actual, expected) in gathered.data.iter().zip(ct.data.iter()) {
+                for (actual, expected) in gathered
+                    .materialize_f64()
+                    .iter()
+                    .zip(ct.materialize_f64().iter())
+                {
                     assert!(
                         (actual - expected).abs() < tol,
                         "|{} - {}| >= {}",

@@ -599,7 +599,7 @@ mod tests {
 
     fn tensor_data(value: Value) -> (Vec<f64>, Vec<usize>) {
         let tensor = test_support::gather(value).expect("gather tensor");
-        (tensor.data, tensor.shape)
+        (tensor.materialize_f64(), tensor.shape)
     }
 
     fn approx(lhs: &[f64], rhs: &[f64], tol: f64) {
@@ -777,7 +777,7 @@ mod tests {
             let (cpu_data, _) = tensor_data(cpu);
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &x.data,
+                    data: &x.materialize_f64(),
                     shape: &x.shape,
                 })
                 .expect("upload");
@@ -814,7 +814,7 @@ mod tests {
         let (cpu_data, _) = tensor_data(cpu);
         let handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
-                data: &x.data,
+                data: &x.materialize_f64(),
                 shape: &x.shape,
             })
             .expect("upload");

@@ -1530,9 +1530,8 @@ mod tests {
 
     #[test]
     fn arity_bound_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("arity tensor");
-        tensor.data.clear();
         assert_eq!(
             parse_finite_arity_bound(&Value::Tensor(tensor), "narginchk", "minArgs").unwrap(),
             7
@@ -1551,11 +1550,10 @@ mod tests {
             assert!(parse_finite_arity_bound(&scalar, "narginchk", "minArgs").is_err());
         }
 
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("arity tensor");
         // The f64 mirror is intentionally plausible but must never decide an
         // integer-only argument bound.
-        tensor.data[0] = 1.0;
         assert!(parse_finite_arity_bound(&Value::Tensor(tensor), "narginchk", "minArgs",).is_err());
     }
 

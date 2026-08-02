@@ -885,7 +885,7 @@ mod tests {
             panic!("expected tensor, got {result:?}");
         };
         assert_eq!(tensor.shape, vec![2, 2, 3]);
-        assert_eq!(tensor.dtype, NumericDType::U8);
+        assert_eq!(tensor.numeric_dtype(), NumericDType::U8);
         assert_eq!(
             tensor.integer_storage(),
             Some(&IntegerStorage::U8(vec![
@@ -912,7 +912,7 @@ mod tests {
         match &outputs[0] {
             Value::Tensor(rgb) => {
                 assert_eq!(rgb.shape, vec![1, 2, 3]);
-                assert_eq!(rgb.dtype, NumericDType::U8);
+                assert_eq!(rgb.numeric_dtype(), NumericDType::U8);
                 assert_eq!(
                     rgb.integer_storage(),
                     Some(&IntegerStorage::U8(vec![1, 5, 2, 6, 3, 7]))
@@ -927,7 +927,7 @@ mod tests {
         match &outputs[2] {
             Value::Tensor(alpha) => {
                 assert_eq!(alpha.shape, vec![1, 2]);
-                assert_eq!(alpha.dtype, NumericDType::U8);
+                assert_eq!(alpha.numeric_dtype(), NumericDType::U8);
                 assert_eq!(
                     alpha.integer_storage(),
                     Some(&IntegerStorage::U8(vec![4, 8]))
@@ -1085,7 +1085,7 @@ mod tests {
             panic!("expected tensor, got {result:?}");
         };
         assert_eq!(tensor.shape, vec![2, 2]);
-        assert_eq!(tensor.dtype, NumericDType::U16);
+        assert_eq!(tensor.numeric_dtype(), NumericDType::U16);
         assert_eq!(
             tensor.integer_storage(),
             Some(&IntegerStorage::U16(vec![1, 300, 2, 65535]))
@@ -1106,7 +1106,7 @@ mod tests {
             panic!("expected tensor, got {result:?}");
         };
         assert_eq!(tensor.shape, vec![2, 2, 3]);
-        assert_eq!(tensor.dtype, NumericDType::U8);
+        assert_eq!(tensor.numeric_dtype(), NumericDType::U8);
     }
 
     fn http_response(status: u16, reason: &str, content_type: &str, body: &[u8]) -> Vec<u8> {

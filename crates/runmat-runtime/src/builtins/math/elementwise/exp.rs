@@ -284,7 +284,7 @@ pub(crate) mod tests {
                     .into_iter()
                     .map(|v| v.exp())
                     .collect();
-                for (a, b) in t.data.iter().zip(expected.iter()) {
+                for (a, b) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((a - b).abs() < 1e-12);
                 }
             }
@@ -296,9 +296,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exp_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor =
-            Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 2]), vec![3, 1]).unwrap();
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 2]), vec![3, 1]).unwrap();
 
         let result = exp_builtin(Value::Tensor(tensor)).expect("exp");
 
@@ -307,7 +305,7 @@ pub(crate) mod tests {
                 assert_eq!(t.shape, vec![3, 1]);
                 assert!(t.integer_storage().is_none());
                 let expected = [1.0, std::f64::consts::E, 2.0_f64.exp()];
-                for (actual, expected) in t.data.iter().zip(expected) {
+                for (actual, expected) in t.materialize_f64().iter().zip(expected) {
                     assert!((*actual - expected).abs() < 1e-12);
                 }
             }
@@ -380,7 +378,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
                 let expected: Vec<f64> = "Hi".chars().map(|c| (c as u32 as f64).exp()).collect();
-                for (a, b) in t.data.iter().zip(expected.iter()) {
+                for (a, b) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((a - b).abs() < 1e-12);
                 }
             }
@@ -398,7 +396,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
                 let expected = [std::f64::consts::E, 1.0, std::f64::consts::E, 1.0];
-                for (a, b) in t.data.iter().zip(expected.iter()) {
+                for (a, b) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((a - b).abs() < 1e-12);
                 }
             }
@@ -422,15 +420,15 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = exp_builtin(Value::GpuTensor(handle)).expect("exp");
             let gathered = test_support::gather(result).expect("gather");
-            let expected: Vec<f64> = tensor.data.iter().map(|&v| v.exp()).collect();
+            let expected: Vec<f64> = tensor.materialize_f64().iter().map(|&v| v.exp()).collect();
             assert_eq!(gathered.shape, vec![4, 1]);
-            for (a, b) in gathered.data.iter().zip(expected.iter()) {
+            for (a, b) in gathered.materialize_f64().iter().zip(expected.iter()) {
                 assert!((a - b).abs() < 1e-12);
             }
         });
@@ -446,7 +444,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
         let cpu = exp_real(Value::Tensor(tensor.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()
@@ -465,7 +463,11 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (a, b) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (a, b) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((a - b).abs() < tol, "|{} - {}| >= {}", a, b, tol);
         }
     }

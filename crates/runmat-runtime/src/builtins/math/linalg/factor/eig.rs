@@ -1163,10 +1163,8 @@ pub(crate) mod tests {
 
     #[test]
     fn eig_matrix_conversion_reads_typed_integer_storage_exactly() {
-        let mut tensor =
-            Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3, 4, 5, 6]), vec![3, 2])
-                .expect("typed integer tensor");
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3, 4, 5, 6]), vec![3, 2])
+            .expect("typed integer tensor");
 
         let matrix = tensor_to_matrix(&tensor).expect("matrix");
         assert_eq!(matrix.nrows(), 3);
@@ -1185,7 +1183,7 @@ pub(crate) mod tests {
             Value::Int(v) => vec![Complex64::new(v.to_f64(), 0.0)],
             Value::Complex(re, im) => vec![Complex64::new(re, im)],
             Value::Tensor(t) => t
-                .data
+                .materialize_f64()
                 .iter()
                 .map(|&v| Complex64::new(v, 0.0))
                 .collect::<Vec<_>>(),
@@ -1233,7 +1231,12 @@ pub(crate) mod tests {
             "shape mismatch: {:?} vs {:?}",
             a.shape, b.shape
         );
-        for (idx, (lhs, rhs)) in a.data.iter().zip(b.data.iter()).enumerate() {
+        for (idx, (lhs, rhs)) in a
+            .materialize_f64()
+            .iter()
+            .zip(b.materialize_f64().iter())
+            .enumerate()
+        {
             let diff = (lhs - rhs).abs();
             assert!(
                 diff <= tol,
@@ -1479,7 +1482,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![2.0, 1.0, 0.0, 3.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1503,14 +1506,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![2.0, 0.0, 0.0, 3.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result =
                 eig_builtin(Value::GpuTensor(handle), vec![Value::from("nobalance")]).expect("eig");
             match result {
-                Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 3.0]),
+                Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![2.0, 3.0]),
                 Value::ComplexTensor(ct) => {
                     assert_eq!(ct.data[0], (2.0, 0.0));
                     assert_eq!(ct.data[1], (3.0, 0.0));
@@ -1562,7 +1565,7 @@ pub(crate) mod tests {
         };
         let tensor = Tensor::new(vec![4.0, 2.0, 1.0, 3.0], vec![2, 2]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
@@ -1618,7 +1621,7 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let tensor = Tensor::new(vec![1.0, 1.0, 0.0, 2.0], vec![2, 2]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");

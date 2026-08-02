@@ -1266,7 +1266,7 @@ pub(crate) mod tests {
             let gathered =
                 test_support::gather(Value::GpuTensor(handle.clone())).expect("gather values");
             assert_eq!(gathered.shape, tensor.shape);
-            assert_eq!(gathered.data, tensor.data);
+            assert_eq!(gathered.materialize_f64(), tensor.materialize_f64());
         });
     }
 
@@ -1364,9 +1364,8 @@ pub(crate) mod tests {
                 ("single", vec![2.0, 4.0], false),
                 ("logical", vec![1.0, 1.0], true),
             ] {
-                let mut tensor = Tensor::new_integer(IntegerStorage::I32(vec![2, 4]), vec![1, 2])
+                let tensor = Tensor::new_integer(IntegerStorage::I32(vec![2, 4]), vec![1, 2])
                     .expect("integer tensor");
-                tensor.data = vec![99.0, 101.0];
 
                 let uploaded = call(Value::Tensor(tensor), vec![Value::from(class_name)])
                     .expect("gpuArray class upload");
@@ -1378,7 +1377,7 @@ pub(crate) mod tests {
                 let gathered =
                     test_support::gather(Value::GpuTensor(handle)).expect("gather uploaded tensor");
                 assert_eq!(gathered.shape, vec![1, 2]);
-                assert_eq!(gathered.data, expected, "{class_name}");
+                assert_eq!(gathered.materialize_f64(), expected, "{class_name}");
             }
         });
     }
@@ -1461,7 +1460,7 @@ pub(crate) mod tests {
             let gathered =
                 test_support::gather(Value::GpuTensor(handle.clone())).expect("gather logical");
             assert_eq!(gathered.shape, logical.shape);
-            assert_eq!(gathered.data, vec![1.0, 0.0, 1.0, 1.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 1.0, 1.0]);
         });
     }
 
@@ -1522,7 +1521,7 @@ pub(crate) mod tests {
             let gathered =
                 test_support::gather(Value::GpuTensor(handle.clone())).expect("gather bool");
             assert_eq!(gathered.shape, vec![1, 1]);
-            assert_eq!(gathered.data, vec![1.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0]);
         });
     }
 
@@ -1544,7 +1543,7 @@ pub(crate) mod tests {
             for col in 0..4 {
                 for row in 0..2 {
                     let idx = row + col * 2;
-                    let code = gathered.data[idx];
+                    let code = gathered.materialize_f64()[idx];
                     let ch = char::from_u32(code as u32)
                         .expect("valid unicode scalar from numeric code");
                     recovered.push(ch);
@@ -1566,7 +1565,7 @@ pub(crate) mod tests {
                 test_support::gather(Value::GpuTensor(handle.clone())).expect("gather string");
             assert_eq!(gathered.shape, vec![1, 3]);
             let expected: Vec<f64> = "gpu".chars().map(|ch| ch as u32 as f64).collect();
-            assert_eq!(gathered.data, expected);
+            assert_eq!(gathered.materialize_f64(), expected);
         });
     }
 
@@ -1576,7 +1575,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![5.0, 6.0], vec![2, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1661,7 +1660,7 @@ pub(crate) mod tests {
             };
             let gathered =
                 test_support::gather(Value::GpuTensor(handle.clone())).expect("gather int32");
-            assert_eq!(gathered.data, vec![1.0, -4.0, 123456.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, -4.0, 123456.0]);
         });
     }
 
@@ -1677,7 +1676,7 @@ pub(crate) mod tests {
             };
             let gathered =
                 test_support::gather(Value::GpuTensor(handle.clone())).expect("gather uint8");
-            assert_eq!(gathered.data, vec![0.0, 13.0, 255.0, 255.0]);
+            assert_eq!(gathered.materialize_f64(), vec![0.0, 13.0, 255.0, 255.0]);
         });
     }
 
@@ -1694,7 +1693,7 @@ pub(crate) mod tests {
             let gathered =
                 test_support::gather(Value::GpuTensor(handle.clone())).expect("gather single");
             let expected = [1.234_567_9_f32 as f64, (-9.876_543_f32) as f64];
-            for (observed, expected) in gathered.data.iter().zip(expected.iter()) {
+            for (observed, expected) in gathered.materialize_f64().iter().zip(expected.iter()) {
                 assert!((observed - expected).abs() < 1e-6);
             }
         });
@@ -1717,7 +1716,7 @@ pub(crate) mod tests {
             };
             assert!(runmat_accelerate_api::handle_is_logical(&handle));
             let gathered = test_support::gather(Value::GpuTensor(handle.clone())).expect("gather");
-            assert_eq!(gathered.data, vec![0.0, 1.0, 1.0]);
+            assert_eq!(gathered.materialize_f64(), vec![0.0, 1.0, 1.0]);
         });
     }
 
@@ -1751,7 +1750,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![2.0, 0.0, -5.5], vec![3, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1766,7 +1765,7 @@ pub(crate) mod tests {
             assert!(runmat_accelerate_api::handle_is_logical(&new_handle));
             let gathered =
                 test_support::gather(Value::GpuTensor(new_handle.clone())).expect("gather");
-            assert_eq!(gathered.data, vec![1.0, 0.0, 1.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 1.0]);
             provider.free(&handle).ok();
             provider.free(&new_handle).ok();
         });
@@ -1778,7 +1777,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 0.0], vec![2, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1820,7 +1819,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");

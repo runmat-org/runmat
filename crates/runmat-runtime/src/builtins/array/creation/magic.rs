@@ -331,7 +331,7 @@ mod tests {
         match value {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![0, 0]);
-                assert!(tensor.data.is_empty());
+                assert!(tensor.materialize_f64().is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
         }
@@ -374,7 +374,7 @@ mod tests {
         };
         assert_eq!(tensor.shape, vec![3, 3]);
         let expected = vec![8.0, 3.0, 4.0, 1.0, 5.0, 9.0, 6.0, 7.0, 2.0];
-        assert_eq!(tensor.data, expected);
+        assert_eq!(tensor.materialize_f64(), expected);
     }
 
     #[test]
@@ -388,7 +388,7 @@ mod tests {
         let expected = vec![
             16.0, 5.0, 9.0, 4.0, 2.0, 11.0, 7.0, 14.0, 3.0, 10.0, 6.0, 15.0, 13.0, 8.0, 12.0, 1.0,
         ];
-        assert_eq!(tensor.data, expected);
+        assert_eq!(tensor.materialize_f64(), expected);
     }
 
     /// Verify that every value 1..=n² appears exactly once and that all rows,
@@ -449,7 +449,7 @@ mod tests {
             34.0, 29.0, 26.0, 21.0, 22.0, 17.0, 12.0, 13.0, 19.0, 23.0, 27.0, 10.0, 14.0, 18.0,
             24.0, 25.0, 20.0, 15.0, 16.0, 11.0,
         ];
-        assert_eq!(tensor.data, expected);
+        assert_eq!(tensor.materialize_f64(), expected);
     }
 
     #[test]
@@ -460,7 +460,7 @@ mod tests {
             other => panic!("expected tensor, got {other:?}"),
         };
         assert_eq!(tensor.shape, vec![10, 10]);
-        assert_magic_properties(&tensor.data, 10);
+        assert_magic_properties(&tensor.materialize_f64(), 10);
     }
 
     #[test]
@@ -471,6 +471,6 @@ mod tests {
             other => panic!("expected tensor, got {other:?}"),
         };
         assert_eq!(tensor.shape, vec![14, 14]);
-        assert_magic_properties(&tensor.data, 14);
+        assert_magic_properties(&tensor.materialize_f64(), 14);
     }
 }

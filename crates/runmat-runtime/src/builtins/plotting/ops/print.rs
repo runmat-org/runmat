@@ -638,9 +638,8 @@ mod tests {
 
     #[test]
     fn print_figure_handle_arg_reads_typed_integer_storage_exactly() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U32(vec![5]), vec![1, 1]).unwrap();
-        tensor.data.clear();
 
         assert_eq!(
             figure_handle_arg(&Value::Tensor(tensor)).unwrap(),

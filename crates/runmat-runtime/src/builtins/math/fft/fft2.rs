@@ -519,8 +519,7 @@ pub(crate) mod tests {
     #[test]
     fn fft2_size_vector_reads_typed_integer_storage_exactly() {
         let tensor = Tensor::new((0..6).map(|v| v as f64).collect(), vec![2, 3]).unwrap();
-        let mut size = Tensor::new_integer(IntegerStorage::U16(vec![4, 2]), vec![1, 2]).unwrap();
-        size.data.fill(f64::NAN);
+        let size = Tensor::new_integer(IntegerStorage::U16(vec![4, 2]), vec![1, 2]).unwrap();
 
         let result = fft2_builtin(Value::Tensor(tensor), vec![Value::Tensor(size)]).expect("fft2");
 
@@ -567,7 +566,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new((0..8).map(|v| v as f64).collect(), vec![2, 4]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -651,7 +650,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new((0..16).map(|v| v as f64).collect(), vec![4, 4]).expect("tensor");
         let tensor_cpu = tensor.clone();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");

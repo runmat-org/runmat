@@ -489,8 +489,7 @@ mod tests {
 
     fn int_row(storage: IntegerStorage) -> Value {
         let len = storage.len();
-        let mut tensor = Tensor::new_integer(storage, vec![1, len]).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, vec![1, len]).expect("integer tensor");
         Value::Tensor(tensor)
     }
 
@@ -506,7 +505,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(tensor.shape, vec![1, 2]);
-        assert_eq!(tensor.data, vec![15.0, 30.0]);
+        assert_eq!(tensor.materialize_f64(), vec![15.0, 30.0]);
     }
 
     #[test]
@@ -520,7 +519,7 @@ mod tests {
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor");
         };
-        assert_eq!(tensor.data, vec![10.0, 20.0]);
+        assert_eq!(tensor.materialize_f64(), vec![10.0, 20.0]);
     }
 
     #[test]
@@ -583,7 +582,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(tensor.shape, vec![2, 2]);
-        assert_eq!(tensor.data, vec![15.0, 30.0, 150.0, 300.0]);
+        assert_eq!(tensor.materialize_f64(), vec![15.0, 30.0, 150.0, 300.0]);
     }
 
     #[test]

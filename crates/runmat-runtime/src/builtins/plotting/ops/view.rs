@@ -298,7 +298,7 @@ mod tests {
         let _ = clear_figure(None);
         let value = view_builtin(vec![Value::Num(45.0), Value::Num(20.0)]).unwrap();
         let t = Tensor::try_from(&value).unwrap();
-        assert_eq!(t.data, vec![45.0, 20.0]);
+        assert_eq!(t.materialize_f64(), vec![45.0, 20.0]);
         let fig = clone_figure(current_figure_handle()).unwrap();
         let meta = fig.axes_metadata(0).unwrap();
         assert_eq!(meta.view_azimuth_deg, Some(45.0));
@@ -332,12 +332,12 @@ mod tests {
         let _ = view_builtin(vec![ax.clone(), Value::Num(2.0)]).unwrap();
         let v = view_builtin(vec![ax.clone()]).unwrap();
         let t = Tensor::try_from(&v).unwrap();
-        assert_eq!(t.data, vec![0.0, 90.0]);
+        assert_eq!(t.materialize_f64(), vec![0.0, 90.0]);
 
         let _ = view_builtin(vec![ax.clone(), Value::Num(3.0)]).unwrap();
         let v = view_builtin(vec![ax]).unwrap();
         let t = Tensor::try_from(&v).unwrap();
-        assert_eq!(t.data, vec![-37.5, 30.0]);
+        assert_eq!(t.materialize_f64(), vec![-37.5, 30.0]);
     }
 
     #[test]
@@ -354,7 +354,7 @@ mod tests {
         let _ = view_builtin(vec![ax.clone(), Value::Num(405.0), Value::Num(89.0)]).unwrap();
         let queried = get_builtin(vec![ax.clone(), Value::String("View".into())]).unwrap();
         let t = Tensor::try_from(&queried).unwrap();
-        assert_eq!(t.data, vec![405.0, 89.0]);
+        assert_eq!(t.materialize_f64(), vec![405.0, 89.0]);
 
         set_builtin(vec![
             ax,
@@ -377,14 +377,13 @@ mod tests {
         reset_hold_state_for_run();
         let _ = clear_figure(None);
 
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::I16(vec![45, 20]), vec![1, 2]).expect("angles");
-        tensor.data.clear();
         let angles = Value::Tensor(tensor);
         let value = view_builtin(vec![angles]).unwrap();
         let t = Tensor::try_from(&value).unwrap();
 
-        assert_eq!(t.data, vec![45.0, 20.0]);
+        assert_eq!(t.materialize_f64(), vec![45.0, 20.0]);
     }
 
     #[test]
@@ -394,17 +393,13 @@ mod tests {
         reset_hold_state_for_run();
         let _ = clear_figure(None);
 
-        let mut az =
-            Tensor::new_integer(IntegerStorage::I16(vec![45]), vec![1, 1]).expect("azimuth");
-        az.data.clear();
-        let mut el =
-            Tensor::new_integer(IntegerStorage::I16(vec![20]), vec![1, 1]).expect("elevation");
-        el.data.clear();
+        let az = Tensor::new_integer(IntegerStorage::I16(vec![45]), vec![1, 1]).expect("azimuth");
+        let el = Tensor::new_integer(IntegerStorage::I16(vec![20]), vec![1, 1]).expect("elevation");
 
         let value = view_builtin(vec![Value::Tensor(az), Value::Tensor(el)]).unwrap();
         let t = Tensor::try_from(&value).unwrap();
 
-        assert_eq!(t.data, vec![45.0, 20.0]);
+        assert_eq!(t.materialize_f64(), vec![45.0, 20.0]);
     }
 
     #[test]

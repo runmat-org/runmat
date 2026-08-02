@@ -707,8 +707,7 @@ pub(crate) mod tests {
     }
 
     fn integer_tensor_from_rows(rows: usize, cols: usize, storage: IntegerStorage) -> Tensor {
-        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
         tensor
     }
 
@@ -759,7 +758,7 @@ pub(crate) mod tests {
                 assert_eq!(t.shape, vec![3, 3]);
                 let expected =
                     tensor_from_rows(3, 3, &[1.0, 3.0, 2.0, 4.0, 10.0, 6.0, 3.0, 7.0, 4.0]);
-                assert_eq!(t.data, expected.data);
+                assert_eq!(t.materialize_f64(), expected.materialize_f64());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -776,7 +775,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![2.0, 6.0, 4.0, 8.0]);
+                assert_eq!(t.materialize_f64(), vec![2.0, 6.0, 4.0, 8.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -801,7 +800,7 @@ pub(crate) mod tests {
                     3,
                     &[12.0, 21.0, 16.0, 27.0, 45.0, 33.0, 24.0, 39.0, 28.0],
                 );
-                assert_eq!(t.data, expected.data);
+                assert_eq!(t.materialize_f64(), expected.materialize_f64());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -826,7 +825,7 @@ pub(crate) mod tests {
                     3,
                     &[-7.0, -4.0, 7.0, -15.0, -6.0, 15.0, -13.0, -4.0, 13.0],
                 );
-                assert_eq!(t.data, expected.data);
+                assert_eq!(t.materialize_f64(), expected.materialize_f64());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -846,7 +845,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 1]);
-                assert_eq!(t.data, vec![45.0]);
+                assert_eq!(t.materialize_f64(), vec![45.0]);
             }
             Value::Num(n) => assert!((n - 45.0).abs() <= EPS),
             other => panic!("expected scalar 45, got {other:?}"),
@@ -884,7 +883,7 @@ pub(crate) mod tests {
     #[test]
     fn conv2_complex_scaling() {
         let tensor = tensor_from_rows(2, 2, &[1.0, 2.0, 3.0, 4.0]);
-        let expected_data = tensor.data.clone();
+        let expected_data = tensor.materialize_f64().clone();
         let result =
             conv2_builtin(Value::Tensor(tensor), Value::Complex(0.0, 2.0), Vec::new()).unwrap();
         match result {
@@ -913,7 +912,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 0]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
         }
@@ -927,7 +926,7 @@ pub(crate) mod tests {
         match same {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 3]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
         }
@@ -974,7 +973,10 @@ pub(crate) mod tests {
         let numeric_tensor = test_support::gather(numeric_result).expect("gather numeric");
 
         assert_eq!(logical_tensor.shape, numeric_tensor.shape);
-        assert_eq!(logical_tensor.data, numeric_tensor.data);
+        assert_eq!(
+            logical_tensor.materialize_f64(),
+            numeric_tensor.materialize_f64()
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1002,7 +1004,7 @@ pub(crate) mod tests {
                         36.0, 67.0, 77.0,
                     ],
                 );
-                assert_eq!(t.data, expected.data);
+                assert_eq!(t.materialize_f64(), expected.materialize_f64());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1016,11 +1018,11 @@ pub(crate) mod tests {
             let b = tensor_from_rows(2, 2, &[1.0, 0.0, 0.0, -1.0]);
 
             let a_view = HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             };
             let b_view = HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             };
 
@@ -1044,7 +1046,7 @@ pub(crate) mod tests {
             let cpu_tensor = test_support::gather(cpu_result).unwrap();
 
             assert_eq!(gathered.shape, cpu_tensor.shape);
-            assert_eq!(gathered.data, cpu_tensor.data);
+            assert_eq!(gathered.materialize_f64(), cpu_tensor.materialize_f64());
         });
     }
 
@@ -1078,11 +1080,11 @@ pub(crate) mod tests {
         );
 
         let a_view = HostTensorView {
-            data: &a.data,
+            data: &a.materialize_f64(),
             shape: &a.shape,
         };
         let b_view = HostTensorView {
-            data: &b.data,
+            data: &b.materialize_f64(),
             shape: &b.shape,
         };
 
@@ -1106,7 +1108,7 @@ pub(crate) mod tests {
         let cpu_tensor = test_support::gather(cpu_value).expect("gather cpu");
 
         assert_eq!(gpu_tensor.shape, cpu_tensor.shape);
-        assert_eq!(gpu_tensor.data, cpu_tensor.data);
+        assert_eq!(gpu_tensor.materialize_f64(), cpu_tensor.materialize_f64());
     }
 
     fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

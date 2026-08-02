@@ -425,7 +425,7 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 3]);
-                assert!(tensor.data.iter().all(|value| *value >= 0.0));
+                assert!(tensor.materialize_f64().iter().all(|value| *value >= 0.0));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -455,8 +455,8 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 2]);
-                assert!(tensor.data[0] >= 0.0 && tensor.data[0] <= 5.0);
-                assert!(tensor.data[1] >= 0.0 && tensor.data[1] <= 10.0);
+                assert!(tensor.materialize_f64()[0] >= 0.0 && tensor.materialize_f64()[0] <= 5.0);
+                assert!(tensor.materialize_f64()[1] >= 0.0 && tensor.materialize_f64()[1] <= 10.0);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -514,7 +514,7 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 3]);
-                assert!(tensor.data.iter().all(|value| *value >= 0.0));
+                assert!(tensor.materialize_f64().iter().all(|value| *value >= 0.0));
             }
             other => panic!("expected tensor, got {other:?}"),
         }

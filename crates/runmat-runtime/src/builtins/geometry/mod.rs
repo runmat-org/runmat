@@ -588,6 +588,6 @@ mod tests {
             panic!("expected faces tensor");
         };
         assert_eq!(faces.shape, vec![1, 3]);
-        assert_eq!(faces.data, vec![1.0, 2.0, 3.0]);
+        assert_eq!(faces.materialize_f64(), vec![1.0, 2.0, 3.0]);
     }
 }

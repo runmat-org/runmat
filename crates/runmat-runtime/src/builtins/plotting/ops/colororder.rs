@@ -409,14 +409,13 @@ mod tests {
     }
 
     fn integer_rgb_matrix(data: Vec<u8>, rows: usize) -> Value {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U8(data), vec![rows, 3]).unwrap();
-        tensor.data.clear();
         Value::Tensor(tensor)
     }
 
     fn tensor_data(value: Value) -> Vec<f64> {
-        Tensor::try_from(&value).unwrap().data
+        Tensor::try_from(&value).unwrap().materialize_f64()
     }
 
     fn assert_close(actual: &[f64], expected: &[f64]) {

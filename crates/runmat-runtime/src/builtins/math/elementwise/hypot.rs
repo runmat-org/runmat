@@ -277,10 +277,9 @@ pub(crate) mod tests {
 
     #[test]
     fn scalar_hypot_value_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
                 .expect("integer tensor");
-        tensor.data.clear();
 
         assert_eq!(
             scalar_hypot_value(&Value::Tensor(tensor)),
@@ -379,7 +378,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
                 let expected = [1.0, 3.0, (5.0f64).sqrt(), (17.0f64).sqrt()];
-                for (actual, expect) in t.data.iter().zip(expected.iter()) {
+                for (actual, expect) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expect).abs() < 1e-12, "{actual} vs {expect}");
                 }
             }
@@ -396,7 +395,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
                 let expected = [4.123105625617661, 4.47213595499958, 5.0, 5.656854249492381];
-                for (actual, expect) in t.data.iter().zip(expected.iter()) {
+                for (actual, expect) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expect).abs() < 1e-12);
                 }
             }
@@ -422,7 +421,7 @@ pub(crate) mod tests {
                     (3.0f64).hypot(5.0),
                     (6.0f64).hypot(5.0),
                 ];
-                for (actual, expect) in t.data.iter().zip(expected.iter()) {
+                for (actual, expect) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expect).abs() < 1e-12, "{actual} vs {expect}");
                 }
             }
@@ -433,11 +432,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hypot_typed_integer_tensor_broadcast_reads_integer_storage() {
-        let mut matrix =
+        let matrix =
             Tensor::new_integer(IntegerStorage::I16(vec![3, 4, 5, 12]), vec![2, 2]).unwrap();
-        let mut row = Tensor::new_integer(IntegerStorage::I16(vec![4, 3]), vec![1, 2]).unwrap();
-        matrix.data.fill(0.0);
-        row.data.fill(0.0);
+        let row = Tensor::new_integer(IntegerStorage::I16(vec![4, 3]), vec![1, 2]).unwrap();
 
         let result =
             hypot_builtin(Value::Tensor(matrix), Value::Tensor(row)).expect("integer hypot");
@@ -450,7 +447,7 @@ pub(crate) mod tests {
                     5.0_f64.hypot(3.0),
                     12.0_f64.hypot(3.0),
                 ];
-                for (actual, expect) in t.data.iter().zip(expected.iter()) {
+                for (actual, expect) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expect).abs() < 1e-12, "{actual} vs {expect}");
                 }
             }
@@ -489,7 +486,7 @@ pub(crate) mod tests {
                     complex_magnitude(3.0, 4.0).hypot(0.0),
                     complex_magnitude(5.0, 12.0).hypot(1.0),
                 ];
-                for (actual, expect) in t.data.iter().zip(expected.iter()) {
+                for (actual, expect) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expect).abs() < 1e-12);
                 }
             }
@@ -510,7 +507,7 @@ pub(crate) mod tests {
                     (65.0f64.powi(2) + 1.0).sqrt(),
                     (66.0f64.powi(2) + 1.0).sqrt(),
                 ];
-                for (actual, expect) in t.data.iter().zip(expected.iter()) {
+                for (actual, expect) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expect).abs() < 1e-12);
                 }
             }
@@ -534,7 +531,7 @@ pub(crate) mod tests {
                     0.0_f64.hypot(2.0),
                     1.0_f64.hypot(3.0),
                 ];
-                for (actual, expect) in out.data.iter().zip(expected.iter()) {
+                for (actual, expect) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expect).abs() < 1e-12, "{actual} vs {expect}");
                 }
             }
@@ -603,13 +600,13 @@ pub(crate) mod tests {
             let rhs = Tensor::new(vec![4.0, 12.0, 15.0, 24.0], vec![2, 2]).unwrap();
             let h_lhs = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &lhs.data,
+                    data: &lhs.materialize_f64(),
                     shape: &lhs.shape,
                 })
                 .expect("upload lhs");
             let h_rhs = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &rhs.data,
+                    data: &rhs.materialize_f64(),
                     shape: &rhs.shape,
                 })
                 .expect("upload rhs");
@@ -618,7 +615,7 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gathered result");
             let expected = [5.0, 13.0, 17.0, 25.0];
             assert_eq!(gathered.shape, vec![2, 2]);
-            for (actual, expect) in gathered.data.iter().zip(expected.iter()) {
+            for (actual, expect) in gathered.materialize_f64().iter().zip(expected.iter()) {
                 assert!((actual - expect).abs() < 1e-12);
             }
         });
@@ -631,7 +628,7 @@ pub(crate) mod tests {
             let lhs = Tensor::new(vec![3.0, 4.0], vec![2, 1]).unwrap();
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &lhs.data,
+                    data: &lhs.materialize_f64(),
                     shape: &lhs.shape,
                 })
                 .expect("upload");
@@ -639,8 +636,12 @@ pub(crate) mod tests {
                 hypot_builtin(Value::GpuTensor(handle), Value::Num(4.0)).expect("gpu + host hypot");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 1]);
-            let expected: Vec<f64> = lhs.data.iter().map(|&x| x.hypot(4.0)).collect();
-            for (actual, expect) in gathered.data.iter().zip(expected.iter()) {
+            let expected: Vec<f64> = lhs
+                .materialize_f64()
+                .iter()
+                .map(|&x| x.hypot(4.0))
+                .collect();
+            for (actual, expect) in gathered.materialize_f64().iter().zip(expected.iter()) {
                 assert!((actual - expect).abs() < 1e-12);
             }
         });
@@ -653,19 +654,18 @@ pub(crate) mod tests {
             let lhs = Tensor::new(vec![3.0, 4.0], vec![2, 1]).unwrap();
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &lhs.data,
+                    data: &lhs.materialize_f64(),
                     shape: &lhs.shape,
                 })
                 .expect("upload");
-            let mut rhs = Tensor::new_integer(IntegerStorage::I16(vec![4, 3]), vec![2, 1]).unwrap();
-            rhs.data.fill(0.0);
+            let rhs = Tensor::new_integer(IntegerStorage::I16(vec![4, 3]), vec![2, 1]).unwrap();
 
             let result = hypot_builtin(Value::GpuTensor(handle), Value::Tensor(rhs))
                 .expect("gpu + integer host hypot");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 1]);
             let expected = [5.0, 5.0];
-            for (actual, expect) in gathered.data.iter().zip(expected.iter()) {
+            for (actual, expect) in gathered.materialize_f64().iter().zip(expected.iter()) {
                 assert!((actual - expect).abs() < 1e-12, "{actual} vs {expect}");
             }
         });
@@ -678,19 +678,18 @@ pub(crate) mod tests {
             let rhs = Tensor::new(vec![4.0, 3.0], vec![2, 1]).unwrap();
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &rhs.data,
+                    data: &rhs.materialize_f64(),
                     shape: &rhs.shape,
                 })
                 .expect("upload");
-            let mut lhs = Tensor::new_integer(IntegerStorage::I16(vec![3, 4]), vec![2, 1]).unwrap();
-            lhs.data.fill(0.0);
+            let lhs = Tensor::new_integer(IntegerStorage::I16(vec![3, 4]), vec![2, 1]).unwrap();
 
             let result = hypot_builtin(Value::Tensor(lhs), Value::GpuTensor(handle))
                 .expect("integer host + gpu hypot");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 1]);
             let expected = [5.0, 5.0];
-            for (actual, expect) in gathered.data.iter().zip(expected.iter()) {
+            for (actual, expect) in gathered.materialize_f64().iter().zip(expected.iter()) {
                 assert!((actual - expect).abs() < 1e-12, "{actual} vs {expect}");
             }
         });
@@ -706,7 +705,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![0, 3]);
-                assert!(out.data.is_empty());
+                assert!(out.materialize_f64().is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
         }
@@ -728,13 +727,13 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let h_lhs = provider
             .upload(&runmat_accelerate_api::HostTensorView {
-                data: &lhs.data,
+                data: &lhs.materialize_f64(),
                 shape: &lhs.shape,
             })
             .expect("upload lhs");
         let h_rhs = provider
             .upload(&runmat_accelerate_api::HostTensorView {
-                data: &rhs.data,
+                data: &rhs.materialize_f64(),
                 shape: &rhs.shape,
             })
             .expect("upload rhs");
@@ -748,7 +747,11 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (actual, expect) in gathered.data.iter().zip(expected.data.iter()) {
+        for (actual, expect) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(expected.materialize_f64().iter())
+        {
             assert!(
                 (actual - expect).abs() < tol,
                 "|{actual} - {expect}| >= {tol}"

@@ -908,9 +908,8 @@ pub(crate) mod tests {
             assert!(maximum.is_err());
         }
 
-        let mut typed_count =
+        let typed_count =
             Tensor::new_integer(IntegerStorage::U64(vec![42]), vec![1, 1]).expect("count");
-        typed_count.data.clear();
         assert_eq!(parse_count(&Value::Tensor(typed_count)).unwrap(), 42);
 
         let boundary = parse_count(&Value::Num(usize::MAX as f64));
@@ -921,14 +920,12 @@ pub(crate) mod tests {
         }
         assert!(parse_count(&Value::Num((usize::MAX as f64) + 1.0)).is_err());
 
-        let mut typed_negative =
+        let typed_negative =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("count");
-        typed_negative.data.clear();
         assert!(parse_count(&Value::Tensor(typed_negative)).is_err());
 
-        let mut typed_max =
+        let typed_max =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("count");
-        typed_max.data.clear();
         let maximum = parse_count(&Value::Tensor(typed_max));
         if usize::BITS == 64 {
             assert_eq!(maximum.unwrap(), usize::MAX);
@@ -1044,7 +1041,7 @@ pub(crate) mod tests {
             other => panic!("expected tensor result, got {other:?}"),
         };
         assert_eq!(tensor.shape, vec![1, 6]);
-        assert_eq!(tensor.data, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
 
         handle.join().expect("server thread");
         remove_client_for_test(client_id(&client));
@@ -1142,7 +1139,7 @@ pub(crate) mod tests {
             other => panic!("expected tensor result, got {other:?}"),
         };
         assert_eq!(tensor.shape, vec![1, 3]);
-        assert_eq!(tensor.data, vec![42.0, 43.0, 44.0]);
+        assert_eq!(tensor.materialize_f64(), vec![42.0, 43.0, 44.0]);
 
         handle.join().expect("server thread");
         remove_client_for_test(client_id(&client));

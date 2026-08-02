@@ -1508,9 +1508,8 @@ mod tests {
         }
         assert!(parse_sheet_selector(&Value::Int(IntValue::I64(-1))).is_err());
 
-        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1])
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1])
             .expect("typed sheet tensor");
-        tensor.data.clear();
         assert!(matches!(
             parse_sheet_selector(&Value::Tensor(tensor)),
             Ok(SheetSelector::Index(6))
@@ -1537,9 +1536,8 @@ mod tests {
 
     #[test]
     fn xlsread_numeric_range_reads_typed_integer_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![2, 3, 4, 5]), vec![1, 4])
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![2, 3, 4, 5]), vec![1, 4])
             .expect("typed range tensor");
-        tensor.data.clear();
 
         let range = parse_range(&Value::Tensor(tensor)).expect("numeric range");
         assert_eq!(range.start_row, 1);
@@ -1547,17 +1545,15 @@ mod tests {
         assert_eq!(range.end_row, Some(3));
         assert_eq!(range.end_col, Some(4));
 
-        let mut invalid = Tensor::new_integer(IntegerStorage::I16(vec![-1, 1]), vec![1, 2])
+        let invalid = Tensor::new_integer(IntegerStorage::I16(vec![-1, 1]), vec![1, 2])
             .expect("typed invalid range");
-        invalid.data.clear();
         assert!(parse_range(&Value::Tensor(invalid)).is_err());
 
-        let mut too_large = Tensor::new_integer(
+        let too_large = Tensor::new_integer(
             IntegerStorage::U64(vec![MAX_EXCEL_ROW_INDEX as u64 + 2, 1]),
             vec![1, 2],
         )
         .expect("typed excessive range");
-        too_large.data.clear();
         assert!(parse_range(&Value::Tensor(too_large)).is_err());
 
         let boundary = Value::Tensor(
@@ -1706,7 +1702,10 @@ mod tests {
         match value {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![3, 2]);
-                assert_eq!(tensor.data, vec![1.5, 2.5, 3.5, 10.0, 20.0, 30.0]);
+                assert_eq!(
+                    tensor.materialize_f64(),
+                    vec![1.5, 2.5, 3.5, 10.0, 20.0, 30.0]
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1721,7 +1720,7 @@ mod tests {
         match value {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 1]);
-                assert_eq!(tensor.data, vec![10.0, 20.0]);
+                assert_eq!(tensor.materialize_f64(), vec![10.0, 20.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1736,7 +1735,7 @@ mod tests {
         match value {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 1]);
-                assert_eq!(tensor.data, vec![1.5]);
+                assert_eq!(tensor.materialize_f64(), vec![1.5]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1961,7 +1960,7 @@ mod tests {
         match &outputs[0] {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 2]);
-                assert_eq!(tensor.data, vec![1.5, 2.5, 10.0, 20.0]);
+                assert_eq!(tensor.materialize_f64(), vec![1.5, 2.5, 10.0, 20.0]);
             }
             other => panic!("expected numeric tensor, got {other:?}"),
         }

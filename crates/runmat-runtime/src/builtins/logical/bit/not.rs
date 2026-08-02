@@ -369,14 +369,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 1.0, 0.0, 2.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = run_not(Value::GpuTensor(handle)).expect("not on gpu");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![1.0, 0.0, 1.0, 0.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 1.0, 0.0]);
         });
     }
 
@@ -481,7 +481,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![0.0, 3.0, 0.0, -1.0], vec![2, 2]).unwrap();
         let cpu = run_not_host(Value::Tensor(tensor.clone())).unwrap();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()
@@ -496,7 +496,11 @@ pub(crate) mod tests {
             ProviderPrecision::F64 => 1e-12,
             ProviderPrecision::F32 => 1e-5,
         };
-        for (expected, actual) in cpu_tensor.data.iter().zip(gathered.data.iter()) {
+        for (expected, actual) in cpu_tensor
+            .materialize_f64()
+            .iter()
+            .zip(gathered.materialize_f64().iter())
+        {
             assert!((*expected - *actual).abs() < tol, "{expected} vs {actual}");
         }
     }

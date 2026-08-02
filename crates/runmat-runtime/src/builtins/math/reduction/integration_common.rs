@@ -394,10 +394,8 @@ mod tests {
 
     #[test]
     fn optional_dim_parses_typed_integer_tensor_exactly() {
-        let mut dim =
-            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
-                .expect("typed dim");
-        dim.data.clear();
+        let dim = Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+            .expect("typed dim");
 
         assert_eq!(
             parse_optional_dim("trapz", &Value::Tensor(dim)).expect("typed dim"),
@@ -407,18 +405,16 @@ mod tests {
 
     #[test]
     fn optional_dim_rejects_negative_typed_integer_tensor() {
-        let mut dim =
+        let dim =
             Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("negative dim");
-        dim.data.clear();
 
         assert!(parse_optional_dim("trapz", &Value::Tensor(dim)).is_err());
     }
 
     #[test]
     fn tensor_spacing_width_reads_typed_integer_storage_exactly() {
-        let mut spacing =
+        let spacing =
             Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 3]), vec![1, 3]).expect("spacing");
-        spacing.data = vec![0.0, 0.0, 0.0];
         let spec = SpacingSpec::Tensor(spacing);
 
         assert_eq!(interval_width(&spec, 1, 2, 1), 2.0);
@@ -426,9 +422,8 @@ mod tests {
 
     #[test]
     fn scalar_spacing_reads_typed_integer_storage_exactly() {
-        let mut spacing =
+        let spacing =
             Tensor::new_integer(IntegerStorage::I16(vec![3]), vec![1, 1]).expect("spacing");
-        spacing.data.clear();
 
         let spec =
             spacing_from_value("trapz", Some(Value::Tensor(spacing)), &[1, 4], 2).expect("spacing");
@@ -452,9 +447,8 @@ mod tests {
 
     #[test]
     fn real_tensor_to_complex_reads_typed_integer_storage_exactly() {
-        let mut real =
+        let real =
             Tensor::new_integer(IntegerStorage::I16(vec![-2, 5]), vec![1, 2]).expect("real input");
-        real.data = vec![0.0, 0.0];
 
         let complex = value_into_complex_tensor("trapz", Value::Tensor(real)).expect("complex");
 

@@ -665,9 +665,8 @@ pub(crate) mod tests {
 
     #[test]
     fn cond_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![2, 0, 0, 4]), vec![2, 2])
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![2, 0, 0, 4]), vec![2, 2])
             .expect("integer");
-        tensor.data.fill(1.0);
         let result = cond_builtin(Value::Tensor(tensor), Vec::new()).expect("cond");
         match result {
             Value::Num(value) => assert!((value - 2.0).abs() < 1e-12),
@@ -702,9 +701,7 @@ pub(crate) mod tests {
     #[test]
     fn cond_norm_argument_reads_integer_tensor_storage() {
         let tensor = Tensor::new(vec![4.0, 2.0, -1.0, 3.0], vec![2, 2]).unwrap();
-        let mut order =
-            Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("order");
-        order.data.clear();
+        let order = Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("order");
         let result = cond_builtin(Value::Tensor(tensor), vec![Value::Tensor(order)]).expect("cond");
         match result {
             Value::Num(value) => assert!((value - 2.142_857_142_857_143).abs() < 1e-9),
@@ -725,16 +722,14 @@ pub(crate) mod tests {
             IntegerStorage::U64(vec![1]),
         ];
         for storage in storages {
-            let mut order = Tensor::new_integer(storage, vec![1, 1]).expect("order");
-            order.data = vec![f64::NAN];
+            let order = Tensor::new_integer(storage, vec![1, 1]).expect("order");
             assert!(matches!(
                 parse_norm_value(&Value::Tensor(order)),
                 Ok(CondNorm::One)
             ));
         }
-        let mut wide = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+        let wide = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
             .expect("wide order");
-        wide.data = vec![1.0];
         assert!(parse_norm_value(&Value::Tensor(wide)).is_err());
     }
 
@@ -814,7 +809,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![4.0, 1.0, 2.0, 3.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -827,7 +822,7 @@ pub(crate) mod tests {
                     _ => unreachable!(),
                 })
                 .expect("cpu cond");
-            assert!((gathered.data[0] - expected).abs() < 1e-12);
+            assert!((gathered.materialize_f64()[0] - expected).abs() < 1e-12);
         });
     }
 
@@ -846,13 +841,13 @@ pub(crate) mod tests {
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu = cond_builtin(Value::GpuTensor(handle), Vec::new()).expect("cond");
         let gathered = test_support::gather(gpu).expect("gather");
-        assert!((gathered.data[0] - cpu_value).abs() < 1e-9);
+        assert!((gathered.materialize_f64()[0] - cpu_value).abs() < 1e-9);
     }
 
     fn cond_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

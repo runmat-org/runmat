@@ -400,18 +400,17 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I16(vec![1, 2, 3]),
             vec![3, 1],
         )
         .expect("integer tensor");
-        tensor.data.fill(1.0);
 
         match acosh_builtin(Value::Tensor(tensor)).expect("acosh") {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 1]);
                 let expected = [0.0, 2.0f64.acosh(), 3.0f64.acosh()];
-                for (actual, expected) in out.data.iter().zip(expected.iter()) {
+                for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expected).abs() < 1e-12);
                 }
                 assert!(out.integer_storage().is_none());
@@ -423,10 +422,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_below_domain_typed_integer_promotes_from_storage() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![0, 2]), vec![1, 2])
                 .expect("integer tensor");
-        tensor.data.fill(2.0);
 
         match acosh_builtin(Value::Tensor(tensor)).expect("acosh") {
             Value::ComplexTensor(out) => {
@@ -472,7 +470,7 @@ pub(crate) mod tests {
                 assert_eq!(t.shape, vec![1, 2]);
                 let expected: Vec<f64> =
                     "Az".chars().map(|ch| (ch as u32 as f64).acosh()).collect();
-                for (actual, exp) in t.data.iter().zip(expected.iter()) {
+                for (actual, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - exp).abs() < 1e-12);
                 }
             }
@@ -604,14 +602,18 @@ pub(crate) mod tests {
             let tensor =
                 Tensor::new(vec![1.0, 2.0, 5.0, 10.0], vec![4, 1]).expect("tensor construction");
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = acosh_builtin(Value::GpuTensor(handle)).expect("acosh");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![4, 1]);
-            for (actual, expected) in gathered.data.iter().zip(tensor.data.iter()) {
+            for (actual, expected) in gathered
+                .materialize_f64()
+                .iter()
+                .zip(tensor.materialize_f64().iter())
+            {
                 let ref_val = expected.acosh();
                 assert!((actual - ref_val).abs() < 1e-12);
             }
@@ -624,7 +626,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.5, 2.0], vec![2, 1]).expect("tensor construction");
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -656,7 +658,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 10.0], vec![3, 1]).unwrap();
         let cpu = acosh_real(Value::Tensor(tensor.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()
@@ -672,7 +674,11 @@ pub(crate) mod tests {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
                 };
-                for (actual, expected) in gathered.data.iter().zip(ct.data.iter()) {
+                for (actual, expected) in gathered
+                    .materialize_f64()
+                    .iter()
+                    .zip(ct.materialize_f64().iter())
+                {
                     assert!((actual - expected).abs() < tol);
                 }
             }

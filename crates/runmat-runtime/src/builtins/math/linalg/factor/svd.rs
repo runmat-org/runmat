@@ -910,10 +910,8 @@ pub(crate) mod tests {
 
     #[test]
     fn svd_matrix_conversion_reads_typed_integer_storage_exactly() {
-        let mut tensor =
-            Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3, 4, 5, 6]), vec![3, 2])
-                .expect("typed integer tensor");
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3, 4, 5, 6]), vec![3, 2])
+            .expect("typed integer tensor");
 
         let matrix = tensor_to_matrix(&tensor).expect("matrix");
         assert_eq!(matrix.nrows(), 3);
@@ -928,7 +926,9 @@ pub(crate) mod tests {
 
     fn dmatrix_from_value(value: Value) -> DMatrix<f64> {
         match value {
-            Value::Tensor(t) => DMatrix::from_column_slice(t.rows(), t.cols(), &t.data),
+            Value::Tensor(t) => {
+                DMatrix::from_column_slice(t.rows(), t.cols(), &t.materialize_f64())
+            }
             Value::Num(n) => DMatrix::from_element(1, 1, n),
             other => panic!("expected real tensor, got {other:?}"),
         }
@@ -953,7 +953,7 @@ pub(crate) mod tests {
             }
             Value::Tensor(t) => {
                 let data: Vec<Complex64> = t
-                    .data
+                    .materialize_f64()
                     .iter()
                     .copied()
                     .map(|v| Complex64::new(v, 0.0))
@@ -995,7 +995,8 @@ pub(crate) mod tests {
         let v = dmatrix_from_value(eval.v());
 
         let recon = &u * &s * v.transpose();
-        let original = DMatrix::from_column_slice(matrix.rows(), matrix.cols(), &matrix.data);
+        let original =
+            DMatrix::from_column_slice(matrix.rows(), matrix.cols(), &matrix.materialize_f64());
         matrix_close(&recon, &original, 1e-10);
     }
 
@@ -1081,7 +1082,7 @@ pub(crate) mod tests {
         match eval.sigma() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert!(t.data[0] >= t.data[1]);
+                assert!(t.materialize_f64()[0] >= t.materialize_f64()[1]);
             }
             other => panic!("expected sigma matrix, got {other:?}"),
         }
@@ -1140,7 +1141,11 @@ pub(crate) mod tests {
         let logical_s = tensor_from_value(logical_eval.singular_values());
         let numeric_s = tensor_from_value(numeric_eval.singular_values());
         assert_eq!(logical_s.shape, numeric_s.shape);
-        for (a, b) in logical_s.data.iter().zip(numeric_s.data.iter()) {
+        for (a, b) in logical_s
+            .materialize_f64()
+            .iter()
+            .zip(numeric_s.materialize_f64().iter())
+        {
             assert!((a - b).abs() < 1e-12, "{a} vs {b}");
         }
     }
@@ -1199,7 +1204,7 @@ pub(crate) mod tests {
         match eval.sigma() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                assert!(t.data[0] >= t.data[1]);
+                assert!(t.materialize_f64()[0] >= t.materialize_f64()[1]);
             }
             Value::Num(n) => assert!(n >= 0.0),
             other => panic!("expected vector singular values, got {other:?}"),
@@ -1212,7 +1217,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).expect("tensor");
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1241,7 +1246,7 @@ pub(crate) mod tests {
         let host_v = dmatrix_from_value(host_eval.v());
 
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("provider");
@@ -1261,10 +1266,15 @@ pub(crate) mod tests {
     fn svd_vector_matches_host_norm() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).expect("tensor");
         let s = svd_builtin(Value::Tensor(tensor.clone()), Vec::new()).expect("svd");
-        let expected = tensor.data.iter().map(|v| v * v).sum::<f64>().sqrt();
+        let expected = tensor
+            .materialize_f64()
+            .iter()
+            .map(|v| v * v)
+            .sum::<f64>()
+            .sqrt();
         match s {
             Value::Num(n) => assert!((n - expected).abs() < 1e-10),
-            Value::Tensor(t) => assert!((t.data[0] - expected).abs() < 1e-10),
+            Value::Tensor(t) => assert!((t.materialize_f64()[0] - expected).abs() < 1e-10),
             other => panic!("unexpected output {other:?}"),
         }
     }

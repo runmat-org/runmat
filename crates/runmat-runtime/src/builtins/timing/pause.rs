@@ -546,7 +546,7 @@ pub(crate) mod tests {
         reset_state(true);
         let result = block_on(pause_builtin(Vec::new())).expect("pause()");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data.len(), 0),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64().len(), 0),
             other => panic!("expected empty tensor, got {other:?}"),
         }
     }
@@ -558,7 +558,7 @@ pub(crate) mod tests {
         reset_state(true);
         let result = block_on(pause_builtin(vec![Value::Num(0.0)])).expect("pause(0)");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data.len(), 0),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64().len(), 0),
             other => panic!("expected empty tensor, got {other:?}"),
         }
     }
@@ -571,16 +571,15 @@ pub(crate) mod tests {
         let result =
             block_on(pause_builtin(vec![Value::Int(IntValue::I32(0))])).expect("pause(int)");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data.len(), 0),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64().len(), 0),
             other => panic!("expected empty tensor, got {other:?}"),
         }
     }
 
     #[test]
     fn pause_tensor_reads_typed_integer_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
             .expect("typed pause tensor");
-        tensor.data.clear();
 
         match parse_tensor(tensor).expect("pause tensor") {
             PauseArgument::Wait(PauseWait::Seconds(seconds)) => assert_eq!(seconds, 2026.0),
@@ -595,7 +594,7 @@ pub(crate) mod tests {
         reset_state(true);
         let result = block_on(pause_builtin(vec![Value::Num(-0.0)])).expect("pause(-0)");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data.len(), 0),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64().len(), 0),
             other => panic!("expected empty tensor, got {other:?}"),
         }
     }
@@ -627,7 +626,7 @@ pub(crate) mod tests {
         let empty = Tensor::zeros(vec![0, 0]);
         let result = block_on(pause_builtin(vec![Value::Tensor(empty)])).expect("pause([])");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data.len(), 0),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64().len(), 0),
             other => panic!("expected empty tensor, got {other:?}"),
         }
     }
@@ -641,7 +640,7 @@ pub(crate) mod tests {
         let result =
             block_on(pause_builtin(vec![Value::LogicalArray(logical)])).expect("pause(true)");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data.len(), 0),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64().len(), 0),
             other => panic!("expected empty tensor, got {other:?}"),
         }
     }
@@ -653,7 +652,7 @@ pub(crate) mod tests {
         reset_state(true);
         let result = block_on(pause_builtin(vec![Value::Num(f64::INFINITY)])).expect("pause(Inf)");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data.len(), 0),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64().len(), 0),
             other => panic!("expected empty tensor, got {other:?}"),
         }
     }
@@ -666,14 +665,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result =
                 block_on(pause_builtin(vec![Value::GpuTensor(handle)])).expect("pause(gpuScalar)");
             match result {
-                Value::Tensor(t) => assert_eq!(t.data.len(), 0),
+                Value::Tensor(t) => assert_eq!(t.materialize_f64().len(), 0),
                 other => panic!("expected empty tensor, got {other:?}"),
             }
         });
@@ -693,14 +692,14 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let tensor = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
         let result =
             block_on(pause_builtin(vec![Value::GpuTensor(handle)])).expect("pause(gpuScalar)");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data.len(), 0),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64().len(), 0),
             other => panic!("expected empty tensor, got {other:?}"),
         }
     }

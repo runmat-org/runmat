@@ -974,10 +974,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn integer_tensor_display_uses_exact_backing_storage() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]), vec![1, 2])
                 .expect("integer tensor");
-        tensor.data.clear();
 
         let lines = format_for_disp(&Value::Tensor(tensor));
 
@@ -987,9 +986,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn integer_tensor_nested_summary_preserves_class() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![1, 2])
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![1, 2])
             .expect("integer tensor");
-        tensor.data.clear();
         let mut fields = StructValue::new();
         fields.insert("values", Value::Tensor(tensor));
 
@@ -1075,7 +1073,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1097,7 +1095,7 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("tensor");
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");

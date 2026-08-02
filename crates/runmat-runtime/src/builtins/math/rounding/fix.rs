@@ -301,7 +301,10 @@ pub(crate) mod tests {
         let result = fix_builtin(input).expect("fix");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![-3.0, -2.0, 0.0, 0.0, 0.0, 2.0, 3.0]);
+                assert_eq!(
+                    t.materialize_f64(),
+                    vec![-3.0, -2.0, 0.0, 0.0, 0.0, 2.0, 3.0]
+                );
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -315,7 +318,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![1.0, 4.0, -2.0, 0.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 4.0, -2.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -342,7 +345,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 3]);
-                assert_eq!(t.data, vec![65.0, 66.0, 67.0]);
+                assert_eq!(t.materialize_f64(), vec![65.0, 66.0, 67.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -354,7 +357,7 @@ pub(crate) mod tests {
         let logical = LogicalArray::new(vec![1, 0, 1, 1], vec![2, 2]).unwrap();
         let result = fix_builtin(Value::LogicalArray(logical)).expect("fix");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 0.0, 1.0, 1.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 0.0, 1.0, 1.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -382,17 +385,15 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fix_read_typed_integer_storage_exactly() {
-        let mut scalar =
+        let scalar =
             Tensor::new_integer(IntegerStorage::I64(vec![i64::MAX]), vec![1, 1]).expect("integer");
-        scalar.data[0] = 0.0;
         assert_eq!(
             fix_builtin(Value::Tensor(scalar)).expect("fix"),
             Value::Int(IntValue::I64(i64::MAX))
         );
 
-        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 3]), vec![1, 2])
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 3]), vec![1, 2])
             .expect("integer");
-        tensor.data.fill(0.0);
         match fix_builtin(Value::Tensor(tensor)).expect("fix") {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
@@ -425,12 +426,12 @@ pub(crate) mod tests {
         let Value::Tensor(out) = result else {
             panic!("expected tensor result");
         };
-        assert!(out.data[0].is_nan(), "NaN should propagate");
-        assert_eq!(out.data[1], f64::INFINITY);
-        assert_eq!(out.data[2], f64::NEG_INFINITY);
-        assert_eq!(out.data[3], 0.0);
+        assert!(out.materialize_f64()[0].is_nan(), "NaN should propagate");
+        assert_eq!(out.materialize_f64()[1], f64::INFINITY);
+        assert_eq!(out.materialize_f64()[2], f64::NEG_INFINITY);
+        assert_eq!(out.materialize_f64()[3], 0.0);
         assert!(
-            out.data[3].is_sign_positive(),
+            out.materialize_f64()[3].is_sign_positive(),
             "negative zero should canonicalize to +0"
         );
     }
@@ -453,13 +454,13 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![-1.9, -0.1, 0.1, 2.6], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = fix_builtin(Value::GpuTensor(handle)).expect("fix");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.data, vec![-1.0, 0.0, 0.0, 2.0]);
+            assert_eq!(gathered.materialize_f64(), vec![-1.0, 0.0, 0.0, 2.0]);
         });
     }
 
@@ -473,7 +474,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![-3.7, -0.4, 0.4, 3.7], vec![4, 1]).unwrap();
         let cpu = fix_tensor(tensor.clone()).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()
@@ -483,6 +484,6 @@ pub(crate) mod tests {
         let gpu = block_on(fix_gpu(handle)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         assert_eq!(gathered.shape, cpu.shape);
-        assert_eq!(gathered.data, cpu.data);
+        assert_eq!(gathered.materialize_f64(), cpu.materialize_f64());
     }
 }

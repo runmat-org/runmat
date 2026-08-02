@@ -75,7 +75,7 @@ fn mixed_selectors_basic_2d_range() {
     let runmat_builtins::Value::Tensor(t) = &vars[1] else {
         panic!("expected sub tensor, got {:?}", vars[1]);
     };
-    assert_eq!(t.data, vec![2.0, 5.0]);
+    assert_eq!(t.materialize_f64(), vec![2.0, 5.0]);
 }
 
 #[test]
@@ -89,7 +89,7 @@ fn logical_mask_rows_select() {
         .unwrap();
     if let runmat_builtins::Value::Tensor(t) = sel {
         assert_eq!(t.shape, vec![2, 2]);
-        assert_eq!(t.data, vec![1.0, 5.0, 2.0, 6.0]);
+        assert_eq!(t.materialize_f64(), vec![1.0, 5.0, 2.0, 6.0]);
     }
 }
 
@@ -98,7 +98,7 @@ fn slice_assignment_column_and_row() {
     let src = "A=[1 2 3; 4 5 6]; A(:,2) = [8;9]; A(1,:) = [7 7 7];";
     let vars = execute_source(src).unwrap();
     // Final A should be [7 7 7; 4 9 6] -> column-major data [7 4 7 9 7 6]
-    assert!(vars.iter().any(|value| matches!(value, runmat_builtins::Value::Tensor(tensor) if tensor.data == vec![7.0, 4.0, 7.0, 9.0, 7.0, 6.0])));
+    assert!(vars.iter().any(|value| matches!(value, runmat_builtins::Value::Tensor(tensor) if tensor.materialize_f64() == vec![7.0, 4.0, 7.0, 9.0, 7.0, 6.0])));
 }
 
 #[test]
@@ -130,7 +130,7 @@ fn slice_assignment_3d_entire_slice() {
         for c in 1..=cols {
             for r in 1..=rows {
                 let idx = (r - 1) + (c - 1) * rows + (p - 1) * rows * cols;
-                gathered.push(a.data[idx]);
+                gathered.push(a.materialize_f64()[idx]);
             }
         }
         assert_eq!(gathered, second_slice_vals);
@@ -149,10 +149,10 @@ fn gpu_slice_assignment_and_range_indexing() {
             runmat_builtins::Value::Tensor(tensor) => Some(tensor),
             _ => None,
         })
-        .find(|tensor| tensor.data == vec![8.0, 9.0])
+        .find(|tensor| tensor.materialize_f64() == vec![8.0, 9.0])
         .expect("B tensor");
 
-    assert_eq!(b_tensor.data, vec![8.0, 9.0]);
+    assert_eq!(b_tensor.materialize_f64(), vec![8.0, 9.0]);
 }
 
 #[test]
@@ -167,10 +167,10 @@ fn gpu_range_end_indexing() {
             runmat_builtins::Value::Tensor(tensor) => Some(tensor),
             _ => None,
         })
-        .find(|tensor| tensor.data == vec![2.0, 5.0])
+        .find(|tensor| tensor.materialize_f64() == vec![2.0, 5.0])
         .expect("B tensor");
 
-    assert_eq!(b_tensor.data, vec![2.0, 5.0]);
+    assert_eq!(b_tensor.materialize_f64(), vec![2.0, 5.0]);
 }
 
 #[test]
@@ -185,8 +185,8 @@ fn gpu_range_end_assignment() {
             runmat_builtins::Value::Tensor(tensor) => Some(tensor),
             _ => None,
         })
-        .find(|tensor| tensor.data == vec![9.0, 9.0, 9.0, 4.0])
+        .find(|tensor| tensor.materialize_f64() == vec![9.0, 9.0, 9.0, 4.0])
         .expect("B tensor");
 
-    assert_eq!(b_tensor.data, vec![9.0, 9.0, 9.0, 4.0]);
+    assert_eq!(b_tensor.materialize_f64(), vec![9.0, 9.0, 9.0, 4.0]);
 }

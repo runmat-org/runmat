@@ -564,9 +564,8 @@ mod tests {
         Value::Tensor(Tensor::new(data, shape).unwrap())
     }
 
-    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, poison: f64) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-        tensor.data.fill(poison);
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, _poison: f64) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
         Value::Tensor(tensor)
     }
 
@@ -580,10 +579,10 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 2]);
-                assert!((tensor.data[0] - 1.0).abs() < 1e-12);
-                assert!((tensor.data[1] - 1.0).abs() < 1e-12);
-                assert!((tensor.data[2] - 1.0).abs() < 1e-12);
-                assert!((tensor.data[3] - 1.0).abs() < 1e-12);
+                assert!((tensor.materialize_f64()[0] - 1.0).abs() < 1e-12);
+                assert!((tensor.materialize_f64()[1] - 1.0).abs() < 1e-12);
+                assert!((tensor.materialize_f64()[2] - 1.0).abs() < 1e-12);
+                assert!((tensor.materialize_f64()[3] - 1.0).abs() < 1e-12);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -599,8 +598,8 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 2]);
-                assert!((tensor.data[0] - 1.0).abs() < 1.0e-12);
-                assert!((tensor.data[3] - 1.0).abs() < 1.0e-12);
+                assert!((tensor.materialize_f64()[0] - 1.0).abs() < 1.0e-12);
+                assert!((tensor.materialize_f64()[3] - 1.0).abs() < 1.0e-12);
             }
             other => panic!("expected tensor correlation, got {other:?}"),
         }
@@ -624,8 +623,8 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 1]);
-                assert!((tensor.data[0] - 1.0).abs() < 1.0e-12);
-                assert!((tensor.data[1] - 1.0).abs() < 1.0e-12);
+                assert!((tensor.materialize_f64()[0] - 1.0).abs() < 1.0e-12);
+                assert!((tensor.materialize_f64()[1] - 1.0).abs() < 1.0e-12);
             }
             other => panic!("expected tensor correlation, got {other:?}"),
         }
@@ -639,8 +638,8 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 1]);
-                assert!((tensor.data[0] - 1.0).abs() < 1e-12);
-                assert!((tensor.data[1] + 1.0).abs() < 1e-12);
+                assert!((tensor.materialize_f64()[0] - 1.0).abs() < 1e-12);
+                assert!((tensor.materialize_f64()[1] + 1.0).abs() < 1e-12);
             }
             other => panic!("expected tensor, got {other:?}"),
         }

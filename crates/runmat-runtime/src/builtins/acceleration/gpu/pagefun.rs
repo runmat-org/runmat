@@ -1113,7 +1113,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![19.0, 43.0, 22.0, 50.0]);
+                assert_eq!(t.materialize_f64(), vec![19.0, 43.0, 22.0, 50.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1122,12 +1122,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pagefun_rejects_poisoned_typed_integer_inputs_before_float_materialization() {
-        let mut lhs =
-            Tensor::new_integer(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2]).unwrap();
-        let mut rhs =
-            Tensor::new_integer(IntegerStorage::U16(vec![5, 7, 6, 8]), vec![2, 2]).unwrap();
-        lhs.data.fill(f64::NAN);
-        rhs.data.fill(f64::NAN);
+        let lhs = Tensor::new_integer(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2]).unwrap();
+        let rhs = Tensor::new_integer(IntegerStorage::U16(vec![5, 7, 6, 8]), vec![2, 2]).unwrap();
 
         let result = pagefun_builtin(
             Value::FunctionHandle("mtimes".into()),
@@ -1141,12 +1137,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pagefun_matrix_result_reader_rejects_poisoned_typed_integer_storage() {
-        let mut result = Tensor::new_integer(
+        let result = Tensor::new_integer(
             IntegerStorage::U64(vec![9_007_199_254_740_993, 7]),
             vec![1, 2],
         )
         .unwrap();
-        result.data.fill(f64::NAN);
 
         let error = tensor_matrix_data(Value::Tensor(result))
             .expect_err("typed callback result must not use f64");
@@ -1179,7 +1174,10 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2, 2]);
-                assert_eq!(t.data, vec![19.0, 43.0, 22.0, 50.0, 2.0, 1.0, 4.0, 5.0]);
+                assert_eq!(
+                    t.materialize_f64(),
+                    vec![19.0, 43.0, 22.0, 50.0, 2.0, 1.0, 4.0, 5.0]
+                );
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1200,7 +1198,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2, 2]);
                 assert_eq!(
-                    t.data,
+                    t.materialize_f64(),
                     vec![1.0, 3.0, 2.0, 4.0, 5.0, 7.0, 6.0, 8.0],
                     "broadcasted identity should preserve pages"
                 );
@@ -1223,7 +1221,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2, 0]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1244,7 +1242,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![19.0, 43.0, 22.0, 50.0]);
+                assert_eq!(t.materialize_f64(), vec![19.0, 43.0, 22.0, 50.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1263,7 +1261,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![19.0, 43.0, 22.0, 50.0]);
+                assert_eq!(t.materialize_f64(), vec![19.0, 43.0, 22.0, 50.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1285,7 +1283,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![19.0, 43.0, 22.0, 50.0]);
+                assert_eq!(t.materialize_f64(), vec![19.0, 43.0, 22.0, 50.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1306,7 +1304,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![19.0, 43.0, 22.0, 50.0]);
+                assert_eq!(t.materialize_f64(), vec![19.0, 43.0, 22.0, 50.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1443,11 +1441,11 @@ pub(crate) mod tests {
             let identity = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
 
             let view_lhs = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let view_rhs = HostTensorView {
-                data: &identity.data,
+                data: &identity.materialize_f64(),
                 shape: &identity.shape,
             };
             let lhs = provider.upload(&view_lhs).expect("upload lhs");
@@ -1463,7 +1461,7 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2, 2]);
             assert_eq!(
-                gathered.data,
+                gathered.materialize_f64(),
                 vec![1.0, 3.0, 2.0, 4.0, 5.0, 7.0, 6.0, 8.0],
                 "GPU fallback should match identity broadcast"
             );
@@ -1500,11 +1498,11 @@ pub(crate) mod tests {
         .unwrap();
 
         let view_lhs = HostTensorView {
-            data: &lhs.data,
+            data: &lhs.materialize_f64(),
             shape: &lhs.shape,
         };
         let view_rhs = HostTensorView {
-            data: &rhs.data,
+            data: &rhs.materialize_f64(),
             shape: &rhs.shape,
         };
 
@@ -1540,8 +1538,14 @@ pub(crate) mod tests {
         };
 
         assert_eq!(provider_tensor.shape, expected_tensor.shape);
-        assert_eq!(provider_tensor.data, expected_tensor.data);
+        assert_eq!(
+            provider_tensor.materialize_f64(),
+            expected_tensor.materialize_f64()
+        );
         assert_eq!(builtin_tensor.shape, expected_tensor.shape);
-        assert_eq!(builtin_tensor.data, expected_tensor.data);
+        assert_eq!(
+            builtin_tensor.materialize_f64(),
+            expected_tensor.materialize_f64()
+        );
     }
 }

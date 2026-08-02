@@ -118,12 +118,11 @@ mod tests {
 
     #[test]
     fn ishandle_vectorizes_typed_handles_without_a_floating_mirror() {
-        let mut handles = runmat_builtins::Tensor::new_integer(
+        let handles = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::I16(vec![-1, -2]),
             vec![2, 1],
         )
         .unwrap();
-        handles.data.clear();
         let result = ishandle_builtin(vec![Value::Tensor(handles)]).unwrap();
         match result {
             Value::LogicalArray(logical) => assert_eq!(logical.data, vec![0, 0]),

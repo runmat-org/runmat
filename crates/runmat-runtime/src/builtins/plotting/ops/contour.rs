@@ -2326,24 +2326,22 @@ pub(crate) mod tests {
     fn scalar_level_count_reads_typed_integer_tensor_exactly() {
         setup_plot_tests();
         let exact = 9_007_199_254_740_993_u64;
-        let mut tensor = runmat_builtins::Tensor::new_integer(
+        let tensor = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![exact]),
             vec![1, 1],
         )
         .expect("typed level count");
-        tensor.data.clear();
 
         match parse_level_spec(Value::Tensor(tensor), "contour").unwrap() {
             ContourLevelSpec::Count(count) => assert_eq!(count, exact as usize),
             other => panic!("expected exact level count, got {other:?}"),
         }
 
-        let mut negative = runmat_builtins::Tensor::new_integer(
+        let negative = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::I64(vec![-1]),
             vec![1, 1],
         )
         .expect("negative level count");
-        negative.data.clear();
         assert!(parse_level_spec(Value::Tensor(negative), "contour").is_err());
 
         let boundary = if usize::BITS == 64 {

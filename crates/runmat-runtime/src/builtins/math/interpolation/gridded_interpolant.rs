@@ -1418,14 +1418,12 @@ mod tests {
 
     fn int_col(storage: IntegerStorage) -> Value {
         let len = storage.len();
-        let mut tensor = Tensor::new_integer(storage, vec![len, 1]).unwrap();
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, vec![len, 1]).unwrap();
         Value::Tensor(tensor)
     }
 
     fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
         Value::Tensor(tensor)
     }
 
@@ -1472,10 +1470,10 @@ mod tests {
         match subsref(obj, vec![row(&[-1.0, 0.5, 1.5, 3.0])]).unwrap() {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 4]);
-                assert!(tensor.data[0].is_nan());
-                assert_eq!(tensor.data[1], 5.0);
-                assert_eq!(tensor.data[2], 25.0);
-                assert!(tensor.data[3].is_nan());
+                assert!(tensor.materialize_f64()[0].is_nan());
+                assert_eq!(tensor.materialize_f64()[1], 5.0);
+                assert_eq!(tensor.materialize_f64()[2], 25.0);
+                assert!(tensor.materialize_f64()[3].is_nan());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1489,7 +1487,7 @@ mod tests {
         ])
         .unwrap();
         match subsref(obj, vec![row(&[1.2, 2.6])]).unwrap() {
-            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![10.0, 40.0]),
+            Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![10.0, 40.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -1538,7 +1536,7 @@ mod tests {
         match subsref(obj, vec![query]).unwrap() {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 1]);
-                assert_eq!(tensor.data, vec![0.0, 30.0]);
+                assert_eq!(tensor.materialize_f64(), vec![0.0, 30.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1578,9 +1576,9 @@ mod tests {
         .unwrap();
         match subsref(obj, vec![row(&[0.0, 3.0, 5.0])]).unwrap() {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.data[0], 0.0);
-                assert_eq!(tensor.data[1], 15.0);
-                assert_eq!(tensor.data[2], 18.0);
+                assert_eq!(tensor.materialize_f64()[0], 0.0);
+                assert_eq!(tensor.materialize_f64()[1], 15.0);
+                assert_eq!(tensor.materialize_f64()[2], 18.0);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1597,9 +1595,9 @@ mod tests {
         .unwrap();
         match subsref(obj, vec![row(&[-1.0, 0.4, 3.0])]).unwrap() {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.data[0], -10.0);
-                assert_eq!(tensor.data[1], 0.0);
-                assert_eq!(tensor.data[2], 70.0);
+                assert_eq!(tensor.materialize_f64()[0], -10.0);
+                assert_eq!(tensor.materialize_f64()[1], 0.0);
+                assert_eq!(tensor.materialize_f64()[2], 70.0);
             }
             other => panic!("expected tensor, got {other:?}"),
         }

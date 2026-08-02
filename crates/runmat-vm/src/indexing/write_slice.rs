@@ -1546,9 +1546,8 @@ mod tests {
     fn integer_plan_assignment_preserves_exact_uint64_rhs() {
         let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![1, 2, 3]), vec![1, 3]).expect("tensor");
-        let mut rhs_tensor =
+        let rhs_tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 9]), vec![1, 2]).expect("rhs");
-        rhs_tensor.data.clear();
         let rhs = Value::Tensor(rhs_tensor);
         let plan = IndexPlan::new(vec![0, 1], vec![1, 2], vec![2], 1, vec![1, 3]);
         let result = block_on(assign_tensor_with_plan(tensor, &plan, &rhs)).expect("assign");
@@ -1604,9 +1603,8 @@ mod tests {
 
     #[test]
     fn typed_slice_deletion_uses_exact_storage_when_f64_mirrors_are_unavailable() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![1, u64::MAX, 3]), vec![1, 3])
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![1, u64::MAX, 3]), vec![1, 3])
             .expect("tensor");
-        tensor.data.clear();
         let plan = IndexPlan::new(vec![1], vec![1, 1], vec![1], 1, vec![1, 3]);
         let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).expect("empty rhs"));
 
@@ -1659,10 +1657,8 @@ mod tests {
                     vec![1, 2],
                 )
                 .expect("destination tensor");
-                let mut rhs =
-                    Tensor::new_integer(IntegerStorage::$storage(vec![$value]), vec![1, 1])
-                        .expect("rhs tensor");
-                rhs.data = vec![f64::NAN];
+                let rhs = Tensor::new_integer(IntegerStorage::$storage(vec![$value]), vec![1, 1])
+                    .expect("rhs tensor");
                 let plan = IndexPlan::new(vec![1], vec![1, 1], vec![1], 1, vec![1, 2]);
 
                 let Value::Tensor(output) =
@@ -1691,9 +1687,8 @@ mod tests {
     #[test]
     fn real_plan_assignment_reads_typed_integer_rhs_without_mirror() {
         let tensor = Tensor::new(vec![0.0, 0.0, 0.0], vec![1, 3]).expect("tensor");
-        let mut rhs_tensor =
+        let rhs_tensor =
             Tensor::new_integer(IntegerStorage::U16(vec![4, 9]), vec![1, 2]).expect("rhs");
-        rhs_tensor.data.clear();
         let rhs = Value::Tensor(rhs_tensor);
         let plan = IndexPlan::new(vec![0, 2], vec![1, 2], vec![2], 1, vec![1, 3]);
         let result = block_on(assign_tensor_with_plan(tensor, &plan, &rhs)).expect("assign");
@@ -1701,15 +1696,14 @@ mod tests {
         let Value::Tensor(output) = result else {
             panic!("expected tensor");
         };
-        assert_eq!(output.data, vec![4.0, 0.0, 9.0]);
+        assert_eq!(output.materialize_f64(), vec![4.0, 0.0, 9.0]);
     }
 
     #[test]
     fn real_scalar_expansion_reads_all_typed_integer_classes_without_f64_mirrors() {
         macro_rules! assert_scalar_expansion {
             ($storage:expr, $expected:expr) => {{
-                let mut tensor = Tensor::new_integer($storage, vec![1, 1]).expect("scalar rhs");
-                tensor.data.clear();
+                let tensor = Tensor::new_integer($storage, vec![1, 1]).expect("scalar rhs");
                 let rhs = Value::Tensor(tensor);
 
                 assert_eq!(

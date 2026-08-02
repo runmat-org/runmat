@@ -464,7 +464,10 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![8, 1]);
-                assert_eq!(out.data, vec![4.0, 5.0, 6.0, 7.0, 0.0, 1.0, 2.0, 3.0]);
+                assert_eq!(
+                    out.materialize_f64(),
+                    vec![4.0, 5.0, 6.0, 7.0, 0.0, 1.0, 2.0, 3.0]
+                );
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -478,7 +481,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![5, 1]);
-                assert_eq!(out.data, vec![3.0, 4.0, 5.0, 1.0, 2.0]);
+                assert_eq!(out.materialize_f64(), vec![3.0, 4.0, 5.0, 1.0, 2.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -491,7 +494,7 @@ pub(crate) mod tests {
         let fft_plan = build_shift_plan(&tensor.shape, &[0], ShiftKind::Fft);
         let fft_data = apply_shift(
             "ifftshift",
-            &tensor.data,
+            &tensor.materialize_f64(),
             &fft_plan.ext_shape,
             &fft_plan.positive,
         )
@@ -503,7 +506,7 @@ pub(crate) mod tests {
         match restored {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![7, 1]);
-                assert_eq!(out.data, tensor.data);
+                assert_eq!(out.materialize_f64(), tensor.materialize_f64());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -519,7 +522,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 3]);
-                assert_eq!(out.data, vec![2.0, 5.0, 3.0, 6.0, 1.0, 4.0]);
+                assert_eq!(out.materialize_f64(), vec![2.0, 5.0, 3.0, 6.0, 1.0, 4.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -535,7 +538,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 3]);
-                assert_eq!(out.data, vec![2.0, 5.0, 3.0, 6.0, 1.0, 4.0]);
+                assert_eq!(out.materialize_f64(), vec![2.0, 5.0, 3.0, 6.0, 1.0, 4.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -554,7 +557,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, tensor.shape);
-                assert_eq!(out.data, tensor.data);
+                assert_eq!(out.materialize_f64(), tensor.materialize_f64());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -613,7 +616,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new((0..8).map(|v| v as f64).collect(), vec![8, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -621,7 +624,10 @@ pub(crate) mod tests {
                 ifftshift_builtin(Value::GpuTensor(handle), Vec::new()).expect("ifftshift");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![8, 1]);
-            assert_eq!(gathered.data, vec![4.0, 5.0, 6.0, 7.0, 0.0, 1.0, 2.0, 3.0]);
+            assert_eq!(
+                gathered.materialize_f64(),
+                vec![4.0, 5.0, 6.0, 7.0, 0.0, 1.0, 2.0, 3.0]
+            );
         });
     }
 
@@ -702,7 +708,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 3]);
-                assert_eq!(out.data, vec![4.0, 1.0, 5.0, 2.0, 6.0, 3.0]);
+                assert_eq!(out.materialize_f64(), vec![4.0, 1.0, 5.0, 2.0, 6.0, 3.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -720,7 +726,7 @@ pub(crate) mod tests {
         let cpu = ifftshift_builtin(Value::Tensor(tensor.clone()), Vec::new()).expect("cpu");
 
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider registered");
@@ -733,7 +739,7 @@ pub(crate) mod tests {
         match cpu {
             Value::Tensor(host) => {
                 assert_eq!(gathered.shape, host.shape);
-                assert_eq!(gathered.data, host.data);
+                assert_eq!(gathered.materialize_f64(), host.materialize_f64());
             }
             other => panic!("expected tensor cpu result, got {other:?}"),
         }

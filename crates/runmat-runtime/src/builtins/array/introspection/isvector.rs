@@ -214,11 +214,11 @@ pub(crate) mod tests {
             let vector = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
             let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let vector_view = runmat_accelerate_api::HostTensorView {
-                data: &vector.data,
+                data: &vector.materialize_f64(),
                 shape: &vector.shape,
             };
             let matrix_view = runmat_accelerate_api::HostTensorView {
-                data: &matrix.data,
+                data: &matrix.materialize_f64(),
                 shape: &matrix.shape,
             };
             let vector_handle = provider.upload(&vector_view).expect("upload vector");
@@ -241,7 +241,7 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");

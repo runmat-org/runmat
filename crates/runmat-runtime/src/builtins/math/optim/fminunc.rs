@@ -1183,7 +1183,7 @@ mod tests {
 
     fn vector_from_value(value: &Value) -> Vec<f64> {
         match value {
-            Value::Tensor(tensor) => tensor.data.clone(),
+            Value::Tensor(tensor) => tensor.materialize_f64().clone(),
             Value::Num(n) => vec![*n],
             other => panic!("expected numeric value, got {other:?}"),
         }
@@ -1338,10 +1338,13 @@ mod tests {
         match &outputs[5] {
             Value::Tensor(hessian) => {
                 assert_eq!(hessian.shape, vec![3, 3]);
-                assert!(hessian.data.iter().all(|value| value.is_finite()));
-                assert!(hessian.data[0] > 0.0);
-                assert!(hessian.data[4] > 0.0);
-                assert!(hessian.data[8] > 0.0);
+                assert!(hessian
+                    .materialize_f64()
+                    .iter()
+                    .all(|value| value.is_finite()));
+                assert!(hessian.materialize_f64()[0] > 0.0);
+                assert!(hessian.materialize_f64()[4] > 0.0);
+                assert!(hessian.materialize_f64()[8] > 0.0);
             }
             other => panic!("unexpected hessian {other:?}"),
         }
@@ -1423,12 +1426,10 @@ mod tests {
 
     #[test]
     fn options_read_typed_integer_tensor_storage_exactly() {
-        let mut max_iter =
+        let max_iter =
             Tensor::new_integer(IntegerStorage::U16(vec![5]), vec![1, 1]).expect("MaxIter");
-        max_iter.data = vec![0.0];
-        let mut gradient = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1])
+        let gradient = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1])
             .expect("SpecifyObjectiveGradient");
-        gradient.data.clear();
 
         let mut opts = StructValue::new();
         opts.insert("MaxIter", Value::Tensor(max_iter));
@@ -1440,19 +1441,17 @@ mod tests {
 
     #[test]
     fn options_reject_typed_integer_limits_exactly() {
-        let mut negative =
+        let negative =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("MaxIter");
-        negative.data = vec![5.0];
         let mut opts = StructValue::new();
         opts.insert("MaxIter", Value::Tensor(negative));
         assert!(FminuncOptions::from_struct(Some(&opts), 1).is_err());
 
-        let mut too_large = Tensor::new_integer(
+        let too_large = Tensor::new_integer(
             IntegerStorage::U64(vec![(MAX_FUN_EVAL_LIMIT as u64) + 1]),
             vec![1, 1],
         )
         .expect("MaxFunEvals");
-        too_large.data = vec![MAX_FUN_EVAL_LIMIT as f64];
         let mut opts = StructValue::new();
         opts.insert("MaxFunEvals", Value::Tensor(too_large));
         assert!(FminuncOptions::from_struct(Some(&opts), 1).is_err());

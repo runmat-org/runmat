@@ -2609,9 +2609,8 @@ pub(crate) mod tests {
 
     #[test]
     fn scalar_map_helpers_read_typed_integer_tensor_storage_exactly() {
-        let mut u64_tensor = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+        let u64_tensor = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
             .expect("uint64 key");
-        u64_tensor.data.clear();
         assert_eq!(
             unsigned_from_value(
                 &Value::Tensor(u64_tensor),
@@ -2623,9 +2622,8 @@ pub(crate) mod tests {
             u64::MAX
         );
 
-        let mut i32_tensor =
+        let i32_tensor =
             Tensor::new_integer(IntegerStorage::I32(vec![-7]), vec![1, 1]).expect("int32 key");
-        i32_tensor.data.clear();
         assert_eq!(
             integer_from_value(
                 &Value::Tensor(i32_tensor),
@@ -2638,9 +2636,8 @@ pub(crate) mod tests {
             -7
         );
 
-        let mut logical_tensor =
+        let logical_tensor =
             Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("logical key");
-        logical_tensor.data.clear();
         assert!(
             bool_from_value(&Value::Tensor(logical_tensor), "key", BUILTIN_CONSTRUCTOR,)
                 .expect("logical key")
@@ -2679,15 +2676,13 @@ pub(crate) mod tests {
 
     #[test]
     fn vector_map_keys_and_values_read_typed_integer_storage_exactly() {
-        let mut keys = Tensor::new_integer(
+        let keys = Tensor::new_integer(
             IntegerStorage::U64(vec![u64::MAX - 1, u64::MAX]),
             vec![1, 2],
         )
         .expect("uint64 keys");
-        keys.data.clear();
-        let mut values =
+        let values =
             Tensor::new_integer(IntegerStorage::I32(vec![11, 22]), vec![1, 2]).expect("values");
-        values.data.clear();
 
         let map = containers_map_builtin(vec![
             Value::Tensor(keys),
@@ -2697,12 +2692,11 @@ pub(crate) mod tests {
         ])
         .expect("map");
 
-        let mut payload = Tensor::new_integer(
+        let payload = Tensor::new_integer(
             IntegerStorage::U64(vec![u64::MAX - 1, u64::MAX]),
             vec![1, 2],
         )
         .expect("payload");
-        payload.data.clear();
         let key_payload = crate::make_cell(vec![Value::Tensor(payload)], 1, 1).unwrap();
         let result = containers_map_subsref(map, "()".to_string(), key_payload).expect("lookup");
         match result {
@@ -2718,9 +2712,8 @@ pub(crate) mod tests {
     #[test]
     fn value_type_logical_reads_typed_integer_tensor_storage_exactly() {
         let keys = crate::make_cell(vec![Value::from("mask")], 1, 1).unwrap();
-        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2])
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2])
             .expect("integer logical source");
-        tensor.data.clear();
         let values = crate::make_cell(vec![Value::Tensor(tensor)], 1, 1).unwrap();
         let map = containers_map_builtin(vec![
             keys,
@@ -2759,7 +2752,7 @@ pub(crate) mod tests {
             match value {
                 Value::Tensor(t) => {
                     assert_eq!(t.shape, shape);
-                    assert_eq!(t.data, data);
+                    assert_eq!(t.materialize_f64(), data);
                 }
                 other => panic!("expected tensor, got {:?}", other),
             }

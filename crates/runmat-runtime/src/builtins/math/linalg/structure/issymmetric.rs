@@ -815,9 +815,8 @@ pub(crate) mod tests {
     #[test]
     fn tolerance_reads_typed_integer_tensor_storage_exactly() {
         let tensor = Tensor::new(vec![1.0, 5.0, 4.0, 1.0], vec![2, 2]).unwrap();
-        let mut tolerance =
+        let tolerance =
             Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("tolerance");
-        tolerance.data[0] = 0.0;
 
         let result = issymmetric_builtin(Value::Tensor(tensor), vec![Value::Tensor(tolerance)])
             .expect("issymmetric");
@@ -837,8 +836,7 @@ pub(crate) mod tests {
             IntegerStorage::U64(vec![1]),
         ];
         for storage in storages {
-            let mut tolerance = Tensor::new_integer(storage, vec![1, 1]).expect("tolerance");
-            tolerance.data = vec![f64::NAN];
+            let tolerance = Tensor::new_integer(storage, vec![1, 1]).expect("tolerance");
             assert_eq!(
                 parse_tolerance_value(&Value::Tensor(tolerance)).unwrap(),
                 1.0
@@ -955,9 +953,8 @@ pub(crate) mod tests {
     #[test]
     fn negative_typed_integer_tensor_tolerance_errors() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
-        let mut tolerance =
+        let tolerance =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("tolerance");
-        tolerance.data[0] = 1.0;
         let err =
             issymmetric_builtin(Value::Tensor(tensor), vec![Value::Tensor(tolerance)]).unwrap_err();
         let message = err.to_string();
@@ -1000,7 +997,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![2.0, 1.0, 1.0, 3.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1021,7 +1018,7 @@ pub(crate) mod tests {
         let cpu = issymmetric_builtin(Value::Tensor(tensor.clone()), Vec::new()).unwrap();
 
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().unwrap();
@@ -1036,7 +1033,7 @@ pub(crate) mod tests {
         )
         .unwrap();
         let view_skew = runmat_accelerate_api::HostTensorView {
-            data: &skew.data,
+            data: &skew.materialize_f64(),
             shape: &skew.shape,
         };
         let handle_skew = provider.upload(&view_skew).unwrap();

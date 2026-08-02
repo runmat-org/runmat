@@ -1143,8 +1143,7 @@ mod tests {
     }
 
     fn int_tensor(storage: IntegerStorage, len: usize) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![len, 1]).unwrap();
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, vec![len, 1]).unwrap();
         Value::Tensor(tensor)
     }
 
@@ -1197,9 +1196,9 @@ mod tests {
         ]))
         .unwrap();
         let outputs = output_tensors(value);
-        assert_eq!(outputs[1].data, vec![1.0, 1.0, 3.0, 4.0]);
-        assert!((outputs[0].data[1] - 0.4).abs() < 1.0e-12);
-        assert!((outputs[0].data[2] - 0.7).abs() < 1.0e-12);
+        assert_eq!(outputs[1].materialize_f64(), vec![1.0, 1.0, 3.0, 4.0]);
+        assert!((outputs[0].materialize_f64()[1] - 0.4).abs() < 1.0e-12);
+        assert!((outputs[0].materialize_f64()[2] - 0.7).abs() < 1.0e-12);
     }
 
     #[test]
@@ -1219,8 +1218,8 @@ mod tests {
         let _guard = crate::output_count::push_output_count(Some(2));
         let value = block_on(ecdf_builtin(vec![tensor(vec![3.0, 1.0, 2.0, 2.0])])).unwrap();
         let outputs = output_tensors(value);
-        assert_eq!(outputs[0].data, vec![0.0, 0.25, 0.75, 1.0]);
-        assert_eq!(outputs[1].data, vec![1.0, 1.0, 2.0, 3.0]);
+        assert_eq!(outputs[0].materialize_f64(), vec![0.0, 0.25, 0.75, 1.0]);
+        assert_eq!(outputs[1].materialize_f64(), vec![1.0, 1.0, 2.0, 3.0]);
     }
 
     #[test]
@@ -1237,8 +1236,8 @@ mod tests {
         ]))
         .unwrap();
         let outputs = output_tensors(value);
-        assert_eq!(outputs[0].data, vec![1.0, 0.5, 0.25, 0.0]);
-        assert_eq!(outputs[1].data, vec![1.0, 1.0, 2.0, 3.0]);
+        assert_eq!(outputs[0].materialize_f64(), vec![1.0, 0.5, 0.25, 0.0]);
+        assert_eq!(outputs[1].materialize_f64(), vec![1.0, 1.0, 2.0, 3.0]);
         assert_eq!(outputs[2].shape, vec![4, 1]);
         assert_eq!(outputs[3].shape, vec![4, 1]);
     }
@@ -1253,10 +1252,10 @@ mod tests {
         ]))
         .unwrap();
         let outputs = output_tensors(value);
-        assert_eq!(outputs[1].data, vec![1.0, 1.0, 3.0, 4.0]);
-        assert!((outputs[0].data[1] - 0.25).abs() < 1.0e-12);
-        assert!((outputs[0].data[2] - 0.625).abs() < 1.0e-12);
-        assert!((outputs[0].data[3] - 1.0).abs() < 1.0e-12);
+        assert_eq!(outputs[1].materialize_f64(), vec![1.0, 1.0, 3.0, 4.0]);
+        assert!((outputs[0].materialize_f64()[1] - 0.25).abs() < 1.0e-12);
+        assert!((outputs[0].materialize_f64()[2] - 0.625).abs() < 1.0e-12);
+        assert!((outputs[0].materialize_f64()[3] - 1.0).abs() < 1.0e-12);
     }
 
     #[test]
@@ -1269,8 +1268,8 @@ mod tests {
         ]))
         .unwrap();
         let outputs = output_tensors(value);
-        assert_eq!(outputs[1].data, vec![2.0, 2.0, 3.0, 4.0]);
-        assert!((outputs[0].data[1] - (1.0 / 3.0)).abs() < 1.0e-12);
+        assert_eq!(outputs[1].materialize_f64(), vec![2.0, 2.0, 3.0, 4.0]);
+        assert!((outputs[0].materialize_f64()[1] - (1.0 / 3.0)).abs() < 1.0e-12);
     }
 
     #[test]
@@ -1283,17 +1282,20 @@ mod tests {
         ]))
         .unwrap();
         let outputs = output_tensors(value);
-        assert_eq!(outputs[1].data, vec![1.0, 1.0, 2.0, 3.0]);
+        assert_eq!(outputs[1].materialize_f64(), vec![1.0, 1.0, 2.0, 3.0]);
         let expected = [
             0.0,
             1.0 / 3.0,
             1.0 / 3.0 + 1.0 / 2.0,
             1.0 / 3.0 + 1.0 / 2.0 + 1.0,
         ];
-        for (actual, expected) in outputs[0].data.iter().zip(expected) {
+        for (actual, expected) in outputs[0].materialize_f64().iter().zip(expected) {
             assert!((actual - expected).abs() < 1.0e-12);
         }
-        assert!(outputs[0].data.iter().all(|value| value.is_finite()));
+        assert!(outputs[0]
+            .materialize_f64()
+            .iter()
+            .all(|value| value.is_finite()));
     }
 
     #[test]
@@ -1318,8 +1320,11 @@ mod tests {
         ]))
         .unwrap();
         let outputs = output_tensors(value);
-        assert_eq!(outputs[1].data, vec![2.0, 2.0, 3.0, 4.0]);
-        assert!(outputs[0].data.windows(2).all(|pair| pair[0] <= pair[1]));
+        assert_eq!(outputs[1].materialize_f64(), vec![2.0, 2.0, 3.0, 4.0]);
+        assert!(outputs[0]
+            .materialize_f64()
+            .windows(2)
+            .all(|pair| pair[0] <= pair[1]));
     }
 
     #[test]

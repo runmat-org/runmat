@@ -406,9 +406,8 @@ pub(crate) mod tests {
 
     #[test]
     fn close_accepts_empty_typed_integer_tensor_without_double_mirror() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U8(Vec::new()), vec![0, 0]).expect("empty tensor");
-        tensor.data.clear();
         assert_eq!(close_value(&Value::Tensor(tensor)).expect("close"), false);
     }
 

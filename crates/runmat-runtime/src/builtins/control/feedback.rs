@@ -207,7 +207,7 @@ mod tests {
         let Value::Tensor(tensor) = object.properties.get(field).expect(field) else {
             panic!("expected tensor");
         };
-        tensor.data.clone()
+        tensor.materialize_f64().clone()
     }
 
     #[test]

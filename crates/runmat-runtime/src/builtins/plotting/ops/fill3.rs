@@ -481,7 +481,7 @@ mod tests {
         let Value::Tensor(handles) = handles else {
             panic!("expected vector of handles");
         };
-        assert_eq!(handles.data.len(), 2);
+        assert_eq!(handles.materialize_f64().len(), 2);
         let figure = clone_figure(current_figure_handle()).unwrap();
         assert_eq!(figure.len(), 2);
         let patches = figure.plots().collect::<Vec<_>>();

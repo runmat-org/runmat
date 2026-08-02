@@ -138,7 +138,7 @@ fn sub(x: i32, y: i32) -> Result<i32, String> {
     builtin_path = "tests::matrix_sum"
 )]
 fn matrix_sum(m: Tensor) -> Result<f64, String> {
-    Ok(m.data.iter().sum())
+    Ok(m.materialize_f64().iter().sum())
 }
 
 #[runtime_builtin(
@@ -203,7 +203,7 @@ fn test_matrix_operations() {
     let mut matrix = Tensor::zeros2(2, 3);
     assert_eq!(matrix.rows(), 2);
     assert_eq!(matrix.cols(), 3);
-    assert_eq!(matrix.data.len(), 6);
+    assert_eq!(matrix.len(), 6);
 
     // Test setting and getting values (0-based helpers)
     matrix.set2(1, 2, 5.0).unwrap();

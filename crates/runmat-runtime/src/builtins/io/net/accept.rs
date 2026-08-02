@@ -735,14 +735,12 @@ pub(crate) mod tests {
 
     #[test]
     fn typed_timeout_parser_accepts_integer_tensor_scalars() {
-        let mut typed =
+        let typed =
             Tensor::new_integer(IntegerStorage::U16(vec![30]), vec![1, 1]).expect("timeout");
-        typed.data.clear();
         assert_eq!(parse_timeout_value(&Value::Tensor(typed)).unwrap(), 30.0);
 
-        let mut negative =
+        let negative =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("timeout");
-        negative.data.clear();
         assert!(parse_timeout_value(&Value::Tensor(negative)).is_err());
     }
 

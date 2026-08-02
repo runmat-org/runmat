@@ -1283,7 +1283,7 @@ mod tests {
         match call(Vec::new()).unwrap() {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![0, 0]);
-                assert!(tensor.data.is_empty());
+                assert!(tensor.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1332,8 +1332,7 @@ mod tests {
     #[test]
     fn blkdiag_integer_and_logical_blocks_preserve_exact_integer_storage() {
         let wide = 9_007_199_254_740_993_u64;
-        let mut integer = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).unwrap();
-        integer.data.clear();
+        let integer = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).unwrap();
         let logical = LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap();
 
         let Value::Tensor(output) =
@@ -1446,7 +1445,7 @@ mod tests {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 4]);
                 assert_eq!(
-                    out.data,
+                    out.materialize_f64(),
                     vec![1.0, 3.0, 0.0, 2.0, 4.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 6.0]
                 );
             }
@@ -1466,9 +1465,9 @@ mod tests {
         {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 5]);
-                assert_eq!(out.data[0], 1.0);
-                assert_eq!(out.data[1 + 3 * 3], 4.0);
-                assert_eq!(out.data[2 + 4 * 3], 5.0);
+                assert_eq!(out.materialize_f64()[0], 1.0);
+                assert_eq!(out.materialize_f64()[1 + 3 * 3], 4.0);
+                assert_eq!(out.materialize_f64()[2 + 4 * 3], 5.0);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1493,10 +1492,10 @@ mod tests {
         match call(vec![Value::Tensor(a), Value::Tensor(b)]).unwrap() {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 2]);
-                assert_eq!(out.dtype, NumericDType::F32);
-                assert_eq!(out.data[0], 1.5);
-                assert_eq!(out.data[1], 2.5);
-                assert_eq!(out.data[5], 3.25);
+                assert_eq!(out.numeric_dtype(), NumericDType::F32);
+                assert_eq!(out.materialize_f64()[0], 1.5);
+                assert_eq!(out.materialize_f64()[1], 2.5);
+                assert_eq!(out.materialize_f64()[5], 3.25);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1649,13 +1648,13 @@ mod tests {
             let b = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
             let ha = provider
                 .upload(&HostTensorView {
-                    data: &a.data,
+                    data: &a.materialize_f64(),
                     shape: &a.shape,
                 })
                 .unwrap();
             let hb = provider
                 .upload(&HostTensorView {
-                    data: &b.data,
+                    data: &b.materialize_f64(),
                     shape: &b.shape,
                 })
                 .unwrap();
@@ -1664,7 +1663,7 @@ mod tests {
             let gathered = test_support::gather(value).unwrap();
             assert_eq!(gathered.shape, vec![3, 3]);
             assert_eq!(
-                gathered.data,
+                gathered.materialize_f64(),
                 vec![1.0, 2.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 4.0]
             );
         });
@@ -1677,13 +1676,13 @@ mod tests {
             let b = Tensor::new_with_dtype(vec![2.5], vec![1, 1], NumericDType::F32).unwrap();
             let ha = provider
                 .upload(&HostTensorView {
-                    data: &a.data,
+                    data: &a.materialize_f64(),
                     shape: &a.shape,
                 })
                 .unwrap();
             let hb = provider
                 .upload(&HostTensorView {
-                    data: &b.data,
+                    data: &b.materialize_f64(),
                     shape: &b.shape,
                 })
                 .unwrap();
@@ -1708,7 +1707,7 @@ mod tests {
             let Value::Tensor(out) = gathered else {
                 panic!("expected gathered tensor");
             };
-            assert_eq!(out.dtype, NumericDType::F32);
+            assert_eq!(out.numeric_dtype(), NumericDType::F32);
             assert_eq!(out.shape, vec![2, 2]);
         });
     }
@@ -1719,7 +1718,7 @@ mod tests {
             let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
             let handle = provider
                 .upload(&HostTensorView {
-                    data: &tensor.data,
+                    data: &tensor.materialize_f64(),
                     shape: &tensor.shape,
                 })
                 .unwrap();
@@ -1727,7 +1726,7 @@ mod tests {
             assert!(matches!(value, Value::GpuTensor(_)));
             let gathered = test_support::gather(value).unwrap();
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![1.0, 0.0, 0.0, 2.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 0.0, 2.0]);
         });
     }
 
@@ -1737,7 +1736,7 @@ mod tests {
             let logical = Tensor::new(vec![1.0, 0.0], vec![2, 1]).unwrap();
             let handle = provider
                 .upload(&HostTensorView {
-                    data: &logical.data,
+                    data: &logical.materialize_f64(),
                     shape: &logical.shape,
                 })
                 .unwrap();
@@ -1752,7 +1751,10 @@ mod tests {
             assert!(runmat_accelerate_api::handle_is_logical(&handle));
             let gathered = test_support::gather(Value::GpuTensor(handle)).unwrap();
             assert_eq!(gathered.shape, vec![3, 2]);
-            assert_eq!(gathered.data, vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0]);
+            assert_eq!(
+                gathered.materialize_f64(),
+                vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+            );
         });
     }
 

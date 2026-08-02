@@ -1082,10 +1082,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_integer_tensor_preserves_exact_uint64_values() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]), vec![1, 2])
                 .expect("integer tensor");
-        tensor.data.clear();
 
         let encoded =
             block_on(jsonencode_builtin(Value::Tensor(tensor), Vec::new())).expect("jsonencode");
@@ -1139,9 +1138,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_options_read_wide_uint64_storage_exactly() {
-        let mut false_option =
+        let false_option =
             Tensor::new_integer(IntegerStorage::U8(vec![0]), vec![1, 1]).expect("integer tensor");
-        false_option.data.clear();
         let compact = block_on(jsonencode_builtin(
             Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor")),
             vec![Value::from("PrettyPrint"), Value::Tensor(false_option)],
@@ -1149,9 +1147,8 @@ pub(crate) mod tests {
         .expect("jsonencode");
         assert_eq!(as_string(compact), "[1,2]");
 
-        let mut true_option = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+        let true_option = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
             .expect("integer tensor");
-        true_option.data.clear();
         let pretty = block_on(jsonencode_builtin(
             Value::Tensor(Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).expect("tensor")),
             vec![Value::from("PrettyPrint"), Value::Tensor(true_option)],
@@ -1322,7 +1319,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).expect("tensor");
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1344,7 +1341,7 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).expect("tensor");
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");

@@ -90,19 +90,16 @@ mod tests {
             IntegerStorage::U64(vec![82, 77]),
         ];
         for storage in storages {
-            let mut tensor = Tensor::new_integer(storage, vec![1, 2]).expect("tensor");
-            tensor.data.fill(f64::NAN);
+            let tensor = Tensor::new_integer(storage, vec![1, 2]).expect("tensor");
             assert_eq!(tensor_char_codes_to_string(&tensor).as_deref(), Some("RM"));
         }
 
-        let mut negative =
+        let negative =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("tensor");
-        negative.data.clear();
         assert!(tensor_char_codes_to_string(&negative).is_none());
 
-        let mut invalid =
+        let invalid =
             Tensor::new_integer(IntegerStorage::U32(vec![0x11_0000]), vec![1, 1]).expect("tensor");
-        invalid.data.clear();
         assert!(tensor_char_codes_to_string(&invalid).is_none());
     }
 }

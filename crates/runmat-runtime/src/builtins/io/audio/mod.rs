@@ -1992,10 +1992,10 @@ mod tests {
         );
 
         assert_eq!(y.shape, vec![3, 1]);
-        assert_eq!(y.dtype, NumericDType::F64);
-        assert_eq!(y.data[0], -1.0);
-        assert_eq!(y.data[1], 0.0);
-        assert!((y.data[2] - (32767.0 / 32768.0)).abs() < 1e-12);
+        assert_eq!(y.numeric_dtype(), NumericDType::F64);
+        assert_eq!(y.materialize_f64()[0], -1.0);
+        assert_eq!(y.materialize_f64()[1], 0.0);
+        assert!((y.materialize_f64()[2] - (32767.0 / 32768.0)).abs() < 1e-12);
         let _ = fs::remove_file(path);
     }
 
@@ -2026,10 +2026,10 @@ mod tests {
         );
 
         assert_eq!(y.shape, vec![2, 2]);
-        assert!((y.data[0] - (32767.0 / 32768.0)).abs() < 1e-12);
-        assert_eq!(y.data[1], 0.0);
-        assert_eq!(y.data[2], -1.0);
-        assert_eq!(y.data[3], 0.5);
+        assert!((y.materialize_f64()[0] - (32767.0 / 32768.0)).abs() < 1e-12);
+        assert_eq!(y.materialize_f64()[1], 0.0);
+        assert_eq!(y.materialize_f64()[2], -1.0);
+        assert_eq!(y.materialize_f64()[3], 0.5);
         let _ = fs::remove_file(path);
     }
 
@@ -2054,7 +2054,7 @@ mod tests {
         let y = tensor(outputs[0].clone());
         assert_eq!(outputs[1], Value::Num(22_050.0));
         assert_eq!(y.shape, vec![2, 1]);
-        assert_eq!(y.data, vec![-0.5, 0.0]);
+        assert_eq!(y.materialize_f64(), vec![-0.5, 0.0]);
         let _ = fs::remove_file(path);
     }
 
@@ -2062,10 +2062,8 @@ mod tests {
     #[cfg(target_pointer_width = "64")]
     fn audioread_sample_range_reads_typed_integer_storage_exactly() {
         let exact = (1_u64 << 53) + 1;
-        let mut range =
-            Tensor::new_integer(IntegerStorage::U64(vec![exact, exact + 1]), vec![1, 2])
-                .expect("range");
-        range.data.fill(f64::NAN);
+        let range = Tensor::new_integer(IntegerStorage::U64(vec![exact, exact + 1]), vec![1, 2])
+            .expect("range");
 
         assert_eq!(
             parse_sample_range(&Value::Tensor(range)).expect("sample range"),
@@ -2093,7 +2091,7 @@ mod tests {
             .expect("audioread"),
         );
 
-        assert_eq!(y.data, vec![0.0, 128.0, 255.0]);
+        assert_eq!(y.materialize_f64(), vec![0.0, 128.0, 255.0]);
         assert_eq!(
             y.integer_storage(),
             Some(&IntegerStorage::U8(vec![0, 128, 255]))
@@ -2208,7 +2206,7 @@ mod tests {
         );
 
         assert_eq!(y.shape, vec![3, 1]);
-        assert_eq!(y.data, vec![-0.25, 0.0, 0.5]);
+        assert_eq!(y.materialize_f64(), vec![-0.25, 0.0, 0.5]);
         let _ = fs::remove_file(path);
     }
 
@@ -2227,9 +2225,9 @@ mod tests {
             .expect("audioread"),
         );
 
-        assert_eq!(y.dtype, NumericDType::F32);
+        assert_eq!(y.numeric_dtype(), NumericDType::F32);
         assert!(y.integer_storage().is_none());
-        assert_eq!(y.data, vec![-0.25, 0.0, 0.5]);
+        assert_eq!(y.materialize_f64(), vec![-0.25, 0.0, 0.5]);
         let _ = fs::remove_file(path);
     }
 
@@ -2248,9 +2246,9 @@ mod tests {
             .expect("audioread"),
         );
 
-        assert_eq!(y.dtype, NumericDType::F64);
+        assert_eq!(y.numeric_dtype(), NumericDType::F64);
         assert!(y.integer_storage().is_none());
-        assert_eq!(y.data, vec![-0.25, 0.0, 0.5]);
+        assert_eq!(y.materialize_f64(), vec![-0.25, 0.0, 0.5]);
         let _ = fs::remove_file(path);
     }
 
@@ -2275,7 +2273,7 @@ mod tests {
         let y = tensor(outputs[0].clone());
         assert_eq!(outputs[1], Value::Num(32_000.0));
         assert_eq!(y.shape, vec![2, 1]);
-        assert_eq!(y.data, vec![0.0, 0.5]);
+        assert_eq!(y.materialize_f64(), vec![0.0, 0.5]);
         let _ = fs::remove_file(path);
     }
 
@@ -2304,7 +2302,7 @@ mod tests {
         let y = tensor(outputs[0].clone());
         assert_eq!(outputs[1], Value::Num(16_000.0));
         assert_eq!(y.shape, vec![2, 1]);
-        assert_eq!(y.data, vec![0.0, 0.5]);
+        assert_eq!(y.materialize_f64(), vec![0.0, 0.5]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

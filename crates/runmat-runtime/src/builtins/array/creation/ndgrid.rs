@@ -1054,7 +1054,7 @@ mod tests {
         assert_eq!(eval.outputs.len(), 1);
         let x_out = test_support::gather(output(&eval, 0).expect("X")).expect("host");
         assert_eq!(x_out.shape, vec![3, 1]);
-        assert_eq!(x_out.data, vec![1.0, 2.0, 3.0]);
+        assert_eq!(x_out.materialize_f64(), vec![1.0, 2.0, 3.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1070,17 +1070,17 @@ mod tests {
         let x1 = test_support::gather(outputs[0].clone()).expect("x1");
         assert_eq!(x1.shape, vec![2, 2, 2]);
         assert_eq!(
-            x1.data,
+            x1.materialize_f64(),
             vec![10.0, 20.0, 10.0, 20.0, 10.0, 20.0, 10.0, 20.0]
         );
         let x2 = test_support::gather(outputs[1].clone()).expect("x2");
         assert_eq!(
-            x2.data,
+            x2.materialize_f64(),
             vec![10.0, 10.0, 20.0, 20.0, 10.0, 10.0, 20.0, 20.0]
         );
         let x3 = test_support::gather(outputs[2].clone()).expect("x3");
         assert_eq!(
-            x3.data,
+            x3.materialize_f64(),
             vec![10.0, 10.0, 10.0, 10.0, 20.0, 20.0, 20.0, 20.0]
         );
     }
@@ -1095,10 +1095,13 @@ mod tests {
 
         let x_out = test_support::gather(output(&eval, 0).expect("X")).expect("host");
         assert_eq!(x_out.shape, vec![3, 2]);
-        assert_eq!(x_out.data, vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
+        assert_eq!(x_out.materialize_f64(), vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
         let y_out = test_support::gather(output(&eval, 1).expect("Y")).expect("host");
         assert_eq!(y_out.shape, vec![3, 2]);
-        assert_eq!(y_out.data, vec![10.0, 10.0, 10.0, 20.0, 20.0, 20.0]);
+        assert_eq!(
+            y_out.materialize_f64(),
+            vec![10.0, 10.0, 10.0, 20.0, 20.0, 20.0]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1117,12 +1120,12 @@ mod tests {
         let x_out = test_support::gather(output(&eval, 0).expect("X")).expect("host");
         assert_eq!(x_out.shape, vec![2, 3, 2]);
         assert_eq!(
-            x_out.data,
+            x_out.materialize_f64(),
             vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0]
         );
         let z_out = test_support::gather(output(&eval, 2).expect("Z")).expect("host");
         assert_eq!(
-            z_out.data,
+            z_out.materialize_f64(),
             vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
         );
     }
@@ -1155,8 +1158,8 @@ mod tests {
             panic!("expected real Y");
         };
         assert_eq!(y_out.shape, vec![2, 2]);
-        assert_eq!(y_out.dtype, NumericDType::F64);
-        assert_eq!(y_out.data, vec![10.0, 10.0, 20.0, 20.0]);
+        assert_eq!(y_out.numeric_dtype(), NumericDType::F64);
+        assert_eq!(y_out.materialize_f64(), vec![10.0, 10.0, 20.0, 20.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1217,8 +1220,7 @@ mod tests {
                     source_values[1].clone(),
                 ])
                 .expect("second expected storage");
-            let mut axis = Tensor::new_integer(storage, vec![1, 2]).expect("integer axis");
-            axis.data.fill(f64::NAN);
+            let axis = Tensor::new_integer(storage, vec![1, 2]).expect("integer axis");
             let eval = eval(&[Value::Tensor(axis)], Some(2)).expect("ndgrid");
             let Value::Tensor(first_output) = output(&eval, 0).expect("grid output") else {
                 panic!("expected exact integer tensor");
@@ -1235,12 +1237,11 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ndgrid_reads_typed_integer_axis_length_from_storage_without_mirror() {
-        let mut axis = Tensor::new_integer(
+        let axis = Tensor::new_integer(
             IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
             vec![1, 2],
         )
         .expect("axis");
-        axis.data.clear();
 
         let eval = eval(&[Value::Tensor(axis)], Some(2)).expect("ndgrid");
         let Value::Tensor(first) = output(&eval, 0).expect("first grid") else {
@@ -1322,7 +1323,10 @@ mod tests {
         assert_eq!(x_out.shape, vec![2, 3]);
         assert_eq!(x_out.data, vec![1, 0, 1, 0, 1, 0]);
         let y_out = test_support::gather(output(&eval, 1).expect("Y")).expect("Y host");
-        assert_eq!(y_out.data, vec![10.0, 10.0, 20.0, 20.0, 30.0, 30.0]);
+        assert_eq!(
+            y_out.materialize_f64(),
+            vec![10.0, 10.0, 20.0, 20.0, 30.0, 30.0]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1341,7 +1345,7 @@ mod tests {
         let x_out = test_support::gather(output(&eval, 0).expect("X")).expect("host");
         assert_eq!(x_out.shape, vec![2, 3, 2]);
         assert_eq!(
-            x_out.data,
+            x_out.materialize_f64(),
             vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0]
         );
     }
@@ -1410,13 +1414,13 @@ mod tests {
             let y = tensor(vec![10.0, 20.0, 30.0], vec![1, 3]);
             let x_handle = provider
                 .upload(&HostTensorView {
-                    data: &x.data,
+                    data: &x.materialize_f64(),
                     shape: &x.shape,
                 })
                 .expect("upload x");
             let y_handle = provider
                 .upload(&HostTensorView {
-                    data: &y.data,
+                    data: &y.materialize_f64(),
                     shape: &y.shape,
                 })
                 .expect("upload y");
@@ -1437,7 +1441,10 @@ mod tests {
             assert_eq!(telemetry.upload_bytes, 0);
             let gathered = test_support::gather(y_out).expect("gather");
             assert_eq!(gathered.shape, vec![2, 3]);
-            assert_eq!(gathered.data, vec![10.0, 10.0, 20.0, 20.0, 30.0, 30.0]);
+            assert_eq!(
+                gathered.materialize_f64(),
+                vec![10.0, 10.0, 20.0, 20.0, 30.0, 30.0]
+            );
         });
     }
 
@@ -1449,13 +1456,13 @@ mod tests {
             let y = tensor(vec![10.0, 20.0, 30.0], vec![3, 1]);
             let x_handle = provider
                 .upload(&HostTensorView {
-                    data: &x.data,
+                    data: &x.materialize_f64(),
                     shape: &x.shape,
                 })
                 .expect("upload x");
             let y_handle = provider
                 .upload(&HostTensorView {
-                    data: &y.data,
+                    data: &y.materialize_f64(),
                     shape: &y.shape,
                 })
                 .expect("upload y");
@@ -1475,9 +1482,9 @@ mod tests {
             let y_after =
                 test_support::gather(Value::GpuTensor(y_handle)).expect("gather original y");
             assert_eq!(x_after.shape, vec![1, 2]);
-            assert_eq!(x_after.data, vec![1.0, 2.0]);
+            assert_eq!(x_after.materialize_f64(), vec![1.0, 2.0]);
             assert_eq!(y_after.shape, vec![3, 1]);
-            assert_eq!(y_after.data, vec![10.0, 20.0, 30.0]);
+            assert_eq!(y_after.materialize_f64(), vec![10.0, 20.0, 30.0]);
         });
     }
 }

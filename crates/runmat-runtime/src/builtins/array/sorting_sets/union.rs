@@ -1921,31 +1921,28 @@ pub(crate) mod tests {
         let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("union");
         match eval.values_value() {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![1.0, 3.0, 5.0, 7.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 3.0, 5.0, 7.0]);
                 assert_eq!(t.shape, vec![4, 1]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
         let ia = tensor::value_into_tensor_for("union", eval.ia_value()).expect("ia tensor");
-        assert_eq!(ia.data, vec![3.0, 1.0, 2.0]);
+        assert_eq!(ia.materialize_f64(), vec![3.0, 1.0, 2.0]);
         assert_eq!(ia.shape, vec![3, 1]);
         let ib = tensor::value_into_tensor_for("union", eval.ib_value()).expect("ib tensor");
-        assert_eq!(ib.data, vec![1.0]);
+        assert_eq!(ib.materialize_f64(), vec![1.0]);
         assert_eq!(ib.shape, vec![1, 1]);
     }
 
     #[test]
     fn union_preserves_exact_integer_elements_and_rows() {
-        let mut a = Tensor::new_integer(
+        let a = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993]),
             vec![3, 1],
         )
         .expect("input");
-        let mut b =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![0, 7]), vec![2, 1])
-                .expect("input");
-        a.data.clear();
-        b.data.clear();
+        let b = Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![0, 7]), vec![2, 1])
+            .expect("input");
         let (values, ia, ib) = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
             .expect("union")
             .into_triple();
@@ -1962,22 +1959,20 @@ pub(crate) mod tests {
             ]))
         );
         let ia = tensor::value_into_tensor_for("union", ia).expect("indices");
-        assert_eq!(ia.data, vec![2.0, 3.0, 1.0]);
+        assert_eq!(ia.materialize_f64(), vec![2.0, 3.0, 1.0]);
         let ib = tensor::value_into_tensor_for("union", ib).expect("indices");
-        assert_eq!(ib.data, vec![2.0]);
+        assert_eq!(ib.materialize_f64(), vec![2.0]);
 
-        let mut a = Tensor::new_integer(
+        let a = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993, 0, 1]),
             vec![2, 2],
         )
         .expect("rows input");
-        let mut b = Tensor::new_integer(
+        let b = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_993, 4, 1, 2]),
             vec![2, 2],
         )
         .expect("rows input");
-        a.data.clear();
-        b.data.clear();
         let (values, ia, ib) =
             evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
                 .expect("union rows")
@@ -1997,55 +1992,49 @@ pub(crate) mod tests {
             ]))
         );
         let ia = tensor::value_into_tensor_for("union", ia).expect("row indices");
-        assert_eq!(ia.data, vec![2.0, 1.0]);
+        assert_eq!(ia.materialize_f64(), vec![2.0, 1.0]);
         let ib = tensor::value_into_tensor_for("union", ib).expect("row indices");
-        assert_eq!(ib.data, vec![2.0]);
+        assert_eq!(ib.materialize_f64(), vec![2.0]);
     }
 
     #[test]
     fn union_numeric_fallback_reads_mirrorless_integer_storage() {
-        let mut a =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![7, 2]), vec![2, 1])
-                .expect("input");
-        let mut b =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::I32(vec![2, 9]), vec![2, 1])
-                .expect("input");
-        a.data.clear();
-        b.data.clear();
+        let a = Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![7, 2]), vec![2, 1])
+            .expect("input");
+        let b = Tensor::new_integer(runmat_builtins::IntegerStorage::I32(vec![2, 9]), vec![2, 1])
+            .expect("input");
         let (values, ia, ib) = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
             .expect("union")
             .into_triple();
         let values = tensor::value_into_tensor_for("union", values).expect("values");
-        assert_eq!(values.data, vec![2.0, 7.0, 9.0]);
+        assert_eq!(values.materialize_f64(), vec![2.0, 7.0, 9.0]);
         assert_eq!(values.shape, vec![3, 1]);
         let ia = tensor::value_into_tensor_for("union", ia).expect("indices");
-        assert_eq!(ia.data, vec![2.0, 1.0]);
+        assert_eq!(ia.materialize_f64(), vec![2.0, 1.0]);
         let ib = tensor::value_into_tensor_for("union", ib).expect("indices");
-        assert_eq!(ib.data, vec![2.0]);
+        assert_eq!(ib.materialize_f64(), vec![2.0]);
 
-        let mut a = Tensor::new_integer(
+        let a = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U16(vec![1, 3, 1, 2, 4, 2]),
             vec![3, 2],
         )
         .expect("rows input");
-        let mut b = Tensor::new_integer(
+        let b = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I32(vec![3, 5, 4, 6]),
             vec![2, 2],
         )
         .expect("rows input");
-        a.data.clear();
-        b.data.clear();
         let (values, ia, ib) =
             evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
                 .expect("union rows")
                 .into_triple();
         let values = tensor::value_into_tensor_for("union", values).expect("row values");
         assert_eq!(values.shape, vec![3, 2]);
-        assert_eq!(values.data, vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]);
+        assert_eq!(values.materialize_f64(), vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]);
         let ia = tensor::value_into_tensor_for("union", ia).expect("row indices");
-        assert_eq!(ia.data, vec![1.0, 2.0]);
+        assert_eq!(ia.materialize_f64(), vec![1.0, 2.0]);
         let ib = tensor::value_into_tensor_for("union", ib).expect("row indices");
-        assert_eq!(ib.data, vec![2.0]);
+        assert_eq!(ib.materialize_f64(), vec![2.0]);
     }
 
     #[test]
@@ -2106,15 +2095,15 @@ pub(crate) mod tests {
             .expect("union");
         match eval.values_value() {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![5.0, 7.0, 1.0, 3.0, 2.0, 4.0]);
+                assert_eq!(t.materialize_f64(), vec![5.0, 7.0, 1.0, 3.0, 2.0, 4.0]);
                 assert_eq!(t.shape, vec![6, 1]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
         let ia = tensor::value_into_tensor_for("union", eval.ia_value()).expect("ia tensor");
-        assert_eq!(ia.data, vec![1.0, 2.0, 3.0]);
+        assert_eq!(ia.materialize_f64(), vec![1.0, 2.0, 3.0]);
         let ib = tensor::value_into_tensor_for("union", eval.ib_value()).expect("ib tensor");
-        assert_eq!(ib.data, vec![1.0, 2.0, 3.0]);
+        assert_eq!(ib.materialize_f64(), vec![1.0, 2.0, 3.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2125,13 +2114,13 @@ pub(crate) mod tests {
         let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("union");
         let values = tensor::value_into_tensor_for("union", eval.values_value()).expect("values");
         assert_eq!(values.shape, vec![3, 1]);
-        assert_eq!(values.data[0], 1.0);
-        assert_eq!(values.data[1], 2.0);
-        assert!(values.data[2].is_nan());
+        assert_eq!(values.materialize_f64()[0], 1.0);
+        assert_eq!(values.materialize_f64()[1], 2.0);
+        assert!(values.materialize_f64()[2].is_nan());
         let ia = tensor::value_into_tensor_for("union", eval.ia_value()).expect("ia tensor");
-        assert_eq!(ia.data, vec![2.0, 1.0]);
+        assert_eq!(ia.materialize_f64(), vec![2.0, 1.0]);
         let ib = tensor::value_into_tensor_for("union", eval.ib_value()).expect("ib tensor");
-        assert_eq!(ib.data, vec![1.0]);
+        assert_eq!(ib.materialize_f64(), vec![1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2144,14 +2133,14 @@ pub(crate) mod tests {
         match eval.values_value() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 2]);
-                assert_eq!(t.data, vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
         let ia = tensor::value_into_tensor_for("union", eval.ia_value()).expect("ia tensor");
-        assert_eq!(ia.data, vec![1.0, 2.0]);
+        assert_eq!(ia.materialize_f64(), vec![1.0, 2.0]);
         let ib = tensor::value_into_tensor_for("union", eval.ib_value()).expect("ib tensor");
-        assert_eq!(ib.data, vec![2.0]);
+        assert_eq!(ib.materialize_f64(), vec![2.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2169,14 +2158,14 @@ pub(crate) mod tests {
         match values {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 2]);
-                assert_eq!(t.data, vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
         let ia_tensor = tensor::value_into_tensor_for("union", ia).expect("ia tensor");
-        assert_eq!(ia_tensor.data, vec![1.0, 2.0]);
+        assert_eq!(ia_tensor.materialize_f64(), vec![1.0, 2.0]);
         let ib_tensor = tensor::value_into_tensor_for("union", ib).expect("ib tensor");
-        assert_eq!(ib_tensor.data, vec![2.0]);
+        assert_eq!(ib_tensor.materialize_f64(), vec![2.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2194,9 +2183,9 @@ pub(crate) mod tests {
             other => panic!("expected char array, got {other:?}"),
         }
         let ia = tensor::value_into_tensor_for("union", eval.ia_value()).expect("ia tensor");
-        assert_eq!(ia.data, vec![4.0, 1.0, 3.0]);
+        assert_eq!(ia.materialize_f64(), vec![4.0, 1.0, 3.0]);
         let ib = tensor::value_into_tensor_for("union", eval.ib_value()).expect("ib tensor");
-        assert_eq!(ib.data, vec![3.0]);
+        assert_eq!(ib.materialize_f64(), vec![3.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2246,9 +2235,9 @@ pub(crate) mod tests {
             other => panic!("expected string array, got {other:?}"),
         }
         let ia = tensor::value_into_tensor_for("union", eval.ia_value()).expect("ia tensor");
-        assert_eq!(ia.data, vec![1.0, 2.0]);
+        assert_eq!(ia.materialize_f64(), vec![1.0, 2.0]);
         let ib = tensor::value_into_tensor_for("union", eval.ib_value()).expect("ib tensor");
-        assert_eq!(ib.data, vec![2.0]);
+        assert_eq!(ib.materialize_f64(), vec![2.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2258,11 +2247,11 @@ pub(crate) mod tests {
             let a = Tensor::new(vec![4.0, 1.0, 2.0], vec![3, 1]).unwrap();
             let b = Tensor::new(vec![2.0, 5.0], vec![2, 1]).unwrap();
             let view_a = HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             };
             let view_b = HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             };
             let handle_a = provider.upload(&view_a).expect("upload A");
@@ -2274,11 +2263,11 @@ pub(crate) mod tests {
             )
             .expect("union");
             let values = tensor::value_into_tensor_for("union", eval.values_value()).unwrap();
-            assert_eq!(values.data, vec![4.0, 1.0, 2.0, 5.0]);
+            assert_eq!(values.materialize_f64(), vec![4.0, 1.0, 2.0, 5.0]);
             let ia = tensor::value_into_tensor_for("union", eval.ia_value()).unwrap();
-            assert_eq!(ia.data, vec![1.0, 2.0, 3.0]);
+            assert_eq!(ia.materialize_f64(), vec![1.0, 2.0, 3.0]);
             let ib = tensor::value_into_tensor_for("union", eval.ib_value()).unwrap();
-            assert_eq!(ib.data, vec![2.0]);
+            assert_eq!(ib.materialize_f64(), vec![2.0]);
         });
     }
 
@@ -2368,15 +2357,15 @@ pub(crate) mod tests {
             evaluate_sync(Value::Int(IntValue::I32(1)), Value::Num(3.0), &[]).expect("union");
         match eval.values_value() {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![1.0, 3.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 3.0]);
                 assert_eq!(t.shape, vec![2, 1]);
             }
             other => panic!("expected numeric tensor, got {other:?}"),
         }
         let ia = tensor::value_into_tensor_for("union", eval.ia_value()).unwrap();
-        assert_eq!(ia.data, vec![1.0]);
+        assert_eq!(ia.materialize_f64(), vec![1.0]);
         let ib = tensor::value_into_tensor_for("union", eval.ib_value()).unwrap();
-        assert_eq!(ib.data, vec![1.0]);
+        assert_eq!(ib.materialize_f64(), vec![1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2397,11 +2386,11 @@ pub(crate) mod tests {
 
         let provider = runmat_accelerate_api::provider().expect("provider");
         let view_a = HostTensorView {
-            data: &a.data,
+            data: &a.materialize_f64(),
             shape: &a.shape,
         };
         let view_b = HostTensorView {
-            data: &b.data,
+            data: &b.materialize_f64(),
             shape: &b.shape,
         };
         let handle_a = provider.upload(&view_a).expect("upload A");
@@ -2412,9 +2401,9 @@ pub(crate) mod tests {
         let gpu_ia = tensor::value_into_tensor_for("union", gpu_eval.ia_value()).unwrap();
         let gpu_ib = tensor::value_into_tensor_for("union", gpu_eval.ib_value()).unwrap();
 
-        assert_eq!(gpu_values.data, cpu_values.data);
+        assert_eq!(gpu_values.materialize_f64(), cpu_values.materialize_f64());
         assert_eq!(gpu_values.shape, cpu_values.shape);
-        assert_eq!(gpu_ia.data, cpu_ia.data);
-        assert_eq!(gpu_ib.data, cpu_ib.data);
+        assert_eq!(gpu_ia.materialize_f64(), cpu_ia.materialize_f64());
+        assert_eq!(gpu_ib.materialize_f64(), cpu_ib.materialize_f64());
     }
 }

@@ -914,8 +914,8 @@ mod tests {
         match result {
             V::OutputList(outputs) => {
                 assert_eq!(outputs.len(), 4);
-                assert!(matches!(&outputs[0], V::Tensor(t) if t.data.is_empty()));
-                assert!(matches!(&outputs[1], V::Tensor(t) if t.data.is_empty()));
+                assert!(matches!(&outputs[0], V::Tensor(t) if t.materialize_f64().is_empty()));
+                assert!(matches!(&outputs[1], V::Tensor(t) if t.materialize_f64().is_empty()));
                 assert!(matches!(&outputs[2], V::Num(flag) if *flag == -2.0));
                 match &outputs[3] {
                     V::Struct(s) => {
@@ -980,15 +980,12 @@ mod tests {
 
     #[test]
     fn bounds_and_options_read_typed_integer_tensor_storage_exactly() {
-        let mut lower =
+        let lower =
             Tensor::new_integer(IntegerStorage::I16(vec![0]), vec![1, 1]).expect("lower bound");
-        lower.data.clear();
-        let mut upper =
+        let upper =
             Tensor::new_integer(IntegerStorage::U16(vec![5]), vec![1, 1]).expect("upper bound");
-        upper.data.clear();
-        let mut max_iter =
+        let max_iter =
             Tensor::new_integer(IntegerStorage::U16(vec![1000]), vec![1, 1]).expect("MaxIter");
-        max_iter.data = vec![0.0];
 
         let mut opts = StructValue::new();
         opts.insert("MaxIter", Value::Tensor(max_iter));
@@ -1007,9 +1004,8 @@ mod tests {
 
     #[test]
     fn options_reject_nonpositive_typed_integer_storage_exactly() {
-        let mut max_iter =
+        let max_iter =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("MaxIter");
-        max_iter.data = vec![1000.0];
         let mut opts = StructValue::new();
         opts.insert("MaxIter", Value::Tensor(max_iter));
 

@@ -409,9 +409,9 @@ mod tests {
         .unwrap()
         {
             Value::Tensor(tensor) => {
-                assert!(tensor.data[0].is_nan());
-                assert!(tensor.data[1].is_infinite());
-                assert!(tensor.data[1].is_sign_positive());
+                assert!(tensor.materialize_f64()[0].is_nan());
+                assert!(tensor.materialize_f64()[1].is_infinite());
+                assert!(tensor.materialize_f64()[1].is_sign_positive());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -423,7 +423,7 @@ mod tests {
         match call(Value::Tensor(tensor)).unwrap() {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                assert_eq!(out.data, vec![0.0, 1.0, 2.0, 3.0]);
+                assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 2.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -431,9 +431,8 @@ mod tests {
 
     #[test]
     fn dense_typed_integer_tensor_is_rejected_by_class() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 4, 9]), vec![2, 2]).unwrap();
-        tensor.data.fill(f64::NAN);
 
         let err = call(Value::Tensor(tensor)).unwrap_err();
         assert_eq!(err.identifier(), ERROR_INVALID_INPUT.identifier);
@@ -441,8 +440,7 @@ mod tests {
 
     #[test]
     fn dense_negative_typed_integer_is_rejected_by_class_before_domain() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, -4]), vec![1, 2]).unwrap();
-        tensor.data.fill(4.0);
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, -4]), vec![1, 2]).unwrap();
 
         let err = call(Value::Tensor(tensor)).unwrap_err();
         assert_eq!(err.identifier(), ERROR_INVALID_INPUT.identifier);
@@ -559,14 +557,14 @@ mod tests {
             let tensor = Tensor::new(vec![0.0, 1.0, 4.0, 9.0], vec![4, 1]).unwrap();
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &tensor.data,
+                    data: &tensor.materialize_f64(),
                     shape: &tensor.shape,
                 })
                 .unwrap();
             let result = call(Value::GpuTensor(handle)).unwrap();
             let gathered = test_support::gather(result).unwrap();
             assert_eq!(gathered.shape, vec![4, 1]);
-            assert_eq!(gathered.data, vec![0.0, 1.0, 2.0, 3.0]);
+            assert_eq!(gathered.materialize_f64(), vec![0.0, 1.0, 2.0, 3.0]);
         });
     }
 
@@ -576,7 +574,7 @@ mod tests {
             let tensor = Tensor::new(vec![1.0, -4.0], vec![1, 2]).unwrap();
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &tensor.data,
+                    data: &tensor.materialize_f64(),
                     shape: &tensor.shape,
                 })
                 .unwrap();

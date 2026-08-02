@@ -253,11 +253,11 @@ mod tests {
         let Value::Tensor(mins) = result.smallest else {
             panic!("expected min tensor");
         };
-        assert_eq!(mins.data, vec![1.0, 2.0]);
+        assert_eq!(mins.materialize_f64(), vec![1.0, 2.0]);
         let Value::Tensor(maxes) = result.largest else {
             panic!("expected max tensor");
         };
-        assert_eq!(maxes.data, vec![3.0, 4.0]);
+        assert_eq!(maxes.materialize_f64(), vec![3.0, 4.0]);
     }
 
     #[tokio::test]

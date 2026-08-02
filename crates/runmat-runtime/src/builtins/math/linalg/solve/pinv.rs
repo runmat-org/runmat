@@ -405,7 +405,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                approx_equal(&out.data, &[0.04, 0.08, 0.08, 0.16], 1e-12);
+                approx_equal(&out.materialize_f64(), &[0.04, 0.08, 0.08, 0.16], 1e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -414,15 +414,14 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pinv_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![2, 0, 0, 4]), vec![2, 2]).unwrap();
-        tensor.data.fill(1.0);
 
         let result = pinv_builtin(Value::Tensor(tensor), Vec::new()).expect("pinv");
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                approx_equal(&out.data, &[0.5, 0.0, 0.0, 0.25], 1e-12);
+                approx_equal(&out.materialize_f64(), &[0.5, 0.0, 0.0, 0.25], 1e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -436,7 +435,11 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 3]);
-                approx_equal(&out.data, &[1.0, 0.0, 0.0, 0.0, 0.0, 1.0], 1e-12);
+                approx_equal(
+                    &out.materialize_f64(),
+                    &[1.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+                    1e-12,
+                );
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -450,7 +453,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                approx_equal(&out.data, &[1.0, 0.0, 0.0, 0.0], 1e-9);
+                approx_equal(&out.materialize_f64(), &[1.0, 0.0, 0.0, 0.0], 1e-9);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -489,14 +492,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 2.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = pinv_builtin(Value::GpuTensor(handle), Vec::new()).expect("gpu pinv");
             let gathered = test_support::gather(result).expect("gather");
             let cpu = pinv_real_tensor(&tensor, None).expect("cpu pinv");
-            approx_equal(&gathered.data, &cpu.data, 1e-12);
+            approx_equal(&gathered.materialize_f64(), &cpu.materialize_f64(), 1e-12);
         });
     }
 
@@ -513,7 +516,7 @@ pub(crate) mod tests {
         let cpu = pinv_real_tensor(&tensor, None).expect("cpu pinv");
 
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
@@ -525,10 +528,10 @@ pub(crate) mod tests {
 
         match runmat_accelerate_api::provider().unwrap().precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => {
-                approx_equal(&gathered.data, &cpu.data, 1e-10);
+                approx_equal(&gathered.materialize_f64(), &cpu.materialize_f64(), 1e-10);
             }
             runmat_accelerate_api::ProviderPrecision::F32 => {
-                approx_equal(&gathered.data, &cpu.data, 5e-5);
+                approx_equal(&gathered.materialize_f64(), &cpu.materialize_f64(), 5e-5);
             }
         }
     }

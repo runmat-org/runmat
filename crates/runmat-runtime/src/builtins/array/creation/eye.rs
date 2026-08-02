@@ -661,9 +661,9 @@ pub(crate) mod tests {
                     for c in 0..3 {
                         let idx = r + c * 3;
                         if r == c {
-                            assert_eq!(t.data[idx], 1.0);
+                            assert_eq!(t.materialize_f64()[idx], 1.0);
                         } else {
-                            assert_eq!(t.data[idx], 0.0);
+                            assert_eq!(t.materialize_f64()[idx], 0.0);
                         }
                     }
                 }
@@ -680,14 +680,14 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 4]);
-                assert_eq!(t.data.len(), 8);
+                assert_eq!(t.materialize_f64().len(), 8);
                 for r in 0..2 {
                     for c in 0..4 {
                         let idx = r + c * 2;
                         if r == c {
-                            assert_eq!(t.data[idx], 1.0);
+                            assert_eq!(t.materialize_f64()[idx], 1.0);
                         } else {
-                            assert_eq!(t.data[idx], 0.0);
+                            assert_eq!(t.materialize_f64()[idx], 0.0);
                         }
                     }
                 }
@@ -704,11 +704,11 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 4]);
-                assert_eq!(t.data.len(), 8);
-                assert_eq!(t.data[0], 1.0);
-                assert_eq!(t.data[1], 0.0);
-                assert_eq!(t.data[2], 0.0);
-                assert_eq!(t.data[3], 1.0);
+                assert_eq!(t.materialize_f64().len(), 8);
+                assert_eq!(t.materialize_f64()[0], 1.0);
+                assert_eq!(t.materialize_f64()[1], 0.0);
+                assert_eq!(t.materialize_f64()[2], 0.0);
+                assert_eq!(t.materialize_f64()[3], 1.0);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -721,7 +721,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 0]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -736,7 +736,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, tensor.shape);
-                assert_eq!(t.data, vec![1.0, 0.0, 0.0, 1.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 0.0, 0.0, 1.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -942,15 +942,15 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3, 2]);
                 // slice 0
-                assert_eq!(t.data[0], 1.0);
-                assert_eq!(t.data[1], 0.0);
-                assert_eq!(t.data[2], 0.0);
-                assert_eq!(t.data[3], 1.0);
+                assert_eq!(t.materialize_f64()[0], 1.0);
+                assert_eq!(t.materialize_f64()[1], 0.0);
+                assert_eq!(t.materialize_f64()[2], 0.0);
+                assert_eq!(t.materialize_f64()[3], 1.0);
                 // slice 1 offset = rows * cols = 6
-                assert_eq!(t.data[6], 1.0);
-                assert_eq!(t.data[7], 0.0);
-                assert_eq!(t.data[8], 0.0);
-                assert_eq!(t.data[9], 1.0);
+                assert_eq!(t.materialize_f64()[6], 1.0);
+                assert_eq!(t.materialize_f64()[7], 0.0);
+                assert_eq!(t.materialize_f64()[8], 0.0);
+                assert_eq!(t.materialize_f64()[9], 1.0);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -968,7 +968,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -984,10 +984,10 @@ pub(crate) mod tests {
                     assert_eq!(gpu.shape, vec![2, 3]);
                     let gathered = test_support::gather(Value::GpuTensor(gpu)).expect("gather");
                     assert_eq!(gathered.shape, vec![2, 3]);
-                    assert_eq!(gathered.data[0], 1.0);
-                    assert_eq!(gathered.data[1], 0.0);
-                    assert_eq!(gathered.data[2], 0.0);
-                    assert_eq!(gathered.data[3], 1.0);
+                    assert_eq!(gathered.materialize_f64()[0], 1.0);
+                    assert_eq!(gathered.materialize_f64()[1], 0.0);
+                    assert_eq!(gathered.materialize_f64()[2], 0.0);
+                    assert_eq!(gathered.materialize_f64()[3], 1.0);
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
             }
@@ -1000,14 +1000,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 0.0, 0.0, 0.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let prototype = provider.upload(&view).expect("upload proto");
             let result = block_on(eye_builtin(vec![Value::GpuTensor(prototype)])).expect("eye");
             let gathered = test_support::gather(result).expect("gather gpu identity");
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![1.0, 0.0, 0.0, 1.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 0.0, 1.0]);
         });
     }
 
@@ -1020,7 +1020,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![1.0, 0.0, 0.0, 1.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 0.0, 0.0, 1.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1063,7 +1063,7 @@ pub(crate) mod tests {
         let cpu_value = block_on(eye_builtin(vec![Value::Num(3.0)])).expect("cpu eye");
         let host_proto = Tensor::zeros(vec![3, 3]);
         let view = HostTensorView {
-            data: &host_proto.data,
+            data: &host_proto.materialize_f64(),
             shape: &host_proto.shape,
         };
         let gpu_proto = provider.upload(&view).expect("upload proto");
@@ -1082,6 +1082,6 @@ pub(crate) mod tests {
         };
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        assert_eq!(gathered.data, cpu_tensor.data);
+        assert_eq!(gathered.materialize_f64(), cpu_tensor.materialize_f64());
     }
 }

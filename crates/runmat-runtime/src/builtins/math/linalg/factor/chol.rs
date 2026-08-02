@@ -640,9 +640,8 @@ pub(crate) mod tests {
 
     #[test]
     fn chol_matrix_conversion_reads_typed_integer_storage_exactly() {
-        let mut tensor = Matrix::new_integer(IntegerStorage::I16(vec![4, 2, 2, 3]), vec![2, 2])
+        let tensor = Matrix::new_integer(IntegerStorage::I16(vec![4, 2, 2, 3]), vec![2, 2])
             .expect("typed integer tensor");
-        tensor.data.fill(f64::NAN);
 
         let matrix = RowMajorMatrix::from_tensor(&tensor, "chol").expect("matrix");
         assert_eq!(matrix.rows, 2);
@@ -669,12 +668,12 @@ pub(crate) mod tests {
                 let mut sum = 0.0;
                 for k in 0..rows {
                     let rik = if k <= i {
-                        matrix.data[k + i * rows]
+                        matrix.materialize_f64()[k + i * rows]
                     } else {
                         0.0
                     };
                     let rjk = if k <= j {
-                        matrix.data[k + j * rows]
+                        matrix.materialize_f64()[k + j * rows]
                     } else {
                         0.0
                     };
@@ -696,12 +695,12 @@ pub(crate) mod tests {
                 let mut sum = 0.0;
                 for k in 0..rows {
                     let lik = if i >= k {
-                        matrix.data[i + k * rows]
+                        matrix.materialize_f64()[i + k * rows]
                     } else {
                         0.0
                     };
                     let ljk = if j >= k {
-                        matrix.data[j + k * rows]
+                        matrix.materialize_f64()[j + k * rows]
                     } else {
                         0.0
                     };
@@ -715,7 +714,11 @@ pub(crate) mod tests {
 
     fn tensor_close(lhs: &Matrix, rhs: &Matrix, tol: f64) {
         assert_eq!(lhs.shape, rhs.shape, "shape mismatch");
-        for (a, b) in lhs.data.iter().zip(rhs.data.iter()) {
+        for (a, b) in lhs
+            .materialize_f64()
+            .iter()
+            .zip(rhs.materialize_f64().iter())
+        {
             assert!(
                 (a - b).abs() <= tol,
                 "tensors differ: {a} vs {b} (tol {tol})"
@@ -730,7 +733,7 @@ pub(crate) mod tests {
                 ComplexTensor::new(vec![(re, im)], vec![1, 1]).expect("complex tensor")
             }
             Value::Tensor(t) => {
-                let data: Vec<(f64, f64)> = t.data.iter().map(|&v| (v, 0.0)).collect();
+                let data: Vec<(f64, f64)> = t.materialize_f64().iter().map(|&v| (v, 0.0)).collect();
                 ComplexTensor::new(data, t.shape.clone()).expect("complex tensor")
             }
             Value::Num(n) => {
@@ -826,7 +829,7 @@ pub(crate) mod tests {
         let r_tensor = tensor_from_value(r);
         assert_eq!(r_tensor.shape, vec![3, 3]);
         for diag in 0..3 {
-            let value = r_tensor.data[diag + diag * 3];
+            let value = r_tensor.materialize_f64()[diag + diag * 3];
             assert!(value > 0.0, "Cholesky diagonal must be positive");
         }
         let recon = reconstruct_from_upper(&r_tensor);
@@ -870,7 +873,7 @@ pub(crate) mod tests {
         let l = tensor_from_value(result);
         assert_eq!(l.shape, vec![3, 3]);
         for diag in 0..3 {
-            let value = l.data[diag + diag * 3];
+            let value = l.materialize_f64()[diag + diag * 3];
             assert!(value > 0.0, "Cholesky diagonal must be positive");
         }
         let recon = reconstruct_from_lower(&l);
@@ -905,10 +908,10 @@ pub(crate) mod tests {
         assert_eq!(eval.flag_index(), 2);
         let factor = tensor_from_value(eval.factor());
         assert_eq!(factor.shape, vec![2, 2]);
-        assert!((factor.data[0] - 1.0).abs() < 1e-12);
-        assert!((factor.data[1] - 0.0).abs() < 1e-12);
-        assert!((factor.data[2] - 2.0).abs() < 1e-12);
-        assert!((factor.data[3] - 0.0).abs() < 1e-12);
+        assert!((factor.materialize_f64()[0] - 1.0).abs() < 1e-12);
+        assert!((factor.materialize_f64()[1] - 0.0).abs() < 1e-12);
+        assert!((factor.materialize_f64()[2] - 2.0).abs() < 1e-12);
+        assert!((factor.materialize_f64()[3] - 0.0).abs() < 1e-12);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -952,7 +955,7 @@ pub(crate) mod tests {
         assert_eq!(eval.flag_index(), 0);
         let factor = tensor_from_value(eval.factor());
         assert_eq!(factor.shape, vec![0, 0]);
-        assert!(factor.data.is_empty());
+        assert!(factor.materialize_f64().is_empty());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1014,7 +1017,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let a = Matrix::new(vec![6.0, 2.0, 2.0, 5.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1031,7 +1034,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let a = Matrix::new(vec![1.0, 2.0, 2.0, 1.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1040,10 +1043,10 @@ pub(crate) mod tests {
             let factor = eval.factor();
             assert!(matches!(factor, Value::GpuTensor(_)));
             let gathered = test_support::gather(factor).expect("gather factor");
-            assert!((gathered.data[0] - 1.0).abs() < 1e-12);
-            assert!((gathered.data[1] - 0.0).abs() < 1e-12);
-            assert!((gathered.data[2] - 2.0).abs() < 1e-12);
-            assert!((gathered.data[3] - 0.0).abs() < 1e-12);
+            assert!((gathered.materialize_f64()[0] - 1.0).abs() < 1e-12);
+            assert!((gathered.materialize_f64()[1] - 0.0).abs() < 1e-12);
+            assert!((gathered.materialize_f64()[2] - 2.0).abs() < 1e-12);
+            assert!((gathered.materialize_f64()[3] - 0.0).abs() < 1e-12);
         });
     }
 
@@ -1079,7 +1082,7 @@ pub(crate) mod tests {
 
         let provider = runmat_accelerate_api::provider().expect("provider");
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
@@ -1099,7 +1102,7 @@ pub(crate) mod tests {
             Value::Num(n) => assert!((n - 3.0).abs() < 1e-12),
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 1]);
-                assert!((t.data[0] - 3.0).abs() < 1e-12);
+                assert!((t.materialize_f64()[0] - 3.0).abs() < 1e-12);
             }
             other => panic!("expected scalar-like, got {other:?}"),
         }

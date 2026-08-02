@@ -873,21 +873,19 @@ pub(crate) mod tests {
 
     #[test]
     fn query_text_and_numeric_scalar_read_typed_integer_storage_exactly() {
-        let mut query = Tensor::new_integer(
+        let query = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![u64::MAX]),
             vec![1, 1],
         )
         .expect("typed query tensor");
-        query.data.clear();
         assert_eq!(
             value_to_query_string(&Value::Tensor(query), "id").expect("query text"),
             "18446744073709551615"
         );
 
-        let mut timeout =
+        let timeout =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![2026]), vec![1, 1])
                 .expect("typed timeout tensor");
-        timeout.data.clear();
         assert_eq!(
             numeric_scalar(&Value::Tensor(timeout), "timeout").expect("numeric scalar"),
             2026.0
@@ -1026,7 +1024,7 @@ pub(crate) mod tests {
         let result = run_webread(Value::from(url), args).expect("webread binary response");
 
         match result {
-            Value::Tensor(mut tensor) => {
+            Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 5]);
                 assert_eq!(
                     tensor.integer_storage(),
@@ -1035,7 +1033,6 @@ pub(crate) mod tests {
 
                 // Binary consumers must use exact uint8 backing storage rather
                 // than the compatibility f64 mirror.
-                tensor.data = vec![f64::NAN; payload.len()];
                 let persisted = crate::data::DataArrayPayload::from_value(
                     "uint8".to_string(),
                     &Value::Tensor(tensor),

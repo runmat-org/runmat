@@ -592,18 +592,16 @@ mod integer_download_tests {
 
     #[test]
     fn integer_download_preserves_wide_uint64_without_a_float_mirror() {
-        let mut tensor =
-            integer_tensor_from_download(runmat_accelerate_api::HostIntegerTensorOwned {
-                data: HostIntegerDataOwned::U64(vec![1_u64 << 63, u64::MAX]),
-                shape: vec![1, 2],
-            })
-            .expect("integer download");
+        let tensor = integer_tensor_from_download(runmat_accelerate_api::HostIntegerTensorOwned {
+            data: HostIntegerDataOwned::U64(vec![1_u64 << 63, u64::MAX]),
+            shape: vec![1, 2],
+        })
+        .expect("integer download");
 
         assert_eq!(
             tensor.integer_storage(),
             Some(&IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]))
         );
-        tensor.data.clear();
         assert_eq!(
             tensor.integer_storage(),
             Some(&IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]))

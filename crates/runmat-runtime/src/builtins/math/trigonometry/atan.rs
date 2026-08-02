@@ -595,7 +595,11 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 1]);
-                for (value, expected) in out.data.iter().zip(tensor.data.iter().map(|v| v.atan())) {
+                for (value, expected) in out
+                    .materialize_f64()
+                    .iter()
+                    .zip(tensor.materialize_f64().iter().map(|v| v.atan()))
+                {
                     assert!((value - expected).abs() < 1e-12);
                 }
             }
@@ -606,19 +610,18 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I16(vec![0, 1, 2]),
             vec![3, 1],
         )
         .expect("integer tensor");
-        tensor.data.fill(0.0);
 
         let result = atan_builtin(Value::Tensor(tensor), Vec::new()).expect("atan");
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 1]);
                 let expected = [0.0, 1.0f64.atan(), 2.0f64.atan()];
-                for (actual, expected) in out.data.iter().zip(expected.iter()) {
+                for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expected).abs() < 1e-12);
                 }
                 assert!(out.integer_storage().is_none());
@@ -629,12 +632,11 @@ pub(crate) mod tests {
 
     #[test]
     fn atan_like_complex_reads_typed_integer_storage_exactly() {
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I64(vec![-3, 0, 5]),
             vec![3, 1],
         )
         .expect("integer tensor");
-        tensor.data.fill(f64::NAN);
 
         let result = atan_builtin(
             Value::Tensor(tensor),
@@ -709,7 +711,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, chars.cols]);
-                for (value, ch) in t.data.iter().zip(chars.data.iter()) {
+                for (value, ch) in t.materialize_f64().iter().zip(chars.data.iter()) {
                     let expected = (*ch as u32 as f64).atan();
                     assert!((value - expected).abs() < 1e-12);
                 }
@@ -748,8 +750,9 @@ pub(crate) mod tests {
         .expect("atan");
         match result {
             Value::Tensor(out) => {
-                let expected: Vec<f64> = tensor.data.iter().map(|&v| v.atan()).collect();
-                assert_eq!(out.data, expected);
+                let expected: Vec<f64> =
+                    tensor.materialize_f64().iter().map(|&v| v.atan()).collect();
+                assert_eq!(out.materialize_f64(), expected);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -778,15 +781,15 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![-1.0, 0.0, 1.0], vec![3, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = atan_builtin(Value::GpuTensor(handle), Vec::new()).expect("atan");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![3, 1]);
-            let expected: Vec<f64> = tensor.data.iter().map(|&v| v.atan()).collect();
-            assert_eq!(gathered.data, expected);
+            let expected: Vec<f64> = tensor.materialize_f64().iter().map(|&v| v.atan()).collect();
+            assert_eq!(gathered.materialize_f64(), expected);
         });
     }
 
@@ -796,7 +799,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let input = provider.upload(&view).expect("upload");
@@ -809,8 +812,9 @@ pub(crate) mod tests {
             match result {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-                    let expected: Vec<f64> = tensor.data.iter().map(|&v| v.atan()).collect();
-                    assert_eq!(gathered.data, expected);
+                    let expected: Vec<f64> =
+                        tensor.materialize_f64().iter().map(|&v| v.atan()).collect();
+                    assert_eq!(gathered.materialize_f64(), expected);
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
             }
@@ -835,7 +839,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let proto = provider.upload(&view).expect("upload");
@@ -918,7 +922,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![-2.0, -0.5, 0.0, 0.5, 2.0], vec![5, 1]).unwrap();
         let cpu = atan_real(Value::Tensor(tensor.clone())).unwrap();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()
@@ -934,7 +938,7 @@ pub(crate) mod tests {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
                 };
-                for (a, b) in gt.data.iter().zip(ct.data.iter()) {
+                for (a, b) in gt.materialize_f64().iter().zip(ct.materialize_f64().iter()) {
                     assert!((a - b).abs() < tol, "|{a} - {b}| >= {tol}");
                 }
             }

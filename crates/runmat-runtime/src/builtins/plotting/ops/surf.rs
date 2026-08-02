@@ -730,9 +730,18 @@ pub(crate) mod tests {
             )
             .unwrap();
         assert!(rest.is_empty());
-        assert_eq!(Tensor::try_from(&x).unwrap().data, vec![1.0, 2.0]);
-        assert_eq!(Tensor::try_from(&y).unwrap().data, vec![1.0, 2.0]);
-        assert_eq!(Tensor::try_from(&z).unwrap().data, vec![1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(
+            Tensor::try_from(&x).unwrap().materialize_f64(),
+            vec![1.0, 2.0]
+        );
+        assert_eq!(
+            Tensor::try_from(&y).unwrap().materialize_f64(),
+            vec![1.0, 2.0]
+        );
+        assert_eq!(
+            Tensor::try_from(&z).unwrap().materialize_f64(),
+            vec![1.0, 2.0, 3.0, 4.0]
+        );
     }
 
     #[test]
@@ -750,8 +759,14 @@ pub(crate) mod tests {
             )
             .unwrap();
         assert!(rest.is_empty());
-        assert_eq!(Tensor::try_from(&x).unwrap().data, vec![1.0, 2.0, 3.0, 4.0]);
-        assert_eq!(Tensor::try_from(&y).unwrap().data, vec![1.0, 2.0, 3.0]);
+        assert_eq!(
+            Tensor::try_from(&x).unwrap().materialize_f64(),
+            vec![1.0, 2.0, 3.0, 4.0]
+        );
+        assert_eq!(
+            Tensor::try_from(&y).unwrap().materialize_f64(),
+            vec![1.0, 2.0, 3.0]
+        );
     }
 
     #[test]

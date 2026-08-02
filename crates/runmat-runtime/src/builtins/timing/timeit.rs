@@ -509,18 +509,16 @@ pub(crate) mod tests {
 
     #[test]
     fn output_count_reads_typed_integer_scalar_storage_exactly() {
-        let mut count = Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1])
+        let count = Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1])
             .expect("typed output count");
-        count.data.clear();
 
         assert_eq!(
             parse_non_negative_integer(&Value::Tensor(count)).unwrap(),
             2
         );
 
-        let mut negative = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
+        let negative = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
             .expect("negative output count");
-        negative.data.clear();
         assert!(parse_non_negative_integer(&Value::Tensor(negative)).is_err());
     }
 

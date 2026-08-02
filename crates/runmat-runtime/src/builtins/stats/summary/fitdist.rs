@@ -1440,14 +1440,12 @@ mod tests {
     }
 
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         Value::Tensor(tensor)
     }
 
     fn mirrorless_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         Value::Tensor(tensor)
     }
 
@@ -1509,7 +1507,10 @@ mod tests {
         match density {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 1]);
-                assert!(tensor.data.iter().all(|value| value.is_finite()));
+                assert!(tensor
+                    .materialize_f64()
+                    .iter()
+                    .all(|value| value.is_finite()));
             }
             other => panic!("expected tensor density, got {other:?}"),
         }
@@ -1656,7 +1657,10 @@ mod tests {
             panic!("expected vector density");
         };
         assert_eq!(density.shape, vec![2, 1]);
-        assert!((density.data[0] - distribution_math::standard_normal_pdf(0.0)).abs() < 1.0e-12);
+        assert!(
+            (density.materialize_f64()[0] - distribution_math::standard_normal_pdf(0.0)).abs()
+                < 1.0e-12
+        );
 
         let probability = block_on(cdf_builtin(
             Value::String("Poisson".into()),

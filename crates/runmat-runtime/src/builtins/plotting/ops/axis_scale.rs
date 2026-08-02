@@ -178,15 +178,13 @@ mod tests {
     use runmat_builtins::{IntegerStorage, Tensor};
 
     fn poisoned_scalar(storage: IntegerStorage) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![1, 1]).unwrap();
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, vec![1, 1]).unwrap();
         Value::Tensor(tensor)
     }
 
     #[test]
     fn axis_scale_numeric_scalar_reads_typed_integer_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::I16(vec![12]), vec![1, 1]).unwrap();
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![12]), vec![1, 1]).unwrap();
 
         assert_eq!(numeric_scalar(&Value::Tensor(tensor)), Some(12.0));
     }

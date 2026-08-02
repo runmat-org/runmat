@@ -968,7 +968,7 @@ mod tests {
         let Value::Tensor(f) = &values[1] else {
             panic!("expected f tensor");
         };
-        (pxx.data.clone(), f.data.clone())
+        (pxx.materialize_f64().clone(), f.materialize_f64().clone())
     }
 
     fn output_pair_with_pxx_shape(value: Value) -> (Vec<f64>, Vec<usize>, Vec<f64>) {
@@ -981,21 +981,22 @@ mod tests {
         let Value::Tensor(f) = &values[1] else {
             panic!("expected f tensor");
         };
-        (pxx.data.clone(), pxx.shape.clone(), f.data.clone())
+        (
+            pxx.materialize_f64().clone(),
+            pxx.shape.clone(),
+            f.materialize_f64().clone(),
+        )
     }
 
     fn integer_tensor(values: Vec<i16>, shape: Vec<usize>) -> Tensor {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::I16(values), shape).expect("typed integer tensor");
-        tensor.data.fill(f64::NAN);
         tensor
     }
 
     #[test]
     fn periodogram_scalar_detector_reads_typed_integer_storage_without_mirror() {
-        let mut scalar =
-            Tensor::new_integer(IntegerStorage::I16(vec![8]), vec![1, 1]).expect("scalar");
-        scalar.data.clear();
+        let scalar = Tensor::new_integer(IntegerStorage::I16(vec![8]), vec![1, 1]).expect("scalar");
         let vector = integer_tensor(vec![8, 16], vec![1, 2]);
 
         assert!(is_scalar_numeric(&Value::Tensor(scalar)));
@@ -1252,9 +1253,9 @@ mod tests {
             crate::builtins::common::test_support::gather(values[0].clone()).expect("gather pxx");
         let f = crate::builtins::common::test_support::gather(values[1].clone()).expect("gather f");
         assert_eq!(pxx.shape, vec![17, 1]);
-        assert_eq!(f.data[4], 4.0);
+        assert_eq!(f.materialize_f64()[4], 4.0);
         let peak = pxx
-            .data
+            .materialize_f64()
             .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
@@ -1305,9 +1306,14 @@ mod tests {
         let gpu_f =
             crate::builtins::common::test_support::gather(values[1].clone()).expect("gather f");
 
-        assert_eq!(gpu_f.data, host_f);
-        assert_eq!(gpu_pxx.data.len(), host_pxx.len());
-        for (idx, (actual, expected)) in gpu_pxx.data.iter().zip(host_pxx.iter()).enumerate() {
+        assert_eq!(gpu_f.materialize_f64(), host_f);
+        assert_eq!(gpu_pxx.materialize_f64().len(), host_pxx.len());
+        for (idx, (actual, expected)) in gpu_pxx
+            .materialize_f64()
+            .iter()
+            .zip(host_pxx.iter())
+            .enumerate()
+        {
             assert!(
                 (actual - expected).abs() < 1e-6,
                 "centered bin {idx}: gpu {actual}, host {expected}"

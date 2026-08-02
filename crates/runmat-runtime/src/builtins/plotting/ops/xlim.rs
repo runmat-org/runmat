@@ -128,6 +128,6 @@ mod tests {
         assert!(matches!(result, Value::Tensor(_)));
         let queried = xlim_builtin(Vec::new()).unwrap();
         let tensor = runmat_builtins::Tensor::try_from(&queried).unwrap();
-        assert_eq!(tensor.data, vec![0.0, 10.0]);
+        assert_eq!(tensor.materialize_f64(), vec![0.0, 10.0]);
     }
 }

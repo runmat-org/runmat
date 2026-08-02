@@ -636,8 +636,7 @@ pub(crate) mod tests {
     }
 
     fn cleared_int_value(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         Value::Tensor(tensor)
     }
 
@@ -652,7 +651,7 @@ pub(crate) mod tests {
         let Value::Tensor(x) = x else {
             panic!("expected tensor");
         };
-        assert_eq!(x.data, vec![1.0, 2.0, 3.0]);
+        assert_eq!(x.materialize_f64(), vec![1.0, 2.0, 3.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -661,9 +661,7 @@ mod tests {
     }
 
     fn typed_integer_tensor_value(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let len = storage.len();
-        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-        tensor.data = vec![99.0; len];
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
         Value::Tensor(tensor)
     }
 
@@ -678,7 +676,10 @@ mod tests {
         assert_eq!(tensor.shape, vec![rows.len(), 3]);
         for (row_idx, expected) in rows.iter().enumerate() {
             for col in 0..3 {
-                assert_close(tensor.data[col * rows.len() + row_idx], expected[col]);
+                assert_close(
+                    tensor.materialize_f64()[col * rows.len() + row_idx],
+                    expected[col],
+                );
             }
         }
     }
@@ -770,7 +771,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(z.shape, vec![3, 3]);
-        assert_close(z.data[6], 2.0);
+        assert_close(z.materialize_f64()[6], 2.0);
     }
 
     #[test]
@@ -789,7 +790,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(z.shape, vec![3, 3]);
-        assert_close(z.data[6], 2.0);
+        assert_close(z.materialize_f64()[6], 2.0);
     }
 
     #[test]

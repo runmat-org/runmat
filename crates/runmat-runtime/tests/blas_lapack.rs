@@ -12,21 +12,19 @@ fn test_blas_matrix_multiplication() {
 
     // [1 2] * [2 1] = [4 5]
     // [3 4]   [1 2]   [10 11]
-    assert_eq!(result.data, vec![4.0, 10.0, 5.0, 11.0]);
+    assert_eq!(result.materialize_f64(), vec![4.0, 10.0, 5.0, 11.0]);
     assert_eq!(result.rows(), 2);
     assert_eq!(result.cols(), 2);
 }
 
 #[test]
 fn blas_matrix_multiplication_reads_typed_integer_storage_exactly() {
-    let mut a = Matrix::new_integer(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2]).unwrap();
-    let mut b = Matrix::new_integer(IntegerStorage::I16(vec![2, 1, 1, 2]), vec![2, 2]).unwrap();
-    a.data.fill(f64::NAN);
-    b.data.fill(f64::NAN);
+    let a = Matrix::new_integer(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2]).unwrap();
+    let b = Matrix::new_integer(IntegerStorage::I16(vec![2, 1, 1, 2]), vec![2, 2]).unwrap();
 
     let result = blas_matrix_mul(&a, &b).unwrap();
 
-    assert_eq!(result.data, vec![4.0, 10.0, 5.0, 11.0]);
+    assert_eq!(result.materialize_f64(), vec![4.0, 10.0, 5.0, 11.0]);
 }
 
 #[test]
@@ -92,8 +90,7 @@ fn test_lapack_linear_solve() {
 
 #[test]
 fn lapack_linear_solve_reads_typed_integer_matrix_storage_exactly() {
-    let mut a = Matrix::new_integer(IntegerStorage::I16(vec![2, 1, 1, 3]), vec![2, 2]).unwrap();
-    a.data.fill(f64::NAN);
+    let a = Matrix::new_integer(IntegerStorage::I16(vec![2, 1, 1, 3]), vec![2, 2]).unwrap();
     let b = vec![5.0, 6.0];
 
     let solution = lapack_solve_linear_system(&a, &b).unwrap();
@@ -135,10 +132,10 @@ fn test_lapack_qr_decomposition() {
 
     // Check if Q^T * Q is approximately identity
     let tolerance = 1e-10;
-    assert!((qt_q.data[0] - 1.0).abs() < tolerance); // [0,0] should be 1
-    assert!((qt_q.data[1]).abs() < tolerance); // [0,1] should be 0
-    assert!((qt_q.data[2]).abs() < tolerance); // [1,0] should be 0
-    assert!((qt_q.data[3] - 1.0).abs() < tolerance); // [1,1] should be 1
+    assert!((qt_q.materialize_f64()[0] - 1.0).abs() < tolerance); // [0,0] should be 1
+    assert!((qt_q.materialize_f64()[1]).abs() < tolerance); // [0,1] should be 0
+    assert!((qt_q.materialize_f64()[2]).abs() < tolerance); // [1,0] should be 0
+    assert!((qt_q.materialize_f64()[3] - 1.0).abs() < tolerance); // [1,1] should be 1
 }
 
 #[test]
@@ -181,17 +178,17 @@ fn test_lapack_matrix_inverse() {
     let expected = [2.0 / 3.0, -1.0 / 3.0, -1.0 / 3.0, 2.0 / 3.0];
 
     for (i, &expected_val) in expected.iter().enumerate() {
-        assert!((inv.data[i] - expected_val).abs() < 1e-10);
+        assert!((inv.materialize_f64()[i] - expected_val).abs() < 1e-10);
     }
 
     // Verify A * A^(-1) = I
     let identity = blas_matrix_mul(&matrix, &inv).unwrap();
 
     let tolerance = 1e-10;
-    assert!((identity.data[0] - 1.0).abs() < tolerance);
-    assert!((identity.data[1]).abs() < tolerance);
-    assert!((identity.data[2]).abs() < tolerance);
-    assert!((identity.data[3] - 1.0).abs() < tolerance);
+    assert!((identity.materialize_f64()[0] - 1.0).abs() < tolerance);
+    assert!((identity.materialize_f64()[1]).abs() < tolerance);
+    assert!((identity.materialize_f64()[2]).abs() < tolerance);
+    assert!((identity.materialize_f64()[3] - 1.0).abs() < tolerance);
 }
 
 #[test]
@@ -202,7 +199,7 @@ fn test_builtin_blas_functions() {
 
     match call_builtin("blas_matmul", &[Value::Tensor(a), Value::Tensor(b)]) {
         Ok(Value::Tensor(m)) => {
-            assert_eq!(m.data, vec![4.0, 10.0, 5.0, 11.0]);
+            assert_eq!(m.materialize_f64(), vec![4.0, 10.0, 5.0, 11.0]);
         }
         Err(message) if message.message().contains("Undefined function") => {
             // Builtin not wired up yet; direct helper coverage above still exercises implementation.

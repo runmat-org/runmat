@@ -23,7 +23,7 @@ fn logical_mask_write_rows_scalar_broadcast() {
     let vars = execute_source(src).unwrap();
     // Rows 1 and 3 all set to 7
     // Final A = [7 7; 3 4; 7 7] → column-major data [7 3 7 7 4 7]
-    assert!(vars.iter().any(|value| matches!(value, runmat_builtins::Value::Tensor(tensor) if tensor.shape == vec![3, 2] && tensor.data == vec![7.0, 3.0, 7.0, 7.0, 4.0, 7.0])));
+    assert!(vars.iter().any(|value| matches!(value, runmat_builtins::Value::Tensor(tensor) if tensor.shape == vec![3, 2] && tensor.materialize_f64() == vec![7.0, 3.0, 7.0, 7.0, 4.0, 7.0])));
 }
 
 #[test]
@@ -34,7 +34,7 @@ fn logical_mask_write_cols_vector_broadcast() {
     let vars = execute_source(src).unwrap();
     // Columns 2 and 4 replaced by [8;9]
     // Expected columns: [1 2], [8 9], [5 6], [8 9] → data col-major [1,2,8,9,5,6,8,9]
-    assert!(vars.iter().any(|value| matches!(value, runmat_builtins::Value::Tensor(tensor) if tensor.shape == vec![2, 4] && tensor.data == vec![1.0, 2.0, 8.0, 9.0, 5.0, 6.0, 8.0, 9.0])));
+    assert!(vars.iter().any(|value| matches!(value, runmat_builtins::Value::Tensor(tensor) if tensor.shape == vec![2, 4] && tensor.materialize_f64() == vec![1.0, 2.0, 8.0, 9.0, 5.0, 6.0, 8.0, 9.0])));
 }
 
 #[test]
@@ -45,7 +45,7 @@ fn mixed_mask_and_range_write_matrix_no_broadcast() {
     // After assignment: rows 1 and 3, cols 2..3 set to [[10,11];[12,13]] respecting column-major write
     // Final A row-major for intuition:
     // [1 10 11; 4 5 6; 7 12 13] → column-major data [1,4,7,10,5,12,11,6,13]
-    assert!(vars.iter().any(|value| matches!(value, runmat_builtins::Value::Tensor(tensor) if tensor.shape == vec![3, 3] && tensor.data == vec![1.0, 4.0, 7.0, 10.0, 5.0, 12.0, 11.0, 6.0, 13.0])));
+    assert!(vars.iter().any(|value| matches!(value, runmat_builtins::Value::Tensor(tensor) if tensor.shape == vec![3, 3] && tensor.materialize_f64() == vec![1.0, 4.0, 7.0, 10.0, 5.0, 12.0, 11.0, 6.0, 13.0])));
 }
 
 #[test]
@@ -57,7 +57,7 @@ fn broadcast_invariants_scalar_to_submatrix() {
     // After setting rows 1..2, cols 2..3 to 5:
     // Columns become: [1 5 3], [4 5 6]-> actually col2 [5 5 6]? Wait rows 1..2 become 5, row3 stays same.
     // Correct columns: c1=[1,2,3], c2=[5,5,6], c3=[5,5,9], c4=[10,11,12]
-    assert!(vars.iter().any(|value| matches!(value, runmat_builtins::Value::Tensor(tensor) if tensor.shape == vec![3, 4] && tensor.data == vec![1.0, 2.0, 3.0, 5.0, 5.0, 6.0, 5.0, 5.0, 9.0, 10.0, 11.0, 12.0])));
+    assert!(vars.iter().any(|value| matches!(value, runmat_builtins::Value::Tensor(tensor) if tensor.shape == vec![3, 4] && tensor.materialize_f64() == vec![1.0, 2.0, 3.0, 5.0, 5.0, 6.0, 5.0, 5.0, 9.0, 10.0, 11.0, 12.0])));
 }
 
 #[test]
@@ -67,13 +67,13 @@ fn end_arithmetic_range_store_linear_and_subscripted() {
     let vars = execute_source(src).unwrap();
     // A indices 2,4,6,8 replaced → [1,99,3,98,5,97,7,96,9,10]
     // MATLAB 1:10 yields a row vector (1 x 10)
-    assert!(vars.iter().any(|value| matches!(value, runmat_builtins::Value::Tensor(tensor) if tensor.shape == vec![1, 10] && tensor.data == vec![1.0, 99.0, 3.0, 98.0, 5.0, 97.0, 7.0, 96.0, 9.0, 10.0])));
+    assert!(vars.iter().any(|value| matches!(value, runmat_builtins::Value::Tensor(tensor) if tensor.shape == vec![1, 10] && tensor.materialize_f64() == vec![1.0, 99.0, 3.0, 98.0, 5.0, 97.0, 7.0, 96.0, 9.0, 10.0])));
 
     // 2D subscripted with end arithmetic on a range dim
     let src2 = "A = reshape([1 2 3 4 5 6 7 8 9 10 11 12], 3,4); A(1:end-1, 3) = [42; 43];";
     let vars2 = execute_source(src2).unwrap();
     // Column 3 becomes [42,43,9]
-    assert!(vars2.iter().any(|value| matches!(value, runmat_builtins::Value::Tensor(tensor) if tensor.shape == vec![3, 4] && tensor.data == vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 42.0, 43.0, 9.0, 10.0, 11.0, 12.0])));
+    assert!(vars2.iter().any(|value| matches!(value, runmat_builtins::Value::Tensor(tensor) if tensor.shape == vec![3, 4] && tensor.materialize_f64() == vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 42.0, 43.0, 9.0, 10.0, 11.0, 12.0])));
 }
 
 #[test]
@@ -99,7 +99,7 @@ fn gather_scatter_roundtrip_consistency() {
         .unwrap();
     // Original data 1..24 in column-major
     let expected: Vec<f64> = (1..=24).map(|x| x as f64).collect();
-    assert_eq!(a.data, expected);
+    assert_eq!(a.materialize_f64(), expected);
 }
 
 #[test]
@@ -108,13 +108,13 @@ fn fastpath_roundtrip_and_broadcast() {
     let src = "A=reshape([1 2 3 4 5 6 7 8 9 10 11 12],3,4); C1=A(:,2); A(:,2)=[30;31;32]; B1=A; A(1,:)=100; B2=A; A(:,3)=7; B3=A;";
     let vars = execute_source(src).unwrap();
     // C1 == original second column [4;5;6]
-    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Tensor(t) if t.shape==vec![3,1] && t.data==vec![4.0,5.0,6.0])));
+    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Tensor(t) if t.shape==vec![3,1] && t.materialize_f64()==vec![4.0,5.0,6.0])));
     // After A(:,2)=[30;31;32], B1 reflects updated column in col-major
-    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Tensor(t) if t.shape==vec![3,4] && t.data==vec![1.0,2.0,3.0,30.0,31.0,32.0,7.0,8.0,9.0,10.0,11.0,12.0])));
+    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Tensor(t) if t.shape==vec![3,4] && t.materialize_f64()==vec![1.0,2.0,3.0,30.0,31.0,32.0,7.0,8.0,9.0,10.0,11.0,12.0])));
     // After A(1,:)=100, B2 has first row set across all columns (col-major indices 0,3,6,9)
-    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Tensor(t) if t.shape==vec![3,4] && t.data[0]==100.0 && t.data[3]==100.0 && t.data[6]==100.0 && t.data[9]==100.0)));
+    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Tensor(t) if t.shape==vec![3,4] && t.materialize_f64()[0]==100.0 && t.materialize_f64()[3]==100.0 && t.materialize_f64()[6]==100.0 && t.materialize_f64()[9]==100.0)));
     // After A(:,3)=7 (scalar broadcast), all entries in third column are 7
-    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Tensor(t) if t.shape==vec![3,4] && t.data[6]==7.0 && t.data[7]==7.0 && t.data[8]==7.0)));
+    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Tensor(t) if t.shape==vec![3,4] && t.materialize_f64()[6]==7.0 && t.materialize_f64()[7]==7.0 && t.materialize_f64()[8]==7.0)));
 }
 
 #[test]
@@ -124,7 +124,7 @@ fn negative_step_linear_index() {
     let b = find_last_tensor(&vars);
     // MATLAB preserves numeric index array shape for linear indexing.
     assert_eq!(b.shape, vec![1, 5]);
-    assert_eq!(b.data, vec![10.0, 8.0, 6.0, 4.0, 2.0]);
+    assert_eq!(b.materialize_f64(), vec![10.0, 8.0, 6.0, 4.0, 2.0]);
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn negative_step_2d_subscript_index() {
     };
     assert_eq!(b.shape, vec![3, 2]);
     // Column-major order preserves index order: rows [3,2,1] for cols [4,2]
-    assert_eq!(b.data, vec![12.0, 11.0, 10.0, 6.0, 5.0, 4.0]);
+    assert_eq!(b.materialize_f64(), vec![12.0, 11.0, 10.0, 6.0, 5.0, 4.0]);
 }
 
 #[test]
@@ -149,7 +149,7 @@ fn empty_row_selection() {
         other => panic!("expected B tensor, got {other:?}"),
     };
     assert_eq!(b.shape, vec![0, 2]);
-    assert_eq!(b.data.len(), 0);
+    assert_eq!(b.materialize_f64().len(), 0);
 }
 
 #[test]
@@ -161,7 +161,7 @@ fn empty_col_selection() {
         other => panic!("expected B tensor, got {other:?}"),
     };
     assert_eq!(b.shape, vec![3, 0]);
-    assert_eq!(b.data.len(), 0);
+    assert_eq!(b.materialize_f64().len(), 0);
 }
 
 #[test]
@@ -170,7 +170,7 @@ fn empty_both_selection() {
     let vars = execute_source(src).unwrap();
     let b = find_last_tensor(&vars);
     assert_eq!(b.shape, vec![0, 0]);
-    assert_eq!(b.data.len(), 0);
+    assert_eq!(b.materialize_f64().len(), 0);
 }
 
 #[test]
@@ -182,7 +182,7 @@ fn mixed_selectors_rows_vector_and_col_range() {
         other => panic!("expected B tensor, got {other:?}"),
     };
     assert_eq!(b.shape, vec![2, 2]);
-    assert_eq!(b.data, vec![4.0, 6.0, 7.0, 9.0]);
+    assert_eq!(b.materialize_f64(), vec![4.0, 6.0, 7.0, 9.0]);
 }
 
 #[test]
@@ -205,7 +205,7 @@ fn gather_scatter_roundtrip_negative_step() {
         .find(|t| t.shape == vec![3, 4])
         .unwrap();
     let expected: Vec<f64> = (1..=12).map(|x| x as f64).collect();
-    assert_eq!(a.data, expected);
+    assert_eq!(a.materialize_f64(), expected);
 }
 
 #[test]
@@ -225,16 +225,16 @@ fn multidim_empty_mixes() {
     let mut saw_b4 = false;
     for v in &vars {
         if let runmat_builtins::Value::Tensor(t) = v {
-            if t.shape == vec![0, 4, 2] && t.data.is_empty() {
+            if t.shape == vec![0, 4, 2] && t.materialize_f64().is_empty() {
                 saw_b1 = true;
             }
-            if t.shape == vec![3, 0, 2] && t.data.is_empty() {
+            if t.shape == vec![3, 0, 2] && t.materialize_f64().is_empty() {
                 saw_b2 = true;
             }
-            if t.shape == vec![3, 4, 0] && t.data.is_empty() {
+            if t.shape == vec![3, 4, 0] && t.materialize_f64().is_empty() {
                 saw_b3 = true;
             }
-            if t.shape == vec![0, 2, 0] && t.data.is_empty() {
+            if t.shape == vec![0, 2, 0] && t.materialize_f64().is_empty() {
                 saw_b4 = true;
             }
         }
@@ -259,7 +259,7 @@ fn mixed_logical_mask_and_range_across_3d() {
     };
     assert_eq!(s.shape, vec![2, 2, 1]);
     // Expected from plane 2: col2 [16,17,18], col3 [19,20,21] selecting rows 1 & 3 => [16,18,19,21]
-    assert_eq!(s.data, vec![16.0, 18.0, 19.0, 21.0]);
+    assert_eq!(s.materialize_f64(), vec![16.0, 18.0, 19.0, 21.0]);
 }
 
 #[test]
@@ -286,12 +286,12 @@ fn scatter_broadcasts_negative_steps_and_degenerate_dims() {
     let rows = 3usize;
     let cols = 4usize;
     let idx = |r: usize, c: usize, p: usize| -> usize { (r) + c * rows + p * rows * cols }; // r,c,p are 0-based here
-    assert_eq!(a.data[idx(0, 2, 1)], 99.0);
-    assert_eq!(a.data[idx(1, 2, 1)], 99.0);
-    assert_eq!(a.data[idx(2, 2, 1)], 99.0);
+    assert_eq!(a.materialize_f64()[idx(0, 2, 1)], 99.0);
+    assert_eq!(a.materialize_f64()[idx(1, 2, 1)], 99.0);
+    assert_eq!(a.materialize_f64()[idx(2, 2, 1)], 99.0);
     // Validate A(1:2:3, 2, 1) = [70;80]
-    assert_eq!(a.data[idx(0, 1, 0)], 70.0);
-    assert_eq!(a.data[idx(2, 1, 0)], 80.0);
+    assert_eq!(a.materialize_f64()[idx(0, 1, 0)], 70.0);
+    assert_eq!(a.materialize_f64()[idx(2, 1, 0)], 80.0);
 }
 
 #[test]
@@ -303,9 +303,9 @@ fn fastpath_gather_multi_columns_and_rows() {
 	"#;
     let vars = execute_source(src).unwrap();
     // C is columns 2 and 4 -> data [4 5 6 10 11 12]
-    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Tensor(t) if t.shape==vec![3,2] && t.data==vec![4.0,5.0,6.0,10.0,11.0,12.0])));
+    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Tensor(t) if t.shape==vec![3,2] && t.materialize_f64()==vec![4.0,5.0,6.0,10.0,11.0,12.0])));
     // R is rows [1 3] across all columns -> shape [2,4]; data per col-major: [1,3,4,6,7,9,10,12]
-    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Tensor(t) if t.shape==vec![2,4] && t.data==vec![1.0,3.0,4.0,6.0,7.0,9.0,10.0,12.0])));
+    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Tensor(t) if t.shape==vec![2,4] && t.materialize_f64()==vec![1.0,3.0,4.0,6.0,7.0,9.0,10.0,12.0])));
 }
 
 #[test]
@@ -322,13 +322,13 @@ fn fastpath_scatter_multi_columns_and_rows() {
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Tensor(t)
-		if t.shape==vec![3,4] && t.data==vec![1.0,2.0,3.0,30.0,31.0,32.0,7.0,8.0,9.0,40.0,41.0,42.0])));
+		if t.shape==vec![3,4] && t.materialize_f64()==vec![1.0,2.0,3.0,30.0,31.0,32.0,7.0,8.0,9.0,40.0,41.0,42.0])));
     // After row scatter (rows 1 and 3 set to 9 across all columns), C reflects broadcasts
     let expected_c: Vec<f64> = vec![9.0, 2.0, 9.0, 9.0, 31.0, 9.0, 9.0, 8.0, 9.0, 9.0, 41.0, 9.0];
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Tensor(t)
-		if t.shape==vec![3,4] && t.data==expected_c)));
+		if t.shape==vec![3,4] && t.materialize_f64()==expected_c)));
 }
 
 #[test]
@@ -350,17 +350,17 @@ fn func_returns_into_row_col_linear_slices() {
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Tensor(t)
-		if t.shape==vec![2,3] && t.data==vec![0.0,0.0, 7.0,0.0, 8.0,0.0])));
+		if t.shape==vec![2,3] && t.materialize_f64()==vec![0.0,0.0, 7.0,0.0, 8.0,0.0])));
     // D should have col1 rows 1..2 set to 7,8
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Tensor(t)
-		if t.shape==vec![3,2] && t.data[0]==7.0 && t.data[1]==8.0)));
+		if t.shape==vec![3,2] && t.materialize_f64()[0]==7.0 && t.materialize_f64()[1]==8.0)));
     // F should have indices 1 and 9 set to 7 and 8
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Tensor(t)
-		if t.shape==vec![3,3] && t.data[0]==7.0 && t.data[8]==8.0)));
+		if t.shape==vec![3,3] && t.materialize_f64()[0]==7.0 && t.materialize_f64()[8]==8.0)));
 }
 
 #[test]
@@ -384,17 +384,17 @@ fn cell_expansion_into_row_col_linear_slices() {
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Tensor(t)
-		if t.shape==vec![2,3] && t.data==vec![0.0,0.0, 7.0,0.0, 8.0,0.0])));
+		if t.shape==vec![2,3] && t.materialize_f64()==vec![0.0,0.0, 7.0,0.0, 8.0,0.0])));
     // F col1 rows 1..2 set to 11,12
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Tensor(t)
-		if t.shape==vec![3,2] && t.data[0]==11.0 && t.data[1]==12.0)));
+		if t.shape==vec![3,2] && t.materialize_f64()[0]==11.0 && t.materialize_f64()[1]==12.0)));
     // I indices 1 and 9 set to 70 and 80
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Tensor(t)
-		if t.shape==vec![3,3] && t.data[0]==70.0 && t.data[8]==80.0)));
+		if t.shape==vec![3,3] && t.materialize_f64()[0]==70.0 && t.materialize_f64()[8]==80.0)));
 }
 
 #[test]

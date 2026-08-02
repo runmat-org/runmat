@@ -945,16 +945,20 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Tensor, Type, Value};
 
-    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, poison: f64) -> Tensor {
-        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-        tensor.data.fill(poison);
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, _poison: f64) -> Tensor {
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
         tensor
     }
 
     fn assert_tensor_close(actual: &Tensor, expected: &[f64], tol: f64) {
         let dim = (expected.len() as f64).sqrt() as usize;
         assert_eq!(actual.shape, vec![dim, dim], "unexpected tensor shape");
-        for (idx, (&got, &want)) in actual.data.iter().zip(expected.iter()).enumerate() {
+        for (idx, (&got, &want)) in actual
+            .materialize_f64()
+            .iter()
+            .zip(expected.iter())
+            .enumerate()
+        {
             if want.is_nan() {
                 assert!(
                     got.is_nan(),
@@ -1049,8 +1053,8 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                assert!((out.data[0] - 1.0).abs() < 1.0e-12);
-                assert!((out.data[3] - 1.0).abs() < 1.0e-12);
+                assert!((out.materialize_f64()[0] - 1.0).abs() < 1.0e-12);
+                assert!((out.materialize_f64()[3] - 1.0).abs() < 1.0e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1078,7 +1082,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 3]);
-                for value in out.data {
+                for value in out.materialize_f64() {
                     assert!((value - 1.0).abs() < 1.0e-12);
                 }
             }
@@ -1124,7 +1128,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => t,
             _ => panic!("expected tensor output"),
         };
-        assert_tensor_close(&actual_tensor, &expected_tensor.data, 1.0e-10);
+        assert_tensor_close(&actual_tensor, &expected_tensor.materialize_f64(), 1.0e-10);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1227,7 +1231,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => t,
             _ => panic!("expected tensor"),
         };
-        assert_tensor_close(&a, &b.data, 1.0e-12);
+        assert_tensor_close(&a, &b.materialize_f64(), 1.0e-12);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1244,7 +1248,7 @@ pub(crate) mod tests {
             )
             .unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1393,7 +1397,7 @@ pub(crate) mod tests {
         )
         .expect("cpu corrcoef");
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("provider");
@@ -1406,6 +1410,6 @@ pub(crate) mod tests {
         let host = block_on(download_handle_async(provider, &gpu)).expect("download");
         let gathered =
             Tensor::new(host.data.clone(), host.shape.clone()).expect("tensor reconstruction");
-        assert_tensor_close(&gathered, &cpu.data, 1.0e-6);
+        assert_tensor_close(&gathered, &cpu.materialize_f64(), 1.0e-6);
     }
 }

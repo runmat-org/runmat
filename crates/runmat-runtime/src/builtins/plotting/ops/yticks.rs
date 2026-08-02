@@ -148,7 +148,9 @@ mod tests {
         .unwrap();
         let queried = yticks_builtin(Vec::new()).unwrap();
         assert_eq!(
-            runmat_builtins::Tensor::try_from(&queried).unwrap().data,
+            runmat_builtins::Tensor::try_from(&queried)
+                .unwrap()
+                .materialize_f64(),
             vec![1.0, 3.0, 9.0]
         );
         let mode = get_builtin(vec![ax.clone(), Value::String("YTickMode".into())]).unwrap();

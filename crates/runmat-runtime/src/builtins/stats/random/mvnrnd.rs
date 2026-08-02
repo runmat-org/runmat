@@ -430,15 +430,13 @@ mod tests {
         Value::Tensor(Tensor::new(data, shape).unwrap())
     }
 
-    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, poison: f64) -> Tensor {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(poison);
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, _poison: f64) -> Tensor {
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         tensor
     }
 
     fn cleared_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         tensor
     }
 
@@ -454,7 +452,7 @@ mod tests {
         match out {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![5, 2]);
-                assert!(t.data.iter().all(|value| value.is_finite()));
+                assert!(t.materialize_f64().iter().all(|value| value.is_finite()));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -471,7 +469,7 @@ mod tests {
         .expect("mvnrnd");
         let expected = random::expected_normal_scaled_sequence(0.0, 1.0, 6);
         match out {
-            Value::Tensor(t) => assert_eq!(t.data, expected),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), expected),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -552,7 +550,9 @@ mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 2]);
                 for row in 0..3 {
-                    assert!((t.data[row] - t.data[3 + row]).abs() < 1.0e-10);
+                    assert!(
+                        (t.materialize_f64()[row] - t.materialize_f64()[3 + row]).abs() < 1.0e-10
+                    );
                 }
             }
             other => panic!("expected tensor, got {other:?}"),

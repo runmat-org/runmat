@@ -648,7 +648,7 @@ mod tests {
 
     fn tensor_property(value: &Value, name: &str) -> Vec<f64> {
         match property(value, name) {
-            Value::Tensor(tensor) => tensor.data.clone(),
+            Value::Tensor(tensor) => tensor.materialize_f64().clone(),
             other => panic!("expected tensor property {name}, got {other:?}"),
         }
     }
@@ -664,18 +664,16 @@ mod tests {
             -3
         );
 
-        let mut exponent =
+        let exponent =
             Tensor::new_integer(IntegerStorage::I16(vec![-2]), vec![1, 1]).expect("typed exponent");
-        exponent.data.clear();
         assert_eq!(
             parse_integer_exponent(&Value::Tensor(exponent)).unwrap(),
             -2
         );
 
-        let mut too_large =
+        let too_large =
             Tensor::new_integer(IntegerStorage::U64(vec![i64::MAX as u64 + 1]), vec![1, 1])
                 .expect("wide exponent");
-        too_large.data.clear();
         assert!(parse_integer_exponent(&Value::Tensor(too_large)).is_err());
     }
 
@@ -721,14 +719,14 @@ mod tests {
         match property(&sys, "Numerator") {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 1]);
-                assert_eq!(tensor.data, vec![20.0]);
+                assert_eq!(tensor.materialize_f64(), vec![20.0]);
             }
             other => panic!("expected numerator tensor, got {other:?}"),
         }
         match property(&sys, "Denominator") {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 2]);
-                assert_eq!(tensor.data, vec![1.0, 5.0]);
+                assert_eq!(tensor.materialize_f64(), vec![1.0, 5.0]);
             }
             other => panic!("expected denominator tensor, got {other:?}"),
         }
@@ -796,14 +794,14 @@ mod tests {
         match property(&sys, "Numerator") {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 2]);
-                assert_eq!(tensor.data, vec![1.0, 2.0]);
+                assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0]);
             }
             other => panic!("expected numerator tensor, got {other:?}"),
         }
         match property(&sys, "Denominator") {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 3]);
-                assert_eq!(tensor.data, vec![1.0, 3.0, 2.0]);
+                assert_eq!(tensor.materialize_f64(), vec![1.0, 3.0, 2.0]);
             }
             other => panic!("expected denominator tensor, got {other:?}"),
         }

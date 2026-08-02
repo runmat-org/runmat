@@ -2378,7 +2378,7 @@ pub(crate) mod tests {
         };
         let cpu = mean_host(Value::Tensor(t.clone()), &args).unwrap();
         let provider = runmat_accelerate_api::provider().unwrap();
-        let h = gpu_helpers::upload_tensor(provider.as_ref(), &t).unwrap();
+        let h = gpu_helpers::upload_tensor(provider, &t).unwrap();
         let gpu = block_on(mean_gpu(h, &args)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {

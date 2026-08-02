@@ -823,9 +823,7 @@ pub(crate) mod tests {
 
     #[test]
     fn pad_length_reads_typed_integer_tensor_exactly() {
-        let mut length =
-            Tensor::new_integer(IntegerStorage::U64(vec![5]), vec![1, 1]).expect("length");
-        length.data[0] = f64::NAN;
+        let length = Tensor::new_integer(IntegerStorage::U64(vec![5]), vec![1, 1]).expect("length");
 
         let result =
             pad_builtin(Value::String("GPU".into()), vec![Value::Tensor(length)]).expect("pad");
@@ -1011,9 +1009,8 @@ pub(crate) mod tests {
 
     #[test]
     fn pad_length_rejects_negative_typed_integer_tensor() {
-        let mut length =
+        let length =
             Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("length");
-        length.data[0] = 8.0;
 
         let err =
             pad_builtin(Value::String("data".into()), vec![Value::Tensor(length)]).unwrap_err();
@@ -1022,9 +1019,8 @@ pub(crate) mod tests {
 
     #[test]
     fn pad_length_rejects_oversized_exact_integer_and_double_lengths() {
-        let mut length =
+        let length =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("length");
-        length.data[0] = 4.0;
         let err =
             pad_builtin(Value::String("data".into()), vec![Value::Tensor(length)]).unwrap_err();
         assert_eq!(err.to_string(), PAD_ERROR_LENGTH.message);
@@ -1046,9 +1042,8 @@ pub(crate) mod tests {
 
     #[test]
     fn pad_length_rejects_nonscalar_typed_integer_tensor() {
-        let mut length =
+        let length =
             Tensor::new_integer(IntegerStorage::I32(vec![2, 3]), vec![1, 2]).expect("length");
-        length.data.fill(4.0);
 
         for args in [
             vec![Value::Tensor(length.clone())],

@@ -924,8 +924,7 @@ mod tests {
     }
 
     fn integer_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
         Value::Tensor(tensor)
     }
 
@@ -939,7 +938,7 @@ mod tests {
     fn matrix_from_value(value: &Value) -> DMatrix<f64> {
         match value {
             Value::Tensor(tensor) => {
-                DMatrix::from_column_slice(tensor.rows, tensor.cols, &tensor.data)
+                DMatrix::from_column_slice(tensor.rows, tensor.cols, &tensor.materialize_f64())
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1077,9 +1076,7 @@ mod tests {
 
     #[test]
     fn lqr_accepts_typed_integer_sample_time_property_on_state_space_object() {
-        let mut sample_time =
-            Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).unwrap();
-        sample_time.data.clear();
+        let sample_time = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).unwrap();
         let sys = block_on(crate::builtins::control::ss::ss_builtin(
             tensor(vec![1.0, 0.0, 1.0, 1.0], 2, 2),
             tensor(vec![0.0, 1.0], 2, 1),

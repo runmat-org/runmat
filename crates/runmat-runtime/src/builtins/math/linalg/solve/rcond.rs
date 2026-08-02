@@ -410,9 +410,8 @@ pub(crate) mod tests {
 
     #[test]
     fn rcond_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![2, 0, 0, 4]), vec![2, 2])
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![2, 0, 0, 4]), vec![2, 2])
             .expect("integer");
-        tensor.data.fill(1.0);
         let result = rcond_builtin(Value::Tensor(tensor)).expect("rcond");
         match result {
             Value::Num(value) => assert!((value - 0.5).abs() < 1e-12),
@@ -533,14 +532,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![2.0, 0.0, 0.0, 0.5], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let gpu_value = rcond_builtin(Value::GpuTensor(handle)).expect("rcond");
             let gathered = test_support::gather(gpu_value).expect("gather");
             assert_eq!(gathered.shape, vec![1, 1]);
-            assert!((gathered.data[0] - 0.25).abs() < 1e-12);
+            assert!((gathered.materialize_f64()[0] - 0.25).abs() < 1e-12);
         });
     }
 
@@ -567,7 +566,7 @@ pub(crate) mod tests {
 
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
@@ -575,7 +574,7 @@ pub(crate) mod tests {
         let gpu_value = rcond_builtin(Value::GpuTensor(handle)).expect("gpu rcond");
         let gathered = test_support::gather(gpu_value).expect("gather");
         assert_eq!(gathered.shape, vec![1, 1]);
-        assert!((gathered.data[0] - cpu_scalar).abs() < tol);
+        assert!((gathered.materialize_f64()[0] - cpu_scalar).abs() < tol);
     }
 
     fn rcond_builtin(value: Value) -> BuiltinResult<Value> {

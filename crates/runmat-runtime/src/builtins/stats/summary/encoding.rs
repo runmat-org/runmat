@@ -1308,14 +1308,12 @@ mod tests {
     }
 
     fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
         Value::Tensor(tensor)
     }
 
     fn mirrorless_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
         Value::Tensor(tensor)
     }
 
@@ -1340,7 +1338,7 @@ mod tests {
         };
         assert_eq!(out.shape, vec![3, 4]);
         assert_f64_slice_eq_nan(
-            &out.data,
+            &out.materialize_f64(),
             &[
                 1.0,
                 0.0,
@@ -1381,7 +1379,7 @@ mod tests {
         };
         assert_eq!(out.shape, vec![3, 4]);
         assert_eq!(
-            out.data,
+            out.materialize_f64(),
             vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0]
         );
     }
@@ -1400,7 +1398,7 @@ mod tests {
             panic!("tensor");
         };
         assert_eq!(out.shape, vec![3, 2]);
-        assert_eq!(out.data, vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
+        assert_eq!(out.materialize_f64(), vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
     }
 
     #[test]
@@ -1411,7 +1409,7 @@ mod tests {
             panic!("tensor");
         };
         assert_eq!(out.shape, vec![3, 2]);
-        assert_eq!(out.data, vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
+        assert_eq!(out.materialize_f64(), vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
     }
 
     #[test]
@@ -1425,7 +1423,7 @@ mod tests {
         };
         assert_eq!(out.shape, vec![3, 4]);
         assert_eq!(
-            out.data,
+            out.materialize_f64(),
             vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0]
         );
     }
@@ -1454,7 +1452,7 @@ mod tests {
 
         assert_eq!(out.shape, vec![3, 4]);
         assert_eq!(
-            out.data,
+            out.materialize_f64(),
             vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0]
         );
     }
@@ -1486,7 +1484,7 @@ mod tests {
             panic!("dummy tensor");
         };
         assert_eq!(dummy.shape, vec![2, 3]);
-        assert_eq!(dummy.data, vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
+        assert_eq!(dummy.materialize_f64(), vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
 
         let Value::Tensor(encoded) =
             block_on(onehotencode_builtin(group, Value::Num(2.0), Vec::new())).unwrap()
@@ -1494,7 +1492,10 @@ mod tests {
             panic!("encoded tensor");
         };
         assert_eq!(encoded.shape, vec![2, 3]);
-        assert_eq!(encoded.data, vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
+        assert_eq!(
+            encoded.materialize_f64(),
+            vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]
+        );
     }
 
     #[test]
@@ -1539,7 +1540,7 @@ mod tests {
             panic!("tensor");
         };
         assert_eq!(out.shape, vec![3, 2]);
-        assert_eq!(out.data, vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0]);
+        assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0]);
     }
 
     #[test]
@@ -1565,7 +1566,7 @@ mod tests {
         };
         assert_eq!(out.shape, vec![3, 2]);
         assert_f64_slice_eq_nan(
-            &out.data,
+            &out.materialize_f64(),
             &[1.0, f64::NAN, f64::NAN, 0.0, f64::NAN, f64::NAN],
         );
 
@@ -1597,7 +1598,7 @@ mod tests {
             panic!("tensor");
         };
         assert_eq!(out.shape, vec![3, 2]);
-        assert_eq!(out.data, vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
+        assert_eq!(out.materialize_f64(), vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
     }
 
     #[test]

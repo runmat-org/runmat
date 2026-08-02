@@ -856,7 +856,7 @@ pub(crate) mod tests {
             return;
         };
         let tensor = Tensor::new(vec![3.0, -2.0, 5.0, 7.0], vec![1, 4]).unwrap();
-        let handle = gpu_helpers::upload_tensor(provider.as_ref(), &tensor).expect("upload");
+        let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
         let gpu_value = polyint_builtin(Value::GpuTensor(handle), Vec::new()).expect("polyint gpu");
         let gathered = test_support::gather(gpu_value).expect("gather");
         let cpu_value =

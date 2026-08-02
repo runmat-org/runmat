@@ -910,9 +910,8 @@ mod tests {
 
     #[test]
     fn text_boundary_positions_read_typed_integer_storage_exactly() {
-        let mut boundary =
+        let boundary =
             Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).expect("boundary");
-        boundary.data.clear();
 
         assert_eq!(
             block(insert_after_builtin(
@@ -923,11 +922,8 @@ mod tests {
             Value::String("runmat".into())
         );
 
-        let mut start =
-            Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("start");
-        start.data.clear();
-        let mut stop = Tensor::new_integer(IntegerStorage::U16(vec![4]), vec![1, 1]).expect("stop");
-        stop.data.clear();
+        let start = Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("start");
+        let stop = Tensor::new_integer(IntegerStorage::U16(vec![4]), vec![1, 1]).expect("stop");
 
         assert_eq!(
             block(replace_between_builtin(
@@ -945,9 +941,7 @@ mod tests {
 
     #[test]
     fn text_boundary_positions_reject_invalid_integer_and_double_values() {
-        let mut zero =
-            Tensor::new_integer(IntegerStorage::U16(vec![0]), vec![1, 1]).expect("boundary");
-        zero.data.clear();
+        let zero = Tensor::new_integer(IntegerStorage::U16(vec![0]), vec![1, 1]).expect("boundary");
         assert!(block(insert_after_builtin(
             Value::String("run".into()),
             vec![Value::Tensor(zero), Value::String("mat".into())],

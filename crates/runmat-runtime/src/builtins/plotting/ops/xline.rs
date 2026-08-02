@@ -417,12 +417,11 @@ mod tests {
     }
 
     fn integer_tensor(data: &[i16]) -> Tensor {
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I16(data.to_vec()),
             vec![1, data.len()],
         )
         .unwrap();
-        tensor.data.clear();
         tensor
     }
 
@@ -483,7 +482,7 @@ mod tests {
         let _guard = setup();
         let handles = xline_builtin(vec![Value::Tensor(tensor(&[1.0, 2.0, 3.0]))]).unwrap();
         let tensor = Tensor::try_from(&handles).unwrap();
-        assert_eq!(tensor.data.len(), 3);
+        assert_eq!(tensor.materialize_f64().len(), 3);
     }
 
     #[test]
@@ -491,7 +490,7 @@ mod tests {
         let _guard = setup();
         let handles = xline_builtin(vec![Value::Tensor(integer_tensor(&[1, 2, 3]))]).unwrap();
         let tensor = Tensor::try_from(&handles).unwrap();
-        assert_eq!(tensor.data.len(), 3);
+        assert_eq!(tensor.materialize_f64().len(), 3);
     }
 
     #[test]

@@ -2602,14 +2602,12 @@ mod tests {
     use tempfile::tempdir;
 
     fn poisoned_integer_scalar(storage: IntegerStorage) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
         Value::Tensor(tensor)
     }
 
     fn poisoned_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         tensor
     }
 
@@ -2940,10 +2938,10 @@ mod tests {
             panic!("expected tensors");
         };
         let query = italy
-            .data
+            .materialize_f64()
             .iter()
-            .zip(&rome.data)
-            .zip(&paris.data)
+            .zip(&rome.materialize_f64())
+            .zip(&paris.materialize_f64())
             .map(|((i, r), p)| i - r + p)
             .collect::<Vec<_>>();
         let nearest = vec2word_builtin(vec![
@@ -3004,7 +3002,10 @@ mod tests {
         };
         assert_eq!(tensor.rows, 1);
         assert_eq!(tensor.cols, 8);
-        assert!(tensor.data.iter().any(|value| value.abs() > 0.0));
+        assert!(tensor
+            .materialize_f64()
+            .iter()
+            .any(|value| value.abs() > 0.0));
     }
 
     #[tokio::test]
@@ -3056,13 +3057,13 @@ mod tests {
             panic!("expected first tensor");
         };
         assert_eq!(first.shape, vec![2, 2]);
-        assert_eq!(first.data, vec![1.0, 10.0, 2.0, 20.0]);
+        assert_eq!(first.materialize_f64(), vec![1.0, 10.0, 2.0, 20.0]);
 
         let Value::Tensor(second) = &cell.data[1] else {
             panic!("expected second tensor");
         };
         assert_eq!(second.shape, vec![2, 2]);
-        assert_eq!(second.data, vec![0.0, 0.0, 2.0, 20.0]);
+        assert_eq!(second.materialize_f64(), vec![0.0, 0.0, 2.0, 20.0]);
     }
 
     #[tokio::test]
@@ -3099,15 +3100,18 @@ mod tests {
             panic!("expected first tensor");
         };
         assert_eq!(first.shape, vec![2, 3]);
-        assert_eq!(first.data[0..2], [1.0, 10.0]);
-        assert!(first.data[2].is_nan());
-        assert!(first.data[3].is_nan());
-        assert_eq!(first.data[4..6], [-5.0, -5.0]);
+        assert_eq!(first.materialize_f64()[0..2], [1.0, 10.0]);
+        assert!(first.materialize_f64()[2].is_nan());
+        assert!(first.materialize_f64()[3].is_nan());
+        assert_eq!(first.materialize_f64()[4..6], [-5.0, -5.0]);
 
         let Value::Tensor(second) = &cell.data[1] else {
             panic!("expected second tensor");
         };
-        assert_eq!(second.data, vec![2.0, 20.0, -5.0, -5.0, -5.0, -5.0]);
+        assert_eq!(
+            second.materialize_f64(),
+            vec![2.0, 20.0, -5.0, -5.0, -5.0, -5.0]
+        );
     }
 
     #[tokio::test]
@@ -3140,13 +3144,13 @@ mod tests {
             panic!("expected first tensor");
         };
         assert_eq!(first.shape, vec![2, 2]);
-        assert_eq!(first.data, vec![1.0, 11.0, 2.0, 22.0]);
+        assert_eq!(first.materialize_f64(), vec![1.0, 11.0, 2.0, 22.0]);
 
         let Value::Tensor(second) = &cell.data[1] else {
             panic!("expected second tensor");
         };
         assert_eq!(second.shape, vec![2, 1]);
-        assert_eq!(second.data, vec![1.0, 11.0]);
+        assert_eq!(second.materialize_f64(), vec![1.0, 11.0]);
     }
 
     #[tokio::test]
@@ -3195,14 +3199,14 @@ mod tests {
             panic!("expected first tensor");
         };
         assert_eq!(first.shape, vec![1, 4]);
-        assert_eq!(first.data[0], 1.0);
-        assert!(first.data[1].is_nan());
-        assert_eq!(first.data[2..4], [2.0, 0.0]);
+        assert_eq!(first.materialize_f64()[0], 1.0);
+        assert!(first.materialize_f64()[1].is_nan());
+        assert_eq!(first.materialize_f64()[2..4], [2.0, 0.0]);
         let Value::Tensor(second) = &cell.data[1] else {
             panic!("expected second tensor");
         };
         assert_eq!(second.shape, vec![1, 4]);
-        assert_eq!(second.data, vec![2.0, 0.0, 0.0, 0.0]);
+        assert_eq!(second.materialize_f64(), vec![2.0, 0.0, 0.0, 0.0]);
 
         let err = doc2sequence_builtin(vec![Value::Num(1.0), documents.clone()])
             .await
@@ -3258,12 +3262,12 @@ mod tests {
             panic!("expected first tensor");
         };
         assert_eq!(first.shape, vec![1, 3]);
-        assert_eq!(first.data, vec![1.0, 2.0, 3.0]);
+        assert_eq!(first.materialize_f64(), vec![1.0, 2.0, 3.0]);
         let Value::Tensor(second) = &left.data[1] else {
             panic!("expected second tensor");
         };
         assert_eq!(second.shape, vec![1, 3]);
-        assert_eq!(second.data, vec![0.0, 0.0, 3.0]);
+        assert_eq!(second.materialize_f64(), vec![0.0, 0.0, 3.0]);
 
         let none = doc2sequence_builtin(vec![
             Value::Object(word_encoding.clone()),
@@ -3280,7 +3284,7 @@ mod tests {
             panic!("expected second tensor");
         };
         assert_eq!(second.shape, vec![1, 1]);
-        assert_eq!(second.data, vec![3.0]);
+        assert_eq!(second.materialize_f64(), vec![3.0]);
 
         let shortest = doc2sequence_builtin(vec![
             Value::Object(word_encoding),
@@ -3297,12 +3301,12 @@ mod tests {
             panic!("expected first tensor");
         };
         assert_eq!(first.shape, vec![1, 1]);
-        assert_eq!(first.data, vec![1.0]);
+        assert_eq!(first.materialize_f64(), vec![1.0]);
         let Value::Tensor(second) = &shortest.data[1] else {
             panic!("expected second tensor");
         };
         assert_eq!(second.shape, vec![1, 1]);
-        assert_eq!(second.data, vec![3.0]);
+        assert_eq!(second.materialize_f64(), vec![3.0]);
     }
 
     #[tokio::test]
@@ -3333,9 +3337,9 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(sequence.shape, vec![2, 2]);
-        assert!(sequence.data[0].is_nan());
-        assert!(sequence.data[1].is_nan());
-        assert_eq!(sequence.data[2..4], [1.0, 10.0]);
+        assert!(sequence.materialize_f64()[0].is_nan());
+        assert!(sequence.materialize_f64()[1].is_nan());
+        assert_eq!(sequence.materialize_f64()[2..4], [1.0, 10.0]);
     }
 
     #[tokio::test]
@@ -3383,10 +3387,10 @@ mod tests {
         };
         assert_eq!(tensor.rows, 2);
         assert_eq!(tensor.cols, 2);
-        assert_eq!(tensor.data[0], 0.0);
-        assert_eq!(tensor.data[2], 1.0);
-        assert!(tensor.data[1].is_nan());
-        assert!(tensor.data[3].is_nan());
+        assert_eq!(tensor.materialize_f64()[0], 0.0);
+        assert_eq!(tensor.materialize_f64()[2], 1.0);
+        assert!(tensor.materialize_f64()[1].is_nan());
+        assert!(tensor.materialize_f64()[3].is_nan());
     }
 
     #[tokio::test]
@@ -3408,7 +3412,7 @@ mod tests {
         let Value::Tensor(tensor) = result else {
             panic!("expected tensor");
         };
-        assert_eq!(tensor.data, vec![1.0, 0.0]);
+        assert_eq!(tensor.materialize_f64(), vec![1.0, 0.0]);
     }
 
     #[tokio::test]
@@ -3440,7 +3444,7 @@ mod tests {
         let Value::Tensor(dist) = &outputs[1] else {
             panic!("expected distances");
         };
-        assert!(dist.data[0] < dist.data[1]);
+        assert!(dist.materialize_f64()[0] < dist.materialize_f64()[1]);
     }
 
     #[tokio::test]

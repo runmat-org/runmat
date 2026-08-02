@@ -176,11 +176,11 @@ pub(crate) mod tests {
             let non_empty_tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
 
             let empty_view = runmat_accelerate_api::HostTensorView {
-                data: &empty_tensor.data,
+                data: &empty_tensor.materialize_f64(),
                 shape: &empty_tensor.shape,
             };
             let non_empty_view = runmat_accelerate_api::HostTensorView {
-                data: &non_empty_tensor.data,
+                data: &non_empty_tensor.materialize_f64(),
                 shape: &non_empty_tensor.shape,
             };
 
@@ -207,7 +207,7 @@ pub(crate) mod tests {
 
         let empty_tensor = Tensor::new(Vec::new(), vec![0, 4]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &empty_tensor.data,
+            data: &empty_tensor.materialize_f64(),
             shape: &empty_tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");

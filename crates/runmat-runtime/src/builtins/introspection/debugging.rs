@@ -883,7 +883,7 @@ mod tests {
             Value::String("2:3".to_string()),
         ]))
         .expect("dbtype");
-        assert!(matches!(result, Value::Tensor(t) if t.data.is_empty()));
+        assert!(matches!(result, Value::Tensor(t) if t.materialize_f64().is_empty()));
     }
 
     #[test]

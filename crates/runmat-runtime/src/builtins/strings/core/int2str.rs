@@ -489,10 +489,9 @@ pub(crate) mod tests {
             .expect("uint64 scalar");
         assert_eq!(char_rows(scalar), vec![u64::MAX.to_string()]);
 
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]), vec![1, 2])
                 .expect("uint64 tensor");
-        tensor.data.clear();
         let matrix = int2str_builtin(Value::Tensor(tensor), Vec::new()).expect("uint64 array");
         assert_eq!(
             char_rows(matrix),
@@ -562,7 +561,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![10.2, 20.8], vec![1, 2]).expect("tensor");
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");

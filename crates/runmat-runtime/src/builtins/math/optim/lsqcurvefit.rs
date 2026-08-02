@@ -807,9 +807,8 @@ mod tests {
 
     #[test]
     fn lsqcurvefit_real_array_reads_typed_integer_storage_exactly() {
-        let mut input =
+        let input =
             Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 3]), vec![1, 3]).expect("integer");
-        input.data.fill(f64::NAN);
 
         let parsed = block_on(real_array("xdata", Value::Tensor(input))).expect("real array");
 
@@ -819,9 +818,8 @@ mod tests {
 
     #[test]
     fn lsqcurvefit_bound_vector_reads_typed_integer_storage_exactly() {
-        let mut input =
+        let input =
             Tensor::new_integer(IntegerStorage::I16(vec![-1, 2]), vec![1, 2]).expect("integer");
-        input.data.clear();
 
         let parsed = block_on(bound_vector(
             "lower bounds",
@@ -840,11 +838,11 @@ mod tests {
             |_function, args, requested_outputs| {
                 assert_eq!(requested_outputs, 1);
                 let p = match &args[0] {
-                    Value::Tensor(t) => t.data.clone(),
+                    Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected params, got {other:?}"),
                 };
                 let xdata = match &args[1] {
-                    Value::Tensor(t) => t.data.clone(),
+                    Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected xdata, got {other:?}"),
                 };
                 Box::pin(async move {
@@ -869,8 +867,8 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                assert!((t.data[0] - 2.0).abs() < 1.0e-5);
-                assert!((t.data[1] - 1.0).abs() < 1.0e-5);
+                assert!((t.materialize_f64()[0] - 2.0).abs() < 1.0e-5);
+                assert!((t.materialize_f64()[1] - 1.0).abs() < 1.0e-5);
             }
             other => panic!("unexpected value {other:?}"),
         }
@@ -881,11 +879,11 @@ mod tests {
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, _requested_outputs| {
                 let p = match &args[0] {
-                    Value::Tensor(t) => t.data.clone(),
+                    Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected params, got {other:?}"),
                 };
                 let xdata = match &args[1] {
-                    Value::Tensor(t) => t.data.clone(),
+                    Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected xdata, got {other:?}"),
                 };
                 Box::pin(async move {
@@ -917,8 +915,8 @@ mod tests {
         .expect("lsqcurvefit");
         match result {
             Value::Tensor(t) => {
-                assert!((t.data[0] - 2.5).abs() < 1.0e-4);
-                assert!((t.data[1] - 0.7).abs() < 1.0e-4);
+                assert!((t.materialize_f64()[0] - 2.5).abs() < 1.0e-4);
+                assert!((t.materialize_f64()[1] - 0.7).abs() < 1.0e-4);
             }
             other => panic!("unexpected value {other:?}"),
         }
@@ -929,11 +927,11 @@ mod tests {
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, _requested_outputs| {
                 let p = match &args[0] {
-                    Value::Tensor(t) => t.data.clone(),
+                    Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected params, got {other:?}"),
                 };
                 let xdata = match &args[1] {
-                    Value::Tensor(t) => t.data.clone(),
+                    Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected xdata, got {other:?}"),
                 };
                 Box::pin(async move {
@@ -956,7 +954,7 @@ mod tests {
         ))
         .expect("lsqcurvefit");
         match result {
-            Value::Tensor(t) => assert!((t.data[0] - 1.0).abs() < 1.0e-8),
+            Value::Tensor(t) => assert!((t.materialize_f64()[0] - 1.0).abs() < 1.0e-8),
             Value::Num(n) => assert!((n - 1.0).abs() < 1.0e-8),
             other => panic!("unexpected value {other:?}"),
         }
@@ -968,11 +966,11 @@ mod tests {
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, _requested_outputs| {
                 let p = match &args[0] {
-                    Value::Tensor(t) => t.data.clone(),
+                    Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected params, got {other:?}"),
                 };
                 let xdata = match &args[1] {
-                    Value::Tensor(t) => t.data.clone(),
+                    Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected xdata, got {other:?}"),
                 };
                 Box::pin(async move {
@@ -1010,7 +1008,7 @@ mod tests {
                     Value::Tensor(j) => {
                         assert_eq!(j.shape, vec![3, 2]);
                         let expected = [0.0, 1.0, 2.0, 1.0, 1.0, 1.0];
-                        for (actual, expected) in j.data.iter().zip(expected) {
+                        for (actual, expected) in j.materialize_f64().iter().zip(expected) {
                             assert!((actual - expected).abs() < 1.0e-6);
                         }
                     }
@@ -1031,7 +1029,7 @@ mod tests {
                     other => panic!("expected scalar param, got {other:?}"),
                 };
                 let xdata = match &args[1] {
-                    Value::Tensor(t) => t.data.clone(),
+                    Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected xdata, got {other:?}"),
                 };
                 Box::pin(async move {
@@ -1078,7 +1076,7 @@ mod tests {
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, _requested_outputs| {
                 let p = match &args[0] {
-                    Value::Tensor(t) => t.data.clone(),
+                    Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected params, got {other:?}"),
                 };
                 Box::pin(async move { Ok(Value::Num(p[0] + p[1])) })
@@ -1096,7 +1094,9 @@ mod tests {
         ))
         .expect("lsqcurvefit");
         match result {
-            Value::Tensor(t) => assert!((t.data[0] + t.data[1] - 3.0).abs() < 1.0e-6),
+            Value::Tensor(t) => {
+                assert!((t.materialize_f64()[0] + t.materialize_f64()[1] - 3.0).abs() < 1.0e-6)
+            }
             other => panic!("unexpected value {other:?}"),
         }
     }

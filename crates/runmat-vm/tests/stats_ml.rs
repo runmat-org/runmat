@@ -21,12 +21,9 @@ fn has_tensor_shape(vars: &[Value], shape: &[usize]) -> bool {
 
 fn has_tensor_data(vars: &[Value], shape: &[usize], expected: &[f64]) -> bool {
     vars.iter().any(|value| match value {
-        Value::Tensor(Tensor {
-            shape: tensor_shape,
-            data,
-            ..
-        }) => {
-            tensor_shape == shape
+        Value::Tensor(tensor) => {
+            let data = tensor.materialize_f64();
+            tensor.shape == shape
                 && data.len() == expected.len()
                 && data
                     .iter()

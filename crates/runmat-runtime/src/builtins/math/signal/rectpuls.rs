@@ -252,9 +252,8 @@ mod tests {
     }
 
     fn integer_tensor(values: Vec<i16>, shape: Vec<usize>) -> Tensor {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::I16(values), shape).expect("typed integer tensor");
-        tensor.data.fill(f64::NAN);
         tensor
     }
 
@@ -279,7 +278,7 @@ mod tests {
         let input = Tensor::new(vec![-0.5, -0.25, 0.0, 0.25, 0.5, 0.75], vec![1, 6]).unwrap();
         let out = expect_tensor(call(Value::Tensor(input), Vec::new()).expect("rectpuls"));
         assert_eq!(out.shape, vec![1, 6]);
-        assert_eq!(out.data, vec![0.5, 1.0, 1.0, 1.0, 0.5, 0.0]);
+        assert_eq!(out.materialize_f64(), vec![0.5, 1.0, 1.0, 1.0, 0.5, 0.0]);
     }
 
     #[test]
@@ -288,7 +287,7 @@ mod tests {
         let out =
             expect_tensor(call(Value::Tensor(input), vec![Value::Num(2.0)]).expect("rectpuls"));
         assert_eq!(out.shape, vec![1, 3]);
-        assert_eq!(out.data, vec![0.5, 1.0, 0.5]);
+        assert_eq!(out.materialize_f64(), vec![0.5, 1.0, 0.5]);
     }
 
     #[test]

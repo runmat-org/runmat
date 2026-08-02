@@ -1162,14 +1162,12 @@ mod tests {
     }
 
     fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
         Value::Tensor(tensor)
     }
 
     fn poisoned_int_tensor_shape(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
         Value::Tensor(tensor)
     }
 
@@ -1193,8 +1191,7 @@ mod tests {
     }
 
     fn cleared_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
         Value::Tensor(tensor)
     }
 
@@ -1223,23 +1220,23 @@ mod tests {
         .unwrap();
         let out = outputs(out);
         match &out[0] {
-            Value::Tensor(idx) => assert_eq!(idx.data, vec![1.0, 1.0, 2.0, 2.0]),
+            Value::Tensor(idx) => assert_eq!(idx.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0]),
             other => panic!("idx {other:?}"),
         }
         match &out[1] {
             Value::Tensor(c) => {
                 assert_eq!(c.shape, vec![2, 2]);
-                assert!((c.data[0] - 0.1).abs() < 1.0e-12);
-                assert!((c.data[1] - 9.9).abs() < 1.0e-12);
-                assert!((c.data[2] - 0.05).abs() < 1.0e-12);
-                assert!((c.data[3] - 10.0).abs() < 1.0e-12);
+                assert!((c.materialize_f64()[0] - 0.1).abs() < 1.0e-12);
+                assert!((c.materialize_f64()[1] - 9.9).abs() < 1.0e-12);
+                assert!((c.materialize_f64()[2] - 0.05).abs() < 1.0e-12);
+                assert!((c.materialize_f64()[3] - 10.0).abs() < 1.0e-12);
             }
             other => panic!("centers {other:?}"),
         }
         match &out[2] {
             Value::Tensor(sumd) => {
                 assert_eq!(sumd.shape, vec![2, 1]);
-                assert!(sumd.data.iter().all(|v| v.is_finite()));
+                assert!(sumd.materialize_f64().iter().all(|v| v.is_finite()));
             }
             other => panic!("sumd {other:?}"),
         }
@@ -1281,19 +1278,18 @@ mod tests {
         .unwrap();
         let out = outputs(out);
         match &out[0] {
-            Value::Tensor(idx) => assert_eq!(idx.data, vec![1.0, 1.0, 2.0, 2.0]),
+            Value::Tensor(idx) => assert_eq!(idx.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0]),
             other => panic!("idx {other:?}"),
         }
         match &out[1] {
-            Value::Tensor(centers) => assert_eq!(centers.data, vec![0.0, 10.0]),
+            Value::Tensor(centers) => assert_eq!(centers.materialize_f64(), vec![0.0, 10.0]),
             other => panic!("centers {other:?}"),
         }
     }
 
     #[test]
     fn kmeans_empty_option_helpers_use_typed_integer_storage_len() {
-        let mut empty = Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 1]).unwrap();
-        empty.data = vec![1.0];
+        let empty = Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 1]).unwrap();
         let empty = Value::Tensor(empty);
 
         assert!(is_empty_numeric(&empty));
@@ -1315,9 +1311,9 @@ mod tests {
         match &out[0] {
             Value::Tensor(idx) => {
                 assert_eq!(idx.shape, vec![5, 1]);
-                assert!(idx.data[2].is_nan());
-                assert!(idx.data[0].is_finite());
-                assert!(idx.data[4].is_finite());
+                assert!(idx.materialize_f64()[2].is_nan());
+                assert!(idx.materialize_f64()[0].is_finite());
+                assert!(idx.materialize_f64()[4].is_finite());
             }
             other => panic!("idx {other:?}"),
         }

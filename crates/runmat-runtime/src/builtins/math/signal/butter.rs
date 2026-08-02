@@ -1103,7 +1103,7 @@ mod tests {
 
     fn tensor_data(value: &Value) -> Vec<f64> {
         match value {
-            Value::Tensor(tensor) => tensor.data.clone(),
+            Value::Tensor(tensor) => tensor.materialize_f64().clone(),
             other => panic!("expected real tensor, got {other:?}"),
         }
     }
@@ -1122,7 +1122,7 @@ mod tests {
     fn complex_column(value: &Value) -> Vec<Complex64> {
         match value {
             Value::Tensor(tensor) => tensor
-                .data
+                .materialize_f64()
                 .iter()
                 .map(|value| Complex64::new(*value, 0.0))
                 .collect(),
@@ -1290,9 +1290,7 @@ mod tests {
 
     #[test]
     fn butter_order_reads_typed_integer_storage_exactly() {
-        let mut order =
-            Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("order");
-        order.data.clear();
+        let order = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("order");
         let _guard = crate::output_count::push_output_count(Some(2));
 
         let values = match block_on(butter_builtin(
@@ -1312,9 +1310,7 @@ mod tests {
 
     #[test]
     fn butter_cutoff_reads_typed_integer_storage_exactly() {
-        let mut cutoff =
-            Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("cutoff");
-        cutoff.data[0] = f64::NAN;
+        let cutoff = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("cutoff");
         let values = output_values(
             1,
             Value::Tensor(cutoff),
@@ -1403,7 +1399,7 @@ mod tests {
         match &values[1] {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 1]);
-                assert_eq!(tensor.data, vec![1.0, 0.0]);
+                assert_eq!(tensor.materialize_f64(), vec![1.0, 0.0]);
             }
             other => panic!("expected input matrix, got {other:?}"),
         }

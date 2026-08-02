@@ -673,7 +673,7 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 2, 4]);
-                assert_eq!(out.data.len(), 24);
+                assert_eq!(out.materialize_f64().len(), 24);
             }
             _ => panic!("expected tensor result"),
         }
@@ -734,18 +734,15 @@ pub(crate) mod tests {
 
     #[test]
     fn permute_order_parser_uses_exact_integer_tensor_storage() {
-        let mut exact_order = Tensor::new_integer(IntegerStorage::U64(vec![2, 1]), vec![1, 2])
+        let exact_order = Tensor::new_integer(IntegerStorage::U64(vec![2, 1]), vec![1, 2])
             .expect("integer order");
-        exact_order.data.clear();
         assert_eq!(
             parse_order_argument("permute", Value::Tensor(exact_order)).expect("parse order"),
             vec![2, 1]
         );
 
-        let mut out_of_range =
-            Tensor::new_integer(IntegerStorage::U64(vec![1, u64::MAX]), vec![1, 2])
-                .expect("integer order");
-        out_of_range.data.clear();
+        let out_of_range = Tensor::new_integer(IntegerStorage::U64(vec![1, u64::MAX]), vec![1, 2])
+            .expect("integer order");
         let err = parse_order_argument("permute", Value::Tensor(out_of_range))
             .expect_err("uint64 order must reject exactly");
         assert!(
@@ -753,9 +750,8 @@ pub(crate) mod tests {
             "unexpected error: {err}"
         );
 
-        let mut negative =
+        let negative =
             Tensor::new_integer(IntegerStorage::I8(vec![1, -1]), vec![1, 2]).expect("order");
-        negative.data.clear();
         let err = parse_order_argument("permute", Value::Tensor(negative))
             .expect_err("negative order must reject");
         assert!(
@@ -930,7 +926,7 @@ pub(crate) mod tests {
             let host_data: Vec<f64> = (1..=12).map(|n| n as f64).collect();
             let host = tensor(&host_data, &[2, 2, 3]);
             let view = HostTensorView {
-                data: &host.data,
+                data: &host.materialize_f64(),
                 shape: &host.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1000,7 +996,7 @@ pub(crate) mod tests {
             .expect("cpu permute");
 
         let view = HostTensorView {
-            data: &host.data,
+            data: &host.materialize_f64(),
             shape: &host.shape,
         };
         let handle = provider.upload(&view).expect("upload to GPU");
@@ -1011,7 +1007,7 @@ pub(crate) mod tests {
         match cpu_value {
             Value::Tensor(ct) => {
                 assert_eq!(ct.shape, gathered.shape);
-                assert_eq!(ct.data, gathered.data);
+                assert_eq!(ct.materialize_f64(), gathered.materialize_f64());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }

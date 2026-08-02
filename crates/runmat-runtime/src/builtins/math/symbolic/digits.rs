@@ -253,8 +253,7 @@ mod tests {
             IntegerStorage::U64(vec![40]),
         ] {
             set_current_digits_for_test(DEFAULT_DIGITS);
-            let mut precision = Tensor::new_integer(storage, vec![1, 1]).expect("precision");
-            precision.data.fill(f64::NAN);
+            let precision = Tensor::new_integer(storage, vec![1, 1]).expect("precision");
 
             assert_eq!(
                 block_on(digits_builtin(vec![Value::Tensor(precision)])).expect("digits"),
@@ -267,9 +266,8 @@ mod tests {
     #[test]
     fn digits_rejects_negative_typed_integer_tensor_storage() {
         let _guard = lock_digits();
-        let mut precision =
+        let precision =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("precision");
-        precision.data.clear();
 
         let err = block_on(digits_builtin(vec![Value::Tensor(precision)])).unwrap_err();
         assert_eq!(

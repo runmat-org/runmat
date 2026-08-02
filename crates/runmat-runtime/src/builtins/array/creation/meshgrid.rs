@@ -1592,8 +1592,7 @@ pub(crate) mod tests {
 
         for storage in storages {
             let values = storage.exact_values();
-            let mut axis = Tensor::new_integer(storage.clone(), vec![1, 3]).expect("axis");
-            axis.data.fill(f64::NAN);
+            let axis = Tensor::new_integer(storage.clone(), vec![1, 3]).expect("axis");
             let eval = evaluate(&[Value::Tensor(axis)]).expect("meshgrid");
             let Value::Tensor(x) = eval_first(&eval).expect("X") else {
                 panic!("expected real integer X output");
@@ -1652,12 +1651,11 @@ pub(crate) mod tests {
 
     #[test]
     fn meshgrid_reads_typed_integer_axis_length_from_storage_without_mirror() {
-        let mut axis = Tensor::new_integer(
+        let axis = Tensor::new_integer(
             IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
             vec![1, 2],
         )
         .expect("axis");
-        axis.data.clear();
 
         let eval = evaluate(&[Value::Tensor(axis)]).expect("meshgrid");
         let Value::Tensor(x) = eval_first(&eval).expect("X") else {
@@ -1770,9 +1768,8 @@ pub(crate) mod tests {
 
     #[test]
     fn meshgrid_tensor_to_complex_reads_typed_integer_storage_exactly() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::I64(vec![-3, 5]), vec![1, 2]).expect("tensor");
-        tensor.data.fill(f64::NAN);
 
         let out = tensor_to_complex_tensor(tensor).expect("complex tensor");
         assert_eq!(out.shape, vec![1, 2]);
@@ -1802,13 +1799,13 @@ pub(crate) mod tests {
         let x_out = test_support::gather(eval_first(&eval).expect("X")).expect("host");
         assert_eq!(x_out.shape, vec![3, 3]);
         assert_eq!(
-            x_out.data,
+            x_out.materialize_f64(),
             vec![-1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0]
         );
         let y_out = test_support::gather(eval_second(&eval).expect("Y")).expect("host");
         assert_eq!(y_out.shape, vec![3, 3]);
         assert_eq!(
-            y_out.data,
+            y_out.materialize_f64(),
             vec![-1.0, 0.0, 1.0, -1.0, 0.0, 1.0, -1.0, 0.0, 1.0]
         );
     }
@@ -1880,10 +1877,13 @@ pub(crate) mod tests {
         assert_eq!(eval.output_count(), 2);
         let x_out = test_support::gather(eval_first(&eval).expect("X")).expect("host");
         assert_eq!(x_out.shape, vec![2, 3]);
-        assert_eq!(x_out.data, vec![0.0, 0.0, 0.5, 0.5, 1.0, 1.0]);
+        assert_eq!(x_out.materialize_f64(), vec![0.0, 0.0, 0.5, 0.5, 1.0, 1.0]);
         let y_out = test_support::gather(eval_second(&eval).expect("Y")).expect("host");
         assert_eq!(y_out.shape, vec![2, 3]);
-        assert_eq!(y_out.data, vec![10.0, 20.0, 10.0, 20.0, 10.0, 20.0]);
+        assert_eq!(
+            y_out.materialize_f64(),
+            vec![10.0, 20.0, 10.0, 20.0, 10.0, 20.0]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1898,13 +1898,13 @@ pub(crate) mod tests {
         let x_out = test_support::gather(eval_first(&eval).expect("X")).expect("host");
         assert_eq!(x_out.shape, vec![3, 2, 2]);
         assert_eq!(
-            x_out.data,
+            x_out.materialize_f64(),
             vec![1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0]
         );
         let z_out = test_support::gather(eval_third(&eval).expect("Z")).expect("host");
         assert_eq!(z_out.shape, vec![3, 2, 2]);
         assert_eq!(
-            z_out.data,
+            z_out.materialize_f64(),
             vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
         );
     }
@@ -1917,7 +1917,7 @@ pub(crate) mod tests {
             let y = tensor_from_vec(vec![2.0, 4.0], 2, 1);
             let proto = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
             let proto_view = HostTensorView {
-                data: &proto.data,
+                data: &proto.materialize_f64(),
                 shape: &proto.shape,
             };
             let proto_handle = provider.upload(&proto_view).expect("upload");
@@ -1942,11 +1942,11 @@ pub(crate) mod tests {
             let x = tensor_from_vec(vec![0.0, 0.5], 1, 2);
             let y = tensor_from_vec(vec![1.0, 2.0], 2, 1);
             let x_view = HostTensorView {
-                data: &x.data,
+                data: &x.materialize_f64(),
                 shape: &x.shape,
             };
             let y_view = HostTensorView {
-                data: &y.data,
+                data: &y.materialize_f64(),
                 shape: &y.shape,
             };
             let x_handle = provider.upload(&x_view).expect("upload");
@@ -1983,11 +1983,11 @@ pub(crate) mod tests {
             test_support::gather(eval_second(&cpu_eval).expect("Y cpu")).expect("gather Y cpu");
 
         let x_view = HostTensorView {
-            data: &x.data,
+            data: &x.materialize_f64(),
             shape: &x.shape,
         };
         let y_view = HostTensorView {
-            data: &y.data,
+            data: &y.materialize_f64(),
             shape: &y.shape,
         };
         let x_gpu = provider.upload(&x_view).expect("upload x");
@@ -2005,9 +2005,9 @@ pub(crate) mod tests {
         let gathered_y = test_support::gather(gpu_y_value).expect("gather Y gpu");
 
         assert_eq!(gathered_x.shape, cpu_x.shape);
-        assert_eq!(gathered_x.data, cpu_x.data);
+        assert_eq!(gathered_x.materialize_f64(), cpu_x.materialize_f64());
         assert_eq!(gathered_y.shape, cpu_y.shape);
-        assert_eq!(gathered_y.data, cpu_y.data);
+        assert_eq!(gathered_y.materialize_f64(), cpu_y.materialize_f64());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

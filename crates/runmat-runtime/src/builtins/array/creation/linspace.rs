@@ -543,7 +543,7 @@ pub(crate) mod tests {
                 assert_eq!(t.shape, vec![1, 5]);
                 let expected = [0.0, 0.25, 0.5, 0.75, 1.0];
                 for (idx, expected_val) in expected.iter().enumerate() {
-                    assert!((t.data[idx] - expected_val).abs() < 1e-12);
+                    assert!((t.materialize_f64()[idx] - expected_val).abs() < 1e-12);
                 }
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -553,8 +553,7 @@ pub(crate) mod tests {
     #[test]
     fn linspace_count_parser_preserves_typed_integer_tensors_exactly() {
         let large = 9_007_199_254_740_993_u64;
-        let mut count = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).unwrap();
-        count.data.clear();
+        let count = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).unwrap();
 
         assert_eq!(
             parse_count_host(&Value::Tensor(count)).unwrap(),
@@ -576,28 +575,24 @@ pub(crate) mod tests {
         ];
 
         for storage in storages {
-            let mut count = Tensor::new_integer(storage, vec![1, 1]).expect("integer count");
-            count.data.fill(f64::NAN);
+            let count = Tensor::new_integer(storage, vec![1, 1]).expect("integer count");
             assert_eq!(parse_count_host(&Value::Tensor(count)).unwrap(), 2);
         }
     }
 
     #[test]
     fn linspace_count_parser_rejects_negative_typed_integer_tensors() {
-        let mut count = Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).unwrap();
-        count.data.clear();
+        let count = Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).unwrap();
 
         assert!(parse_count_host(&Value::Tensor(count)).is_err());
     }
 
     #[test]
     fn linspace_real_integer_tensor_endpoints_read_exact_storage() {
-        let mut start =
+        let start =
             Tensor::new_integer(IntegerStorage::I64(vec![-3]), vec![1, 1]).expect("start tensor");
-        start.data.clear();
-        let mut stop =
+        let stop =
             Tensor::new_integer(IntegerStorage::U64(vec![9]), vec![1, 1]).expect("stop tensor");
-        stop.data.clear();
 
         let result = linspace_builtin(
             Value::Tensor(start),
@@ -606,7 +601,7 @@ pub(crate) mod tests {
         )
         .expect("linspace");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data, vec![-3.0, 3.0, 9.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![-3.0, 3.0, 9.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -629,8 +624,8 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 100]);
-                assert!((t.data.first().copied().unwrap() + 1.0).abs() < 1e-12);
-                assert!((t.data.last().copied().unwrap() - 1.0).abs() < 1e-12);
+                assert!((t.materialize_f64().first().copied().unwrap() + 1.0).abs() < 1e-12);
+                assert!((t.materialize_f64().last().copied().unwrap() - 1.0).abs() < 1e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -648,7 +643,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 0]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
         }
@@ -666,7 +661,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 1]);
-                assert!((t.data[0] - 9.0).abs() < 1e-12);
+                assert!((t.materialize_f64()[0] - 9.0).abs() < 1e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -802,7 +797,7 @@ pub(crate) mod tests {
                 assert_eq!(t.shape, vec![1, 3]);
                 let expected = [1.0, 0.5, 0.0];
                 for (idx, expected_val) in expected.iter().enumerate() {
-                    assert!((t.data[idx] - expected_val).abs() < 1e-12);
+                    assert!((t.materialize_f64()[idx] - expected_val).abs() < 1e-12);
                 }
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -817,7 +812,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 1]);
-                assert!((t.data[0] - 7.0).abs() < 1e-12);
+                assert!((t.materialize_f64()[0] - 7.0).abs() < 1e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -839,7 +834,7 @@ pub(crate) mod tests {
                 assert_eq!(t.shape, vec![1, 3]);
                 let expected = [2.0, 3.0, 4.0];
                 for (idx, expected_val) in expected.iter().enumerate() {
-                    assert!((t.data[idx] - expected_val).abs() < 1e-12);
+                    assert!((t.materialize_f64()[idx] - expected_val).abs() < 1e-12);
                 }
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -848,11 +843,8 @@ pub(crate) mod tests {
 
     #[test]
     fn linspace_typed_integer_tensor_endpoints_read_exact_storage() {
-        let mut start =
-            Tensor::new_integer(IntegerStorage::I16(vec![-2]), vec![1, 1]).expect("start");
-        start.data.clear();
-        let mut stop = Tensor::new_integer(IntegerStorage::U16(vec![4]), vec![1, 1]).expect("stop");
-        stop.data.clear();
+        let start = Tensor::new_integer(IntegerStorage::I16(vec![-2]), vec![1, 1]).expect("start");
+        let stop = Tensor::new_integer(IntegerStorage::U16(vec![4]), vec![1, 1]).expect("stop");
 
         let result = linspace_builtin(
             Value::Tensor(start),
@@ -865,7 +857,7 @@ pub(crate) mod tests {
                 assert_eq!(t.shape, vec![1, 4]);
                 let expected = [-2.0, 0.0, 2.0, 4.0];
                 for (idx, expected_val) in expected.iter().enumerate() {
-                    assert!((t.data[idx] - expected_val).abs() < 1e-12);
+                    assert!((t.materialize_f64()[idx] - expected_val).abs() < 1e-12);
                 }
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -884,7 +876,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 4]);
-                assert!(t.data.iter().all(|v| (*v - 5.0).abs() < 1e-12));
+                assert!(t.materialize_f64().iter().all(|v| (*v - 5.0).abs() < 1e-12));
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -897,11 +889,11 @@ pub(crate) mod tests {
             let start = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
             let stop = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
             let start_view = runmat_accelerate_api::HostTensorView {
-                data: &start.data,
+                data: &start.materialize_f64(),
                 shape: &start.shape,
             };
             let stop_view = runmat_accelerate_api::HostTensorView {
-                data: &stop.data,
+                data: &stop.materialize_f64(),
                 shape: &stop.shape,
             };
             let start_handle = provider.upload(&start_view).expect("upload start");
@@ -918,7 +910,7 @@ pub(crate) mod tests {
                     let expected = [0.0, 0.25, 0.5, 0.75, 1.0];
                     assert_eq!(gathered.shape, vec![1, 5]);
                     for (idx, expected_val) in expected.iter().enumerate() {
-                        assert!((gathered.data[idx] - expected_val).abs() < 1e-12);
+                        assert!((gathered.materialize_f64()[idx] - expected_val).abs() < 1e-12);
                     }
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
@@ -933,11 +925,11 @@ pub(crate) mod tests {
             let start = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
             let stop = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
             let start_view = runmat_accelerate_api::HostTensorView {
-                data: &start.data,
+                data: &start.materialize_f64(),
                 shape: &start.shape,
             };
             let stop_view = runmat_accelerate_api::HostTensorView {
-                data: &stop.data,
+                data: &stop.materialize_f64(),
                 shape: &stop.shape,
             };
             let start_handle = provider.upload(&start_view).expect("upload start");
@@ -952,7 +944,7 @@ pub(crate) mod tests {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
                     assert_eq!(gathered.shape, vec![1, 0]);
-                    assert!(gathered.data.is_empty());
+                    assert!(gathered.materialize_f64().is_empty());
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
             }
@@ -974,11 +966,11 @@ pub(crate) mod tests {
         let start = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
         let stop = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let start_view = HostTensorView {
-            data: &start.data,
+            data: &start.materialize_f64(),
             shape: &start.shape,
         };
         let stop_view = HostTensorView {
-            data: &stop.data,
+            data: &stop.materialize_f64(),
             shape: &stop.shape,
         };
         let start_handle = provider.upload(&start_view).expect("upload start");
@@ -1003,7 +995,7 @@ pub(crate) mod tests {
 
         assert_eq!(gathered.shape, vec![1, 9]);
         for (idx, expected_value) in expected.iter().enumerate() {
-            let actual = gathered.data[idx];
+            let actual = gathered.materialize_f64()[idx];
             assert!(
                 (actual - expected_value).abs() <= tol,
                 "mismatch at {idx}: gpu={} expected={}",

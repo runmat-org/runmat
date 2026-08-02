@@ -736,12 +736,11 @@ pub(crate) mod tests {
 
     #[test]
     fn weboptions_timeout_reads_typed_integer_tensor_storage_exactly() {
-        let mut timeout = runmat_builtins::Tensor::new_integer(
+        let timeout = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::U16(vec![2026]),
             vec![1, 1],
         )
         .expect("typed timeout");
-        timeout.data.clear();
 
         let result = run_weboptions(vec![Value::from("Timeout"), Value::Tensor(timeout)])
             .expect("weboptions timeout");

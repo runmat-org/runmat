@@ -288,7 +288,7 @@ pub(crate) mod tests {
         match (Value::Tensor(original_tensor), restored) {
             (Value::Tensor(orig), Value::Tensor(rest)) => {
                 assert_eq!(orig.shape, rest.shape);
-                assert_eq!(orig.data, rest.data);
+                assert_eq!(orig.materialize_f64(), rest.materialize_f64());
             }
             _ => panic!("expected tensor pair"),
         }
@@ -385,7 +385,7 @@ pub(crate) mod tests {
             let host = make_tensor(&(0..24).map(|n| n as f64).collect::<Vec<_>>(), &[2, 3, 4]);
             let order = make_tensor(&[3.0, 1.0, 2.0], &[1, 3]);
             let view = runmat_accelerate_api::HostTensorView {
-                data: &host.data,
+                data: &host.materialize_f64(),
                 shape: &host.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -396,7 +396,7 @@ pub(crate) mod tests {
             let restored = ipermute_builtin(permuted, Value::Tensor(order)).expect("ipermute gpu");
             let gathered = test_support::gather(restored).expect("gather");
             assert_eq!(gathered.shape, host.shape);
-            assert_eq!(gathered.data, host.data);
+            assert_eq!(gathered.materialize_f64(), host.materialize_f64());
         });
     }
 
@@ -449,7 +449,7 @@ pub(crate) mod tests {
         let cpu = ipermute_builtin(permuted, Value::Tensor(order.clone())).expect("cpu ipermute");
 
         let view = runmat_accelerate_api::HostTensorView {
-            data: &host.data,
+            data: &host.materialize_f64(),
             shape: &host.shape,
         };
         let handle = provider.upload(&view).expect("upload");
@@ -461,7 +461,7 @@ pub(crate) mod tests {
         match cpu {
             Value::Tensor(ct) => {
                 assert_eq!(ct.shape, gathered.shape);
-                assert_eq!(ct.data, gathered.data);
+                assert_eq!(ct.materialize_f64(), gathered.materialize_f64());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -506,7 +506,7 @@ pub(crate) mod tests {
         match restored {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 5, 1]);
-                assert_eq!(out.data, row.data);
+                assert_eq!(out.materialize_f64(), row.materialize_f64());
             }
             Value::Num(n) => {
                 panic!("expected tensor result, got scalar {n}");

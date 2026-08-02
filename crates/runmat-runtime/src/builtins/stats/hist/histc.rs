@@ -540,12 +540,11 @@ mod tests {
     }
 
     fn values(value: Tensor) -> Vec<f64> {
-        value.data
+        value.materialize_f64()
     }
 
     fn typed_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         Value::Tensor(tensor)
     }
 
@@ -701,9 +700,9 @@ mod tests {
         let edges = tensor(Vec::new(), vec![1, 0]);
         let result = block_on(evaluate(x, edges, None)).expect("histc empty edges");
         assert_eq!(result.counts.shape, vec![1, 0]);
-        assert!(result.counts.data.is_empty());
+        assert!(result.counts.materialize_f64().is_empty());
         assert_eq!(result.indices.shape, vec![0, 0]);
-        assert!(result.indices.data.is_empty());
+        assert!(result.indices.materialize_f64().is_empty());
     }
 
     #[test]
@@ -807,6 +806,6 @@ mod tests {
         let Value::Tensor(counts) = result else {
             panic!("expected tensor");
         };
-        assert_eq!(counts.data, vec![1.0, 1.0]);
+        assert_eq!(counts.materialize_f64(), vec![1.0, 1.0]);
     }
 }

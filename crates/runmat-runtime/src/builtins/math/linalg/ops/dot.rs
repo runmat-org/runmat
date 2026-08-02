@@ -634,7 +634,7 @@ pub(crate) mod tests {
         match cols {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 3]);
-                assert_eq!(t.data, vec![18.0, 20.0, 18.0]);
+                assert_eq!(t.materialize_f64(), vec![18.0, 20.0, 18.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -647,7 +647,7 @@ pub(crate) mod tests {
         match rows {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                assert_eq!(t.data, vec![28.0, 28.0]);
+                assert_eq!(t.materialize_f64(), vec![28.0, 28.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -655,14 +655,11 @@ pub(crate) mod tests {
 
     #[test]
     fn dot_reads_typed_integer_tensors_and_dimension_exactly() {
-        let mut lhs = Tensor::new_integer(IntegerStorage::I16(vec![1, 4, 2, 5, 3, 6]), vec![2, 3])
+        let lhs = Tensor::new_integer(IntegerStorage::I16(vec![1, 4, 2, 5, 3, 6]), vec![2, 3])
             .expect("lhs");
-        lhs.data.clear();
-        let mut rhs = Tensor::new_integer(IntegerStorage::U16(vec![6, 3, 5, 2, 4, 1]), vec![2, 3])
+        let rhs = Tensor::new_integer(IntegerStorage::U16(vec![6, 3, 5, 2, 4, 1]), vec![2, 3])
             .expect("rhs");
-        rhs.data.clear();
-        let mut dim = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("dim");
-        dim.data.clear();
+        let dim = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("dim");
 
         let value = dot_builtin(
             Value::Tensor(lhs),
@@ -673,7 +670,7 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 3]);
-                assert_eq!(t.data, vec![18.0, 20.0, 18.0]);
+                assert_eq!(t.materialize_f64(), vec![18.0, 20.0, 18.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -765,7 +762,7 @@ pub(crate) mod tests {
         let value = dot_builtin(Value::Tensor(lhs), Value::Tensor(rhs), Vec::new()).expect("dot");
         match value {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![0.0, 0.0, 0.0]);
+                assert_eq!(t.materialize_f64(), vec![0.0, 0.0, 0.0]);
                 assert_eq!(t.shape, vec![1, 3]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -831,7 +828,7 @@ pub(crate) mod tests {
         .expect("dot");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![1.0, 7.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 7.0]);
                 assert_eq!(t.shape, vec![1, 2]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -845,11 +842,11 @@ pub(crate) mod tests {
             let lhs = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 4]).unwrap();
             let rhs = Tensor::new(vec![4.0, 3.0, 2.0, 1.0], vec![1, 4]).unwrap();
             let view_lhs = HostTensorView {
-                data: &lhs.data,
+                data: &lhs.materialize_f64(),
                 shape: &lhs.shape,
             };
             let view_rhs = HostTensorView {
-                data: &rhs.data,
+                data: &rhs.materialize_f64(),
                 shape: &rhs.shape,
             };
             let gpu_lhs = provider.upload(&view_lhs).expect("upload lhs");
@@ -864,7 +861,7 @@ pub(crate) mod tests {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
                     assert_eq!(gathered.shape, vec![1, 1]);
-                    assert_eq!(gathered.data, vec![20.0]);
+                    assert_eq!(gathered.materialize_f64(), vec![20.0]);
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
             }
@@ -878,7 +875,7 @@ pub(crate) mod tests {
             let lhs = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 4]).unwrap();
             let rhs = Tensor::new(vec![4.0, 3.0, 2.0, 1.0], vec![1, 4]).unwrap();
             let view_lhs = HostTensorView {
-                data: &lhs.data,
+                data: &lhs.materialize_f64(),
                 shape: &lhs.shape,
             };
             let gpu_lhs = provider.upload(&view_lhs).expect("upload lhs");
@@ -893,7 +890,7 @@ pub(crate) mod tests {
                     let gathered =
                         test_support::gather(Value::GpuTensor(handle)).expect("gather result");
                     assert_eq!(gathered.shape, vec![1, 1]);
-                    assert_eq!(gathered.data, vec![20.0]);
+                    assert_eq!(gathered.materialize_f64(), vec![20.0]);
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
             }
@@ -914,7 +911,7 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data, vec![3.0, 8.0]);
+                assert_eq!(t.materialize_f64(), vec![3.0, 8.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -932,11 +929,11 @@ pub(crate) mod tests {
         let cpu = dot_real_tensor(&lhs, &rhs, Some(1)).expect("cpu dot");
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view_lhs = HostTensorView {
-            data: &lhs.data,
+            data: &lhs.materialize_f64(),
             shape: &lhs.shape,
         };
         let view_rhs = HostTensorView {
-            data: &rhs.data,
+            data: &rhs.materialize_f64(),
             shape: &rhs.shape,
         };
         let gpu_lhs = provider.upload(&view_lhs).expect("upload lhs");
@@ -949,7 +946,7 @@ pub(crate) mod tests {
         .expect("gpu dot");
         let gathered = test_support::gather(gpu_value).expect("gather");
         assert_eq!(gathered.shape, cpu.shape);
-        assert_eq!(gathered.data, cpu.data);
+        assert_eq!(gathered.materialize_f64(), cpu.materialize_f64());
     }
 
     fn dot_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

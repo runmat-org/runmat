@@ -1828,8 +1828,7 @@ mod tests {
     }
 
     fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
         Value::Tensor(tensor)
     }
 
@@ -1884,8 +1883,8 @@ mod tests {
             other => panic!("coefficients {other:?}"),
         };
         let estimates = tensor(coeffs.fields.get("Estimate").unwrap());
-        assert!((estimates.data[0] - 1.0).abs() < 1.0e-10);
-        assert!((estimates.data[1] - 2.0).abs() < 1.0e-10);
+        assert!((estimates.materialize_f64()[0] - 1.0).abs() < 1.0e-10);
+        assert!((estimates.materialize_f64()[1] - 2.0).abs() < 1.0e-10);
         let predicted = block_on(predict_builtin(
             model,
             tensor_value(vec![4.0, 5.0], 2, 1),
@@ -1894,8 +1893,8 @@ mod tests {
         .unwrap();
         let ypred = tensor(&predicted);
         assert_eq!(ypred.shape, vec![2, 1]);
-        assert!((ypred.data[0] - 9.0).abs() < 1.0e-10);
-        assert!((ypred.data[1] - 11.0).abs() < 1.0e-10);
+        assert!((ypred.materialize_f64()[0] - 9.0).abs() < 1.0e-10);
+        assert!((ypred.materialize_f64()[1] - 11.0).abs() < 1.0e-10);
     }
 
     #[test]
@@ -1921,8 +1920,8 @@ mod tests {
         .unwrap();
         let ypred = tensor(&predicted);
         assert_eq!(ypred.shape, vec![2, 1]);
-        assert!((ypred.data[0] - 7.0).abs() < 1.0e-10);
-        assert!((ypred.data[1] - 9.0).abs() < 1.0e-10);
+        assert!((ypred.materialize_f64()[0] - 7.0).abs() < 1.0e-10);
+        assert!((ypred.materialize_f64()[1] - 9.0).abs() < 1.0e-10);
     }
 
     #[test]
@@ -1965,9 +1964,9 @@ mod tests {
         };
         let estimates = tensor(coeffs.fields.get("Estimate").unwrap());
         assert_eq!(estimates.shape, vec![3, 1]);
-        assert!((estimates.data[0] - 1.0).abs() < 1.0e-10);
-        assert!(estimates.data[1].abs() < 1.0e-10);
-        assert!((estimates.data[2] - 2.0).abs() < 1.0e-10);
+        assert!((estimates.materialize_f64()[0] - 1.0).abs() < 1.0e-10);
+        assert!(estimates.materialize_f64()[1].abs() < 1.0e-10);
+        assert!((estimates.materialize_f64()[2] - 2.0).abs() < 1.0e-10);
     }
 
     #[test]
@@ -1999,10 +1998,10 @@ mod tests {
             other => panic!("expected tensor or output list, got {other:?}"),
         };
         assert_eq!(yci.shape, vec![2, 2]);
-        assert!(yci.data[0] < yci.data[1]);
-        assert!(yci.data[2] < yci.data[3]);
-        assert!(yci.data[0] < yci.data[2]);
-        assert!(yci.data[1] < yci.data[3]);
+        assert!(yci.materialize_f64()[0] < yci.materialize_f64()[1]);
+        assert!(yci.materialize_f64()[2] < yci.materialize_f64()[3]);
+        assert!(yci.materialize_f64()[0] < yci.materialize_f64()[2]);
+        assert!(yci.materialize_f64()[1] < yci.materialize_f64()[3]);
     }
 
     #[test]
@@ -2028,7 +2027,7 @@ mod tests {
         };
         let estimates = tensor(coeffs.fields.get("Estimate").unwrap());
         assert_eq!(estimates.shape, vec![1, 1]);
-        assert!((estimates.data[0] - 2.0).abs() < 1.0e-10);
+        assert!((estimates.materialize_f64()[0] - 2.0).abs() < 1.0e-10);
 
         let intercept_only =
             object(block_on(fitlm_builtin(table, vec![Value::String("Y ~ 1".into())])).unwrap());
@@ -2038,7 +2037,7 @@ mod tests {
         };
         let estimates = tensor(coeffs.fields.get("Estimate").unwrap());
         assert_eq!(estimates.shape, vec![1, 1]);
-        assert!((estimates.data[0] - 4.0).abs() < 1.0e-10);
+        assert!((estimates.materialize_f64()[0] - 4.0).abs() < 1.0e-10);
     }
 
     #[test]
@@ -2063,7 +2062,7 @@ mod tests {
         let predicted = block_on(predict_builtin(model, xnew, Vec::new())).unwrap();
         let yhat = tensor(&predicted);
         assert_eq!(yhat.shape, vec![2, 1]);
-        assert_eq!(yhat.data, vec![4.0, 4.0]);
+        assert_eq!(yhat.materialize_f64(), vec![4.0, 4.0]);
     }
 
     #[test]

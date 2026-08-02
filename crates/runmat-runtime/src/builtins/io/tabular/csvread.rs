@@ -1011,7 +1011,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                assert_eq!(t.data, vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1028,7 +1028,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![4.0, 7.0, 5.0, 8.0]);
+                assert_eq!(t.materialize_f64(), vec![4.0, 7.0, 5.0, 8.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1049,7 +1049,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![5.0, 8.0, 6.0, 9.0]);
+                assert_eq!(t.materialize_f64(), vec![5.0, 8.0, 6.0, 9.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1070,7 +1070,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![5.0, 8.0, 6.0, 9.0]);
+                assert_eq!(t.materialize_f64(), vec![5.0, 8.0, 6.0, 9.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1079,10 +1079,8 @@ pub(crate) mod tests {
 
     #[test]
     fn csvread_numeric_range_reads_typed_integer_storage_exactly() {
-        let mut range =
-            BuiltinTensor::new_integer(IntegerStorage::U16(vec![1, 2, 3, 4]), vec![1, 4])
-                .expect("range");
-        range.data.fill(f64::NAN);
+        let range = BuiltinTensor::new_integer(IntegerStorage::U16(vec![1, 2, 3, 4]), vec![1, 4])
+            .expect("range");
 
         let parsed = parse_range_numeric(&Value::Tensor(range)).expect("range");
 
@@ -1094,14 +1092,12 @@ pub(crate) mod tests {
 
     #[test]
     fn csvread_start_offsets_read_typed_integer_storage_exactly() {
-        let mut row = BuiltinTensor::new_integer(IntegerStorage::U64(vec![7]), vec![1, 1])
+        let row = BuiltinTensor::new_integer(IntegerStorage::U64(vec![7]), vec![1, 1])
             .expect("row offset");
-        row.data.clear();
         assert_eq!(value_to_start_index(&Value::Tensor(row), "row").unwrap(), 7);
 
-        let mut negative = BuiltinTensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
+        let negative = BuiltinTensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
             .expect("negative row offset");
-        negative.data.clear();
         assert!(value_to_start_index(&Value::Tensor(negative), "row").is_err());
 
         assert_eq!(
@@ -1125,8 +1121,7 @@ pub(crate) mod tests {
         ];
 
         for storage in storages {
-            let mut tensor = BuiltinTensor::new_integer(storage, vec![1, 1]).expect("index");
-            tensor.data = vec![f64::NAN];
+            let tensor = BuiltinTensor::new_integer(storage, vec![1, 1]).expect("index");
             assert_eq!(
                 value_to_start_index(&Value::Tensor(tensor), "row").expect("index"),
                 7
@@ -1143,7 +1138,10 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
-                assert_eq!(t.data, vec![1.0, 0.0, 7.0, 0.0, 5.0, 8.0, 3.0, 0.0, 0.0]);
+                assert_eq!(
+                    t.materialize_f64(),
+                    vec![1.0, 0.0, 7.0, 0.0, 5.0, 8.0, 3.0, 0.0, 0.0]
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1176,7 +1174,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data, vec![1.0, 2.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1193,7 +1191,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![1.0, 3.0, 2.0, 4.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1211,7 +1209,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                assert_eq!(t.data, vec![21.5, 22.0]);
+                assert_eq!(t.materialize_f64(), vec![21.5, 22.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1238,7 +1236,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                assert_eq!(t.data, vec![21.5, 22.0]);
+                assert_eq!(t.materialize_f64(), vec![21.5, 22.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1264,7 +1262,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                assert_eq!(t.data, vec![21.5, 22.0]);
+                assert_eq!(t.materialize_f64(), vec![21.5, 22.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }

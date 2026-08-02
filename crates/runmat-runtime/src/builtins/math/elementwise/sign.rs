@@ -437,7 +437,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                assert_eq!(out.data, vec![-1.0, 0.0, 0.0, 1.0]);
+                assert_eq!(out.materialize_f64(), vec![-1.0, 0.0, 0.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -481,7 +481,10 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 6]);
-                assert!(out.data.iter().all(|&v| (v - 1.0).abs() < 1e-12));
+                assert!(out
+                    .materialize_f64()
+                    .iter()
+                    .all(|&v| (v - 1.0).abs() < 1e-12));
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -495,7 +498,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                assert_eq!(out.data, vec![0.0, 1.0, 0.0, 1.0]);
+                assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 0.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -574,10 +577,10 @@ pub(crate) mod tests {
         let result = sign_builtin(Value::Tensor(tensor)).unwrap();
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.data[0], 1.0);
-                assert_eq!(out.data[1], -1.0);
-                assert_eq!(out.data[2], 0.0);
-                assert!(out.data[3].is_nan());
+                assert_eq!(out.materialize_f64()[0], 1.0);
+                assert_eq!(out.materialize_f64()[1], -1.0);
+                assert_eq!(out.materialize_f64()[2], 0.0);
+                assert!(out.materialize_f64()[3].is_nan());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -613,14 +616,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![-3.0, -0.5, 0.0, 2.5], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = sign_builtin(Value::GpuTensor(handle)).expect("sign");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![-1.0, -1.0, 0.0, 1.0]);
+            assert_eq!(gathered.materialize_f64(), vec![-1.0, -1.0, 0.0, 1.0]);
         });
     }
 
@@ -706,7 +709,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![-3.0, 0.0, 4.0, f64::NAN], vec![2, 2]).unwrap();
         let cpu = sign_real(Value::Tensor(tensor.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()
@@ -718,7 +721,7 @@ pub(crate) mod tests {
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
                 assert_eq!(gt.shape, ct.shape);
-                for (a, b) in gt.data.iter().zip(ct.data.iter()) {
+                for (a, b) in gt.materialize_f64().iter().zip(ct.materialize_f64().iter()) {
                     if a.is_nan() && b.is_nan() {
                         continue;
                     }

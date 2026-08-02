@@ -754,8 +754,7 @@ mod tests {
     }
 
     fn mirrorless_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("typed integer tensor");
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, shape).expect("typed integer tensor");
         tensor
     }
 
@@ -826,7 +825,10 @@ mod tests {
         let Value::Tensor(tensor) = value else {
             panic!("expected tensor");
         };
-        assert!(tensor.data.windows(2).all(|pair| pair[1] >= pair[0]));
+        assert!(tensor
+            .materialize_f64()
+            .windows(2)
+            .all(|pair| pair[1] >= pair[0]));
     }
 
     #[test]
@@ -841,8 +843,8 @@ mod tests {
         let Value::Tensor(tensor) = value else {
             panic!("expected tensor");
         };
-        assert!((tensor.data[0] - 2.25).abs() < 1e-10);
-        assert!((tensor.data[1] - 6.25).abs() < 1e-10);
+        assert!((tensor.materialize_f64()[0] - 2.25).abs() < 1e-10);
+        assert!((tensor.materialize_f64()[1] - 6.25).abs() < 1e-10);
     }
 
     #[test]
@@ -863,10 +865,10 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(tensor.shape, vec![1, 2, 2]);
-        assert_eq!(tensor.data.len(), 4);
-        assert!((tensor.data[0] - 2.25).abs() < 1e-10);
-        assert!((tensor.data[1] - 6.25).abs() < 1e-10);
-        assert!((tensor.data[2] - 225.0).abs() < 1e-10);
-        assert!((tensor.data[3] - 625.0).abs() < 1e-10);
+        assert_eq!(tensor.materialize_f64().len(), 4);
+        assert!((tensor.materialize_f64()[0] - 2.25).abs() < 1e-10);
+        assert!((tensor.materialize_f64()[1] - 6.25).abs() < 1e-10);
+        assert!((tensor.materialize_f64()[2] - 225.0).abs() < 1e-10);
+        assert!((tensor.materialize_f64()[3] - 625.0).abs() < 1e-10);
     }
 }

@@ -936,8 +936,7 @@ mod tests {
     }
 
     fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
         Value::Tensor(tensor)
     }
 
@@ -1066,7 +1065,7 @@ mod tests {
             panic!("expected Values tensor");
         };
         assert_eq!(values.shape, vec![2, 2]);
-        assert_eq!(values.data, vec![2.0, 0.0, 0.0, 2.0]);
+        assert_eq!(values.materialize_f64(), vec![2.0, 0.0, 0.0, 2.0]);
 
         let figure = clone_figure(current_figure_handle()).unwrap();
         let plot = figure.plots().next().unwrap();
@@ -1149,6 +1148,6 @@ mod tests {
         let Value::Tensor(values) = props else {
             panic!("expected Values tensor");
         };
-        assert_eq!(values.data, vec![2.0, 0.0, 0.0, 2.0]);
+        assert_eq!(values.materialize_f64(), vec![2.0, 0.0, 0.0, 2.0]);
     }
 }

@@ -843,19 +843,18 @@ mod tests {
         .unwrap();
         let zlim = get_builtin(vec![Value::Num(ax), Value::String("ZLim".into())]).unwrap();
         let zlim = Tensor::try_from(&zlim).unwrap();
-        assert_eq!(zlim.data, vec![4.0, 5.0]);
+        assert_eq!(zlim.materialize_f64(), vec![4.0, 5.0]);
     }
 
     #[test]
     fn axis_limits_read_typed_integer_storage_exactly() {
         let _guard = setup();
         let ax = crate::builtins::plotting::gca::gca_builtin(vec![]).unwrap();
-        let mut limits = Tensor::new_integer(
+        let limits = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I16(vec![0, 10, -2, 2, 4, 5]),
             vec![1, 6],
         )
         .expect("typed limits");
-        limits.data.clear();
 
         axis_builtin(vec![Value::Tensor(limits)]).unwrap();
 
@@ -867,9 +866,9 @@ mod tests {
                 .unwrap();
         let zlim = Tensor::try_from(&get_builtin(vec![ax, Value::String("ZLim".into())]).unwrap())
             .unwrap();
-        assert_eq!(xlim.data, vec![0.0, 10.0]);
-        assert_eq!(ylim.data, vec![-2.0, 2.0]);
-        assert_eq!(zlim.data, vec![4.0, 5.0]);
+        assert_eq!(xlim.materialize_f64(), vec![0.0, 10.0]);
+        assert_eq!(ylim.materialize_f64(), vec![-2.0, 2.0]);
+        assert_eq!(zlim.materialize_f64(), vec![4.0, 5.0]);
     }
 
     #[test]
@@ -902,8 +901,8 @@ mod tests {
         let ylim = get_builtin(vec![ax, Value::String("YLim".into())]).unwrap();
         let xlim = Tensor::try_from(&xlim).unwrap();
         let ylim = Tensor::try_from(&ylim).unwrap();
-        assert!(xlim.data.iter().all(|value| value.is_nan()));
-        assert!(ylim.data.iter().all(|value| value.is_nan()));
+        assert!(xlim.materialize_f64().iter().all(|value| value.is_nan()));
+        assert!(ylim.materialize_f64().iter().all(|value| value.is_nan()));
     }
 
     #[test]

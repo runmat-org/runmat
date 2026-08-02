@@ -1121,14 +1121,12 @@ mod tests {
     }
 
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
         Value::Tensor(tensor)
     }
 
     fn cleared_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
         Value::Tensor(tensor)
     }
 
@@ -1164,7 +1162,7 @@ mod tests {
                 match &outputs[0] {
                     Value::Tensor(y) => {
                         assert_eq!(y.shape, vec![4, 2]);
-                        assert!(y.data.iter().all(|value| value.is_finite()));
+                        assert!(y.materialize_f64().iter().all(|value| value.is_finite()));
                     }
                     other => panic!("expected tensor, got {other:?}"),
                 }
@@ -1297,8 +1295,7 @@ mod tests {
 
     #[test]
     fn tsne_empty_option_helpers_use_typed_integer_storage_len() {
-        let mut empty = Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 1]).unwrap();
-        empty.data = vec![1.0];
+        let empty = Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 1]).unwrap();
         let empty = Value::Tensor(empty);
 
         assert!(is_empty_numeric(&empty));

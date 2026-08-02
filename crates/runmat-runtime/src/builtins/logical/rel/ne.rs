@@ -620,10 +620,9 @@ pub(crate) mod tests {
 
     #[test]
     fn scalar_numeric_value_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
                 .expect("integer tensor");
-        tensor.data.clear();
 
         assert_eq!(
             scalar_numeric_value(&Value::Tensor(tensor)),
@@ -653,8 +652,7 @@ pub(crate) mod tests {
         ];
 
         for (storage, real, expected) in cases {
-            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer scalar");
-            tensor.data = vec![f64::NAN];
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer scalar");
             assert_eq!(
                 run_ne(Value::Tensor(tensor), Value::Complex(real, 0.0)).expect("ne"),
                 Value::Bool(expected)
@@ -664,13 +662,10 @@ pub(crate) mod tests {
 
     #[test]
     fn ne_dense_integer_arrays_read_exact_storage_without_mirror() {
-        let mut lhs =
-            Tensor::new_integer(IntegerStorage::U64(vec![0, (1_u64 << 53) + 1]), vec![2, 1])
-                .expect("lhs");
-        lhs.data.clear();
-        let mut rhs = Tensor::new_integer(IntegerStorage::I64(vec![0, 1, i64::MAX]), vec![1, 3])
+        let lhs = Tensor::new_integer(IntegerStorage::U64(vec![0, (1_u64 << 53) + 1]), vec![2, 1])
+            .expect("lhs");
+        let rhs = Tensor::new_integer(IntegerStorage::I64(vec![0, 1, i64::MAX]), vec![1, 3])
             .expect("rhs");
-        rhs.data.clear();
 
         let result = run_ne(Value::Tensor(lhs), Value::Tensor(rhs)).expect("ne");
         match result {
@@ -895,11 +890,11 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).unwrap();
             let tensor_b = Tensor::new(vec![1.0, 0.0, 3.0, 5.0], vec![2, 2]).unwrap();
             let view_a = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let view_b = HostTensorView {
-                data: &tensor_b.data,
+                data: &tensor_b.materialize_f64(),
                 shape: &tensor_b.shape,
             };
             let h_a = provider.upload(&view_a).expect("upload a");
@@ -907,7 +902,7 @@ pub(crate) mod tests {
             let result = run_ne(Value::GpuTensor(h_a), Value::GpuTensor(h_b)).expect("ne");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![0.0, 1.0, 1.0, 0.0]);
+            assert_eq!(gathered.materialize_f64(), vec![0.0, 1.0, 1.0, 0.0]);
         });
     }
 
@@ -917,7 +912,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -942,11 +937,11 @@ pub(crate) mod tests {
         let b = Tensor::new(vec![1.0, 0.0, 3.0, 5.0], vec![2, 2]).unwrap();
         let cpu = run_ne_host(Value::Tensor(a.clone()), Value::Tensor(b.clone())).unwrap();
         let view_a = HostTensorView {
-            data: &a.data,
+            data: &a.materialize_f64(),
             shape: &a.shape,
         };
         let view_b = HostTensorView {
-            data: &b.data,
+            data: &b.materialize_f64(),
             shape: &b.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("provider");
@@ -961,7 +956,7 @@ pub(crate) mod tests {
                     ProviderPrecision::F64 => 1e-12,
                     ProviderPrecision::F32 => 1e-5,
                 };
-                for (a, b) in gt.data.iter().zip(cp.data.iter()) {
+                for (a, b) in gt.materialize_f64().iter().zip(cp.data.iter()) {
                     let diff = *a - f64::from(*b);
                     assert!(
                         diff.abs() < tol,

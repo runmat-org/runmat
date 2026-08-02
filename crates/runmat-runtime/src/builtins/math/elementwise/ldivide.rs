@@ -879,10 +879,9 @@ pub(crate) mod tests {
 
     #[test]
     fn scalar_extractors_read_typed_integer_tensor_storage_exactly() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
                 .expect("integer tensor");
-        tensor.data.clear();
         let value = Value::Tensor(tensor);
 
         assert_eq!(
@@ -971,12 +970,11 @@ pub(crate) mod tests {
 
     #[test]
     fn ldivide_mixed_arrays_ignore_poisoned_integer_mirrors_and_return_double() {
-        let mut divisor = Tensor::new_integer(
+        let divisor = Tensor::new_integer(
             IntegerStorage::U64(vec![9_007_199_254_740_993, 4]),
             vec![1, 2],
         )
         .expect("integer divisor");
-        divisor.data.fill(f64::NAN);
         let numerator =
             Tensor::new(vec![18_014_398_509_481_986.0, 20.0], vec![1, 2]).expect("numerator");
 
@@ -984,14 +982,13 @@ pub(crate) mod tests {
         let Value::Tensor(result) = result else {
             panic!("expected double tensor");
         };
-        assert_eq!(result.data, vec![2.0, 5.0]);
+        assert_eq!(result.materialize_f64(), vec![2.0, 5.0]);
         assert!(result.integer_storage().is_none());
     }
 
     #[test]
     fn ldivide_like_complex_conversion_reads_typed_integer_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::U32(vec![4, 5]), vec![1, 2]).unwrap();
-        tensor.data.fill(0.0);
+        let tensor = Tensor::new_integer(IntegerStorage::U32(vec![4, 5]), vec![1, 2]).unwrap();
 
         let result =
             block_on(super::real_to_complex(Value::Tensor(tensor))).expect("complex conversion");
@@ -1041,7 +1038,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
                 let expected = [1.0, 0.5, 0.3333333333333333, 0.25];
-                for (got, exp) in t.data.iter().zip(expected.iter()) {
+                for (got, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((got - exp).abs() < 1e-12);
                 }
             }
@@ -1070,7 +1067,7 @@ pub(crate) mod tests {
                     20.0,
                     13.333333333333334,
                 ];
-                for (got, exp) in t.data.iter().zip(expected.iter()) {
+                for (got, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((got - exp).abs() < EPS);
                 }
             }
@@ -1109,9 +1106,9 @@ pub(crate) mod tests {
             ldivide_builtin(Value::Tensor(tensor), Value::Num(0.0), Vec::new()).expect("ldivide");
         match result {
             Value::Tensor(t) => {
-                assert!(t.data[0].is_nan());
-                assert_eq!(t.data[1], 0.0);
-                assert_eq!(t.data[2], -0.0);
+                assert!(t.materialize_f64()[0].is_nan());
+                assert_eq!(t.materialize_f64()[1], 0.0);
+                assert_eq!(t.materialize_f64()[2], -0.0);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1132,7 +1129,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
                 let expected = [1.0, f64::INFINITY, 4.0, 8.0];
-                for (got, exp) in t.data.iter().zip(expected.iter()) {
+                for (got, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     if exp.is_infinite() {
                         assert!(got.is_infinite());
                     } else {
@@ -1153,8 +1150,8 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert!((t.data[0] - (2.0 / 65.0)).abs() < EPS);
-                assert!((t.data[1] - (2.0 / 66.0)).abs() < EPS);
+                assert!((t.materialize_f64()[0] - (2.0 / 65.0)).abs() < EPS);
+                assert!((t.materialize_f64()[1] - (2.0 / 66.0)).abs() < EPS);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1167,11 +1164,11 @@ pub(crate) mod tests {
             let lhs = Tensor::new(vec![10.0, 20.0, 30.0], vec![3, 1]).unwrap();
             let rhs = Tensor::new(vec![2.0, 5.0, 10.0], vec![3, 1]).unwrap();
             let view_l = HostTensorView {
-                data: &lhs.data,
+                data: &lhs.materialize_f64(),
                 shape: &lhs.shape,
             };
             let view_r = HostTensorView {
-                data: &rhs.data,
+                data: &rhs.materialize_f64(),
                 shape: &rhs.shape,
             };
             let ha = provider.upload(&view_l).expect("upload lhs");
@@ -1181,7 +1178,7 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![3, 1]);
             let expected = [0.2, 0.25, 0.3333333333333333];
-            for (got, exp) in gathered.data.iter().zip(expected.iter()) {
+            for (got, exp) in gathered.materialize_f64().iter().zip(expected.iter()) {
                 assert!((got - exp).abs() < GPU_EPS);
             }
         });
@@ -1207,7 +1204,10 @@ pub(crate) mod tests {
             match result {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-                    assert!(gathered.data.iter().all(|v| (v - 0.5).abs() < GPU_EPS));
+                    assert!(gathered
+                        .materialize_f64()
+                        .iter()
+                        .all(|v| (v - 0.5).abs() < GPU_EPS));
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
             }
@@ -1218,9 +1218,7 @@ pub(crate) mod tests {
     #[test]
     fn ldivide_like_gpu_prototype_uploads_typed_integer_storage_exactly() {
         test_support::with_test_provider(|provider| {
-            let mut divisor =
-                Tensor::new_integer(IntegerStorage::I32(vec![2, 4]), vec![2, 1]).unwrap();
-            divisor.data.fill(0.0);
+            let divisor = Tensor::new_integer(IntegerStorage::I32(vec![2, 4]), vec![2, 1]).unwrap();
             let proto_view = HostTensorView {
                 data: &[0.0],
                 shape: &[1, 1],
@@ -1236,7 +1234,7 @@ pub(crate) mod tests {
 
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 1]);
-            assert_eq!(gathered.data, vec![10.0, 5.0]);
+            assert_eq!(gathered.materialize_f64(), vec![10.0, 5.0]);
         });
     }
 
@@ -1247,11 +1245,11 @@ pub(crate) mod tests {
             let lhs = Tensor::new(vec![8.0, 18.0], vec![2, 1]).unwrap();
             let rhs = Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap();
             let view_l = HostTensorView {
-                data: &lhs.data,
+                data: &lhs.materialize_f64(),
                 shape: &lhs.shape,
             };
             let view_r = HostTensorView {
-                data: &rhs.data,
+                data: &rhs.materialize_f64(),
                 shape: &rhs.shape,
             };
             let ha = provider.upload(&view_l).expect("upload lhs");
@@ -1267,7 +1265,7 @@ pub(crate) mod tests {
             };
             assert_eq!(t.shape, vec![2, 1]);
             let expected = [0.25, 1.0 / 6.0];
-            for (got, exp) in t.data.iter().zip(expected.iter()) {
+            for (got, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                 assert!((got - exp).abs() < GPU_EPS);
             }
         });
@@ -1333,7 +1331,7 @@ pub(crate) mod tests {
             match result {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-                    assert!((gathered.data[0] - 2.5).abs() < GPU_EPS);
+                    assert!((gathered.materialize_f64()[0] - 2.5).abs() < GPU_EPS);
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
             }
@@ -1351,11 +1349,11 @@ pub(crate) mod tests {
         let rhs = Tensor::new(vec![2.0, 3.0, 4.0, 5.0], vec![2, 2]).unwrap();
         let cpu = ldivide_host(Value::Tensor(lhs.clone()), Value::Tensor(rhs.clone())).unwrap();
         let view_l = HostTensorView {
-            data: &lhs.data,
+            data: &lhs.materialize_f64(),
             shape: &lhs.shape,
         };
         let view_r = HostTensorView {
-            data: &rhs.data,
+            data: &rhs.materialize_f64(),
             shape: &rhs.shape,
         };
         let provider = runmat_accelerate_api::provider().unwrap();
@@ -1365,16 +1363,20 @@ pub(crate) mod tests {
         let gathered = test_support::gather(gpu).expect("gather");
         match cpu {
             Value::Tensor(t) => {
-                assert_eq!(gathered.data.len(), t.data.len());
+                assert_eq!(gathered.materialize_f64().len(), t.materialize_f64().len());
                 let tol = match provider.precision() {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
                 };
-                for (ga, ca) in gathered.data.iter().zip(t.data.iter()) {
+                for (ga, ca) in gathered
+                    .materialize_f64()
+                    .iter()
+                    .zip(t.materialize_f64().iter())
+                {
                     assert!((ga - ca).abs() < tol);
                 }
             }
-            Value::Num(n) => assert_eq!(gathered.data, vec![n]),
+            Value::Num(n) => assert_eq!(gathered.materialize_f64(), vec![n]),
             other => panic!("unexpected cpu result {other:?}"),
         }
     }

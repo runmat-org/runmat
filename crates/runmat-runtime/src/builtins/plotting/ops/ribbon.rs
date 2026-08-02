@@ -478,8 +478,7 @@ mod tests {
     }
 
     fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
         Value::Tensor(tensor)
     }
 
@@ -499,7 +498,7 @@ mod tests {
         let Value::Tensor(handles) = handles else {
             panic!("expected handle vector");
         };
-        assert_eq!(handles.data.len(), 2);
+        assert_eq!(handles.materialize_f64().len(), 2);
 
         let figure = clone_figure(current_figure_handle()).expect("figure");
         assert_eq!(figure.plots().count(), 2);
@@ -512,7 +511,7 @@ mod tests {
         assert_eq!(first.z_data.as_ref().unwrap()[0], vec![1.0, 2.0, 3.0]);
 
         let ty = get_builtin(vec![
-            Value::Num(handles.data[0]),
+            Value::Num(handles.materialize_f64()[0]),
             Value::String("Type".into()),
         ])
         .expect("get type");

@@ -906,19 +906,14 @@ mod tests {
 
     #[test]
     fn statset_reads_typed_integer_tensor_options_exactly() {
-        let mut max_iter =
+        let max_iter =
             Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("MaxIter");
-        max_iter.data.clear();
-        let mut tol_fun =
+        let tol_fun =
             Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("TolFun");
-        tol_fun.data.clear();
-        let mut deriv_step =
+        let deriv_step =
             Tensor::new_integer(IntegerStorage::U16(vec![3, 4]), vec![1, 2]).expect("DerivStep");
-        deriv_step.data[0] = f64::NAN;
-        deriv_step.data[1] = -1.0;
-        let mut use_parallel =
+        let use_parallel =
             Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("UseParallel");
-        use_parallel.data.clear();
 
         let options = struct_value(
             block_on(statset_builtin(vec![
@@ -960,8 +955,7 @@ mod tests {
             IntegerStorage::U64(vec![1]),
         ];
         for storage in storages {
-            let mut scalar = Tensor::new_integer(storage, vec![1, 1]).unwrap();
-            scalar.data.fill(f64::NAN);
+            let scalar = Tensor::new_integer(storage, vec![1, 1]).unwrap();
             assert!(matches!(
                 bool_or_on_off_value("UseParallel", &Value::Tensor(scalar)),
                 Ok(Value::Bool(true))
@@ -981,16 +975,13 @@ mod tests {
             IntegerStorage::U32(vec![7]),
             IntegerStorage::U64(vec![7]),
         ] {
-            let mut value = Tensor::new_integer(storage, vec![1, 1]).unwrap();
-            value.data.fill(f64::NAN);
+            let value = Tensor::new_integer(storage, vec![1, 1]).unwrap();
             assert_eq!(
                 positive_integer_value("MaxIter", &Value::Tensor(value)).unwrap(),
                 Value::Num(7.0)
             );
         }
-        let mut wide =
-            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap();
-        wide.data.fill(7.0);
+        let wide = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap();
         assert!(positive_integer_value("MaxIter", &Value::Tensor(wide)).is_err());
     }
 

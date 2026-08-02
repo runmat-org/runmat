@@ -553,14 +553,13 @@ mod tests {
 
     fn tensor_data(value: Value) -> Vec<f64> {
         match value {
-            Value::Tensor(tensor) => tensor.data,
+            Value::Tensor(tensor) => tensor.materialize_f64(),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
 
     fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         Value::Tensor(tensor)
     }
 
@@ -677,9 +676,8 @@ mod tests {
             "Variable".to_string(),
             Value::CharArray(CharArray::new_row("s")),
         );
-        let mut sample_time =
+        let sample_time =
             Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("sample time");
-        sample_time.data.clear();
         object
             .properties
             .insert("Ts".to_string(), Value::Tensor(sample_time));

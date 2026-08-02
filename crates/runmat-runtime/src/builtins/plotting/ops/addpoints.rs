@@ -310,18 +310,17 @@ mod tests {
     }
 
     fn integer_vector(values: &[i16]) -> Value {
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I16(values.to_vec()),
             vec![1, values.len()],
         )
         .unwrap();
-        tensor.data.fill(f64::NAN);
         Value::Tensor(tensor)
     }
 
     fn tensor_data(value: Value) -> Vec<f64> {
         match value {
-            Value::Tensor(tensor) => tensor.data,
+            Value::Tensor(tensor) => tensor.materialize_f64(),
             other => panic!("expected tensor, got {other:?}"),
         }
     }

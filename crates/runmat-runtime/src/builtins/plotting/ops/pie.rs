@@ -383,12 +383,11 @@ mod tests {
     }
 
     fn int_vec_tensor(data: Vec<i16>) -> Tensor {
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I16(data.clone()),
             vec![data.len()],
         )
         .expect("integer tensor");
-        tensor.data.clear();
         tensor
     }
 

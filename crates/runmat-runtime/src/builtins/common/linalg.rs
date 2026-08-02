@@ -277,9 +277,8 @@ mod tests {
 
     #[test]
     fn parse_tolerance_arg_reads_typed_integer_tensor_storage() {
-        let mut tol =
+        let tol =
             Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("typed tolerance");
-        tol.data.clear();
         assert_eq!(
             parse_tolerance_arg("rank", &[Value::Tensor(tol)]).expect("tolerance"),
             Some(2.0)
@@ -288,9 +287,8 @@ mod tests {
 
     #[test]
     fn parse_tolerance_arg_rejects_negative_typed_integer_storage() {
-        let mut tol = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
+        let tol = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
             .expect("typed tolerance");
-        tol.data.clear();
         let err = parse_tolerance_arg("pinv", &[Value::Tensor(tol)])
             .expect_err("negative typed tolerance must reject");
         assert!(err.contains("tolerance must be >= 0"), "{err}");
@@ -298,21 +296,19 @@ mod tests {
 
     #[test]
     fn scalar_mul_real_reads_typed_integer_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![2, 3, 5]), vec![3, 1])
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![2, 3, 5]), vec![3, 1])
             .expect("typed tensor");
-        tensor.data.fill(f64::NAN);
 
         let out = scalar_mul_real(&tensor, 4.0);
 
-        assert_eq!(out.data, vec![8.0, 12.0, 20.0]);
+        assert_eq!(out.materialize_f64(), vec![8.0, 12.0, 20.0]);
         assert!(out.integer_storage().is_none());
     }
 
     #[test]
     fn scalar_mul_complex_reads_typed_integer_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::I16(vec![-2, 3]), vec![2, 1])
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![-2, 3]), vec![2, 1])
             .expect("typed tensor");
-        tensor.data.fill(f64::NAN);
 
         let out = scalar_mul_complex(&tensor, 2.0, -0.5);
 
@@ -321,24 +317,21 @@ mod tests {
 
     #[test]
     fn matmul_real_reads_typed_integer_storage_exactly() {
-        let mut lhs =
+        let lhs =
             Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 3, 4]), vec![2, 2]).expect("lhs");
-        let mut rhs =
+        let rhs =
             Tensor::new_integer(IntegerStorage::I16(vec![5, 6, 7, 8]), vec![2, 2]).expect("rhs");
-        lhs.data.fill(f64::NAN);
-        rhs.data.fill(f64::NAN);
 
         let out = matmul_real(&lhs, &rhs).expect("matmul");
 
-        assert_eq!(out.data, vec![23.0, 34.0, 31.0, 46.0]);
+        assert_eq!(out.materialize_f64(), vec![23.0, 34.0, 31.0, 46.0]);
         assert!(out.integer_storage().is_none());
     }
 
     #[test]
     fn matmul_mixed_real_complex_reads_typed_integer_storage_exactly() {
-        let mut real =
+        let real =
             Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2]).expect("real");
-        real.data.fill(f64::NAN);
         let complex = ComplexTensor::new(
             vec![(1.0, 1.0), (2.0, 0.0), (0.0, 1.0), (3.0, -1.0)],
             vec![2, 2],

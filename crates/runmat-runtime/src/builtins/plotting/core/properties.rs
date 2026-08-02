@@ -7321,18 +7321,15 @@ mod tests {
 
     #[test]
     fn numeric_property_helpers_read_typed_integer_storage() {
-        let mut aspect_tensor =
+        let aspect_tensor =
             Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 3]), vec![1, 3]).expect("aspect");
-        aspect_tensor.data.clear();
         let aspect = Value::Tensor(aspect_tensor);
-        let mut position_tensor =
+        let position_tensor =
             Tensor::new_integer(IntegerStorage::U32(vec![10, 20, 300, 200]), vec![1, 4])
                 .expect("position");
-        position_tensor.data.clear();
         let position = Value::Tensor(position_tensor);
-        let mut text_tensor =
+        let text_tensor =
             Tensor::new_integer(IntegerStorage::I16(vec![-2, 5, 9]), vec![1, 3]).expect("text");
-        text_tensor.data.clear();
         let text = Value::Tensor(text_tensor);
 
         assert_eq!(
@@ -7346,15 +7343,12 @@ mod tests {
         let parsed = parse_text_position(&text, "text").expect("text position");
         assert_eq!(parsed, glam::Vec3::new(-2.0, 5.0, 9.0));
 
-        let mut zdata =
+        let zdata =
             Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2]).expect("zdata");
-        zdata.data.clear();
         let zgrid = surface_z_grid_from_value(&Value::Tensor(zdata), 2, 2, "surf").expect("zdata");
         assert_eq!(zgrid, vec![vec![1.0, 2.0], vec![3.0, 4.0]]);
 
-        let mut scalar =
-            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("scalar");
-        scalar.data.clear();
+        let scalar = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("scalar");
         let scalar = Value::Tensor(scalar);
         assert_eq!(scalar_numeric_value(&scalar), Some(7.0));
         assert_eq!(handle_scalar(&scalar, "plot").expect("handle"), 7.0);

@@ -632,7 +632,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 1]);
                 let expected = [1.23, 2.5, 3.5];
-                for (a, b) in t.data.iter().zip(expected.iter()) {
+                for (a, b) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((a - b).abs() < 1e-12, "expected {b}, got {a}");
                 }
             }
@@ -648,7 +648,7 @@ pub(crate) mod tests {
             .expect("round");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![100.0, 100.0, 200.0]);
+                assert_eq!(t.materialize_f64(), vec![100.0, 100.0, 200.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -699,14 +699,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![-2.5, -0.2, 0.5, 1.8], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = round_builtin(Value::GpuTensor(handle), Vec::new()).expect("round");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![4, 1]);
-            assert_eq!(gathered.data, vec![-3.0, 0.0, 1.0, 2.0]);
+            assert_eq!(gathered.materialize_f64(), vec![-3.0, 0.0, 1.0, 2.0]);
         });
     }
 
@@ -715,7 +715,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.2345, 2.499, 149.9, 150.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -730,7 +730,7 @@ pub(crate) mod tests {
             );
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![4, 1]);
-            assert_eq!(gathered.data, vec![0.0, 0.0, 100.0, 200.0]);
+            assert_eq!(gathered.materialize_f64(), vec![0.0, 0.0, 100.0, 200.0]);
         });
     }
 
@@ -739,7 +739,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0012345, 12.3456, 98765.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -754,7 +754,7 @@ pub(crate) mod tests {
             );
             let gathered = test_support::gather(result).expect("gather");
             let expected = [0.00123, 12.3, 98800.0];
-            for (actual, expected) in gathered.data.iter().zip(expected.iter()) {
+            for (actual, expected) in gathered.materialize_f64().iter().zip(expected.iter()) {
                 assert!(
                     (actual - expected).abs() < 1e-10,
                     "expected {expected}, got {actual}"

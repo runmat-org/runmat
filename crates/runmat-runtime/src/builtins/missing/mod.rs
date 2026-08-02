@@ -2288,9 +2288,7 @@ mod tests {
     #[test]
     fn missing_preserves_typed_integer_size_vectors_exactly() {
         let large = 9_007_199_254_740_993_u64;
-        let mut dims =
-            Tensor::new_integer(IntegerStorage::U64(vec![large, 0]), vec![1, 2]).unwrap();
-        dims.data.clear();
+        let dims = Tensor::new_integer(IntegerStorage::U64(vec![large, 0]), vec![1, 2]).unwrap();
 
         let result = block_on(missing_builtin(vec![Value::Tensor(dims)])).unwrap();
 
@@ -2318,9 +2316,8 @@ mod tests {
 
     #[test]
     fn missing_numeric_scalar_reads_typed_integer_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
             .expect("typed numeric scalar");
-        tensor.data.clear();
 
         assert_eq!(
             numeric_scalar(&Value::Tensor(tensor), "fillmissing constant").unwrap(),
@@ -2330,12 +2327,10 @@ mod tests {
 
     #[test]
     fn missing_rejects_negative_typed_integer_sizes() {
-        let mut scalar = Tensor::new_integer(IntegerStorage::I8(vec![-1]), vec![1, 1]).unwrap();
-        scalar.data.clear();
+        let scalar = Tensor::new_integer(IntegerStorage::I8(vec![-1]), vec![1, 1]).unwrap();
         assert!(scalar_usize(&Value::Tensor(scalar), "missing size").is_err());
 
-        let mut dims = Tensor::new_integer(IntegerStorage::I64(vec![2, -1]), vec![1, 2]).unwrap();
-        dims.data.clear();
+        let dims = Tensor::new_integer(IntegerStorage::I64(vec![2, -1]), vec![1, 2]).unwrap();
         assert!(tensor_shape_as_size(&dims).is_err());
     }
 
@@ -2370,9 +2365,8 @@ mod tests {
 
     #[test]
     fn ismissing_typed_integer_tensor_ignores_f64_mirror() {
-        let mut input = Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3]), vec![1, 3])
+        let input = Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3]), vec![1, 3])
             .expect("integer tensor");
-        input.data.clear();
 
         let result = block_on(ismissing_builtin(Value::Tensor(input))).unwrap();
 
@@ -2387,21 +2381,20 @@ mod tests {
         let value = tensor(vec![1.0, 2.0, f64::NAN, 4.0, 5.0, 6.0], vec![3, 2]);
         let result = block_on(rmmissing_builtin(value, Vec::new())).unwrap();
         assert!(
-            matches!(result, Value::Tensor(t) if t.shape == vec![2, 2] && t.data == vec![1.0, 2.0, 4.0, 5.0])
+            matches!(result, Value::Tensor(t) if t.shape == vec![2, 2] && t.materialize_f64() == vec![1.0, 2.0, 4.0, 5.0])
         );
 
         let value = tensor(vec![1.0, 2.0, f64::NAN, 4.0, 5.0, 6.0], vec![3, 2]);
         let result = block_on(rmmissing_builtin(value, vec![Value::Num(2.0)])).unwrap();
         assert!(
-            matches!(result, Value::Tensor(t) if t.shape == vec![3, 1] && t.data == vec![4.0, 5.0, 6.0])
+            matches!(result, Value::Tensor(t) if t.shape == vec![3, 1] && t.materialize_f64() == vec![4.0, 5.0, 6.0])
         );
     }
 
     #[test]
     fn rmmissing_typed_integer_tensor_preserves_storage_and_reports_no_missing() {
         let expected = IntegerStorage::U64(vec![1, u64::MAX, 3, 4]);
-        let mut input = Tensor::new_integer(expected.clone(), vec![2, 2]).expect("integer tensor");
-        input.data.clear();
+        let input = Tensor::new_integer(expected.clone(), vec![2, 2]).expect("integer tensor");
 
         let result = remove_missing_tensor(
             input,
@@ -2424,8 +2417,7 @@ mod tests {
     #[test]
     fn rmmissing_typed_integer_vector_mask_uses_storage_len_not_mirror() {
         let expected = IntegerStorage::I16(vec![1, 2, 3]);
-        let mut input = Tensor::new_integer(expected.clone(), vec![1, 3]).expect("integer tensor");
-        input.data.clear();
+        let input = Tensor::new_integer(expected.clone(), vec![1, 3]).expect("integer tensor");
 
         let result = remove_missing_tensor(
             input,
@@ -2487,11 +2479,11 @@ mod tests {
     fn fillmissing_supports_constant_previous_and_linear() {
         let value = tensor(vec![1.0, f64::NAN, 3.0], vec![3, 1]);
         let result = block_on(fillmissing_builtin(value, vec![Value::from("linear")])).unwrap();
-        assert!(matches!(result, Value::Tensor(t) if t.data == vec![1.0, 2.0, 3.0]));
+        assert!(matches!(result, Value::Tensor(t) if t.materialize_f64() == vec![1.0, 2.0, 3.0]));
 
         let value = tensor(vec![1.0, f64::NAN, 3.0], vec![1, 3]);
         let result = block_on(fillmissing_builtin(value, vec![Value::from("linear")])).unwrap();
-        assert!(matches!(result, Value::Tensor(t) if t.data == vec![1.0, 2.0, 3.0]));
+        assert!(matches!(result, Value::Tensor(t) if t.materialize_f64() == vec![1.0, 2.0, 3.0]));
 
         let value = tensor(vec![1.0, f64::NAN, f64::NAN], vec![3, 1]);
         let result = block_on(fillmissing_builtin(
@@ -2499,14 +2491,13 @@ mod tests {
             vec![Value::from("constant"), Value::Num(9.0)],
         ))
         .unwrap();
-        assert!(matches!(result, Value::Tensor(t) if t.data == vec![1.0, 9.0, 9.0]));
+        assert!(matches!(result, Value::Tensor(t) if t.materialize_f64() == vec![1.0, 9.0, 9.0]));
     }
 
     #[test]
     fn fillmissing_typed_integer_tensor_preserves_storage_and_reports_no_missing() {
         let expected = IntegerStorage::I32(vec![10, 20, 30]);
-        let mut input = Tensor::new_integer(expected.clone(), vec![3, 1]).expect("integer tensor");
-        input.data.clear();
+        let input = Tensor::new_integer(expected.clone(), vec![3, 1]).expect("integer tensor");
 
         let result = fill_missing_tensor(
             input,
@@ -2531,7 +2522,9 @@ mod tests {
     fn fillmissing_nearest_uses_original_neighbors() {
         let value = tensor(vec![1.0, f64::NAN, f64::NAN, 4.0], vec![1, 4]);
         let result = block_on(fillmissing_builtin(value, vec![Value::from("nearest")])).unwrap();
-        assert!(matches!(result, Value::Tensor(t) if t.data == vec![1.0, 1.0, 4.0, 4.0]));
+        assert!(
+            matches!(result, Value::Tensor(t) if t.materialize_f64() == vec![1.0, 1.0, 4.0, 4.0])
+        );
     }
 
     #[test]
@@ -2555,7 +2548,9 @@ mod tests {
             vec![Value::Num(-99.0)],
         ))
         .unwrap();
-        assert!(matches!(result, Value::Tensor(t) if t.data[0].is_nan() && t.data[1] == 2.0));
+        assert!(
+            matches!(result, Value::Tensor(t) if t.materialize_f64()[0].is_nan() && t.materialize_f64()[1] == 2.0)
+        );
     }
 
     #[test]
@@ -2563,8 +2558,7 @@ mod tests {
         let marker = Tensor::new_integer(IntegerStorage::I16(vec![-99]), vec![1, 1])
             .expect("integer marker");
         let expected = IntegerStorage::I16(vec![-99, 2]);
-        let mut input = Tensor::new_integer(expected.clone(), vec![1, 2]).expect("integer input");
-        input.data = vec![0.0, 2.0];
+        let input = Tensor::new_integer(expected.clone(), vec![1, 2]).expect("integer input");
 
         let result = block_on(standardize_missing_builtin(
             Value::Tensor(input),
@@ -2575,7 +2569,7 @@ mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.integer_storage(), Some(&expected));
-                assert_eq!(tensor.data, vec![0.0, 2.0]);
+                assert_eq!(tensor.materialize_f64(), vec![0.0, 2.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -2598,26 +2592,28 @@ mod tests {
             vec![tensor(vec![2.0, f64::NAN, 5.0], vec![1, 3])],
         ))
         .unwrap();
-        assert!(matches!(result, Value::Tensor(t) if t.data == vec![2.0, 4.0, 3.0]));
+        assert!(matches!(result, Value::Tensor(t) if t.materialize_f64() == vec![2.0, 4.0, 3.0]));
     }
 
     #[test]
     fn nanmin_pairwise_reads_typed_integer_storage_exactly() {
-        let mut left = Tensor::new_integer(IntegerStorage::U16(vec![9, 4, 3]), vec![1, 3]).unwrap();
-        left.data.clear();
+        let left = Tensor::new_integer(IntegerStorage::U16(vec![9, 4, 3]), vec![1, 3]).unwrap();
         let right = tensor(vec![2.0, f64::NAN, 5.0], vec![1, 3]);
 
         let result = block_on(nanmin_builtin(Value::Tensor(left), vec![right])).unwrap();
 
-        assert!(matches!(result, Value::Tensor(tensor) if tensor.data == vec![2.0, 4.0, 3.0]));
+        assert!(
+            matches!(result, Value::Tensor(tensor) if tensor.materialize_f64() == vec![2.0, 4.0, 3.0])
+        );
 
         let left = tensor(vec![9.0, 4.0, 3.0], vec![1, 3]);
-        let mut right = Tensor::new_integer(IntegerStorage::U8(vec![5]), vec![1, 1]).unwrap();
-        right.data.clear();
+        let right = Tensor::new_integer(IntegerStorage::U8(vec![5]), vec![1, 1]).unwrap();
 
         let result = block_on(nanmin_builtin(left, vec![Value::Tensor(right)])).unwrap();
 
-        assert!(matches!(result, Value::Tensor(tensor) if tensor.data == vec![5.0, 4.0, 3.0]));
+        assert!(
+            matches!(result, Value::Tensor(tensor) if tensor.materialize_f64() == vec![5.0, 4.0, 3.0])
+        );
     }
 
     #[test]
@@ -2655,14 +2651,13 @@ mod tests {
             Vec::new(),
         ))
         .unwrap();
-        assert!(matches!(result, Value::Tensor(t) if t.data[2] == 2.0));
+        assert!(matches!(result, Value::Tensor(t) if t.materialize_f64()[2] == 2.0));
     }
 
     #[test]
     fn movmad_reads_typed_integer_storage_and_returns_double_output() {
-        let mut input = Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 100, 4, 5]), vec![5, 1])
+        let input = Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 100, 4, 5]), vec![5, 1])
             .expect("integer movmad input");
-        input.data.clear();
 
         let result = block_on(movmad_builtin(
             Value::Tensor(input),
@@ -2674,7 +2669,7 @@ mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert!(tensor.integer_storage().is_none());
-                assert_eq!(tensor.data, vec![0.5, 1.0, 2.0, 1.0, 0.5]);
+                assert_eq!(tensor.materialize_f64(), vec![0.5, 1.0, 2.0, 1.0, 0.5]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }

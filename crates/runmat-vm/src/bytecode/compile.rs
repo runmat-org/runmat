@@ -2894,7 +2894,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(tensor.shape, vec![2, 2]);
-        assert_eq!(tensor.data, vec![1.0, 3.0, 2.0, 4.0]);
+        assert_eq!(tensor.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
     }
 
     #[test]
@@ -2950,7 +2950,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(tensor.shape, vec![2, 1]);
-        assert_eq!(tensor.data, vec![2.0, 4.0]);
+        assert_eq!(tensor.materialize_f64(), vec![2.0, 4.0]);
     }
 
     #[test]
@@ -2984,7 +2984,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(tensor.shape, vec![2, 1]);
-        assert_eq!(tensor.data, vec![30.0, 40.0]);
+        assert_eq!(tensor.materialize_f64(), vec![30.0, 40.0]);
     }
 
     #[test]
@@ -3017,7 +3017,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(tensor.shape, vec![1, 4]);
-        assert_eq!(tensor.data, vec![10.0, 9.0, 30.0, 8.0]);
+        assert_eq!(tensor.materialize_f64(), vec![10.0, 9.0, 30.0, 8.0]);
     }
 
     #[test]
@@ -3765,7 +3765,7 @@ out = weekly.AvgRevenue;\n",
             );
         };
         assert_eq!(tensor.shape, vec![2, 1]);
-        assert_eq!(tensor.data, vec![200.0, 90.0]);
+        assert_eq!(tensor.materialize_f64(), vec![200.0, 90.0]);
         let _ = std::fs::remove_file(&path);
     }
 
@@ -3801,7 +3801,7 @@ summary = [peak; dominant; total];\n",
             );
         };
         assert_eq!(tensor.shape, vec![3, 1]);
-        assert_eq!(tensor.data, vec![3.0, 2.0, 6.0]);
+        assert_eq!(tensor.materialize_f64(), vec![3.0, 2.0, 6.0]);
     }
 
     #[test]
@@ -3836,7 +3836,7 @@ summary = [numel(b); numel(a); all(isfinite(y)); err < 1e-12];\n",
             );
         };
         assert_eq!(tensor.shape, vec![4, 1]);
-        assert_eq!(tensor.data, vec![3.0, 3.0, 1.0, 1.0]);
+        assert_eq!(tensor.materialize_f64(), vec![3.0, 3.0, 1.0, 1.0]);
     }
 
     #[test]
@@ -3873,7 +3873,7 @@ summary = [rankA; double(err < 1e-12); numel(p); double(pivot_ok)];\n",
             );
         };
         assert_eq!(tensor.shape, vec![4, 1]);
-        assert_eq!(tensor.data, vec![2.0, 1.0, 2.0, 1.0]);
+        assert_eq!(tensor.materialize_f64(), vec![2.0, 1.0, 2.0, 1.0]);
     }
 
     #[test]
@@ -6184,7 +6184,7 @@ y = x^[1 2; 3 4];\n",
             panic!("expected tensor");
         };
         assert_eq!(tensor.shape, vec![2, 2]);
-        assert_eq!(tensor.data, vec![1.0, 3.0, 9.0, 4.0]);
+        assert_eq!(tensor.materialize_f64(), vec![1.0, 3.0, 9.0, 4.0]);
     }
 
     #[test]
@@ -6212,7 +6212,7 @@ y = x^[1 2; 3 4];\n",
             panic!("expected tensor");
         };
         assert_eq!(tensor.shape, vec![2, 2]);
-        assert_eq!(tensor.data, vec![1.0, 3.0, 9.0, 8.0]);
+        assert_eq!(tensor.materialize_f64(), vec![1.0, 3.0, 9.0, 8.0]);
     }
 
     #[test]

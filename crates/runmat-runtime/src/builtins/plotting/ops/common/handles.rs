@@ -215,8 +215,7 @@ mod tests {
         ];
 
         for storage in storages {
-            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("handle");
-            tensor.data = vec![f64::NAN];
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("handle");
             assert_eq!(
                 handles_from_value(&Value::Tensor(tensor), "figure").expect("handle"),
                 vec![FigureHandle::from(1)]
@@ -238,8 +237,7 @@ mod tests {
         ];
 
         for storage in storages {
-            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("handle");
-            tensor.data = vec![f64::NAN];
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("handle");
             assert_eq!(numeric_handle_scalar(&Value::Tensor(tensor)), Some(1.0));
         }
     }

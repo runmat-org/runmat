@@ -1109,7 +1109,7 @@ mod tests {
         let Value::Tensor(f) = &values[1] else {
             panic!("expected f tensor");
         };
-        (pxx.data.clone(), f.data.clone())
+        (pxx.materialize_f64().clone(), f.materialize_f64().clone())
     }
 
     fn output_pair_with_pxx_shape(value: Value) -> (Vec<f64>, Vec<usize>, Vec<f64>) {
@@ -1122,13 +1122,16 @@ mod tests {
         let Value::Tensor(f) = &values[1] else {
             panic!("expected f tensor");
         };
-        (pxx.data.clone(), pxx.shape.clone(), f.data.clone())
+        (
+            pxx.materialize_f64().clone(),
+            pxx.shape.clone(),
+            f.materialize_f64().clone(),
+        )
     }
 
     fn integer_tensor(values: Vec<i16>, shape: Vec<usize>) -> Tensor {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::I16(values), shape).expect("typed integer tensor");
-        tensor.data.fill(f64::NAN);
         tensor
     }
 
@@ -1220,9 +1223,8 @@ mod tests {
 
     #[test]
     fn pwelch_scalar_window_reads_typed_integer_storage_length_exactly() {
-        let mut window =
+        let window =
             Tensor::new_integer(IntegerStorage::I16(vec![8]), vec![1, 1]).expect("window length");
-        window.data.clear();
 
         let out = call(
             Value::Tensor(Tensor::new(vec![1.0; 16], vec![1, 16]).unwrap()),
@@ -1484,8 +1486,8 @@ mod tests {
 
         assert_eq!(gpu_pxx.shape, vec![17, 2]);
         assert_eq!(gpu_f.shape, vec![17, 1]);
-        assert_eq!(gpu_f.data, cpu_f);
-        for (actual, expected) in gpu_pxx.data.iter().zip(cpu_pxx.iter()) {
+        assert_eq!(gpu_f.materialize_f64(), cpu_f);
+        for (actual, expected) in gpu_pxx.materialize_f64().iter().zip(cpu_pxx.iter()) {
             assert!(
                 (actual - expected).abs() <= 1.0e-5,
                 "actual={actual} expected={expected}"

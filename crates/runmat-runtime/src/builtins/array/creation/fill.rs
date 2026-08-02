@@ -850,7 +850,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
-                assert!(t.data.iter().all(|&x| (x - 2.5).abs() < 1e-12));
+                assert!(t.materialize_f64().iter().all(|&x| (x - 2.5).abs() < 1e-12));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -864,7 +864,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 4]);
-                assert!(t.data.iter().all(|&x| (x + 4.0).abs() < 1e-12));
+                assert!(t.materialize_f64().iter().all(|&x| (x + 4.0).abs() < 1e-12));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -879,7 +879,10 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3, 4]);
-                assert!(t.data.iter().all(|&x| (x - 10.0).abs() < 1e-12));
+                assert!(t
+                    .materialize_f64()
+                    .iter()
+                    .all(|&x| (x - 10.0).abs() < 1e-12));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -915,9 +918,8 @@ pub(crate) mod tests {
             other => panic!("expected logical array, got {other:?}"),
         }
 
-        let mut fill_value =
+        let fill_value =
             Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("uint64 fill");
-        fill_value.data[0] = 0.0;
         let result = block_on(fill_builtin(
             Value::Tensor(fill_value),
             vec![Value::Num(1.0), Value::Num(2.0), Value::from("logical")],
@@ -945,7 +947,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
                 assert!(t
-                    .data
+                    .materialize_f64()
                     .iter()
                     .all(|&x| (x - std::f64::consts::PI).abs() < 1e-12));
             }
@@ -1062,9 +1064,8 @@ pub(crate) mod tests {
             Some(&IntegerStorage::U64(vec![wide, wide, wide]))
         );
 
-        let mut fill_value = Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1])
+        let fill_value = Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1])
             .expect("typed fill scalar");
-        fill_value.data.clear();
         let prototype = Tensor::new_integer(IntegerStorage::U32(vec![0]), vec![1, 1])
             .expect("uint32 prototype");
         let result = block_on(fill_builtin(
@@ -1194,7 +1195,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                assert!(t.data.iter().all(|&x| (x - 1.5).abs() < 1e-12));
+                assert!(t.materialize_f64().iter().all(|&x| (x - 1.5).abs() < 1e-12));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1209,7 +1210,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert!(t.data.iter().all(|&x| (x - 4.2).abs() < 1e-12));
+                assert!(t.materialize_f64().iter().all(|&x| (x - 4.2).abs() < 1e-12));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1260,7 +1261,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1275,7 +1276,10 @@ pub(crate) mod tests {
                 Value::GpuTensor(gpu) => {
                     assert_eq!(gpu.shape, vec![2, 2]);
                     let gathered = test_support::gather(Value::GpuTensor(gpu)).expect("gather");
-                    assert!(gathered.data.iter().all(|&x| (x - 0.5).abs() < 1e-12));
+                    assert!(gathered
+                        .materialize_f64()
+                        .iter()
+                        .all(|&x| (x - 0.5).abs() < 1e-12));
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
             }
@@ -1326,7 +1330,7 @@ pub(crate) mod tests {
             Value::GpuTensor(handle) => {
                 let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
                 assert_eq!(gathered.shape, vec![2, 3]);
-                for entry in gathered.data {
+                for entry in gathered.materialize_f64() {
                     assert!((entry - target).abs() < 1e-12);
                 }
             }

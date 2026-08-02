@@ -407,7 +407,7 @@ mod tests {
         (0..tensor.rows)
             .map(|row| {
                 (0..tensor.cols)
-                    .map(|col| tensor.data[col * tensor.rows + row])
+                    .map(|col| tensor.materialize_f64()[col * tensor.rows + row])
                     .collect()
             })
             .collect()
@@ -455,7 +455,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(out.shape, vec![6, 3]);
-        assert_eq!(out.dtype, NumericDType::F64);
+        assert_eq!(out.numeric_dtype(), NumericDType::F64);
         assert_eq!(
             tensor_rows(&out),
             vec![
@@ -639,14 +639,14 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(out.shape, vec![1, 0]);
-        assert!(out.data.is_empty());
+        assert!(out.materialize_f64().is_empty());
 
         let empty_literal = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
         let Value::Tensor(out) = call(Value::Tensor(empty_literal)).expect("perms []") else {
             panic!("expected tensor");
         };
         assert_eq!(out.shape, vec![1, 0]);
-        assert!(out.data.is_empty());
+        assert!(out.materialize_f64().is_empty());
     }
 
     #[test]
@@ -680,7 +680,7 @@ mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &tensor.data,
+                    data: &tensor.materialize_f64(),
                     shape: &tensor.shape,
                 })
                 .expect("upload");
@@ -697,7 +697,7 @@ mod tests {
             let logical_tensor = Tensor::new(vec![0.0, 1.0, 1.0], vec![1, 3]).unwrap();
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &logical_tensor.data,
+                    data: &logical_tensor.materialize_f64(),
                     shape: &logical_tensor.shape,
                 })
                 .expect("upload logical");

@@ -338,7 +338,7 @@ mod tests {
             let source = Tensor::new(vec![-1.0, 4.4], vec![1, 2]).expect("source");
             let handle = provider
                 .upload(&HostTensorView {
-                    data: &source.data,
+                    data: &source.materialize_f64(),
                     shape: &source.shape,
                 })
                 .expect("upload");

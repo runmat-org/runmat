@@ -409,10 +409,9 @@ mod tests {
         storage: IntegerStorage,
         rows: usize,
         cols: usize,
-        poison: f64,
+        _poison: f64,
     ) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
-        tensor.data.fill(poison);
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
         Value::Tensor(tensor)
     }
 
@@ -430,8 +429,8 @@ mod tests {
         let out = block_on(ridge_builtin(y, x, Value::Num(0.0), vec![Value::Num(0.0)])).unwrap();
         let out = tensor_out(out);
         assert_eq!(out.shape, vec![2, 1]);
-        assert!((out.data[0] - 1.0).abs() < 1.0e-10);
-        assert!((out.data[1] - 2.0).abs() < 1.0e-10);
+        assert!((out.materialize_f64()[0] - 1.0).abs() < 1.0e-10);
+        assert!((out.materialize_f64()[1] - 2.0).abs() < 1.0e-10);
     }
 
     #[test]
@@ -443,8 +442,8 @@ mod tests {
         let out = block_on(ridge_builtin(y, x, k, vec![scaled])).unwrap();
         let out = tensor_out(out);
         assert_eq!(out.shape, vec![2, 2]);
-        assert!((out.data[0] - 1.0).abs() < 1.0e-10);
-        assert!((out.data[1] - 2.0).abs() < 1.0e-10);
+        assert!((out.materialize_f64()[0] - 1.0).abs() < 1.0e-10);
+        assert!((out.materialize_f64()[1] - 2.0).abs() < 1.0e-10);
     }
 
     #[test]
@@ -460,8 +459,8 @@ mod tests {
         .unwrap();
         let out = tensor_out(out);
         assert_eq!(out.shape, vec![1, 2]);
-        assert!(out.data[0] > out.data[1]);
-        assert!((out.data[0] - 2.581_988_897).abs() < 1.0e-8);
+        assert!(out.materialize_f64()[0] > out.materialize_f64()[1]);
+        assert!((out.materialize_f64()[0] - 2.581_988_897).abs() < 1.0e-8);
     }
 
     #[test]
@@ -470,8 +469,8 @@ mod tests {
         let x = tensor(vec![0.0, 1.0, 2.0, 3.0], 4, 1);
         let out = block_on(ridge_builtin(y, x, Value::Num(0.0), vec![Value::Num(0.0)])).unwrap();
         let out = tensor_out(out);
-        assert!((out.data[0] - 1.0).abs() < 1.0e-10);
-        assert!((out.data[1] - 2.0).abs() < 1.0e-10);
+        assert!((out.materialize_f64()[0] - 1.0).abs() < 1.0e-10);
+        assert!((out.materialize_f64()[1] - 2.0).abs() < 1.0e-10);
     }
 
     #[test]
@@ -495,8 +494,8 @@ mod tests {
         let out = block_on(ridge_builtin(y, x, Value::Num(0.0), vec![Value::Num(0.0)])).unwrap();
         let out = tensor_out(out);
         assert_eq!(out.shape, vec![3, 1]);
-        assert!(out.data[0].abs() < 1.0e-10);
-        assert!((out.data[1] - 1.0).abs() < 1.0e-10);
-        assert!((out.data[2] - 0.5).abs() < 1.0e-10);
+        assert!(out.materialize_f64()[0].abs() < 1.0e-10);
+        assert!((out.materialize_f64()[1] - 1.0).abs() < 1.0e-10);
+        assert!((out.materialize_f64()[2] - 0.5).abs() < 1.0e-10);
     }
 }

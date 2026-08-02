@@ -1706,8 +1706,7 @@ mod tests {
     }
 
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
         Value::Tensor(tensor)
     }
 
@@ -1775,7 +1774,7 @@ mod tests {
         let Value::Tensor(tensor) = vars.fields.get(name).unwrap() else {
             panic!("expected numeric column");
         };
-        tensor.data[0]
+        tensor.materialize_f64()[0]
     }
 
     fn table_string_arg(args: &[Value], name: &str) -> String {

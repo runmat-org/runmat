@@ -789,8 +789,7 @@ mod tests {
     use runmat_builtins::{CellArray, IntegerStorage, StructValue};
 
     fn poisoned_integer_scalar(storage: IntegerStorage) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
         Value::Tensor(tensor)
     }
 
@@ -812,9 +811,8 @@ mod tests {
 
     #[test]
     fn numeric_vector_reads_typed_integer_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![7, 11]), vec![1, 2])
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![7, 11]), vec![1, 2])
             .expect("integer tensor");
-        tensor.data.fill(f64::NAN);
 
         assert_eq!(
             numeric_vector(&Value::Tensor(tensor), "SentimentScore").expect("numeric"),
@@ -857,7 +855,7 @@ mod tests {
         let Value::Tensor(tensor) = value else {
             panic!("expected tensor");
         };
-        tensor.data
+        tensor.materialize_f64()
     }
 
     fn outputs(value: Value) -> Vec<Value> {

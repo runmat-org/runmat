@@ -96,7 +96,7 @@ fn double_fn(x: i32) -> Result<i32, String> {
 fn host_only_trace(value: Value) -> Result<Value, String> {
     match value {
         Value::Tensor(t) => {
-            let sum: f64 = t.data.iter().copied().sum();
+            let sum: f64 = t.materialize_f64().iter().copied().sum();
             Ok(Value::Num(sum))
         }
         other => Err(format!("host_only_trace: unsupported input {other:?}")),
@@ -115,9 +115,9 @@ fn host_only_add_tensors(a: Value, b: Value) -> Result<Value, String> {
                 return Err("host_only_add_tensors: shape mismatch".to_string());
             }
             let data: Vec<f64> = ta
-                .data
+                .materialize_f64()
                 .iter()
-                .zip(tb.data.iter())
+                .zip(tb.materialize_f64().iter())
                 .map(|(x, y)| x + y)
                 .collect();
             let tensor = Tensor::new(data, ta.shape.clone()).map_err(|e| e.to_string())?;
@@ -167,7 +167,7 @@ fn dispatcher_gathers_multiple_gpu_arguments() {
     let result = call_builtin("host_only_add_tensors", &[ga, gb]).unwrap();
 
     match result {
-        Value::Tensor(t) => assert_eq!(t.data, vec![6.0, 8.0, 10.0, 12.0]),
+        Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![6.0, 8.0, 10.0, 12.0]),
         other => panic!("expected tensor result, got {other:?}"),
     }
 }

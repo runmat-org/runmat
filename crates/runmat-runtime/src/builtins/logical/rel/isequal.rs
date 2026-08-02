@@ -557,24 +557,21 @@ pub(crate) mod tests {
 
     #[test]
     fn isequal_integer_tensor_values_are_compared_exactly() {
-        let mut same_left = Tensor::new_integer(
+        let same_left = Tensor::new_integer(
             IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
             vec![1, 2],
         )
         .expect("left integer tensor");
-        let mut same_right = Tensor::new_integer(
+        let same_right = Tensor::new_integer(
             IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
             vec![1, 2],
         )
         .expect("right integer tensor");
-        let mut different = Tensor::new_integer(
+        let different = Tensor::new_integer(
             IntegerStorage::U64(vec![(1_u64 << 53), u64::MAX]),
             vec![1, 2],
         )
         .expect("different integer tensor");
-        same_left.data.fill(f64::NAN);
-        same_right.data.clear();
-        different.data.fill(0.0);
 
         assert_eq!(
             run_isequal(vec![Value::Tensor(same_left), Value::Tensor(same_right)])

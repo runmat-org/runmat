@@ -735,9 +735,8 @@ mod tests {
 
     #[test]
     fn parse_lengths_reads_typed_integer_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![1, 3]), vec![1, 2])
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![1, 3]), vec![1, 2])
             .expect("integer tensor");
-        tensor.data.clear();
 
         assert_eq!(
             parse_lengths(&Value::Tensor(tensor)).expect("lengths"),
@@ -747,9 +746,8 @@ mod tests {
 
     #[test]
     fn parse_lengths_rejects_empty_typed_integer_storage_without_mirror() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 0]).expect("empty");
-        tensor.data.clear();
 
         let err = parse_lengths(&Value::Tensor(tensor)).expect_err("empty should reject");
         assert!(
@@ -799,7 +797,7 @@ mod tests {
         );
         let counts = tensor_property(&bag, "Counts");
         assert_eq!(counts.shape, vec![2, 3]);
-        assert_eq!(counts.data, vec![1.0, 1.0, 1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(counts.materialize_f64(), vec![1.0, 1.0, 1.0, 0.0, 0.0, 1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -817,7 +815,7 @@ mod tests {
             .expect("bag"),
         );
         let ngram_lengths = tensor_property(&bag, "NgramLengths");
-        assert_eq!(ngram_lengths.data, vec![1.0, 3.0]);
+        assert_eq!(ngram_lengths.materialize_f64(), vec![1.0, 3.0]);
         assert_eq!(bag.properties.get("NumNgrams"), Some(&Value::Num(4.0)));
     }
 
@@ -834,7 +832,10 @@ mod tests {
             object(run(vec![Value::StringArray(ngrams), Value::Tensor(counts)]).expect("bag"));
         assert_eq!(bag.properties.get("NumDocuments"), Some(&Value::Num(2.0)));
         assert_eq!(bag.properties.get("NumNgrams"), Some(&Value::Num(2.0)));
-        assert_eq!(tensor_property(&bag, "NgramLengths").data, vec![2.0]);
+        assert_eq!(
+            tensor_property(&bag, "NgramLengths").materialize_f64(),
+            vec![2.0]
+        );
     }
 
     #[test]
@@ -853,11 +854,12 @@ mod tests {
             ])
             .expect("single bag"),
         );
-        assert_eq!(tensor_property(&bag, "Counts").data, vec![2.0, 3.0]);
+        assert_eq!(
+            tensor_property(&bag, "Counts").materialize_f64(),
+            vec![2.0, 3.0]
+        );
 
-        let mut negative =
-            Tensor::new_integer(IntegerStorage::I64(vec![1, -1]), vec![1, 2]).unwrap();
-        negative.data.clear();
+        let negative = Tensor::new_integer(IntegerStorage::I64(vec![1, -1]), vec![1, 2]).unwrap();
         assert!(run(vec![Value::StringArray(ngrams), Value::Tensor(negative),]).is_err());
     }
 
@@ -884,7 +886,10 @@ mod tests {
             ])
             .expect("bag"),
         );
-        assert_eq!(tensor_property(&bag, "NgramLengths").data, vec![1.0, 2.0]);
+        assert_eq!(
+            tensor_property(&bag, "NgramLengths").materialize_f64(),
+            vec![1.0, 2.0]
+        );
 
         let filtered = object(
             run(vec![
@@ -896,8 +901,14 @@ mod tests {
             .expect("bag"),
         );
         assert_eq!(filtered.properties.get("NumNgrams"), Some(&Value::Num(2.0)));
-        assert_eq!(tensor_property(&filtered, "NgramLengths").data, vec![2.0]);
-        assert_eq!(tensor_property(&filtered, "Counts").data, vec![0.0, 4.0]);
+        assert_eq!(
+            tensor_property(&filtered, "NgramLengths").materialize_f64(),
+            vec![2.0]
+        );
+        assert_eq!(
+            tensor_property(&filtered, "Counts").materialize_f64(),
+            vec![0.0, 4.0]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -966,7 +977,7 @@ mod tests {
         assert_eq!(bag.properties.get("NumNgrams"), Some(&Value::Num(1.0)));
         let counts = tensor_property(&bag, "Counts");
         assert_eq!(counts.shape, vec![2, 1]);
-        assert_eq!(counts.data, vec![4.0, 9.0]);
+        assert_eq!(counts.materialize_f64(), vec![4.0, 9.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -577,9 +577,8 @@ mod tests {
 
     #[test]
     fn integer_cast_scalar_result_uses_exact_storage_len() {
-        let mut input =
+        let input =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("input");
-        input.data.clear();
 
         let output = crate::dispatcher::call_builtin("uint32", &[Value::Tensor(input)])
             .expect("integer scalar cast");

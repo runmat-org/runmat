@@ -206,9 +206,8 @@ mod tests {
             Some(SourceId(9)),
             Some(vec![span_of(source, "alpha"), span_of(source, "beta")]),
         );
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("integer tensor");
-        tensor.data.clear();
 
         let name = dispatch_inputname(vec![Value::Tensor(tensor)]).expect("inputname succeeds");
         assert_eq!(name, Value::String("beta".to_string()));

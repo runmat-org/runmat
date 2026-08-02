@@ -180,7 +180,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                assert_eq!(out.data, vec![0.0, 2.0, 3.0, u32::MAX as f64]);
+                assert_eq!(out.materialize_f64(), vec![0.0, 2.0, 3.0, u32::MAX as f64]);
                 assert_eq!(
                     out.integer_storage(),
                     Some(&IntegerStorage::U32(vec![0, 2, 3, u32::MAX]))
@@ -215,7 +215,7 @@ pub(crate) mod tests {
                 .expect("source");
             let handle = provider
                 .upload(&HostTensorView {
-                    data: &tensor.data,
+                    data: &tensor.materialize_f64(),
                     shape: &tensor.shape,
                 })
                 .expect("upload");

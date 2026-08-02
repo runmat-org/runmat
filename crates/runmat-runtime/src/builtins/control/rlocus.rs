@@ -1235,9 +1235,8 @@ mod tests {
 
     #[test]
     fn numeric_values_reads_typed_integer_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::I16(vec![-1, 0, 2]), vec![1, 3])
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![-1, 0, 2]), vec![1, 3])
             .expect("typed integer tensor");
-        tensor.data = vec![f64::NAN, f64::INFINITY, 1.5];
 
         assert_eq!(
             numeric_values(&Value::Tensor(tensor), "A").expect("numeric values"),
@@ -1272,9 +1271,8 @@ mod tests {
 
     #[test]
     fn matrix_property_reads_typed_integer_storage_exactly() {
-        let mut matrix = Tensor::new_integer(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2])
+        let matrix = Tensor::new_integer(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2])
             .expect("typed integer matrix");
-        matrix.data.fill(f64::NAN);
         let mut object = ObjectInstance::new("ss".to_string());
         object
             .properties
@@ -1336,11 +1334,11 @@ mod tests {
 
         let roots = tensor(&outputs[0]);
         assert_eq!(roots.shape, vec![1, 3]);
-        assert_eq!(roots.data, vec![-1.0, -2.0, -4.0]);
+        assert_eq!(roots.materialize_f64(), vec![-1.0, -2.0, -4.0]);
 
         let gains = tensor(&outputs[1]);
         assert_eq!(gains.shape, vec![1, 3]);
-        assert_eq!(gains.data, vec![0.0, 1.0, 3.0]);
+        assert_eq!(gains.materialize_f64(), vec![0.0, 1.0, 3.0]);
     }
 
     #[test]
@@ -1357,11 +1355,11 @@ mod tests {
 
         let roots = tensor(&outputs[0]);
         assert_eq!(roots.shape, vec![1, 3]);
-        assert_eq!(roots.data, vec![-1.0, -2.0, -4.0]);
+        assert_eq!(roots.materialize_f64(), vec![-1.0, -2.0, -4.0]);
 
         let gains = tensor(&outputs[1]);
         assert_eq!(gains.shape, vec![1, 3]);
-        assert_eq!(gains.data, vec![0.0, 1.0, 3.0]);
+        assert_eq!(gains.materialize_f64(), vec![0.0, 1.0, 3.0]);
         assert!(gains.integer_storage().is_none());
     }
 
@@ -1374,7 +1372,7 @@ mod tests {
         assert_eq!(roots.shape, vec![2, 3]);
 
         for (gain_idx, gain) in [0.0_f64, 1.0, 2.0].iter().enumerate() {
-            let column = &roots.data[gain_idx * 2..gain_idx * 2 + 2];
+            let column = &roots.materialize_f64()[gain_idx * 2..gain_idx * 2 + 2];
             for root in column {
                 let residual = root * root + (3.0 + gain) * root + 2.0;
                 assert!(
@@ -1397,7 +1395,7 @@ mod tests {
         let result = run_rlocus(sys, vec![gains]).expect("rlocus");
         let roots = tensor(&result);
         assert_eq!(roots.shape, vec![1, 3]);
-        for (actual, expected) in roots.data.iter().zip([-1.0, -2.0, -4.0]) {
+        for (actual, expected) in roots.materialize_f64().iter().zip([-1.0, -2.0, -4.0]) {
             assert!((actual - expected).abs() < 1.0e-8);
         }
     }
@@ -1448,7 +1446,7 @@ mod tests {
         let roots = run_rlocus(sys, vec![gains]).expect("rlocus");
         let roots = tensor(&roots);
         assert_eq!(roots.shape, vec![1, 1]);
-        assert!(roots.data[0].abs() < 1.0e-12);
+        assert!(roots.materialize_f64()[0].abs() < 1.0e-12);
     }
 
     #[test]

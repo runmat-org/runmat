@@ -744,9 +744,8 @@ pub(crate) mod tests {
 
     #[test]
     fn lu_matrix_conversion_reads_typed_integer_storage_exactly() {
-        let mut tensor = Matrix::new_integer(IntegerStorage::I16(vec![4, 6, 3, 3]), vec![2, 2])
+        let tensor = Matrix::new_integer(IntegerStorage::I16(vec![4, 6, 3, 3]), vec![2, 2])
             .expect("typed integer tensor");
-        tensor.data.fill(f64::NAN);
 
         let matrix = RowMajorMatrix::from_tensor(&tensor).expect("matrix");
         assert_eq!(matrix.rows, 2);
@@ -779,7 +778,7 @@ pub(crate) mod tests {
 
     fn assert_tensor_close(a: &Matrix, b: &Matrix, tol: f64) {
         assert_eq!(a.shape, b.shape);
-        for (lhs, rhs) in a.data.iter().zip(&b.data) {
+        for (lhs, rhs) in a.materialize_f64().iter().zip(&b.materialize_f64()) {
             assert!(
                 (lhs - rhs).abs() <= tol,
                 "mismatch: lhs={lhs}, rhs={rhs}, tol={tol}"
@@ -859,7 +858,7 @@ pub(crate) mod tests {
         let u = tensor_from_value(eval.upper());
         let p = tensor_from_value(eval.permutation_matrix());
 
-        assert!(u.data.iter().any(|&v| v.abs() <= 1e-12));
+        assert!(u.materialize_f64().iter().any(|&v| v.abs() <= 1e-12));
 
         let pa = crate::builtins::common::matrix::matrix_mul(&p, &a).expect("P*A");
         let lu_product = crate::builtins::common::matrix::matrix_mul(&l, &u).expect("L*U");
@@ -875,7 +874,7 @@ pub(crate) mod tests {
         assert_eq!(eval.pivot_mode(), PivotMode::Vector);
         let pivot = tensor_from_value(eval.pivot_vector());
         assert_eq!(pivot.shape, vec![2, 1]);
-        assert_eq!(pivot.data, vec![2.0, 1.0]);
+        assert_eq!(pivot.materialize_f64(), vec![2.0, 1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -978,7 +977,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let host = Matrix::new(vec![10.0, 3.0, 7.0, 2.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &host.data,
+                data: &host.materialize_f64(),
                 shape: &host.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1004,7 +1003,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let host = Matrix::new(vec![4.0, 6.0, 3.0, 3.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &host.data,
+                data: &host.materialize_f64(),
                 shape: &host.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1026,9 +1025,9 @@ pub(crate) mod tests {
         let l = tensor_from_value(eval.lower());
         let u = tensor_from_value(eval.upper());
         let p = tensor_from_value(eval.permutation_matrix());
-        assert_eq!(l.data, vec![1.0]);
-        assert_eq!(u.data, vec![5.0]);
-        assert_eq!(p.data, vec![1.0]);
+        assert_eq!(l.materialize_f64(), vec![1.0]);
+        assert_eq!(u.materialize_f64(), vec![5.0]);
+        assert_eq!(p.materialize_f64(), vec![1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1046,7 +1045,7 @@ pub(crate) mod tests {
         let cpu_eval = evaluate(Value::Tensor(host.clone()), &[]).expect("cpu evaluate");
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view = runmat_accelerate_api::HostTensorView {
-            data: &host.data,
+            data: &host.materialize_f64(),
             shape: &host.shape,
         };
         let handle = provider.upload(&view).expect("upload");

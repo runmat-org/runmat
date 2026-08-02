@@ -423,8 +423,7 @@ mod tests {
     }
 
     fn cleared_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
         Value::Tensor(tensor)
     }
 
@@ -436,7 +435,7 @@ mod tests {
         let Value::Tensor(tensor) = series else {
             panic!("expected tensor");
         };
-        assert_eq!(tensor.data, vec![30.0, 40.0]);
+        assert_eq!(tensor.materialize_f64(), vec![30.0, 40.0]);
         assert_eq!(tensor.numeric_dtype(), NumericDType::U8);
         assert_eq!(
             tensor.integer_storage(),
@@ -469,13 +468,16 @@ mod tests {
         let Value::Tensor(theta) = theta else {
             panic!("expected theta tensor");
         };
-        assert_eq!(theta.data, vec![0.0, std::f64::consts::FRAC_PI_2]);
+        assert_eq!(
+            theta.materialize_f64(),
+            vec![0.0, std::f64::consts::FRAC_PI_2]
+        );
         let r =
             get_builtin(vec![Value::Num(handle), Value::String("RData".into())]).expect("r data");
         let Value::Tensor(r) = r else {
             panic!("expected r tensor");
         };
-        assert_eq!(r.data, vec![1.0, 2.0]);
+        assert_eq!(r.materialize_f64(), vec![1.0, 2.0]);
     }
 
     #[test]
@@ -494,7 +496,7 @@ mod tests {
         let Value::Tensor(handles) = out else {
             panic!("expected handle vector");
         };
-        assert_eq!(handles.data.len(), 2);
+        assert_eq!(handles.materialize_f64().len(), 2);
         let figure = clone_figure(current_figure_handle()).expect("figure");
         assert_eq!(figure.plots().count(), 2);
         let size_vectors: Vec<Vec<f32>> = figure
@@ -593,8 +595,8 @@ mod tests {
         let Value::Tensor(y) = y else {
             panic!("expected y tensor");
         };
-        assert!(x.data[0].abs() < 1e-12);
-        assert!((y.data[0] - 2.0).abs() < 1e-12);
+        assert!(x.materialize_f64()[0].abs() < 1e-12);
+        assert!((y.materialize_f64()[0] - 2.0).abs() < 1e-12);
     }
 
     #[test]

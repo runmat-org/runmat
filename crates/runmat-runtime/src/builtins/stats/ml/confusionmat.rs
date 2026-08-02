@@ -706,11 +706,14 @@ mod tests {
             panic!("matrix");
         };
         assert_eq!(c.shape, vec![3, 3]);
-        assert_eq!(c.data, vec![0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(
+            c.materialize_f64(),
+            vec![0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+        );
         let Value::Tensor(order) = &values[1] else {
             panic!("order");
         };
-        assert_eq!(order.data, vec![1.0, 2.0, 3.0]);
+        assert_eq!(order.materialize_f64(), vec![1.0, 2.0, 3.0]);
     }
 
     #[test]
@@ -725,7 +728,7 @@ mod tests {
             panic!("matrix");
         };
         assert_eq!(c.shape, vec![2, 2]);
-        assert_eq!(c.data, vec![1.0, 1.0, 0.0, 1.0]);
+        assert_eq!(c.materialize_f64(), vec![1.0, 1.0, 0.0, 1.0]);
     }
 
     #[test]
@@ -743,11 +746,14 @@ mod tests {
             panic!("matrix");
         };
         assert_eq!(c.shape, vec![3, 3]);
-        assert_eq!(c.data, vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0]);
+        assert_eq!(
+            c.materialize_f64(),
+            vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0]
+        );
         let Value::Tensor(order) = &values[1] else {
             panic!("order");
         };
-        assert_eq!(order.data, vec![3.0, 2.0, 1.0]);
+        assert_eq!(order.materialize_f64(), vec![3.0, 2.0, 1.0]);
     }
 
     #[test]
@@ -777,7 +783,7 @@ mod tests {
             panic!("matrix");
         };
         assert_eq!(c.shape, vec![2, 2]);
-        assert_eq!(c.data, vec![1.0, 1.0, 1.0, 0.0]);
+        assert_eq!(c.materialize_f64(), vec![1.0, 1.0, 1.0, 0.0]);
         let Value::StringArray(order) = &values[1] else {
             panic!("order");
         };
@@ -791,7 +797,7 @@ mod tests {
             panic!("matrix");
         };
         assert_eq!(c.shape, vec![2, 2]);
-        assert_eq!(c.data, vec![0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(c.materialize_f64(), vec![0.0, 0.0, 0.0, 1.0]);
         let Value::LogicalArray(order) = &values[1] else {
             panic!("order");
         };
@@ -849,7 +855,10 @@ mod tests {
             panic!("matrix");
         };
         assert_eq!(c.shape, vec![3, 3]);
-        assert_eq!(c.data, vec![0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(
+            c.materialize_f64(),
+            vec![0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+        );
         let Value::Object(order) = &values[1] else {
             panic!("categorical order");
         };

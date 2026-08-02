@@ -473,11 +473,11 @@ pub(crate) mod tests {
             let lhs = Tensor::new(vec![0.0, 2.0, 0.0, 4.0], vec![2, 2]).unwrap();
             let rhs = Tensor::new(vec![1.0, 0.0, 3.0, 0.0], vec![2, 2]).unwrap();
             let lhs_view = HostTensorView {
-                data: &lhs.data,
+                data: &lhs.materialize_f64(),
                 shape: &lhs.shape,
             };
             let rhs_view = HostTensorView {
-                data: &rhs.data,
+                data: &rhs.materialize_f64(),
                 shape: &rhs.shape,
             };
             let a = provider.upload(&lhs_view).unwrap();
@@ -485,7 +485,7 @@ pub(crate) mod tests {
             let result = run_or(Value::GpuTensor(a), Value::GpuTensor(b)).unwrap();
             let gathered = test_support::gather(result).unwrap();
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![1.0, 1.0, 1.0, 1.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 1.0, 1.0, 1.0]);
         });
     }
 
@@ -497,11 +497,11 @@ pub(crate) mod tests {
             let rhs = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
 
             let lhs_view = HostTensorView {
-                data: &lhs.data,
+                data: &lhs.materialize_f64(),
                 shape: &lhs.shape,
             };
             let rhs_view = HostTensorView {
-                data: &rhs.data,
+                data: &rhs.materialize_f64(),
                 shape: &rhs.shape,
             };
 
@@ -511,7 +511,7 @@ pub(crate) mod tests {
             let result = run_or(Value::GpuTensor(gpu_lhs), Value::GpuTensor(gpu_rhs)).expect("or");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![4, 1]);
-            assert_eq!(gathered.data, vec![0.0, 1.0, 0.0, 1.0]);
+            assert_eq!(gathered.materialize_f64(), vec![0.0, 1.0, 0.0, 1.0]);
         });
     }
 
@@ -535,11 +535,11 @@ pub(crate) mod tests {
         };
 
         let view_lhs = HostTensorView {
-            data: &lhs.data,
+            data: &lhs.materialize_f64(),
             shape: &lhs.shape,
         };
         let view_rhs = HostTensorView {
-            data: &rhs.data,
+            data: &rhs.materialize_f64(),
             shape: &rhs.shape,
         };
         let gpu_lhs = provider.upload(&view_lhs).expect("upload lhs");
@@ -554,7 +554,11 @@ pub(crate) mod tests {
             ProviderPrecision::F64 => 1e-12,
             ProviderPrecision::F32 => 1e-5,
         };
-        for (idx, (actual, expected)) in gathered.data.iter().zip(expected_data.iter()).enumerate()
+        for (idx, (actual, expected)) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(expected_data.iter())
+            .enumerate()
         {
             let expected_f = if *expected != 0 { 1.0 } else { 0.0 };
             assert!(

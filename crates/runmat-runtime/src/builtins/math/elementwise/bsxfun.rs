@@ -764,7 +764,10 @@ mod tests {
             panic!("expected tensor result");
         };
         assert_eq!(tensor.shape, vec![3, 2]);
-        assert_eq!(tensor.data, vec![11.0, 12.0, 13.0, 21.0, 22.0, 23.0]);
+        assert_eq!(
+            tensor.materialize_f64(),
+            vec![11.0, 12.0, 13.0, 21.0, 22.0, 23.0]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -784,12 +787,12 @@ mod tests {
             panic!("expected tensor result");
         };
         assert_eq!(tensor.shape, vec![2, 3, 4]);
-        assert_eq!(tensor.data[0], 101.0);
-        assert_eq!(tensor.data[1], 102.0);
-        assert_eq!(tensor.data[2], 203.0);
-        assert_eq!(tensor.data[6], 107.0);
-        assert_eq!(tensor.data[8], 209.0);
-        assert_eq!(tensor.data[23], 324.0);
+        assert_eq!(tensor.materialize_f64()[0], 101.0);
+        assert_eq!(tensor.materialize_f64()[1], 102.0);
+        assert_eq!(tensor.materialize_f64()[2], 203.0);
+        assert_eq!(tensor.materialize_f64()[6], 107.0);
+        assert_eq!(tensor.materialize_f64()[8], 209.0);
+        assert_eq!(tensor.materialize_f64()[23], 324.0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -847,7 +850,7 @@ mod tests {
             panic!("expected numeric result, got {result:?}");
         };
         assert_eq!(tensor.shape, vec![1, 1]);
-        assert_eq!(tensor.data, vec![2.0]);
+        assert_eq!(tensor.materialize_f64(), vec![2.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -940,7 +943,10 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(tensor.shape, vec![2, 3]);
-        assert_eq!(tensor.data, vec![21.0, 22.0, 41.0, 42.0, 61.0, 62.0]);
+        assert_eq!(
+            tensor.materialize_f64(),
+            vec![21.0, 22.0, 41.0, 42.0, 61.0, 62.0]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -959,7 +965,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(tensor.shape, vec![0, 3]);
-        assert!(tensor.data.is_empty());
+        assert!(tensor.materialize_f64().is_empty());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

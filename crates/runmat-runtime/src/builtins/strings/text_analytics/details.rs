@@ -1228,20 +1228,18 @@ mod tests {
 
     fn numeric_column(table: &ObjectInstance, name: &str) -> Vec<f64> {
         match table_column(table, name) {
-            Value::Tensor(tensor) => tensor.data,
+            Value::Tensor(tensor) => tensor.materialize_f64(),
             other => panic!("expected numeric column {name}, got {other:?}"),
         }
     }
 
     fn poisoned_integer_scalar(storage: IntegerStorage) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
         Value::Tensor(tensor)
     }
 
     fn poisoned_integer_vector(storage: IntegerStorage, cols: usize) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![1, cols]).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, vec![1, cols]).expect("integer tensor");
         Value::Tensor(tensor)
     }
 

@@ -925,9 +925,8 @@ pub(crate) mod tests {
     #[test]
     fn filewrite_writes_raw_bytes_from_typed_integer_storage() {
         let path = unique_path("filewrite_typed_raw_bytes");
-        let mut tensor = Tensor::new_integer(IntegerStorage::U8(vec![0, 127, 255]), vec![3, 1])
+        let tensor = Tensor::new_integer(IntegerStorage::U8(vec![0, 127, 255]), vec![3, 1])
             .expect("typed byte tensor");
-        tensor.data.clear();
 
         run_filewrite(
             Value::from(path.to_string_lossy().to_string()),
@@ -956,8 +955,7 @@ pub(crate) mod tests {
         ];
 
         for (storage, expected) in cases {
-            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed tensor");
-            tensor.data = vec![f64::NAN];
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed tensor");
             assert_eq!(
                 tensor_to_bytes(&tensor).expect("byte payload"),
                 vec![expected]
@@ -969,9 +967,8 @@ pub(crate) mod tests {
     #[test]
     fn filewrite_typed_integer_tensor_range_errors_keep_exact_wide_values() {
         let path = unique_path("filewrite_typed_integer_range");
-        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
             .expect("typed integer tensor");
-        tensor.data.clear();
 
         let err = unwrap_error_message(
             run_filewrite(

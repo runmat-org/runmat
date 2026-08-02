@@ -400,7 +400,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![1.0, 2.0, 3.0, 4.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -424,8 +424,8 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                assert!((t.data[0] - 5.0).abs() < 1e-12);
-                assert!((t.data[1] - (2f64).sqrt()).abs() < 1e-12);
+                assert!((t.materialize_f64()[0] - 5.0).abs() < 1e-12);
+                assert!((t.materialize_f64()[1] - (2f64).sqrt()).abs() < 1e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -439,7 +439,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data, vec![65.0, 122.0]);
+                assert_eq!(t.materialize_f64(), vec![65.0, 122.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -460,14 +460,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![-2.0, -1.0, 0.0, 3.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = abs_builtin(Value::GpuTensor(handle)).expect("abs");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![4, 1]);
-            assert_eq!(gathered.data, vec![2.0, 1.0, 0.0, 3.0]);
+            assert_eq!(gathered.materialize_f64(), vec![2.0, 1.0, 0.0, 3.0]);
         });
     }
 
@@ -520,8 +520,8 @@ pub(crate) mod tests {
             );
             let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
             assert_eq!(gathered.shape, vec![2, 1]);
-            assert!((gathered.data[0] - 5.0).abs() < 1e-12);
-            assert!((gathered.data[1] - (2f64).sqrt()).abs() < 1e-12);
+            assert!((gathered.materialize_f64()[0] - 5.0).abs() < 1e-12);
+            assert!((gathered.materialize_f64()[1] - (2f64).sqrt()).abs() < 1e-12);
         });
     }
 
@@ -536,7 +536,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![-3.0, -1.0, 0.5, -0.25], vec![4, 1]).unwrap();
         let cpu = abs_real(Value::Tensor(tensor.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let h = runmat_accelerate_api::provider()
@@ -552,7 +552,7 @@ pub(crate) mod tests {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
                 };
-                for (a, b) in gt.data.iter().zip(ct.data.iter()) {
+                for (a, b) in gt.materialize_f64().iter().zip(ct.materialize_f64().iter()) {
                     assert!((*a - *b).abs() < tol, "|{} - {}| >= {}", a, b, tol);
                 }
             }
@@ -583,8 +583,8 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        assert!((gathered.data[0] - 5.0).abs() < tol);
-        assert!((gathered.data[1] - (2f64).sqrt()).abs() < tol);
+        assert!((gathered.materialize_f64()[0] - 5.0).abs() < tol);
+        assert!((gathered.materialize_f64()[1] - (2f64).sqrt()).abs() < tol);
     }
 
     #[cfg(feature = "wgpu")]
@@ -604,7 +604,13 @@ pub(crate) mod tests {
         let gpu = block_on(abs_gpu(handle)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         assert_eq!(gathered.shape, vec![2, 1]);
-        assert!(gathered.data[0].is_infinite() && gathered.data[0].is_sign_positive());
-        assert!(gathered.data[1].is_infinite() && gathered.data[1].is_sign_positive());
+        assert!(
+            gathered.materialize_f64()[0].is_infinite()
+                && gathered.materialize_f64()[0].is_sign_positive()
+        );
+        assert!(
+            gathered.materialize_f64()[1].is_infinite()
+                && gathered.materialize_f64()[1].is_sign_positive()
+        );
     }
 }

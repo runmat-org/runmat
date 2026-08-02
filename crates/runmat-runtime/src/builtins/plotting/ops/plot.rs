@@ -989,8 +989,7 @@ pub(crate) mod tests {
     }
 
     fn cleared_int_value(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         Value::Tensor(tensor)
     }
 
@@ -1005,7 +1004,7 @@ pub(crate) mod tests {
         let Value::Tensor(x) = x else {
             panic!("expected tensor");
         };
-        assert_eq!(x.data, vec![1.0, 2.0, 3.0]);
+        assert_eq!(x.materialize_f64(), vec![1.0, 2.0, 3.0]);
     }
 
     fn assert_plotting_unavailable(err: &RuntimeError) {
@@ -1346,8 +1345,8 @@ pub(crate) mod tests {
                 .into_tensors_async("plot"),
         )
         .unwrap();
-        assert_eq!(x_tensor.data, vec![1.0, 2.0, 3.0]);
-        assert_eq!(y_tensor.data, vec![10.0, 20.0, 30.0]);
+        assert_eq!(x_tensor.materialize_f64(), vec![1.0, 2.0, 3.0]);
+        assert_eq!(y_tensor.materialize_f64(), vec![10.0, 20.0, 30.0]);
     }
 
     #[test]

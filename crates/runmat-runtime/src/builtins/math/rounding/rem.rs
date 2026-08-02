@@ -635,7 +635,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
                 assert_eq!(
-                    t.data
+                    t.materialize_f64()
                         .iter()
                         .map(|v| (v * 10.0).round() / 10.0)
                         .collect::<Vec<_>>(),
@@ -676,7 +676,7 @@ pub(crate) mod tests {
                     .iter()
                     .map(|&ch| rem_real_scalar(ch as u32 as f64, 5.0))
                     .collect();
-                assert_eq!(t.data, expected);
+                assert_eq!(t.materialize_f64(), expected);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -689,7 +689,7 @@ pub(crate) mod tests {
         let value =
             rem_builtin(Value::LogicalArray(logical), Value::Num(2.0)).expect("logical rem");
         match value {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 0.0, 1.0, 0.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 0.0, 1.0, 0.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -703,7 +703,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                assert_eq!(t.data, vec![1.0, -2.0, 1.0, -2.0, 1.0, -2.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, -2.0, 1.0, -2.0, 1.0, -2.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -716,11 +716,11 @@ pub(crate) mod tests {
             let numer = Tensor::new(vec![-5.0, -3.0, 0.0, 1.0, 6.0, 9.0], vec![3, 2]).unwrap();
             let denom = Tensor::new(vec![4.0; 6], vec![3, 2]).unwrap();
             let numer_view = runmat_accelerate_api::HostTensorView {
-                data: &numer.data,
+                data: &numer.materialize_f64(),
                 shape: &numer.shape,
             };
             let denom_view = runmat_accelerate_api::HostTensorView {
-                data: &denom.data,
+                data: &denom.materialize_f64(),
                 shape: &denom.shape,
             };
             let numer_handle = provider.upload(&numer_view).expect("upload numer");
@@ -732,7 +732,10 @@ pub(crate) mod tests {
             .expect("rem");
             let gathered = test_support::gather(result).expect("gather result");
             assert_eq!(gathered.shape, vec![3, 2]);
-            assert_eq!(gathered.data, vec![-1.0, -3.0, 0.0, 1.0, 2.0, 1.0]);
+            assert_eq!(
+                gathered.materialize_f64(),
+                vec![-1.0, -3.0, 0.0, 1.0, 2.0, 1.0]
+            );
         });
     }
 
@@ -750,9 +753,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rem_scalar_fast_path_reads_typed_integer_storage_exactly() {
-        let mut lhs =
+        let lhs =
             Tensor::new_integer(IntegerStorage::I16(vec![-7]), vec![1, 1]).expect("lhs tensor");
-        lhs.data[0] = 999.0;
 
         assert_eq!(scalar_real_value(&Value::Tensor(lhs.clone())), Some(-7.0));
 
@@ -765,12 +767,9 @@ pub(crate) mod tests {
 
     #[test]
     fn rem_dense_integer_arrays_preserve_exact_storage_without_mirror() {
-        let mut lhs =
-            Tensor::new_integer(IntegerStorage::I64(vec![-7, 7]), vec![2, 1]).expect("lhs");
-        lhs.data.clear();
-        let mut rhs =
+        let lhs = Tensor::new_integer(IntegerStorage::I64(vec![-7, 7]), vec![2, 1]).expect("lhs");
+        let rhs =
             Tensor::new_integer(IntegerStorage::I64(vec![4, -4, 0]), vec![1, 3]).expect("rhs");
-        rhs.data.clear();
 
         let result = rem_builtin(Value::Tensor(lhs), Value::Tensor(rhs)).expect("rem");
         let Value::Tensor(result) = result else {
@@ -782,9 +781,8 @@ pub(crate) mod tests {
             Some(&IntegerStorage::I64(vec![-3, 3, -3, 3, 0, 0]))
         );
 
-        let mut lhs =
+        let lhs =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("lhs");
-        lhs.data.clear();
         assert_eq!(
             rem_builtin(Value::Tensor(lhs), Value::Num(2.0)).expect("rem"),
             Value::Int(IntValue::U64(1))
@@ -816,13 +814,13 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider registered");
         let numer_handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
-                data: &numer.data,
+                data: &numer.materialize_f64(),
                 shape: &numer.shape,
             })
             .expect("upload numer");
         let denom_handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
-                data: &denom.data,
+                data: &denom.materialize_f64(),
                 shape: &denom.shape,
             })
             .expect("upload denom");
@@ -841,7 +839,11 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (gpu, cpu) in gpu_tensor.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gpu_tensor
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!(
                 (gpu - cpu).abs() <= tol,
                 "|{gpu} - {cpu}| exceeded tolerance {tol}"

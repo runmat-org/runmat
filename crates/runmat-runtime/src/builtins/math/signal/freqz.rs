@@ -435,7 +435,7 @@ mod tests {
         };
         assert!((h.data[0].0 - 1.0).abs() < 1e-12);
         assert_eq!(w.shape, vec![8, 1]);
-        assert!((w.data[1] - 62.5).abs() < 1e-12);
+        assert!((w.materialize_f64()[1] - 62.5).abs() < 1e-12);
     }
 
     #[test]

@@ -855,10 +855,8 @@ mod tests {
 
     #[test]
     fn parse_ode_input_reads_typed_integer_storage_exactly() {
-        let mut tspan = Tensor::new_integer(IntegerStorage::U16(vec![0, 2]), vec![1, 2]).unwrap();
-        tspan.data = vec![0.0, 0.0];
-        let mut y0 = Tensor::new_integer(IntegerStorage::I16(vec![3, -4]), vec![2, 1]).unwrap();
-        y0.data = vec![0.0, 0.0];
+        let tspan = Tensor::new_integer(IntegerStorage::U16(vec![0, 2]), vec![1, 2]).unwrap();
+        let y0 = Tensor::new_integer(IntegerStorage::I16(vec![3, -4]), vec![2, 1]).unwrap();
 
         let input = block_on(parse_ode_input(
             "ode_test",

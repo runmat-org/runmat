@@ -1739,7 +1739,7 @@ pub(crate) mod tests {
                 match sv.fields.get("A").unwrap() {
                     Value::Tensor(t) => {
                         assert_eq!(t.shape, vec![2, 2]);
-                        assert_eq!(t.data, vec![1.0, 4.0, 2.0, 5.0]);
+                        assert_eq!(t.materialize_f64(), vec![1.0, 4.0, 2.0, 5.0]);
                     }
                     other => panic!("expected tensor, got {other:?}"),
                 }
@@ -1904,15 +1904,15 @@ pub(crate) mod tests {
         let values: HashMap<_, _> = entries.into_iter().collect();
         match values.get("s").unwrap() {
             Value::Tensor(t) => {
-                assert_eq!(t.dtype, NumericDType::F32);
-                assert_eq!(t.data, vec![1.5, 2.5]);
+                assert_eq!(t.numeric_dtype(), NumericDType::F32);
+                assert_eq!(t.materialize_f64(), vec![1.5, 2.5]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
         match values.get("u16").unwrap() {
             Value::Tensor(t) => {
-                assert_eq!(t.dtype, NumericDType::U16);
-                assert_eq!(t.data, vec![10.0, 20.0]);
+                assert_eq!(t.numeric_dtype(), NumericDType::U16);
+                assert_eq!(t.materialize_f64(), vec![10.0, 20.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1934,14 +1934,11 @@ pub(crate) mod tests {
         ];
         let mut entries = Vec::new();
         for (name, storage) in &cases {
-            let mut tensor =
-                Tensor::new_integer(storage.clone(), vec![2, 1]).expect("integer tensor");
-            tensor.data.clear();
+            let tensor = Tensor::new_integer(storage.clone(), vec![2, 1]).expect("integer tensor");
             entries.push(((*name).to_string(), Value::Tensor(tensor)));
         }
-        let mut empty = Tensor::new_integer(IntegerStorage::U64(Vec::new()), vec![0, 2])
+        let empty = Tensor::new_integer(IntegerStorage::U64(Vec::new()), vec![0, 2])
             .expect("empty integer tensor");
-        empty.data.clear();
         entries.push(("empty_u64".to_string(), Value::Tensor(empty)));
         entries.push((
             "scalar_u64".to_string(),
@@ -2045,14 +2042,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_save_roundtrip_preserves_nested_integer_tensors() {
-        let mut unsigned =
+        let unsigned =
             Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]), vec![1, 2])
                 .expect("unsigned tensor");
-        unsigned.data.clear();
-        let mut signed =
-            Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![2, 1])
-                .expect("signed tensor");
-        signed.data.clear();
+        let signed = Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![2, 1])
+            .expect("signed tensor");
         let cell = make_cell(
             vec![
                 Value::Tensor(unsigned.clone()),
@@ -2373,7 +2367,7 @@ pub(crate) mod tests {
 
         let tensor = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![2, 2]).unwrap();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload tensor");
@@ -2394,7 +2388,7 @@ pub(crate) mod tests {
             Value::Struct(sv) => match sv.fields.get("gpu_var") {
                 Some(Value::Tensor(t)) => {
                     assert_eq!(t.shape, vec![2, 2]);
-                    assert_eq!(t.data, tensor.data);
+                    assert_eq!(t.materialize_f64(), tensor.materialize_f64());
                 }
                 other => panic!("expected tensor, got {other:?}"),
             },

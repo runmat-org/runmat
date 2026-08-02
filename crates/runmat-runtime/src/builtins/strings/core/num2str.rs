@@ -1383,9 +1383,8 @@ pub(crate) mod tests {
 
     #[test]
     fn num2str_precision_parser_preserves_typed_integer_tensor_bounds() {
-        let mut precision =
+        let precision =
             Tensor::new_integer(IntegerStorage::U64(vec![52]), vec![1, 1]).expect("precision");
-        precision.data.clear();
         assert_eq!(
             try_extract_precision(&Value::Tensor(precision)).unwrap(),
             Some(52)
@@ -1577,7 +1576,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![10.5, 20.5], vec![1, 2]).expect("tensor");
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");

@@ -632,9 +632,8 @@ pub(crate) mod tests {
 
     #[test]
     fn reshape_size_scalar_reads_typed_integer_storage_exactly() {
-        let mut dim = Tensor::new_integer(IntegerStorage::U64(vec![3]), vec![1, 1])
+        let dim = Tensor::new_integer(IntegerStorage::U64(vec![3]), vec![1, 1])
             .expect("dimension tensor");
-        dim.data.clear();
 
         match block_on(parse_size_scalar(&Value::Tensor(dim))).expect("dimension") {
             DimToken::Known(value) => assert_eq!(value, 3),
@@ -644,9 +643,8 @@ pub(crate) mod tests {
 
     #[test]
     fn reshape_size_vector_reads_typed_integer_storage_without_mirror() {
-        let mut dims = Tensor::new_integer(IntegerStorage::U64(vec![2, 3]), vec![1, 2])
+        let dims = Tensor::new_integer(IntegerStorage::U64(vec![2, 3]), vec![1, 2])
             .expect("dimension tensor");
-        dims.data.clear();
 
         let parsed =
             block_on(parse_size_arguments(&[Value::Tensor(dims)])).expect("dimension vector");
@@ -673,7 +671,10 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 4]);
-                assert_eq!(out.data, (1..=12).map(|v| v as f64).collect::<Vec<_>>());
+                assert_eq!(
+                    out.materialize_f64(),
+                    (1..=12).map(|v| v as f64).collect::<Vec<_>>()
+                );
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -737,7 +738,7 @@ pub(crate) mod tests {
             match result {
                 Value::Tensor(out) => {
                     assert_eq!(out.shape, vec![2, 2]);
-                    assert_eq!(out.integer_data, Some(expected));
+                    assert_eq!(out.integer_storage(), Some(&expected));
                 }
                 other => panic!("expected typed integer tensor, got {other:?}"),
             }
@@ -830,7 +831,7 @@ pub(crate) mod tests {
             let data: Vec<f64> = (1..=12).map(|v| v as f64).collect();
             let tensor = tensor_from_slice(&data, &[3, 4]);
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -902,7 +903,7 @@ pub(crate) mod tests {
         let data: Vec<f64> = (1..=12).map(|v| v as f64).collect();
         let tensor = tensor_from_slice(&data, &[3, 4]);
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
@@ -917,7 +918,7 @@ pub(crate) mod tests {
         assert_eq!(reshaped.shape, vec![2, 6]);
         let host = block_on(download_handle_async(provider, &reshaped)).expect("download");
         assert_eq!(host.shape, vec![2, 6]);
-        assert_eq!(host.data, tensor.data);
+        assert_eq!(host.data, tensor.materialize_f64());
     }
 
     #[test]
@@ -1036,8 +1037,8 @@ pub(crate) mod tests {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 1, 1]);
                 assert_eq!(
-                    out.integer_data,
-                    Some(IntegerStorage::U64(vec![9_007_199_254_740_993]))
+                    out.integer_storage(),
+                    Some(&IntegerStorage::U64(vec![9_007_199_254_740_993]))
                 );
             }
             other => panic!("expected typed integer tensor, got {other:?}"),

@@ -1727,18 +1727,18 @@ pub(crate) mod tests {
         let (values, ia, ic) = eval.into_triple();
         match values {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![1.0, 2.0, 3.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0]);
                 assert_eq!(t.shape, vec![3, 1]);
             }
             Value::Num(_) => panic!("expected tensor result"),
             other => panic!("unexpected result {other:?}"),
         }
         match ia {
-            Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 4.0, 1.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![2.0, 4.0, 1.0]),
             other => panic!("unexpected IA {other:?}"),
         }
         match ic {
-            Value::Tensor(t) => assert_eq!(t.data, vec![3.0, 1.0, 3.0, 2.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![3.0, 1.0, 3.0, 2.0]),
             other => panic!("unexpected IC {other:?}"),
         }
     }
@@ -1770,10 +1770,10 @@ pub(crate) mod tests {
         let (values, ..) = eval.into_triple();
         match values {
             Value::Tensor(t) => {
-                assert_eq!(t.data.len(), 3);
-                assert_eq!(t.data[0], 1.0);
-                assert_eq!(t.data[1], 2.0);
-                assert!(t.data[2].is_nan());
+                assert_eq!(t.materialize_f64().len(), 3);
+                assert_eq!(t.materialize_f64()[0], 1.0);
+                assert_eq!(t.materialize_f64()[1], 2.0);
+                assert!(t.materialize_f64()[2].is_nan());
             }
             other => panic!("unexpected values {other:?}"),
         }
@@ -1787,9 +1787,9 @@ pub(crate) mod tests {
         let (values, ..) = eval.into_triple();
         match values {
             Value::Tensor(t) => {
-                assert!(t.data[0].is_nan());
-                assert_eq!(t.data[1], 2.0);
-                assert_eq!(t.data[2], 1.0);
+                assert!(t.materialize_f64()[0].is_nan());
+                assert_eq!(t.materialize_f64()[1], 2.0);
+                assert_eq!(t.materialize_f64()[2], 1.0);
             }
             other => panic!("unexpected values {other:?}"),
         }
@@ -1802,11 +1802,11 @@ pub(crate) mod tests {
         let eval = evaluate_sync(Value::Tensor(tensor), &[Value::from("stable")]).expect("unique");
         let (values, ia) = eval.into_pair();
         match values {
-            Value::Tensor(t) => assert_eq!(t.data, vec![4.0, 2.0, 1.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![4.0, 2.0, 1.0]),
             other => panic!("unexpected values {other:?}"),
         }
         match ia {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 2.0, 4.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 4.0]),
             other => panic!("unexpected IA {other:?}"),
         }
     }
@@ -1818,15 +1818,15 @@ pub(crate) mod tests {
         let eval = evaluate_sync(Value::Tensor(tensor), &[Value::from("last")]).expect("unique");
         let (values, ia, ic) = eval.into_triple();
         match values {
-            Value::Tensor(t) => assert_eq!(t.data, vec![7.0, 8.0, 9.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![7.0, 8.0, 9.0]),
             other => panic!("unexpected values {other:?}"),
         }
         match ia {
-            Value::Tensor(t) => assert_eq!(t.data, vec![4.0, 5.0, 3.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![4.0, 5.0, 3.0]),
             other => panic!("unexpected IA {other:?}"),
         }
         match ic {
-            Value::Tensor(t) => assert_eq!(t.data, vec![3.0, 2.0, 3.0, 1.0, 2.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![3.0, 2.0, 3.0, 1.0, 2.0]),
             other => panic!("unexpected IC {other:?}"),
         }
     }
@@ -1840,16 +1840,16 @@ pub(crate) mod tests {
         match values {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 2]);
-                assert_eq!(t.data, vec![1.0, 1.0, 2.0, 2.0, 3.0, 4.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0, 3.0, 4.0]);
             }
             other => panic!("unexpected values {other:?}"),
         }
         match ia {
-            Value::Tensor(t) => assert_eq!(t.data, vec![4.0, 1.0, 3.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![4.0, 1.0, 3.0]),
             other => panic!("unexpected IA {other:?}"),
         }
         match ic {
-            Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 2.0, 3.0, 1.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![2.0, 2.0, 3.0, 1.0]),
             other => panic!("unexpected IC {other:?}"),
         }
     }
@@ -1871,16 +1871,16 @@ pub(crate) mod tests {
         match values {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![1.0, 2.0, 1.0, 2.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 1.0, 2.0]);
             }
             other => panic!("unexpected values {other:?}"),
         }
         match ia {
-            Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 3.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![2.0, 3.0]),
             other => panic!("unexpected IA {other:?}"),
         }
         match ic {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 1.0, 2.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 2.0]),
             other => panic!("unexpected IC {other:?}"),
         }
     }
@@ -1900,11 +1900,11 @@ pub(crate) mod tests {
             other => panic!("unexpected values {other:?}"),
         }
         match ia {
-            Value::Tensor(t) => assert_eq!(t.data, vec![4.0, 1.0, 3.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![4.0, 1.0, 3.0]),
             other => panic!("unexpected IA {other:?}"),
         }
         match ic {
-            Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 2.0, 3.0, 1.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![2.0, 2.0, 3.0, 1.0]),
             other => panic!("unexpected IC {other:?}"),
         }
     }
@@ -1928,11 +1928,11 @@ pub(crate) mod tests {
             other => panic!("unexpected values {other:?}"),
         }
         match ia {
-            Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 3.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![2.0, 3.0]),
             other => panic!("unexpected IA {other:?}"),
         }
         match ic {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 1.0, 2.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 2.0]),
             other => panic!("unexpected IC {other:?}"),
         }
     }
@@ -1956,11 +1956,11 @@ pub(crate) mod tests {
             other => panic!("unexpected values {other:?}"),
         }
         match ia {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 2.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 2.0]),
             other => panic!("unexpected IA {other:?}"),
         }
         match ic {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 2.0, 1.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 1.0]),
             other => panic!("unexpected IC {other:?}"),
         }
     }
@@ -1994,11 +1994,11 @@ pub(crate) mod tests {
             other => panic!("unexpected values {other:?}"),
         }
         match ia {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 3.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 3.0]),
             other => panic!("unexpected IA {other:?}"),
         }
         match ic {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 1.0, 2.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 2.0]),
             other => panic!("unexpected IC {other:?}"),
         }
     }
@@ -2031,7 +2031,7 @@ pub(crate) mod tests {
         let eval = evaluate_sync(Value::LogicalArray(logical), &[]).expect("unique");
         let values = eval.into_values_value();
         match values {
-            Value::Tensor(t) => assert_eq!(t.data, vec![0.0, 1.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![0.0, 1.0]),
             other => panic!("unexpected values {other:?}"),
         }
     }
@@ -2042,7 +2042,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![5.0, 3.0, 5.0, 1.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -2050,7 +2050,7 @@ pub(crate) mod tests {
                 evaluate_sync(Value::GpuTensor(handle), &[Value::from("stable")]).expect("unique");
             let values = eval.into_values_value();
             match values {
-                Value::Tensor(t) => assert_eq!(t.data, vec![5.0, 3.0, 1.0]),
+                Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![5.0, 3.0, 1.0]),
                 other => panic!("unexpected values {other:?}"),
             }
         });
@@ -2069,7 +2069,7 @@ pub(crate) mod tests {
 
         let provider = runmat_accelerate_api::provider().expect("provider registered");
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
@@ -2085,9 +2085,9 @@ pub(crate) mod tests {
         let gpu_ic = test_support::gather(gpu_ic).expect("gather gpu ic");
 
         assert_eq!(gpu_values.shape, host_values.shape);
-        assert_eq!(gpu_values.data, host_values.data);
-        assert_eq!(gpu_ia.data, host_ia.data);
-        assert_eq!(gpu_ic.data, host_ic.data);
+        assert_eq!(gpu_values.materialize_f64(), host_values.materialize_f64());
+        assert_eq!(gpu_ia.materialize_f64(), host_ia.materialize_f64());
+        assert_eq!(gpu_ic.materialize_f64(), host_ic.materialize_f64());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2159,16 +2159,16 @@ pub(crate) mod tests {
         match values {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 3]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("unexpected values {other:?}"),
         }
         match ia {
-            Value::Tensor(t) => assert!(t.data.is_empty()),
+            Value::Tensor(t) => assert!(t.materialize_f64().is_empty()),
             other => panic!("unexpected IA {other:?}"),
         }
         match ic {
-            Value::Tensor(t) => assert!(t.data.is_empty()),
+            Value::Tensor(t) => assert!(t.materialize_f64().is_empty()),
             other => panic!("unexpected IC {other:?}"),
         }
     }
@@ -2188,12 +2188,11 @@ pub(crate) mod tests {
 
     #[test]
     fn unique_preserves_exact_integer_elements_rows_and_indices() {
-        let mut input = Tensor::new_integer(
+        let input = Tensor::new_integer(
             IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993, u64::MAX]),
             vec![4, 1],
         )
         .expect("input");
-        input.data.clear();
         let (values, ia, ic) = evaluate_sync(Value::Tensor(input), &[])
             .expect("unique")
             .into_triple();
@@ -2211,18 +2210,17 @@ pub(crate) mod tests {
         let Value::Tensor(ia) = ia else {
             panic!("expected indices");
         };
-        assert_eq!(ia.data, vec![2.0, 3.0, 1.0]);
+        assert_eq!(ia.materialize_f64(), vec![2.0, 3.0, 1.0]);
         let Value::Tensor(ic) = ic else {
             panic!("expected indices");
         };
-        assert_eq!(ic.data, vec![3.0, 1.0, 2.0, 3.0]);
+        assert_eq!(ic.materialize_f64(), vec![3.0, 1.0, 2.0, 3.0]);
 
-        let mut rows = Tensor::new_integer(
+        let rows = Tensor::new_integer(
             IntegerStorage::I64(vec![i64::MAX, i64::MIN, i64::MAX, 1, 2, 1]),
             vec![3, 2],
         )
         .expect("input");
-        rows.data.clear();
         let (values, ia, ic) = evaluate_sync(
             Value::Tensor(rows),
             &[
@@ -2243,38 +2241,36 @@ pub(crate) mod tests {
         let Value::Tensor(ia) = ia else {
             panic!("expected indices");
         };
-        assert_eq!(ia.data, vec![3.0, 2.0]);
+        assert_eq!(ia.materialize_f64(), vec![3.0, 2.0]);
         let Value::Tensor(ic) = ic else {
             panic!("expected indices");
         };
-        assert_eq!(ic.data, vec![1.0, 2.0, 1.0]);
+        assert_eq!(ic.materialize_f64(), vec![1.0, 2.0, 1.0]);
     }
 
     #[test]
     fn unique_numeric_fallback_reads_mirrorless_integer_storage() {
         let opts = parse_options(&[]).expect("options");
-        let mut input =
+        let input =
             Tensor::new_integer(IntegerStorage::U16(vec![7, 2, 7, 9]), vec![4, 1]).expect("input");
-        input.data.clear();
         let (values, ia, ic) = unique_numeric_elements(input, &opts)
             .expect("unique numeric elements")
             .into_triple();
         let Value::Tensor(values) = values else {
             panic!("expected numeric values");
         };
-        assert_eq!(values.data, vec![2.0, 7.0, 9.0]);
+        assert_eq!(values.materialize_f64(), vec![2.0, 7.0, 9.0]);
         let Value::Tensor(ia) = ia else {
             panic!("expected indices");
         };
-        assert_eq!(ia.data, vec![2.0, 1.0, 4.0]);
+        assert_eq!(ia.materialize_f64(), vec![2.0, 1.0, 4.0]);
         let Value::Tensor(ic) = ic else {
             panic!("expected inverse indices");
         };
-        assert_eq!(ic.data, vec![2.0, 1.0, 2.0, 3.0]);
+        assert_eq!(ic.materialize_f64(), vec![2.0, 1.0, 2.0, 3.0]);
 
-        let mut rows = Tensor::new_integer(IntegerStorage::U16(vec![1, 3, 1, 2, 4, 2]), vec![3, 2])
+        let rows = Tensor::new_integer(IntegerStorage::U16(vec![1, 3, 1, 2, 4, 2]), vec![3, 2])
             .expect("rows");
-        rows.data.clear();
         let (values, ia, ic) = unique_numeric_rows(rows, &opts)
             .expect("unique numeric rows")
             .into_triple();
@@ -2282,15 +2278,15 @@ pub(crate) mod tests {
             panic!("expected numeric rows");
         };
         assert_eq!(values.shape, vec![2, 2]);
-        assert_eq!(values.data, vec![1.0, 3.0, 2.0, 4.0]);
+        assert_eq!(values.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
         let Value::Tensor(ia) = ia else {
             panic!("expected row indices");
         };
-        assert_eq!(ia.data, vec![1.0, 2.0]);
+        assert_eq!(ia.materialize_f64(), vec![1.0, 2.0]);
         let Value::Tensor(ic) = ic else {
             panic!("expected row inverse indices");
         };
-        assert_eq!(ic.data, vec![1.0, 2.0, 1.0]);
+        assert_eq!(ic.materialize_f64(), vec![1.0, 2.0, 1.0]);
     }
 
     #[test]

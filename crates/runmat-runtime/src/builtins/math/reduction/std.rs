@@ -1321,7 +1321,7 @@ pub(crate) mod tests {
         let cpu = std_host(Value::Tensor(tensor.clone()), &args).expect("cpu std");
         let cpu_tensor = test_support::gather(cpu).expect("gather cpu");
 
-        let handle = gpu_helpers::upload_tensor(provider.as_ref(), &tensor).expect("upload");
+        let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
         let gpu_value = block_on(std_gpu(handle.clone(), &args)).expect("gpu std");
         let gpu_tensor = test_support::gather(gpu_value).expect("gather gpu");
         provider.free(&handle).ok();

@@ -383,14 +383,14 @@ mod tests {
         let Value::Tensor(ax) = out else {
             panic!("expected axes handle vector");
         };
-        assert_eq!(ax.data.len(), 2);
+        assert_eq!(ax.materialize_f64().len(), 2);
         let left_location = get_builtin(vec![
-            Value::Num(ax.data[0]),
+            Value::Num(ax.materialize_f64()[0]),
             Value::String("YAxisLocation".into()),
         ])
         .unwrap();
         let right_location = get_builtin(vec![
-            Value::Num(ax.data[1]),
+            Value::Num(ax.materialize_f64()[1]),
             Value::String("YAxisLocation".into()),
         ])
         .unwrap();
@@ -414,7 +414,7 @@ mod tests {
             panic!("expected output list");
         };
         assert_eq!(values.len(), 3);
-        assert!(matches!(&values[0], Value::Tensor(ax) if ax.data.len() == 2));
+        assert!(matches!(&values[0], Value::Tensor(ax) if ax.materialize_f64().len() == 2));
         assert!(matches!(&values[1], Value::Num(_) | Value::Tensor(_)));
         assert!(matches!(&values[2], Value::Num(_) | Value::Tensor(_)));
     }
@@ -435,19 +435,35 @@ mod tests {
             panic!("expected axes handle vector");
         };
         assert_eq!(
-            get_builtin(vec![Value::Num(ax.data[0]), Value::String("XScale".into())]).unwrap(),
+            get_builtin(vec![
+                Value::Num(ax.materialize_f64()[0]),
+                Value::String("XScale".into())
+            ])
+            .unwrap(),
             Value::String("log".into())
         );
         assert_eq!(
-            get_builtin(vec![Value::Num(ax.data[0]), Value::String("YScale".into())]).unwrap(),
+            get_builtin(vec![
+                Value::Num(ax.materialize_f64()[0]),
+                Value::String("YScale".into())
+            ])
+            .unwrap(),
             Value::String("linear".into())
         );
         assert_eq!(
-            get_builtin(vec![Value::Num(ax.data[1]), Value::String("XScale".into())]).unwrap(),
+            get_builtin(vec![
+                Value::Num(ax.materialize_f64()[1]),
+                Value::String("XScale".into())
+            ])
+            .unwrap(),
             Value::String("linear".into())
         );
         assert_eq!(
-            get_builtin(vec![Value::Num(ax.data[1]), Value::String("YScale".into())]).unwrap(),
+            get_builtin(vec![
+                Value::Num(ax.materialize_f64()[1]),
+                Value::String("YScale".into())
+            ])
+            .unwrap(),
             Value::String("log".into())
         );
     }

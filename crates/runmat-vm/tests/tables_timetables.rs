@@ -1,4 +1,4 @@
-use runmat_builtins::{CellArray, Tensor, Value};
+use runmat_builtins::{CellArray, Value};
 
 #[path = "support/mod.rs"]
 mod test_helpers;
@@ -21,7 +21,7 @@ fn has_timetable(vars: &[Value]) -> bool {
 
 fn has_tensor(vars: &[Value], expected: &[f64]) -> bool {
     vars.iter().any(|value| match value {
-        Value::Tensor(Tensor { data, .. }) => data == expected,
+        Value::Tensor(tensor) => tensor.materialize_f64() == expected,
         _ => false,
     })
 }

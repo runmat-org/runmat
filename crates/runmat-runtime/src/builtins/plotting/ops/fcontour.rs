@@ -673,12 +673,11 @@ mod tests {
 
     #[test]
     fn fcontour_numeric_vector_reads_typed_integer_storage_exactly() {
-        let mut domain = Tensor::new_integer(
+        let domain = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I16(vec![-4, 4]),
             vec![1, 2],
         )
         .expect("typed domain vector");
-        domain.data.clear();
 
         assert_eq!(
             numeric_vector(&Value::Tensor(domain)).expect("numeric vector"),
@@ -788,28 +787,25 @@ mod tests {
 
     #[test]
     fn fcontour_mesh_density_reads_typed_integer_tensor_exactly() {
-        let mut exact = runmat_builtins::Tensor::new_integer(
+        let exact = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![400]),
             vec![1, 1],
         )
         .expect("typed density");
-        exact.data.clear();
         assert_eq!(parse_mesh_density(&Value::Tensor(exact)).unwrap(), 400);
 
-        let mut too_large = runmat_builtins::Tensor::new_integer(
+        let too_large = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![401]),
             vec![1, 1],
         )
         .expect("large density");
-        too_large.data.clear();
         assert!(parse_mesh_density(&Value::Tensor(too_large)).is_err());
 
-        let mut negative = runmat_builtins::Tensor::new_integer(
+        let negative = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::I64(vec![-1]),
             vec![1, 1],
         )
         .expect("negative density");
-        negative.data.clear();
         assert!(parse_mesh_density(&Value::Tensor(negative)).is_err());
 
         let boundary = if usize::BITS == 64 {
@@ -822,12 +818,11 @@ mod tests {
 
     #[test]
     fn fcontour_function_scalar_reads_typed_integer_storage_exactly() {
-        let mut tensor = runmat_builtins::Tensor::new_integer(
+        let tensor = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::I16(vec![12]),
             vec![1, 1],
         )
         .unwrap();
-        tensor.data.clear();
 
         assert_eq!(
             contour_value_to_scalar(Value::Tensor(tensor)).unwrap(),

@@ -1020,7 +1020,7 @@ mod tests {
             );
             let input_handle = provider
                 .upload(&HostTensorView {
-                    data: &input.data,
+                    data: &input.materialize_f64(),
                     shape: &input.shape,
                 })
                 .expect("upload");
@@ -1223,7 +1223,7 @@ mod tests {
                 let input = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]).unwrap();
                 let expected = qammod(Value::Tensor(input.clone()), 4, vec![]);
                 let view = HostTensorView {
-                    data: &input.data,
+                    data: &input.materialize_f64(),
                     shape: &input.shape,
                 };
                 let input_handle = provider.upload(&view).expect("upload");
@@ -1275,7 +1275,7 @@ mod tests {
                     vec![Value::from("InputType"), Value::from("bit")],
                 );
                 let view = HostTensorView {
-                    data: &input.data,
+                    data: &input.materialize_f64(),
                     shape: &input.shape,
                 };
                 let input_handle = provider.upload(&view).expect("upload");

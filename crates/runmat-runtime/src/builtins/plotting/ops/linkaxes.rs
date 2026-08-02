@@ -210,7 +210,7 @@ mod tests {
 
     fn numeric_vec(value: Value) -> Vec<f64> {
         let tensor = Tensor::try_from(&value).expect("tensor value");
-        tensor.data
+        tensor.materialize_f64()
     }
 
     fn subplot(rows: f64, cols: f64, index: f64) -> f64 {
@@ -237,12 +237,11 @@ mod tests {
         let _guard = setup();
         let first = subplot(1.0, 2.0, 1.0);
         let second = subplot(1.0, 2.0, 2.0);
-        let mut handles = Tensor::new_integer(
+        let handles = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U32(vec![first as u32, second as u32]),
             vec![1, 2],
         )
         .expect("typed axes handles");
-        handles.data.clear();
         let first_target = decode_axes_handle(first).expect("first axes handle");
         let second_target = decode_axes_handle(second).expect("second axes handle");
 

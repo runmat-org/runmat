@@ -833,8 +833,7 @@ mod tests {
     #[test]
     fn linear_assignment_reads_typed_integer_rhs_without_mirror() {
         let tensor = Tensor::new(vec![0.0, 0.0], vec![1, 2]).expect("tensor");
-        let mut rhs = Tensor::new_integer(IntegerStorage::U16(vec![11]), vec![1, 1]).expect("rhs");
-        rhs.data.clear();
+        let rhs = Tensor::new_integer(IntegerStorage::U16(vec![11]), vec![1, 1]).expect("rhs");
 
         let result = block_on(assign_tensor_scalar(
             tensor,
@@ -847,15 +846,14 @@ mod tests {
         let Value::Tensor(output) = result else {
             panic!("expected tensor");
         };
-        assert_eq!(output.data, vec![0.0, 11.0]);
+        assert_eq!(output.materialize_f64(), vec![0.0, 11.0]);
     }
 
     #[test]
     fn integer_linear_assignment_reads_typed_integer_rhs_without_mirror() {
         let tensor =
             Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![1, 2]).expect("tensor");
-        let mut rhs = Tensor::new_integer(IntegerStorage::I16(vec![7]), vec![1, 1]).expect("rhs");
-        rhs.data.clear();
+        let rhs = Tensor::new_integer(IntegerStorage::I16(vec![7]), vec![1, 1]).expect("rhs");
 
         let result = block_on(assign_tensor_scalar(
             tensor,

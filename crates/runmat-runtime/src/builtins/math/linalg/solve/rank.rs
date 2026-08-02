@@ -387,9 +387,8 @@ pub(crate) mod tests {
 
     #[test]
     fn rank_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![1, 0, 0, 1]), vec![2, 2])
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![1, 0, 0, 1]), vec![2, 2])
             .expect("integer");
-        tensor.data.fill(0.0);
         let result = rank_real_tensor_value(tensor, None).expect("rank");
         match result {
             Value::Num(r) => assert_eq!(r, 2.0),
@@ -518,13 +517,13 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 4.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = rank_builtin(Value::GpuTensor(handle), Vec::new()).expect("rank");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.data[0], 1.0);
+            assert_eq!(gathered.materialize_f64()[0], 1.0);
         });
     }
 
@@ -546,7 +545,7 @@ pub(crate) mod tests {
         let cpu_rank = rank_real_tensor(&tensor, None).expect("cpu rank") as f64;
 
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("provider");
@@ -555,7 +554,7 @@ pub(crate) mod tests {
         let gpu_value = rank_builtin(Value::GpuTensor(handle), Vec::new()).expect("rank");
         let gathered = test_support::gather(gpu_value).expect("gather");
 
-        assert_eq!(gathered.data, vec![cpu_rank]);
+        assert_eq!(gathered.materialize_f64(), vec![cpu_rank]);
     }
 
     fn rank_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

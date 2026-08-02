@@ -618,7 +618,7 @@ mod tests {
 
     fn tensor_data(value: Value) -> Vec<f64> {
         match value {
-            Value::Tensor(tensor) => tensor.data,
+            Value::Tensor(tensor) => tensor.materialize_f64(),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -626,9 +626,8 @@ mod tests {
     #[test]
     fn qqplot_numeric_helpers_read_typed_integer_storage_exactly() {
         let wide = u64::MAX - 1;
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![wide, wide - 1]), vec![2, 1]).unwrap();
-        tensor.data.clear();
         assert_eq!(
             tensor_values_f64(&tensor),
             vec![
@@ -643,15 +642,13 @@ mod tests {
                 IntValue::U64(wide - 1).to_f64()
             ]]
         );
-        let mut pvec = Tensor::new_integer(IntegerStorage::U8(vec![75, 25]), vec![1, 2]).unwrap();
-        pvec.data.clear();
+        let pvec = Tensor::new_integer(IntegerStorage::U8(vec![75, 25]), vec![1, 2]).unwrap();
         assert_eq!(probabilities_from_tensor(pvec).unwrap(), vec![0.25, 0.75]);
     }
 
     #[test]
     fn qqplot_scalar_typed_integer_sample_uses_storage_len_for_default_shape() {
-        let mut input = Tensor::new_integer(IntegerStorage::I16(vec![42]), Vec::new()).unwrap();
-        input.data.clear();
+        let input = Tensor::new_integer(IntegerStorage::I16(vec![42]), Vec::new()).unwrap();
 
         let series = normal_series_from_tensor(input, None).unwrap();
 

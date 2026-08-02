@@ -600,7 +600,7 @@ pub(crate) mod tests {
             mod_builtin(Value::Tensor(tensor), Value::Tensor(divisor)).expect("mod broadcast");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.data, vec![-3.0, -3.0, 0.0, -3.0]);
+                assert_eq!(out.materialize_f64(), vec![-3.0, -3.0, 0.0, -3.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -635,7 +635,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
                 let expected = [0.5, 1.1, 1.7, 0.4];
-                for (a, b) in t.data.iter().zip(expected.iter()) {
+                for (a, b) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((a - b).abs() < 1e-12);
                 }
             }
@@ -693,7 +693,7 @@ pub(crate) mod tests {
         let chars = CharArray::new("ABC".chars().collect(), 1, 3).unwrap();
         let result = mod_builtin(Value::CharArray(chars), Value::Num(5.0)).expect("mod");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data, vec![0.0, 1.0, 2.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![0.0, 1.0, 2.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -715,7 +715,7 @@ pub(crate) mod tests {
         let value =
             mod_builtin(Value::LogicalArray(logical), Value::Num(2.0)).expect("logical mod");
         match value {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 0.0, 1.0, 0.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 0.0, 1.0, 0.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -729,7 +729,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                assert_eq!(t.data, vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -752,11 +752,11 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![-5.0, -3.0, 0.0, 1.0, 6.0, 9.0], vec![3, 2]).unwrap();
             let divisor = Tensor::new(vec![4.0, 4.0, 4.0, 4.0, 4.0, 4.0], vec![3, 2]).unwrap();
             let a_view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let b_view = runmat_accelerate_api::HostTensorView {
-                data: &divisor.data,
+                data: &divisor.materialize_f64(),
                 shape: &divisor.shape,
             };
             let a_handle = provider.upload(&a_view).expect("upload a");
@@ -765,7 +765,10 @@ pub(crate) mod tests {
                 mod_builtin(Value::GpuTensor(a_handle), Value::GpuTensor(b_handle)).expect("mod");
             let gathered = test_support::gather(result).expect("gather result");
             assert_eq!(gathered.shape, vec![3, 2]);
-            assert_eq!(gathered.data, vec![3.0, 1.0, 0.0, 1.0, 2.0, 1.0]);
+            assert_eq!(
+                gathered.materialize_f64(),
+                vec![3.0, 1.0, 0.0, 1.0, 2.0, 1.0]
+            );
         });
     }
 
@@ -783,9 +786,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mod_scalar_fast_path_reads_typed_integer_storage_exactly() {
-        let mut lhs =
+        let lhs =
             Tensor::new_integer(IntegerStorage::I16(vec![7]), vec![1, 1]).expect("lhs tensor");
-        lhs.data.clear();
 
         assert_eq!(scalar_real_value(&Value::Tensor(lhs.clone())), Some(7.0));
 
@@ -798,12 +800,9 @@ pub(crate) mod tests {
 
     #[test]
     fn mod_dense_integer_arrays_preserve_exact_storage_without_mirror() {
-        let mut lhs =
-            Tensor::new_integer(IntegerStorage::I64(vec![-7, 7]), vec![2, 1]).expect("lhs");
-        lhs.data.clear();
-        let mut rhs =
+        let lhs = Tensor::new_integer(IntegerStorage::I64(vec![-7, 7]), vec![2, 1]).expect("lhs");
+        let rhs =
             Tensor::new_integer(IntegerStorage::I64(vec![4, -4, 0]), vec![1, 3]).expect("rhs");
-        rhs.data.clear();
 
         let result = mod_builtin(Value::Tensor(lhs), Value::Tensor(rhs)).expect("mod");
         let Value::Tensor(result) = result else {
@@ -815,9 +814,8 @@ pub(crate) mod tests {
             Some(&IntegerStorage::I64(vec![1, 3, -3, -1, -7, 7]))
         );
 
-        let mut lhs =
+        let lhs =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("lhs");
-        lhs.data.clear();
         assert_eq!(
             mod_builtin(Value::Tensor(lhs), Value::Num(3.0)).expect("mod"),
             Value::Int(IntValue::U64(0))
@@ -839,13 +837,13 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider registered");
         let numer_handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
-                data: &numer.data,
+                data: &numer.materialize_f64(),
                 shape: &numer.shape,
             })
             .expect("upload numer");
         let denom_handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
-                data: &denom.data,
+                data: &denom.materialize_f64(),
                 shape: &denom.shape,
             })
             .expect("upload denom");
@@ -864,7 +862,11 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (gpu, cpu) in gpu_tensor.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gpu_tensor
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!(
                 (gpu - cpu).abs() <= tol,
                 "|{gpu} - {cpu}| exceeded tolerance {tol}"

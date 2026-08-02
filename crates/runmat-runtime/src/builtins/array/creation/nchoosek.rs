@@ -715,7 +715,7 @@ mod tests {
         else {
             panic!("expected single tensor coefficient");
         };
-        assert_eq!(single_out.dtype, NumericDType::F32);
+        assert_eq!(single_out.numeric_dtype(), NumericDType::F32);
         assert_eq!(single_out.shape, vec![1, 1]);
         assert_eq!(
             single_out.into_numeric_storage().expect("single storage"),
@@ -753,7 +753,7 @@ mod tests {
         };
         assert_eq!(out.shape, vec![5, 4]);
         assert_eq!(
-            out.data,
+            out.materialize_f64(),
             vec![
                 2.0, 2.0, 2.0, 2.0, 4.0, // col 1
                 4.0, 4.0, 4.0, 6.0, 6.0, // col 2
@@ -784,13 +784,13 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(zero.shape, vec![1, 0]);
-        assert!(zero.data.is_empty());
+        assert!(zero.materialize_f64().is_empty());
 
         let Value::Tensor(too_large) = call(Value::Tensor(vector), Value::Num(4.0)).unwrap() else {
             panic!("expected tensor");
         };
         assert_eq!(too_large.shape, vec![0, 4]);
-        assert!(too_large.data.is_empty());
+        assert!(too_large.materialize_f64().is_empty());
     }
 
     #[test]
@@ -801,9 +801,12 @@ mod tests {
         else {
             panic!("expected tensor");
         };
-        assert_eq!(out.dtype, NumericDType::U32);
+        assert_eq!(out.numeric_dtype(), NumericDType::U32);
         assert_eq!(out.shape, vec![3, 2]);
-        assert_eq!(out.data, vec![10.0, 10.0, 20.0, 20.0, 30.0, 30.0]);
+        assert_eq!(
+            out.materialize_f64(),
+            vec![10.0, 10.0, 20.0, 20.0, 30.0, 30.0]
+        );
     }
 
     #[test]
@@ -821,22 +824,20 @@ mod tests {
 
         for storage in storages {
             let values = storage.exact_values();
-            let mut scalar = Tensor::new_integer(
+            let scalar = Tensor::new_integer(
                 storage
                     .from_exact_values_like(vec![values[0].clone()])
                     .expect("scalar storage"),
                 vec![1, 1],
             )
             .expect("scalar tensor");
-            scalar.data.clear();
-            let mut k = Tensor::new_integer(
+            let k = Tensor::new_integer(
                 storage
                     .from_exact_values_like(vec![one_like(&values[0])])
                     .expect("k storage"),
                 vec![1, 1],
             )
             .expect("k tensor");
-            k.data.clear();
             assert_eq!(
                 call(Value::Tensor(scalar), Value::Tensor(k)).expect("scalar coefficient"),
                 Value::Int(values[0].clone())
@@ -852,9 +853,7 @@ mod tests {
                     values[2].clone(),
                 ])
                 .expect("expected combinations");
-            let mut input =
-                Tensor::new_integer(storage.clone(), vec![1, 3]).expect("integer vector");
-            input.data.clear();
+            let input = Tensor::new_integer(storage.clone(), vec![1, 3]).expect("integer vector");
             let Value::Tensor(output) =
                 call(Value::Tensor(input), Value::Num(2.0)).expect("combinations")
             else {
@@ -1026,7 +1025,7 @@ mod tests {
             let vector = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &vector.data,
+                    data: &vector.materialize_f64(),
                     shape: &vector.shape,
                 })
                 .expect("upload");
@@ -1035,7 +1034,7 @@ mod tests {
                 panic!("expected tensor");
             };
             assert_eq!(out.shape, vec![3, 2]);
-            assert_eq!(out.data, vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
+            assert_eq!(out.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
         });
     }
 }

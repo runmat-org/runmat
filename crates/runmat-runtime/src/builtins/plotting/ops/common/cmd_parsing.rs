@@ -144,13 +144,11 @@ mod tests {
 
     #[test]
     fn scalar_and_hold_parsers_read_typed_integer_storage() {
-        let mut scalar_tensor =
+        let scalar_tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![4]), vec![1, 1]).expect("scalar");
-        scalar_tensor.data.clear();
         let scalar = Value::Tensor(scalar_tensor);
-        let mut hold_tensor =
+        let hold_tensor =
             Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("hold");
-        hold_tensor.data.clear();
         let hold = Value::Tensor(hold_tensor);
 
         assert_eq!(scalar_from_value(&scalar, "subplot").expect("scalar"), 4);

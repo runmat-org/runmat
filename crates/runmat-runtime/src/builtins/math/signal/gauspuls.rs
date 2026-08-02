@@ -536,9 +536,8 @@ mod tests {
     }
 
     fn integer_tensor(values: Vec<i16>, shape: Vec<usize>) -> Tensor {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::I16(values), shape).expect("typed integer tensor");
-        tensor.data.fill(f64::NAN);
         tensor
     }
 
@@ -559,8 +558,8 @@ mod tests {
             .expect("gauspuls"),
         );
         assert_eq!(out.shape, vec![1, 3]);
-        assert!(out.data[1] > out.data[0]);
-        assert!(out.data[1] > out.data[2]);
+        assert!(out.materialize_f64()[1] > out.materialize_f64()[0]);
+        assert!(out.materialize_f64()[1] > out.materialize_f64()[2]);
     }
 
     #[test]
@@ -568,8 +567,8 @@ mod tests {
         let input = integer_tensor(vec![0, 1], vec![1, 2]);
         let out = expect_tensor(call(Value::Tensor(input), Vec::new()).expect("gauspuls"));
         assert_eq!(out.shape, vec![1, 2]);
-        assert!((out.data[0] - 1.0).abs() <= 1e-12);
-        assert!(out.data[1].is_finite());
+        assert!((out.materialize_f64()[0] - 1.0).abs() <= 1e-12);
+        assert!(out.materialize_f64()[1].is_finite());
     }
 
     #[test]
@@ -591,11 +590,11 @@ mod tests {
         assert_eq!(in_phase.shape, vec![1, 2]);
         assert_eq!(quadrature.shape, vec![1, 2]);
         assert_eq!(envelope.shape, vec![1, 2]);
-        assert!((in_phase.data[0] - 1.0).abs() <= 1e-12);
-        assert!(quadrature.data[0].abs() <= 1e-12);
-        assert!((envelope.data[0] - 1.0).abs() <= 1e-12);
-        assert!(in_phase.data[1].abs() <= 1e-12);
-        assert!((quadrature.data[1] - envelope.data[1]).abs() <= 1e-12);
+        assert!((in_phase.materialize_f64()[0] - 1.0).abs() <= 1e-12);
+        assert!(quadrature.materialize_f64()[0].abs() <= 1e-12);
+        assert!((envelope.materialize_f64()[0] - 1.0).abs() <= 1e-12);
+        assert!(in_phase.materialize_f64()[1].abs() <= 1e-12);
+        assert!((quadrature.materialize_f64()[1] - envelope.materialize_f64()[1]).abs() <= 1e-12);
     }
 
     #[test]
@@ -613,9 +612,9 @@ mod tests {
         assert_eq!(in_phase.shape, vec![1, 2]);
         assert_eq!(quadrature.shape, vec![1, 2]);
         assert_eq!(envelope.shape, vec![1, 2]);
-        assert!((in_phase.data[0] - 1.0).abs() <= 1e-12);
-        assert!(quadrature.data[0].abs() <= 1e-12);
-        assert!((envelope.data[0] - 1.0).abs() <= 1e-12);
+        assert!((in_phase.materialize_f64()[0] - 1.0).abs() <= 1e-12);
+        assert!(quadrature.materialize_f64()[0].abs() <= 1e-12);
+        assert!((envelope.materialize_f64()[0] - 1.0).abs() <= 1e-12);
     }
 
     #[test]

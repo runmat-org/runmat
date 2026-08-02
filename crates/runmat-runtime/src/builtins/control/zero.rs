@@ -127,8 +127,14 @@ mod tests {
             panic!("expected real zeros");
         };
         assert_eq!(zeros.shape, vec![2, 1]);
-        assert!(zeros.data.iter().any(|z| (*z + 1.0).abs() < 1.0e-8));
-        assert!(zeros.data.iter().any(|z| (*z + 2.0).abs() < 1.0e-8));
+        assert!(zeros
+            .materialize_f64()
+            .iter()
+            .any(|z| (*z + 1.0).abs() < 1.0e-8));
+        assert!(zeros
+            .materialize_f64()
+            .iter()
+            .any(|z| (*z + 2.0).abs() < 1.0e-8));
     }
 
     #[test]
@@ -161,6 +167,6 @@ mod tests {
             panic!("expected real empty column");
         };
         assert_eq!(zeros.shape, vec![0, 1]);
-        assert!(zeros.data.is_empty());
+        assert!(zeros.materialize_f64().is_empty());
     }
 }

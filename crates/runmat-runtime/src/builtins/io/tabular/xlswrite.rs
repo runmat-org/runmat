@@ -1650,9 +1650,8 @@ mod tests {
 
     #[test]
     fn xlswrite_numeric_range_reads_typed_integer_storage_exactly() {
-        let mut range =
+        let range =
             Tensor::new_integer(IntegerStorage::U16(vec![2, 3]), vec![1, 2]).expect("range");
-        range.data.clear();
 
         let parsed = parse_range_start(&Value::Tensor(range)).expect("range");
 
@@ -1695,9 +1694,8 @@ mod tests {
     fn xlswrite_accepts_cell_strings_logicals_and_ints() {
         let path = temp_path("xls");
         let filename = path.to_string_lossy().into_owned();
-        let mut typed = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
+        let typed = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
             .expect("typed scalar tensor");
-        typed.data.clear();
         let values = cell(
             vec![
                 Value::from("name"),
@@ -1729,9 +1727,8 @@ mod tests {
     #[test]
     fn xlswrite_preserves_integer_cell_xml_exactly() {
         let wide = (1_u64 << 53) + 1;
-        let mut typed =
+        let typed =
             Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("wide tensor");
-        typed.data.clear();
 
         let scalar = block_on(XlsTable::from_value(Value::Int(IntValue::U64(u64::MAX))))
             .expect("scalar table");
@@ -1983,21 +1980,18 @@ mod tests {
 
     #[test]
     fn xlswrite_sheet_selector_preserves_typed_integer_tensor_bounds() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1])
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1])
             .expect("typed sheet tensor");
-        tensor.data.clear();
         assert!(matches!(
             parse_sheet_selector(&Value::Tensor(tensor)),
             Ok(SheetSelector::Index(6))
         ));
 
-        let mut too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+        let too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
             .expect("typed sheet tensor");
-        too_large.data.clear();
         assert!(parse_sheet_selector(&Value::Tensor(too_large)).is_err());
-        let mut negative =
+        let negative =
             Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("negative");
-        negative.data.clear();
         assert!(parse_sheet_selector(&Value::Tensor(negative)).is_err());
 
         assert!(parse_sheet_selector(&Value::Num(usize::MAX as f64)).is_err());

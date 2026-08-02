@@ -537,7 +537,7 @@ pub(crate) mod tests {
             let tensor =
                 Tensor::new((1..=6).map(|v| v as f64).collect::<Vec<_>>(), vec![2, 3]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -561,7 +561,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let dims = Tensor::new(vec![0.0, 5.0, 3.0], vec![1, 3]).unwrap();
             let view = HostTensorView {
-                data: &dims.data,
+                data: &dims.materialize_f64(),
                 shape: &dims.shape,
             };
             let handle = provider.upload(&view).expect("upload");

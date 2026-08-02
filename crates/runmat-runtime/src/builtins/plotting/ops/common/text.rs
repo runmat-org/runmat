@@ -215,9 +215,8 @@ mod tests {
     fn axes_target_parser_reads_typed_integer_storage_exactly() {
         let encoded =
             crate::builtins::plotting::state::encode_axes_handle(FigureHandle::from(7), 2);
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U32(vec![encoded as u32]), vec![1, 1]).unwrap();
-        tensor.data.clear();
 
         assert_eq!(
             try_parse_axes_target(&Value::Tensor(tensor)),

@@ -292,7 +292,7 @@ mod tests {
         ])
         .expect("get position");
         let tensor = Tensor::try_from(&value).expect("position tensor");
-        assert_eq!(tensor.data, vec![100.0, 100.0, 1000.0, 700.0]);
+        assert_eq!(tensor.materialize_f64(), vec![100.0, 100.0, 1000.0, 700.0]);
     }
 
     #[test]

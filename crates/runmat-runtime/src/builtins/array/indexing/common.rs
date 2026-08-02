@@ -272,15 +272,13 @@ mod tests {
 
     #[test]
     fn parse_dims_reads_typed_integer_tensor_storage_exactly() {
-        let mut scalar =
+        let scalar =
             Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("scalar dim");
-        scalar.data.clear();
         let dims = block_on(parse_dims(&Value::Tensor(scalar), "zeros")).expect("scalar dims");
         assert_eq!(dims, vec![7]);
 
-        let mut vector =
+        let vector =
             Tensor::new_integer(IntegerStorage::U16(vec![2, 3]), vec![1, 2]).expect("vector dims");
-        vector.data.clear();
         let dims = block_on(parse_dims(&Value::Tensor(vector), "zeros")).expect("vector dims");
         assert_eq!(dims, vec![2, 3]);
     }

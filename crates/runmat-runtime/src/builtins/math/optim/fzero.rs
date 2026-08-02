@@ -698,10 +698,8 @@ mod tests {
 
     #[test]
     fn fzero_bracket_reads_typed_integer_storage_exactly() {
-        let mut bracket =
+        let bracket =
             Tensor::new_integer(IntegerStorage::U16(vec![3, 4]), vec![1, 2]).expect("bracket");
-        bracket.data[0] = 0.0;
-        bracket.data[1] = 1.0;
 
         let root = block_on(fzero_builtin(
             Value::FunctionHandle("sin".into()),
@@ -731,9 +729,7 @@ mod tests {
 
     #[test]
     fn fzero_initial_guess_reads_typed_integer_storage_exactly() {
-        let mut guess =
-            Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("guess");
-        guess.data.clear();
+        let guess = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("guess");
 
         let root = block_on(fzero_builtin(
             Value::FunctionHandle("cos".into()),

@@ -1661,9 +1661,8 @@ mod tests {
     fn writecell_accepts_scalar_char_tensor_and_logical_cells() {
         let path = temp_path("csv");
         let filename = path.to_string_lossy().into_owned();
-        let mut typed = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
+        let typed = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
             .expect("typed scalar tensor");
-        typed.data.clear();
         let values = cell(
             vec![
                 Value::CharArray(CharArray::new_row("name")),
@@ -1687,9 +1686,8 @@ mod tests {
         let path = temp_path("csv");
         let filename = path.to_string_lossy().into_owned();
         let wide = (1_u64 << 53) + 1;
-        let mut typed =
+        let typed =
             Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("wide tensor");
-        typed.data.clear();
         let values = cell(
             vec![Value::Int(IntValue::U64(u64::MAX)), Value::Tensor(typed)],
             1,
@@ -1708,10 +1706,8 @@ mod tests {
         assert!(parse_sheet(&Value::Num(usize::MAX as f64)).is_err());
         assert!(parse_sheet(&Value::Num((usize::MAX as f64) + 1.0)).is_err());
 
-        let mut typed =
-            Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1])
-                .expect("typed sheet");
-        typed.data.clear();
+        let typed = Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1])
+            .expect("typed sheet");
         let parsed = parse_sheet(&Value::Tensor(typed));
         match usize::try_from((1_u64 << 53) + 1) {
             Ok(expected) => {

@@ -687,7 +687,11 @@ pub(crate) mod tests {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, tensor.shape);
                 for (idx, (re, im)) in out.data.iter().enumerate() {
-                    assert!(approx_eq((*re, *im), (tensor.data[idx], 0.0), 1e-12));
+                    assert!(approx_eq(
+                        (*re, *im),
+                        (tensor.materialize_f64()[idx], 0.0),
+                        1e-12
+                    ));
                 }
             }
             other => panic!("expected complex tensor, got {other:?}"),
@@ -707,7 +711,7 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, tensor.shape);
-                assert_eq!(out.data, tensor.data);
+                assert_eq!(out.materialize_f64(), tensor.materialize_f64());
             }
             other => panic!("expected real tensor, got {other:?}"),
         }
@@ -726,7 +730,11 @@ pub(crate) mod tests {
         let result = value_to_complex_tensor(value, "ifft2").expect("complex output");
         assert_eq!(result.shape, tensor.shape);
         for (idx, (re, im)) in result.data.iter().enumerate() {
-            assert!(approx_eq((*re, *im), (tensor.data[idx], 0.0), 1e-12));
+            assert!(approx_eq(
+                (*re, *im),
+                (tensor.materialize_f64()[idx], 0.0),
+                1e-12
+            ));
         }
     }
 
@@ -764,9 +772,7 @@ pub(crate) mod tests {
     fn ifft2_size_vector_reads_typed_integer_storage_exactly() {
         let tensor = HostTensor::new((0..6).map(|v| v as f64).collect(), vec![2, 3]).unwrap();
         let spectrum = fft2_of_tensor(&tensor);
-        let mut size =
-            HostTensor::new_integer(IntegerStorage::U16(vec![4, 2]), vec![1, 2]).unwrap();
-        size.data.fill(f64::NAN);
+        let size = HostTensor::new_integer(IntegerStorage::U16(vec![4, 2]), vec![1, 2]).unwrap();
 
         let value = ifft2_builtin(Value::ComplexTensor(spectrum), vec![Value::Tensor(size)])
             .expect("ifft2");
@@ -793,7 +799,11 @@ pub(crate) mod tests {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, tensor.shape);
                 for (idx, (re, im)) in out.data.iter().enumerate() {
-                    assert!(approx_eq((*re, *im), (tensor.data[idx], 0.0), 1e-12));
+                    assert!(approx_eq(
+                        (*re, *im),
+                        (tensor.materialize_f64()[idx], 0.0),
+                        1e-12
+                    ));
                 }
             }
             other => panic!("expected complex tensor, got {other:?}"),

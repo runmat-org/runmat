@@ -374,7 +374,7 @@ mod tests {
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
             std::sync::Arc::new(|_function, args, _requested_outputs| {
                 let x = match &args[0] {
-                    Value::Tensor(t) => t.data.clone(),
+                    Value::Tensor(t) => t.materialize_f64().clone(),
                     _ => panic!("expected tensor input"),
                 };
                 Box::pin(async move {
@@ -397,8 +397,14 @@ mod tests {
         .unwrap();
         match root {
             Value::Tensor(t) => {
-                assert!((t.data[0] * t.data[0] + t.data[1] * t.data[1] - 4.0).abs() < 1.0e-5);
-                assert!((t.data[0] * t.data[1] - 1.0).abs() < 1.0e-5);
+                assert!(
+                    (t.materialize_f64()[0] * t.materialize_f64()[0]
+                        + t.materialize_f64()[1] * t.materialize_f64()[1]
+                        - 4.0)
+                        .abs()
+                        < 1.0e-5
+                );
+                assert!((t.materialize_f64()[0] * t.materialize_f64()[1] - 1.0).abs() < 1.0e-5);
             }
             other => panic!("unexpected value {other:?}"),
         }
@@ -415,7 +421,7 @@ mod tests {
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             move |_function, args, _requested_outputs| {
                 let (x, shape) = match &args[0] {
-                    Value::Tensor(t) => (t.data.clone(), t.shape.clone()),
+                    Value::Tensor(t) => (t.materialize_f64().clone(), t.shape.clone()),
                     other => panic!("expected tensor input, got {other:?}"),
                 };
                 assert_eq!(shape, vec![1, 2]);
@@ -437,8 +443,8 @@ mod tests {
         match root {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert!((t.data[0] - 3.0).abs() < 1.0e-5);
-                assert!((t.data[1] - 4.0).abs() < 1.0e-5);
+                assert!((t.materialize_f64()[0] - 3.0).abs() < 1.0e-5);
+                assert!((t.materialize_f64()[1] - 4.0).abs() < 1.0e-5);
             }
             other => panic!("unexpected value {other:?}"),
         }
@@ -456,7 +462,7 @@ mod tests {
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             move |_function, args, _requested_outputs| {
                 let (x, shape) = match &args[0] {
-                    Value::Tensor(t) => (t.data.clone(), t.shape.clone()),
+                    Value::Tensor(t) => (t.materialize_f64().clone(), t.shape.clone()),
                     other => panic!("expected tensor input, got {other:?}"),
                 };
                 assert_eq!(shape, vec![2, 2]);
@@ -479,10 +485,10 @@ mod tests {
         match root {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert!((t.data[0] - 1.0).abs() < 1.0e-5);
-                assert!((t.data[1] - 2.0).abs() < 1.0e-5);
-                assert!((t.data[2] - 3.0).abs() < 1.0e-5);
-                assert!((t.data[3] - 4.0).abs() < 1.0e-5);
+                assert!((t.materialize_f64()[0] - 1.0).abs() < 1.0e-5);
+                assert!((t.materialize_f64()[1] - 2.0).abs() < 1.0e-5);
+                assert!((t.materialize_f64()[2] - 3.0).abs() < 1.0e-5);
+                assert!((t.materialize_f64()[3] - 4.0).abs() < 1.0e-5);
             }
             other => panic!("unexpected value {other:?}"),
         }

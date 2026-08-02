@@ -119,15 +119,15 @@ mod tests {
     fn gobjects_defaults_to_scalar_placeholder() {
         let tensor = tensor_from(block_on(gobjects_builtin(Vec::new())).unwrap());
         assert_eq!(tensor.shape, vec![1, 1]);
-        assert_eq!(tensor.data.len(), 1);
-        assert!(tensor.data[0].is_nan());
+        assert_eq!(tensor.materialize_f64().len(), 1);
+        assert!(tensor.materialize_f64()[0].is_nan());
     }
 
     #[test]
     fn gobjects_accepts_scalar_dims_and_size_vector() {
         let square = tensor_from(block_on(gobjects_builtin(vec![Value::Num(3.0)])).unwrap());
         assert_eq!(square.shape, vec![3, 3]);
-        assert!(square.data.iter().all(|value| value.is_nan()));
+        assert!(square.materialize_f64().iter().all(|value| value.is_nan()));
 
         let rect = tensor_from(
             block_on(gobjects_builtin(vec![Value::Num(2.0), Value::Num(3.0)])).unwrap(),

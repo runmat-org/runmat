@@ -617,23 +617,20 @@ pub(crate) mod tests {
             parse_buffer_size(&Value::Int(IntValue::U64(u64::MAX)), "InputBufferSize").is_err()
         );
 
-        let mut typed = Tensor::new_integer(IntegerStorage::U64(vec![i32::MAX as u64]), vec![1, 1])
+        let typed = Tensor::new_integer(IntegerStorage::U64(vec![i32::MAX as u64]), vec![1, 1])
             .expect("typed buffer size");
-        typed.data.clear();
         assert_eq!(
             parse_buffer_size(&Value::Tensor(typed), "InputBufferSize").unwrap(),
             i32::MAX
         );
 
-        let mut typed_too_large =
+        let typed_too_large =
             Tensor::new_integer(IntegerStorage::U64(vec![i32::MAX as u64 + 1]), vec![1, 1])
                 .expect("typed buffer size");
-        typed_too_large.data.clear();
         assert!(parse_buffer_size(&Value::Tensor(typed_too_large), "InputBufferSize").is_err());
 
-        let mut typed_negative = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
+        let typed_negative = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
             .expect("typed buffer size");
-        typed_negative.data.clear();
         assert!(parse_buffer_size(&Value::Tensor(typed_negative), "InputBufferSize").is_err());
     }
 

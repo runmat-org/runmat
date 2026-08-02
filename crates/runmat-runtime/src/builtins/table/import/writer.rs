@@ -150,9 +150,7 @@ mod tests {
 
     #[test]
     fn cell_to_text_preserves_exact_integer_scalar_storage() {
-        let mut tensor =
-            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap();
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap();
 
         assert_eq!(cell_to_text(&Value::Tensor(tensor)), "18446744073709551615");
     }

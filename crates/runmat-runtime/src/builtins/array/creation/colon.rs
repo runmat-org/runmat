@@ -896,7 +896,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 5]);
-                assert_eq!(t.data, vec![1.0, 2.0, 3.0, 4.0, 5.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0, 5.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1032,7 +1032,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 0]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1046,7 +1046,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 5]);
-                assert_eq!(t.data, vec![5.0, 4.0, 3.0, 2.0, 1.0]);
+                assert_eq!(t.materialize_f64(), vec![5.0, 4.0, 3.0, 2.0, 1.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1060,7 +1060,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 5]);
-                assert_eq!(t.data, vec![0.0, 0.5, 1.0, 1.5, 2.0]);
+                assert_eq!(t.materialize_f64(), vec![0.0, 0.5, 1.0, 1.5, 2.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1074,7 +1074,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 3]);
-                assert_eq!(t.data, vec![0.0, 2.0, 4.0]);
+                assert_eq!(t.materialize_f64(), vec![0.0, 2.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1088,7 +1088,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 0]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1111,7 +1111,7 @@ pub(crate) mod tests {
             colon_builtin(Value::Tensor(start), Value::Tensor(stop), Vec::new()).expect("colon");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![1.0, 2.0, 3.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1119,18 +1119,16 @@ pub(crate) mod tests {
 
     #[test]
     fn colon_scalar_tensors_read_typed_integer_storage_exactly() {
-        let mut start = Tensor::new_integer(
+        let start = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_993]),
             vec![1, 1],
         )
         .unwrap();
-        start.data.clear();
-        let mut stop = Tensor::new_integer(
+        let stop = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_995]),
             vec![1, 1],
         )
         .unwrap();
-        stop.data.clear();
 
         let result =
             colon_builtin(Value::Tensor(start), Value::Tensor(stop), Vec::new()).expect("colon");
@@ -1149,15 +1147,14 @@ pub(crate) mod tests {
 
     #[test]
     fn colon_double_path_scalar_tensor_reads_typed_integer_storage_exactly() {
-        let mut start =
+        let start =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![4]), vec![1, 1]).unwrap();
-        start.data.clear();
         let stop = Tensor::new(vec![6.0], vec![1, 1]).unwrap();
 
         let result =
             colon_builtin(Value::Tensor(start), Value::Tensor(stop), Vec::new()).expect("colon");
         match result {
-            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![4.0, 5.0, 6.0]),
+            Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![4.0, 5.0, 6.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -1186,7 +1183,7 @@ pub(crate) mod tests {
         )
         .expect("colon");
         match result {
-            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0, 2.0, 3.0]),
+            Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 3.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
 
@@ -1215,7 +1212,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let start = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
             let start_view = HostTensorView {
-                data: &start.data,
+                data: &start.materialize_f64(),
                 shape: &start.shape,
             };
             let start_handle = provider.upload(&start_view).expect("upload start");
@@ -1231,7 +1228,7 @@ pub(crate) mod tests {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
                     assert_eq!(gathered.shape, vec![1, 5]);
-                    assert_eq!(gathered.data, vec![0.0, 0.5, 1.0, 1.5, 2.0]);
+                    assert_eq!(gathered.materialize_f64(), vec![0.0, 0.5, 1.0, 1.5, 2.0]);
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
             }
@@ -1254,7 +1251,7 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let start = Tensor::new(vec![-2.0], vec![1, 1]).unwrap();
         let start_view = HostTensorView {
-            data: &start.data,
+            data: &start.materialize_f64(),
             shape: &start.shape,
         };
         let start_handle = provider.upload(&start_view).expect("upload start");
@@ -1279,7 +1276,7 @@ pub(crate) mod tests {
         };
 
         assert_eq!(gathered.shape, expected.shape);
-        assert_eq!(gathered.data, expected.data);
+        assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1289,7 +1286,7 @@ pub(crate) mod tests {
             colon_builtin(Value::Bool(false), Value::Bool(true), Vec::new()).expect("colon");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![0.0, 1.0]);
+                assert_eq!(t.materialize_f64(), vec![0.0, 1.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1337,7 +1334,7 @@ pub(crate) mod tests {
         match result {
             Value::Num(v) => assert!((v - 3.0).abs() < 1e-12),
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![3.0]);
+                assert_eq!(t.materialize_f64(), vec![3.0]);
             }
             other => panic!("expected scalar-compatible result, got {other:?}"),
         }
@@ -1419,7 +1416,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let step = Tensor::new(vec![0.5], vec![1, 1]).unwrap();
             let view = HostTensorView {
-                data: &step.data,
+                data: &step.materialize_f64(),
                 shape: &step.shape,
             };
             let step_handle = provider.upload(&view).expect("upload step");
@@ -1432,7 +1429,7 @@ pub(crate) mod tests {
             match result {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-                    assert_eq!(gathered.data, vec![0.0, 0.5, 1.0, 1.5, 2.0]);
+                    assert_eq!(gathered.materialize_f64(), vec![0.0, 0.5, 1.0, 1.5, 2.0]);
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
             }

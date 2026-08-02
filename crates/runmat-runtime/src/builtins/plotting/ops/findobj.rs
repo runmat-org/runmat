@@ -630,7 +630,7 @@ mod tests {
     }
 
     fn handles(value: Value) -> Vec<f64> {
-        tensor(value).data
+        tensor(value).materialize_f64()
     }
 
     fn row(data: &[f64]) -> Value {
@@ -639,8 +639,7 @@ mod tests {
 
     #[test]
     fn findobj_depth_reads_typed_integer_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::U8(vec![3]), vec![1, 1]).unwrap();
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(IntegerStorage::U8(vec![3]), vec![1, 1]).unwrap();
 
         assert_eq!(depth_from_value(&Value::Tensor(tensor)).unwrap(), 3);
     }
@@ -659,16 +658,14 @@ mod tests {
         ];
 
         for storage in storages {
-            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("depth");
-            tensor.data = vec![f64::NAN];
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("depth");
             assert_eq!(depth_from_value(&Value::Tensor(tensor)).expect("depth"), 3);
         }
     }
 
     #[test]
     fn findobj_root_handles_reads_typed_integer_storage_exactly() {
-        let mut roots = Tensor::new_integer(IntegerStorage::U16(vec![11, 13]), vec![1, 2]).unwrap();
-        roots.data.clear();
+        let roots = Tensor::new_integer(IntegerStorage::U16(vec![11, 13]), vec![1, 2]).unwrap();
         let args = vec![Value::Tensor(roots), Value::String("Type".into())];
         let (handles, rest) = split_root_handles(&args)
             .expect("split roots")

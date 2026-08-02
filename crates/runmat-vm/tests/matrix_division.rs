@@ -14,7 +14,7 @@ fn assert_same_real_tensor(lhs: &Value, rhs: &Value) {
     match (lhs, rhs) {
         (Value::Tensor(left), Value::Tensor(right)) => {
             assert_eq!(left.shape, right.shape);
-            assert_eq!(left.data, right.data);
+            assert_eq!(left.materialize_f64(), right.materialize_f64());
         }
         (Value::Num(left), Value::Num(right)) => {
             assert!((left - right).abs() < 1e-12, "left={left} right={right}");

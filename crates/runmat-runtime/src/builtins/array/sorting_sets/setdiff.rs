@@ -1574,25 +1574,23 @@ pub(crate) mod tests {
         match eval.values_value() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 1]);
-                assert_eq!(t.data, vec![5.0]);
+                assert_eq!(t.materialize_f64(), vec![5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
         let ia = tensor::value_into_tensor_for("setdiff", eval.ia_value()).expect("ia tensor");
-        assert_eq!(ia.data, vec![1.0]);
+        assert_eq!(ia.materialize_f64(), vec![1.0]);
     }
 
     #[test]
     fn setdiff_preserves_exact_integer_elements_and_rows() {
-        let mut a = Tensor::new_integer(
+        let a = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993]),
             vec![3, 1],
         )
         .expect("input");
-        let mut b = Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![0]), vec![1, 1])
+        let b = Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![0]), vec![1, 1])
             .expect("input");
-        a.data.clear();
-        b.data.clear();
         let (values, ia) = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
             .expect("setdiff")
             .into_pair();
@@ -1607,20 +1605,18 @@ pub(crate) mod tests {
             ]))
         );
         let ia = tensor::value_into_tensor_for("setdiff", ia).expect("indices");
-        assert_eq!(ia.data, vec![3.0, 1.0]);
+        assert_eq!(ia.materialize_f64(), vec![3.0, 1.0]);
 
-        let mut a = Tensor::new_integer(
+        let a = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I64(vec![i64::MAX, 4, 0, 2]),
             vec![2, 2],
         )
         .expect("rows input");
-        let mut b = Tensor::new_integer(
+        let b = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I64(vec![i64::MAX, 0]),
             vec![1, 2],
         )
         .expect("rows input");
-        a.data.clear();
-        b.data.clear();
         let (values, ia) =
             evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
                 .expect("setdiff rows")
@@ -1633,48 +1629,43 @@ pub(crate) mod tests {
             Some(&runmat_builtins::IntegerStorage::I64(vec![4, 2]))
         );
         let ia = tensor::value_into_tensor_for("setdiff", ia).expect("row indices");
-        assert_eq!(ia.data, vec![2.0]);
+        assert_eq!(ia.materialize_f64(), vec![2.0]);
     }
 
     #[test]
     fn setdiff_numeric_fallback_reads_mirrorless_integer_storage() {
-        let mut a = Tensor::new_integer(
+        let a = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U16(vec![7, 2, 9]),
             vec![3, 1],
         )
         .expect("input");
-        let mut b = Tensor::new_integer(runmat_builtins::IntegerStorage::I32(vec![2]), vec![1, 1])
+        let b = Tensor::new_integer(runmat_builtins::IntegerStorage::I32(vec![2]), vec![1, 1])
             .expect("input");
-        a.data.clear();
-        b.data.clear();
         let (values, ia) = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
             .expect("setdiff")
             .into_pair();
         let values = tensor::value_into_tensor_for("setdiff", values).expect("values");
-        assert_eq!(values.data, vec![7.0, 9.0]);
+        assert_eq!(values.materialize_f64(), vec![7.0, 9.0]);
         assert_eq!(values.shape, vec![2, 1]);
         let ia = tensor::value_into_tensor_for("setdiff", ia).expect("indices");
-        assert_eq!(ia.data, vec![1.0, 3.0]);
+        assert_eq!(ia.materialize_f64(), vec![1.0, 3.0]);
 
-        let mut a = Tensor::new_integer(
+        let a = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U16(vec![1, 3, 1, 2, 4, 2]),
             vec![3, 2],
         )
         .expect("rows input");
-        let mut b =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::I32(vec![3, 4]), vec![1, 2])
-                .expect("rows input");
-        a.data.clear();
-        b.data.clear();
+        let b = Tensor::new_integer(runmat_builtins::IntegerStorage::I32(vec![3, 4]), vec![1, 2])
+            .expect("rows input");
         let (values, ia) =
             evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
                 .expect("setdiff rows")
                 .into_pair();
         let values = tensor::value_into_tensor_for("setdiff", values).expect("row values");
         assert_eq!(values.shape, vec![1, 2]);
-        assert_eq!(values.data, vec![1.0, 2.0]);
+        assert_eq!(values.materialize_f64(), vec![1.0, 2.0]);
         let ia = tensor::value_into_tensor_for("setdiff", ia).expect("row indices");
-        assert_eq!(ia.data, vec![1.0]);
+        assert_eq!(ia.materialize_f64(), vec![1.0]);
     }
 
     #[test]
@@ -1709,12 +1700,12 @@ pub(crate) mod tests {
         match eval.values_value() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 1]);
-                assert_eq!(t.data, vec![2.0]);
+                assert_eq!(t.materialize_f64(), vec![2.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
         let ia = tensor::value_into_tensor_for("setdiff", eval.ia_value()).expect("ia tensor");
-        assert_eq!(ia.data, vec![2.0]);
+        assert_eq!(ia.materialize_f64(), vec![2.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1727,12 +1718,12 @@ pub(crate) mod tests {
         match eval.values_value() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data, vec![1.0, 2.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
         let ia = tensor::value_into_tensor_for("setdiff", eval.ia_value()).expect("ia tensor");
-        assert_eq!(ia.data, vec![1.0]);
+        assert_eq!(ia.materialize_f64(), vec![1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1742,9 +1733,9 @@ pub(crate) mod tests {
         let b = Tensor::new(vec![f64::NAN], vec![1, 1]).unwrap();
         let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("setdiff");
         let values = tensor::value_into_tensor_for("setdiff", eval.values_value()).expect("values");
-        assert_eq!(values.data, vec![2.0, 3.0]);
+        assert_eq!(values.materialize_f64(), vec![2.0, 3.0]);
         let ia = tensor::value_into_tensor_for("setdiff", eval.ia_value()).expect("ia tensor");
-        assert_eq!(ia.data, vec![2.0, 3.0]);
+        assert_eq!(ia.materialize_f64(), vec![2.0, 3.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1762,7 +1753,7 @@ pub(crate) mod tests {
             other => panic!("expected char array, got {other:?}"),
         }
         let ia = tensor::value_into_tensor_for("setdiff", eval.ia_value()).expect("ia tensor");
-        assert_eq!(ia.data, vec![3.0]);
+        assert_eq!(ia.materialize_f64(), vec![3.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1802,7 +1793,7 @@ pub(crate) mod tests {
             other => panic!("expected string array, got {other:?}"),
         }
         let ia = tensor::value_into_tensor_for("setdiff", eval.ia_value()).expect("ia tensor");
-        assert_eq!(ia.data, vec![1.0]);
+        assert_eq!(ia.materialize_f64(), vec![1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1869,11 +1860,11 @@ pub(crate) mod tests {
             let tensor_a = Tensor::new(vec![10.0, 4.0, 6.0, 4.0], vec![4, 1]).unwrap();
             let tensor_b = Tensor::new(vec![6.0, 4.0, 2.0], vec![3, 1]).unwrap();
             let view_a = HostTensorView {
-                data: &tensor_a.data,
+                data: &tensor_a.materialize_f64(),
                 shape: &tensor_a.shape,
             };
             let view_b = HostTensorView {
-                data: &tensor_b.data,
+                data: &tensor_b.materialize_f64(),
                 shape: &tensor_b.shape,
             };
             let handle_a = provider.upload(&view_a).expect("upload a");
@@ -1882,12 +1873,12 @@ pub(crate) mod tests {
                 .expect("setdiff");
             match eval.values_value() {
                 Value::Tensor(t) => {
-                    assert_eq!(t.data, vec![10.0]);
+                    assert_eq!(t.materialize_f64(), vec![10.0]);
                 }
                 other => panic!("expected tensor result, got {other:?}"),
             }
             let ia = tensor::value_into_tensor_for("setdiff", eval.ia_value()).expect("ia tensor");
-            assert_eq!(ia.data, vec![1.0]);
+            assert_eq!(ia.materialize_f64(), vec![1.0]);
         });
     }
 
@@ -1908,11 +1899,11 @@ pub(crate) mod tests {
 
         let provider = runmat_accelerate_api::provider().expect("provider");
         let view_a = HostTensorView {
-            data: &a.data,
+            data: &a.materialize_f64(),
             shape: &a.shape,
         };
         let view_b = HostTensorView {
-            data: &b.data,
+            data: &b.materialize_f64(),
             shape: &b.shape,
         };
         let handle_a = provider.upload(&view_a).expect("upload A");
@@ -1922,9 +1913,9 @@ pub(crate) mod tests {
         let gpu_values = tensor::value_into_tensor_for("setdiff", gpu_eval.values_value()).unwrap();
         let gpu_ia = tensor::value_into_tensor_for("setdiff", gpu_eval.ia_value()).unwrap();
 
-        assert_eq!(gpu_values.data, cpu_values.data);
+        assert_eq!(gpu_values.materialize_f64(), cpu_values.materialize_f64());
         assert_eq!(gpu_values.shape, cpu_values.shape);
-        assert_eq!(gpu_ia.data, cpu_ia.data);
+        assert_eq!(gpu_ia.materialize_f64(), cpu_ia.materialize_f64());
         assert_eq!(gpu_ia.shape, cpu_ia.shape);
     }
 }

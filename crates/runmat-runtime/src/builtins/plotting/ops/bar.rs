@@ -1312,8 +1312,7 @@ pub(crate) mod tests {
     }
 
     fn poisoned_integer_matrix(storage: IntegerStorage, rows: usize, cols: usize) -> Tensor {
-        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer matrix");
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer matrix");
         tensor
     }
 
@@ -1460,9 +1459,8 @@ pub(crate) mod tests {
 
     #[test]
     fn bar_width_candidate_accepts_typed_integer_scalar_without_double_mirror() {
-        let mut width =
+        let width =
             Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("typed width");
-        width.data.clear();
 
         assert!(is_positional_bar_width_candidate(
             &Value::Tensor(width),

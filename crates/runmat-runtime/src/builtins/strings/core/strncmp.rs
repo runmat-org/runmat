@@ -405,9 +405,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_prefix_length_typed_integer_tensor_reads_exact_storage() {
-        let mut limit =
+        let limit =
             Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("integer tensor");
-        limit.data.clear();
         let result = strncmp_builtin(
             Value::String("gamma".into()),
             Value::String("gamut".into()),
@@ -563,9 +562,8 @@ pub(crate) mod tests {
 
     #[test]
     fn strncmp_prefix_length_rejects_negative_typed_integer_tensor() {
-        let mut limit =
+        let limit =
             Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("integer tensor");
-        limit.data[0] = 3.0;
         let err = error_message(
             strncmp_builtin(
                 Value::String("abc".into()),
@@ -610,7 +608,7 @@ pub(crate) mod tests {
         };
         let tensor = Tensor::new(vec![3.0], vec![1, 1]).unwrap();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload prefix length to GPU");

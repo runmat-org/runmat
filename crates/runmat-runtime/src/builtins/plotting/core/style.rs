@@ -1521,12 +1521,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn line_style_scalar_options_read_typed_integer_storage() {
-        let mut line_width =
+        let line_width =
             Tensor::new_integer(IntegerStorage::U64(vec![3]), vec![1, 1]).expect("width");
-        line_width.data.clear();
-        let mut marker_size =
+        let marker_size =
             Tensor::new_integer(IntegerStorage::U16(vec![9]), vec![1, 1]).expect("size");
-        marker_size.data.clear();
         let rest = vec![
             Value::String("LineWidth".into()),
             Value::Tensor(line_width),

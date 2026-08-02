@@ -581,7 +581,7 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 3]);
-                assert_eq!(t.data, vec![0.0, 0.0, 1.0]);
+                assert_eq!(t.materialize_f64(), vec![0.0, 0.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -597,7 +597,7 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 1]);
-                assert_eq!(t.data, vec![0.0, 0.0, 1.0]);
+                assert_eq!(t.materialize_f64(), vec![0.0, 0.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -617,7 +617,7 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                assert_eq!(t.data, vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
+                assert_eq!(t.materialize_f64(), vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -625,14 +625,11 @@ pub(crate) mod tests {
 
     #[test]
     fn cross_reads_typed_integer_tensors_and_dimension_exactly() {
-        let mut lhs = Tensor::new_integer(IntegerStorage::I16(vec![1, 0, 0, 1, 0, 0]), vec![2, 3])
+        let lhs = Tensor::new_integer(IntegerStorage::I16(vec![1, 0, 0, 1, 0, 0]), vec![2, 3])
             .expect("lhs");
-        lhs.data.fill(f64::NAN);
-        let mut rhs = Tensor::new_integer(IntegerStorage::U16(vec![0, 0, 1, 0, 0, 1]), vec![2, 3])
+        let rhs = Tensor::new_integer(IntegerStorage::U16(vec![0, 0, 1, 0, 0, 1]), vec![2, 3])
             .expect("rhs");
-        rhs.data.fill(f64::NAN);
-        let mut dim = Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("dim");
-        dim.data.fill(f64::NAN);
+        let dim = Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("dim");
 
         let value = cross_builtin(
             Value::Tensor(lhs),
@@ -643,7 +640,7 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                assert_eq!(t.data, vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
+                assert_eq!(t.materialize_f64(), vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -651,19 +648,15 @@ pub(crate) mod tests {
 
     #[test]
     fn cross_uses_integer_storage_length_when_mirrors_are_empty() {
-        let mut lhs =
-            Tensor::new_integer(IntegerStorage::I16(vec![1, 0, 0]), vec![1, 3]).expect("lhs");
-        lhs.data.clear();
-        let mut rhs =
-            Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 0]), vec![1, 3]).expect("rhs");
-        rhs.data.clear();
+        let lhs = Tensor::new_integer(IntegerStorage::I16(vec![1, 0, 0]), vec![1, 3]).expect("lhs");
+        let rhs = Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 0]), vec![1, 3]).expect("rhs");
 
         let value =
             cross_builtin(Value::Tensor(lhs), Value::Tensor(rhs), Vec::new()).expect("cross");
         match value {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 3]);
-                assert_eq!(t.data, vec![0.0, 0.0, 1.0]);
+                assert_eq!(t.materialize_f64(), vec![0.0, 0.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -679,7 +672,7 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2, 3]);
-                assert_eq!(t.data, vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
+                assert_eq!(t.materialize_f64(), vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -716,7 +709,7 @@ pub(crate) mod tests {
         let value =
             cross_builtin(Value::LogicalArray(lhs), Value::Tensor(rhs), Vec::new()).expect("cross");
         match value {
-            Value::Tensor(t) => assert_eq!(t.data, vec![0.0, 0.0, 1.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![0.0, 0.0, 1.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -822,11 +815,11 @@ pub(crate) mod tests {
             let lhs = Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 3]).unwrap();
             let rhs = Tensor::new(vec![0.0, 1.0, 0.0], vec![1, 3]).unwrap();
             let view_lhs = HostTensorView {
-                data: &lhs.data,
+                data: &lhs.materialize_f64(),
                 shape: &lhs.shape,
             };
             let view_rhs = HostTensorView {
-                data: &rhs.data,
+                data: &rhs.materialize_f64(),
                 shape: &rhs.shape,
             };
             let gpu_lhs = provider.upload(&view_lhs).expect("upload lhs");
@@ -841,7 +834,7 @@ pub(crate) mod tests {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
                     assert_eq!(gathered.shape, vec![1, 3]);
-                    assert_eq!(gathered.data, vec![0.0, 0.0, 1.0]);
+                    assert_eq!(gathered.materialize_f64(), vec![0.0, 0.0, 1.0]);
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
             }
@@ -860,11 +853,11 @@ pub(crate) mod tests {
         let cpu = cross_real_tensor(&lhs, &rhs, Some(2)).expect("cpu cross");
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view_lhs = HostTensorView {
-            data: &lhs.data,
+            data: &lhs.materialize_f64(),
             shape: &lhs.shape,
         };
         let view_rhs = HostTensorView {
-            data: &rhs.data,
+            data: &rhs.materialize_f64(),
             shape: &rhs.shape,
         };
         let gpu_lhs = provider.upload(&view_lhs).expect("upload lhs");
@@ -877,7 +870,7 @@ pub(crate) mod tests {
         .expect("gpu cross");
         let gathered = test_support::gather(gpu_value).expect("gather");
         assert_eq!(gathered.shape, cpu.shape);
-        assert_eq!(gathered.data, cpu.data);
+        assert_eq!(gathered.materialize_f64(), cpu.materialize_f64());
     }
 
     fn cross_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

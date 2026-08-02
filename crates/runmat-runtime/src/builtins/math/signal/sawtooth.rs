@@ -363,9 +363,13 @@ mod tests {
         let tensor = Tensor::new(data.clone(), vec![1, n]).unwrap();
         let result = expect_tensor(call(Value::Tensor(tensor)).unwrap());
         assert_eq!(result.shape, vec![1, n]);
-        let min = result.data.iter().cloned().fold(f64::INFINITY, f64::min);
+        let min = result
+            .materialize_f64()
+            .iter()
+            .cloned()
+            .fold(f64::INFINITY, f64::min);
         let max = result
-            .data
+            .materialize_f64()
             .iter()
             .cloned()
             .fold(f64::NEG_INFINITY, f64::max);
@@ -379,11 +383,11 @@ mod tests {
         );
         // First and last samples land exactly on period boundaries (t=0 and t=4*pi)
         // so the rising sawtooth resets to -1 at both ends.
-        assert_close(result.data[0], -1.0);
-        assert_close(*result.data.last().unwrap(), -1.0);
+        assert_close(result.materialize_f64()[0], -1.0);
+        assert_close(*result.materialize_f64().last().unwrap(), -1.0);
 
         // Each sample must satisfy the elementwise formula.
-        for (idx, (&t, &y)) in data.iter().zip(result.data.iter()).enumerate() {
+        for (idx, (&t, &y)) in data.iter().zip(result.materialize_f64().iter()).enumerate() {
             assert_close(y, sawtooth_scalar(t, 1.0));
             if !y.is_finite() {
                 panic!("non-finite sample at index {idx}");
@@ -393,10 +397,10 @@ mod tests {
         // There should be exactly two period boundaries in (0, 4*pi]: the inner
         // reset near index 50 (sample just after 2*pi) and the closing sample.
         let reset_count = result
-            .data
+            .materialize_f64()
             .iter()
             .enumerate()
-            .filter(|(idx, &y)| *idx > 0 && y < result.data[idx - 1])
+            .filter(|(idx, &y)| *idx > 0 && y < result.materialize_f64()[idx - 1])
             .count();
         assert_eq!(
             reset_count, 2,
@@ -491,8 +495,8 @@ mod tests {
         let logical = LogicalArray::new(vec![0, 1], vec![1, 2]).unwrap();
         let result = expect_tensor(call(Value::LogicalArray(logical)).unwrap());
         assert_eq!(result.shape, vec![1, 2]);
-        assert_close(result.data[0], -1.0);
-        assert_close(result.data[1], sawtooth_scalar(1.0, 1.0));
+        assert_close(result.materialize_f64()[0], -1.0);
+        assert_close(result.materialize_f64()[1], sawtooth_scalar(1.0, 1.0));
     }
 
     #[test]
@@ -504,8 +508,8 @@ mod tests {
         .unwrap();
         let result = expect_tensor(call(Value::Tensor(input)).unwrap());
         assert_eq!(result.numeric_dtype(), runmat_builtins::NumericDType::F64);
-        assert_close(result.data[0], -1.0);
-        assert_close(result.data[1], sawtooth_scalar(1.0, 1.0));
+        assert_close(result.materialize_f64()[0], -1.0);
+        assert_close(result.materialize_f64()[1], sawtooth_scalar(1.0, 1.0));
     }
 
     #[test]
@@ -535,7 +539,7 @@ mod tests {
         let result = expect_tensor(call(Value::Tensor(tensor)).unwrap());
         assert_eq!(result.shape, vec![2, 2]);
         let expected = [-1.0, -0.5, 0.0, 0.5];
-        for (got, want) in result.data.iter().zip(expected) {
+        for (got, want) in result.materialize_f64().iter().zip(expected) {
             assert_close(*got, want);
         }
     }

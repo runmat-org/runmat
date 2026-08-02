@@ -507,9 +507,8 @@ mod tests {
 
     #[test]
     fn parse_pages_reads_typed_integer_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![2, 5]), vec![1, 2])
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![2, 5]), vec![1, 2])
             .expect("integer tensor");
-        tensor.data.fill(f64::NAN);
 
         assert_eq!(
             parse_pages(&Value::Tensor(tensor)).expect("pages"),

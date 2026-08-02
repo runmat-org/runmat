@@ -303,7 +303,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 1]);
                 let expected = [0.0, 1.0f64.exp_m1(), (-1.0f64).exp_m1()];
-                for (out, exp) in t.data.iter().zip(expected.iter()) {
+                for (out, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((out - exp).abs() < 1e-12);
                 }
             }
@@ -314,16 +314,15 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn expm1_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 2]), vec![3, 1])
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 2]), vec![3, 1])
             .expect("integer tensor");
-        tensor.data.fill(0.0);
 
         let result = expm1_builtin(Value::Tensor(tensor)).expect("expm1");
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 1]);
                 let expected = [0.0, 1.0f64.exp_m1(), 2.0f64.exp_m1()];
-                for (actual, expected) in out.data.iter().zip(expected.iter()) {
+                for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expected).abs() < 1e-12);
                 }
                 assert!(out.integer_storage().is_none());
@@ -368,7 +367,7 @@ pub(crate) mod tests {
                 assert_eq!(t.shape, vec![1, 3]);
                 for (idx, ch) in ['a', 'b', 'c'].into_iter().enumerate() {
                     let expected = (ch as u32 as f64).exp_m1();
-                    assert!((t.data[idx] - expected).abs() < 1e-12);
+                    assert!((t.materialize_f64()[idx] - expected).abs() < 1e-12);
                 }
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -391,15 +390,19 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 1.0, -1.0, 2.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = expm1_builtin(Value::GpuTensor(handle)).expect("expm1");
             let gathered = test_support::gather(result).expect("gather");
-            let expected: Vec<f64> = tensor.data.iter().map(|&v| v.exp_m1()).collect();
+            let expected: Vec<f64> = tensor
+                .materialize_f64()
+                .iter()
+                .map(|&v| v.exp_m1())
+                .collect();
             assert_eq!(gathered.shape, vec![4, 1]);
-            for (out, exp) in gathered.data.iter().zip(expected.iter()) {
+            for (out, exp) in gathered.materialize_f64().iter().zip(expected.iter()) {
                 assert!((out - exp).abs() < 1e-12);
             }
         });
@@ -415,7 +418,7 @@ pub(crate) mod tests {
         let t = Tensor::new(vec![0.0, -0.5, 0.5, 1.0], vec![4, 1]).unwrap();
         let cpu = expm1_real(Value::Tensor(t.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &t.data,
+            data: &t.materialize_f64(),
             shape: &t.shape,
         };
         let h = runmat_accelerate_api::provider()
@@ -431,7 +434,7 @@ pub(crate) mod tests {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
                 };
-                for (a, b) in gt.data.iter().zip(ct.data.iter()) {
+                for (a, b) in gt.materialize_f64().iter().zip(ct.materialize_f64().iter()) {
                     assert!((a - b).abs() < tol, "|{} - {}| >= {}", a, b, tol);
                 }
             }

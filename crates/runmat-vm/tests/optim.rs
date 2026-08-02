@@ -11,7 +11,7 @@ fn fminunc_solves_quadratic_from_source() {
     )
     .unwrap();
     assert!(vars.iter().any(|value| {
-        matches!(value, Value::Tensor(t) if t.shape == vec![3, 1] && (t.data[0] - 1.0).abs() < 1.0e-4 && (t.data[1] - 2.0).abs() < 1.0e-4 && (t.data[2] - 3.0).abs() < 1.0e-4)
+        matches!(value, Value::Tensor(t) if t.shape == vec![3, 1] && (t.materialize_f64()[0] - 1.0).abs() < 1.0e-4 && (t.materialize_f64()[1] - 2.0).abs() < 1.0e-4 && (t.materialize_f64()[2] - 3.0).abs() < 1.0e-4)
     }));
     assert!(vars
         .iter()
@@ -31,7 +31,7 @@ fn linprog_solves_bounded_program_from_source() {
     )
     .unwrap();
     assert!(vars.iter().any(|value| {
-        matches!(value, Value::Tensor(t) if t.shape == vec![2, 1] && (t.data[0] - 0.0).abs() < 1.0e-7 && (t.data[1] - 4.0).abs() < 1.0e-7)
+        matches!(value, Value::Tensor(t) if t.shape == vec![2, 1] && (t.materialize_f64()[0] - 0.0).abs() < 1.0e-7 && (t.materialize_f64()[1] - 4.0).abs() < 1.0e-7)
     }));
     assert!(vars
         .iter()
@@ -51,7 +51,7 @@ fn linprog_solves_equality_and_bounds_from_source() {
     )
     .unwrap();
     assert!(vars.iter().any(|value| {
-        matches!(value, Value::Tensor(t) if t.shape == vec![2, 1] && (t.data[0] - 3.0).abs() < 1.0e-7 && t.data[1].abs() < 1.0e-7)
+        matches!(value, Value::Tensor(t) if t.shape == vec![2, 1] && (t.materialize_f64()[0] - 3.0).abs() < 1.0e-7 && t.materialize_f64()[1].abs() < 1.0e-7)
     }));
     assert!(vars
         .iter()
@@ -65,7 +65,7 @@ fn linprog_solves_sparse_one_sided_bound_from_source() {
     )
     .unwrap();
     assert!(vars.iter().any(|value| {
-        matches!(value, Value::Tensor(t) if t.shape == vec![2, 1] && (t.data[0] - 2.0).abs() < 1.0e-7 && t.data[1].abs() < 1.0e-7)
+        matches!(value, Value::Tensor(t) if t.shape == vec![2, 1] && (t.materialize_f64()[0] - 2.0).abs() < 1.0e-7 && t.materialize_f64()[1].abs() < 1.0e-7)
     }));
     assert!(vars
         .iter()
@@ -82,7 +82,7 @@ fn linprog_optimizes_along_equality_face_from_source() {
     )
     .unwrap();
     assert!(vars.iter().any(|value| {
-        matches!(value, Value::Tensor(t) if t.shape == vec![3, 1] && (t.data[0] - 1.0).abs() < 1.0e-7 && t.data[1].abs() < 1.0e-7 && t.data[2].abs() < 1.0e-7)
+        matches!(value, Value::Tensor(t) if t.shape == vec![3, 1] && (t.materialize_f64()[0] - 1.0).abs() < 1.0e-7 && t.materialize_f64()[1].abs() < 1.0e-7 && t.materialize_f64()[2].abs() < 1.0e-7)
     }));
     assert!(vars
         .iter()

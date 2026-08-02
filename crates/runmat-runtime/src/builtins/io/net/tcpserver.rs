@@ -699,29 +699,24 @@ pub(crate) mod tests {
         assert!(parse_port(&Value::Int(IntValue::U32(u16::MAX as u32 + 1))).is_err());
         assert!(parse_port(&Value::Int(IntValue::U64(u64::MAX))).is_err());
 
-        let mut typed_max =
-            Tensor::new_integer(IntegerStorage::U64(vec![u16::MAX as u64]), vec![1, 1])
-                .expect("typed port");
-        typed_max.data.clear();
+        let typed_max = Tensor::new_integer(IntegerStorage::U64(vec![u16::MAX as u64]), vec![1, 1])
+            .expect("typed port");
         assert_eq!(parse_port(&Value::Tensor(typed_max)).unwrap(), u16::MAX);
 
-        let mut typed_too_large =
+        let typed_too_large =
             Tensor::new_integer(IntegerStorage::U64(vec![u16::MAX as u64 + 1]), vec![1, 1])
                 .expect("typed port");
-        typed_too_large.data.clear();
         assert!(parse_port(&Value::Tensor(typed_too_large)).is_err());
 
-        let mut typed_negative =
+        let typed_negative =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("typed port");
-        typed_negative.data.clear();
         assert!(parse_port(&Value::Tensor(typed_negative)).is_err());
     }
 
     #[test]
     fn typed_timeout_parser_reads_integer_storage_exactly() {
-        let mut timeout =
+        let timeout =
             Tensor::new_integer(IntegerStorage::U16(vec![30]), vec![1, 1]).expect("timeout");
-        timeout.data.clear();
 
         assert_eq!(parse_timeout(&Value::Tensor(timeout)).unwrap(), 30.0);
     }

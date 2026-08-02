@@ -2190,7 +2190,7 @@ mod tests {
                 crate::builtins::common::test_support::gather(Value::GpuTensor(sum_handle.clone()))
                     .expect("gather sum");
             assert_eq!(sum.shape, vec![1, 4]);
-            assert_eq!(sum.data, vec![3.0, 3.0, 6.0, 4.0]);
+            assert_eq!(sum.materialize_f64(), vec![3.0, 3.0, 6.0, 4.0]);
 
             let var_input = provider
                 .upload(&HostTensorView {
@@ -2217,7 +2217,7 @@ mod tests {
                 crate::builtins::common::test_support::gather(Value::GpuTensor(var_handle.clone()))
                     .expect("gather var");
             assert_eq!(var.shape, vec![1, 2]);
-            assert_eq!(var.data, vec![1.0, 1.0]);
+            assert_eq!(var.materialize_f64(), vec![1.0, 1.0]);
 
             let median_input = provider
                 .upload(&HostTensorView {
@@ -2244,7 +2244,7 @@ mod tests {
             ))
             .expect("gather median");
             assert_eq!(median.shape, vec![1, 4]);
-            assert_eq!(median.data, vec![1.0, 2.0, 6.0, 6.0]);
+            assert_eq!(median.materialize_f64(), vec![1.0, 2.0, 6.0, 6.0]);
 
             provider.free(&input).ok();
             provider.free(&sum_handle).ok();
@@ -2265,7 +2265,7 @@ mod tests {
         .expect("movsum");
         let out = expect_tensor(result);
         assert_eq!(out.shape, vec![1, 4]);
-        assert_eq!(out.data, vec![3.0, 6.0, 9.0, 7.0]);
+        assert_eq!(out.materialize_f64(), vec![3.0, 6.0, 9.0, 7.0]);
     }
 
     #[test]
@@ -2295,7 +2295,7 @@ mod tests {
         .expect("movmean");
         let out = expect_tensor(result);
         assert_eq!(out.shape, vec![2, 3]);
-        assert_eq!(out.data, vec![2.0, 3.0, 3.0, 4.0, 4.0, 5.0]);
+        assert_eq!(out.materialize_f64(), vec![2.0, 3.0, 3.0, 4.0, 4.0, 5.0]);
     }
 
     #[test]
@@ -2309,15 +2309,14 @@ mod tests {
         )
         .expect("movprod");
         let out = expect_tensor(result);
-        assert_eq!(out.data, vec![2.0, 2.0, 3.0, 12.0]);
+        assert_eq!(out.materialize_f64(), vec![2.0, 2.0, 3.0, 12.0]);
     }
 
     #[test]
     fn moving_window_vector_reads_typed_integer_storage_exactly() {
         let input = tensor(vec![2., f64::NAN, 3., 4.], vec![1, 4]);
-        let mut window =
+        let window =
             Tensor::new_integer(IntegerStorage::I16(vec![1, 0]), vec![1, 2]).expect("window");
-        window.data.fill(f64::NAN);
 
         let result = call(
             "movprod",
@@ -2326,7 +2325,7 @@ mod tests {
         )
         .expect("movprod");
         let out = expect_tensor(result);
-        assert_eq!(out.data, vec![2.0, 2.0, 3.0, 12.0]);
+        assert_eq!(out.materialize_f64(), vec![2.0, 2.0, 3.0, 12.0]);
     }
 
     #[test]
@@ -2342,8 +2341,7 @@ mod tests {
             IntegerStorage::U64(vec![3]),
         ];
         for storage in storages {
-            let mut window = Tensor::new_integer(storage, vec![1, 1]).expect("window");
-            window.data = vec![f64::NAN];
+            let window = Tensor::new_integer(storage, vec![1, 1]).expect("window");
             assert!(matches!(
                 block_on(parse_window("movsum", &Value::Tensor(window))),
                 Ok(WindowSpec::Counts {
@@ -2368,7 +2366,7 @@ mod tests {
         )
         .expect("movmin");
         let out = expect_tensor(result);
-        assert_eq!(out.data, vec![0.0, 2.0, 0.0]);
+        assert_eq!(out.materialize_f64(), vec![0.0, 2.0, 0.0]);
     }
 
     #[test]
@@ -2386,7 +2384,7 @@ mod tests {
         .expect("movmax");
         let out = expect_tensor(result);
         assert_eq!(out.shape, vec![1, 2]);
-        assert_eq!(out.data, vec![9.0, 9.0]);
+        assert_eq!(out.materialize_f64(), vec![9.0, 9.0]);
     }
 
     #[test]
@@ -2398,7 +2396,7 @@ mod tests {
         )
         .expect("movmedian");
         let out = expect_tensor(result);
-        assert_eq!(out.data, vec![1.0, 5.5, 6.5, 5.5]);
+        assert_eq!(out.materialize_f64(), vec![1.0, 5.5, 6.5, 5.5]);
     }
 
     #[test]
@@ -2418,20 +2416,19 @@ mod tests {
         .expect("movstd population");
         let sample = expect_tensor(sample);
         let population = expect_tensor(population);
-        assert!((sample.data[0] - 8.0_f64.sqrt()).abs() < 1e-12);
-        assert!((sample.data[1] - 2.0).abs() < 1e-12);
-        assert!((sample.data[2] - 2.0_f64.sqrt()).abs() < 1e-12);
-        assert!((population.data[0] - 2.0).abs() < 1e-12);
-        assert!((population.data[1] - (8.0_f64 / 3.0).sqrt()).abs() < 1e-12);
-        assert!((population.data[2] - 1.0).abs() < 1e-12);
+        assert!((sample.materialize_f64()[0] - 8.0_f64.sqrt()).abs() < 1e-12);
+        assert!((sample.materialize_f64()[1] - 2.0).abs() < 1e-12);
+        assert!((sample.materialize_f64()[2] - 2.0_f64.sqrt()).abs() < 1e-12);
+        assert!((population.materialize_f64()[0] - 2.0).abs() < 1e-12);
+        assert!((population.materialize_f64()[1] - (8.0_f64 / 3.0).sqrt()).abs() < 1e-12);
+        assert!((population.materialize_f64()[2] - 1.0).abs() < 1e-12);
     }
 
     #[test]
     fn movstd_normalization_reads_typed_integer_tensor_storage_exactly() {
         let input = tensor(vec![4., 8., 6.], vec![1, 3]);
-        let mut normalization =
+        let normalization =
             Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("integer tensor");
-        normalization.data.clear();
 
         let result = call(
             "movstd",
@@ -2440,9 +2437,9 @@ mod tests {
         )
         .expect("movstd population");
         let output = expect_tensor(result);
-        assert!((output.data[0] - 2.0).abs() < 1e-12);
-        assert!((output.data[1] - (8.0_f64 / 3.0).sqrt()).abs() < 1e-12);
-        assert!((output.data[2] - 1.0).abs() < 1e-12);
+        assert!((output.materialize_f64()[0] - 2.0).abs() < 1e-12);
+        assert!((output.materialize_f64()[1] - (8.0_f64 / 3.0).sqrt()).abs() < 1e-12);
+        assert!((output.materialize_f64()[2] - 1.0).abs() < 1e-12);
     }
 
     #[test]
@@ -2458,9 +2455,7 @@ mod tests {
             IntegerStorage::U64(vec![1]),
         ];
         for storage in storages {
-            let mut normalization =
-                Tensor::new_integer(storage, vec![1, 1]).expect("normalization");
-            normalization.data = vec![f64::NAN];
+            let normalization = Tensor::new_integer(storage, vec![1, 1]).expect("normalization");
             assert!(matches!(
                 block_on(parse_variance_normalization(
                     "movstd",
@@ -2482,12 +2477,12 @@ mod tests {
         .expect("movstd dim");
         let out = expect_tensor(result);
         assert_eq!(out.shape, vec![3, 3]);
-        assert!((out.data[0] - 8.0_f64.sqrt()).abs() < 1e-12);
-        assert!((out.data[1] - (0.5_f64).sqrt()).abs() < 1e-12);
-        assert!((out.data[2] - 8.0_f64.sqrt()).abs() < 1e-12);
-        assert!((out.data[3] - 2.0).abs() < 1e-12);
-        assert!((out.data[4] - 1.0).abs() < 1e-12);
-        assert!((out.data[5] - (7.0_f64).sqrt()).abs() < 1e-12);
+        assert!((out.materialize_f64()[0] - 8.0_f64.sqrt()).abs() < 1e-12);
+        assert!((out.materialize_f64()[1] - (0.5_f64).sqrt()).abs() < 1e-12);
+        assert!((out.materialize_f64()[2] - 8.0_f64.sqrt()).abs() < 1e-12);
+        assert!((out.materialize_f64()[3] - 2.0).abs() < 1e-12);
+        assert!((out.materialize_f64()[4] - 1.0).abs() < 1e-12);
+        assert!((out.materialize_f64()[5] - (7.0_f64).sqrt()).abs() < 1e-12);
     }
 
     #[test]
@@ -2510,11 +2505,11 @@ mod tests {
         .expect("movstd dim omitnan");
         let out = expect_tensor(result);
         assert_eq!(out.shape, vec![3, 3]);
-        assert_eq!(out.data[0], 0.0);
-        assert!((out.data[1] - 0.5_f64.sqrt()).abs() < 1e-12);
-        assert!((out.data[2] - 8.0_f64.sqrt()).abs() < 1e-12);
-        assert!((out.data[3] - 2.0_f64.sqrt()).abs() < 1e-12);
-        assert_eq!(out.data[6], 0.0);
+        assert_eq!(out.materialize_f64()[0], 0.0);
+        assert!((out.materialize_f64()[1] - 0.5_f64.sqrt()).abs() < 1e-12);
+        assert!((out.materialize_f64()[2] - 8.0_f64.sqrt()).abs() < 1e-12);
+        assert!((out.materialize_f64()[3] - 2.0_f64.sqrt()).abs() < 1e-12);
+        assert_eq!(out.materialize_f64()[6], 0.0);
     }
 
     #[test]
@@ -2544,7 +2539,7 @@ mod tests {
             ],
         )
         .expect("movvar omitnan");
-        assert_eq!(expect_tensor(omit).data, vec![0.0, 12.5, 0.0]);
+        assert_eq!(expect_tensor(omit).materialize_f64(), vec![0.0, 12.5, 0.0]);
 
         let fill = call(
             "movvar",
@@ -2557,7 +2552,7 @@ mod tests {
             ],
         )
         .expect("movvar fill");
-        assert_eq!(expect_tensor(fill).data, vec![1.0, 1.0]);
+        assert_eq!(expect_tensor(fill).materialize_f64(), vec![1.0, 1.0]);
 
         let sample_points = call(
             "movvar",
@@ -2570,7 +2565,10 @@ mod tests {
             ],
         )
         .expect("movvar samplepoints");
-        assert_eq!(expect_tensor(sample_points).data, vec![0.5, 0.5, 0.0]);
+        assert_eq!(
+            expect_tensor(sample_points).materialize_f64(),
+            vec![0.5, 0.5, 0.0]
+        );
     }
 
     #[test]
@@ -2588,7 +2586,7 @@ mod tests {
         .expect("movvar stable fill");
         let out = expect_tensor(result);
         assert_eq!(out.shape, vec![1, 1]);
-        assert_eq!(out.data, vec![0.0]);
+        assert_eq!(out.materialize_f64(), vec![0.0]);
     }
 
     #[test]
@@ -2606,7 +2604,7 @@ mod tests {
         .expect("movstd discard");
         let out = expect_tensor(result);
         assert_eq!(out.shape, vec![1, 2]);
-        assert_eq!(out.data, vec![1.0, 1.0]);
+        assert_eq!(out.materialize_f64(), vec![1.0, 1.0]);
     }
 
     #[test]
@@ -2634,9 +2632,9 @@ mod tests {
         )
         .expect("movsum");
         let out = expect_tensor(result);
-        assert!(out.data[0].is_nan());
-        assert!(out.data[1].is_nan());
-        assert!(out.data[2].is_nan());
+        assert!(out.materialize_f64()[0].is_nan());
+        assert!(out.materialize_f64()[1].is_nan());
+        assert!(out.materialize_f64()[2].is_nan());
     }
 
     #[test]
@@ -2665,7 +2663,7 @@ mod tests {
         )
         .expect("movsum samplepoints");
         let out = expect_tensor(result);
-        assert_eq!(out.data, vec![3.0, 3.0, 3.0]);
+        assert_eq!(out.materialize_f64(), vec![3.0, 3.0, 3.0]);
     }
 
     #[test]
@@ -2677,7 +2675,7 @@ mod tests {
         )
         .expect("movsum huge shrink");
         let out = expect_tensor(result);
-        assert_eq!(out.data, vec![3.0, 3.0]);
+        assert_eq!(out.materialize_f64(), vec![3.0, 3.0]);
     }
 
     #[test]
@@ -2694,7 +2692,7 @@ mod tests {
         )
         .expect("movmean huge fill");
         let out = expect_tensor(result);
-        assert_eq!(out.data, vec![3.0e-12, 3.0e-12]);
+        assert_eq!(out.materialize_f64(), vec![3.0e-12, 3.0e-12]);
     }
 
     #[test]
@@ -2766,7 +2764,7 @@ mod tests {
         .expect("movsum trailing dim");
         let out = expect_tensor(result);
         assert_eq!(out.shape, vec![1, 2, 1, 1]);
-        assert_eq!(out.data, vec![22.0, 23.0]);
+        assert_eq!(out.materialize_f64(), vec![22.0, 23.0]);
     }
 
     #[test]
@@ -2784,8 +2782,8 @@ mod tests {
             vec![nan, Value::Num(1.0), Value::from("omitnan")],
         )
         .expect("movprod omitnan");
-        assert_eq!(expect_tensor(sum).data, vec![0.0]);
-        assert_eq!(expect_tensor(prod).data, vec![1.0]);
+        assert_eq!(expect_tensor(sum).materialize_f64(), vec![0.0]);
+        assert_eq!(expect_tensor(prod).materialize_f64(), vec![1.0]);
     }
 
     #[test]
@@ -2803,7 +2801,10 @@ mod tests {
             vec![input, Value::Num(3.0), Value::from("includemissing")],
         )
         .expect("movmin");
-        assert_eq!(expect_tensor(defaulted).data, vec![2.0, 2.0, 2.0]);
-        assert!(expect_tensor(explicit).data[0].is_nan());
+        assert_eq!(
+            expect_tensor(defaulted).materialize_f64(),
+            vec![2.0, 2.0, 2.0]
+        );
+        assert!(expect_tensor(explicit).materialize_f64()[0].is_nan());
     }
 }

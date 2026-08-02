@@ -728,15 +728,14 @@ mod tests {
 
     #[test]
     fn implicit_errorbar_axis_uses_exact_integer_storage_length() {
-        let mut y = Tensor::new_integer(IntegerStorage::U64(vec![7, 8, 9]), vec![1, 3])
+        let y = Tensor::new_integer(IntegerStorage::U64(vec![7, 8, 9]), vec![1, 3])
             .expect("integer y values");
-        y.data.clear();
 
         let x = infer_errorbar_x_from_y(&Value::Tensor(y)).expect("implicit x");
         let Value::Tensor(x) = x else {
             panic!("expected tensor axis");
         };
-        assert_eq!(x.data, vec![1.0, 2.0, 3.0]);
+        assert_eq!(x.materialize_f64(), vec![1.0, 2.0, 3.0]);
         assert_eq!(x.shape, vec![3]);
     }
 

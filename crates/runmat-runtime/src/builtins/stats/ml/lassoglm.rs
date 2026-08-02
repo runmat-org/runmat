@@ -1578,14 +1578,12 @@ mod tests {
     }
 
     fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
         Value::Tensor(tensor)
     }
 
     fn cleared_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
         Value::Tensor(tensor)
     }
 
@@ -1623,12 +1621,12 @@ mod tests {
             panic!("expected B tensor");
         };
         assert_eq!(coeffs.shape, vec![1, 1]);
-        assert!((coeffs.data[0] - 2.0).abs() < 1.0e-3);
+        assert!((coeffs.materialize_f64()[0] - 2.0).abs() < 1.0e-3);
         let Value::Struct(info) = fit_info else {
             panic!("expected FitInfo");
         };
         let intercept = row_field(&info, "Intercept");
-        assert!((intercept.data[0] - 1.0).abs() < 1.0e-3);
+        assert!((intercept.materialize_f64()[0] - 1.0).abs() < 1.0e-3);
         assert!(info.fields.contains_key("Deviance"));
         assert!(info.fields.contains_key("Distribution"));
     }
@@ -1683,7 +1681,7 @@ mod tests {
             panic!("expected B tensor");
         };
         assert_eq!(coeffs.shape, vec![1, 1]);
-        assert!(coeffs.data[0].is_finite());
+        assert!(coeffs.materialize_f64()[0].is_finite());
     }
 
     #[test]
@@ -1714,8 +1712,11 @@ mod tests {
             panic!("expected FitInfo");
         };
         let deviance = row_field(&info, "Deviance");
-        assert_eq!(deviance.data.len(), 2);
-        assert!(deviance.data.iter().all(|value| value.is_finite()));
+        assert_eq!(deviance.materialize_f64().len(), 2);
+        assert!(deviance
+            .materialize_f64()
+            .iter()
+            .all(|value| value.is_finite()));
 
         let out = block_on(lassoglm_builtin(
             tensor(vec![1.0], vec![1, 1]),
@@ -1809,7 +1810,7 @@ mod tests {
             panic!("expected B tensor");
         };
         assert_eq!(coeffs.shape, vec![1, 1]);
-        assert!((coeffs.data[0] - 2.0).abs() < 1.0e-3);
+        assert!((coeffs.materialize_f64()[0] - 2.0).abs() < 1.0e-3);
         let Value::Struct(info) = fit_info else {
             panic!("expected FitInfo");
         };
@@ -1862,13 +1863,12 @@ mod tests {
             panic!("expected B tensor");
         };
         assert_eq!(coeffs.shape, vec![1, 1]);
-        assert!(coeffs.data[0].is_finite());
+        assert!(coeffs.materialize_f64()[0].is_finite());
     }
 
     #[test]
     fn lassoglm_empty_numeric_helper_uses_typed_integer_storage_len() {
-        let mut empty = Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 1]).unwrap();
-        empty.data = vec![1.0];
+        let empty = Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 1]).unwrap();
 
         assert!(is_empty_numeric(&Value::Tensor(empty)));
     }

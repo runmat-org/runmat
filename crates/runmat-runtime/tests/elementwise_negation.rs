@@ -31,7 +31,10 @@ fn test_matrix_negation() {
     let result = elementwise_neg(&value).unwrap();
 
     if let Value::Tensor(result_matrix) = result {
-        assert_eq!(result_matrix.data, vec![-1.0, -2.0, -3.0, -4.0]);
+        assert_eq!(
+            result_matrix.materialize_f64(),
+            vec![-1.0, -2.0, -3.0, -4.0]
+        );
         assert_eq!(result_matrix.rows(), 2);
         assert_eq!(result_matrix.cols(), 2);
     } else {
@@ -48,7 +51,7 @@ fn test_vector_negation() {
     let result = elementwise_neg(&value).unwrap();
 
     if let Value::Tensor(result_matrix) = result {
-        assert_eq!(result_matrix.data, vec![-1.0, -2.0, -3.0]);
+        assert_eq!(result_matrix.materialize_f64(), vec![-1.0, -2.0, -3.0]);
         assert_eq!(result_matrix.rows(), 1);
         assert_eq!(result_matrix.cols(), 3);
     } else {

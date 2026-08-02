@@ -122,7 +122,7 @@ mod tests {
 
         let queried = caxis_builtin(Vec::new()).unwrap();
         let tensor = Tensor::try_from(&queried).unwrap();
-        assert_eq!(tensor.data, vec![0.1, 0.9]);
+        assert_eq!(tensor.materialize_f64(), vec![0.1, 0.9]);
     }
 
     #[test]

@@ -481,7 +481,7 @@ pub(crate) mod tests {
             panic!("expected tensor result");
         };
         assert_eq!(out.shape, vec![1, 3]);
-        assert_eq!(out.data, vec![0.0, 1.5, 4.0]);
+        assert_eq!(out.materialize_f64(), vec![0.0, 1.5, 4.0]);
     }
 
     #[test]
@@ -492,22 +492,20 @@ pub(crate) mod tests {
         let Value::Tensor(out) = value else {
             panic!("expected tensor result");
         };
-        assert_eq!(out.data, vec![0.0, 0.5, 3.5]);
+        assert_eq!(out.materialize_f64(), vec![0.0, 0.5, 3.5]);
     }
 
     #[test]
     fn cumtrapz_reads_typed_integer_values_and_spacing_exactly() {
-        let mut x = Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 3]), vec![1, 3]).expect("x");
-        x.data = vec![0.0, 0.0, 0.0];
-        let mut y = Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 2]), vec![1, 3]).expect("y");
-        y.data = vec![0.0, 0.0, 0.0];
+        let x = Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 3]), vec![1, 3]).expect("x");
+        let y = Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 2]), vec![1, 3]).expect("y");
 
         let value = run_cumtrapz(Value::Tensor(x), vec![Value::Tensor(y)]).expect("cumtrapz");
 
         let Value::Tensor(out) = value else {
             panic!("expected tensor result");
         };
-        assert_eq!(out.data, vec![0.0, 0.5, 3.5]);
+        assert_eq!(out.materialize_f64(), vec![0.0, 0.5, 3.5]);
     }
 
     #[test]
@@ -519,7 +517,7 @@ pub(crate) mod tests {
             panic!("expected tensor result");
         };
         assert_eq!(out.shape, vec![2, 3]);
-        assert_eq!(out.data, vec![0.0, 0.0, 1.5, 4.5, 4.0, 10.0]);
+        assert_eq!(out.materialize_f64(), vec![0.0, 0.0, 1.5, 4.5, 4.0, 10.0]);
     }
 
     #[test]
@@ -575,7 +573,7 @@ pub(crate) mod tests {
             let y = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
             let handle = provider
                 .upload(&HostTensorView {
-                    data: &y.data,
+                    data: &y.materialize_f64(),
                     shape: &y.shape,
                 })
                 .expect("upload");
@@ -585,7 +583,7 @@ pub(crate) mod tests {
             };
             let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
             assert_eq!(gathered.shape, vec![1, 3]);
-            assert_eq!(gathered.data, vec![0.0, 1.5, 4.0]);
+            assert_eq!(gathered.materialize_f64(), vec![0.0, 1.5, 4.0]);
         });
     }
 
@@ -628,7 +626,7 @@ pub(crate) mod tests {
             let y = Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap();
             let handle = provider
                 .upload(&HostTensorView {
-                    data: &y.data,
+                    data: &y.materialize_f64(),
                     shape: &y.shape,
                 })
                 .expect("upload y");
@@ -639,7 +637,7 @@ pub(crate) mod tests {
             };
             let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
             assert_eq!(gathered.shape, vec![1, 3]);
-            assert_eq!(gathered.data, vec![0.0, 0.5, 3.5]);
+            assert_eq!(gathered.materialize_f64(), vec![0.0, 0.5, 3.5]);
         });
     }
 
@@ -650,13 +648,13 @@ pub(crate) mod tests {
             let y = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
             let y_handle = provider
                 .upload(&HostTensorView {
-                    data: &y.data,
+                    data: &y.materialize_f64(),
                     shape: &y.shape,
                 })
                 .expect("upload y");
             let x_handle = provider
                 .upload(&HostTensorView {
-                    data: &x.data,
+                    data: &x.materialize_f64(),
                     shape: &x.shape,
                 })
                 .expect("upload x");
@@ -670,7 +668,10 @@ pub(crate) mod tests {
             };
             let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
             assert_eq!(gathered.shape, vec![2, 3]);
-            assert_eq!(gathered.data, vec![0.0, 0.0, 1.5, 4.5, 6.5, 15.5]);
+            assert_eq!(
+                gathered.materialize_f64(),
+                vec![0.0, 0.0, 1.5, 4.5, 6.5, 15.5]
+            );
         });
     }
 
@@ -689,7 +690,7 @@ pub(crate) mod tests {
         let cpu = run_cumtrapz(Value::Tensor(x.clone()), vec![Value::Tensor(y.clone())]).unwrap();
         let y_handle = provider
             .upload(&HostTensorView {
-                data: &y.data,
+                data: &y.materialize_f64(),
                 shape: &y.shape,
             })
             .unwrap();
@@ -704,7 +705,11 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
         assert_eq!(gathered.shape, expected.shape);
-        for (actual, expected) in gathered.data.iter().zip(expected.data.iter()) {
+        for (actual, expected) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(expected.materialize_f64().iter())
+        {
             assert!((actual - expected).abs() < tol);
         }
     }

@@ -313,7 +313,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![1.0, 4.0, -4.0, 5.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 4.0, -4.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -340,7 +340,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data, vec![65.0, 66.0]);
+                assert_eq!(t.materialize_f64(), vec![65.0, 66.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -354,7 +354,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![1.0, 0.0, 1.0, 1.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 0.0, 1.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -373,17 +373,15 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_read_typed_integer_storage_exactly() {
-        let mut scalar =
+        let scalar =
             Tensor::new_integer(IntegerStorage::I64(vec![i64::MAX]), vec![1, 1]).expect("integer");
-        scalar.data[0] = 0.0;
         assert_eq!(
             floor_builtin(Value::Tensor(scalar), Vec::new()).expect("floor"),
             Value::Int(IntValue::I64(i64::MAX))
         );
 
-        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 3]), vec![1, 2])
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 3]), vec![1, 2])
             .expect("integer");
-        tensor.data.fill(0.0);
         match floor_builtin(Value::Tensor(tensor), Vec::new()).expect("floor") {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
@@ -402,14 +400,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.2, 1.9, -0.1, -3.8], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = floor_builtin(Value::GpuTensor(handle), Vec::new()).expect("floor");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![0.0, 1.0, -1.0, -4.0]);
+            assert_eq!(gathered.materialize_f64(), vec![0.0, 1.0, -1.0, -4.0]);
         });
     }
 
@@ -450,7 +448,7 @@ pub(crate) mod tests {
         let t = Tensor::new(vec![0.3, 1.1, -0.2, -1.7], vec![2, 2]).unwrap();
         let cpu = floor_numeric(Value::Tensor(t.clone())).unwrap();
         let view = HostTensorView {
-            data: &t.data,
+            data: &t.materialize_f64(),
             shape: &t.shape,
         };
         let h = runmat_accelerate_api::provider()
@@ -462,10 +460,10 @@ pub(crate) mod tests {
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
                 assert_eq!(gt.shape, ct.shape);
-                assert_eq!(gt.data, ct.data);
+                assert_eq!(gt.materialize_f64(), ct.materialize_f64());
             }
             (Value::Num(c), gt) => {
-                assert_eq!(gt.data, vec![c]);
+                assert_eq!(gt.materialize_f64(), vec![c]);
             }
             other => panic!("unexpected comparison {other:?}"),
         }

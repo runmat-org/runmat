@@ -828,12 +828,10 @@ mod tests {
     fn data(value: &Value) -> Vec<f64> {
         match value {
             Value::Num(n) => vec![*n],
-            Value::Tensor(tensor) => tensor.data.clone(),
-            Value::GpuTensor(handle) => {
-                test_support::gather(Value::GpuTensor(handle.clone()))
-                    .expect("gather gpu output")
-                    .data
-            }
+            Value::Tensor(tensor) => tensor.materialize_f64().clone(),
+            Value::GpuTensor(handle) => test_support::gather(Value::GpuTensor(handle.clone()))
+                .expect("gather gpu output")
+                .materialize_f64(),
             other => panic!("expected numeric output, got {other:?}"),
         }
     }
@@ -1003,7 +1001,7 @@ mod tests {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 4, 2]);
                 assert_close(
-                    &out.data,
+                    &out.materialize_f64(),
                     &(1..=24).map(|value| value as f64).collect::<Vec<_>>(),
                 );
             }
@@ -1012,7 +1010,7 @@ mod tests {
         match &outputs[1] {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 4, 2]);
-                assert_close(&out.data, &[0.0; 24]);
+                assert_close(&out.materialize_f64(), &[0.0; 24]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1076,14 +1074,10 @@ mod tests {
 
     #[test]
     fn typed_integer_host_inputs_read_exact_storage() {
-        let mut theta =
+        let theta =
             Tensor::new_integer(IntegerStorage::I16(vec![0, 0]), vec![1, 2]).expect("theta");
-        let mut rho =
-            Tensor::new_integer(IntegerStorage::U16(vec![2, 3]), vec![1, 2]).expect("rho");
-        let mut z = Tensor::new_integer(IntegerStorage::U16(vec![7, 8]), vec![1, 2]).expect("z");
-        theta.data.fill(f64::NAN);
-        rho.data.fill(0.0);
-        z.data.fill(0.0);
+        let rho = Tensor::new_integer(IntegerStorage::U16(vec![2, 3]), vec![1, 2]).expect("rho");
+        let z = Tensor::new_integer(IntegerStorage::U16(vec![7, 8]), vec![1, 2]).expect("z");
 
         let _guard = crate::output_count::push_output_count(Some(3));
         let outputs = output_list(
@@ -1133,12 +1127,9 @@ mod tests {
             };
             let theta = provider.upload(&theta_view).expect("upload theta");
 
-            let mut rho =
+            let rho =
                 Tensor::new_integer(IntegerStorage::U16(vec![2, 3]), vec![1, 2]).expect("rho");
-            let mut z =
-                Tensor::new_integer(IntegerStorage::U16(vec![7, 8]), vec![1, 2]).expect("z");
-            rho.data.fill(0.0);
-            z.data.fill(0.0);
+            let z = Tensor::new_integer(IntegerStorage::U16(vec![7, 8]), vec![1, 2]).expect("z");
 
             let _guard = crate::output_count::push_output_count(Some(3));
             let outputs = output_list(
@@ -1168,9 +1159,8 @@ mod tests {
             };
             let rho = provider.upload(&rho_view).expect("upload rho");
 
-            let mut theta =
+            let theta =
                 Tensor::new_integer(IntegerStorage::I16(vec![0, 0]), vec![1, 2]).expect("theta");
-            theta.data.fill(f64::NAN);
 
             let _guard = crate::output_count::push_output_count(Some(2));
             let outputs = output_list(

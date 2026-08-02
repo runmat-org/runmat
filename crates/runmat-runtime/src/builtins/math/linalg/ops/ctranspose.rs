@@ -699,7 +699,7 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 2]);
-                assert_eq!(out.data, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+                assert_eq!(out.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -765,7 +765,7 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
-                assert_eq!(out.data, vec![1.0, 2.0]);
+                assert_eq!(out.materialize_f64(), vec![1.0, 2.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -896,7 +896,7 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, expected.shape);
-                assert_eq!(out.data, expected.data);
+                assert_eq!(out.materialize_f64(), expected.materialize_f64());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -933,14 +933,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let t = tensor(&[1.0, 4.0, 2.0, 5.0], &[2, 2]);
             let view = HostTensorView {
-                data: &t.data,
+                data: &t.materialize_f64(),
                 shape: &t.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = call_ctranspose(Value::GpuTensor(handle)).expect("ctranspose");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![1.0, 2.0, 4.0, 5.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 2.0, 4.0, 5.0]);
         });
     }
 
@@ -1079,14 +1079,14 @@ pub(crate) mod tests {
         };
 
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu_value = call_ctranspose(Value::GpuTensor(handle)).expect("gpu");
         let gathered = test_support::gather(gpu_value).expect("gather");
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        assert_eq!(gathered.data, cpu_tensor.data);
+        assert_eq!(gathered.materialize_f64(), cpu_tensor.materialize_f64());
     }
 
     #[test]

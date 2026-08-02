@@ -439,18 +439,18 @@ mod tests {
     fn lowpass_has_expected_shape_symmetry_and_dc_gain() {
         let out = tensor(call(Value::Num(10.0), Value::Num(0.25), &[]).unwrap());
         assert_eq!(out.shape, vec![1, 11]);
-        for idx in 0..out.data.len() {
-            let mirror = out.data.len() - 1 - idx;
-            assert!((out.data[idx] - out.data[mirror]).abs() < 1e-12);
+        for idx in 0..out.materialize_f64().len() {
+            let mirror = out.materialize_f64().len() - 1 - idx;
+            assert!((out.materialize_f64()[idx] - out.materialize_f64()[mirror]).abs() < 1e-12);
         }
-        let sum: f64 = out.data.iter().sum();
+        let sum: f64 = out.materialize_f64().iter().sum();
         assert!((sum - 1.0).abs() < 1e-10);
     }
 
     #[test]
     fn highpass_scales_at_nyquist() {
         let out = tensor(call(Value::Num(10.0), Value::Num(0.35), &[Value::from("high")]).unwrap());
-        let response = frequency_response(&out.data, std::f64::consts::PI).norm();
+        let response = frequency_response(&out.materialize_f64(), std::f64::consts::PI).norm();
         assert!((response - 1.0).abs() < 1e-10);
     }
 
@@ -458,7 +458,7 @@ mod tests {
     fn odd_order_highpass_is_adjusted_to_even_order() {
         let out = tensor(call(Value::Num(5.0), Value::Num(0.35), &[Value::from("high")]).unwrap());
         assert_eq!(out.shape, vec![1, 7]);
-        let response = frequency_response(&out.data, std::f64::consts::PI).norm();
+        let response = frequency_response(&out.materialize_f64(), std::f64::consts::PI).norm();
         assert!((response - 1.0).abs() < 1e-10);
     }
 
@@ -470,7 +470,7 @@ mod tests {
 
         let stop =
             tensor(call(Value::Num(20.0), Value::Tensor(wn), &[Value::from("stop")]).unwrap());
-        let dc: f64 = stop.data.iter().sum();
+        let dc: f64 = stop.materialize_f64().iter().sum();
         assert!((dc - 1.0).abs() < 1e-10);
     }
 
@@ -486,7 +486,7 @@ mod tests {
             .unwrap(),
         );
         assert_eq!(out.shape, vec![1, 5]);
-        assert!((out.data.iter().sum::<f64>() - 1.0).abs() > 1e-3);
+        assert!((out.materialize_f64().iter().sum::<f64>() - 1.0).abs() > 1e-3);
     }
 
     #[test]

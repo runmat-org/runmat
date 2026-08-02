@@ -287,15 +287,14 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log2_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 4]), vec![3, 1])
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 4]), vec![3, 1])
             .expect("integer tensor");
-        tensor.data.fill(1.0);
 
         let result = log2_builtin(Value::Tensor(tensor)).expect("log2");
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 1]);
-                assert_eq!(out.data, vec![0.0, 1.0, 2.0]);
+                assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 2.0]);
                 assert!(out.integer_storage().is_none());
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -305,9 +304,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn log2_negative_typed_integer_tensor_promotes_to_complex_from_storage() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::I32(vec![-4, 4]), vec![1, 2])
+        let tensor = Tensor::new_integer(IntegerStorage::I32(vec![-4, 4]), vec![1, 2])
             .expect("integer tensor");
-        tensor.data.fill(4.0);
 
         let result = log2_builtin(Value::Tensor(tensor)).expect("log2");
         match result {
@@ -415,10 +413,16 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert!((t.data[0] - 0.0).abs() < 1e-12);
-                assert!(t.data[1].is_infinite() && t.data[1].is_sign_negative());
-                assert!((t.data[2] - 0.0).abs() < 1e-12);
-                assert!(t.data[3].is_infinite() && t.data[3].is_sign_negative());
+                assert!((t.materialize_f64()[0] - 0.0).abs() < 1e-12);
+                assert!(
+                    t.materialize_f64()[1].is_infinite()
+                        && t.materialize_f64()[1].is_sign_negative()
+                );
+                assert!((t.materialize_f64()[2] - 0.0).abs() < 1e-12);
+                assert!(
+                    t.materialize_f64()[3].is_infinite()
+                        && t.materialize_f64()[3].is_sign_negative()
+                );
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -480,8 +484,8 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert!((t.data[0] - (65.0f64).log2()).abs() < 1e-12);
-                assert!((t.data[1] - (90.0f64).log2()).abs() < 1e-12);
+                assert!((t.materialize_f64()[0] - (65.0f64).log2()).abs() < 1e-12);
+                assert!((t.materialize_f64()[1] - (90.0f64).log2()).abs() < 1e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -493,15 +497,15 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 4.0, 8.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = log2_builtin(Value::GpuTensor(handle)).expect("log2");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![4, 1]);
-            let expected: Vec<f64> = tensor.data.iter().map(|&v| v.log2()).collect();
-            for (a, b) in gathered.data.iter().zip(expected.iter()) {
+            let expected: Vec<f64> = tensor.materialize_f64().iter().map(|&v| v.log2()).collect();
+            for (a, b) in gathered.materialize_f64().iter().zip(expected.iter()) {
                 assert!((a - b).abs() < 1e-12);
             }
         });
@@ -513,7 +517,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![-2.0, 2.0], vec![1, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -541,7 +545,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 4.0, 8.0], vec![4, 1]).unwrap();
         let cpu = log2_real(Value::Tensor(tensor.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()
@@ -557,7 +561,7 @@ pub(crate) mod tests {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
                 };
-                for (a, b) in gt.data.iter().zip(ct.data.iter()) {
+                for (a, b) in gt.materialize_f64().iter().zip(ct.materialize_f64().iter()) {
                     assert!((a - b).abs() < tol, "|{} - {}| >= {}", a, b, tol);
                 }
             }

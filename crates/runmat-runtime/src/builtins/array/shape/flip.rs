@@ -820,7 +820,7 @@ pub(crate) mod tests {
         let value =
             flip_builtin(Value::Tensor(tensor), Vec::new()).expect("flip row vector default");
         match value {
-            Value::Tensor(t) => assert_eq!(t.data, vec![4.0, 3.0, 2.0, 1.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![4.0, 3.0, 2.0, 1.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -865,7 +865,7 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 2]);
-                assert_eq!(t.data, vec![2.0, 4.0, 1.0, 6.0, 3.0, 5.0]);
+                assert_eq!(t.materialize_f64(), vec![2.0, 4.0, 1.0, 6.0, 3.0, 5.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -878,7 +878,7 @@ pub(crate) mod tests {
         let value = flip_builtin(Value::Tensor(tensor), vec![Value::from("horizontal")])
             .expect("flip horizontal");
         match value {
-            Value::Tensor(t) => assert_eq!(t.data, vec![5.0, 3.0, 6.0, 1.0, 4.0, 2.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![5.0, 3.0, 6.0, 1.0, 4.0, 2.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -897,7 +897,10 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2, 2]);
-                assert_eq!(t.data, vec![6.0, 5.0, 8.0, 7.0, 2.0, 1.0, 4.0, 3.0]);
+                assert_eq!(
+                    t.materialize_f64(),
+                    vec![6.0, 5.0, 8.0, 7.0, 2.0, 1.0, 4.0, 3.0]
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -911,7 +914,7 @@ pub(crate) mod tests {
         let value =
             flip_builtin(Value::Tensor(tensor), vec![Value::from("both")]).expect("flip both");
         match value {
-            Value::Tensor(out) => assert_eq!(out.data, expected.data),
+            Value::Tensor(out) => assert_eq!(out.materialize_f64(), expected.materialize_f64()),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -942,7 +945,7 @@ pub(crate) mod tests {
         let value = flip_builtin(Value::Tensor(tensor), vec![Value::CharArray(keyword)])
             .expect("flip via char");
         match value {
-            Value::Tensor(t) => assert_eq!(t.data, expected.data),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), expected.materialize_f64()),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -1003,7 +1006,10 @@ pub(crate) mod tests {
             flip_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).expect("flip dims");
         match value {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![4.0, 3.0, 2.0, 1.0, 8.0, 7.0, 6.0, 5.0]);
+                assert_eq!(
+                    t.materialize_f64(),
+                    vec![4.0, 3.0, 2.0, 1.0, 8.0, 7.0, 6.0, 5.0]
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1035,7 +1041,7 @@ pub(crate) mod tests {
         .expect("dims");
         let value = flip_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).expect("flip");
         match value {
-            Value::Tensor(t) => assert_eq!(t.data, original.data),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), original.materialize_f64()),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -1058,7 +1064,7 @@ pub(crate) mod tests {
         let dims = Tensor::new(vec![3.0], vec![1, 1]).unwrap();
         let value = flip_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).expect("flip");
         match value {
-            Value::Tensor(t) => assert_eq!(t.data, original.data),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), original.materialize_f64()),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -1079,7 +1085,7 @@ pub(crate) mod tests {
             let tensor =
                 Tensor::new((1..=8).map(|v| v as f64).collect(), vec![2, 2, 2]).expect("tensor");
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1087,7 +1093,7 @@ pub(crate) mod tests {
                 flip_tensor(tensor.clone(), &[default_flip_dim(&tensor.shape)]).expect("cpu flip");
             let value = flip_builtin(Value::GpuTensor(handle), Vec::new()).expect("flip gpu");
             let gathered = test_support::gather(value).expect("gather gpu result");
-            assert_eq!(gathered.data, cpu.data);
+            assert_eq!(gathered.materialize_f64(), cpu.materialize_f64());
         });
     }
 
@@ -1102,7 +1108,7 @@ pub(crate) mod tests {
             Tensor::new((1..=8).map(|v| v as f64).collect(), vec![2, 2, 2]).expect("tensor");
         let cpu = flip_tensor(tensor.clone(), &[1, 3]).expect("cpu flip");
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()
@@ -1117,6 +1123,6 @@ pub(crate) mod tests {
         )
         .expect("flip gpu");
         let gathered = test_support::gather(gpu_value).expect("gather");
-        assert_eq!(gathered.data, cpu.data);
+        assert_eq!(gathered.materialize_f64(), cpu.materialize_f64());
     }
 }

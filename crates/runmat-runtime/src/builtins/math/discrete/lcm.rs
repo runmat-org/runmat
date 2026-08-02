@@ -586,8 +586,8 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 2]);
-                assert_eq!(tensor.dtype, NumericDType::F64);
-                assert_eq!(tensor.data, vec![45.0, 765.0, 90.0, 180.0]);
+                assert_eq!(tensor.numeric_dtype(), NumericDType::F64);
+                assert_eq!(tensor.materialize_f64(), vec![45.0, 765.0, 90.0, 180.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -604,8 +604,8 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 3]);
-                assert_eq!(tensor.dtype, NumericDType::U16);
-                assert_eq!(tensor.data, vec![255.0, 64897.0, 5115.0]);
+                assert_eq!(tensor.numeric_dtype(), NumericDType::U16);
+                assert_eq!(tensor.materialize_f64(), vec![255.0, 64897.0, 5115.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -619,8 +619,8 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 3]);
-                assert_eq!(tensor.dtype, NumericDType::U32);
-                assert_eq!(tensor.data, vec![30.0, 30.0, 105.0]);
+                assert_eq!(tensor.numeric_dtype(), NumericDType::U32);
+                assert_eq!(tensor.materialize_f64(), vec![30.0, 30.0, 105.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -784,8 +784,11 @@ mod tests {
         let out = block_on(lcm_builtin(Value::Tensor(left), Value::Tensor(right))).expect("lcm");
         match out {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.dtype, NumericDType::F32);
-                assert_eq!(tensor.data, vec![(16_777_217_u128 as f32) as f64, 15.0]);
+                assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
+                assert_eq!(
+                    tensor.materialize_f64(),
+                    vec![(16_777_217_u128 as f32) as f64, 15.0]
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }

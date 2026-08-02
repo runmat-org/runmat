@@ -476,7 +476,7 @@ pub(crate) mod tests {
                     (0.75f64).acos(),
                     1.0f64.acos(),
                 ];
-                for (a, b) in t.data.iter().zip(expected.iter()) {
+                for (a, b) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((a - b).abs() < 1e-12);
                 }
             }
@@ -487,18 +487,17 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acos_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I16(vec![-1, 0, 1]),
             vec![3, 1],
         )
         .expect("integer tensor");
-        tensor.data.fill(0.0);
 
         match acos_builtin(Value::Tensor(tensor)).expect("acos") {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 1]);
                 let expected = [std::f64::consts::PI, std::f64::consts::FRAC_PI_2, 0.0];
-                for (actual, expected) in out.data.iter().zip(expected.iter()) {
+                for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expected).abs() < 1e-12);
                 }
                 assert!(out.integer_storage().is_none());
@@ -510,10 +509,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acos_outside_domain_typed_integer_promotes_from_storage() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![2, 0]), vec![1, 2])
                 .expect("integer tensor");
-        tensor.data.fill(0.0);
 
         match acos_builtin(Value::Tensor(tensor)).expect("acos") {
             Value::ComplexTensor(out) => {
@@ -531,12 +529,11 @@ pub(crate) mod tests {
     #[test]
     fn acos_wide_unsigned_integer_tensor_uses_storage_not_mirror() {
         let value = u64::MAX;
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![value]),
             vec![1, 1],
         )
         .expect("integer tensor");
-        tensor.data.fill(0.0);
 
         match acos_builtin(Value::Tensor(tensor)).expect("acos") {
             Value::Complex(re, im) => {
@@ -555,9 +552,9 @@ pub(crate) mod tests {
         let result = acos_builtin(Value::LogicalArray(logical)).expect("acos logical");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.data.len(), 4);
-                assert!((t.data[0] - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
-                assert!(t.data[1].abs() < 1e-12);
+                assert_eq!(t.materialize_f64().len(), 4);
+                assert!((t.materialize_f64()[0] - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+                assert!(t.materialize_f64()[1].abs() < 1e-12);
             }
             other => panic!("unexpected result {other:?}"),
         }
@@ -638,7 +635,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 0.5, -0.75, 1.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -651,7 +648,7 @@ pub(crate) mod tests {
                 (-0.75f64).acos(),
                 1.0f64.acos(),
             ];
-            for (a, b) in gathered.data.iter().zip(expected.iter()) {
+            for (a, b) in gathered.materialize_f64().iter().zip(expected.iter()) {
                 assert!((a - b).abs() < 1e-12);
             }
         });
@@ -663,7 +660,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.2, -1.3], vec![2, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -688,7 +685,7 @@ pub(crate) mod tests {
         let t = Tensor::new(vec![-1.0, -0.5, 0.0, 0.5, 1.0], vec![5, 1]).unwrap();
         let cpu = acos_real(Value::Tensor(t.clone())).expect("acos cpu");
         let view = runmat_accelerate_api::HostTensorView {
-            data: &t.data,
+            data: &t.materialize_f64(),
             shape: &t.shape,
         };
         let h = runmat_accelerate_api::provider()
@@ -704,7 +701,7 @@ pub(crate) mod tests {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-3,
                 };
-                for (a, b) in gt.data.iter().zip(ct.data.iter()) {
+                for (a, b) in gt.materialize_f64().iter().zip(ct.materialize_f64().iter()) {
                     assert!((a - b).abs() < tol, "|{} - {}| >= {}", a, b, tol);
                 }
             }

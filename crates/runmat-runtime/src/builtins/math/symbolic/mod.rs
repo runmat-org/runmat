@@ -96,9 +96,8 @@ mod tests {
 
     #[test]
     fn symbolic_scalar_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U16(vec![257]), vec![1, 1]).expect("tensor");
-        tensor.data.clear();
 
         let expr =
             value_to_symbolic_scalar(&Value::Tensor(tensor)).expect("symbolic scalar conversion");

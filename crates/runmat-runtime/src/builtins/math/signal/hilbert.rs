@@ -561,7 +561,7 @@ pub(crate) mod tests {
         crate::builtins::common::test_support::with_test_provider(|provider| {
             let input = Tensor::new(vec![1.0, 0.0, -1.0, 0.0], vec![1, 4]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &input.data,
+                data: &input.materialize_f64(),
                 shape: &input.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -590,7 +590,7 @@ pub(crate) mod tests {
         };
         let input = Tensor::new(vec![1.0, 0.0, -1.0, 0.0], vec![1, 4]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &input.data,
+            data: &input.materialize_f64(),
             shape: &input.shape,
         };
         let handle = provider.upload(&view).expect("upload");
@@ -638,7 +638,7 @@ pub(crate) mod tests {
             hilbert_call(Value::Tensor(input.clone()), vec![Value::Num(6.0)]).unwrap(),
         );
         let view = runmat_accelerate_api::HostTensorView {
-            data: &input.data,
+            data: &input.materialize_f64(),
             shape: &input.shape,
         };
         let handle = provider.upload(&view).expect("upload");

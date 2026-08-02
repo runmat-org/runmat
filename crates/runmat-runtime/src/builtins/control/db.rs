@@ -446,8 +446,8 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, expected_shape);
-                assert_eq!(tensor.data.len(), expected.len());
-                for (&actual, &expected) in tensor.data.iter().zip(expected) {
+                assert_eq!(tensor.materialize_f64().len(), expected.len());
+                for (&actual, &expected) in tensor.materialize_f64().iter().zip(expected) {
                     if expected.is_infinite() {
                         assert_eq!(actual, expected);
                     } else {
@@ -781,7 +781,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 10.0, 100.0], vec![1, 3]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");

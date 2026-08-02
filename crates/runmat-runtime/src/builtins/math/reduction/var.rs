@@ -1273,7 +1273,7 @@ pub(crate) mod tests {
         )
         .unwrap();
         let provider = runmat_accelerate_api::provider().unwrap();
-        let handle = gpu_helpers::upload_tensor(provider.as_ref(), &tensor).unwrap();
+        let handle = gpu_helpers::upload_tensor(provider, &tensor).unwrap();
         let gpu = block_on(var_gpu(
             handle,
             &ParsedArguments {

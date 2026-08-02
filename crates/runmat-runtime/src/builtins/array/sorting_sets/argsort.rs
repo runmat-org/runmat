@@ -281,7 +281,7 @@ pub(crate) mod tests {
         let indices = argsort_builtin(Value::Tensor(tensor), Vec::new()).expect("argsort");
         match indices {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![2.0, 3.0, 1.0]);
+                assert_eq!(t.materialize_f64(), vec![2.0, 3.0, 1.0]);
                 assert_eq!(t.shape, vec![3, 1]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -299,7 +299,7 @@ pub(crate) mod tests {
         let Value::Tensor(indices) = indices else {
             panic!("expected index tensor");
         };
-        assert_eq!(indices.data, vec![2.0, 3.0, 1.0]);
+        assert_eq!(indices.materialize_f64(), vec![2.0, 3.0, 1.0]);
     }
 
     #[test]
@@ -317,7 +317,7 @@ pub(crate) mod tests {
         let indices =
             argsort_builtin(Value::Tensor(tensor), vec![Value::from("descend")]).expect("argsort");
         match indices {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 4.0, 3.0, 2.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 4.0, 3.0, 2.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -345,7 +345,7 @@ pub(crate) mod tests {
         )
         .expect("argsort");
         match indices {
-            Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 4.0, 3.0, 1.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![2.0, 4.0, 3.0, 1.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -356,7 +356,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![f64::NAN, 4.0, 1.0, 2.0], vec![4, 1]).unwrap();
         let indices = argsort_builtin(Value::Tensor(tensor), Vec::new()).expect("argsort");
         match indices {
-            Value::Tensor(t) => assert_eq!(t.data, vec![3.0, 4.0, 2.0, 1.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![3.0, 4.0, 2.0, 1.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -386,7 +386,10 @@ pub(crate) mod tests {
         let indices = argsort_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(5))])
             .expect("argsort");
         match indices {
-            Value::Tensor(t) => assert!(t.data.iter().all(|v| (*v - 1.0).abs() < f64::EPSILON)),
+            Value::Tensor(t) => assert!(t
+                .materialize_f64()
+                .iter()
+                .all(|v| (*v - 1.0).abs() < f64::EPSILON)),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -454,7 +457,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![2.0, 2.0, 1.0, 2.0], vec![4, 1]).unwrap();
         let indices = argsort_builtin(Value::Tensor(tensor), Vec::new()).expect("argsort");
         match indices {
-            Value::Tensor(t) => assert_eq!(t.data, vec![3.0, 1.0, 2.0, 4.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![3.0, 1.0, 2.0, 4.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -470,7 +473,7 @@ pub(crate) mod tests {
         )
         .expect("argsort");
         match indices {
-            Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 3.0, 1.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![2.0, 3.0, 1.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -481,13 +484,13 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![3.0, 1.0, 2.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let indices = argsort_builtin(Value::GpuTensor(handle), Vec::new()).expect("argsort");
             match indices {
-                Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 3.0, 1.0]),
+                Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![2.0, 3.0, 1.0]),
                 other => panic!("expected tensor result, got {other:?}"),
             }
         });
@@ -503,7 +506,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![0.0, 5.0, -1.0, 2.0], vec![4, 1]).unwrap();
         let cpu_indices = argsort_builtin(Value::Tensor(tensor.clone()), Vec::new()).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let gpu_handle = runmat_accelerate_api::provider()
@@ -521,6 +524,6 @@ pub(crate) mod tests {
             other => panic!("expected tensor, got {other:?}"),
         };
         assert_eq!(gpu_tensor.shape, cpu_tensor.shape);
-        assert_eq!(gpu_tensor.data, cpu_tensor.data);
+        assert_eq!(gpu_tensor.materialize_f64(), cpu_tensor.materialize_f64());
     }
 }

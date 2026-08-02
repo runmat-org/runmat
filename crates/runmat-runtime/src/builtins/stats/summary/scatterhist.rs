@@ -1411,8 +1411,7 @@ mod tests {
     }
 
     fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
         Value::Tensor(tensor)
     }
 
@@ -1548,7 +1547,7 @@ mod tests {
         };
         assert_eq!(handles.shape, vec![3, 1]);
         let decoded = handles
-            .data
+            .materialize_f64()
             .iter()
             .map(|handle| decode_axes_handle(*handle).unwrap().1)
             .collect::<Vec<_>>();

@@ -602,7 +602,7 @@ pub(crate) mod tests {
         let gathered = test_support::gather(result).expect("gather");
         assert_eq!(gathered.shape, vec![1, 5]);
         let expected = expected_randperm(5, 5);
-        assert_eq!(gathered.data, expected);
+        assert_eq!(gathered.materialize_f64(), expected);
     }
 
     #[test]
@@ -617,8 +617,7 @@ pub(crate) mod tests {
 
     #[test]
     fn randperm_size_arguments_read_typed_integer_storage_exactly() {
-        let mut n = Tensor::new_integer(IntegerStorage::U64(vec![5]), vec![1, 1]).expect("n");
-        n.data.clear();
+        let n = Tensor::new_integer(IntegerStorage::U64(vec![5]), vec![1, 1]).expect("n");
         assert_eq!(
             block_on(parse_size_argument(
                 &Value::Tensor(n),
@@ -629,9 +628,8 @@ pub(crate) mod tests {
             5
         );
 
-        let mut vector =
+        let vector =
             Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![1, 2]).expect("vector");
-        vector.data.clear();
         assert!(block_on(parse_size_argument(
             &Value::Tensor(vector),
             false,
@@ -649,7 +647,7 @@ pub(crate) mod tests {
         let result = randperm_builtin(args).expect("randperm");
         let gathered = test_support::gather(result).expect("gather");
         assert_eq!(gathered.shape, vec![1, 4]);
-        let data = gathered.data;
+        let data = gathered.materialize_f64();
         let expected = expected_randperm(10, 4);
         assert_eq!(data, expected);
         let mut sorted = data.clone();
@@ -668,7 +666,7 @@ pub(crate) mod tests {
         let result = randperm_builtin(args).expect("randperm");
         let gathered = test_support::gather(result).expect("gather");
         assert_eq!(gathered.shape, vec![1, 0]);
-        assert!(gathered.data.is_empty());
+        assert!(gathered.materialize_f64().is_empty());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -705,7 +703,7 @@ pub(crate) mod tests {
         let gathered = test_support::gather(result).expect("gather");
         assert_eq!(gathered.shape, vec![1, 5]);
         let expected = expected_randperm(5, 5);
-        assert_eq!(gathered.data, expected);
+        assert_eq!(gathered.materialize_f64(), expected);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -723,7 +721,7 @@ pub(crate) mod tests {
         let gathered = test_support::gather(result).expect("gather");
         assert_eq!(gathered.shape, vec![1, 4]);
         let expected = expected_randperm(4, 4);
-        assert_eq!(gathered.data, expected);
+        assert_eq!(gathered.materialize_f64(), expected);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -734,7 +732,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let proto_tensor = Tensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap();
             let view = HostTensorView {
-                data: &proto_tensor.data,
+                data: &proto_tensor.materialize_f64(),
                 shape: &proto_tensor.shape,
             };
             let proto_handle = provider.upload(&view).expect("upload prototype");
@@ -752,7 +750,7 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 3]);
             let expected = expected_randperm(6, 3);
-            assert_eq!(gathered.data, expected);
+            assert_eq!(gathered.materialize_f64(), expected);
         });
     }
 

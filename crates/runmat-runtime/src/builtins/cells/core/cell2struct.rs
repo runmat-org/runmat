@@ -362,12 +362,11 @@ mod tests {
     fn typed_tensor_dimensions_are_exactly_validated() {
         let cells = CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap();
         let fields = CellArray::new(vec![Value::from("id")], 1, 1).unwrap();
-        let mut dim = runmat_builtins::Tensor::new_integer(
+        let dim = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::U16(vec![1]),
             vec![1, 1],
         )
         .expect("typed dim");
-        dim.data.clear();
 
         let out = cell2struct_builtin(
             Value::Cell(cells.clone()),

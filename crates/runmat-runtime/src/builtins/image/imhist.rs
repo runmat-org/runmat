@@ -1086,9 +1086,9 @@ mod tests {
             panic!("expected counts tensor");
         };
         assert_eq!(counts.shape, vec![256, 1]);
-        assert_eq!(counts.data[0], 1.0);
-        assert_eq!(counts.data[1], 2.0);
-        assert_eq!(counts.data[255], 1.0);
+        assert_eq!(counts.materialize_f64()[0], 1.0);
+        assert_eq!(counts.materialize_f64()[1], 2.0);
+        assert_eq!(counts.materialize_f64()[255], 1.0);
     }
 
     #[test]
@@ -1105,9 +1105,9 @@ mod tests {
         assert_eq!(u8_image.class_max, 255.0);
         assert_eq!(u8_image.default_bins, 256);
         let u8_eval = u8_image.evaluate(None).expect("uint8 histogram");
-        assert_eq!(u8_eval.counts.data[0], 1.0);
-        assert_eq!(u8_eval.counts.data[1], 2.0);
-        assert_eq!(u8_eval.counts.data[255], 1.0);
+        assert_eq!(u8_eval.counts.materialize_f64()[0], 1.0);
+        assert_eq!(u8_eval.counts.materialize_f64()[1], 2.0);
+        assert_eq!(u8_eval.counts.materialize_f64()[255], 1.0);
 
         let u16_image = GrayscaleInput::from_tensor(u16).expect("uint16 image");
         assert_eq!(u16_image.class_max, 65535.0);
@@ -1125,8 +1125,8 @@ mod tests {
         let locations = Tensor::try_from(&outputs[1]).unwrap();
         assert_eq!(counts.shape, vec![3, 1]);
         assert_eq!(locations.shape, vec![3, 1]);
-        assert_eq!(counts.data, vec![1.0, 1.0, 2.0]);
-        assert_eq!(locations.data, vec![0.0, 0.5, 1.0]);
+        assert_eq!(counts.materialize_f64(), vec![1.0, 1.0, 2.0]);
+        assert_eq!(locations.materialize_f64(), vec![0.0, 0.5, 1.0]);
     }
 
     #[test]
@@ -1136,7 +1136,7 @@ mod tests {
             panic!("expected counts");
         };
         assert_eq!(counts.shape, vec![2, 1]);
-        assert_eq!(counts.data, vec![3.0, 3.0]);
+        assert_eq!(counts.materialize_f64(), vec![3.0, 3.0]);
     }
 
     #[test]
@@ -1154,8 +1154,8 @@ mod tests {
         };
         let counts = Tensor::try_from(&outputs[0]).unwrap();
         let locations = Tensor::try_from(&outputs[1]).unwrap();
-        assert_eq!(counts.data, vec![1.0, 2.0, 1.0]);
-        assert_eq!(locations.data, vec![1.0, 2.0, 3.0]);
+        assert_eq!(counts.materialize_f64(), vec![1.0, 2.0, 1.0]);
+        assert_eq!(locations.materialize_f64(), vec![1.0, 2.0, 3.0]);
     }
 
     #[test]
@@ -1166,7 +1166,7 @@ mod tests {
         else {
             panic!("expected counts");
         };
-        assert_eq!(counts.data, vec![1.0, 2.0, 1.0]);
+        assert_eq!(counts.materialize_f64(), vec![1.0, 2.0, 1.0]);
     }
 
     #[test]
@@ -1215,9 +1215,8 @@ mod tests {
 
     #[test]
     fn scalar_number_reads_typed_integer_storage_exactly() {
-        let mut bins = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
+        let bins = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
             .expect("typed bin count");
-        bins.data.clear();
 
         assert_eq!(scalar_number(&Value::Tensor(bins)), Some(2026.0));
     }
@@ -1251,8 +1250,7 @@ mod tests {
             IntegerStorage::U32(vec![2]),
             IntegerStorage::U64(vec![2]),
         ] {
-            let mut bins = Tensor::new_integer(storage, vec![1, 1]).expect("typed bin count");
-            bins.data.fill(f64::NAN);
+            let bins = Tensor::new_integer(storage, vec![1, 1]).expect("typed bin count");
             assert_eq!(
                 parse_optional_bin_count(&Value::Tensor(bins)).unwrap(),
                 Some(2)
@@ -1330,7 +1328,7 @@ mod tests {
             &[Value::Num((MAX_PLOT_BINS + 100) as f64)],
         ))
         .unwrap();
-        assert_eq!(eval.counts.data.len(), MAX_PLOT_BINS + 100);
+        assert_eq!(eval.counts.materialize_f64().len(), MAX_PLOT_BINS + 100);
         let plot = plot_display_bins(&eval.counts, &eval.locations).unwrap();
         assert!(plot.counts.len() <= MAX_PLOT_BINS);
         assert_eq!(plot.counts.iter().sum::<f64>(), 2.0);

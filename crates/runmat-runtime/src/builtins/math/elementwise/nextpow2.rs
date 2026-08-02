@@ -235,20 +235,19 @@ mod tests {
         let Value::Tensor(t) = value else {
             panic!("expected tensor")
         };
-        assert_eq!(t.data, vec![0.0, 0.0, 2.0, 4.0]);
+        assert_eq!(t.materialize_f64(), vec![0.0, 0.0, 2.0, 4.0]);
     }
 
     #[test]
     fn nextpow2_tensor_reads_typed_integer_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 3, 9]), vec![4, 1])
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 3, 9]), vec![4, 1])
             .expect("typed integer tensor");
-        tensor.data.fill(f64::NAN);
 
         let value = block_on(super::nextpow2_builtin(Value::Tensor(tensor))).expect("nextpow2");
         let Value::Tensor(t) = value else {
             panic!("expected tensor")
         };
-        assert_eq!(t.data, vec![0.0, 0.0, 2.0, 4.0]);
+        assert_eq!(t.materialize_f64(), vec![0.0, 0.0, 2.0, 4.0]);
     }
 
     #[test]
@@ -264,7 +263,7 @@ mod tests {
             let gpu =
                 block_on(super::nextpow2_builtin(Value::GpuTensor(handle))).expect("gpu nextpow2");
             let t = test_support::gather(gpu).expect("gather");
-            assert_eq!(t.data, vec![0.0, 0.0, 2.0, 4.0]);
+            assert_eq!(t.materialize_f64(), vec![0.0, 0.0, 2.0, 4.0]);
         });
     }
 

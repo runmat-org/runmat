@@ -607,10 +607,9 @@ mod tests {
     }
 
     fn int_tensor(data: Vec<i16>, rows: usize, cols: usize) -> Tensor {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(runmat_builtins::IntegerStorage::I16(data), vec![rows, cols])
                 .expect("integer tensor");
-        tensor.data.clear();
         tensor
     }
 
@@ -640,7 +639,7 @@ mod tests {
     fn triplot_column_tensor_reads_typed_integer_storage_exactly() {
         let column = column_tensor(&int_tensor(vec![1, 2, 3, 4], 2, 2), 1);
 
-        assert_eq!(column.data, vec![3.0, 4.0]);
+        assert_eq!(column.materialize_f64(), vec![3.0, 4.0]);
         assert_eq!(column.numeric_dtype(), runmat_builtins::NumericDType::I16);
         assert_eq!(
             column.integer_storage(),

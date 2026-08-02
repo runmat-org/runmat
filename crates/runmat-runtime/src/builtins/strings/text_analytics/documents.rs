@@ -2851,14 +2851,12 @@ mod tests {
     use runmat_builtins::{IntegerStorage, NumericStorage};
 
     fn poisoned_integer_scalar(storage: IntegerStorage) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
         Value::Tensor(tensor)
     }
 
     fn poisoned_integer_vector(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         tensor
     }
 
@@ -2945,9 +2943,9 @@ mod tests {
             vec!["an", "example", "of", "a", "short", "sentence", "second"]
         );
         let lengths = tensor_property(&doc, "DocumentLengths");
-        assert_eq!(lengths.data, vec![6.0, 4.0]);
+        assert_eq!(lengths.materialize_f64(), vec![6.0, 4.0]);
         let shape = tensor_property(&doc, "Shape");
-        assert_eq!(shape.data, vec![2.0, 1.0]);
+        assert_eq!(shape.materialize_f64(), vec![2.0, 1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2987,16 +2985,16 @@ mod tests {
         );
         let lengths = tensor_property(&doc, "DocumentLengths");
         assert_eq!(lengths.shape, vec![1, 1]);
-        assert_eq!(lengths.data, vec![0.0]);
+        assert_eq!(lengths.materialize_f64(), vec![0.0]);
         let shape = tensor_property(&doc, "Shape");
-        assert_eq!(shape.data, vec![1.0, 1.0]);
+        assert_eq!(shape.materialize_f64(), vec![1.0, 1.0]);
 
         let bag = object(run_bag(vec![Value::Object(doc)]).expect("bag"));
         assert_eq!(bag.properties.get("NumDocuments"), Some(&Value::Num(1.0)));
         assert_eq!(bag.properties.get("NumWords"), Some(&Value::Num(0.0)));
         let counts = tensor_property(&bag, "Counts");
         assert_eq!(counts.shape, vec![1, 0]);
-        assert!(counts.data.is_empty());
+        assert!(counts.materialize_f64().is_empty());
     }
 
     #[test]
@@ -3358,10 +3356,10 @@ mod tests {
             panic!("expected Counts");
         };
         assert_eq!(counts.shape, vec![2, 7]);
-        assert_eq!(counts.data[0], 1.0);
-        assert_eq!(counts.data[1], 0.0);
-        assert_eq!(counts.data[3 * 2], 1.0);
-        assert_eq!(counts.data[3 * 2 + 1], 1.0);
+        assert_eq!(counts.materialize_f64()[0], 1.0);
+        assert_eq!(counts.materialize_f64()[1], 0.0);
+        assert_eq!(counts.materialize_f64()[3 * 2], 1.0);
+        assert_eq!(counts.materialize_f64()[3 * 2 + 1], 1.0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -3387,11 +3385,12 @@ mod tests {
             ])
             .expect("single bag"),
         );
-        assert_eq!(tensor_property(&bag, "Counts").data, vec![2.0, 3.0]);
+        assert_eq!(
+            tensor_property(&bag, "Counts").materialize_f64(),
+            vec![2.0, 3.0]
+        );
 
-        let mut negative =
-            Tensor::new_integer(IntegerStorage::I64(vec![1, -1]), vec![1, 2]).unwrap();
-        negative.data.clear();
+        let negative = Tensor::new_integer(IntegerStorage::I64(vec![1, -1]), vec![1, 2]).unwrap();
         assert!(run_bag(vec![Value::StringArray(words), Value::Tensor(negative),]).is_err());
     }
 
@@ -3422,7 +3421,7 @@ mod tests {
         );
         let counts = tensor_property(&bag, "Counts");
         assert_eq!(counts.shape, vec![2, 2]);
-        assert_eq!(counts.data, vec![1.0, 0.0, 2.0, 3.0]);
+        assert_eq!(counts.materialize_f64(), vec![1.0, 0.0, 2.0, 3.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -3461,7 +3460,7 @@ mod tests {
             panic!("expected Counts");
         };
         assert_eq!(counts.shape, vec![1, 3]);
-        assert_eq!(counts.data, vec![1.0, 1.0, 1.0]);
+        assert_eq!(counts.materialize_f64(), vec![1.0, 1.0, 1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -3496,7 +3495,7 @@ mod tests {
         let counts = tensor_property(&filtered_bag, "Counts");
         assert_eq!(counts.shape, vec![2, 7]);
         assert_eq!(
-            counts.data,
+            counts.materialize_f64(),
             vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0]
         );
     }
@@ -3550,7 +3549,7 @@ mod tests {
         );
         let counts = tensor_property(&filtered_bag, "Counts");
         assert_eq!(counts.shape, vec![2, 3]);
-        assert_eq!(counts.data, vec![1.0, 0.0, 1.0, 1.0, 0.0, 1.0]);
+        assert_eq!(counts.materialize_f64(), vec![1.0, 0.0, 1.0, 1.0, 0.0, 1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -3804,6 +3803,6 @@ mod tests {
         assert_eq!(string_array_property(&filtered, "Vocabulary"), vec!["keep"]);
         let counts = tensor_property(&filtered, "Counts");
         assert_eq!(counts.shape, vec![2, 1]);
-        assert_eq!(counts.data, vec![1.0, 2.0]);
+        assert_eq!(counts.materialize_f64(), vec![1.0, 2.0]);
     }
 }

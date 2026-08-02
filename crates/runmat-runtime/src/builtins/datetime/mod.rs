@@ -3534,8 +3534,7 @@ mod tests {
     }
 
     fn integer_tensor(storage: runmat_builtins::IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         Value::Tensor(tensor)
     }
 
@@ -3568,7 +3567,7 @@ mod tests {
         assert_eq!(object.class_name, DATETIME_CLASS);
         assert_eq!(format_for_object(&object), DEFAULT_DATE_FORMAT);
         let serials = serial_tensor_for_object(&object).expect("serials");
-        assert_eq!(serials.data.len(), 1);
+        assert_eq!(serials.materialize_f64().len(), 1);
         let year =
             futures::executor::block_on(year_builtin(Value::Object(object.clone()))).expect("year");
         assert_eq!(year, Value::Num(2024.0));
@@ -3614,7 +3613,9 @@ mod tests {
             vec![1, 1],
         )]);
         assert_eq!(
-            serials_from_datetime_value(&object).unwrap().data,
+            serials_from_datetime_value(&object)
+                .unwrap()
+                .materialize_f64(),
             vec![serial.floor()]
         );
     }
@@ -3654,8 +3655,12 @@ mod tests {
             Value::from("yyyy-MM-dd"),
         ]);
         assert_eq!(
-            serials_from_datetime_value(&converted).unwrap().data,
-            serials_from_datetime_value(&value).unwrap().data
+            serials_from_datetime_value(&converted)
+                .unwrap()
+                .materialize_f64(),
+            serials_from_datetime_value(&value)
+                .unwrap()
+                .materialize_f64()
         );
     }
 
@@ -3866,7 +3871,7 @@ mod tests {
             panic!("expected datevec tensor");
         };
         assert_eq!(date_vector.shape, vec![1, 6]);
-        assert_eq!(&date_vector.data[..3], &[2024.0, 3.0, 14.0]);
+        assert_eq!(&date_vector.materialize_f64()[..3], &[2024.0, 3.0, 14.0]);
 
         let round_trip =
             futures::executor::block_on(datenum_builtin(vec![Value::Tensor(date_vector.clone())]))
@@ -3935,12 +3940,11 @@ mod tests {
     #[test]
     fn datenum_typed_integer_date_vector_reads_exact_storage() {
         let serial = serial_for_date(2024, 3, 14);
-        let mut typed_date_vector = Tensor::new_integer(
+        let typed_date_vector = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U16(vec![2024, 3, 14]),
             vec![1, 3],
         )
         .expect("typed date vector");
-        typed_date_vector.data.clear();
         let typed_round_trip =
             futures::executor::block_on(datenum_builtin(vec![Value::Tensor(typed_date_vector)]))
                 .expect("datenum typed date vector");
@@ -3950,22 +3954,20 @@ mod tests {
     #[test]
     fn datenum_typed_integer_serials_read_exact_storage() {
         let serial = serial_for_date(2024, 3, 14).floor() as u32;
-        let mut scalar = Tensor::new_integer(
+        let scalar = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U32(vec![serial]),
             vec![1, 1],
         )
         .expect("typed serial");
-        scalar.data.clear();
         let scalar_out = futures::executor::block_on(datenum_builtin(vec![Value::Tensor(scalar)]))
             .expect("datenum typed scalar serial");
         assert_eq!(scalar_out, Value::Num(f64::from(serial)));
 
-        let mut vector = Tensor::new_integer(
+        let vector = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U32(vec![serial, serial + 1]),
             vec![1, 2],
         )
         .expect("typed serial vector");
-        vector.data.clear();
         let vector_out = futures::executor::block_on(datenum_builtin(vec![Value::Tensor(vector)]))
             .expect("datenum typed vector serial");
         let Value::Tensor(vector_out) = vector_out else {
@@ -3973,7 +3975,7 @@ mod tests {
         };
         assert_eq!(vector_out.shape, vec![1, 2]);
         assert_eq!(
-            vector_out.data,
+            vector_out.materialize_f64(),
             vec![f64::from(serial), f64::from(serial + 1)]
         );
     }
@@ -4010,8 +4012,8 @@ mod tests {
         ]))
         .expect("calendarDuration");
         let (months, days) = calendar_duration_tensors_from_value(&duration).expect("components");
-        assert_eq!(months.data, vec![14.0]);
-        assert_eq!(days.data, vec![3.0]);
+        assert_eq!(months.materialize_f64(), vec![14.0]);
+        assert_eq!(days.materialize_f64(), vec![3.0]);
 
         assert!(futures::executor::block_on(calyears_builtin(Value::Num(f64::MAX))).is_err());
         assert!(futures::executor::block_on(calendar_duration_builtin(vec![
@@ -4035,7 +4037,7 @@ mod tests {
         let Value::Tensor(mask) = mask else {
             panic!("expected isbusday tensor");
         };
-        assert_eq!(mask.data, vec![0.0, 1.0, 0.0]);
+        assert_eq!(mask.materialize_f64(), vec![0.0, 1.0, 0.0]);
 
         assert_eq!(
             futures::executor::block_on(isbusday_builtin(
@@ -4055,7 +4057,7 @@ mod tests {
         let Value::Tensor(business_days) = business_days else {
             panic!("expected busdays tensor");
         };
-        assert_eq!(business_days.data, vec![friday, friday + 3.0]);
+        assert_eq!(business_days.materialize_f64(), vec![friday, friday + 3.0]);
 
         assert_eq!(
             futures::executor::block_on(days252bus_builtin(
@@ -4075,10 +4077,9 @@ mod tests {
             .expect("daysdif"),
             Value::Num(3.0)
         );
-        let mut typed_basis =
+        let typed_basis =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U8(vec![1]), vec![1, 1])
                 .expect("basis");
-        typed_basis.data.clear();
         assert_eq!(
             futures::executor::block_on(daysdif_builtin(
                 Value::Num(serial_for_date(2024, 1, 30)),
@@ -4110,16 +4111,19 @@ mod tests {
         let holidays = futures::executor::block_on(holidays_builtin(vec![Value::Num(2024.0)]))
             .expect("holidays");
         let serials = serials_from_datetime_value(&holidays).expect("holiday serials");
-        assert!(serials.data.contains(&serial_for_date(2024, 1, 1)));
+        assert!(serials
+            .materialize_f64()
+            .contains(&serial_for_date(2024, 1, 1)));
 
-        let mut typed_year =
+        let typed_year =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![2024]), vec![1, 1])
                 .unwrap();
-        typed_year.data.clear();
         let holidays =
             futures::executor::block_on(holidays_builtin(vec![Value::Tensor(typed_year)]))
                 .expect("holidays from typed year");
         let serials = serials_from_datetime_value(&holidays).expect("holiday serials");
-        assert!(serials.data.contains(&serial_for_date(2024, 1, 1)));
+        assert!(serials
+            .materialize_f64()
+            .contains(&serial_for_date(2024, 1, 1)));
     }
 }

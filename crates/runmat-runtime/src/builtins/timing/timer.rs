@@ -1406,9 +1406,8 @@ mod tests {
 
     #[test]
     fn timer_numeric_scalar_reads_typed_integer_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
             .expect("typed timer scalar");
-        tensor.data.clear();
 
         assert_eq!(
             numeric_scalar(&Value::Tensor(tensor), "StartDelay").expect("numeric scalar"),
@@ -1432,9 +1431,8 @@ mod tests {
             },
         )));
 
-        let mut tasks =
+        let tasks =
             Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("typed tasks");
-        tasks.data.clear();
         let timer = block_on(timer_builtin(vec![
             Value::String("TimerFcn".into()),
             Value::BoundFunctionHandle {
@@ -1471,14 +1469,12 @@ mod tests {
 
     #[test]
     fn timer_tasks_to_execute_rejects_invalid_integer_bounds() {
-        let mut negative =
+        let negative =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("negative tasks");
-        negative.data.clear();
         assert!(parse_tasks_to_execute_value(&Value::Tensor(negative)).is_err());
 
-        let mut zero =
+        let zero =
             Tensor::new_integer(IntegerStorage::U16(vec![0]), vec![1, 1]).expect("zero tasks");
-        zero.data.clear();
         assert!(parse_tasks_to_execute_value(&Value::Tensor(zero)).is_err());
 
         let boundary = if usize::BITS == 64 {

@@ -1,4 +1,4 @@
-use runmat_builtins::{LogicalArray, StringArray, Tensor, Value};
+use runmat_builtins::{LogicalArray, StringArray, Value};
 
 #[path = "support/mod.rs"]
 mod test_helpers;
@@ -6,7 +6,8 @@ use test_helpers::execute_source;
 
 fn has_tensor(vars: &[Value], expected: &[f64]) -> bool {
     vars.iter().any(|value| match value {
-        Value::Tensor(Tensor { data, .. }) => {
+        Value::Tensor(tensor) => {
+            let data = tensor.materialize_f64();
             data.len() == expected.len()
                 && data.iter().zip(expected.iter()).all(|(actual, expected)| {
                     if expected.is_nan() {

@@ -1090,18 +1090,16 @@ mod tests {
 
     #[test]
     fn numeric_inputs_read_typed_integer_storage_despite_poisoned_mirrors() {
-        let mut vector =
+        let vector =
             Tensor::new_integer(IntegerStorage::I64(vec![-7, 3]), vec![2, 1]).expect("vector");
-        vector.data.fill(f64::NAN);
         assert_eq!(
             block_on(numeric_vector("f", V::Tensor(vector), FiniteMode::Finite)).unwrap(),
             vec![-7.0, 3.0]
         );
 
         let wide = 9_007_199_254_740_993_u64;
-        let mut matrix =
+        let matrix =
             Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("matrix");
-        matrix.data.fill(f64::NAN);
         let parsed = block_on(numeric_matrix("A", V::Tensor(matrix)))
             .unwrap()
             .expect("matrix input");
@@ -1128,8 +1126,8 @@ mod tests {
         );
         match &outputs[0] {
             V::Tensor(x) => {
-                assert!((x.data[0] - 0.0).abs() < 1.0e-7, "{x:?}");
-                assert!((x.data[1] - 4.0).abs() < 1.0e-7, "{x:?}");
+                assert!((x.materialize_f64()[0] - 0.0).abs() < 1.0e-7, "{x:?}");
+                assert!((x.materialize_f64()[1] - 4.0).abs() < 1.0e-7, "{x:?}");
             }
             other => panic!("unexpected x {other:?}"),
         }
@@ -1153,8 +1151,8 @@ mod tests {
         );
         match &outputs[0] {
             V::Tensor(x) => {
-                assert!((x.data[0] - 3.0).abs() < 1.0e-7, "{x:?}");
-                assert!((x.data[1] - 0.0).abs() < 1.0e-7, "{x:?}");
+                assert!((x.materialize_f64()[0] - 3.0).abs() < 1.0e-7, "{x:?}");
+                assert!((x.materialize_f64()[1] - 0.0).abs() < 1.0e-7, "{x:?}");
             }
             other => panic!("unexpected x {other:?}"),
         }
@@ -1170,8 +1168,8 @@ mod tests {
             vec![empty(), empty(), V::Num(2.0), V::Num(1.0)],
             4,
         );
-        assert!(matches!(&outputs[0], V::Tensor(t) if t.data.is_empty()));
-        assert!(matches!(&outputs[1], V::Tensor(t) if t.data.is_empty()));
+        assert!(matches!(&outputs[0], V::Tensor(t) if t.materialize_f64().is_empty()));
+        assert!(matches!(&outputs[1], V::Tensor(t) if t.materialize_f64().is_empty()));
         assert!(matches!(&outputs[2], V::Num(flag) if *flag == -2.0));
         assert!(matches!(&outputs[3], V::Struct(s) if s.fields.contains_key("message")));
     }
@@ -1179,8 +1177,8 @@ mod tests {
     #[test]
     fn reports_unbounded_problem() {
         let outputs = run(V::Num(-1.0), empty(), empty(), Vec::new(), 3);
-        assert!(matches!(&outputs[0], V::Tensor(t) if t.data.is_empty()));
-        assert!(matches!(&outputs[1], V::Tensor(t) if t.data.is_empty()));
+        assert!(matches!(&outputs[0], V::Tensor(t) if t.materialize_f64().is_empty()));
+        assert!(matches!(&outputs[1], V::Tensor(t) if t.materialize_f64().is_empty()));
         assert!(matches!(&outputs[2], V::Num(flag) if *flag == -3.0));
     }
 
@@ -1195,8 +1193,8 @@ mod tests {
         );
         match &outputs[0] {
             V::Tensor(x) => {
-                assert!((x.data[0] - 2.0).abs() < 1.0e-7, "{x:?}");
-                assert!((x.data[1] - 3.0).abs() < 1.0e-7, "{x:?}");
+                assert!((x.materialize_f64()[0] - 2.0).abs() < 1.0e-7, "{x:?}");
+                assert!((x.materialize_f64()[1] - 3.0).abs() < 1.0e-7, "{x:?}");
             }
             other => panic!("unexpected x {other:?}"),
         }
@@ -1219,8 +1217,8 @@ mod tests {
         );
         match &outputs[0] {
             V::Tensor(x) => {
-                assert!((x.data[0] - 2.0).abs() < 1.0e-7, "{x:?}");
-                assert!(x.data[1].abs() < 1.0e-7, "{x:?}");
+                assert!((x.materialize_f64()[0] - 2.0).abs() < 1.0e-7, "{x:?}");
+                assert!(x.materialize_f64()[1].abs() < 1.0e-7, "{x:?}");
             }
             other => panic!("unexpected x {other:?}"),
         }
@@ -1244,9 +1242,9 @@ mod tests {
         );
         match &outputs[0] {
             V::Tensor(x) => {
-                assert!((x.data[0] - 1.0).abs() < 1.0e-7, "{x:?}");
-                assert!(x.data[1].abs() < 1.0e-7, "{x:?}");
-                assert!(x.data[2].abs() < 1.0e-7, "{x:?}");
+                assert!((x.materialize_f64()[0] - 1.0).abs() < 1.0e-7, "{x:?}");
+                assert!(x.materialize_f64()[1].abs() < 1.0e-7, "{x:?}");
+                assert!(x.materialize_f64()[2].abs() < 1.0e-7, "{x:?}");
             }
             other => panic!("unexpected x {other:?}"),
         }

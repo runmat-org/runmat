@@ -1166,8 +1166,7 @@ pub(crate) mod tests {
         ];
 
         for (storage, expected) in cases {
-            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed tensor");
-            tensor.data = vec![f64::NAN];
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed tensor");
             let elements = flatten_elements(&Value::Tensor(tensor)).expect("typed elements");
             assert_eq!(elements.len(), 1);
             assert_eq!(integer_raw(&elements[0]), Some(expected));
@@ -1176,9 +1175,7 @@ pub(crate) mod tests {
 
     #[test]
     fn fwrite_scalar_parser_reads_typed_integer_storage_exactly() {
-        let mut scalar =
-            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("scalar");
-        scalar.data.clear();
+        let scalar = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("scalar");
         assert_eq!(
             numeric_scalar(&Value::Tensor(scalar), "scalar").expect("scalar"),
             7.0
@@ -1202,21 +1199,18 @@ pub(crate) mod tests {
 
     #[test]
     fn fwrite_fid_and_skip_read_typed_integer_storage_exactly() {
-        let mut fid =
+        let fid =
             Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("fid tensor");
-        fid.data.clear();
         assert_eq!(parse_fid(&Value::Tensor(fid)).unwrap(), 7);
         assert_eq!(parse_fid(&Value::Int(IntValue::U16(7))).unwrap(), 7);
         assert!(parse_fid(&Value::Int(IntValue::U64(u64::MAX))).is_err());
 
-        let mut skip =
+        let skip =
             Tensor::new_integer(IntegerStorage::U16(vec![9]), vec![1, 1]).expect("skip tensor");
-        skip.data.clear();
         assert_eq!(parse_skip(Some(&Value::Tensor(skip))).unwrap(), 9);
 
-        let mut too_large =
+        let too_large =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("skip");
-        too_large.data.clear();
         assert!(parse_skip(Some(&Value::Tensor(too_large))).is_err());
     }
 
@@ -1233,8 +1227,7 @@ pub(crate) mod tests {
             IntegerStorage::U64(vec![7]),
         ];
         for storage in classes {
-            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed scalar");
-            tensor.data = vec![f64::NAN];
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed scalar");
             let value = Value::Tensor(tensor);
             assert_eq!(parse_fid(&value).unwrap(), 7);
             assert_eq!(parse_skip(Some(&value)).unwrap(), 7);
@@ -1279,9 +1272,8 @@ pub(crate) mod tests {
         .expect("fopen");
         let fid = open.as_open().unwrap().fid as i32;
         let values = [9_007_199_254_740_993, u64::MAX];
-        let mut tensor = Tensor::new_integer(IntegerStorage::U64(values.to_vec()), vec![2, 1])
+        let tensor = Tensor::new_integer(IntegerStorage::U64(values.to_vec()), vec![2, 1])
             .expect("typed uint64 tensor");
-        tensor.data = vec![f64::NAN; values.len()];
 
         let eval = run_evaluate(
             &Value::Num(fid as f64),
@@ -1316,9 +1308,8 @@ pub(crate) mod tests {
         .expect("fopen");
         let fid = open.as_open().unwrap().fid as i32;
         let values = [i64::MIN, i64::MAX];
-        let mut tensor = Tensor::new_integer(IntegerStorage::I64(values.to_vec()), vec![2, 1])
+        let tensor = Tensor::new_integer(IntegerStorage::I64(values.to_vec()), vec![2, 1])
             .expect("typed int64 tensor");
-        tensor.data.clear();
 
         let eval = run_evaluate(
             &Value::Num(fid as f64),
@@ -1353,12 +1344,11 @@ pub(crate) mod tests {
         ])
         .expect("fopen");
         let fid = open.as_open().unwrap().fid as i32;
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
             vec![2, 1],
         )
         .expect("typed uint64 tensor");
-        tensor.data.clear();
 
         let eval = run_evaluate(
             &Value::Num(fid as f64),
@@ -1390,12 +1380,11 @@ pub(crate) mod tests {
         ])
         .expect("fopen");
         let fid = open.as_open().unwrap().fid as i32;
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             IntegerStorage::I64(vec![i64::MIN, -1, 65_535, i64::MAX]),
             vec![4, 1],
         )
         .expect("typed int64 tensor");
-        tensor.data.clear();
 
         let eval = run_evaluate(
             &Value::Num(fid as f64),
@@ -1522,7 +1511,7 @@ pub(crate) mod tests {
 
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1615,9 +1604,9 @@ pub(crate) mod tests {
             .expect("wgpu provider");
 
         let tensor = Tensor::new(vec![0.5, -1.25, 3.75], vec![3, 1]).unwrap();
-        let expected = tensor.data.clone();
+        let expected = tensor.materialize_f64().clone();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload to gpu");

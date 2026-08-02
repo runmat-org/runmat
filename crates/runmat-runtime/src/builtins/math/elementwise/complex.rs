@@ -720,12 +720,11 @@ pub(crate) mod tests {
 
     #[test]
     fn complex_integer_components_preserve_uint64_storage_and_scalar_double_expansion() {
-        let mut real = Tensor::new_integer(
+        let real = Tensor::new_integer(
             IntegerStorage::U64(vec![9_223_372_036_854_775_809, u64::MAX]),
             vec![1, 2],
         )
         .unwrap();
-        real.data.clear();
         let result = complex_call(Value::Tensor(real), vec![Value::Num(1.0)]).expect("complex");
         let Value::ComplexTensor(complex) = result else {
             panic!("integer complex values must retain complex tensor storage");
@@ -745,12 +744,10 @@ pub(crate) mod tests {
 
     #[test]
     fn complex_integer_components_broadcast_from_storage_without_mirrors() {
-        let mut real =
+        let real =
             Tensor::new_integer(IntegerStorage::I32(vec![-3]), vec![1, 1]).expect("real scalar");
-        real.data.clear();
-        let mut imag = Tensor::new_integer(IntegerStorage::I32(vec![7, -8, i32::MAX]), vec![3, 1])
+        let imag = Tensor::new_integer(IntegerStorage::I32(vec![7, -8, i32::MAX]), vec![3, 1])
             .expect("imag vector");
-        imag.data.clear();
 
         let result = complex_call(Value::Tensor(real), vec![Value::Tensor(imag)])
             .expect("complex integer broadcast");
@@ -796,13 +793,12 @@ pub(crate) mod tests {
     #[test]
     fn complex_mixed_gpu_path_uploads_typed_integer_storage_exactly() {
         test_support::with_test_provider(|provider| {
-            let mut real = Tensor::new_integer(IntegerStorage::I32(vec![2, 4]), vec![1, 2])
+            let real = Tensor::new_integer(IntegerStorage::I32(vec![2, 4]), vec![1, 2])
                 .expect("typed integer tensor");
-            real.data.clear();
             let imag = Tensor::new(vec![10.0, 20.0], vec![1, 2]).expect("imag tensor");
             let imag_handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &imag.data,
+                    data: &imag.materialize_f64(),
                     shape: &imag.shape,
                 })
                 .expect("upload imag");
@@ -1117,7 +1113,7 @@ pub(crate) mod tests {
             let real = Tensor::new(vec![1.0, -2.0, 3.5], vec![3, 1]).unwrap();
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &real.data,
+                    data: &real.materialize_f64(),
                     shape: &real.shape,
                 })
                 .expect("upload");
@@ -1146,7 +1142,7 @@ pub(crate) mod tests {
             let real = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
             let real_handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &real.data,
+                    data: &real.materialize_f64(),
                     shape: &real.shape,
                 })
                 .expect("upload real");
@@ -1177,13 +1173,13 @@ pub(crate) mod tests {
             let imag = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
             let real_handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &real.data,
+                    data: &real.materialize_f64(),
                     shape: &real.shape,
                 })
                 .expect("upload real");
             let imag_handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &imag.data,
+                    data: &imag.materialize_f64(),
                     shape: &imag.shape,
                 })
                 .expect("upload imag");
@@ -1217,13 +1213,13 @@ pub(crate) mod tests {
             let imag = Tensor::new(vec![10.0, 20.0], vec![2, 1]).unwrap();
             let real_handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &real.data,
+                    data: &real.materialize_f64(),
                     shape: &real.shape,
                 })
                 .expect("upload real");
             let imag_handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &imag.data,
+                    data: &imag.materialize_f64(),
                     shape: &imag.shape,
                 })
                 .expect("upload imag");
@@ -1275,13 +1271,13 @@ pub(crate) mod tests {
         .expect("cpu complex");
         let real_handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
-                data: &real.data,
+                data: &real.materialize_f64(),
                 shape: &real.shape,
             })
             .expect("upload real");
         let imag_handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
-                data: &imag.data,
+                data: &imag.materialize_f64(),
                 shape: &imag.shape,
             })
             .expect("upload imag");
@@ -1314,7 +1310,7 @@ pub(crate) mod tests {
             complex_call(Value::Num(2.0), vec![Value::Tensor(imag.clone())]).expect("cpu complex");
         let imag_handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
-                data: &imag.data,
+                data: &imag.materialize_f64(),
                 shape: &imag.shape,
             })
             .expect("upload imag");

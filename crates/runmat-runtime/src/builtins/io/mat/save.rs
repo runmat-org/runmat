@@ -1553,8 +1553,8 @@ pub(crate) mod tests {
             .collect();
         match values.get("single_data").unwrap() {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.dtype, NumericDType::F32);
-                assert_eq!(tensor.data, vec![1.25, 2.5]);
+                assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
+                assert_eq!(tensor.materialize_f64(), vec![1.25, 2.5]);
             }
             other => panic!("expected single tensor, got {other:?}"),
         }
@@ -1875,7 +1875,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload tensor");
@@ -1894,7 +1894,7 @@ pub(crate) mod tests {
             let array = mat.find_by_name("gpu_data").unwrap();
             match array.data() {
                 matfile::NumericData::Double { real, imag } => {
-                    assert_eq!(real, &tensor.data);
+                    assert_eq!(real, &tensor.materialize_f64());
                     assert!(imag.is_none());
                 }
                 _ => panic!("expected double array"),
@@ -1921,7 +1921,7 @@ pub(crate) mod tests {
 
         let tensor = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![2, 2]).unwrap();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload tensor");
@@ -1940,7 +1940,7 @@ pub(crate) mod tests {
         let array = mat.find_by_name("wgpu_tensor").unwrap();
         match array.data() {
             matfile::NumericData::Double { real, imag } => {
-                assert_eq!(real, &tensor.data);
+                assert_eq!(real, &tensor.materialize_f64());
                 assert!(imag.is_none());
             }
             _ => panic!("expected double array"),

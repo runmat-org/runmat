@@ -1052,10 +1052,9 @@ pub(crate) mod tests {
 
     #[test]
     fn uniform_classifier_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
                 .expect("integer tensor");
-        tensor.data.clear();
 
         match classify_value(&Value::Tensor(tensor)).expect("classify") {
             ClassifiedValue::Double(value) => {
@@ -1110,7 +1109,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 3]);
-                assert_eq!(t.data, vec![3.0, 4.0, 2.0]);
+                assert_eq!(t.materialize_f64(), vec![3.0, 4.0, 2.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1135,7 +1134,7 @@ pub(crate) mod tests {
             .expect("cellfun add");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![5.0, 7.0, 9.0]);
+                assert_eq!(t.materialize_f64(), vec![5.0, 7.0, 9.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1161,7 +1160,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 1]);
-                assert_eq!(tensor.data, vec![9.0]);
+                assert_eq!(tensor.materialize_f64(), vec![9.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1191,7 +1190,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 1]);
-                assert_eq!(tensor.data, vec![13.0]);
+                assert_eq!(tensor.materialize_f64(), vec![13.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1231,7 +1230,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 1]);
-                assert_eq!(tensor.data, vec![23.0]);
+                assert_eq!(tensor.materialize_f64(), vec![23.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1261,7 +1260,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 1]);
-                assert_eq!(tensor.data, vec![24.0]);
+                assert_eq!(tensor.materialize_f64(), vec![24.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1438,7 +1437,7 @@ pub(crate) mod tests {
         .expect("cellfun error handler");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![0.0, 0.0, 0.0]);
+                assert_eq!(t.materialize_f64(), vec![0.0, 0.0, 0.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1521,7 +1520,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data, vec![1.0, 2.5]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.5]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1623,7 +1622,7 @@ pub(crate) mod tests {
             .expect("cellfun size");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![2.0, 2.0]);
+                assert_eq!(t.materialize_f64(), vec![2.0, 2.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1648,7 +1647,7 @@ pub(crate) mod tests {
                 assert_eq!(ca.shape, vec![1, 1]);
                 let inner = ca.data[0].clone();
                 match inner {
-                    Value::Tensor(t) => assert_eq!(t.data, vec![3.0, 3.0]),
+                    Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![3.0, 3.0]),
                     _ => panic!("expected tensor inside cell"),
                 }
             }
@@ -1663,7 +1662,7 @@ pub(crate) mod tests {
             let angle = std::f64::consts::PI / 6.0;
             let tensor = Tensor::new(vec![angle], vec![1, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1673,7 +1672,7 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 1]);
             let expected = angle.sin();
-            assert!((gathered.data[0] - expected).abs() < 1e-12);
+            assert!((gathered.materialize_f64()[0] - expected).abs() < 1e-12);
         });
     }
 
@@ -1688,7 +1687,7 @@ pub(crate) mod tests {
 
         let value = Tensor::new(vec![0.25], vec![1, 1]).unwrap();
         let view = HostTensorView {
-            data: &value.data,
+            data: &value.materialize_f64(),
             shape: &value.shape,
         };
         let handle = provider.upload(&view).expect("upload");
@@ -1698,8 +1697,8 @@ pub(crate) mod tests {
             cellfun_builtin(Value::String("@sin".into()), vec![cell]).expect("cellfun sin");
         let gathered = test_support::gather(result).expect("gather");
         assert_eq!(gathered.shape, vec![1, 1]);
-        let expected = value.data[0].sin();
-        assert!((gathered.data[0] - expected).abs() < 1e-12);
+        let expected = value.materialize_f64()[0].sin();
+        assert!((gathered.materialize_f64()[0] - expected).abs() < 1e-12);
     }
 
     const CELLFUN_TEST_HELPER_ERRORS: [BuiltinErrorDescriptor; 0] = [];

@@ -1733,12 +1733,10 @@ mod tests {
     use futures::executor::block_on;
     use runmat_builtins::{IntegerStorage, NumericStorage};
 
-    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, poison: f64) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, _poison: f64) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         if tensor::element_count(&tensor.shape) == 0 {
-            tensor.data.fill(poison);
         } else {
-            tensor.data.clear();
         }
         Value::Tensor(tensor)
     }
@@ -1810,14 +1808,17 @@ mod tests {
                 match &values[0] {
                     Value::Tensor(t) => {
                         assert_eq!(t.shape, vec![2, 2]);
-                        assert_eq!(t.data.len(), 4);
+                        assert_eq!(t.materialize_f64().len(), 4);
                     }
                     other => panic!("expected tensor sample, got {other:?}"),
                 }
                 match &values[1] {
                     Value::Tensor(t) => {
                         assert_eq!(t.shape, vec![2, 1]);
-                        assert!(t.data.iter().all(|idx| (1.0..=3.0).contains(idx)));
+                        assert!(t
+                            .materialize_f64()
+                            .iter()
+                            .all(|idx| (1.0..=3.0).contains(idx)));
                     }
                     other => panic!("expected tensor indices, got {other:?}"),
                 }
@@ -1908,7 +1909,10 @@ mod tests {
         match range {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 1]);
-                assert!(t.data.iter().all(|value| (1.0..=5.0).contains(value)));
+                assert!(t
+                    .materialize_f64()
+                    .iter()
+                    .all(|value| (1.0..=5.0).contains(value)));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1925,7 +1929,7 @@ mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 4]);
                 assert!(t
-                    .data
+                    .materialize_f64()
                     .iter()
                     .all(|value| [10.0, 20.0, 30.0].contains(value)));
             }
@@ -1946,7 +1950,10 @@ mod tests {
         match out {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert!(t.data.iter().all(|value| (1.0..=3.0).contains(value)));
+                assert!(t
+                    .materialize_f64()
+                    .iter()
+                    .all(|value| (1.0..=3.0).contains(value)));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1957,9 +1964,9 @@ mod tests {
         match out {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 1]);
-                assert_eq!(t.data[0], 1.0);
-                assert!((1.0..=2.0).contains(&t.data[1]));
-                assert!((1.0..=3.0).contains(&t.data[2]));
+                assert_eq!(t.materialize_f64()[0], 1.0);
+                assert!((1.0..=2.0).contains(&t.materialize_f64()[1]));
+                assert!((1.0..=3.0).contains(&t.materialize_f64()[2]));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1974,8 +1981,11 @@ mod tests {
         match out {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 1]);
-                assert!(t.data.iter().all(|value| value.is_finite()));
-                assert!(t.data.iter().all(|value| (1.0..=3.0).contains(value)));
+                assert!(t.materialize_f64().iter().all(|value| value.is_finite()));
+                assert!(t
+                    .materialize_f64()
+                    .iter()
+                    .all(|value| (1.0..=3.0).contains(value)));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -2001,7 +2011,7 @@ mod tests {
                     match value {
                         Value::Tensor(t) => {
                             assert_eq!(t.shape, vec![1, expected_len]);
-                            seen.extend_from_slice(&t.data);
+                            seen.extend_from_slice(&t.materialize_f64());
                         }
                         other => panic!("expected tensor indices, got {other:?}"),
                     }
@@ -2118,7 +2128,7 @@ mod tests {
                 match &values[0] {
                     Value::Tensor(t) => {
                         assert_eq!(t.shape, vec![4, 1]);
-                        assert_eq!(t.data, vec![10.0; 4]);
+                        assert_eq!(t.materialize_f64(), vec![10.0; 4]);
                     }
                     Value::Num(value) => assert_eq!(*value, 10.0),
                     other => panic!("expected tensor bootstat, got {other:?}"),
@@ -2126,7 +2136,7 @@ mod tests {
                 match &values[1] {
                     Value::Tensor(t) => {
                         assert_eq!(t.shape, vec![3, 4]);
-                        assert_eq!(t.data, vec![1.0; 12]);
+                        assert_eq!(t.materialize_f64(), vec![1.0; 12]);
                     }
                     other => panic!("expected tensor bootsam, got {other:?}"),
                 }
@@ -2157,7 +2167,10 @@ mod tests {
                 match &values[1] {
                     Value::Tensor(t) => {
                         assert_eq!(t.shape, vec![3, 2]);
-                        assert!(t.data.iter().all(|idx| (1.0..=3.0).contains(idx)));
+                        assert!(t
+                            .materialize_f64()
+                            .iter()
+                            .all(|idx| (1.0..=3.0).contains(idx)));
                     }
                     other => panic!("expected tensor bootsam, got {other:?}"),
                 }
@@ -2198,7 +2211,7 @@ mod tests {
         match out {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 1]);
-                assert_eq!(t.data, vec![42.0; 3]);
+                assert_eq!(t.materialize_f64(), vec![42.0; 3]);
             }
             other => panic!("expected tensor bootstat, got {other:?}"),
         }
@@ -2221,7 +2234,10 @@ mod tests {
             Value::OutputList(values) => match &values[1] {
                 Value::Tensor(t) => {
                     assert_eq!(t.shape, vec![4, 2]);
-                    assert!(t.data.iter().all(|idx| (1.0..=4.0).contains(idx)));
+                    assert!(t
+                        .materialize_f64()
+                        .iter()
+                        .all(|idx| (1.0..=4.0).contains(idx)));
                 }
                 other => panic!("expected tensor bootsam, got {other:?}"),
             },
@@ -2325,14 +2341,12 @@ mod tests {
 
     #[test]
     fn bootstrp_empty_function_detection_uses_typed_integer_storage_length() {
-        let mut scalar =
+        let scalar =
             Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("typed scalar");
-        scalar.data.clear();
         assert!(!is_empty_function(&Value::Tensor(scalar)));
 
-        let mut empty =
+        let empty =
             Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 0]).expect("typed empty");
-        empty.data.clear();
         assert!(is_empty_function(&Value::Tensor(empty)));
     }
 

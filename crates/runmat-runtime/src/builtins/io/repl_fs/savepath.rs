@@ -763,7 +763,7 @@ pub(crate) mod tests {
             let ascii: Vec<f64> = text.chars().map(|ch| ch as u32 as f64).collect();
             let tensor = Tensor::new(ascii.clone(), vec![1, ascii.len()]).expect("tensor");
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -799,7 +799,7 @@ pub(crate) mod tests {
         let ascii: Vec<f64> = text.chars().map(|ch| ch as u32 as f64).collect();
         let tensor = Tensor::new(ascii.clone(), vec![1, ascii.len()]).expect("tensor");
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");

@@ -653,17 +653,14 @@ mod tests {
 
     #[test]
     fn scalar_number_reads_typed_integer_storage_exactly() {
-        let mut alpha = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
-        alpha.data.clear();
+        let alpha = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
 
         assert_eq!(scalar_number(&Value::Tensor(alpha)), Some(1.0));
     }
 
     #[test]
     fn numeric_matrix_reads_typed_integer_storage_exactly() {
-        let mut tensor =
-            Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3]), vec![1, 3]).unwrap();
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3]), vec![1, 3]).unwrap();
 
         let matrix = numeric_matrix(Value::Tensor(tensor), "grpstats").unwrap();
 
@@ -675,11 +672,9 @@ mod tests {
     #[test]
     fn grpstats_uses_typed_storage_for_row_and_group_lengths() {
         let wide = (1_u64 << 53) + 1;
-        let mut data =
+        let data =
             Tensor::new_integer(IntegerStorage::U64(vec![wide, u64::MAX]), vec![1, 2]).unwrap();
-        data.data.clear();
-        let mut group = Tensor::new_integer(IntegerStorage::I64(vec![-3, -3]), vec![1, 2]).unwrap();
-        group.data = vec![f64::NAN];
+        let group = Tensor::new_integer(IntegerStorage::I64(vec![-3, -3]), vec![1, 2]).unwrap();
 
         let matrix = numeric_matrix(Value::Tensor(data), "grpstats").unwrap();
         assert_eq!(matrix.rows, 2);
@@ -689,8 +684,7 @@ mod tests {
 
     #[test]
     fn matrix_from_table_column_reads_typed_integer_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![4, 5]), vec![2, 1]).unwrap();
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![4, 5]), vec![2, 1]).unwrap();
 
         let matrix = matrix_from_table_column(&Value::Tensor(tensor)).unwrap();
 

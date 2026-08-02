@@ -434,7 +434,7 @@ fn lsqcurvefit_accepts_anonymous_curve_model() {
     )
     .unwrap();
     assert!(vars.iter().any(|v| {
-        matches!(v, runmat_builtins::Value::Tensor(t) if t.shape == vec![2, 1] && (t.data[0] - 2.0).abs() < 1e-5 && (t.data[1] - 1.0).abs() < 1e-5)
+        matches!(v, runmat_builtins::Value::Tensor(t) if t.shape == vec![2, 1] && (t.materialize_f64()[0] - 2.0).abs() < 1e-5 && (t.materialize_f64()[1] - 1.0).abs() < 1e-5)
     }));
 }
 
@@ -443,7 +443,7 @@ fn lsqnonlin_accepts_anonymous_residual_function() {
     let vars =
         execute_source("r = @(x) [x(1)-2; x(2)-3; x(1)+x(2)-5]; x = lsqnonlin(r, [0;0]);").unwrap();
     assert!(vars.iter().any(|v| {
-        matches!(v, runmat_builtins::Value::Tensor(t) if t.shape == vec![2, 1] && (t.data[0] - 2.0).abs() < 1e-5 && (t.data[1] - 3.0).abs() < 1e-5)
+        matches!(v, runmat_builtins::Value::Tensor(t) if t.shape == vec![2, 1] && (t.materialize_f64()[0] - 2.0).abs() < 1e-5 && (t.materialize_f64()[1] - 3.0).abs() < 1e-5)
     }));
 }
 
@@ -486,9 +486,13 @@ fn fsolve_accepts_anonymous_vector_function() {
             .unwrap();
     assert!(vars.iter().any(|v| {
         if let runmat_builtins::Value::Tensor(t) = v {
-            t.data.len() == 2
-                && (t.data[0] * t.data[0] + t.data[1] * t.data[1] - 4.0).abs() < 1e-5
-                && (t.data[0] * t.data[1] - 1.0).abs() < 1e-5
+            t.materialize_f64().len() == 2
+                && (t.materialize_f64()[0] * t.materialize_f64()[0]
+                    + t.materialize_f64()[1] * t.materialize_f64()[1]
+                    - 4.0)
+                    .abs()
+                    < 1e-5
+                && (t.materialize_f64()[0] * t.materialize_f64()[1] - 1.0).abs() < 1e-5
         } else {
             false
         }
@@ -500,7 +504,7 @@ fn ode45_accepts_anonymous_rhs_function() {
     let vars = execute_source("y = ode45(@(t, y) -y, [0 1], 1);").unwrap();
     assert!(vars.iter().any(|v| {
         if let runmat_builtins::Value::Tensor(t) = v {
-            t.cols() == 1 && (t.data[t.rows() - 1] - (-1.0_f64).exp()).abs() < 1e-2
+            t.cols() == 1 && (t.materialize_f64()[t.rows() - 1] - (-1.0_f64).exp()).abs() < 1e-2
         } else {
             false
         }
@@ -514,7 +518,7 @@ fn ode23_accepts_two_output_assignment() {
         if let runmat_builtins::Value::Tensor(tensor) = v {
             tensor.cols() == 1
                 && tensor.rows() == 4
-                && (tensor.data[tensor.rows() - 1] - (-2.0_f64).exp()).abs() < 2e-2
+                && (tensor.materialize_f64()[tensor.rows() - 1] - (-2.0_f64).exp()).abs() < 2e-2
         } else {
             false
         }

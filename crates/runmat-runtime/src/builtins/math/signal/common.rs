@@ -455,14 +455,12 @@ mod tests {
             panic!("expected real tensor");
         };
         assert_eq!(tensor.shape, vec![1, 2]);
-        assert_eq!(tensor.data, vec![1.0, 2.0]);
+        assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0]);
     }
 
     #[test]
     fn signal_complex_vector_parser_reads_typed_integer_storage_exactly() {
-        let mut tensor =
-            Tensor::new_integer(IntegerStorage::I16(vec![3, -2, 5]), vec![1, 3]).unwrap();
-        tensor.data = vec![0.0, 0.0, 0.0];
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![3, -2, 5]), vec![1, 3]).unwrap();
 
         let input = tensor_to_complex_vector("test", "x", tensor).expect("vector");
 
@@ -496,8 +494,7 @@ mod tests {
 
     #[test]
     fn signal_scalar_parser_reads_typed_integer_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).unwrap();
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).unwrap();
 
         let scalar = parse_scalar_f64("test", "fs", &Value::Tensor(tensor)).expect("scalar");
 
@@ -542,8 +539,7 @@ mod tests {
 
     #[test]
     fn scalar_length_arg_reads_typed_integer_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![4]), vec![1, 1]).unwrap();
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![4]), vec![1, 1]).unwrap();
 
         let len = scalar_length_arg(Value::Tensor(tensor)).expect("valid length");
 

@@ -1599,7 +1599,7 @@ pub(crate) mod tests {
         );
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let tensor = Tensor::new(vec![0.5, 1.5, 2.5], vec![3, 1]).unwrap();
-        let handle = gpu_helpers::upload_tensor(provider.as_ref(), &tensor).expect("upload");
+        let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
         let eval = block_on(evaluate(
             Value::GpuTensor(handle),
             &[Value::Tensor(

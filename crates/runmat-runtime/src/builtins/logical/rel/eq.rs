@@ -634,10 +634,9 @@ pub(crate) mod tests {
 
     #[test]
     fn scalar_numeric_value_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
                 .expect("integer tensor");
-        tensor.data.clear();
 
         assert_eq!(
             scalar_numeric_value(&Value::Tensor(tensor)),
@@ -667,8 +666,7 @@ pub(crate) mod tests {
         ];
 
         for (storage, real, expected) in cases {
-            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer scalar");
-            tensor.data = vec![f64::NAN];
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer scalar");
             assert_eq!(
                 run_eq(Value::Tensor(tensor), Value::Complex(real, 0.0)).expect("eq"),
                 Value::Bool(expected)
@@ -678,13 +676,10 @@ pub(crate) mod tests {
 
     #[test]
     fn eq_dense_integer_arrays_read_exact_storage_without_mirror() {
-        let mut lhs =
-            Tensor::new_integer(IntegerStorage::U64(vec![0, (1_u64 << 53) + 1]), vec![2, 1])
-                .expect("lhs");
-        lhs.data.clear();
-        let mut rhs = Tensor::new_integer(IntegerStorage::I64(vec![0, 1, i64::MAX]), vec![1, 3])
+        let lhs = Tensor::new_integer(IntegerStorage::U64(vec![0, (1_u64 << 53) + 1]), vec![2, 1])
+            .expect("lhs");
+        let rhs = Tensor::new_integer(IntegerStorage::I64(vec![0, 1, i64::MAX]), vec![1, 3])
             .expect("rhs");
-        rhs.data.clear();
 
         let result = run_eq(Value::Tensor(lhs), Value::Tensor(rhs)).expect("eq");
         match result {
@@ -840,7 +835,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let a = provider.upload(&view).expect("upload");
@@ -848,7 +843,7 @@ pub(crate) mod tests {
             let result = run_eq(Value::GpuTensor(a), Value::GpuTensor(b)).expect("gpu eq succeeds");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![3, 1]);
-            assert_eq!(gathered.data, vec![1.0, 1.0, 1.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 1.0, 1.0]);
         });
     }
 
@@ -938,7 +933,7 @@ pub(crate) mod tests {
         let cpu =
             run_eq_host(Value::Tensor(tensor.clone()), Value::Tensor(tensor.clone())).unwrap();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().unwrap();
@@ -953,14 +948,14 @@ pub(crate) mod tests {
                     ProviderPrecision::F64 => 1e-12,
                     ProviderPrecision::F32 => 1e-5,
                 };
-                for (idx, value) in actual.data.iter().enumerate() {
+                for (idx, value) in actual.materialize_f64().iter().enumerate() {
                     let expected_val = expected.data[idx] as f64;
                     assert!((value - expected_val).abs() <= tol);
                 }
             }
             (Value::Bool(flag), actual) => {
                 assert_eq!(tensor::element_count(&actual.shape), 1);
-                assert_eq!(actual.data[0] != 0.0, flag);
+                assert_eq!(actual.materialize_f64()[0] != 0.0, flag);
             }
             other => panic!("unexpected comparison result {other:?}"),
         }

@@ -430,10 +430,9 @@ mod tests {
     }
 
     fn int_tensor(data: Vec<i16>, rows: usize, cols: usize) -> Tensor {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(runmat_builtins::IntegerStorage::I16(data), vec![rows, cols])
                 .expect("integer tensor");
-        tensor.data.clear();
         tensor
     }
 
@@ -443,7 +442,10 @@ mod tests {
 
         assert_eq!(transposed.rows, 3);
         assert_eq!(transposed.cols, 2);
-        assert_eq!(transposed.data, vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]);
+        assert_eq!(
+            transposed.materialize_f64(),
+            vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]
+        );
         assert_eq!(
             transposed.numeric_dtype(),
             runmat_builtins::NumericDType::I16

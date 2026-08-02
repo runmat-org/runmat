@@ -276,7 +276,7 @@ mod tests {
         match out {
             Value::Tensor(t) => {
                 assert_eq!(t.cols(), 1);
-                let last = t.data[t.rows() - 1];
+                let last = t.materialize_f64()[t.rows() - 1];
                 assert!((last - (-1.0_f64).exp()).abs() < 5.0e-3);
             }
             other => panic!("unexpected output {other:?}"),
@@ -334,7 +334,7 @@ mod tests {
         match out {
             Value::Tensor(t) => {
                 assert_eq!(t.cols(), 1);
-                let last = t.data[t.rows() - 1];
+                let last = t.materialize_f64()[t.rows() - 1];
                 assert!(last.is_finite());
                 assert!(last > 0.0);
                 assert!(last < 1.0);

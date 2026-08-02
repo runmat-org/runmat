@@ -276,8 +276,7 @@ mod tests {
     }
 
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         tensor
     }
 
@@ -368,7 +367,7 @@ mod tests {
         ];
         let result = block_on(normrnd_builtin(args)).expect("normrnd");
         let data = match result {
-            Value::Tensor(t) => t.data,
+            Value::Tensor(t) => t.materialize_f64(),
             other => panic!("expected tensor, got {other:?}"),
         };
         let mean = data.iter().sum::<f64>() / data.len() as f64;

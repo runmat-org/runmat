@@ -658,8 +658,7 @@ mod tests {
     }
 
     fn cleared_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Tensor {
-        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
         tensor
     }
 
@@ -811,7 +810,7 @@ mod tests {
         let Value::Tensor(x) = x else {
             panic!("expected XData tensor");
         };
-        assert_eq!(x.data, vec![7.0, 8.0, 9.0, 10.0]);
+        assert_eq!(x.materialize_f64(), vec![7.0, 8.0, 9.0, 10.0]);
     }
 
     #[test]
@@ -845,7 +844,7 @@ mod tests {
         let Value::Tensor(handles) = handles else {
             panic!("expected handle row vector");
         };
-        assert_eq!(handles.data.len(), 2);
+        assert_eq!(handles.materialize_f64().len(), 2);
         let fig = clone_figure(current_figure_handle()).unwrap();
         assert_eq!(fig.plots().count(), 2);
     }
@@ -889,6 +888,6 @@ mod tests {
         let Value::Tensor(z) = z else {
             panic!("expected ZData tensor");
         };
-        assert_eq!(z.data, vec![7.0, 8.0, 9.0]);
+        assert_eq!(z.materialize_f64(), vec![7.0, 8.0, 9.0]);
     }
 }

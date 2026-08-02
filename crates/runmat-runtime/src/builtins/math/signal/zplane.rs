@@ -699,10 +699,8 @@ mod tests {
 
     #[test]
     fn sos_reads_typed_integer_storage_exactly() {
-        let mut tensor =
-            Tensor::new_integer(IntegerStorage::I16(vec![1, 1, 0, 1, -1, 0]), vec![1, 6])
-                .expect("integer sos");
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, 1, 0, 1, -1, 0]), vec![1, 6])
+            .expect("integer sos");
 
         let data = block_on(parse_zero_pole_data(vec![Value::Tensor(tensor)])).expect("sos");
 
@@ -736,9 +734,8 @@ mod tests {
 
     #[test]
     fn explicit_zpk_gain_reads_typed_integer_storage_exactly() {
-        let mut gain =
+        let gain =
             Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("integer gain");
-        gain.data.clear();
 
         let data = block_on(parse_zero_pole_data(vec![
             col(&[0.2, 0.4]),
@@ -771,7 +768,10 @@ mod tests {
             panic!("expected handle tensor");
         };
         assert_eq!(handles.shape, vec![1, 4]);
-        assert!(handles.data.iter().all(|handle| handle.is_finite()));
+        assert!(handles
+            .materialize_f64()
+            .iter()
+            .all(|handle| handle.is_finite()));
     }
 
     #[test]

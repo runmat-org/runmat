@@ -321,7 +321,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![0.0, 1.0, 1.0, 0.0]);
+                assert_eq!(t.materialize_f64(), vec![0.0, 1.0, 1.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -447,7 +447,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data, vec![72.0, 105.0]);
+                assert_eq!(t.materialize_f64(), vec![72.0, 105.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -468,14 +468,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 1.0, -3.0, 4.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = conj_builtin(Value::GpuTensor(handle)).expect("conj");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![4, 1]);
-            assert_eq!(gathered.data, tensor.data);
+            assert_eq!(gathered.materialize_f64(), tensor.materialize_f64());
         });
     }
 
@@ -514,7 +514,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, -2.0, 3.5, 0.0], vec![4, 1]).unwrap();
         let cpu = conj_real(Value::Tensor(tensor.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()
@@ -526,7 +526,7 @@ pub(crate) mod tests {
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
                 assert_eq!(ct.shape, gt.shape);
-                assert_eq!(ct.data, gt.data);
+                assert_eq!(ct.materialize_f64(), gt.materialize_f64());
             }
             _ => panic!("unexpected shapes"),
         }

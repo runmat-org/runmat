@@ -391,7 +391,8 @@ pub(crate) mod tests {
         match output {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 2]);
-                for (actual, expected) in tensor.data.iter().zip([1.0, 1.0, 2.0, 6.0]) {
+                for (actual, expected) in tensor.materialize_f64().iter().zip([1.0, 1.0, 2.0, 6.0])
+                {
                     approx_eq(*actual, expected, 1e-12);
                 }
             }
@@ -420,9 +421,8 @@ pub(crate) mod tests {
         let scalar = call(Value::Int(IntValue::I32(5)), Vec::new()).unwrap_err();
         assert_eq!(scalar.identifier(), GAMMA_ERROR_INVALID_INPUT.identifier);
 
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![1, u64::MAX]), vec![1, 2]).unwrap();
-        tensor.data.fill(1.0);
         let tensor = call(Value::Tensor(tensor), Vec::new()).unwrap_err();
         assert_eq!(tensor.identifier(), GAMMA_ERROR_INVALID_INPUT.identifier);
     }
@@ -464,7 +464,7 @@ pub(crate) mod tests {
             let gathered = test_support::gather(output).unwrap();
             assert_eq!(gathered.shape, vec![2, 2]);
             assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
-            for (actual, expected) in gathered.data.iter().zip([1.0, 1.0, 2.0, 6.0]) {
+            for (actual, expected) in gathered.materialize_f64().iter().zip([1.0, 1.0, 2.0, 6.0]) {
                 approx_eq(*actual, expected, 1e-12);
             }
         });

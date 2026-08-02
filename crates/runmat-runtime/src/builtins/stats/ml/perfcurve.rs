@@ -1538,8 +1538,7 @@ mod tests {
     }
 
     fn int_tensor(storage: IntegerStorage, shape: &[usize]) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape.to_vec()).unwrap();
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, shape.to_vec()).unwrap();
         Value::Tensor(tensor)
     }
 
@@ -1581,11 +1580,14 @@ mod tests {
         assert_eq!(y.shape, vec![5, 1]);
         assert_eq!(thresholds.shape, vec![5, 1]);
         assert!((output_num(&result, 3) - 0.75).abs() < 1.0e-12);
-        assert_eq!(x.data[0], 0.0);
-        assert_eq!(y.data[0], 0.0);
-        assert_eq!(thresholds.data[0], thresholds.data[1]);
-        assert_eq!(x.data[4], 1.0);
-        assert_eq!(y.data[4], 1.0);
+        assert_eq!(x.materialize_f64()[0], 0.0);
+        assert_eq!(y.materialize_f64()[0], 0.0);
+        assert_eq!(
+            thresholds.materialize_f64()[0],
+            thresholds.materialize_f64()[1]
+        );
+        assert_eq!(x.materialize_f64()[4], 1.0);
+        assert_eq!(y.materialize_f64()[4], 1.0);
         let opt = output_tensor(&result, 4);
         assert_eq!(opt.shape, vec![1, 2]);
     }
@@ -1651,7 +1653,10 @@ mod tests {
         let suby = output_tensor(&result, 5);
         assert_eq!(x.shape, vec![4, 1]);
         assert_eq!(suby.shape, vec![4, 1]);
-        assert!(y.data.iter().any(|value| (*value - 0.5).abs() < 1.0e-12));
+        assert!(y
+            .materialize_f64()
+            .iter()
+            .any(|value| (*value - 0.5).abs() < 1.0e-12));
         match &result {
             Value::OutputList(values) => match &values[6] {
                 Value::Cell(names) => assert_eq!(
@@ -1677,7 +1682,7 @@ mod tests {
         .unwrap();
         let x = output_tensor(&result, 0);
         assert_eq!(x.shape, vec![2, 1]);
-        assert_eq!(x.data, vec![0.5, 0.0]);
+        assert_eq!(x.materialize_f64(), vec![0.5, 0.0]);
         assert!(output_num(&result, 3).is_finite());
 
         let result = perfcurve_builtin(
@@ -1693,7 +1698,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(output_tensor(&result, 0).data, vec![0.0, 0.5]);
+        assert_eq!(output_tensor(&result, 0).materialize_f64(), vec![0.0, 0.5]);
     }
 
     #[tokio::test]
@@ -1753,8 +1758,11 @@ mod tests {
         .await
         .unwrap();
         let y = output_tensor(&result, 1);
-        assert!(y.data.iter().any(|value| (*value - 0.5).abs() < 1.0e-12));
+        assert!(y
+            .materialize_f64()
+            .iter()
+            .any(|value| (*value - 0.5).abs() < 1.0e-12));
         let opt = output_tensor(&result, 4);
-        assert!(opt.data.iter().all(|value| value.is_nan()));
+        assert!(opt.materialize_f64().iter().all(|value| value.is_nan()));
     }
 }

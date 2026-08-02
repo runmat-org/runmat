@@ -847,10 +847,9 @@ mod tests {
         storage: IntegerStorage,
         rows: usize,
         cols: usize,
-        poison: f64,
+        _poison: f64,
     ) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
-        tensor.data.fill(poison);
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
         Value::Tensor(tensor)
     }
 
@@ -887,15 +886,15 @@ mod tests {
         let out = outputs(block_on(regress_builtin(y, x, Vec::new())).unwrap());
         let b = tensor_ref(&out[0]);
         assert_eq!(b.shape, vec![2, 1]);
-        assert_close(b.data[0], 1.0);
-        assert_close(b.data[1], 2.0);
+        assert_close(b.materialize_f64()[0], 1.0);
+        assert_close(b.materialize_f64()[1], 2.0);
         assert_eq!(tensor_ref(&out[1]).shape, vec![2, 2]);
         assert_eq!(tensor_ref(&out[2]).shape, vec![4, 1]);
         assert_eq!(tensor_ref(&out[3]).shape, vec![4, 2]);
         let stats = tensor_ref(&out[4]);
         assert_eq!(stats.shape, vec![1, 4]);
-        assert_close(stats.data[0], 1.0);
-        assert_close(stats.data[3], 0.0);
+        assert_close(stats.materialize_f64()[0], 1.0);
+        assert_close(stats.materialize_f64()[3], 0.0);
     }
 
     #[test]
@@ -911,8 +910,8 @@ mod tests {
         let out = outputs(block_on(regress_builtin(y, x, Vec::new())).unwrap());
         let b = tensor_ref(&out[0]);
         assert_eq!(b.shape, vec![2, 1]);
-        assert_close(b.data[0], 1.0);
-        assert_close(b.data[1], 2.0);
+        assert_close(b.materialize_f64()[0], 1.0);
+        assert_close(b.materialize_f64()[1], 2.0);
     }
 
     #[test]
@@ -931,8 +930,8 @@ mod tests {
         let x = tensor(vec![1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 2.0, 3.0], 4, 2);
         let out = outputs(block_on(regress_builtin(y, x, vec![Value::Num(0.1)])).unwrap());
         let b = tensor_ref(&out[0]);
-        assert_close(b.data[0], 1.0);
-        assert_close(b.data[1], 2.0);
+        assert_close(b.materialize_f64()[0], 1.0);
+        assert_close(b.materialize_f64()[1], 2.0);
         assert_eq!(tensor_ref(&out[2]).shape, vec![3, 1]);
         assert_eq!(tensor_ref(&out[3]).shape, vec![3, 2]);
     }
@@ -964,8 +963,8 @@ mod tests {
         let out = outputs(block_on(regress_builtin(y, x, Vec::new())).unwrap());
 
         let b = tensor_ref(&out[0]);
-        assert_close_tol(b.data[0], 1.023809523809523, 1.0e-12);
-        assert_close_tol(b.data[1], 0.9971428571428576, 1.0e-12);
+        assert_close_tol(b.materialize_f64()[0], 1.023809523809523, 1.0e-12);
+        assert_close_tol(b.materialize_f64()[1], 0.9971428571428576, 1.0e-12);
 
         let bint = tensor_ref(&out[1]);
         let expected_bint = [
@@ -974,7 +973,7 @@ mod tests {
             1.3542858140996163,
             1.1062955833956896,
         ];
-        for (actual, expected) in bint.data.iter().zip(expected_bint) {
+        for (actual, expected) in bint.materialize_f64().iter().zip(expected_bint) {
             assert_close_tol(*actual, expected, 1.0e-9);
         }
 
@@ -993,7 +992,7 @@ mod tests {
             0.1118688233249418,
             0.4729586349799683,
         ];
-        for (actual, expected) in rint.data.iter().zip(expected_rint) {
+        for (actual, expected) in rint.materialize_f64().iter().zip(expected_rint) {
             assert_close_tol(*actual, expected, 1.0e-9);
         }
 
@@ -1004,7 +1003,7 @@ mod tests {
             1.4348829360466553e-05,
             0.027047619047619084,
         ];
-        for (actual, expected) in stats.data.iter().zip(expected_stats) {
+        for (actual, expected) in stats.materialize_f64().iter().zip(expected_stats) {
             assert_close_tol(*actual, expected, 1.0e-9);
         }
     }
@@ -1024,12 +1023,12 @@ mod tests {
         );
         let out = outputs(block_on(regress_builtin(y, x, Vec::new())).unwrap());
         let b = tensor_ref(&out[0]);
-        assert_close(b.data[0], 1.0);
-        assert_close(b.data[1], 0.0);
-        assert_close(b.data[2], 1.0);
+        assert_close(b.materialize_f64()[0], 1.0);
+        assert_close(b.materialize_f64()[1], 0.0);
+        assert_close(b.materialize_f64()[2], 1.0);
         let bint = tensor_ref(&out[1]);
-        assert_close(bint.data[1], 0.0);
-        assert_close(bint.data[4], 0.0);
+        assert_close(bint.materialize_f64()[1], 0.0);
+        assert_close(bint.materialize_f64()[4], 0.0);
     }
 
     #[test]

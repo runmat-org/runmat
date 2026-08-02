@@ -1396,8 +1396,7 @@ mod tests {
     }
 
     fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         Value::Tensor(tensor)
     }
 
@@ -1505,8 +1504,7 @@ mod tests {
 
     #[test]
     fn scalar_group_label_reads_typed_integer_storage_without_double_mirror() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![42]), vec![1, 1]).unwrap();
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![42]), vec![1, 1]).unwrap();
 
         assert_eq!(
             scalar_group_label(&Value::Tensor(tensor)).unwrap(),

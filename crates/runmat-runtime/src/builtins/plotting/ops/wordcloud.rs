@@ -1552,8 +1552,7 @@ mod tests {
     #[test]
     fn wordcloud_integer_options_read_all_typed_storage_classes_with_poisoned_f64_mirrors() {
         for storage in integer_scalar_storages(2) {
-            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer option");
-            tensor.data = vec![f64::NAN];
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer option");
             let value = Value::Tensor(tensor);
 
             let mut options = WordCloudOptions::default();
@@ -1567,8 +1566,7 @@ mod tests {
     #[test]
     fn wordcloud_parent_reads_all_typed_storage_classes_with_poisoned_f64_mirrors() {
         for storage in integer_scalar_storages(1) {
-            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer parent");
-            tensor.data = vec![f64::NAN];
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer parent");
             assert_eq!(
                 numeric_figure_parent(&Value::Tensor(tensor)),
                 Some(FigureHandle::from(1))
@@ -1578,12 +1576,11 @@ mod tests {
 
     #[test]
     fn wordcloud_numeric_vector_reads_typed_integer_storage_exactly() {
-        let mut sizes = Tensor::new_integer(
+        let sizes = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U16(vec![2, 4, 8]),
             vec![1, 3],
         )
         .expect("typed size vector");
-        sizes.data.clear();
 
         assert_eq!(
             numeric_vector(&Value::Tensor(sizes), "SizeData").expect("numeric vector"),
@@ -1593,12 +1590,11 @@ mod tests {
 
     #[test]
     fn wordcloud_color_reads_typed_integer_storage_exactly() {
-        let mut color = Tensor::new_integer(
+        let color = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U16(vec![1, 0, 0]),
             vec![1, 3],
         )
         .expect("typed color vector");
-        color.data.clear();
 
         assert_eq!(
             color_list(&Value::Tensor(color), "Color", None).expect("color list"),
@@ -1608,12 +1604,11 @@ mod tests {
 
     #[test]
     fn wordcloud_color_matrix_reads_typed_integer_storage_exactly() {
-        let mut color = Tensor::new_integer(
+        let color = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U16(vec![1, 0, 0, 1, 0, 0]),
             vec![2, 3],
         )
         .expect("typed color matrix");
-        color.data.clear();
 
         assert_eq!(
             color_list(&Value::Tensor(color), "Color", Some(2)).expect("color list"),
@@ -1724,7 +1719,7 @@ mod tests {
         let Value::Tensor(sizes) = sizes else {
             panic!("expected SizeData tensor");
         };
-        assert_eq!(sizes.data, vec![2.0, 1.0, 1.0]);
+        assert_eq!(sizes.materialize_f64(), vec![2.0, 1.0, 1.0]);
 
         let docs = tokenized_document_object(vec![
             vec!["delta".into(), "epsilon".into(), "delta".into()],
@@ -1758,7 +1753,7 @@ mod tests {
         let Value::Tensor(sizes) = sizes else {
             panic!("expected categorical counts");
         };
-        assert_eq!(sizes.data, vec![2.0, 1.0]);
+        assert_eq!(sizes.materialize_f64(), vec![2.0, 1.0]);
 
         let table = table_object(
             &["Word", "Count"],

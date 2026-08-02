@@ -311,9 +311,8 @@ mod tests {
 
     #[test]
     fn create_matrix_preserves_exact_integer_storage_column_major() {
-        let mut scalar = Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63]), vec![1, 1])
+        let scalar = Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63]), vec![1, 1])
             .expect("scalar integer tensor");
-        scalar.data.clear();
         let mut stack = vec![
             Value::Tensor(scalar),
             Value::Int(IntValue::U64(u64::MAX)),
@@ -335,9 +334,8 @@ mod tests {
 
     #[test]
     fn pack_uses_cleared_typed_scalar_storage_for_class_and_value() {
-        let mut scalar = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+        let scalar = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
             .expect("scalar integer tensor");
-        scalar.data.clear();
         let mut stack = vec![Value::Tensor(scalar), Value::Num(3.5)];
 
         pack_to_row(&mut stack, 2).expect("pack row");

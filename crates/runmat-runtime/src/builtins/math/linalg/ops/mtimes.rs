@@ -516,7 +516,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![58.0, 139.0, 64.0, 154.0]);
+                assert_eq!(t.materialize_f64(), vec![58.0, 139.0, 64.0, 154.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -571,7 +571,7 @@ pub(crate) mod tests {
         let result = mtimes_builtin(Value::Num(0.5), Value::Tensor(a)).expect("mtimes");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![0.5, 1.0, 1.5, 2.0]);
+                assert_eq!(t.materialize_f64(), vec![0.5, 1.0, 1.5, 2.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -584,7 +584,7 @@ pub(crate) mod tests {
         let result = mtimes_builtin(Value::Tensor(a), Value::Num(3.0)).expect("mtimes");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![3.0, 6.0, 9.0, 12.0]);
+                assert_eq!(t.materialize_f64(), vec![3.0, 6.0, 9.0, 12.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -612,7 +612,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![2.0, 3.0, 4.0, 5.0]);
+                assert_eq!(t.materialize_f64(), vec![2.0, 3.0, 4.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -683,7 +683,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &matrix.data,
+                data: &matrix.materialize_f64(),
                 shape: &matrix.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -696,7 +696,7 @@ pub(crate) mod tests {
                 other => panic!("expected gpu tensor, got {other:?}"),
             };
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![2.0, 4.0, 6.0, 8.0]);
+            assert_eq!(gathered.materialize_f64(), vec![2.0, 4.0, 6.0, 8.0]);
         });
     }
 
@@ -705,13 +705,12 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &matrix.data,
+                data: &matrix.materialize_f64(),
                 shape: &matrix.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let mut scalar =
+            let scalar =
                 Tensor::new_integer(IntegerStorage::U8(vec![3]), vec![1, 1]).expect("scalar");
-            scalar.data[0] = 0.0;
 
             let result = mtimes_builtin(Value::Tensor(scalar), Value::GpuTensor(handle))
                 .expect("gpu scalar mtimes");
@@ -722,7 +721,7 @@ pub(crate) mod tests {
                 other => panic!("expected gpu tensor, got {other:?}"),
             };
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![3.0, 6.0, 9.0, 12.0]);
+            assert_eq!(gathered.materialize_f64(), vec![3.0, 6.0, 9.0, 12.0]);
         });
     }
 
@@ -733,11 +732,11 @@ pub(crate) mod tests {
             let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let b = Tensor::new(vec![5.0, 7.0, 6.0, 8.0], vec![2, 2]).unwrap();
             let view_a = runmat_accelerate_api::HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             };
             let view_b = runmat_accelerate_api::HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             };
             let ha = provider.upload(&view_a).expect("upload A");
@@ -746,7 +745,7 @@ pub(crate) mod tests {
                 mtimes_builtin(Value::GpuTensor(ha), Value::GpuTensor(hb)).expect("mtimes");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![26.0, 38.0, 30.0, 44.0]);
+            assert_eq!(gathered.materialize_f64(), vec![26.0, 38.0, 30.0, 44.0]);
         });
     }
 
@@ -767,11 +766,11 @@ pub(crate) mod tests {
 
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view_a = runmat_accelerate_api::HostTensorView {
-            data: &a.data,
+            data: &a.materialize_f64(),
             shape: &a.shape,
         };
         let view_b = runmat_accelerate_api::HostTensorView {
-            data: &b.data,
+            data: &b.materialize_f64(),
             shape: &b.shape,
         };
         let ha = provider.upload(&view_a).expect("upload A");
@@ -781,7 +780,7 @@ pub(crate) mod tests {
         let gathered = test_support::gather(gpu).expect("gather gpu");
 
         assert_eq!(gathered.shape, expected.shape);
-        assert_eq!(gathered.data, expected.data);
+        assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 
     fn mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {

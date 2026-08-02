@@ -640,12 +640,11 @@ pub(crate) mod tests {
     #[test]
     fn csvwrite_preserves_typed_integer_matrix_values_exactly() {
         let path = temp_path("csv");
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             IntegerStorage::U64(vec![u64::MAX, 17, (1_u64 << 53) + 1, 29]),
             vec![2, 2],
         )
         .expect("typed integer matrix");
-        tensor.data.fill(0.0);
         let filename = path.to_string_lossy().into_owned();
 
         csvwrite_builtin(Value::from(filename), Value::Tensor(tensor), Vec::new())
@@ -691,7 +690,7 @@ pub(crate) mod tests {
             let path = temp_path("csv");
             let tensor = Tensor::new(vec![0.5, 1.5], vec![1, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -746,22 +745,19 @@ pub(crate) mod tests {
 
     #[test]
     fn csvwrite_offset_parser_preserves_typed_integer_tensor_bounds() {
-        let mut offset =
+        let offset =
             Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("typed offset");
-        offset.data.clear();
         assert_eq!(
             parse_offset(&Value::Tensor(offset), "row offset").unwrap(),
             7
         );
 
-        let mut negative =
+        let negative =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("negative");
-        negative.data.clear();
         assert!(parse_offset(&Value::Tensor(negative), "row offset").is_err());
 
-        let mut too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+        let too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
             .expect("too large");
-        too_large.data.clear();
         let parsed = parse_offset(&Value::Tensor(too_large), "row offset");
         if usize::try_from(u64::MAX).is_ok() {
             assert_eq!(parsed.unwrap(), usize::MAX);
@@ -787,7 +783,7 @@ pub(crate) mod tests {
         let path = temp_path("csv");
         let tensor = Tensor::new(vec![2.0, 4.0], vec![1, 2]).unwrap();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");

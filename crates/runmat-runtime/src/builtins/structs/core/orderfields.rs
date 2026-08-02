@@ -881,10 +881,9 @@ pub(crate) mod tests {
         let mut st = StructValue::new();
         st.fields.insert("first".to_string(), Value::Num(1.0));
         st.fields.insert("second".to_string(), Value::Num(2.0));
-        let mut permutation =
+        let permutation =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U8(vec![2, 1]), vec![1, 2])
                 .unwrap();
-        permutation.data.clear();
 
         let Value::Struct(reordered) =
             run_orderfields(Value::Struct(st), vec![Value::Tensor(permutation)]).unwrap()
@@ -917,7 +916,7 @@ pub(crate) mod tests {
         let eval = evaluate(Value::Struct(st), &[]).expect("evaluate");
         let perm = eval.permutation_value();
         match perm {
-            Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 1.0, 3.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![2.0, 1.0, 3.0]),
             other => panic!("expected tensor permutation, got {other:?}"),
         }
         let Value::Struct(ordered) = eval.into_ordered_value() else {
@@ -981,7 +980,7 @@ pub(crate) mod tests {
         let eval = evaluate(Value::Cell(array), &[]).expect("evaluate");
         let perm = eval.permutation_value();
         match perm {
-            Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 3.0, 1.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![2.0, 3.0, 1.0]),
             other => panic!("expected tensor permutation, got {other:?}"),
         }
     }

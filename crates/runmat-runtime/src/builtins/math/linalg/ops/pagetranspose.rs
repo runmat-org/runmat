@@ -443,7 +443,7 @@ mod tests {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 2, 2]);
                 assert_eq!(
-                    out.data,
+                    out.materialize_f64(),
                     vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0, 7.0, 9.0, 11.0, 8.0, 10.0, 12.0]
                 );
             }
@@ -462,7 +462,7 @@ mod tests {
         match value {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 2]);
-                assert_eq!(out.data, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+                assert_eq!(out.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -575,7 +575,7 @@ mod tests {
         match call_one(Value::Tensor(tensor(&[], &[0, 3]))).expect("pagetranspose") {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 0]);
-                assert!(out.data.is_empty());
+                assert!(out.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
         }

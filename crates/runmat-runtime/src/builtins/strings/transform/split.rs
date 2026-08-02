@@ -1278,14 +1278,12 @@ pub(crate) mod tests {
             IntegerStorage::U32(vec![1]),
             IntegerStorage::U64(vec![u64::MAX]),
         ] {
-            let mut enabled = Tensor::new_integer(storage, vec![1, 1]).expect("enabled");
-            enabled.data.clear();
+            let enabled = Tensor::new_integer(storage, vec![1, 1]).expect("enabled");
             assert!(parse_bool(&Value::Tensor(enabled), "IncludeDelimiters").unwrap());
         }
 
-        let mut disabled =
+        let disabled =
             Tensor::new_integer(IntegerStorage::I16(vec![0]), vec![1, 1]).expect("disabled");
-        disabled.data.clear();
         assert!(!parse_bool(&Value::Tensor(disabled), "IncludeDelimiters").unwrap());
     }
 

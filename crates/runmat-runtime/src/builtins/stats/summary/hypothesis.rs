@@ -1177,14 +1177,12 @@ mod tests {
     }
 
     fn poisoned_integer_scalar(storage: IntegerStorage) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![1, 1]).unwrap();
-        tensor.data[0] = f64::NAN;
+        let tensor = Tensor::new_integer(storage, vec![1, 1]).unwrap();
         Value::Tensor(tensor)
     }
 
     fn poisoned_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
         Value::Tensor(tensor)
     }
 
@@ -1206,8 +1204,8 @@ mod tests {
         match &outputs[2] {
             Value::Tensor(ci) => {
                 assert_eq!(ci.shape, vec![2, 1]);
-                assert_close(ci.data[0], -6.031_813, 1.0e-6);
-                assert_close(ci.data[1], 1.031_813, 1.0e-6);
+                assert_close(ci.materialize_f64()[0], -6.031_813, 1.0e-6);
+                assert_close(ci.materialize_f64()[1], 1.031_813, 1.0e-6);
             }
             other => panic!("expected ci tensor, got {other:?}"),
         }
@@ -1262,8 +1260,8 @@ mod tests {
         }
         match &outputs[2] {
             Value::Tensor(ci) => {
-                assert_eq!(ci.data[0], f64::NEG_INFINITY);
-                assert!(ci.data[1] < 0.0);
+                assert_eq!(ci.materialize_f64()[0], f64::NEG_INFINITY);
+                assert!(ci.materialize_f64()[1] < 0.0);
             }
             other => panic!("expected ci tensor, got {other:?}"),
         }
@@ -1271,8 +1269,8 @@ mod tests {
             Value::Struct(stats) => match stats.fields.get("sd").unwrap() {
                 Value::Tensor(sd) => {
                     assert_eq!(sd.shape, vec![2, 1]);
-                    assert_close(sd.data[0], 1.290_994, 1.0e-6);
-                    assert_close(sd.data[1], 1.290_994, 1.0e-6);
+                    assert_close(sd.materialize_f64()[0], 1.290_994, 1.0e-6);
+                    assert_close(sd.materialize_f64()[1], 1.290_994, 1.0e-6);
                 }
                 other => panic!("expected unequal sd tensor, got {other:?}"),
             },

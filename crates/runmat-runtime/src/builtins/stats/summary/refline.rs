@@ -522,19 +522,18 @@ mod tests {
     }
 
     fn int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
         Value::Tensor(tensor)
     }
 
     fn x_data(handle: f64) -> Vec<f64> {
         let value = get_builtin(vec![Value::Num(handle), Value::String("XData".into())]).unwrap();
-        Tensor::try_from(&value).unwrap().data
+        Tensor::try_from(&value).unwrap().materialize_f64()
     }
 
     fn y_data(handle: f64) -> Vec<f64> {
         let value = get_builtin(vec![Value::Num(handle), Value::String("YData".into())]).unwrap();
-        Tensor::try_from(&value).unwrap().data
+        Tensor::try_from(&value).unwrap().materialize_f64()
     }
 
     #[test]

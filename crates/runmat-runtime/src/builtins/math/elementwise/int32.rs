@@ -241,7 +241,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                assert_eq!(out.data, vec![-2.0, 2.0, 3.0, i32::MAX as f64]);
+                assert_eq!(out.materialize_f64(), vec![-2.0, 2.0, 3.0, i32::MAX as f64]);
                 assert_eq!(
                     out.integer_storage(),
                     Some(&IntegerStorage::I32(vec![-2, 2, 3, i32::MAX]))
@@ -259,7 +259,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data, vec![65.0, 122.0]);
+                assert_eq!(t.materialize_f64(), vec![65.0, 122.0]);
                 assert_eq!(
                     t.integer_storage(),
                     Some(&IntegerStorage::I32(vec![65, 122]))
@@ -292,7 +292,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![-3.0, 4.4, 5.6], vec![3, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");

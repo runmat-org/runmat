@@ -983,7 +983,7 @@ mod tests {
         let result = block_on(elementwise_mul(&Value::Tensor(matrix), &Value::Num(2.0))).unwrap();
 
         if let Value::Tensor(m) = result {
-            assert_eq!(m.data, vec![2.0, 4.0, 6.0, 8.0]);
+            assert_eq!(m.materialize_f64(), vec![2.0, 4.0, 6.0, 8.0]);
             assert_eq!(m.rows(), 2);
             assert_eq!(m.cols(), 2);
         } else {
@@ -999,7 +999,7 @@ mod tests {
         let result = block_on(elementwise_mul(&Value::Tensor(m1), &Value::Tensor(m2))).unwrap();
 
         if let Value::Tensor(m) = result {
-            assert_eq!(m.data, vec![2.0, 6.0, 12.0, 20.0]);
+            assert_eq!(m.materialize_f64(), vec![2.0, 6.0, 12.0, 20.0]);
         } else {
             panic!("Expected matrix result");
         }
@@ -1023,7 +1023,7 @@ mod tests {
         let result = elementwise_pow(&Value::Tensor(matrix), &Value::Num(2.0)).unwrap();
 
         if let Value::Tensor(m) = result {
-            assert_eq!(m.data, vec![4.0, 9.0, 16.0, 25.0]);
+            assert_eq!(m.materialize_f64(), vec![4.0, 9.0, 16.0, 25.0]);
         } else {
             panic!("Expected matrix result");
         }
@@ -1123,9 +1123,8 @@ mod tests {
 
     #[test]
     fn elementwise_integer_operations_read_typed_storage_not_poisoned_mirrors() {
-        let mut input = Tensor::new_integer(IntegerStorage::I64(vec![2, 3]), vec![1, 2])
+        let input = Tensor::new_integer(IntegerStorage::I64(vec![2, 3]), vec![1, 2])
             .expect("integer tensor");
-        input.data.fill(f64::NAN);
 
         let Value::Tensor(product) = block_on(elementwise_mul(
             &Value::Tensor(input.clone()),
@@ -1168,17 +1167,14 @@ mod tests {
             power(&Value::Int(IntValue::U64(u64::MAX)), &Value::Num(1.0)).expect("scalar power");
         assert_eq!(scalar_power, Value::Int(IntValue::U64(u64::MAX)));
 
-        let mut scalar_tensor =
-            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
-                .expect("scalar tensor");
-        scalar_tensor.data.clear();
+        let scalar_tensor = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("scalar tensor");
         let scalar_tensor_power =
             power(&Value::Tensor(scalar_tensor), &Value::Num(1.0)).expect("tensor scalar power");
         assert_eq!(scalar_tensor_power, Value::Int(IntValue::U64(u64::MAX)));
 
-        let mut complex_base =
+        let complex_base =
             Tensor::new_integer(IntegerStorage::U8(vec![3]), vec![1, 1]).expect("complex base");
-        complex_base.data.clear();
         let complex_power = power(&Value::Tensor(complex_base), &Value::Complex(1.0, 0.0))
             .expect("complex exponent power");
         let Value::Complex(re, im) = complex_power else {

@@ -702,10 +702,9 @@ mod tests {
 
     #[test]
     fn uniform_classifier_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
                 .expect("integer tensor");
-        tensor.data.clear();
 
         match classify_uniform_value(&Value::Tensor(tensor)).expect("classify") {
             ClassifiedValue::Double(value) => {
@@ -759,7 +758,7 @@ mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 1]);
-                assert_eq!(tensor.data, vec![3.0, 2.0]);
+                assert_eq!(tensor.materialize_f64(), vec![3.0, 2.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -822,11 +821,11 @@ mod tests {
             Value::OutputList(outputs) => {
                 assert_eq!(outputs.len(), 2);
                 match &outputs[0] {
-                    Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0, 2.0]),
+                    Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0]),
                     other => panic!("expected first tensor, got {other:?}"),
                 }
                 match &outputs[1] {
-                    Value::Tensor(tensor) => assert_eq!(tensor.data, vec![11.0, 12.0]),
+                    Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![11.0, 12.0]),
                     other => panic!("expected second tensor, got {other:?}"),
                 }
             }

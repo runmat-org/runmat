@@ -636,14 +636,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 1.0, -2.0], vec![3, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result =
                 logical_builtin(Value::GpuTensor(handle.clone()), Vec::new()).expect("logical");
             let gathered = test_support::gather(result.clone()).expect("gather");
-            assert_eq!(gathered.data, vec![0.0, 1.0, 1.0]);
+            assert_eq!(gathered.materialize_f64(), vec![0.0, 1.0, 1.0]);
             if let Value::GpuTensor(out) = result {
                 assert!(runmat_accelerate_api::handle_is_logical(&out));
             } else {
@@ -658,7 +658,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -721,7 +721,7 @@ pub(crate) mod tests {
         let cpu = logical_builtin(Value::Tensor(tensor.clone()), Vec::new()).unwrap();
 
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
@@ -751,6 +751,6 @@ pub(crate) mod tests {
         };
 
         assert_eq!(gathered.shape, expected_shape);
-        assert_eq!(gathered.data, expected);
+        assert_eq!(gathered.materialize_f64(), expected);
     }
 }

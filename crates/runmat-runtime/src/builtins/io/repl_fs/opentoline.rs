@@ -441,18 +441,16 @@ mod tests {
 
     #[test]
     fn opentoline_tensor_positions_read_integer_storage_exactly() {
-        let mut line =
+        let line =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![9]), vec![1, 1]).unwrap();
-        line.data.clear();
 
         assert_eq!(
             block_on(positive_integer_arg(&Value::Tensor(line), "line")).unwrap(),
             9
         );
 
-        let mut zero =
+        let zero =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U8(vec![0]), vec![1, 1]).unwrap();
-        zero.data.clear();
         assert!(block_on(positive_integer_arg(&Value::Tensor(zero), "line")).is_err());
     }
 

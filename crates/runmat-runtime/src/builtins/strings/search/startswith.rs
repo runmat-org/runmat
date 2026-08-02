@@ -594,9 +594,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn startswith_ignore_case_typed_integer_tensor_reads_exact_storage() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("integer tensor");
-        tensor.data.clear();
         let result = run_startswith(
             Value::String("RunMat".into()),
             Value::String("run".into()),

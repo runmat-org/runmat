@@ -364,9 +364,8 @@ mod tests {
 
     #[test]
     fn copyobj_handle_scalar_reads_typed_integer_storage_exactly() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U32(vec![7]), vec![1, 1]).unwrap();
-        tensor.data.clear();
 
         assert_eq!(
             handle_scalar(&Value::Tensor(tensor), "source").unwrap(),
@@ -376,10 +375,9 @@ mod tests {
 
     #[test]
     fn copyobj_handle_list_reads_typed_integer_storage_exactly() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U32(vec![3, 5]), vec![1, 2])
                 .unwrap();
-        tensor.data.clear();
 
         let list = handle_list(&Value::Tensor(tensor), "source").expect("handle list");
 
@@ -470,12 +468,12 @@ mod tests {
             panic!("expected tensor result");
         };
         assert_eq!(copied.shape, vec![1, 2]);
-        assert_eq!(copied.data.len(), 2);
+        assert_eq!(copied.materialize_f64().len(), 2);
         assert!(copied
-            .data
+            .materialize_f64()
             .iter()
             .all(|&handle| handle != first && handle != second));
-        for handle in copied.data {
+        for handle in copied.materialize_f64() {
             assert_eq!(
                 value_num(
                     get_builtin(vec![Value::Num(handle), Value::String("Parent".into())]).unwrap()
@@ -507,7 +505,7 @@ mod tests {
         assert_eq!(
             value_num(
                 get_builtin(vec![
-                    Value::Num(copied.data[0]),
+                    Value::Num(copied.materialize_f64()[0]),
                     Value::String("Parent".into())
                 ])
                 .unwrap()
@@ -517,7 +515,7 @@ mod tests {
         assert_eq!(
             value_num(
                 get_builtin(vec![
-                    Value::Num(copied.data[1]),
+                    Value::Num(copied.materialize_f64()[1]),
                     Value::String("Parent".into())
                 ])
                 .unwrap()

@@ -140,7 +140,9 @@ mod tests {
 
         let set = xticks_builtin(vec![tensor(vec![0.0, 2.5, 5.0])]).unwrap();
         assert_eq!(
-            runmat_builtins::Tensor::try_from(&set).unwrap().data,
+            runmat_builtins::Tensor::try_from(&set)
+                .unwrap()
+                .materialize_f64(),
             vec![0.0, 2.5, 5.0]
         );
         assert_eq!(
@@ -150,13 +152,17 @@ mod tests {
 
         let queried = xticks_builtin(Vec::new()).unwrap();
         assert_eq!(
-            runmat_builtins::Tensor::try_from(&queried).unwrap().data,
+            runmat_builtins::Tensor::try_from(&queried)
+                .unwrap()
+                .materialize_f64(),
             vec![0.0, 2.5, 5.0]
         );
         let ax = crate::builtins::plotting::gca::gca_builtin(Vec::new()).unwrap();
         let prop = get_builtin(vec![ax, Value::String("XTick".into())]).unwrap();
         assert_eq!(
-            runmat_builtins::Tensor::try_from(&prop).unwrap().data,
+            runmat_builtins::Tensor::try_from(&prop)
+                .unwrap()
+                .materialize_f64(),
             vec![0.0, 2.5, 5.0]
         );
 
@@ -205,7 +211,9 @@ mod tests {
         ]))
         .unwrap();
         let queried = xticks_builtin(Vec::new()).unwrap();
-        let ticks = runmat_builtins::Tensor::try_from(&queried).unwrap().data;
+        let ticks = runmat_builtins::Tensor::try_from(&queried)
+            .unwrap()
+            .materialize_f64();
 
         assert_eq!(ticks.first().copied(), Some(10.0));
         assert_eq!(ticks.last().copied(), Some(30.0));

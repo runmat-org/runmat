@@ -1022,10 +1022,8 @@ pub(crate) mod tests {
 
     #[test]
     fn any_reads_typed_integer_storage_without_mirror() {
-        let mut tensor =
-            Tensor::new_integer(IntegerStorage::I16(vec![0, 0, 2, 0, 0, 0]), vec![2, 3])
-                .expect("typed integer input");
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![0, 0, 2, 0, 0, 0]), vec![2, 3])
+            .expect("typed integer input");
 
         let result = any_builtin(Value::Tensor(tensor), Vec::new()).expect("any");
 
@@ -1230,7 +1228,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 1.0, 0.0, 0.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1251,7 +1249,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![f64::NAN, 0.0, f64::NAN, 0.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1294,7 +1292,7 @@ pub(crate) mod tests {
         ))
         .unwrap();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = match runmat_accelerate_api::provider() {
@@ -1348,7 +1346,7 @@ pub(crate) mod tests {
         ))
         .unwrap();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = match runmat_accelerate_api::provider() {

@@ -942,9 +942,8 @@ mod tests {
         #[cfg(target_pointer_width = "64")]
         {
             let exact_value = 9_007_199_254_740_993_u64;
-            let mut exact =
+            let exact =
                 Tensor::new_integer(IntegerStorage::U64(vec![exact_value]), vec![1, 1]).unwrap();
-            exact.data.clear();
             assert_eq!(
                 parse_length(&Value::Tensor(exact), "fft").unwrap(),
                 Some(exact_value as usize)
@@ -978,9 +977,8 @@ mod tests {
         #[cfg(target_pointer_width = "64")]
         {
             let exact = 9_007_199_254_740_993_u64;
-            let mut sizes =
+            let sizes =
                 Tensor::new_integer(IntegerStorage::U64(vec![1, exact]), vec![1, 2]).unwrap();
-            sizes.data.fill(f64::NAN);
 
             assert_eq!(
                 parse_2d_lengths_from_tensor(&sizes, "fft2").unwrap(),

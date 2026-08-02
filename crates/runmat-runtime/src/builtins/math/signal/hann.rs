@@ -307,7 +307,7 @@ mod tests {
             0.0,
         ];
         assert_eq!(t.shape, vec![8, 1]);
-        for (got, want) in t.data.iter().zip(expected.iter()) {
+        for (got, want) in t.materialize_f64().iter().zip(expected.iter()) {
             assert!((got - want).abs() < 1e-12, "got {got}, want {want}");
         }
     }
@@ -320,14 +320,14 @@ mod tests {
         )
         .expect("gather hann(0)");
         assert_eq!(zero.shape, vec![0, 1]);
-        assert!(zero.data.is_empty());
+        assert!(zero.materialize_f64().is_empty());
 
         let one = test_support::gather(
             block_on(hann_builtin(Value::Num(1.0), Vec::new())).expect("hann(1)"),
         )
         .expect("gather hann(1)");
         assert_eq!(one.shape, vec![1, 1]);
-        assert_eq!(one.data, vec![1.0]);
+        assert_eq!(one.materialize_f64(), vec![1.0]);
     }
 
     #[test]
@@ -355,14 +355,14 @@ mod tests {
         )
         .expect("gather hann periodic");
         assert_eq!(periodic.shape, vec![4, 1]);
-        assert!((periodic.data[1] - 0.5).abs() < 1e-12);
+        assert!((periodic.materialize_f64()[1] - 0.5).abs() < 1e-12);
 
         let single = test_support::gather(
             block_on(hann_builtin(Value::Num(4.0), vec![Value::from("single")]))
                 .expect("hann single"),
         )
         .expect("gather hann single");
-        assert_eq!(single.dtype, runmat_builtins::NumericDType::F32);
+        assert_eq!(single.numeric_dtype(), runmat_builtins::NumericDType::F32);
     }
 
     #[test]
@@ -371,19 +371,19 @@ mod tests {
             let value = block_on(hann_builtin(Value::Num(8.0), Vec::new())).expect("hann gpu");
             let tensor = test_support::gather(value).expect("gather");
             assert_eq!(tensor.shape, vec![8, 1]);
-            assert!((tensor.data[3] - 0.9504844339512095).abs() < 1e-12);
+            assert!((tensor.materialize_f64()[3] - 0.9504844339512095).abs() < 1e-12);
 
             let periodic = block_on(hann_builtin(Value::Num(4.0), vec![Value::from("periodic")]))
                 .expect("hann periodic gpu");
             let periodic = test_support::gather(periodic).expect("gather periodic");
             assert_eq!(periodic.shape, vec![4, 1]);
-            assert!((periodic.data[1] - 0.5).abs() < 1e-12);
+            assert!((periodic.materialize_f64()[1] - 0.5).abs() < 1e-12);
 
             let periodic_one =
                 block_on(hann_builtin(Value::Num(1.0), vec![Value::from("periodic")]))
                     .expect("hann periodic len1 gpu");
             let periodic_one = test_support::gather(periodic_one).expect("gather periodic len1");
-            assert_eq!(periodic_one.data, vec![1.0]);
+            assert_eq!(periodic_one.materialize_f64(), vec![1.0]);
         });
     }
 }

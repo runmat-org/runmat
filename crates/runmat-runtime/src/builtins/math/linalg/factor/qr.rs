@@ -1043,7 +1043,7 @@ pub(crate) mod tests {
 
     fn tensor_close(a: &Matrix, b: &Matrix, tol: f64) {
         assert_eq!(a.shape, b.shape);
-        for (lhs, rhs) in a.data.iter().zip(&b.data) {
+        for (lhs, rhs) in a.materialize_f64().iter().zip(&b.materialize_f64()) {
             if (lhs - rhs).abs() > tol {
                 panic!("tensor mismatch: lhs={lhs}, rhs={rhs}, tol={tol}");
             }
@@ -1094,10 +1094,8 @@ pub(crate) mod tests {
 
     #[test]
     fn qr_matrix_conversion_reads_typed_integer_storage_exactly() {
-        let mut tensor =
-            Matrix::new_integer(IntegerStorage::I16(vec![1, 2, 3, 4, 5, 6]), vec![3, 2])
-                .expect("typed integer tensor");
-        tensor.data.fill(f64::NAN);
+        let tensor = Matrix::new_integer(IntegerStorage::I16(vec![1, 2, 3, 4, 5, 6]), vec![3, 2])
+            .expect("typed integer tensor");
 
         let matrix = ColMajorMatrix::from_tensor(&tensor).expect("matrix");
         assert_eq!(matrix.rows, 3);
@@ -1157,7 +1155,8 @@ pub(crate) mod tests {
             for j in 0..q.cols() {
                 let mut sum = 0.0;
                 for k in 0..q.rows() {
-                    sum += q.data[k + i * q.rows()] * q.data[k + j * q.rows()];
+                    sum += q.materialize_f64()[k + i * q.rows()]
+                        * q.materialize_f64()[k + j * q.rows()];
                 }
                 qtq_data[i + j * q.cols()] = sum;
             }
@@ -1184,7 +1183,10 @@ pub(crate) mod tests {
         assert_eq!(eval.pivot_mode(), PivotMode::Vector);
         let vector = tensor_from_value(eval.permutation());
         assert_eq!(vector.shape, vec![2, 1]);
-        assert!(vector.data.iter().all(|v| *v == 1.0 || *v == 2.0));
+        assert!(vector
+            .materialize_f64()
+            .iter()
+            .all(|v| *v == 1.0 || *v == 2.0));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1204,9 +1206,7 @@ pub(crate) mod tests {
     fn qr_economy_option_reads_typed_integer_scalar_storage_exactly() {
         let data: Vec<f64> = (0..12).map(|i| (i + 1) as f64).collect();
         let a = Matrix::new(data, vec![4, 3]).unwrap();
-        let mut option =
-            Matrix::new_integer(IntegerStorage::U8(vec![0]), vec![1, 1]).expect("option");
-        option.data.clear();
+        let option = Matrix::new_integer(IntegerStorage::U8(vec![0]), vec![1, 1]).expect("option");
 
         let eval = evaluate(Value::Tensor(a), &[Value::Tensor(option)]).expect("evaluate econ");
         assert_eq!(eval.mode(), QrMode::Economy);
@@ -1228,8 +1228,7 @@ pub(crate) mod tests {
         ];
 
         for storage in options {
-            let mut option = Matrix::new_integer(storage, vec![1, 1]).expect("option");
-            option.data[0] = 1.0;
+            let option = Matrix::new_integer(storage, vec![1, 1]).expect("option");
             assert!(block_on(is_zero_scalar(&Value::Tensor(option))));
         }
     }
@@ -1256,7 +1255,7 @@ pub(crate) mod tests {
             let data: Vec<f64> = vec![1.0, 4.0, 2.0, 5.0];
             let a = Matrix::new(data.clone(), vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1311,7 +1310,7 @@ pub(crate) mod tests {
         let host_p = tensor_from_value(host_eval.permutation_matrix());
 
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("provider");
@@ -1351,7 +1350,7 @@ pub(crate) mod tests {
         )
         .unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("provider");
@@ -1377,7 +1376,8 @@ pub(crate) mod tests {
             for j in 0..gpu_q.cols() {
                 let mut sum = 0.0;
                 for k in 0..gpu_q.rows() {
-                    sum += gpu_q.data[k + i * gpu_q.rows()] * gpu_q.data[k + j * gpu_q.rows()];
+                    sum += gpu_q.materialize_f64()[k + i * gpu_q.rows()]
+                        * gpu_q.materialize_f64()[k + j * gpu_q.rows()];
                 }
                 qtq_data[i + j * gpu_q.cols()] = sum;
             }
@@ -1402,7 +1402,7 @@ pub(crate) mod tests {
 
         // Q*R reconstructs the input (no pivoting)
         let qr_product = crate::builtins::common::matrix::matrix_mul(&gpu_q, &gpu_r).expect("Q*R");
-        let a_matrix = Matrix::new(tensor.data.clone(), tensor.shape.clone()).unwrap();
+        let a_matrix = Matrix::new(tensor.materialize_f64().clone(), tensor.shape.clone()).unwrap();
         tensor_close(&qr_product, &a_matrix, 1e-3);
     }
 

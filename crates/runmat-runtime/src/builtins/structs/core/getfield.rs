@@ -1273,9 +1273,8 @@ pub(crate) mod tests {
             vec![1, 2],
         )
         .unwrap();
-        let mut index_tensor =
+        let index_tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("index tensor");
-        index_tensor.data.clear();
         let index = CellArray::new_with_shape(vec![Value::Tensor(index_tensor)], vec![1, 1])
             .expect("index cell");
 
@@ -1297,9 +1296,8 @@ pub(crate) mod tests {
             "values".to_string(),
             Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![1, 2]).unwrap()),
         );
-        let mut selector =
+        let selector =
             Tensor::new_integer(IntegerStorage::U64(vec![2, 1]), vec![1, 2]).expect("selector");
-        selector.data = vec![1.0, 1.0];
         let index =
             CellArray::new_with_shape(vec![Value::Tensor(selector)], vec![1, 1]).expect("index");
 
@@ -1311,7 +1309,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 2]);
-                assert_eq!(tensor.data, vec![20.0, 10.0]);
+                assert_eq!(tensor.materialize_f64(), vec![20.0, 10.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1319,19 +1317,17 @@ pub(crate) mod tests {
 
     #[test]
     fn getfield_vector_index_preserves_typed_integer_target_storage() {
-        let mut values = Tensor::new_integer(
+        let values = Tensor::new_integer(
             IntegerStorage::U64(vec![u64::MAX - 1, u64::MAX]),
             vec![1, 2],
         )
         .expect("typed target");
-        values.data = vec![10.0, 20.0];
         let mut st = StructValue::new();
         st.fields
             .insert("values".to_string(), Value::Tensor(values));
 
-        let mut selector =
+        let selector =
             Tensor::new_integer(IntegerStorage::U64(vec![2, 1]), vec![1, 2]).expect("selector");
-        selector.data = vec![1.0, 1.0];
         let index =
             CellArray::new_with_shape(vec![Value::Tensor(selector)], vec![1, 1]).expect("index");
 
@@ -1347,7 +1343,10 @@ pub(crate) mod tests {
                     tensor.integer_storage(),
                     Some(&IntegerStorage::U64(vec![u64::MAX, u64::MAX - 1]))
                 );
-                assert_eq!(tensor.data, vec![u64::MAX as f64, (u64::MAX - 1) as f64]);
+                assert_eq!(
+                    tensor.materialize_f64(),
+                    vec![u64::MAX as f64, (u64::MAX - 1) as f64]
+                );
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1681,7 +1680,7 @@ pub(crate) mod tests {
 
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");

@@ -55,8 +55,7 @@ mod tests {
     fn value_to_f64_reads_all_typed_integer_tensor_classes_without_f64_mirrors() {
         macro_rules! assert_typed_scalar {
             ($storage:expr, $expected:expr) => {{
-                let mut tensor = Tensor::new_integer($storage, vec![1, 1]).expect("scalar tensor");
-                tensor.data.clear();
+                let tensor = Tensor::new_integer($storage, vec![1, 1]).expect("scalar tensor");
                 assert_eq!(value_to_f64(&Value::Tensor(tensor)).unwrap(), $expected);
             }};
         }
@@ -81,10 +80,8 @@ mod tests {
             assert!(value_to_f64(&Value::Int(value)).is_err());
         }
 
-        let mut tensor =
-            Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1])
-                .expect("scalar tensor");
-        tensor.data = vec![f64::NAN];
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1])
+            .expect("scalar tensor");
         assert!(value_to_f64(&Value::Tensor(tensor)).is_err());
     }
 }

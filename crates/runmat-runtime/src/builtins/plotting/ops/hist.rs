@@ -1566,12 +1566,11 @@ pub(crate) mod tests {
     }
 
     fn int_tensor(data: Vec<i16>) -> Tensor {
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I16(data.clone()),
             vec![data.len()],
         )
         .expect("integer tensor");
-        tensor.data.clear();
         tensor
     }
 
@@ -1611,34 +1610,31 @@ pub(crate) mod tests {
     #[test]
     fn hist_bin_counts_read_typed_integer_tensors_exactly() {
         let exact = 9_007_199_254_740_993_u64;
-        let mut scalar_count = runmat_builtins::Tensor::new_integer(
+        let scalar_count = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![exact]),
             vec![1, 1],
         )
         .expect("typed bin count");
-        scalar_count.data.clear();
         match parse_hist_bins(Some(Value::Tensor(scalar_count)), 10).unwrap() {
             HistBinSpec::Count(count) => assert_eq!(count, exact as usize),
             _ => panic!("expected count bin spec"),
         }
 
-        let mut num_bins = runmat_builtins::Tensor::new_integer(
+        let num_bins = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![exact]),
             vec![1, 1],
         )
         .expect("typed NumBins");
-        num_bins.data.clear();
         assert_eq!(
             parse_num_bins_value(&Value::Tensor(num_bins)).unwrap(),
             exact as usize
         );
 
-        let mut negative = runmat_builtins::Tensor::new_integer(
+        let negative = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::I64(vec![-1]),
             vec![1, 1],
         )
         .expect("negative bin count");
-        negative.data.clear();
         assert!(parse_hist_bins(Some(Value::Tensor(negative)), 10).is_err());
 
         let boundary = if usize::BITS == 64 {
@@ -1739,12 +1735,12 @@ pub(crate) mod tests {
         let data = Value::Tensor(tensor_from(&[0.0, 0.2, 0.8, 1.0]));
         let eval = block_on(evaluate_async(data, &[])).expect("hist evaluate");
         let counts = match eval.counts_value() {
-            Value::Tensor(tensor) => tensor.data,
+            Value::Tensor(tensor) => tensor.materialize_f64(),
             other => panic!("unexpected value: {other:?}"),
         };
         assert_eq!(counts.len(), 2);
         let centers = match eval.centers_value() {
-            Value::Tensor(tensor) => tensor.data,
+            Value::Tensor(tensor) => tensor.materialize_f64(),
             other => panic!("unexpected centers: {other:?}"),
         };
         assert_eq!(centers.len(), 2);
@@ -1758,7 +1754,7 @@ pub(crate) mod tests {
         let args = vec![Value::String("NumBins".into()), Value::Num(4.0)];
         let eval = block_on(evaluate_async(data, &args)).expect("hist evaluate");
         let centers = match eval.centers_value() {
-            Value::Tensor(tensor) => tensor.data,
+            Value::Tensor(tensor) => tensor.materialize_f64(),
             other => panic!("unexpected centers: {other:?}"),
         };
         assert_eq!(centers.len(), 4);
@@ -1777,7 +1773,7 @@ pub(crate) mod tests {
         ];
         let eval = block_on(evaluate_async(data, &args)).expect("hist evaluate");
         let centers = match eval.centers_value() {
-            Value::Tensor(tensor) => tensor.data,
+            Value::Tensor(tensor) => tensor.materialize_f64(),
             other => panic!("unexpected centers: {other:?}"),
         };
         assert_eq!(centers.len(), 2);
@@ -1795,7 +1791,7 @@ pub(crate) mod tests {
         ];
         let eval = block_on(evaluate_async(data, &args)).expect("hist evaluate");
         let centers = match eval.centers_value() {
-            Value::Tensor(tensor) => tensor.data,
+            Value::Tensor(tensor) => tensor.materialize_f64(),
             other => panic!("unexpected centers: {other:?}"),
         };
         assert!(centers.len() >= 2);

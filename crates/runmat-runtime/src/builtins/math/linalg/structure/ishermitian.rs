@@ -840,9 +840,8 @@ pub(crate) mod tests {
             vec![2, 2],
         )
         .unwrap();
-        let mut tolerance =
+        let tolerance =
             Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("tolerance");
-        tolerance.data[0] = 0.0;
 
         let result =
             ishermitian_builtin(Value::ComplexTensor(tensor), vec![Value::Tensor(tolerance)])
@@ -863,8 +862,7 @@ pub(crate) mod tests {
             IntegerStorage::U64(vec![1]),
         ];
         for storage in storages {
-            let mut tolerance = Tensor::new_integer(storage, vec![1, 1]).expect("tolerance");
-            tolerance.data = vec![f64::NAN];
+            let tolerance = Tensor::new_integer(storage, vec![1, 1]).expect("tolerance");
             assert_eq!(
                 parse_tolerance_value(&Value::Tensor(tolerance)).unwrap(),
                 1.0
@@ -978,9 +976,8 @@ pub(crate) mod tests {
     #[test]
     fn rejects_negative_typed_integer_tensor_tolerance() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
-        let mut tolerance =
+        let tolerance =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("tolerance");
-        tolerance.data[0] = 1.0;
         let err = ishermitian_builtin(Value::Tensor(tensor), vec![Value::Tensor(tolerance)])
             .expect_err("ishermitian should error on negative tolerance");
         let message = err.to_string();
@@ -1042,7 +1039,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![3.0, 4.0, 4.0, 6.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1062,7 +1059,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![5.0, 2.0, 2.0, 7.0], vec![2, 2]).unwrap();
         let cpu = ishermitian_builtin(Value::Tensor(tensor.clone()), Vec::new()).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()

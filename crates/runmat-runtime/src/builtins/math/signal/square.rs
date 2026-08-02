@@ -345,24 +345,28 @@ mod tests {
         let tensor = Tensor::new(data.clone(), vec![1, n]).unwrap();
         let result = expect_tensor(call(Value::Tensor(tensor)).unwrap());
         assert_eq!(result.shape, vec![1, n]);
-        for (idx, &value) in result.data.iter().enumerate() {
+        for (idx, &value) in result.materialize_f64().iter().enumerate() {
             assert!(
                 value == 1.0 || value == -1.0,
                 "index {idx}: expected only +-1 values, got {value}"
             );
         }
         // Each sample must agree with the elementwise formula.
-        for (&t, &y) in data.iter().zip(result.data.iter()) {
+        for (&t, &y) in data.iter().zip(result.materialize_f64().iter()) {
             assert_eq!(y, square_scalar(t, 50.0));
         }
         // The wave is +1 across the first half period, then -1 across the second
         // half. The final sample lands on the period boundary (t = 2*pi) and wraps
         // back to phi = 0 -> +1.
-        assert_eq!(result.data[0], 1.0);
+        assert_eq!(result.materialize_f64()[0], 1.0);
         let toggle_point = data.iter().position(|&t| t >= PI).unwrap();
-        assert!(result.data[..toggle_point].iter().all(|&v| v == 1.0));
-        assert!(result.data[toggle_point..n - 1].iter().all(|&v| v == -1.0));
-        assert_eq!(*result.data.last().unwrap(), 1.0);
+        assert!(result.materialize_f64()[..toggle_point]
+            .iter()
+            .all(|&v| v == 1.0));
+        assert!(result.materialize_f64()[toggle_point..n - 1]
+            .iter()
+            .all(|&v| v == -1.0));
+        assert_eq!(*result.materialize_f64().last().unwrap(), 1.0);
     }
 
     #[test]
@@ -402,7 +406,7 @@ mod tests {
         let result =
             expect_tensor(call_with_duty(Value::Tensor(tensor), Value::Num(25.0)).unwrap());
         let threshold = PI / 2.0;
-        for (idx, (&t, &y)) in data.iter().zip(result.data.iter()).enumerate() {
+        for (idx, (&t, &y)) in data.iter().zip(result.materialize_f64().iter()).enumerate() {
             let expected = if t < threshold { 1.0 } else { -1.0 };
             assert_eq!(y, expected, "index {idx}, t={t}");
         }
@@ -440,7 +444,7 @@ mod tests {
         let logical = LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap();
         let result = expect_tensor(call(Value::LogicalArray(logical)).unwrap());
         assert_eq!(result.shape, vec![1, 2]);
-        assert_eq!(result.data, vec![1.0, 1.0]);
+        assert_eq!(result.materialize_f64(), vec![1.0, 1.0]);
     }
 
     #[test]
@@ -481,6 +485,6 @@ mod tests {
         let tensor = Tensor::new(vec![0.0, PI / 2.0, PI, 3.0 * PI / 2.0], vec![2, 2]).unwrap();
         let result = expect_tensor(call(Value::Tensor(tensor)).unwrap());
         assert_eq!(result.shape, vec![2, 2]);
-        assert_eq!(result.data, vec![1.0, 1.0, -1.0, -1.0]);
+        assert_eq!(result.materialize_f64(), vec![1.0, 1.0, -1.0, -1.0]);
     }
 }

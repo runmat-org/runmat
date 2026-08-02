@@ -500,29 +500,23 @@ pub(crate) mod tests {
         assert_eq!(parse_fid(&Value::Int(IntValue::U16(7))).unwrap(), 7);
         assert!(parse_fid(&Value::Int(IntValue::U64(u64::MAX))).is_err());
 
-        let mut fid_tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1])
+        let fid_tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1])
             .expect("typed fid tensor");
-        fid_tensor.data.clear();
         assert_eq!(parse_fid(&Value::Tensor(fid_tensor)).unwrap(), 7);
-        let mut fid_too_large =
-            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
-                .expect("typed fid tensor");
-        fid_too_large.data.clear();
+        let fid_too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("typed fid tensor");
         assert!(parse_fid(&Value::Tensor(fid_too_large)).is_err());
 
         let nchar =
             futures::executor::block_on(parse_nchar(&[Value::Int(IntValue::U16(64))])).unwrap();
         assert_eq!(nchar, Some(64));
-        let mut nchar_tensor = Tensor::new_integer(IntegerStorage::U16(vec![64]), vec![1, 1])
+        let nchar_tensor = Tensor::new_integer(IntegerStorage::U16(vec![64]), vec![1, 1])
             .expect("typed nchar tensor");
-        nchar_tensor.data.clear();
         let nchar_from_tensor =
             futures::executor::block_on(parse_nchar(&[Value::Tensor(nchar_tensor)])).unwrap();
         assert_eq!(nchar_from_tensor, Some(64));
-        let mut negative_nchar_tensor =
-            Tensor::new_integer(IntegerStorage::I8(vec![-1]), vec![1, 1])
-                .expect("typed nchar tensor");
-        negative_nchar_tensor.data.clear();
+        let negative_nchar_tensor = Tensor::new_integer(IntegerStorage::I8(vec![-1]), vec![1, 1])
+            .expect("typed nchar tensor");
         assert!(
             futures::executor::block_on(parse_nchar(&[Value::Tensor(negative_nchar_tensor)]))
                 .is_err()
@@ -543,8 +537,7 @@ pub(crate) mod tests {
             IntegerStorage::U64(vec![7]),
         ];
         for storage in classes {
-            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed scalar");
-            tensor.data = vec![f64::NAN];
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed scalar");
             let value = Value::Tensor(tensor);
             assert_eq!(parse_fid(&value).unwrap(), 7);
             assert_eq!(
@@ -602,7 +595,7 @@ pub(crate) mod tests {
         let ltout = eval.outputs()[1].clone();
         match ltout {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![10.0]);
+                assert_eq!(t.materialize_f64(), vec![10.0]);
                 assert_eq!(t.shape, vec![1, 1]);
             }
             other => panic!("expected numeric tensor, got {other:?}"),
@@ -648,7 +641,7 @@ pub(crate) mod tests {
         }
         match &eval.outputs()[1] {
             Value::Tensor(t) => {
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected empty numeric tensor, got {other:?}"),
         }
@@ -700,7 +693,7 @@ pub(crate) mod tests {
             other => panic!("expected char array, got {other:?}"),
         }
         match &first.outputs()[1] {
-            Value::Tensor(t) => assert!(t.data.is_empty()),
+            Value::Tensor(t) => assert!(t.materialize_f64().is_empty()),
             other => panic!("expected empty numeric tensor, got {other:?}"),
         }
 
@@ -713,7 +706,7 @@ pub(crate) mod tests {
             other => panic!("expected char array, got {other:?}"),
         }
         match &second.outputs()[1] {
-            Value::Tensor(t) => assert_eq!(t.data, vec![13.0, 10.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![13.0, 10.0]),
             other => panic!("expected CRLF terminators, got {other:?}"),
         }
 
@@ -749,7 +742,7 @@ pub(crate) mod tests {
         }
         match &outputs[1] {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![13.0, 10.0]);
+                assert_eq!(t.materialize_f64(), vec![13.0, 10.0]);
             }
             other => panic!("expected numeric tensor, got {other:?}"),
         }

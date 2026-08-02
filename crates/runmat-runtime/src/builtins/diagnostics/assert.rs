@@ -643,14 +643,12 @@ pub(crate) mod tests {
 
     #[test]
     fn assert_reads_typed_integer_tensor_storage_exactly() {
-        let mut passing =
+        let passing =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 1]), vec![2, 1]).unwrap();
-        passing.data.fill(0.0);
         assert_builtin(vec![Value::Tensor(passing)]).expect("assert should pass");
 
-        let mut failing =
+        let failing =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 0]), vec![2, 1]).unwrap();
-        failing.data.fill(1.0);
         let err = unwrap_error(
             assert_builtin(vec![Value::Tensor(failing)]).expect_err("assert should fail"),
         );
@@ -806,7 +804,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -851,7 +849,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 0.0, 3.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -899,7 +897,7 @@ pub(crate) mod tests {
 
         let tensor = Tensor::new(vec![1.0, 0.0], vec![2, 1]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");

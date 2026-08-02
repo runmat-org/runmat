@@ -531,9 +531,14 @@ mod tests {
             let Value::Tensor(cmap) = builtin(vec![Value::Num(6.0)]).expect(name) else {
                 panic!("expected tensor");
             };
-            assert_eq!((cmap.rows, cmap.cols, cmap.data.len()), (6, 3, 18));
+            assert_eq!(
+                (cmap.rows, cmap.cols, cmap.materialize_f64().len()),
+                (6, 3, 18)
+            );
             assert!(
-                cmap.data.iter().all(|v| (0.0..=1.0).contains(v)),
+                cmap.materialize_f64()
+                    .iter()
+                    .all(|v| (0.0..=1.0).contains(v)),
                 "{name} produced out-of-range RGB entries"
             );
         }
@@ -560,31 +565,28 @@ mod tests {
 
     #[test]
     fn length_argument_reads_typed_integer_tensor_exactly() {
-        let mut length = runmat_builtins::Tensor::new_integer(
+        let length = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![MAX_COLORMAP_LENGTH as u64]),
             vec![1, 1],
         )
         .expect("typed length");
-        length.data.clear();
         assert_eq!(
             colormap_length(&Value::Tensor(length), "parula").unwrap(),
             MAX_COLORMAP_LENGTH
         );
 
-        let mut too_large = runmat_builtins::Tensor::new_integer(
+        let too_large = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![MAX_COLORMAP_LENGTH as u64 + 1]),
             vec![1, 1],
         )
         .expect("too large");
-        too_large.data.clear();
         assert!(colormap_length(&Value::Tensor(too_large), "parula").is_err());
 
-        let mut negative = runmat_builtins::Tensor::new_integer(
+        let negative = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::I64(vec![-1]),
             vec![1, 1],
         )
         .expect("negative");
-        negative.data.clear();
         assert!(colormap_length(&Value::Tensor(negative), "parula").is_err());
     }
 
@@ -601,12 +603,11 @@ mod tests {
         assert_eq!(len, 2);
         assert!(matches!(map, ColorMap::Listed(_)));
 
-        let mut typed = Tensor::new_integer(
+        let typed = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U8(vec![0, 1, 0, 1, 1, 0]),
             vec![2, 3],
         )
         .expect("typed RGB colormap");
-        typed.data.clear();
         let (map, len) = parse_rgb_colormap_tensor(&typed, "colormap").expect("parse typed");
         assert_eq!(len, 2);
         assert!(matches!(map, ColorMap::Listed(_)));

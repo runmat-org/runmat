@@ -56,10 +56,9 @@ mod tests {
     fn typed_linear_reads_ignore_cleared_f64_mirrors_for_all_integer_classes() {
         macro_rules! assert_read {
             ($storage:ident, $value:expr) => {{
-                let mut tensor =
+                let tensor =
                     Tensor::new_integer(IntegerStorage::$storage(vec![0, $value]), vec![1, 2])
                         .expect("typed tensor");
-                tensor.data.clear();
                 assert_eq!(
                     block_on(generic_index(&Value::Tensor(tensor), &[2])).expect("typed read"),
                     Value::Int(

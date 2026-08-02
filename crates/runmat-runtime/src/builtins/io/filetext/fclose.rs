@@ -628,15 +628,13 @@ pub(crate) mod tests {
 
     #[test]
     fn fclose_vector_parser_reads_typed_integer_storage_exactly() {
-        let mut ids =
+        let ids =
             Tensor::new_integer(IntegerStorage::U16(vec![7, 9]), vec![1, 2]).expect("typed fids");
-        ids.data = vec![99.0, 101.0];
 
         assert_eq!(collect_file_ids(&Value::Tensor(ids)).unwrap(), vec![7, 9]);
 
-        let mut too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+        let too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
             .expect("typed fid");
-        too_large.data = vec![7.0];
         assert!(collect_file_ids(&Value::Tensor(too_large)).is_err());
     }
 
@@ -654,8 +652,7 @@ pub(crate) mod tests {
         ];
 
         for storage in classes {
-            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed fid");
-            tensor.data = vec![f64::NAN];
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed fid");
             assert_eq!(collect_file_ids(&Value::Tensor(tensor)).unwrap(), vec![7]);
         }
     }

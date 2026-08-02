@@ -473,12 +473,11 @@ pub(crate) mod tests {
 
     #[test]
     fn scalar_numeric_value_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_993]),
             vec![1, 1],
         )
         .expect("integer tensor");
-        tensor.data.clear();
 
         assert_eq!(
             scalar_numeric_value(&Value::Tensor(tensor)),
@@ -488,18 +487,16 @@ pub(crate) mod tests {
 
     #[test]
     fn lt_dense_integer_arrays_read_exact_storage_without_mirror() {
-        let mut lhs = Tensor::new_integer(
+        let lhs = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![0, (1_u64 << 53) + 1]),
             vec![2, 1],
         )
         .expect("lhs");
-        lhs.data.clear();
-        let mut rhs = Tensor::new_integer(
+        let rhs = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I64(vec![0, 1, i64::MAX]),
             vec![1, 3],
         )
         .expect("rhs");
-        rhs.data.clear();
 
         let result = run_lt(Value::Tensor(lhs), Value::Tensor(rhs)).expect("lt");
         match result {
@@ -597,11 +594,11 @@ pub(crate) mod tests {
             let lhs = Tensor::new(vec![1.0, 4.0, 7.0], vec![1, 3]).unwrap();
             let rhs = Tensor::new(vec![2.0, 4.0, 8.0], vec![1, 3]).unwrap();
             let view_l = HostTensorView {
-                data: &lhs.data,
+                data: &lhs.materialize_f64(),
                 shape: &lhs.shape,
             };
             let view_r = HostTensorView {
-                data: &rhs.data,
+                data: &rhs.materialize_f64(),
                 shape: &rhs.shape,
             };
             let handle_l = provider.upload(&view_l).expect("upload lhs");
@@ -610,7 +607,7 @@ pub(crate) mod tests {
                 run_lt(Value::GpuTensor(handle_l), Value::GpuTensor(handle_r)).expect("lt");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 3]);
-            assert_eq!(gathered.data, vec![1.0, 0.0, 1.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 1.0]);
         });
     }
 
@@ -626,11 +623,11 @@ pub(crate) mod tests {
         let cpu = run_lt_host(Value::Tensor(lhs.clone()), Value::Tensor(rhs.clone())).unwrap();
 
         let view_l = HostTensorView {
-            data: &lhs.data,
+            data: &lhs.materialize_f64(),
             shape: &lhs.shape,
         };
         let view_r = HostTensorView {
-            data: &rhs.data,
+            data: &rhs.materialize_f64(),
             shape: &rhs.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("provider");
@@ -647,12 +644,12 @@ pub(crate) mod tests {
                     .iter()
                     .map(|&b| if b != 0 { 1.0 } else { 0.0 })
                     .collect();
-                assert_eq!(tensor.data, expected);
+                assert_eq!(tensor.materialize_f64(), expected);
             }
             (Value::Bool(host_flag), tensor) => {
                 assert_eq!(tensor.shape, vec![1, 1]);
                 let expected = if host_flag { 1.0 } else { 0.0 };
-                assert_eq!(tensor.data, vec![expected]);
+                assert_eq!(tensor.materialize_f64(), vec![expected]);
             }
             other => panic!("unexpected output combination: {other:?}"),
         }

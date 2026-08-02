@@ -1247,8 +1247,7 @@ mod tests {
         ];
 
         for storage in cases {
-            let mut range = Tensor::new_integer(storage, vec![1, 4]).expect("range");
-            range.data = vec![999.0, 1_001.0, 1_003.0, 1_005.0];
+            let range = Tensor::new_integer(storage, vec![1, 4]).expect("range");
             let parsed = RangeSpec::parse(&Value::Tensor(range)).expect("typed range");
             assert_eq!(parsed.start_row, 1);
             assert_eq!(parsed.start_col, 2);
@@ -1260,14 +1259,12 @@ mod tests {
     #[test]
     fn range_and_sheet_parsers_ignore_poisoned_mirrors_for_every_integer_class() {
         for storage in integer_storages(&[2, 3]) {
-            let mut range = Tensor::new_integer(storage, vec![1, 2]).unwrap();
-            range.data.fill(f64::NAN);
+            let range = Tensor::new_integer(storage, vec![1, 2]).unwrap();
             let parsed = RangeSpec::parse(&Value::Tensor(range)).unwrap();
             assert_eq!((parsed.start_row, parsed.start_col), (1, 2));
         }
         for storage in integer_storages(&[2]) {
-            let mut sheet = Tensor::new_integer(storage, vec![1, 1]).unwrap();
-            sheet.data.fill(f64::NAN);
+            let sheet = Tensor::new_integer(storage, vec![1, 1]).unwrap();
             assert!(matches!(
                 SheetSelector::parse(&Value::Tensor(sheet)).unwrap(),
                 SheetSelector::Index(1)
@@ -1277,16 +1274,14 @@ mod tests {
 
     #[test]
     fn range_spec_rejects_nonpositive_typed_integer_indices() {
-        let mut range = Tensor::new_integer(IntegerStorage::I16(vec![1, 0]), vec![1, 2]).unwrap();
-        range.data.clear();
+        let range = Tensor::new_integer(IntegerStorage::I16(vec![1, 0]), vec![1, 2]).unwrap();
 
         assert!(RangeSpec::parse(&Value::Tensor(range)).is_err());
     }
 
     #[test]
     fn sheet_selector_reads_typed_integer_storage_exactly() {
-        let mut sheet = Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).unwrap();
-        sheet.data.clear();
+        let sheet = Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).unwrap();
 
         match SheetSelector::parse(&Value::Tensor(sheet)).unwrap() {
             SheetSelector::Index(index) => assert_eq!(index, 2),
@@ -1296,8 +1291,7 @@ mod tests {
 
     #[test]
     fn sheet_selector_rejects_invalid_integer_and_double_values() {
-        let mut zero = Tensor::new_integer(IntegerStorage::U16(vec![0]), vec![1, 1]).unwrap();
-        zero.data.clear();
+        let zero = Tensor::new_integer(IntegerStorage::U16(vec![0]), vec![1, 1]).unwrap();
         assert!(SheetSelector::parse(&Value::Tensor(zero)).is_err());
         assert!(SheetSelector::parse(&Value::Num(1.0e300)).is_err());
     }

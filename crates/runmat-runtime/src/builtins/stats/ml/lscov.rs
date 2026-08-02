@@ -1142,16 +1142,14 @@ mod tests {
         storage: IntegerStorage,
         rows: usize,
         cols: usize,
-        poison: f64,
+        _poison: f64,
     ) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
-        tensor.data.fill(poison);
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
         Value::Tensor(tensor)
     }
 
     fn mirrorless_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
         Value::Tensor(tensor)
     }
 
@@ -1203,10 +1201,10 @@ mod tests {
         let out = outputs(block_on(lscov_builtin(a, b, Vec::new())).unwrap());
         let x = tensor_ref(&out[0]);
         assert_eq!(x.shape, vec![2, 1]);
-        assert_close(x.data[0], 1.0);
-        assert_close(x.data[1], 2.0);
+        assert_close(x.materialize_f64()[0], 1.0);
+        assert_close(x.materialize_f64()[1], 2.0);
         assert_eq!(tensor_ref(&out[1]).shape, vec![2, 1]);
-        assert_close(tensor_ref(&out[2]).data[0], 0.0);
+        assert_close(tensor_ref(&out[2]).materialize_f64()[0], 0.0);
         assert_eq!(tensor_ref(&out[3]).shape, vec![2, 2]);
     }
 
@@ -1219,8 +1217,8 @@ mod tests {
         let out = outputs(block_on(lscov_builtin(a, b, vec![weights])).unwrap());
         let x = tensor_ref(&out[0]);
         assert_eq!(x.shape, vec![2, 1]);
-        assert_close(x.data[0], 1.0);
-        assert_close(x.data[1], 2.0);
+        assert_close(x.materialize_f64()[0], 1.0);
+        assert_close(x.materialize_f64()[1], 2.0);
     }
 
     #[test]
@@ -1242,7 +1240,7 @@ mod tests {
         let out = outputs(block_on(lscov_builtin(a, b, vec![v, alg])).unwrap());
         let x = tensor_ref(&out[0]);
         assert_eq!(x.shape, vec![2, 1]);
-        assert!(x.data.iter().all(|value| value.is_finite()));
+        assert!(x.materialize_f64().iter().all(|value| value.is_finite()));
     }
 
     #[test]
@@ -1267,12 +1265,12 @@ mod tests {
         let v = tensor(vec![1.0, 1.0, 100.0], 3, 1);
         let out = outputs(block_on(lscov_builtin(a, b, vec![v])).unwrap());
         let x = tensor_ref(&out[0]);
-        assert_close(x.data[0], -0.3972055888223553);
-        assert_close(x.data[1], 5.191616766467066);
+        assert_close(x.materialize_f64()[0], -0.3972055888223553);
+        assert_close(x.materialize_f64()[1], 5.191616766467066);
         let stdx = tensor_ref(&out[1]);
         assert_eq!(stdx.shape, vec![2, 1]);
-        assert!(stdx.data.iter().all(|value| value.is_finite()));
-        assert!(tensor_ref(&out[2]).data[0].is_finite());
+        assert!(stdx.materialize_f64().iter().all(|value| value.is_finite()));
+        assert!(tensor_ref(&out[2]).materialize_f64()[0].is_finite());
     }
 
     #[test]
@@ -1284,8 +1282,8 @@ mod tests {
         let out = outputs(block_on(lscov_builtin(a, b, vec![w])).unwrap());
         let x = tensor_ref(&out[0]);
         assert_eq!(x.shape, vec![2, 1]);
-        assert_close(x.data[0], 1.0);
-        assert_close(x.data[1], 2.0);
+        assert_close(x.materialize_f64()[0], 1.0);
+        assert_close(x.materialize_f64()[1], 2.0);
     }
 
     #[test]
@@ -1306,7 +1304,7 @@ mod tests {
         let out = outputs(block_on(lscov_builtin(a, b, vec![v, alg])).unwrap());
         let x = tensor_ref(&out[0]);
         assert_eq!(x.shape, vec![2, 1]);
-        assert!(x.data.iter().all(|value| value.is_finite()));
+        assert!(x.materialize_f64().iter().all(|value| value.is_finite()));
     }
 
     #[test]
@@ -1326,9 +1324,9 @@ mod tests {
         let alg = Value::String("orth".to_string());
         let out = outputs(block_on(lscov_builtin(a, b, vec![v, alg])).unwrap());
         let x = tensor_ref(&out[0]);
-        assert_close(x.data[0], 1.0);
-        assert_close(x.data[1], 2.0);
-        assert_close(tensor_ref(&out[2]).data[0], 0.0);
+        assert_close(x.materialize_f64()[0], 1.0);
+        assert_close(x.materialize_f64()[1], 2.0);
+        assert_close(tensor_ref(&out[2]).materialize_f64()[0], 0.0);
     }
 
     #[test]
@@ -1339,10 +1337,10 @@ mod tests {
         let out = outputs(block_on(lscov_builtin(a, b, Vec::new())).unwrap());
         let x = tensor_ref(&out[0]);
         assert_eq!(x.shape, vec![2, 2]);
-        assert_close(x.data[0], 1.0);
-        assert_close(x.data[1], 2.0);
-        assert_close(x.data[2], 2.0);
-        assert_close(x.data[3], 2.0);
+        assert_close(x.materialize_f64()[0], 1.0);
+        assert_close(x.materialize_f64()[1], 2.0);
+        assert_close(x.materialize_f64()[2], 2.0);
+        assert_close(x.materialize_f64()[3], 2.0);
         assert_eq!(tensor_ref(&out[2]).shape, vec![1, 2]);
     }
 
@@ -1407,6 +1405,6 @@ mod tests {
         let b = tensor(vec![1.0, 2.0], 2, 1);
         let out = outputs(block_on(lscov_builtin(a, b, Vec::new())).unwrap());
         assert_eq!(tensor_ref(&out[0]).shape, vec![3, 1]);
-        assert_close(tensor_ref(&out[2]).data[0], 0.0);
+        assert_close(tensor_ref(&out[2]).materialize_f64()[0], 0.0);
     }
 }

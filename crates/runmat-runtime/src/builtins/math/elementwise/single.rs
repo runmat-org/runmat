@@ -562,9 +562,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn single_tensor_reads_typed_integer_storage_exactly() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2]).unwrap();
-        tensor.data.fill(f64::NAN);
 
         let result = single_builtin(Value::Tensor(tensor), Vec::new()).expect("single");
         match result {
@@ -631,7 +630,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data, vec![65.0, 90.0]);
+                assert_eq!(t.materialize_f64(), vec![65.0, 90.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -652,7 +651,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.1, 0.2, 0.3, 0.4], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -665,7 +664,7 @@ pub(crate) mod tests {
                         .map(|v| v as f64)
                         .collect();
                     assert_eq!(gathered.shape, vec![2, 2]);
-                    assert_eq!(gathered.data, expected);
+                    assert_eq!(gathered.materialize_f64(), expected);
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
             }
@@ -688,7 +687,7 @@ pub(crate) mod tests {
                     .into_iter()
                     .map(|v| v as f64)
                     .collect();
-                assert_eq!(t.data, expected);
+                assert_eq!(t.materialize_f64(), expected);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -717,7 +716,7 @@ pub(crate) mod tests {
                         .map(|v| v as f64)
                         .collect();
                     assert_eq!(gathered.shape, vec![2, 2]);
-                    assert_eq!(gathered.data, expected);
+                    assert_eq!(gathered.materialize_f64(), expected);
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
             }
@@ -740,7 +739,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, tensor.shape);
                 let expected: Vec<f64> = [1.5f32, 2.25f32].into_iter().map(|v| v as f64).collect();
-                assert_eq!(t.data, expected);
+                assert_eq!(t.materialize_f64(), expected);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -757,13 +756,13 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, tensor.shape);
                 // Sum should equal m exactly.
-                let sum: f64 = t.data.iter().copied().sum();
+                let sum: f64 = t.materialize_f64().iter().copied().sum();
                 assert!(
                     (sum - (m as f64)).abs() < 1e-9,
                     "sum expected {m}, got {sum}"
                 );
                 // All entries must be exactly 1.0
-                assert!(t.data.iter().all(|&v| v == 1.0));
+                assert!(t.materialize_f64().iter().all(|&v| v == 1.0));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -780,14 +779,14 @@ pub(crate) mod tests {
         let cpu = single_tensor_to_host(tensor.clone()).expect("cpu conversion");
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu_value = block_on(single_from_gpu(handle)).expect("gpu single");
         let gathered = test_support::gather(gpu_value).expect("gather");
         assert_eq!(gathered.shape, cpu.shape);
-        assert_eq!(gathered.data, cpu.data);
+        assert_eq!(gathered.materialize_f64(), cpu.materialize_f64());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -801,20 +800,20 @@ pub(crate) mod tests {
         let tensor = Tensor::ones(vec![m, 1]);
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu_value = block_on(single_from_gpu(handle)).expect("gpu single");
         let gathered = test_support::gather(gpu_value).expect("gather");
         assert_eq!(gathered.shape, tensor.shape);
-        let sum: f64 = gathered.data.iter().copied().sum();
+        let sum: f64 = gathered.materialize_f64().iter().copied().sum();
         assert!(
             (sum - (m as f64)).abs() < 1e-9,
             "sum expected {} got {}",
             m,
             sum
         );
-        assert!(gathered.data.iter().all(|&v| v == 1.0));
+        assert!(gathered.materialize_f64().iter().all(|&v| v == 1.0));
     }
 }

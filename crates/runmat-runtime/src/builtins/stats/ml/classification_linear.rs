@@ -1865,8 +1865,7 @@ mod tests {
     }
 
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
         Value::Tensor(tensor)
     }
 
@@ -1912,7 +1911,7 @@ mod tests {
         )
         .unwrap();
         match &outputs[0] {
-            Value::Tensor(labels) => assert_eq!(labels.data, vec![0.0, 1.0]),
+            Value::Tensor(labels) => assert_eq!(labels.materialize_f64(), vec![0.0, 1.0]),
             other => panic!("expected labels, got {other:?}"),
         }
         match &outputs[1] {
@@ -1949,7 +1948,7 @@ mod tests {
         )
         .unwrap();
         match &outputs[0] {
-            Value::Tensor(labels) => assert_eq!(labels.data, vec![0.0, 1.0]),
+            Value::Tensor(labels) => assert_eq!(labels.materialize_f64(), vec![0.0, 1.0]),
             other => panic!("expected labels, got {other:?}"),
         }
     }
@@ -1990,7 +1989,9 @@ mod tests {
         match &outputs[1] {
             Value::Tensor(score) => {
                 assert_eq!(score.shape, vec![2, 2]);
-                assert!((score.data[0] + score.data[2] - 1.0).abs() < 1.0e-8);
+                assert!(
+                    (score.materialize_f64()[0] + score.materialize_f64()[2] - 1.0).abs() < 1.0e-8
+                );
             }
             other => panic!("expected score, got {other:?}"),
         }

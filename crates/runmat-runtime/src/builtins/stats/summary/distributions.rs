@@ -1596,8 +1596,7 @@ mod tests {
     }
 
     fn mirrorless_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
         Value::Tensor(tensor)
     }
 
@@ -1631,8 +1630,8 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 2]);
-                assert_close(tensor.data[0], 0.5, 1e-12);
-                assert_close(tensor.data[1], 0.841_344_746_068_543, 1e-12);
+                assert_close(tensor.materialize_f64()[0], 0.5, 1e-12);
+                assert_close(tensor.materialize_f64()[1], 0.841_344_746_068_543, 1e-12);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1731,8 +1730,8 @@ mod tests {
         match normal {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 2]);
-                assert_close(tensor.data[0], 1.0, 1e-10);
-                assert_close(tensor.data[1], 4.289_707_253_902_944, 1e-10);
+                assert_close(tensor.materialize_f64()[0], 1.0, 1e-10);
+                assert_close(tensor.materialize_f64()[1], 4.289_707_253_902_944, 1e-10);
             }
             other => panic!("expected tensor normal icdf, got {other:?}"),
         }
@@ -1857,8 +1856,8 @@ mod tests {
         match normal {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 2]);
-                assert_close(tensor.data[0], 0.0, 1e-10);
-                assert_close(tensor.data[1], 0.0, 1e-10);
+                assert_close(tensor.materialize_f64()[0], 0.0, 1e-10);
+                assert_close(tensor.materialize_f64()[1], 0.0, 1e-10);
             }
             other => panic!("expected tensor normal icdf, got {other:?}"),
         }
@@ -1875,8 +1874,8 @@ mod tests {
         match uniform {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 2]);
-                assert_close(tensor.data[0], 0.5, 1e-12);
-                assert_close(tensor.data[1], 1.0, 1e-12);
+                assert_close(tensor.materialize_f64()[0], 0.5, 1e-12);
+                assert_close(tensor.materialize_f64()[1], 1.0, 1e-12);
             }
             other => panic!("expected tensor uniform icdf, got {other:?}"),
         }
@@ -1987,9 +1986,9 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 3]);
-                assert_close(tensor.data[0], 0.5, 1e-12);
-                assert_close(tensor.data[1], 0.818_391_266, 1e-9);
-                assert_close(tensor.data[2], 0.977_249_868, 1e-9);
+                assert_close(tensor.materialize_f64()[0], 0.5, 1e-12);
+                assert_close(tensor.materialize_f64()[1], 0.818_391_266, 1e-9);
+                assert_close(tensor.materialize_f64()[2], 0.977_249_868, 1e-9);
             }
             other => panic!("expected tensor cdf, got {other:?}"),
         }
@@ -2138,8 +2137,8 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 2]);
-                assert_close(tensor.data[0], 0.5, 1.0e-12);
-                assert_close(tensor.data[1], 0.841_344_746_068_543, 1.0e-12);
+                assert_close(tensor.materialize_f64()[0], 0.5, 1.0e-12);
+                assert_close(tensor.materialize_f64()[1], 0.841_344_746_068_543, 1.0e-12);
             }
             other => panic!("expected tensor normcdf, got {other:?}"),
         }
@@ -2170,7 +2169,7 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 3]);
-                assert_close(tensor.data[2], 0.300_014_164_121_372, 1.0e-12);
+                assert_close(tensor.materialize_f64()[2], 0.300_014_164_121_372, 1.0e-12);
             }
             other => panic!("expected tensor chi2cdf, got {other:?}"),
         }

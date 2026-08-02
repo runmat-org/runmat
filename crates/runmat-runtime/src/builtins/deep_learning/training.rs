@@ -1409,15 +1409,15 @@ mod tests {
             assert_eq!(updated.shape, shape);
             assert_eq!(avg.shape, shape);
             assert_eq!(avg_sq.shape, shape);
-            assert_close(updated.data[0], 0.990000001);
-            assert_close(updated.data[1], 2.0099999995);
-            assert_close(updated.data[2], 2.9900000003333334);
-            assert_close(avg.data[0], 0.01);
-            assert_close(avg.data[1], -0.02);
-            assert_close(avg.data[2], 0.03);
-            assert_close(avg_sq.data[0], 0.00001);
-            assert_close(avg_sq.data[1], 0.00004);
-            assert_close(avg_sq.data[2], 0.00009);
+            assert_close(updated.materialize_f64()[0], 0.990000001);
+            assert_close(updated.materialize_f64()[1], 2.0099999995);
+            assert_close(updated.materialize_f64()[2], 2.9900000003333334);
+            assert_close(avg.materialize_f64()[0], 0.01);
+            assert_close(avg.materialize_f64()[1], -0.02);
+            assert_close(avg.materialize_f64()[2], 0.03);
+            assert_close(avg_sq.materialize_f64()[0], 0.00001);
+            assert_close(avg_sq.materialize_f64()[1], 0.00004);
+            assert_close(avg_sq.materialize_f64()[2], 0.00009);
         });
     }
 

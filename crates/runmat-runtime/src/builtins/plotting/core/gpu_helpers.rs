@@ -202,10 +202,9 @@ mod tests {
             1.25
         );
 
-        let mut integer =
+        let integer =
             Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
                 .unwrap();
-        integer.data.clear();
         assert_eq!(
             block_on(value_to_scalar_async(Value::Tensor(integer), "test")).unwrap(),
             9_007_199_254_740_993_u64 as f64

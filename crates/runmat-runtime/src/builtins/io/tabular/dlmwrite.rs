@@ -1553,12 +1553,11 @@ pub(crate) mod tests {
     #[test]
     fn dlmwrite_preserves_typed_integer_matrix_values_exactly_by_default() {
         let path = temp_path("csv");
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             IntegerStorage::U64(vec![u64::MAX, 17, (1_u64 << 53) + 1, 29]),
             vec![2, 2],
         )
         .expect("typed integer matrix");
-        tensor.data.fill(0.0);
         let filename = path.to_string_lossy().into_owned();
 
         dlmwrite_builtin(Value::from(filename), Value::Tensor(tensor), Vec::new()).unwrap();
@@ -1651,9 +1650,7 @@ pub(crate) mod tests {
     #[test]
     fn dlmwrite_explicit_precision_keeps_numeric_formatting_for_typed_integers() {
         let path = temp_path("csv");
-        let mut tensor =
-            Tensor::new_integer(IntegerStorage::U16(vec![12, 345]), vec![1, 2]).unwrap();
-        tensor.data.fill(0.0);
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![12, 345]), vec![1, 2]).unwrap();
         let filename = path.to_string_lossy().into_owned();
         dlmwrite_builtin(
             Value::from(filename),
@@ -1733,7 +1730,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).unwrap();
@@ -1756,7 +1753,7 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).unwrap();
@@ -1825,9 +1822,7 @@ pub(crate) mod tests {
 
     #[test]
     fn dlmwrite_integer_tensor_options_preserve_exact_bounds() {
-        let mut offset =
-            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("offset");
-        offset.data.clear();
+        let offset = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("offset");
         assert_eq!(
             parse_offset_value(&Value::Tensor(offset), "row offset").unwrap(),
             7
@@ -1836,9 +1831,8 @@ pub(crate) mod tests {
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("negative");
         assert!(parse_offset_value(&Value::Tensor(negative), "row offset").is_err());
 
-        let mut precision =
+        let precision =
             Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("precision");
-        precision.data.clear();
         assert!(matches!(
             parse_precision_value(&Value::Tensor(precision)),
             Ok(PrecisionSpec::Significant(7))
@@ -1870,15 +1864,13 @@ pub(crate) mod tests {
         ];
 
         for storage in classes {
-            let mut offset = Tensor::new_integer(storage.clone(), vec![1, 1]).expect("offset");
-            offset.data = vec![f64::NAN];
+            let offset = Tensor::new_integer(storage.clone(), vec![1, 1]).expect("offset");
             assert_eq!(
                 parse_offset_value(&Value::Tensor(offset), "row offset").unwrap(),
                 7
             );
 
-            let mut precision = Tensor::new_integer(storage, vec![1, 1]).expect("precision");
-            precision.data = vec![f64::NAN];
+            let precision = Tensor::new_integer(storage, vec![1, 1]).expect("precision");
             assert!(matches!(
                 parse_precision_value(&Value::Tensor(precision)),
                 Ok(PrecisionSpec::Significant(7))

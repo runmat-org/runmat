@@ -128,6 +128,6 @@ mod tests {
         let _ = ylim_builtin(vec![Value::String("auto".into())]).unwrap();
         let queried = ylim_builtin(Vec::new()).unwrap();
         let tensor = runmat_builtins::Tensor::try_from(&queried).unwrap();
-        assert!(tensor.data[0].is_nan() && tensor.data[1].is_nan());
+        assert!(tensor.materialize_f64()[0].is_nan() && tensor.materialize_f64()[1].is_nan());
     }
 }

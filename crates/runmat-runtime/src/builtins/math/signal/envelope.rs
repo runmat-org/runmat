@@ -869,17 +869,15 @@ mod tests {
     }
 
     fn integer_row(values: Vec<i16>) -> Value {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::I16(values.clone()), vec![1, values.len()])
                 .expect("typed integer row");
-        tensor.data.fill(f64::NAN);
         Value::Tensor(tensor)
     }
 
     fn integer_matrix(values: Vec<i16>, shape: Vec<usize>) -> Value {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::I16(values), shape).expect("typed integer matrix");
-        tensor.data.fill(f64::NAN);
         Value::Tensor(tensor)
     }
 
@@ -890,7 +888,7 @@ mod tests {
 
     fn tensor_data(value: Value) -> Vec<f64> {
         match value {
-            Value::Tensor(tensor) => tensor.data,
+            Value::Tensor(tensor) => tensor.materialize_f64(),
             Value::Num(value) => vec![value],
             other => panic!("expected numeric output, got {other:?}"),
         }
@@ -996,10 +994,12 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(upper.shape, vec![4, 2]);
-        assert!(upper.data[..4]
+        assert!(upper.materialize_f64()[..4]
             .iter()
             .all(|value| (*value - 1.0).abs() < 1.0e-12));
-        assert!(upper.data[4..].iter().all(|value| *value >= 2.0));
+        assert!(upper.materialize_f64()[4..]
+            .iter()
+            .all(|value| *value >= 2.0));
     }
 
     #[test]
@@ -1015,10 +1015,12 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(upper.shape, vec![4, 2]);
-        assert!(upper.data[..4]
+        assert!(upper.materialize_f64()[..4]
             .iter()
             .all(|value| (*value - 1.0).abs() < 1.0e-12));
-        assert!(upper.data[4..].iter().all(|value| *value >= 2.0));
+        assert!(upper.materialize_f64()[4..]
+            .iter()
+            .all(|value| *value >= 2.0));
     }
 
     #[test]
@@ -1096,10 +1098,10 @@ mod tests {
         let expected_lower = tensor_data(expected[1].clone());
         assert_eq!(upper.shape, shape);
         assert_eq!(lower.shape, shape);
-        for (actual, expected) in upper.data.iter().zip(expected_upper.iter()) {
+        for (actual, expected) in upper.materialize_f64().iter().zip(expected_upper.iter()) {
             assert!((actual - expected).abs() < 1.0e-5, "{actual} != {expected}");
         }
-        for (actual, expected) in lower.data.iter().zip(expected_lower.iter()) {
+        for (actual, expected) in lower.materialize_f64().iter().zip(expected_lower.iter()) {
             assert!((actual - expected).abs() < 1.0e-5, "{actual} != {expected}");
         }
         provider.free(&handle).ok();

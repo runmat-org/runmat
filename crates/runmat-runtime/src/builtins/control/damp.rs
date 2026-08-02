@@ -294,11 +294,11 @@ mod tests {
         outputs
     }
 
-    fn tensor_data(value: &Value) -> &[f64] {
+    fn tensor_data(value: &Value) -> Vec<f64> {
         let Value::Tensor(tensor) = value else {
             panic!("expected tensor, got {value:?}");
         };
-        &tensor.data
+        tensor.materialize_f64()
     }
 
     #[test]
@@ -327,10 +327,10 @@ mod tests {
         assert_eq!(wn.len(), 2);
         assert_eq!(zeta.len(), 2);
         for value in wn {
-            assert!((*value - 2.0).abs() < 1.0e-8);
+            assert!((value - 2.0).abs() < 1.0e-8);
         }
         for value in zeta {
-            assert!((*value - 0.125).abs() < 1.0e-8);
+            assert!((value - 0.125).abs() < 1.0e-8);
         }
         match &outputs[2] {
             Value::ComplexTensor(poles) => {
@@ -397,10 +397,10 @@ mod tests {
 
         let outputs = damp_outputs(sys, 3);
         for value in tensor_data(&outputs[0]) {
-            assert!((*value - 2.0).abs() < 1.0e-8);
+            assert!((value - 2.0).abs() < 1.0e-8);
         }
         for value in tensor_data(&outputs[1]) {
-            assert!((*value - 0.125).abs() < 1.0e-8);
+            assert!((value - 0.125).abs() < 1.0e-8);
         }
         assert!(
             matches!(&outputs[2], Value::ComplexTensor(ComplexTensor { shape, .. }) if shape == &vec![2, 1])

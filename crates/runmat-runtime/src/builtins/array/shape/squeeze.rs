@@ -412,7 +412,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -444,7 +444,7 @@ pub(crate) mod tests {
         )
         .unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload source tensor");
@@ -460,6 +460,9 @@ pub(crate) mod tests {
         let downloaded = block_on(download_handle_async(provider, &gpu_handle))
             .expect("download squeezed tensor");
         assert_eq!(downloaded.shape.as_slice(), &[3, 4]);
-        assert_eq!(downloaded.data.as_slice(), tensor.data.as_slice());
+        assert_eq!(
+            downloaded.data.as_slice(),
+            tensor.materialize_f64().as_slice()
+        );
     }
 }

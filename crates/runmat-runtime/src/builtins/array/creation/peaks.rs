@@ -755,7 +755,7 @@ mod tests {
     fn peaks_zero_is_empty() {
         let gathered = gather_result(peaks_builtin(vec![Value::Num(0.0)]).expect("peaks"));
         assert_eq!(gathered.shape, vec![0, 0]);
-        assert!(gathered.data.is_empty());
+        assert!(gathered.materialize_f64().is_empty());
     }
 
     #[test]
@@ -797,7 +797,7 @@ mod tests {
         let tol = value_tolerance(&value);
         let gathered = gather_result(value);
         assert_eq!(gathered.shape, vec![1, 1]);
-        let got = gathered.data[0];
+        let got = gathered.materialize_f64()[0];
         assert!((got - expected).abs() < tol);
     }
 
@@ -827,8 +827,8 @@ mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
                 for i in 0..4 {
-                    let expected = peaks_at(x.data[i], y.data[i]);
-                    assert!((t.data[i] - expected).abs() < 1e-12);
+                    let expected = peaks_at(x.materialize_f64()[i], y.materialize_f64()[i]);
+                    assert!((t.materialize_f64()[i] - expected).abs() < 1e-12);
                 }
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -837,10 +837,8 @@ mod tests {
 
     #[test]
     fn peaks_xy_reads_typed_integer_coordinates_from_authoritative_storage() {
-        let mut x = Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 0, 1]), vec![2, 2]).unwrap();
-        let mut y = Tensor::new_integer(IntegerStorage::I16(vec![0, 0, 1, 1]), vec![2, 2]).unwrap();
-        x.data.fill(f64::NAN);
-        y.data.fill(f64::NAN);
+        let x = Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 0, 1]), vec![2, 2]).unwrap();
+        let y = Tensor::new_integer(IntegerStorage::I16(vec![0, 0, 1, 1]), vec![2, 2]).unwrap();
 
         let value = peaks_builtin(vec![Value::Tensor(x), Value::Tensor(y)]).expect("peaks");
         let Value::Tensor(tensor) = value else {
@@ -851,7 +849,7 @@ mod tests {
             .zip([0.0, 0.0, 1.0, 1.0].iter())
             .enumerate()
         {
-            assert!((tensor.data[index] - peaks_at(x, y)).abs() < 1.0e-12);
+            assert!((tensor.materialize_f64()[index] - peaks_at(x, y)).abs() < 1.0e-12);
         }
     }
 
@@ -1026,7 +1024,7 @@ mod tests {
                 let t = gather_handle(handle);
 
                 assert_eq!(t.shape, vec![n, n], "shape mismatch for n={n}");
-                for (i, (&gv, &cv)) in t.data.iter().zip(z_ref.iter()).enumerate() {
+                for (i, (&gv, &cv)) in t.materialize_f64().iter().zip(z_ref.iter()).enumerate() {
                     let err = (gv - cv).abs();
                     assert!(
                         err <= tol,
@@ -1045,7 +1043,7 @@ mod tests {
             let handle = provider.peaks(0).expect("peaks(0)");
             let t = gather_handle(handle);
             assert_eq!(t.shape, vec![0, 0]);
-            assert!(t.data.is_empty());
+            assert!(t.materialize_f64().is_empty());
         }
 
         /// peaks_xy shader matches host at coordinates spanning the interesting
@@ -1090,7 +1088,7 @@ mod tests {
             let t = gather_handle(z_handle);
 
             assert_eq!(t.shape, shape.to_vec());
-            for (i, (&gv, &cv)) in t.data.iter().zip(z_ref.iter()).enumerate() {
+            for (i, (&gv, &cv)) in t.materialize_f64().iter().zip(z_ref.iter()).enumerate() {
                 let err = (gv - cv).abs();
                 assert!(
                     err <= tol,
@@ -1123,7 +1121,7 @@ mod tests {
                 .peaks_xy(&x_handle, &y_handle)
                 .expect("peaks_xy empty");
             let t = gather_handle(z_handle);
-            assert!(t.data.is_empty());
+            assert!(t.materialize_f64().is_empty());
         }
 
         /// End-to-end: peaks_builtin(n) dispatches to GPU and returns a GpuTensor

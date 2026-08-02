@@ -927,9 +927,8 @@ pub(crate) mod tests {
     fn cumsum_parses_typed_integer_dimension_without_mirror() {
         let input = BuiltinsTensor::new_integer(IntegerStorage::I16(vec![1, 4, 2, 5]), vec![2, 2])
             .expect("input");
-        let mut dim = BuiltinsTensor::new_integer(IntegerStorage::I32(vec![2]), vec![1, 1])
+        let dim = BuiltinsTensor::new_integer(IntegerStorage::I32(vec![2]), vec![1, 1])
             .expect("dimension");
-        dim.data.clear();
 
         let result = cumsum_builtin(Value::Tensor(input), vec![Value::Tensor(dim)])
             .expect("cumsum dimension from typed integer tensor");
@@ -975,7 +974,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 3]);
-                assert_eq!(out.data, vec![1.0, 5.0, 2.0, 7.0, 3.0, 9.0]);
+                assert_eq!(out.materialize_f64(), vec![1.0, 5.0, 2.0, 7.0, 3.0, 9.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -990,7 +989,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 3]);
-                assert_eq!(out.data, vec![1.0, 4.0, 3.0, 9.0, 6.0, 15.0]);
+                assert_eq!(out.materialize_f64(), vec![1.0, 4.0, 3.0, 9.0, 6.0, 15.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1004,7 +1003,7 @@ pub(crate) mod tests {
             cumsum_builtin(Value::Tensor(tensor), vec![Value::from("reverse")]).expect("cumsum");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.data, vec![10.0, 9.0, 7.0, 4.0]);
+                assert_eq!(out.materialize_f64(), vec![10.0, 9.0, 7.0, 4.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1019,7 +1018,7 @@ pub(crate) mod tests {
             cumsum_builtin(Value::Tensor(tensor), vec![Value::from("omitnan")]).expect("cumsum");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.data, vec![0.0, 1.0, 1.0, 4.0]);
+                assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 1.0, 4.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1032,8 +1031,8 @@ pub(crate) mod tests {
         let result = cumsum_builtin(Value::Tensor(tensor), Vec::new()).expect("cumsum");
         match result {
             Value::Tensor(out) => {
-                assert!(out.data[1].is_nan());
-                assert!(out.data[2].is_nan());
+                assert!(out.materialize_f64()[1].is_nan());
+                assert!(out.materialize_f64()[2].is_nan());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1075,14 +1074,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = BuiltinsTensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = cumsum_builtin(Value::GpuTensor(handle), Vec::new()).expect("cumsum");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![4, 1]);
-            assert_eq!(gathered.data, vec![1.0, 3.0, 6.0, 10.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 3.0, 6.0, 10.0]);
         });
     }
 
@@ -1098,7 +1097,7 @@ pub(crate) mod tests {
         .expect("cumsum");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.data, vec![7.0, 6.0, 6.0, 2.0]);
+                assert_eq!(out.materialize_f64(), vec![7.0, 6.0, 6.0, 2.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1113,7 +1112,7 @@ pub(crate) mod tests {
             .expect("cumsum");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.data, vec![0.0, 2.0, 5.0, 5.0]);
+                assert_eq!(out.materialize_f64(), vec![0.0, 2.0, 5.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1127,9 +1126,9 @@ pub(crate) mod tests {
             .expect("cumsum");
         match result {
             Value::Tensor(out) => {
-                assert!((out.data[0] - 1.0).abs() < 1e-12);
-                assert!(out.data[1].is_nan());
-                assert!(out.data[2].is_nan());
+                assert!((out.materialize_f64()[0] - 1.0).abs() < 1e-12);
+                assert!(out.materialize_f64()[1].is_nan());
+                assert!(out.materialize_f64()[2].is_nan());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1145,7 +1144,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 3]);
-                assert_eq!(out.data, vec![5.0, 4.0, 7.0, 5.0, 9.0, 6.0]);
+                assert_eq!(out.materialize_f64(), vec![5.0, 4.0, 7.0, 5.0, 9.0, 6.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1231,14 +1230,14 @@ pub(crate) mod tests {
             let tensor = BuiltinsTensor::new(vec![f64::NAN, 2.0, 3.0, f64::NAN], vec![4, 1])
                 .expect("tensor");
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = cumsum_builtin(Value::GpuTensor(handle), vec![Value::from("omitnan")])
                 .expect("cumsum");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.data, vec![0.0, 2.0, 5.0, 5.0]);
+            assert_eq!(gathered.materialize_f64(), vec![0.0, 2.0, 5.0, 5.0]);
         });
     }
 
@@ -1248,7 +1247,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = BuiltinsTensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1313,7 +1312,7 @@ pub(crate) mod tests {
         let tensor = BuiltinsTensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).unwrap();
         let cpu = cumsum_builtin(Value::Tensor(tensor.clone()), Vec::new()).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()
@@ -1325,7 +1324,11 @@ pub(crate) mod tests {
         match cpu {
             Value::Tensor(ct) => {
                 assert_eq!(ct.shape, gathered.shape);
-                for (a, b) in ct.data.iter().zip(gathered.data.iter()) {
+                for (a, b) in ct
+                    .materialize_f64()
+                    .iter()
+                    .zip(gathered.materialize_f64().iter())
+                {
                     assert!((a - b).abs() < 1e-9);
                 }
             }
@@ -1347,7 +1350,7 @@ pub(crate) mod tests {
         )
         .unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().unwrap();
@@ -1365,7 +1368,11 @@ pub(crate) mod tests {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-9,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
                 };
-                for (a, b) in ct.data.iter().zip(gathered.data.iter()) {
+                for (a, b) in ct
+                    .materialize_f64()
+                    .iter()
+                    .zip(gathered.materialize_f64().iter())
+                {
                     assert!((a - b).abs() < tol);
                 }
             }

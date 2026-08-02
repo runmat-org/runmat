@@ -1353,7 +1353,7 @@ mod tests {
         let Value::Tensor(tensor) = value else {
             panic!("expected handle tensor");
         };
-        assert_eq!(tensor.data.len(), 2);
+        assert_eq!(tensor.materialize_f64().len(), 2);
         let _ = std::fs::remove_file(&path);
     }
 
@@ -1364,12 +1364,11 @@ mod tests {
         block_on(plot_builtin(vec![Value::Tensor(tensor(&[1.0, 2.0, 3.0]))])).expect("plot one");
         let second = figure_builtin(vec![Value::String("next".into())]).expect("figure two");
         block_on(plot_builtin(vec![Value::Tensor(tensor(&[3.0, 2.0, 1.0]))])).expect("plot two");
-        let mut handles = Tensor::new_integer(
+        let handles = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I64(vec![first as i64, second as i64]),
             vec![1, 2],
         )
         .expect("handle tensor");
-        handles.data.clear();
 
         let path = temp_path("integer_handles");
         let _ = std::fs::remove_file(&path);
@@ -1386,7 +1385,7 @@ mod tests {
         let Value::Tensor(tensor) = value else {
             panic!("expected handle tensor");
         };
-        assert_eq!(tensor.data.len(), 2);
+        assert_eq!(tensor.materialize_f64().len(), 2);
         let _ = std::fs::remove_file(&path);
     }
 

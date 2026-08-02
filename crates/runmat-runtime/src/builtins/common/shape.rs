@@ -146,9 +146,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numel_reads_typed_integer_storage_length_exactly() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 7, 9]), vec![1, 3]).unwrap();
-        tensor.data.clear();
 
         assert_eq!(block_on(value_numel(&Value::Tensor(tensor))).unwrap(), 3);
     }
@@ -174,6 +173,6 @@ pub(crate) mod tests {
     fn dims_to_row_tensor_converts() {
         let tensor = dims_to_row_tensor(&[2, 4, 6]).unwrap();
         assert_eq!(tensor.shape, vec![1, 3]);
-        assert_eq!(tensor.data, vec![2.0, 4.0, 6.0]);
+        assert_eq!(tensor.materialize_f64(), vec![2.0, 4.0, 6.0]);
     }
 }

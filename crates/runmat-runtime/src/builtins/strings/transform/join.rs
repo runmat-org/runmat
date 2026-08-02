@@ -896,8 +896,7 @@ pub(crate) mod tests {
 
     #[test]
     fn join_dimension_parser_preserves_typed_integer_tensor_bounds() {
-        let mut dim = Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("dim");
-        dim.data.clear();
+        let dim = Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("dim");
         assert_eq!(value_to_dimension(&Value::Tensor(dim)).unwrap(), Some(2));
 
         let zero = Tensor::new_integer(IntegerStorage::U64(vec![0]), vec![1, 1]).expect("dim");

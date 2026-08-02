@@ -130,6 +130,6 @@ mod tests {
         .unwrap();
         let queried = clim_builtin(Vec::new()).unwrap();
         let tensor = runmat_builtins::Tensor::try_from(&queried).unwrap();
-        assert_eq!(tensor.data, vec![0.25, 0.75]);
+        assert_eq!(tensor.materialize_f64(), vec![0.25, 0.75]);
     }
 }

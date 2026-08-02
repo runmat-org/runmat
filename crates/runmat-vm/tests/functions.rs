@@ -53,9 +53,9 @@ fn has_class_ref(values: &[runmat_builtins::Value], class_name: &str) -> bool {
 fn has_numeric_tensor(values: &[runmat_builtins::Value], expected: &[f64]) -> bool {
     values.iter().any(|value| match value {
         runmat_builtins::Value::Tensor(tensor) => {
-            tensor.data.len() == expected.len()
+            tensor.materialize_f64().len() == expected.len()
                 && tensor
-                    .data
+                    .materialize_f64()
                     .iter()
                     .zip(expected)
                     .all(|(actual, expected)| (*actual - *expected).abs() < 1e-9)
@@ -2025,11 +2025,11 @@ fn implicit_array_creation_from_linear_index_assignment() {
     let vars = execute_source(program);
     assert!(vars.iter().any(|v| matches!(
         v,
-        runmat_builtins::Value::Tensor(t) if t.shape == vec![1, 3] && t.data == vec![0.0, 0.0, 10.0]
+        runmat_builtins::Value::Tensor(t) if t.shape == vec![1, 3] && t.materialize_f64() == vec![0.0, 0.0, 10.0]
     )));
     assert!(vars.iter().any(|v| matches!(
         v,
-        runmat_builtins::Value::Tensor(t) if t.shape == vec![1, 1] && t.data == vec![0.0]
+        runmat_builtins::Value::Tensor(t) if t.shape == vec![1, 1] && t.materialize_f64() == vec![0.0]
     )));
 }
 
@@ -2948,7 +2948,7 @@ fn empty_array_member_assignment_assigns_empty_value() {
     assert!(vars.iter().any(|v| {
         matches!(
             v,
-            runmat_builtins::Value::Tensor(t) if t.data.is_empty()
+            runmat_builtins::Value::Tensor(t) if t.materialize_f64().is_empty()
         )
     }));
 }
@@ -2961,7 +2961,7 @@ fn empty_array_cell_content_assignment_assigns_empty_value() {
     assert!(vars.iter().any(|v| {
         matches!(
             v,
-            runmat_builtins::Value::Tensor(t) if t.data.is_empty()
+            runmat_builtins::Value::Tensor(t) if t.materialize_f64().is_empty()
         )
     }));
 }
@@ -4343,7 +4343,7 @@ fn findobj_script_surface_finds_graphics_handles() {
             .filter(|value| matches!(
                 value,
                 runmat_builtins::Value::Tensor(tensor)
-                    if tensor.data.len() == 1 && (tensor.data[0] - line_handle).abs() < 1e-9
+                    if tensor.materialize_f64().len() == 1 && (tensor.materialize_f64()[0] - line_handle).abs() < 1e-9
             ))
             .count()
             >= 2
@@ -4848,9 +4848,9 @@ fn broadcasting_roundtrip_property_like() {
     for v in vars {
         if let runmat_builtins::Value::Tensor(t) = v {
             if t.shape == vec![3, 1]
-                && (t.data[0] - 7.0).abs() < 1e-9
-                && (t.data[1] - 8.0).abs() < 1e-9
-                && (t.data[2] - 9.0).abs() < 1e-9
+                && (t.materialize_f64()[0] - 7.0).abs() < 1e-9
+                && (t.materialize_f64()[1] - 8.0).abs() < 1e-9
+                && (t.materialize_f64()[2] - 9.0).abs() < 1e-9
             {
                 count += 1;
             }
@@ -5521,7 +5521,7 @@ fn string_array_literal_concat_index_and_compare() {
                 }
             }
             runmat_builtins::Value::Tensor(t) => {
-                println!("T shape={:?} data={:?}", t.shape, t.data);
+                println!("T shape={:?} data={:?}", t.shape, t.materialize_f64());
                 if t.shape == vec![2, 2] {
                     saw_e1 = true;
                     saw_e2 = true;
@@ -5568,10 +5568,10 @@ fn computed_integer_indices_work_for_column_slice_read_and_assign() {
     let mut saw_assign = false;
     for value in vars {
         if let runmat_builtins::Value::Tensor(t) = value {
-            if t.shape == vec![2, 1] && t.data == vec![2.0, 5.0] {
+            if t.shape == vec![2, 1] && t.materialize_f64() == vec![2.0, 5.0] {
                 saw_read = true;
             }
-            if t.shape == vec![2, 1] && t.data == vec![7.0, 9.0] {
+            if t.shape == vec![2, 1] && t.materialize_f64() == vec![7.0, 9.0] {
                 saw_assign = true;
             }
         }
@@ -5668,7 +5668,7 @@ fn type_class_static_method_zeros() {
     // The result should be a 2x3 matrix of zeros
     assert!(vars.iter().any(|v| {
         if let runmat_builtins::Value::Tensor(t) = v {
-            t.shape == vec![2, 3] && t.data.iter().all(|&x| x == 0.0)
+            t.shape == vec![2, 3] && t.materialize_f64().iter().all(|&x| x == 0.0)
         } else {
             false
         }

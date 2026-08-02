@@ -1061,10 +1061,9 @@ mod tests {
     }
 
     fn int_tensor(data: &[i16], shape: Vec<usize>) -> Tensor {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(runmat_builtins::IntegerStorage::I16(data.to_vec()), shape)
                 .expect("integer tensor");
-        tensor.data.clear();
         tensor
     }
 
@@ -1099,12 +1098,11 @@ mod tests {
 
     #[test]
     fn quiver_axis_source_reads_typed_integer_storage_exactly() {
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I16(vec![-2, 0, 2]),
             vec![3],
         )
         .expect("typed quiver axis");
-        tensor.data.clear();
         let host = QuiverCoordinateInput::Explicit(NumericInput::Host(tensor));
 
         let f64_axis =
@@ -1189,8 +1187,8 @@ mod tests {
 
         let x_full = x_axis.into_tensor(BUILTIN_NAME).unwrap();
         let y_full = y_axis.into_tensor(BUILTIN_NAME).unwrap();
-        assert_eq!(x_full.data, vec![1.0, 1.0, 1.0, 2.0, 2.0, 2.0]);
-        assert_eq!(y_full.data, vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
+        assert_eq!(x_full.materialize_f64(), vec![1.0, 1.0, 1.0, 2.0, 2.0, 2.0]);
+        assert_eq!(y_full.materialize_f64(), vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
     }
 
     #[test]

@@ -283,7 +283,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![1.0, 0.0, -1.0, 0.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 0.0, -1.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -292,18 +292,17 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cosd_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I16(vec![0, 60, 180]),
             vec![3, 1],
         )
         .expect("integer tensor");
-        tensor.data.fill(0.0);
 
         match cosd_builtin(Value::Tensor(tensor)).expect("cosd") {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 1]);
                 let expected = [1.0, 0.5, -1.0];
-                for (actual, expected) in out.data.iter().zip(expected.iter()) {
+                for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expected).abs() < 1e-12);
                 }
                 assert!(out.integer_storage().is_none());
@@ -320,9 +319,9 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data[0], 1.0);
+                assert_eq!(t.materialize_f64()[0], 1.0);
                 let expected = (1.0_f64 * DEG_TO_RAD).cos();
-                assert!((t.data[1] - expected).abs() < 1e-12);
+                assert!((t.materialize_f64()[1] - expected).abs() < 1e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }

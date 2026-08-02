@@ -1491,8 +1491,7 @@ pub(crate) mod tests {
     }
 
     fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("typed integer tensor");
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, shape).expect("typed integer tensor");
         tensor
     }
 
@@ -1848,7 +1847,7 @@ pub(crate) mod tests {
             let x = Tensor::new(vec![1.0, 5.0, 2.0, 0.0, 3.0], vec![1, 5]).unwrap();
 
             let view = runmat_accelerate_api::HostTensorView {
-                data: &x.data,
+                data: &x.materialize_f64(),
                 shape: &x.shape,
             };
             let x_gpu = provider.upload(&view).expect("upload signal");
@@ -1868,7 +1867,7 @@ pub(crate) mod tests {
             let (y_cpu, _) = eval_cpu.into_pair();
             let (cpu_data, _) = real_tensor_parts(y_cpu, "output");
 
-            approx_eq_slice(&gathered.data, &cpu_data);
+            approx_eq_slice(&gathered.materialize_f64(), &cpu_data);
         });
     }
 
@@ -1905,7 +1904,7 @@ pub(crate) mod tests {
         };
 
         let view = runmat_accelerate_api::HostTensorView {
-            data: &x.data,
+            data: &x.materialize_f64(),
             shape: &x.shape,
         };
         let x_gpu = provider.upload(&view).expect("upload signal");
@@ -1920,6 +1919,6 @@ pub(crate) mod tests {
         let (gpu_value, _) = gpu_eval.into_pair();
         let gathered = test_support::gather(gpu_value).expect("gather");
 
-        approx_eq_slice(&gathered.data, &cpu_tensor.data);
+        approx_eq_slice(&gathered.materialize_f64(), &cpu_tensor.materialize_f64());
     }
 }

@@ -232,7 +232,7 @@ mod tests {
             get_builtin(vec![Value::Num(handle), Value::String("Children".into())]).unwrap();
         match children {
             Value::Num(_) => 1,
-            Value::Tensor(t) => t.data.len(),
+            Value::Tensor(t) => t.materialize_f64().len(),
             _ => 0,
         }
     }

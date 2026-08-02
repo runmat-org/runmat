@@ -243,7 +243,10 @@ mod tests {
         let Value::Tensor(tensor) = value else {
             panic!("expected tensor");
         };
-        assert!(tensor.data.windows(2).all(|pair| pair[1] >= pair[0]));
+        assert!(tensor
+            .materialize_f64()
+            .windows(2)
+            .all(|pair| pair[1] >= pair[0]));
     }
 
     #[test]

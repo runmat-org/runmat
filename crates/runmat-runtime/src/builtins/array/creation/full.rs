@@ -211,7 +211,10 @@ pub(crate) mod tests {
             SparseTensor::new(3, 2, vec![0, 2, 3], vec![0, 2, 1], vec![10.0, 30.0, 20.0]).unwrap();
         let dense = expect_tensor(run_full(Value::SparseTensor(sparse)).unwrap());
         assert_eq!(dense.shape, vec![3, 2]);
-        assert_eq!(dense.data, vec![10.0, 0.0, 30.0, 0.0, 20.0, 0.0]);
+        assert_eq!(
+            dense.materialize_f64(),
+            vec![10.0, 0.0, 30.0, 0.0, 20.0, 0.0]
+        );
     }
 
     #[test]
@@ -244,7 +247,7 @@ pub(crate) mod tests {
             run_full(Value::SparseTensor(SparseTensor::zeros(2, 3))).expect("full sparse"),
         );
         assert_eq!(dense.shape, vec![2, 3]);
-        assert_eq!(dense.data, vec![0.0; 6]);
+        assert_eq!(dense.materialize_f64(), vec![0.0; 6]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -265,7 +268,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
             let handle = provider
                 .upload(&HostTensorView {
-                    data: &tensor.data,
+                    data: &tensor.materialize_f64(),
                     shape: &tensor.shape,
                 })
                 .expect("upload");

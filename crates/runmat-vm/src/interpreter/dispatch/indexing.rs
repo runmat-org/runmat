@@ -2636,9 +2636,8 @@ mod tests {
     fn typed_integer_scalar_range_and_symbolic_paths_ignore_f64_mirrors() {
         macro_rules! assert_typed_scalar {
             ($storage:expr, $expected:expr) => {{
-                let mut tensor =
+                let tensor =
                     Tensor::new_integer($storage, vec![1, 1]).expect("typed integer scalar");
-                tensor.data.clear();
                 let value = Value::Tensor(tensor);
 
                 assert_eq!(
@@ -2826,9 +2825,8 @@ mod tests {
 
     #[test]
     fn logical_value_from_integer_tensor_uses_native_storage_not_mirror() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2])
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2])
             .expect("typed integer tensor");
-        tensor.data.fill(0.0);
 
         let value = super::logical_value_from_tensor(tensor).expect("logical conversion");
         assert_eq!(

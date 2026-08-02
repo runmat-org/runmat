@@ -345,7 +345,7 @@ pub(crate) mod tests {
                     (3.0f64).atan2(2.0),
                     (4.0f64).atan2(2.0),
                 ];
-                for (actual, expect) in t.data.iter().zip(expected.iter()) {
+                for (actual, expect) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expect).abs() < EPS, "{actual} vs {expect}");
                 }
             }
@@ -368,7 +368,7 @@ pub(crate) mod tests {
                     (2.0f64).atan2(1.0),
                     (-2.0f64).atan2(1.0),
                 ];
-                for (actual, expect) in t.data.iter().zip(expected.iter()) {
+                for (actual, expect) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expect).abs() < EPS);
                 }
             }
@@ -378,11 +378,8 @@ pub(crate) mod tests {
 
     #[test]
     fn atan2_typed_integer_tensors_read_exact_storage() {
-        let mut y =
-            Tensor::new_integer(IntegerStorage::I16(vec![1, -1, 2, -2]), vec![2, 2]).unwrap();
-        let mut x = Tensor::new_integer(IntegerStorage::I16(vec![1, 1]), vec![1, 2]).unwrap();
-        y.data.clear();
-        x.data.clear();
+        let y = Tensor::new_integer(IntegerStorage::I16(vec![1, -1, 2, -2]), vec![2, 2]).unwrap();
+        let x = Tensor::new_integer(IntegerStorage::I16(vec![1, 1]), vec![1, 2]).unwrap();
 
         let result = atan2_builtin(Value::Tensor(y), Value::Tensor(x)).expect("atan2");
         match result {
@@ -394,7 +391,7 @@ pub(crate) mod tests {
                     (2.0f64).atan2(1.0),
                     (-2.0f64).atan2(1.0),
                 ];
-                for (actual, expect) in t.data.iter().zip(expected.iter()) {
+                for (actual, expect) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expect).abs() < EPS);
                 }
             }
@@ -404,10 +401,8 @@ pub(crate) mod tests {
 
     #[test]
     fn atan2_scalar_fast_path_reads_typed_integer_without_double_mirror() {
-        let mut y = Tensor::new_integer(IntegerStorage::I16(vec![1]), vec![1, 1]).unwrap();
-        let mut x = Tensor::new_integer(IntegerStorage::I16(vec![1]), vec![1, 1]).unwrap();
-        y.data.clear();
-        x.data.clear();
+        let y = Tensor::new_integer(IntegerStorage::I16(vec![1]), vec![1, 1]).unwrap();
+        let x = Tensor::new_integer(IntegerStorage::I16(vec![1]), vec![1, 1]).unwrap();
 
         let result = atan2_builtin(Value::Tensor(y), Value::Tensor(x)).expect("atan2");
         match result {
@@ -442,7 +437,7 @@ pub(crate) mod tests {
                     0.0f64.atan2(-1.0),
                     1.0f64.atan2(-1.0),
                 ];
-                for (actual, expect) in t.data.iter().zip(expected.iter()) {
+                for (actual, expect) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expect).abs() < EPS);
                 }
             }
@@ -499,7 +494,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 3]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -536,13 +531,13 @@ pub(crate) mod tests {
             let x = Tensor::new(vec![1.0, -1.0, 1.0, -1.0], vec![2, 2]).unwrap();
             let hy = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &y.data,
+                    data: &y.materialize_f64(),
                     shape: &y.shape,
                 })
                 .expect("upload y");
             let hx = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &x.data,
+                    data: &x.materialize_f64(),
                     shape: &x.shape,
                 })
                 .expect("upload x");
@@ -556,7 +551,7 @@ pub(crate) mod tests {
                 (-1.0f64).atan2(1.0),
                 (-1.0f64).atan2(-1.0),
             ];
-            for (actual, expect) in gathered.data.iter().zip(expected.iter()) {
+            for (actual, expect) in gathered.materialize_f64().iter().zip(expected.iter()) {
                 assert!((actual - expect).abs() < EPS);
             }
         });
@@ -569,7 +564,7 @@ pub(crate) mod tests {
             let y = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
             let hy = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &y.data,
+                    data: &y.materialize_f64(),
                     shape: &y.shape,
                 })
                 .expect("upload y");
@@ -577,7 +572,7 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 1]);
             let expected = [(1.0f64).atan2(2.0), (2.0f64).atan2(2.0)];
-            for (actual, expect) in gathered.data.iter().zip(expected.iter()) {
+            for (actual, expect) in gathered.materialize_f64().iter().zip(expected.iter()) {
                 assert!((actual - expect).abs() < EPS);
             }
         });
@@ -589,19 +584,18 @@ pub(crate) mod tests {
             let y = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
             let hy = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &y.data,
+                    data: &y.materialize_f64(),
                     shape: &y.shape,
                 })
                 .expect("upload y");
-            let mut x = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![2, 1]).unwrap();
-            x.data.clear();
+            let x = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![2, 1]).unwrap();
 
             let result = atan2_builtin(Value::GpuTensor(hy), Value::Tensor(x)).expect("atan2");
             match result {
                 Value::Tensor(t) => {
                     assert_eq!(t.shape, vec![2, 1]);
-                    assert!((t.data[0] - 1.0f64.atan2(1.0)).abs() < EPS);
-                    assert!((t.data[1] - 2.0f64.atan2(2.0)).abs() < EPS);
+                    assert!((t.materialize_f64()[0] - 1.0f64.atan2(1.0)).abs() < EPS);
+                    assert!((t.materialize_f64()[1] - 2.0f64.atan2(2.0)).abs() < EPS);
                 }
                 other => panic!("expected host fallback tensor, got {other:?}"),
             }
@@ -614,19 +608,18 @@ pub(crate) mod tests {
             let x = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
             let hx = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &x.data,
+                    data: &x.materialize_f64(),
                     shape: &x.shape,
                 })
                 .expect("upload x");
-            let mut y = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![2, 1]).unwrap();
-            y.data.clear();
+            let y = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![2, 1]).unwrap();
 
             let result = atan2_builtin(Value::Tensor(y), Value::GpuTensor(hx)).expect("atan2");
             match result {
                 Value::Tensor(t) => {
                     assert_eq!(t.shape, vec![2, 1]);
-                    assert!((t.data[0] - 1.0f64.atan2(1.0)).abs() < EPS);
-                    assert!((t.data[1] - 2.0f64.atan2(2.0)).abs() < EPS);
+                    assert!((t.materialize_f64()[0] - 1.0f64.atan2(1.0)).abs() < EPS);
+                    assert!((t.materialize_f64()[1] - 2.0f64.atan2(2.0)).abs() < EPS);
                 }
                 other => panic!("expected host fallback tensor, got {other:?}"),
             }
@@ -646,14 +639,14 @@ pub(crate) mod tests {
         let hy = runmat_accelerate_api::provider()
             .unwrap()
             .upload(&runmat_accelerate_api::HostTensorView {
-                data: &y.data,
+                data: &y.materialize_f64(),
                 shape: &y.shape,
             })
             .unwrap();
         let hx = runmat_accelerate_api::provider()
             .unwrap()
             .upload(&runmat_accelerate_api::HostTensorView {
-                data: &x.data,
+                data: &x.materialize_f64(),
                 shape: &x.shape,
             })
             .unwrap();
@@ -666,7 +659,11 @@ pub(crate) mod tests {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
                 };
-                for (actual, expect) in gathered.data.iter().zip(ct.data.iter()) {
+                for (actual, expect) in gathered
+                    .materialize_f64()
+                    .iter()
+                    .zip(ct.materialize_f64().iter())
+                {
                     assert!((actual - expect).abs() < tol, "{actual} vs {expect}");
                 }
             }

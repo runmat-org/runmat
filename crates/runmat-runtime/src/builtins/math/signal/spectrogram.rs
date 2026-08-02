@@ -1067,12 +1067,10 @@ mod tests {
 
     #[test]
     fn spectrogram_scalar_detector_reads_typed_integer_storage_without_mirror() {
-        let mut scalar =
+        let scalar =
             Tensor::new_integer(IntegerStorage::I16(vec![16]), vec![1, 1]).expect("scalar");
-        scalar.data.clear();
-        let mut vector =
+        let vector =
             Tensor::new_integer(IntegerStorage::I16(vec![16, 32]), vec![1, 2]).expect("vector");
-        vector.data.clear();
 
         assert!(is_scalar_numeric(&Value::Tensor(scalar)));
         assert!(!is_scalar_numeric(&Value::Tensor(vector)));
@@ -1118,9 +1116,9 @@ mod tests {
         };
         assert_eq!(s.shape, vec![17, 3]);
         assert_eq!(ps.shape, vec![17, 3]);
-        assert_eq!(f.data[4], 4.0);
-        assert_eq!(t.data, vec![0.5, 1.0, 1.5]);
-        let first_column_peak = ps.data[..17]
+        assert_eq!(f.materialize_f64()[4], 4.0);
+        assert_eq!(t.materialize_f64(), vec![0.5, 1.0, 1.5]);
+        let first_column_peak = ps.materialize_f64()[..17]
             .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
@@ -1174,7 +1172,7 @@ mod tests {
         let ps =
             crate::builtins::common::test_support::gather(values[3].clone()).expect("gather ps");
         assert_eq!(ps.shape, vec![17, 3]);
-        let peak = ps.data[..17]
+        let peak = ps.materialize_f64()[..17]
             .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
@@ -1197,7 +1195,7 @@ mod tests {
         };
         assert_eq!(default_window(1024).len(), 227);
         assert_eq!(s.shape[0], 129);
-        assert_eq!(s.shape[1], t.data.len());
+        assert_eq!(s.shape[1], t.materialize_f64().len());
     }
 
     #[test]
@@ -1248,7 +1246,7 @@ mod tests {
             panic!("expected f");
         };
         assert_eq!(s.shape, vec![2, 3]);
-        assert_eq!(f.data, vec![0.0, std::f64::consts::PI]);
+        assert_eq!(f.materialize_f64(), vec![0.0, std::f64::consts::PI]);
     }
 
     #[test]
@@ -1270,7 +1268,7 @@ mod tests {
         let Value::Tensor(ps) = &values[3] else {
             panic!("expected ps");
         };
-        assert!((ps.data[0] - 1.0).abs() < 1e-12);
+        assert!((ps.materialize_f64()[0] - 1.0).abs() < 1e-12);
     }
 
     #[test]
@@ -1289,8 +1287,8 @@ mod tests {
         let Value::Tensor(t) = &values[2] else {
             panic!("expected t");
         };
-        assert_eq!(f.data[1], 1.0 / 256.0);
-        assert_eq!(t.data[0], 2.0);
+        assert_eq!(f.materialize_f64()[1], 1.0 / 256.0);
+        assert_eq!(t.materialize_f64()[0], 2.0);
     }
 
     #[test]
@@ -1306,7 +1304,7 @@ mod tests {
         let Value::Tensor(t) = &values[2] else {
             panic!("expected t");
         };
-        assert!((t.data[0] - (1.0 / std::f64::consts::PI)).abs() < 1e-12);
+        assert!((t.materialize_f64()[0] - (1.0 / std::f64::consts::PI)).abs() < 1e-12);
     }
 
     #[test]
@@ -1328,7 +1326,7 @@ mod tests {
         let Value::Tensor(f) = &values[1] else {
             panic!("expected f");
         };
-        assert_eq!(f.data, vec![-1.0, 0.0, 1.0, 2.0]);
+        assert_eq!(f.materialize_f64(), vec![-1.0, 0.0, 1.0, 2.0]);
     }
 
     #[test]

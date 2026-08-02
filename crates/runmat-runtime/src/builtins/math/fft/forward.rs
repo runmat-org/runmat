@@ -600,9 +600,13 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![1, 4, 1]);
-                assert_eq!(ct.data.len(), original.data.len());
+                assert_eq!(ct.data.len(), original.materialize_f64().len());
                 for (idx, (re, im)) in ct.data.iter().enumerate() {
-                    assert!(approx_eq((*re, *im), (original.data[idx], 0.0), 1e-12));
+                    assert!(approx_eq(
+                        (*re, *im),
+                        (original.materialize_f64()[idx], 0.0),
+                        1e-12
+                    ));
                 }
             }
             other => panic!("expected complex tensor, got {other:?}"),
@@ -621,7 +625,7 @@ pub(crate) mod tests {
                 assert_eq!(ct.shape, vec![1, 4, 4]);
                 let mut expected = Vec::with_capacity(16);
                 for _depth in 0..4 {
-                    for &value in &original.data {
+                    for &value in &original.materialize_f64() {
                         expected.push((value, 0.0));
                     }
                 }
@@ -694,7 +698,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -716,7 +720,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -743,7 +747,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new((1..=18).map(|v| v as f64).collect(), vec![2, 3, 3]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -771,7 +775,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4]).unwrap();
             let tensor_cpu = tensor.clone();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");

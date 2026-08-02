@@ -303,7 +303,7 @@ fn readtable_imports_headered_numeric_and_text_columns() {
     match table_member_get(&table, &Value::from("Score")).unwrap() {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.shape, vec![2, 1]);
-            assert_eq!(tensor.data, vec![10.0, 12.0]);
+            assert_eq!(tensor.materialize_f64(), vec![10.0, 12.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
     }
@@ -351,9 +351,9 @@ fn parquetread_imports_common_column_types() {
     match table_member_get(&table, &Value::from("Score")).unwrap() {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.shape, vec![3, 1]);
-            assert_eq!(tensor.data[0], 10.0);
-            assert_eq!(tensor.data[1], 12.5);
-            assert!(tensor.data[2].is_nan());
+            assert_eq!(tensor.materialize_f64()[0], 10.0);
+            assert_eq!(tensor.materialize_f64()[1], 12.5);
+            assert!(tensor.materialize_f64()[2].is_nan());
         }
         other => panic!("expected tensor column, got {other:?}"),
     }
@@ -513,11 +513,11 @@ fn readtable_auto_does_not_consume_headerless_numeric_rows() {
         vec!["Var1".to_string(), "Var2".to_string()]
     );
     match table_member_get(&table, &Value::from("Var1")).unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0, 3.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.0, 3.0]),
         other => panic!("expected tensor, got {other:?}"),
     }
     match table_member_get(&table, &Value::from("Var2")).unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![2.0, 4.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![2.0, 4.0]),
         other => panic!("expected tensor, got {other:?}"),
     }
     let _ = fs::remove_file(&path);
@@ -578,8 +578,8 @@ fn readtable_supports_explicit_names_and_missing_tokens() {
     ));
     match table_member_get(&table, &Value::from("B")).unwrap() {
         Value::Tensor(tensor) => {
-            assert!(tensor.data[0].is_nan());
-            assert_eq!(tensor.data[1], 4.0);
+            assert!(tensor.materialize_f64()[0].is_nan());
+            assert_eq!(tensor.materialize_f64()[1], 4.0);
         }
         other => panic!("expected tensor, got {other:?}"),
     }
@@ -712,7 +712,7 @@ fn readtable_imports_xlsx_sheet_and_range() {
         ]
     );
     match table_member_get(&table, &Value::from("Revenue")).unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![200.0, 90.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![200.0, 90.0]),
         other => panic!("expected tensor, got {other:?}"),
     }
     let _ = fs::remove_file(&path);
@@ -793,7 +793,7 @@ fn detect_import_options_infers_text_delimiter_names_and_types() {
         ]
     );
     match table_member_get(&table, &Value::from("Score")).unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![10.0, 12.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![10.0, 12.0]),
         other => panic!("expected tensor, got {other:?}"),
     }
     let _ = fs::remove_file(&path);
@@ -814,7 +814,7 @@ fn detect_import_options_struct_can_drive_readmatrix() {
     match matrix {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.shape, vec![2, 2]);
-            assert_eq!(tensor.data, vec![1.0, 3.0, 2.0, 4.0]);
+            assert_eq!(tensor.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
     }
@@ -838,7 +838,7 @@ fn detect_import_options_strips_bom_from_detected_names() {
         vec!["A".to_string(), "B".to_string()]
     );
     match table_member_get(&table, &Value::from("A")).unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0, 3.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.0, 3.0]),
         other => panic!("expected tensor, got {other:?}"),
     }
     let _ = fs::remove_file(&path);
@@ -860,7 +860,7 @@ fn detect_import_options_preserves_partial_ranges_for_replay() {
         vec!["B".to_string(), "C".to_string()]
     );
     match table_member_get(&table, &Value::from("B")).unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![2.0, 5.0, 8.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![2.0, 5.0, 8.0]),
         other => panic!("expected tensor, got {other:?}"),
     }
 
@@ -869,7 +869,7 @@ fn detect_import_options_preserves_partial_ranges_for_replay() {
     assert_eq!(row_options.fields.get("Range"), Some(&Value::from("2:3")));
     let table = object(read_table(&path, vec![Value::Struct(row_options)]));
     match table_member_get(&table, &Value::from("Var2")).unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![22.0, 32.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![22.0, 32.0]),
         other => panic!("expected tensor, got {other:?}"),
     }
     let _ = fs::remove_file(&path);
@@ -901,7 +901,7 @@ fn detect_import_options_read_row_names_replays_through_readtable() {
         other => panic!("expected row names, got {other:?}"),
     }
     match table_member_get(&table, &Value::from("Score")).unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![10.0, 12.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![10.0, 12.0]),
         other => panic!("expected tensor, got {other:?}"),
     }
     let _ = fs::remove_file(&path);
@@ -925,7 +925,7 @@ fn detect_import_options_encoding_replays_through_readmatrix() {
     match matrix {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.shape, vec![2, 2]);
-            assert_eq!(tensor.data, vec![1.0, 3.0, 2.0, 4.0]);
+            assert_eq!(tensor.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
     }
@@ -961,7 +961,7 @@ fn detect_import_options_replays_through_filesystem_provider() {
             vec!["Name".to_string(), "Score".to_string()]
         );
         match table_member_get(&table, &Value::from("Score")).unwrap() {
-            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![10.0, 12.0]),
+            Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![10.0, 12.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
 
@@ -981,7 +981,7 @@ fn detect_import_options_replays_through_filesystem_provider() {
         match matrix {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 2]);
-                assert_eq!(tensor.data, vec![1.0, 3.0, 2.0, 4.0]);
+                assert_eq!(tensor.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1088,8 +1088,8 @@ fn readtable_consumes_spreadsheet_import_options_struct() {
     match table_member_get(&table, &Value::from("Amount")).unwrap() {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.shape, vec![2, 1]);
-            assert_eq!(tensor.data, vec![200.0, 90.0]);
-            assert_eq!(tensor.dtype, NumericDType::F64);
+            assert_eq!(tensor.materialize_f64(), vec![200.0, 90.0]);
+            assert_eq!(tensor.numeric_dtype(), NumericDType::F64);
         }
         other => panic!("expected tensor, got {other:?}"),
     }
@@ -1139,8 +1139,8 @@ fn readtable_variable_types_coerce_imported_columns() {
     ));
     match table_member_get(&table, &Value::from("Value")).unwrap() {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.dtype, NumericDType::F32);
-            assert_eq!(tensor.data, vec![1.5, 2.25]);
+            assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
+            assert_eq!(tensor.materialize_f64(), vec![1.5, 2.25]);
         }
         other => panic!("expected tensor, got {other:?}"),
     }
@@ -1326,7 +1326,7 @@ fn table_paren_selects_rows_and_named_variables() {
         vec!["B".to_string()]
     );
     match table_member_get(&subset, &Value::from("B")).unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![6.0, 4.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![6.0, 4.0]),
         other => panic!("expected tensor, got {other:?}"),
     }
 }
@@ -1354,7 +1354,7 @@ fn table_paren_selects_rows_by_row_names() {
 
     let subset = object(table_paren_get(&table, &Value::Cell(selector)).unwrap());
     match table_member_get(&subset, &Value::from("A")).unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![3.0, 1.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![3.0, 1.0]),
         other => panic!("expected tensor, got {other:?}"),
     }
     let props = table_public_properties(&subset).unwrap();
@@ -1408,7 +1408,7 @@ fn groupsummary_mean_counts_groups() {
         ]
     );
     match table_member_get(&summary, &Value::from("mean_X")).unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![3.0, 5.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![3.0, 5.0]),
         other => panic!("expected tensor, got {other:?}"),
     }
 }
@@ -1421,11 +1421,11 @@ fn groupsummary_orders_numeric_groups_numerically() {
     let summary =
         object(groupsummary_impl(table, Value::from("G"), Value::from("sum"), vec![]).unwrap());
     match table_member_get(&summary, &Value::from("G")).unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![2.0, 10.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![2.0, 10.0]),
         other => panic!("expected tensor, got {other:?}"),
     }
     match table_member_get(&summary, &Value::from("sum_X")).unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![5.0, 4.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![5.0, 4.0]),
         other => panic!("expected tensor, got {other:?}"),
     }
 }
@@ -1452,7 +1452,7 @@ fn grpstats_matrix_returns_multiple_statistics_and_group_names() {
     match &outputs[0] {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.shape, vec![2, 2]);
-            assert_eq!(tensor.data, vec![3.5, 1.5, 35.0, 15.0]);
+            assert_eq!(tensor.materialize_f64(), vec![3.5, 1.5, 35.0, 15.0]);
         }
         other => panic!("expected mean tensor, got {other:?}"),
     }
@@ -1461,7 +1461,7 @@ fn grpstats_matrix_returns_multiple_statistics_and_group_names() {
             let root_half = 0.5_f64.sqrt();
             assert_eq!(tensor.shape, vec![2, 2]);
             let expected = [root_half, root_half, 10.0 * root_half, 10.0 * root_half];
-            for (value, expected) in tensor.data.iter().zip(expected) {
+            for (value, expected) in tensor.materialize_f64().iter().zip(expected) {
                 assert!((*value - expected).abs() < 1.0e-12);
             }
         }
@@ -1485,7 +1485,7 @@ fn grpstats_matrix_handles_empty_group_missing_groups_and_output_count_contract(
     match result {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.shape, vec![1, 1]);
-            assert_eq!(tensor.data, vec![2.5]);
+            assert_eq!(tensor.materialize_f64(), vec![2.5]);
         }
         other => panic!("expected all-group mean tensor, got {other:?}"),
     }
@@ -1498,7 +1498,7 @@ fn grpstats_matrix_handles_empty_group_missing_groups_and_output_count_contract(
     }
     let means = grpstats_impl(x.clone(), group, vec![Value::from("mean")]).unwrap();
     match means {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![2.0, 3.5]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![2.0, 3.5]),
         other => panic!("expected means, got {other:?}"),
     }
 
@@ -1545,7 +1545,7 @@ fn grpstats_matrix_preserves_text_group_first_seen_order_and_builtin_handles() {
         panic!("expected output list");
     };
     match &outputs[0] {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![2.5, 3.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![2.5, 3.0]),
         other => panic!("expected mean tensor, got {other:?}"),
     }
     match &outputs[1] {
@@ -1613,23 +1613,23 @@ fn grpstats_table_supports_datavars_varnames_and_multiple_stats() {
         other => panic!("expected group strings, got {other:?}"),
     }
     match table_member_get(&summary, &Value::from("N")).unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![2.0, 2.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![2.0, 2.0]),
         other => panic!("expected count tensor, got {other:?}"),
     }
     match table_member_get(&summary, &Value::from("AverageX")).unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![3.0, 12.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![3.0, 12.0]),
         other => panic!("expected average tensor, got {other:?}"),
     }
     match table_member_get(&summary, &Value::from("PeakX")).unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![4.0, 14.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![4.0, 14.0]),
         other => panic!("expected max tensor, got {other:?}"),
     }
     match table_member_get(&summary, &Value::from("AverageY")).unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![3.0, 5.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![3.0, 5.0]),
         other => panic!("expected Y average tensor, got {other:?}"),
     }
     match table_member_get(&summary, &Value::from("PeakY")).unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![5.0, 7.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![5.0, 7.0]),
         other => panic!("expected Y max tensor, got {other:?}"),
     }
 }
@@ -1651,14 +1651,14 @@ fn grpstats_table_supports_empty_group_and_interval_stats() {
         vec!["GroupCount".to_string(), "meanci_X".to_string()]
     );
     match table_member_get(&summary, &Value::from("GroupCount")).unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![3.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![3.0]),
         other => panic!("expected count tensor, got {other:?}"),
     }
     match table_member_get(&summary, &Value::from("meanci_X")).unwrap() {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.shape, vec![1, 2]);
-            assert!(tensor.data[0] < 4.0);
-            assert!(tensor.data[1] > 4.0);
+            assert!(tensor.materialize_f64()[0] < 4.0);
+            assert!(tensor.materialize_f64()[1] > 4.0);
         }
         other => panic!("expected interval tensor, got {other:?}"),
     }
@@ -1681,7 +1681,7 @@ fn table_conversion_builtins_round_trip_arrays_cells_and_structs() {
     ));
     let array = block_on(table2array_builtin(table.clone())).unwrap();
     match array {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0, 2.0, 3.0, 4.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]),
         other => panic!("expected tensor, got {other:?}"),
     }
     let cells = block_on(table2cell_builtin(table.clone())).unwrap();
@@ -1747,7 +1747,7 @@ fn timetable_conversion_predicates_and_head_work() {
     assert_eq!(first_two_object.class_name, TIMETABLE_CLASS);
     assert_eq!(table_height(&first_two_object).unwrap(), 2);
     match timetable_row_times(&first_two_object).unwrap().unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0, 2.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0]),
         other => panic!("expected selected row times, got {other:?}"),
     }
     let table = block_on(timetable2table_builtin(
@@ -1767,11 +1767,11 @@ fn timetable_conversion_predicates_and_head_work() {
         vec!["Time".to_string(), "X".to_string()]
     );
     match timetable_row_times(&converted_object).unwrap().unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0, 2.0, 3.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 3.0]),
         other => panic!("expected timetable Time member, got {other:?}"),
     }
     match table_member_get(&converted_object, &Value::from("Time")).unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0, 2.0, 3.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 3.0]),
         other => panic!("expected retained Time variable, got {other:?}"),
     }
 }
@@ -1926,7 +1926,7 @@ fn ordinal_constructor_sets_ordered_categorical_semantics() {
         panic!("expected categorical max result");
     };
     match max_cat.properties.get("Codes").unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![3.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![3.0]),
         other => panic!("expected categorical max code, got {other:?}"),
     }
     let min_value = block_on(crate::call_builtin_async(
@@ -1938,7 +1938,7 @@ fn ordinal_constructor_sets_ordered_categorical_semantics() {
         panic!("expected categorical min result");
     };
     match min_cat.properties.get("Codes").unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.0]),
         other => panic!("expected categorical min code, got {other:?}"),
     }
     let all_max = block_on(crate::call_builtin_async(
@@ -1954,7 +1954,7 @@ fn ordinal_constructor_sets_ordered_categorical_semantics() {
         panic!("expected categorical all max result");
     };
     match all_max_cat.properties.get("Codes").unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![3.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![3.0]),
         other => panic!("expected categorical all max code, got {other:?}"),
     }
 
@@ -1970,7 +1970,7 @@ fn ordinal_constructor_sets_ordered_categorical_semantics() {
         other => panic!("expected categories, got {other:?}"),
     }
     match cat.properties.get("Codes").unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![2.0, 1.0, 3.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![2.0, 1.0, 3.0]),
         other => panic!("expected categorical codes, got {other:?}"),
     }
 
@@ -2000,7 +2000,7 @@ fn ordinal_constructor_sets_ordered_categorical_semantics() {
         other => panic!("expected renamed categories, got {other:?}"),
     }
     match renamed_cat.properties.get("Codes").unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![3.0, 1.0, 2.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![3.0, 1.0, 2.0]),
         other => panic!("expected renamed codes, got {other:?}"),
     }
 
@@ -2033,7 +2033,7 @@ fn categorical_compatibility_edges_match_matlab_surface() {
         other => panic!("expected option-word categories, got {other:?}"),
     }
     match option_word_category.properties.get("Codes").unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.0]),
         other => panic!("expected option-word codes, got {other:?}"),
     }
 
@@ -2106,7 +2106,7 @@ fn ordinal_min_max_preserve_categorical_results_for_missing_dims_and_indices() {
         panic!("expected categorical max with missing");
     };
     match default_max.properties.get("Codes").unwrap() {
-        Value::Tensor(tensor) => assert!(tensor.data[0].is_nan()),
+        Value::Tensor(tensor) => assert!(tensor.materialize_f64()[0].is_nan()),
         other => panic!("expected missing max code, got {other:?}"),
     }
 
@@ -2123,7 +2123,7 @@ fn ordinal_min_max_preserve_categorical_results_for_missing_dims_and_indices() {
         panic!("expected omitnan categorical max");
     };
     match omitnan_max.properties.get("Codes").unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.0]),
         other => panic!("expected omitnan max code, got {other:?}"),
     }
 
@@ -2177,7 +2177,7 @@ fn ordinal_min_max_preserve_categorical_results_for_missing_dims_and_indices() {
     match row_max.properties.get("Codes").unwrap() {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.shape, vec![2, 1]);
-            assert_eq!(tensor.data, vec![2.0, 3.0]);
+            assert_eq!(tensor.materialize_f64(), vec![2.0, 3.0]);
         }
         other => panic!("expected row max codes, got {other:?}"),
     }
@@ -2256,7 +2256,7 @@ fn timetable_rowtimes_option_keeps_all_variables_and_table2timetable_does_not_dr
         vec!["A".to_string(), "B".to_string()]
     );
     match timetable_row_times(&converted_obj).unwrap().unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0, 2.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0]),
         other => panic!("expected generated row times, got {other:?}"),
     }
 
@@ -2272,7 +2272,7 @@ fn timetable_rowtimes_option_keeps_all_variables_and_table2timetable_does_not_dr
     .unwrap();
     let read_obj = object(read);
     match timetable_row_times(&read_obj).unwrap().unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![5.0, 6.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![5.0, 6.0]),
         other => panic!("expected explicit readtimetable row times, got {other:?}"),
     }
     let _ = fs::remove_file(path);
@@ -2351,7 +2351,7 @@ fn table_selector_objects_filter_rows_and_variables() {
         .unwrap(),
     );
     match table_member_get(&ranged, &Value::from("X")).unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![30.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![30.0]),
         other => panic!("expected openleft range result, got {other:?}"),
     }
 
@@ -2369,7 +2369,7 @@ fn table_selector_objects_filter_rows_and_variables() {
         .unwrap(),
     );
     match table_member_get(&ranged, &Value::from("X")).unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![20.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![20.0]),
         other => panic!("expected openright range result, got {other:?}"),
     }
 
@@ -2400,7 +2400,7 @@ fn table_selector_objects_filter_rows_and_variables() {
     );
     assert_eq!(selected.class_name, TIMETABLE_CLASS);
     match table_member_get(&selected, &Value::from("X")).unwrap() {
-        Value::Tensor(tensor) => assert_eq!(tensor.data, vec![20.0]),
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![20.0]),
         other => panic!("expected datetime row-time selection, got {other:?}"),
     }
 }
@@ -2479,9 +2479,9 @@ fn categorical_categories_and_dictionary_lookup_have_semantics() {
     };
     match cat.properties.get("Codes").unwrap() {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.data[0], 2.0);
-            assert_eq!(tensor.data[1], 1.0);
-            assert!(tensor.data[2].is_nan());
+            assert_eq!(tensor.materialize_f64()[0], 2.0);
+            assert_eq!(tensor.materialize_f64()[1], 1.0);
+            assert!(tensor.materialize_f64()[2].is_nan());
         }
         other => panic!("expected categorical codes, got {other:?}"),
     }

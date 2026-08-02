@@ -315,8 +315,7 @@ mod tests {
 
     #[test]
     fn value_to_scalar_reads_typed_integer_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::I16(vec![-7]), vec![1, 1]).unwrap();
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![-7]), vec![1, 1]).unwrap();
 
         let parsed = value_to_scalar("optim_test", Value::Tensor(tensor)).unwrap();
 
@@ -325,9 +324,7 @@ mod tests {
 
     #[test]
     fn value_to_real_vector_reads_typed_integer_storage_exactly() {
-        let mut tensor =
-            Tensor::new_integer(IntegerStorage::U16(vec![3, 5, 8]), vec![1, 3]).unwrap();
-        tensor.data = vec![0.0, 0.0, 0.0];
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![3, 5, 8]), vec![1, 3]).unwrap();
 
         let parsed = block_on(value_to_real_vector("optim_test", Value::Tensor(tensor))).unwrap();
 
@@ -336,9 +333,7 @@ mod tests {
 
     #[test]
     fn initial_guess_reads_typed_integer_storage_exactly() {
-        let mut tensor =
-            Tensor::new_integer(IntegerStorage::I32(vec![11, -13]), vec![2, 1]).unwrap();
-        tensor.data = vec![0.0, 0.0];
+        let tensor = Tensor::new_integer(IntegerStorage::I32(vec![11, -13]), vec![2, 1]).unwrap();
 
         let guess = block_on(initial_guess("optim_test", Value::Tensor(tensor))).unwrap();
 
@@ -349,8 +344,7 @@ mod tests {
 
     #[test]
     fn option_usize_reads_typed_integer_storage_exactly() {
-        let mut max_iter = Tensor::new_integer(IntegerStorage::U16(vec![37]), vec![1, 1]).unwrap();
-        max_iter.data = vec![0.0];
+        let max_iter = Tensor::new_integer(IntegerStorage::U16(vec![37]), vec![1, 1]).unwrap();
         let mut options = StructValue::new();
         options.insert("MaxIter", Value::Tensor(max_iter));
 
@@ -362,8 +356,7 @@ mod tests {
 
     #[test]
     fn option_usize_rejects_negative_typed_integer_storage_exactly() {
-        let mut max_iter = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).unwrap();
-        max_iter.data = vec![12.0];
+        let max_iter = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).unwrap();
         let mut options = StructValue::new();
         options.insert("MaxIter", Value::Tensor(max_iter));
 
@@ -373,9 +366,7 @@ mod tests {
     #[test]
     fn option_usize_accepts_wide_typed_integer_storage_despite_poisoned_mirror() {
         let wide = 9_007_199_254_740_993_u64;
-        let mut max_iter =
-            Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).unwrap();
-        max_iter.data = vec![1.0];
+        let max_iter = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).unwrap();
         let mut options = StructValue::new();
         options.insert("MaxIter", Value::Tensor(max_iter));
 

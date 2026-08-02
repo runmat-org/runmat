@@ -1118,17 +1118,16 @@ pub(crate) mod tests {
         let Value::Tensor(indices) = indices else {
             panic!("expected indices tensor");
         };
-        assert_eq!(indices.data, vec![2.0, 2.0, 4.0, 4.0]);
+        assert_eq!(indices.materialize_f64(), vec![2.0, 2.0, 4.0, 4.0]);
     }
 
     #[test]
     fn cummax_integer_storage_and_reverse_indices_remain_exact() {
-        let mut input = Tensor::new_integer(
+        let input = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I64(vec![i64::MIN, -4, -5, -3]),
             vec![2, 2],
         )
         .unwrap();
-        input.data.clear();
         let (values, indices) = evaluate(Value::Tensor(input), &[Value::from("reverse")])
             .unwrap()
             .into_pair();
@@ -1157,14 +1156,14 @@ pub(crate) mod tests {
         match values {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 3]);
-                assert_eq!(out.data, vec![4.0, 4.0, 2.0, 5.0, 7.0, 7.0]);
+                assert_eq!(out.materialize_f64(), vec![4.0, 4.0, 2.0, 5.0, 7.0, 7.0]);
             }
             other => panic!("expected tensor values, got {other:?}"),
         }
         match indices {
             Value::Tensor(idx) => {
                 assert_eq!(idx.shape, vec![2, 3]);
-                assert_eq!(idx.data, vec![1.0, 1.0, 1.0, 2.0, 1.0, 1.0]);
+                assert_eq!(idx.materialize_f64(), vec![1.0, 1.0, 1.0, 2.0, 1.0, 1.0]);
             }
             other => panic!("expected tensor indices, got {other:?}"),
         }
@@ -1179,13 +1178,13 @@ pub(crate) mod tests {
         let (values, indices) = eval.into_pair();
         match values {
             Value::Tensor(out) => {
-                assert_eq!(out.data, vec![4.0, 3.0, 4.0, 5.0, 7.0, 5.0]);
+                assert_eq!(out.materialize_f64(), vec![4.0, 3.0, 4.0, 5.0, 7.0, 5.0]);
             }
             other => panic!("expected tensor values, got {other:?}"),
         }
         match indices {
             Value::Tensor(idx) => {
-                assert_eq!(idx.data, vec![1.0, 1.0, 1.0, 2.0, 3.0, 2.0]);
+                assert_eq!(idx.materialize_f64(), vec![1.0, 1.0, 1.0, 2.0, 3.0, 2.0]);
             }
             other => panic!("expected tensor indices, got {other:?}"),
         }
@@ -1195,9 +1194,7 @@ pub(crate) mod tests {
     fn cummax_parses_typed_integer_dimension_without_mirror() {
         let input =
             Tensor::new_integer(IntegerStorage::I16(vec![4, 3, 2, 5]), vec![2, 2]).expect("input");
-        let mut dim =
-            Tensor::new_integer(IntegerStorage::I32(vec![2]), vec![1, 1]).expect("dimension");
-        dim.data.clear();
+        let dim = Tensor::new_integer(IntegerStorage::I32(vec![2]), vec![1, 1]).expect("dimension");
 
         let eval = evaluate(Value::Tensor(input), &[Value::Tensor(dim)])
             .expect("cummax dimension from typed integer tensor");
@@ -1224,11 +1221,11 @@ pub(crate) mod tests {
         let eval = evaluate(Value::Tensor(tensor), &args).expect("cummax");
         let (values, indices) = eval.into_pair();
         match values {
-            Value::Tensor(out) => assert_eq!(out.data, vec![8.0, 6.0, 6.0, 2.0]),
+            Value::Tensor(out) => assert_eq!(out.materialize_f64(), vec![8.0, 6.0, 6.0, 2.0]),
             other => panic!("expected tensor values, got {other:?}"),
         }
         match indices {
-            Value::Tensor(idx) => assert_eq!(idx.data, vec![1.0, 3.0, 3.0, 4.0]),
+            Value::Tensor(idx) => assert_eq!(idx.materialize_f64(), vec![1.0, 3.0, 3.0, 4.0]),
             other => panic!("expected tensor indices, got {other:?}"),
         }
     }
@@ -1247,13 +1244,13 @@ pub(crate) mod tests {
         let (values, indices) = eval.into_pair();
         match values {
             Value::Tensor(out) => {
-                assert_eq!(out.data, vec![3.0, 5.0, 3.0, 4.0, 3.0, 4.0]);
+                assert_eq!(out.materialize_f64(), vec![3.0, 5.0, 3.0, 4.0, 3.0, 4.0]);
             }
             other => panic!("expected tensor values, got {other:?}"),
         }
         match indices {
             Value::Tensor(idx) => {
-                assert_eq!(idx.data, vec![3.0, 1.0, 3.0, 3.0, 3.0, 3.0]);
+                assert_eq!(idx.materialize_f64(), vec![3.0, 1.0, 3.0, 3.0, 3.0, 3.0]);
             }
             other => panic!("expected tensor indices, got {other:?}"),
         }
@@ -1275,13 +1272,13 @@ pub(crate) mod tests {
         let (values, indices) = eval.into_pair();
         match values {
             Value::Tensor(out) => {
-                assert_eq!(out.data, vec![3.0, 5.0, 3.0, 4.0, 3.0, 4.0]);
+                assert_eq!(out.materialize_f64(), vec![3.0, 5.0, 3.0, 4.0, 3.0, 4.0]);
             }
             other => panic!("expected tensor values, got {other:?}"),
         }
         match indices {
             Value::Tensor(idx) => {
-                assert_eq!(idx.data, vec![3.0, 1.0, 3.0, 3.0, 3.0, 3.0]);
+                assert_eq!(idx.materialize_f64(), vec![3.0, 1.0, 3.0, 3.0, 3.0, 3.0]);
             }
             other => panic!("expected tensor indices, got {other:?}"),
         }
@@ -1296,19 +1293,19 @@ pub(crate) mod tests {
         let (values, indices) = eval.into_pair();
         match values {
             Value::Tensor(out) => {
-                assert!(out.data[0].is_nan());
-                assert_eq!(out.data[1], 5.0);
-                assert_eq!(out.data[2], 5.0);
-                assert_eq!(out.data[3], 5.0);
+                assert!(out.materialize_f64()[0].is_nan());
+                assert_eq!(out.materialize_f64()[1], 5.0);
+                assert_eq!(out.materialize_f64()[2], 5.0);
+                assert_eq!(out.materialize_f64()[3], 5.0);
             }
             other => panic!("expected tensor values, got {other:?}"),
         }
         match indices {
             Value::Tensor(idx) => {
-                assert!(idx.data[0].is_nan());
-                assert_eq!(idx.data[1], 2.0);
-                assert_eq!(idx.data[2], 2.0);
-                assert_eq!(idx.data[3], 2.0);
+                assert!(idx.materialize_f64()[0].is_nan());
+                assert_eq!(idx.materialize_f64()[1], 2.0);
+                assert_eq!(idx.materialize_f64()[2], 2.0);
+                assert_eq!(idx.materialize_f64()[3], 2.0);
             }
             other => panic!("expected tensor indices, got {other:?}"),
         }
@@ -1362,17 +1359,17 @@ pub(crate) mod tests {
         let (values, indices) = eval.into_pair();
         match values {
             Value::Tensor(out) => {
-                assert_eq!(out.data[0], 1.0);
-                assert!(out.data[1].is_nan());
-                assert!(out.data[2].is_nan());
+                assert_eq!(out.materialize_f64()[0], 1.0);
+                assert!(out.materialize_f64()[1].is_nan());
+                assert!(out.materialize_f64()[2].is_nan());
             }
             other => panic!("expected tensor values, got {other:?}"),
         }
         match indices {
             Value::Tensor(idx) => {
-                assert_eq!(idx.data[0], 1.0);
-                assert_eq!(idx.data[1], 2.0);
-                assert_eq!(idx.data[2], 2.0);
+                assert_eq!(idx.materialize_f64()[0], 1.0);
+                assert_eq!(idx.materialize_f64()[1], 2.0);
+                assert_eq!(idx.materialize_f64()[2], 2.0);
             }
             other => panic!("expected tensor indices, got {other:?}"),
         }
@@ -1386,11 +1383,11 @@ pub(crate) mod tests {
         let eval = evaluate(Value::Tensor(tensor.clone()), &args).expect("cummax");
         let (values, indices) = eval.into_pair();
         match values {
-            Value::Tensor(out) => assert_eq!(out.data, tensor.data),
+            Value::Tensor(out) => assert_eq!(out.materialize_f64(), tensor.materialize_f64()),
             other => panic!("expected tensor values, got {other:?}"),
         }
         match indices {
-            Value::Tensor(idx) => assert!(idx.data.iter().all(|v| *v == 1.0)),
+            Value::Tensor(idx) => assert!(idx.materialize_f64().iter().all(|v| *v == 1.0)),
             other => panic!("expected tensor indices, got {other:?}"),
         }
     }
@@ -1404,11 +1401,11 @@ pub(crate) mod tests {
         let eval = evaluate(Value::Tensor(tensor), &args).expect("cummax");
         let (values, indices) = eval.into_pair();
         match values {
-            Value::Tensor(out) => assert_eq!(out.data, vec![3.0, 1.0]),
+            Value::Tensor(out) => assert_eq!(out.materialize_f64(), vec![3.0, 1.0]),
             other => panic!("expected tensor values, got {other:?}"),
         }
         match indices {
-            Value::Tensor(idx) => assert_eq!(idx.data, vec![1.0, 2.0]),
+            Value::Tensor(idx) => assert_eq!(idx.materialize_f64(), vec![1.0, 2.0]),
             other => panic!("expected tensor indices, got {other:?}"),
         }
     }
@@ -1441,12 +1438,12 @@ pub(crate) mod tests {
         let eval = evaluate(Value::Tensor(tensor), &args).expect("cummax");
         let (values, indices) = eval.into_pair();
         match values {
-            Value::Tensor(out) => assert_eq!(out.data, vec![4.0, 4.0, 3.0, 3.0, 3.0]),
+            Value::Tensor(out) => assert_eq!(out.materialize_f64(), vec![4.0, 4.0, 3.0, 3.0, 3.0]),
             other => panic!("expected tensor values, got {other:?}"),
         }
         match indices {
             Value::Tensor(idx) => {
-                assert_eq!(idx.data, vec![2.0, 2.0, 5.0, 5.0, 5.0]);
+                assert_eq!(idx.materialize_f64(), vec![2.0, 2.0, 5.0, 5.0, 5.0]);
             }
             other => panic!("expected tensor indices, got {other:?}"),
         }
@@ -1468,7 +1465,7 @@ pub(crate) mod tests {
             other => panic!("expected complex tensor, got {other:?}"),
         }
         match indices {
-            Value::Tensor(idx) => assert_eq!(idx.data, vec![1.0, 1.0, 1.0]),
+            Value::Tensor(idx) => assert_eq!(idx.materialize_f64(), vec![1.0, 1.0, 1.0]),
             other => panic!("expected tensor indices, got {other:?}"),
         }
     }
@@ -1479,7 +1476,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![4.0, 2.0, 7.0, 1.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1487,8 +1484,8 @@ pub(crate) mod tests {
             let (values, indices) = eval.into_pair();
             let gathered_values = test_support::gather(values).expect("gather values");
             let gathered_indices = test_support::gather(indices).expect("gather indices");
-            assert_eq!(gathered_values.data, vec![4.0, 4.0, 7.0, 7.0]);
-            assert_eq!(gathered_indices.data, vec![1.0, 1.0, 3.0, 3.0]);
+            assert_eq!(gathered_values.materialize_f64(), vec![4.0, 4.0, 7.0, 7.0]);
+            assert_eq!(gathered_indices.materialize_f64(), vec![1.0, 1.0, 3.0, 3.0]);
         });
     }
 
@@ -1523,7 +1520,7 @@ pub(crate) mod tests {
             );
             let gathered_indices =
                 test_support::gather(Value::GpuTensor(index_handle)).expect("gather indices");
-            assert_eq!(gathered_indices.data, vec![3.0, 3.0, 3.0, 4.0]);
+            assert_eq!(gathered_indices.materialize_f64(), vec![3.0, 3.0, 3.0, 4.0]);
         });
     }
 
@@ -1533,7 +1530,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1542,8 +1539,8 @@ pub(crate) mod tests {
             let (values, indices) = eval.into_pair();
             let gathered_values = test_support::gather(values).expect("gather values");
             let gathered_indices = test_support::gather(indices).expect("gather indices");
-            assert_eq!(gathered_values.data, tensor.data);
-            assert!(gathered_indices.data.iter().all(|v| *v == 1.0));
+            assert_eq!(gathered_values.materialize_f64(), tensor.materialize_f64());
+            assert!(gathered_indices.materialize_f64().iter().all(|v| *v == 1.0));
         });
     }
 
@@ -1568,7 +1565,7 @@ pub(crate) mod tests {
 
         let provider = runmat_accelerate_api::provider().expect("provider");
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
@@ -1584,8 +1581,14 @@ pub(crate) mod tests {
         let gathered_idx = test_support::gather(gpu_idx).expect("gather indices");
 
         assert_eq!(gathered_vals.shape, expected_vals.shape);
-        assert_eq!(gathered_vals.data, expected_vals.data);
+        assert_eq!(
+            gathered_vals.materialize_f64(),
+            expected_vals.materialize_f64()
+        );
         assert_eq!(gathered_idx.shape, expected_idx.shape);
-        assert_eq!(gathered_idx.data, expected_idx.data);
+        assert_eq!(
+            gathered_idx.materialize_f64(),
+            expected_idx.materialize_f64()
+        );
     }
 }

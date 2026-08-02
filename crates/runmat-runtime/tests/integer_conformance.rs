@@ -499,9 +499,8 @@ fn integer_elementwise_extrema_preserve_all_classes_and_broadcast_exactly() {
 fn integer_logical_reductions_and_nnz_use_typed_storage_for_all_classes() {
     macro_rules! check {
         ($class:ident, $values:expr) => {{
-            let mut tensor = Tensor::new_integer(IntegerStorage::$class($values), vec![2, 2])
+            let tensor = Tensor::new_integer(IntegerStorage::$class($values), vec![2, 2])
                 .expect("integer tensor");
-            tensor.data.clear();
             let value = Value::Tensor(tensor);
             expect_logical(
                 runmat_runtime::call_builtin("any", std::slice::from_ref(&value)).expect("any"),

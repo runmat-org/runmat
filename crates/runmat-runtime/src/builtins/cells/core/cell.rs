@@ -650,7 +650,7 @@ pub(crate) mod tests {
         expect_cell_with(value, expected_shape, |element| match element {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 0]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected empty double array, found {other:?}"),
         });
@@ -665,25 +665,21 @@ pub(crate) mod tests {
 
     #[test]
     fn cell_size_tensor_preserves_typed_integer_bounds() {
-        let mut dims =
+        let dims =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![2, 3]), vec![1, 2])
                 .expect("dims");
-        dims.data.clear();
         assert_eq!(parse_size_tensor(&dims).unwrap(), vec![2, 3]);
 
-        let mut scalar =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![4]), vec![1, 1])
-                .expect("scalar");
-        scalar.data.clear();
+        let scalar = Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![4]), vec![1, 1])
+            .expect("scalar");
         assert_eq!(
             parse_size_scalar(&Value::Tensor(scalar), "cell").unwrap(),
             4
         );
 
-        let mut negative =
+        let negative =
             Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![-1]), vec![1, 1])
                 .expect("negative");
-        negative.data.clear();
         assert!(parse_size_tensor(&negative).is_err());
 
         assert!(parse_size_scalar(&Value::Num(usize::MAX as f64), "cell").is_err());
@@ -744,7 +740,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![3.0, 2.0], vec![1, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload size vector");
@@ -762,7 +758,7 @@ pub(crate) mod tests {
         );
         let tensor = Tensor::new(vec![2.0, 3.0, 1.0], vec![1, 3]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
@@ -772,7 +768,7 @@ pub(crate) mod tests {
 
         let proto = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
         let proto_view = runmat_accelerate_api::HostTensorView {
-            data: &proto.data,
+            data: &proto.materialize_f64(),
             shape: &proto.shape,
         };
         let proto_handle = provider.upload(&proto_view).expect("upload prototype");
@@ -895,7 +891,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload prototype");

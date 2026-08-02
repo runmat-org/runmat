@@ -482,7 +482,8 @@ pub(crate) mod tests {
                     Some(IntegerStorage::U8(bytes)) => bytes.clone(),
                     other => panic!("expected native uint8 storage, got {other:?}"),
                 };
-                (bytes, tensor.shape, tensor.dtype)
+                let dtype = tensor.numeric_dtype();
+                (bytes, tensor.shape, dtype)
             }
             other => panic!("expected uint8 tensor, got {other:?}"),
         }

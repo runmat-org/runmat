@@ -952,12 +952,11 @@ pub(crate) mod tests {
     #[test]
     fn writematrix_preserves_typed_integer_matrix_values_exactly() {
         let path = temp_path("csv");
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             IntegerStorage::U64(vec![u64::MAX, 17, (1_u64 << 53) + 1, 29]),
             vec![2, 2],
         )
         .expect("typed integer matrix");
-        tensor.data.fill(0.0);
         let filename = path.to_string_lossy().into_owned();
 
         block_on(writematrix_builtin(
@@ -1026,7 +1025,7 @@ pub(crate) mod tests {
             let path = temp_path("csv");
             let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");

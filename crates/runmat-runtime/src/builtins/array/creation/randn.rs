@@ -517,7 +517,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
                 let expected = random::expected_normal_sequence(4);
-                for (observed, exp) in t.data.iter().zip(expected.iter()) {
+                for (observed, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((*observed - *exp).abs() < 1e-12);
                 }
             }
@@ -536,8 +536,8 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3, 4]);
                 let expected = random::expected_normal_sequence(24);
-                assert_eq!(t.data.len(), expected.len());
-                for (observed, exp) in t.data.iter().zip(expected.iter()) {
+                assert_eq!(t.materialize_f64().len(), expected.len());
+                for (observed, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((*observed - *exp).abs() < 1e-12);
                 }
             }
@@ -554,7 +554,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 0]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
         }
@@ -568,7 +568,7 @@ pub(crate) mod tests {
         let result = block_on(randn_builtin(vec![Value::from("single")])).expect("randn single");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.dtype, NumericDType::F32);
+                assert_eq!(t.numeric_dtype(), NumericDType::F32);
                 assert_eq!(t.shape, vec![1, 1]);
             }
             Value::Num(_) => {
@@ -686,8 +686,8 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 4]);
-                assert_eq!(t.dtype, NumericDType::F64);
-                for &v in &t.data {
+                assert_eq!(t.numeric_dtype(), NumericDType::F64);
+                for &v in &t.materialize_f64() {
                     assert!(v.is_finite());
                 }
             }
@@ -706,7 +706,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -722,7 +722,7 @@ pub(crate) mod tests {
                     assert_eq!(gpu.shape, vec![2, 2]);
                     let gathered = test_support::gather(Value::GpuTensor(gpu)).expect("gather");
                     assert_eq!(gathered.shape, vec![2, 2]);
-                    for value in gathered.data {
+                    for value in gathered.materialize_f64() {
                         assert!(value.is_finite());
                     }
                 }
@@ -763,7 +763,7 @@ pub(crate) mod tests {
         );
         let tensor = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().unwrap();
@@ -774,7 +774,7 @@ pub(crate) mod tests {
             Value::GpuTensor(h) => {
                 let gathered = test_support::gather(Value::GpuTensor(h)).expect("gather to host");
                 assert_eq!(gathered.shape, vec![2, 2]);
-                for v in gathered.data {
+                for v in gathered.materialize_f64() {
                     assert!(v.is_finite());
                 }
             }
@@ -798,7 +798,7 @@ pub(crate) mod tests {
         assert_eq!(gathered.shape, vec![4, 4]);
         assert!(
             gathered
-                .data
+                .materialize_f64()
                 .iter()
                 .any(|value| value.is_finite() && value.abs() > 1.0e-6),
             "expected at least one non-trivial normal sample"

@@ -706,11 +706,11 @@ mod dtype_tests {
 
         for (dtype, expected_zeros) in cases {
             let zeros = zeros_with_dtype(&[1, 2], dtype).expect("zeros");
-            assert_eq!(zeros.dtype, dtype);
+            assert_eq!(zeros.numeric_dtype(), dtype);
             assert_eq!(zeros.integer_storage(), Some(&expected_zeros));
 
             let ones = ones_with_dtype(&[1, 2], dtype).expect("ones");
-            assert_eq!(ones.dtype, dtype);
+            assert_eq!(ones.numeric_dtype(), dtype);
             assert_eq!(ones.integer_storage(), Some(&expected_zeros.ones_like(2)));
         }
     }
@@ -719,33 +719,32 @@ mod dtype_tests {
     fn coercion_creates_exact_storage_and_float_conversion_clears_it() {
         let input = Tensor::new(vec![-2.4, 2.6], vec![1, 2]).expect("input");
         let typed = coerce_tensor_dtype(input, NumericDType::I16);
-        assert_eq!(typed.dtype, NumericDType::I16);
+        assert_eq!(typed.numeric_dtype(), NumericDType::I16);
         assert_eq!(
             typed.integer_storage(),
             Some(&IntegerStorage::I16(vec![-2, 3]))
         );
 
         let float = coerce_tensor_dtype(typed, NumericDType::F64);
-        assert_eq!(float.dtype, NumericDType::F64);
+        assert_eq!(float.numeric_dtype(), NumericDType::F64);
         assert!(float.integer_storage().is_none());
     }
 
     #[test]
     fn integer_to_integer_coercion_reads_exact_storage_not_f64_mirror() {
         let wide = 9_007_199_254_740_993_u64;
-        let mut input = Tensor::new_integer(IntegerStorage::U64(vec![wide, u64::MAX]), vec![1, 2])
+        let input = Tensor::new_integer(IntegerStorage::U64(vec![wide, u64::MAX]), vec![1, 2])
             .expect("input");
-        input.data.clear();
 
         let same_class = coerce_tensor_dtype(input.clone(), NumericDType::U64);
-        assert_eq!(same_class.dtype, NumericDType::U64);
+        assert_eq!(same_class.numeric_dtype(), NumericDType::U64);
         assert_eq!(
             same_class.integer_storage(),
             Some(&IntegerStorage::U64(vec![wide, u64::MAX]))
         );
 
         let signed = coerce_tensor_dtype(input, NumericDType::I64);
-        assert_eq!(signed.dtype, NumericDType::I64);
+        assert_eq!(signed.numeric_dtype(), NumericDType::I64);
         assert_eq!(
             signed.integer_storage(),
             Some(&IntegerStorage::I64(vec![
@@ -778,11 +777,9 @@ mod dtype_tests {
         ];
 
         for (storage, dtype) in cases {
-            let mut input =
-                Tensor::new_integer(storage.clone(), vec![1, 2]).expect("integer input");
-            input.data.clear();
+            let input = Tensor::new_integer(storage.clone(), vec![1, 2]).expect("integer input");
             let output = coerce_tensor_dtype(input, dtype);
-            assert_eq!(output.dtype, dtype);
+            assert_eq!(output.numeric_dtype(), dtype);
             assert_eq!(output.integer_storage(), Some(&storage));
         }
     }
@@ -794,7 +791,7 @@ mod dtype_tests {
         let output = coerce_tensor_dtype(input, NumericDType::U64);
 
         assert_eq!(output.shape, vec![0, 3]);
-        assert_eq!(output.dtype, NumericDType::U64);
+        assert_eq!(output.numeric_dtype(), NumericDType::U64);
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::U64(Vec::new()))
@@ -851,9 +848,8 @@ mod dimension_tests {
             Ok(Some(vec![2, 3]))
         );
 
-        let mut scalar_dim = Tensor::new_integer(IntegerStorage::U64(vec![3]), vec![1, 1])
+        let scalar_dim = Tensor::new_integer(IntegerStorage::U64(vec![3]), vec![1, 1])
             .expect("integer scalar dim");
-        scalar_dim.data.clear();
         assert_eq!(
             block_on(dimension_from_value_async(
                 &Value::Tensor(scalar_dim),
@@ -878,8 +874,7 @@ mod dimension_tests {
         ];
 
         for storage in storages {
-            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer dim");
-            tensor.data.fill(f64::NAN);
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer dim");
             assert_eq!(
                 block_on(dims_from_value_async(&Value::Tensor(tensor))),
                 Ok(Some(vec![2]))
@@ -890,9 +885,8 @@ mod dimension_tests {
     #[test]
     fn typed_integer_tensor_dimension_parsers_preserve_large_values_exactly() {
         let large = 9_007_199_254_740_993_u64;
-        let mut scalar = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1])
+        let scalar = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1])
             .expect("large integer dim");
-        scalar.data.clear();
         assert_eq!(
             parse_dimension(&Value::Tensor(scalar.clone()), "size"),
             Ok(large as usize)
@@ -916,9 +910,8 @@ mod dimension_tests {
 
     #[test]
     fn typed_integer_tensor_dimension_parsers_reject_negative_values() {
-        let mut negative =
+        let negative =
             Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("negative dim");
-        negative.data.clear();
         assert!(parse_dimension(&Value::Tensor(negative.clone()), "size").is_err());
         assert!(block_on(dimension_from_value_async(
             &Value::Tensor(negative.clone()),
@@ -932,9 +925,8 @@ mod dimension_tests {
     #[test]
     fn typed_integer_tensor_f64_boundary_reads_exact_storage() {
         let wide = 9_007_199_254_740_993_u64;
-        let mut scalar =
+        let scalar =
             Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("scalar");
-        scalar.data.clear();
         assert_eq!(
             block_on(scalar_f64_from_value_async(&Value::Tensor(scalar))),
             Ok(Some(IntValue::U64(wide).to_f64()))
@@ -954,7 +946,7 @@ mod dimension_tests {
         assert!(normalized.integer_storage().is_none());
         assert_eq!(normalized.shape, vec![1, 2]);
         assert_eq!(
-            normalized.data,
+            normalized.materialize_f64(),
             vec![
                 IntValue::U64(wide).to_f64(),
                 IntValue::U64(wide - 1).to_f64()
@@ -987,9 +979,8 @@ mod dimension_tests {
     #[test]
     fn tensor_into_values_f64_reads_typed_integer_storage_exactly() {
         let wide = 9_007_199_254_740_993_u64;
-        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1])
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1])
             .expect("integer tensor");
-        tensor.data.fill(0.0);
 
         assert_eq!(
             tensor_into_values_f64(tensor),
@@ -1000,9 +991,8 @@ mod dimension_tests {
     #[test]
     fn tensor_into_value_reads_typed_integer_scalar_storage_exactly() {
         let wide = 9_007_199_254_740_993_u64;
-        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1])
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1])
             .expect("integer tensor");
-        tensor.data.clear();
 
         assert_eq!(tensor_into_value(tensor), Value::Int(IntValue::U64(wide)));
     }
@@ -1010,9 +1000,8 @@ mod dimension_tests {
     #[test]
     fn binary_numeric_tensors_reads_typed_integer_scalar_storage_exactly() {
         let wide = 9_007_199_254_740_993_u64;
-        let mut lhs = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1])
+        let lhs = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1])
             .expect("integer tensor");
-        lhs.data.fill(0.0);
         let rhs = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("double tensor");
 
         let (lhs_values, rhs_values, shape) =
@@ -1024,12 +1013,8 @@ mod dimension_tests {
 
     #[test]
     fn binary_numeric_tensors_reads_typed_integer_array_storage_exactly() {
-        let mut lhs =
-            Tensor::new_integer(IntegerStorage::I16(vec![-2, 3]), vec![1, 2]).expect("lhs");
-        lhs.data.fill(0.0);
-        let mut rhs =
-            Tensor::new_integer(IntegerStorage::U64(vec![4, 5]), vec![1, 2]).expect("rhs");
-        rhs.data.fill(9.0);
+        let lhs = Tensor::new_integer(IntegerStorage::I16(vec![-2, 3]), vec![1, 2]).expect("lhs");
+        let rhs = Tensor::new_integer(IntegerStorage::U64(vec![4, 5]), vec![1, 2]).expect("rhs");
 
         let (lhs_values, rhs_values, shape) =
             super::binary_numeric_tensors(&lhs, &rhs, "times", "times").expect("align");
@@ -1041,9 +1026,8 @@ mod dimension_tests {
     #[test]
     fn binary_numeric_tensors_reads_typed_integer_rhs_scalar_storage_exactly() {
         let lhs = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("double tensor");
-        let mut rhs =
+        let rhs =
             Tensor::new_integer(IntegerStorage::I64(vec![-7]), vec![1, 1]).expect("integer tensor");
-        rhs.data.fill(0.0);
 
         let (lhs_values, rhs_values, shape) =
             super::binary_numeric_tensors(&lhs, &rhs, "minus", "minus").expect("align");

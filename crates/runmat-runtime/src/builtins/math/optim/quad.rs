@@ -666,11 +666,8 @@ mod tests {
     #[test]
     fn quad_tol_and_trace_read_typed_integer_storage_exactly() {
         crate::console::reset_thread_buffer();
-        let mut tol = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("tol");
-        tol.data.clear();
-        let mut trace =
-            Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("trace");
-        trace.data.clear();
+        let tol = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("tol");
+        let trace = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("trace");
 
         let result = block_on(quad_builtin(
             Value::FunctionHandle("sin".into()),

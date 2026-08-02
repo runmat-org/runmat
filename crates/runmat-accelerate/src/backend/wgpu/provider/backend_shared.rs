@@ -159,12 +159,10 @@ mod float_result_materialization_tests {
             .expect_err("wide integer scalar must not use f64");
         assert!(scalar.to_string().contains("typed provider result path"));
 
-        let mut tensor =
-            Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![1, 2])
-                .expect("integer tensor");
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![1, 2])
+            .expect("integer tensor");
         let tensor = host_tensor_from_value("eig", Value::Tensor(tensor))
-            .expect_err("poisoned integer tensor must not use f64");
+            .expect_err("integer tensor must use a typed provider result path");
         assert!(tensor.to_string().contains("typed provider result path"));
     }
 }

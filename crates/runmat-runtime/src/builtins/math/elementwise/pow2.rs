@@ -552,26 +552,23 @@ pub(crate) mod tests {
 
     #[test]
     fn pow2_unary_reads_typed_integer_storage_exactly() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::I16(vec![1, 3]), vec![1, 2]).expect("tensor");
-        tensor.data = vec![0.0, 0.0];
 
         let result = pow2_builtin(Value::Tensor(tensor), vec![]).expect("pow2");
 
         match result {
-            Value::Tensor(out) => assert_eq!(out.data, vec![2.0, 8.0]),
+            Value::Tensor(out) => assert_eq!(out.materialize_f64(), vec![2.0, 8.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
 
     #[test]
     fn pow2_binary_scalar_reads_typed_integer_storage_exactly() {
-        let mut mantissa =
+        let mantissa =
             Tensor::new_integer(IntegerStorage::I32(vec![5]), vec![1, 1]).expect("mantissa");
-        mantissa.data = vec![0.0];
-        let mut exponent =
+        let exponent =
             Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).expect("exponent");
-        exponent.data = vec![0.0];
 
         let result = pow2_builtin(Value::Tensor(mantissa), vec![Value::Tensor(exponent)])
             .expect("pow2 scale");
@@ -581,15 +578,13 @@ pub(crate) mod tests {
 
     #[test]
     fn pow2_binary_arrays_ignore_poisoned_integer_mirrors() {
-        let mut mantissa = Tensor::new_integer(
+        let mantissa = Tensor::new_integer(
             IntegerStorage::U64(vec![9_007_199_254_740_993, 3]),
             vec![1, 2],
         )
         .expect("mantissa");
-        let mut exponent =
+        let exponent =
             Tensor::new_integer(IntegerStorage::I16(vec![1, 4]), vec![1, 2]).expect("exponent");
-        mantissa.data.fill(f64::NAN);
-        exponent.data.fill(-1000.0);
 
         let result = pow2_builtin(Value::Tensor(mantissa), vec![Value::Tensor(exponent)])
             .expect("pow2 scale");
@@ -597,7 +592,10 @@ pub(crate) mod tests {
         let Value::Tensor(result) = result else {
             panic!("expected double tensor result");
         };
-        assert_eq!(result.data, vec![18_014_398_509_481_986.0, 48.0]);
+        assert_eq!(
+            result.materialize_f64(),
+            vec![18_014_398_509_481_986.0, 48.0]
+        );
         assert!(result.integer_storage().is_none());
     }
 
@@ -647,7 +645,7 @@ pub(crate) mod tests {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
                 let expected = [0.5, 1.0, 2.0, 4.0];
-                for (a, b) in out.data.iter().zip(expected.iter()) {
+                for (a, b) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((a - b).abs() < 1e-12);
                 }
             }
@@ -664,7 +662,7 @@ pub(crate) mod tests {
             pow2_builtin(Value::Tensor(mantissa), vec![Value::Tensor(exponent)]).expect("pow2");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.data, vec![4.0, 24.0]);
+                assert_eq!(out.materialize_f64(), vec![4.0, 24.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -717,8 +715,8 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
-                assert!((out.data[0] - (65.0f64).exp2()).abs() < 1e-6);
-                assert!((out.data[1] - (66.0f64).exp2()).abs() < 1e-6);
+                assert!((out.materialize_f64()[0] - (65.0f64).exp2()).abs() < 1e-6);
+                assert!((out.materialize_f64()[1] - (66.0f64).exp2()).abs() < 1e-6);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -737,7 +735,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -745,7 +743,7 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![3, 1]);
             let expected = vec![1.0, 2.0, 4.0];
-            assert_eq!(gathered.data, expected);
+            assert_eq!(gathered.materialize_f64(), expected);
         });
     }
 
@@ -756,11 +754,11 @@ pub(crate) mod tests {
             let mantissa = Tensor::new(vec![0.5, 1.5], vec![2, 1]).unwrap();
             let exponent = Tensor::new(vec![3.0, 4.0], vec![2, 1]).unwrap();
             let m_view = runmat_accelerate_api::HostTensorView {
-                data: &mantissa.data,
+                data: &mantissa.materialize_f64(),
                 shape: &mantissa.shape,
             };
             let e_view = runmat_accelerate_api::HostTensorView {
-                data: &exponent.data,
+                data: &exponent.materialize_f64(),
                 shape: &exponent.shape,
             };
             let m_handle = provider.upload(&m_view).expect("upload m");
@@ -768,7 +766,7 @@ pub(crate) mod tests {
             let result = pow2_builtin(Value::GpuTensor(m_handle), vec![Value::GpuTensor(e_handle)])
                 .expect("pow2");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.data, vec![4.0, 24.0]);
+            assert_eq!(gathered.materialize_f64(), vec![4.0, 24.0]);
         });
     }
 
@@ -780,7 +778,7 @@ pub(crate) mod tests {
         let result = pow2_builtin(Value::Tensor(mantissa), vec![exponent]).expect("pow2");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.data, vec![4.0, 8.0, 12.0]);
+                assert_eq!(out.materialize_f64(), vec![4.0, 8.0, 12.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -802,7 +800,7 @@ pub(crate) mod tests {
 
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
@@ -813,7 +811,11 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (g, c) in gpu.data.iter().zip(cpu.data.iter()) {
+        for (g, c) in gpu
+            .materialize_f64()
+            .iter()
+            .zip(cpu.materialize_f64().iter())
+        {
             assert!((g - c).abs() <= tol, "mismatch: gpu={g} cpu={c} tol={tol}");
         }
     }
@@ -840,11 +842,11 @@ pub(crate) mod tests {
 
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let m_view = runmat_accelerate_api::HostTensorView {
-            data: &mantissa.data,
+            data: &mantissa.materialize_f64(),
             shape: &mantissa.shape,
         };
         let e_view = runmat_accelerate_api::HostTensorView {
-            data: &exponent.data,
+            data: &exponent.materialize_f64(),
             shape: &exponent.shape,
         };
         let m_handle = provider.upload(&m_view).expect("upload mantissa");
@@ -856,7 +858,11 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-3,
         };
-        for (g, c) in gpu.data.iter().zip(cpu.data.iter()) {
+        for (g, c) in gpu
+            .materialize_f64()
+            .iter()
+            .zip(cpu.materialize_f64().iter())
+        {
             assert!(
                 (g - c).abs() <= tol,
                 "scale mismatch: gpu={g} cpu={c} tol={tol}"

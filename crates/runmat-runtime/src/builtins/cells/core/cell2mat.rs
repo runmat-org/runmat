@@ -896,7 +896,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![1.0, 3.0, 2.0, 4.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -937,7 +937,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 5]);
                 assert_eq!(
-                    t.data,
+                    t.materialize_f64(),
                     vec![1.0, 6.0, 2.0, 7.0, 3.0, 8.0, 4.0, 9.0, 5.0, 10.0]
                 );
             }
@@ -1194,7 +1194,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3, 2]);
-                assert_eq!(t.data.len(), 12);
+                assert_eq!(t.materialize_f64().len(), 12);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1208,7 +1208,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 0]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
         }
@@ -1220,7 +1220,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("tensor");
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1230,7 +1230,7 @@ pub(crate) mod tests {
             match result {
                 Value::Tensor(t) => {
                     assert_eq!(t.shape, vec![2, 2]);
-                    assert_eq!(t.data, tensor.data);
+                    assert_eq!(t.materialize_f64(), tensor.materialize_f64());
                 }
                 other => panic!("expected tensor, got {other:?}"),
             }
@@ -1247,7 +1247,7 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("tensor");
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
@@ -1256,7 +1256,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, tensor.data);
+                assert_eq!(t.materialize_f64(), tensor.materialize_f64());
             }
             other => panic!("expected tensor, got {other:?}"),
         }

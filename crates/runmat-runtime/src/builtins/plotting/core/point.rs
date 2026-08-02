@@ -583,9 +583,8 @@ mod tests {
 
     #[test]
     fn point_scalar_helpers_accept_typed_integer_without_double_mirror() {
-        let mut scalar =
+        let scalar =
             Tensor::new_integer(IntegerStorage::U16(vec![12]), vec![1, 1]).expect("scalar");
-        scalar.data.clear();
         let value = Value::Tensor(scalar);
 
         assert!(is_scalar_numeric(&value));

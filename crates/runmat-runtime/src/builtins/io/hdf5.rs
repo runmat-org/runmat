@@ -2299,7 +2299,7 @@ mod tests {
         match out {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                assert_eq!(t.data, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -2368,9 +2368,8 @@ mod tests {
             vec![exact as usize]
         );
 
-        let mut vector =
+        let vector =
             Tensor::new_integer(IntegerStorage::U64(vec![exact, 3]), vec![1, 2]).expect("vector");
-        vector.data.fill(f64::NAN);
         assert_eq!(
             numeric_vector_usize(&Value::Tensor(vector), H5WRITE_NAME, "count").expect("vector"),
             vec![exact as usize, 3]
@@ -2539,7 +2538,7 @@ mod tests {
         match out {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![4.0, 6.0, 7.0, 9.0]);
+                assert_eq!(t.materialize_f64(), vec![4.0, 6.0, 7.0, 9.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -2582,7 +2581,7 @@ mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 4]);
                 assert_eq!(
-                    t.data,
+                    t.materialize_f64(),
                     vec![0.0, 0.0, 0.0, 40.0, 0.0, 60.0, 70.0, 0.0, 90.0, 0.0, 0.0, 0.0]
                 );
             }
@@ -2623,7 +2622,7 @@ mod tests {
             Vec::new(),
         ))
         .expect("read rewritten");
-        assert!(matches!(out, Value::Tensor(t) if t.data == vec![3.0, 4.0]));
+        assert!(matches!(out, Value::Tensor(t) if t.materialize_f64() == vec![3.0, 4.0]));
 
         let info = block_on(h5info_builtin(
             Value::String(path.display().to_string()),

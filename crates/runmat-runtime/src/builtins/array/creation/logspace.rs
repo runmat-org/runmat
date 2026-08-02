@@ -523,8 +523,8 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 50]);
-                assert!((t.data[0] - 10.0).abs() < 1e-12);
-                assert!((t.data[49] - 1000.0).abs() < 1e-9);
+                assert!((t.materialize_f64()[0] - 10.0).abs() < 1e-12);
+                assert!((t.materialize_f64()[49] - 1000.0).abs() < 1e-9);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -533,8 +533,7 @@ pub(crate) mod tests {
     #[test]
     fn logspace_count_parser_preserves_typed_integer_tensors_exactly() {
         let large = 9_007_199_254_740_993_u64;
-        let mut count = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).unwrap();
-        count.data.clear();
+        let count = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).unwrap();
 
         assert_eq!(
             block_on(parse_count(&Value::Tensor(count))).unwrap(),
@@ -556,28 +555,24 @@ pub(crate) mod tests {
         ];
 
         for storage in storages {
-            let mut count = Tensor::new_integer(storage, vec![1, 1]).expect("integer count");
-            count.data.fill(f64::NAN);
+            let count = Tensor::new_integer(storage, vec![1, 1]).expect("integer count");
             assert_eq!(block_on(parse_count(&Value::Tensor(count))).unwrap(), 2);
         }
     }
 
     #[test]
     fn logspace_count_parser_rejects_negative_typed_integer_tensors() {
-        let mut count = Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).unwrap();
-        count.data.clear();
+        let count = Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).unwrap();
 
         assert!(block_on(parse_count(&Value::Tensor(count))).is_err());
     }
 
     #[test]
     fn logspace_real_integer_tensor_endpoints_read_exact_storage() {
-        let mut start =
+        let start =
             Tensor::new_integer(IntegerStorage::I64(vec![0]), vec![1, 1]).expect("start tensor");
-        start.data.clear();
-        let mut stop =
+        let stop =
             Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("stop tensor");
-        stop.data.clear();
 
         let result = logspace_builtin(
             Value::Tensor(start),
@@ -586,7 +581,7 @@ pub(crate) mod tests {
         )
         .expect("logspace");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 10.0, 100.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 10.0, 100.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -614,7 +609,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 5]);
                 let expected = [1.0, 3.1622776601683795, 10.0, 31.622776601683793, 100.0];
-                for (a, b) in t.data.iter().zip(expected.iter()) {
+                for (a, b) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((a - b).abs() < 1e-12);
                 }
             }
@@ -634,7 +629,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 0]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -648,7 +643,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 0]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
         }
@@ -666,7 +661,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 1]);
-                assert!((t.data[0] - 1.0).abs() < 1e-12);
+                assert!((t.materialize_f64()[0] - 1.0).abs() < 1e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -744,7 +739,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 3]);
                 let expected = generate_real_log_sequence(2.0, 3.0, 3);
-                for (actual, exp) in t.data.iter().zip(expected.iter()) {
+                for (actual, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - exp).abs() < 1e-12);
                 }
             }
@@ -754,11 +749,8 @@ pub(crate) mod tests {
 
     #[test]
     fn logspace_typed_integer_tensor_endpoints_read_exact_storage() {
-        let mut start =
-            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("start");
-        start.data.clear();
-        let mut stop = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("stop");
-        stop.data.clear();
+        let start = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("start");
+        let stop = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("stop");
 
         let result = logspace_builtin(
             Value::Tensor(start),
@@ -770,7 +762,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 3]);
                 let expected = generate_real_log_sequence(-1.0, 1.0, 3);
-                for (actual, exp) in t.data.iter().zip(expected.iter()) {
+                for (actual, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - exp).abs() < 1e-12);
                 }
             }
@@ -844,7 +836,7 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 3]);
             let expected = [10.0, 100.0, 1000.0];
-            for (a, b) in gathered.data.iter().zip(expected.iter()) {
+            for (a, b) in gathered.materialize_f64().iter().zip(expected.iter()) {
                 assert!((a - b).abs() < 1e-6);
             }
         });
@@ -893,7 +885,7 @@ pub(crate) mod tests {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
                 };
-                for (a, b) in ct.data.iter().zip(gt.data.iter()) {
+                for (a, b) in ct.materialize_f64().iter().zip(gt.materialize_f64().iter()) {
                     assert!((a - b).abs() < tol);
                 }
             }

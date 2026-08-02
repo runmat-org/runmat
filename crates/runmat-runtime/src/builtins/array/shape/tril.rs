@@ -496,8 +496,7 @@ pub(crate) mod tests {
     use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, Type};
 
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         Value::Tensor(tensor)
     }
 
@@ -554,7 +553,7 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(result) => {
                 assert_eq!(result.shape, vec![2, 3]);
-                assert_eq!(result.data, vec![1.0, 4.0, 0.0, 5.0, 0.0, 0.0]);
+                assert_eq!(result.materialize_f64(), vec![1.0, 4.0, 0.0, 5.0, 0.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -604,7 +603,7 @@ pub(crate) mod tests {
             tril_builtin(Value::Tensor(tensor), vec![offset]).expect("tril with positive offset");
         match value {
             Value::Tensor(result) => {
-                assert_eq!(result.data, vec![1.0, 4.0, 2.0, 5.0, 0.0, 6.0]);
+                assert_eq!(result.materialize_f64(), vec![1.0, 4.0, 2.0, 5.0, 0.0, 6.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -619,7 +618,7 @@ pub(crate) mod tests {
             tril_builtin(Value::Tensor(tensor), vec![offset]).expect("tril with negative offset");
         match value {
             Value::Tensor(result) => {
-                assert_eq!(result.data, vec![0.0, 4.0, 0.0, 0.0, 0.0, 0.0]);
+                assert_eq!(result.materialize_f64(), vec![0.0, 4.0, 0.0, 0.0, 0.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -696,14 +695,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let value = tril_builtin(Value::GpuTensor(handle), Vec::new()).expect("tril gpu");
             let gathered = test_support::gather(value).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![1.0, 2.0, 0.0, 4.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 2.0, 0.0, 4.0]);
         });
     }
 
@@ -718,7 +717,7 @@ pub(crate) mod tests {
             Tensor::new((1..=16).map(|v| v as f64).collect::<Vec<_>>(), vec![4, 4]).unwrap();
         let cpu = tril_tensor(tensor.clone(), -1).expect("cpu tril");
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()
@@ -728,6 +727,6 @@ pub(crate) mod tests {
         let gpu = block_on(super::tril_gpu(handle, -1)).expect("gpu tril");
         let gathered = test_support::gather(gpu).expect("gather");
         assert_eq!(gathered.shape, cpu.shape);
-        assert_eq!(gathered.data, cpu.data);
+        assert_eq!(gathered.materialize_f64(), cpu.materialize_f64());
     }
 }

@@ -843,9 +843,8 @@ pub(crate) mod tests {
 
     #[test]
     fn norm_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![3, 4]), vec![2, 1]).expect("integer");
-        tensor.data.fill(0.0);
         let value = norm_builtin(Value::Tensor(tensor), Vec::new()).expect("norm");
         match value {
             Value::Num(v) => assert_close(v, 5.0),
@@ -856,9 +855,7 @@ pub(crate) mod tests {
     #[test]
     fn norm_order_reads_typed_integer_tensor_storage_exactly() {
         let tensor = Tensor::new(vec![3.0, -4.0], vec![2, 1]).unwrap();
-        let mut order =
-            Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("integer");
-        order.data.clear();
+        let order = Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("integer");
         let value = norm_builtin(Value::Tensor(tensor), vec![Value::Tensor(order)]).expect("norm");
         match value {
             Value::Num(v) => assert_close(v, 7.0),
@@ -879,8 +876,7 @@ pub(crate) mod tests {
             IntegerStorage::U64(vec![1]),
         ];
         for storage in storages {
-            let mut order = Tensor::new_integer(storage, vec![1, 1]).expect("order");
-            order.data = vec![f64::NAN];
+            let order = Tensor::new_integer(storage, vec![1, 1]).expect("order");
             assert!(matches!(
                 parse_order_value(&Value::Tensor(order)),
                 Ok(NormOrder::One)
@@ -1041,9 +1037,7 @@ pub(crate) mod tests {
     #[test]
     fn norm_order_reads_integer_tensor_storage() {
         let tensor = Tensor::new(vec![2.0, -3.0], vec![2, 1]).unwrap();
-        let mut order =
-            Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("order");
-        order.data.clear();
+        let order = Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("order");
         let value = norm_builtin(Value::Tensor(tensor), vec![Value::Tensor(order)]).expect("norm");
         match value {
             Value::Num(v) => assert_close(v, 5.0),
@@ -1064,16 +1058,14 @@ pub(crate) mod tests {
             IntegerStorage::U64(vec![1]),
         ];
         for storage in storages {
-            let mut order = Tensor::new_integer(storage, vec![1, 1]).expect("order");
-            order.data = vec![f64::NAN];
+            let order = Tensor::new_integer(storage, vec![1, 1]).expect("order");
             assert!(matches!(
                 parse_order_value(&Value::Tensor(order)),
                 Ok(NormOrder::One)
             ));
         }
-        let mut wide = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+        let wide = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
             .expect("wide order");
-        wide.data = vec![1.0];
         assert!(parse_order_value(&Value::Tensor(wide)).is_err());
     }
 
@@ -1162,13 +1154,13 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![3.0, 4.0], vec![2, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = norm_builtin(Value::GpuTensor(handle), Vec::new()).expect("norm");
             let gathered = test_support::gather(result).expect("gather");
-            assert_close(gathered.data[0], 5.0);
+            assert_close(gathered.materialize_f64()[0], 5.0);
         });
     }
 
@@ -1183,7 +1175,7 @@ pub(crate) mod tests {
         let cpu = norm_real_tensor(&tensor, NormOrder::Default).expect("cpu norm");
 
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
@@ -1191,7 +1183,7 @@ pub(crate) mod tests {
 
         let result = norm_builtin(Value::GpuTensor(handle), Vec::new()).expect("norm");
         let gathered = test_support::gather(result).expect("gather");
-        assert_close(gathered.data[0], cpu);
+        assert_close(gathered.materialize_f64()[0], cpu);
     }
 
     fn norm_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

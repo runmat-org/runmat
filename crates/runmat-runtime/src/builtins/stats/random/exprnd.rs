@@ -247,8 +247,7 @@ mod tests {
     }
 
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         tensor
     }
 
@@ -276,7 +275,7 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 4]);
-                assert!(t.data.iter().all(|&v| v > 0.0));
+                assert!(t.materialize_f64().iter().all(|&v| v > 0.0));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -306,7 +305,7 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                assert!(t.data.iter().all(|&v| v > 0.0));
+                assert!(t.materialize_f64().iter().all(|&v| v > 0.0));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -341,7 +340,7 @@ mod tests {
         let args = vec![Value::Num(mu), Value::Num(n as f64), Value::Num(1.0)];
         let result = block_on(exprnd_builtin(args)).expect("exprnd");
         let data = match result {
-            Value::Tensor(t) => t.data,
+            Value::Tensor(t) => t.materialize_f64(),
             other => panic!("expected tensor, got {other:?}"),
         };
         let mean = data.iter().sum::<f64>() / data.len() as f64;

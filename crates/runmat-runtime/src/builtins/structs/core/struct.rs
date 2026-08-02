@@ -504,10 +504,9 @@ pub(crate) mod tests {
 
     #[test]
     fn struct_uses_typed_integer_storage_to_detect_empty_input() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U64(Vec::new()), vec![0, 0])
                 .unwrap();
-        tensor.data = vec![f64::NAN];
 
         assert!(matches!(
             run_struct(vec![Value::Tensor(tensor)]).unwrap(),

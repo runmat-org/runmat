@@ -412,7 +412,7 @@ mod tests {
         let position =
             get_builtin(vec![Value::Num(handle), Value::String("Position".into())]).unwrap();
         let tensor = Tensor::try_from(&position).unwrap();
-        assert_eq!(tensor.data, vec![1.0, 2.0, 0.0]);
+        assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 0.0]);
     }
 
     #[test]

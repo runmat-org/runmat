@@ -989,7 +989,7 @@ pub(crate) mod tests {
         let result = sort_builtin(Value::Tensor(tensor), Vec::new()).expect("sort");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![1.0, 2.0, 3.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0]);
                 assert_eq!(t.shape, vec![3, 1]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1012,7 +1012,7 @@ pub(crate) mod tests {
         let Value::Tensor(indices) = indices else {
             panic!("expected index tensor");
         };
-        assert_eq!(indices.data, vec![2.0, 3.0, 1.0]);
+        assert_eq!(indices.materialize_f64(), vec![2.0, 3.0, 1.0]);
     }
 
     #[test]
@@ -1072,18 +1072,17 @@ pub(crate) mod tests {
             let Value::Tensor(indices) = indices else {
                 panic!("expected index tensor");
             };
-            assert_eq!(indices.data, vec![2.0, 3.0, 4.0, 1.0]);
+            assert_eq!(indices.materialize_f64(), vec![2.0, 3.0, 4.0, 1.0]);
         }
     }
 
     #[test]
     fn sort_reads_exact_integer_values_without_mirror() {
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993, 7]),
             vec![4, 1],
         )
         .expect("input");
-        tensor.data.clear();
 
         let (sorted, indices) = evaluate(Value::Tensor(tensor), &[])
             .expect("sort")
@@ -1103,7 +1102,7 @@ pub(crate) mod tests {
         let Value::Tensor(indices) = indices else {
             panic!("expected index tensor");
         };
-        assert_eq!(indices.data, vec![2.0, 4.0, 3.0, 1.0]);
+        assert_eq!(indices.materialize_f64(), vec![2.0, 4.0, 3.0, 1.0]);
     }
 
     #[test]
@@ -1131,7 +1130,7 @@ pub(crate) mod tests {
         let Value::Tensor(indices) = indices else {
             panic!("expected index tensor");
         };
-        assert_eq!(indices.data, vec![1.0, 4.0, 3.0, 2.0]);
+        assert_eq!(indices.materialize_f64(), vec![1.0, 4.0, 3.0, 2.0]);
 
         let input = Tensor::new_integer(
             IntegerStorage::I64(vec![i64::MIN, i64::MAX, 2, -1]),
@@ -1154,7 +1153,7 @@ pub(crate) mod tests {
         let Value::Tensor(indices) = indices else {
             panic!("expected index tensor");
         };
-        assert_eq!(indices.data, vec![4.0, 3.0, 2.0, 1.0]);
+        assert_eq!(indices.materialize_f64(), vec![4.0, 3.0, 2.0, 1.0]);
 
         let input = Tensor::new_integer(
             IntegerStorage::U64(vec![u64::MAX, 0, 7, 9_007_199_254_740_993]),
@@ -1179,7 +1178,7 @@ pub(crate) mod tests {
         let Value::Tensor(indices) = indices else {
             panic!("expected index tensor");
         };
-        assert_eq!(indices.data, vec![2.0, 1.0, 1.0, 2.0]);
+        assert_eq!(indices.materialize_f64(), vec![2.0, 1.0, 1.0, 2.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1189,7 +1188,7 @@ pub(crate) mod tests {
         let result =
             sort_builtin(Value::Tensor(tensor), vec![Value::from("descend")]).expect("sort");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data, vec![4.0, 3.0, 2.0, 1.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![4.0, 3.0, 2.0, 1.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -1202,13 +1201,13 @@ pub(crate) mod tests {
         let (sorted, indices) = eval.into_values();
         match sorted {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![2.0, 4.0, 1.0, 5.0, 3.0, 6.0]);
+                assert_eq!(t.materialize_f64(), vec![2.0, 4.0, 1.0, 5.0, 3.0, 6.0]);
                 assert_eq!(t.shape, vec![2, 3]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
         match indices {
-            Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 1.0, 1.0, 2.0, 2.0, 1.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![2.0, 1.0, 1.0, 2.0, 2.0, 1.0]),
             other => panic!("expected tensor indices, got {other:?}"),
         }
     }
@@ -1222,13 +1221,13 @@ pub(crate) mod tests {
         let (sorted, indices) = eval.into_values();
         match sorted {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![1.0, 2.0, 2.0, 3.0, 4.0, 5.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 2.0, 3.0, 4.0, 5.0]);
                 assert_eq!(t.shape, vec![2, 3]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
         match indices {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]),
             other => panic!("expected tensor indices, got {other:?}"),
         }
     }
@@ -1249,7 +1248,7 @@ pub(crate) mod tests {
         .expect("evaluate");
         let (sorted, _) = eval.into_values();
         match sorted {
-            Value::Tensor(t) => assert_eq!(t.data, vec![4.0, 3.0, 1.0, 2.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![4.0, 3.0, 1.0, 2.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -1257,21 +1256,19 @@ pub(crate) mod tests {
     #[test]
     fn sort_typed_integer_dimension_argument_is_not_empty_placeholder_without_mirror() {
         let tensor = Tensor::new(vec![1.0, 3.0, 4.0, 2.0, 2.0, 5.0], vec![2, 3]).unwrap();
-        let mut dim =
-            Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("dimension");
-        dim.data.clear();
+        let dim = Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("dimension");
 
         let eval = evaluate(Value::Tensor(tensor), &[Value::Tensor(dim)]).expect("evaluate");
         let (sorted, indices) = eval.into_values();
         match sorted {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                assert_eq!(t.data, vec![1.0, 2.0, 2.0, 3.0, 4.0, 5.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 2.0, 3.0, 4.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
         match indices {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]),
             other => panic!("expected tensor indices, got {other:?}"),
         }
     }
@@ -1287,7 +1284,7 @@ pub(crate) mod tests {
         .expect("evaluate");
         let (sorted, _) = eval.into_values();
         match sorted {
-            Value::Tensor(t) => assert_eq!(t.data, vec![3.0, 1.0, 4.0, 2.0, 5.0, 2.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![3.0, 1.0, 4.0, 2.0, 5.0, 2.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -1299,11 +1296,11 @@ pub(crate) mod tests {
         let eval = evaluate(Value::Tensor(tensor), &[]).expect("evaluate");
         let (sorted, indices) = eval.into_values();
         match sorted {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 2.0, 4.0, 9.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 4.0, 9.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
         match indices {
-            Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 4.0, 1.0, 3.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![2.0, 4.0, 1.0, 3.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -1316,8 +1313,8 @@ pub(crate) mod tests {
         let (sorted, _) = eval.into_values();
         match sorted {
             Value::Tensor(t) => {
-                assert!(t.data[3].is_nan());
-                assert_eq!(&t.data[0..3], &[1.0, 2.0, 4.0]);
+                assert!(t.materialize_f64()[3].is_nan());
+                assert_eq!(&t.materialize_f64()[0..3], &[1.0, 2.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1327,8 +1324,8 @@ pub(crate) mod tests {
         let (sorted_desc, _) = eval_desc.into_values();
         match sorted_desc {
             Value::Tensor(t) => {
-                assert!(t.data[0].is_nan());
-                assert_eq!(&t.data[1..], &[4.0, 2.0, 1.0]);
+                assert!(t.materialize_f64()[0].is_nan());
+                assert_eq!(&t.materialize_f64()[1..], &[4.0, 2.0, 1.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1345,7 +1342,7 @@ pub(crate) mod tests {
         .expect("evaluate");
         let (sorted, _) = eval.into_values();
         match sorted {
-            Value::Tensor(t) => assert_eq!(t.data, vec![-1.0, -2.0, 3.0, -8.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![-1.0, -2.0, 3.0, -8.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -1365,7 +1362,7 @@ pub(crate) mod tests {
         .expect("evaluate");
         let (sorted, _) = eval.into_values();
         match sorted {
-            Value::Tensor(t) => assert_eq!(t.data, vec![4.0, -3.0, 2.0, -1.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![4.0, -3.0, 2.0, -1.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -1384,7 +1381,7 @@ pub(crate) mod tests {
             other => panic!("expected complex tensor, got {other:?}"),
         }
         match indices {
-            Value::Tensor(t) => assert_eq!(t.data, vec![3.0, 1.0, 2.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![3.0, 1.0, 2.0]),
             other => panic!("expected tensor indices, got {other:?}"),
         }
     }
@@ -1419,11 +1416,11 @@ pub(crate) mod tests {
         let eval = evaluate(Value::Tensor(tensor), &[]).expect("evaluate");
         let (sorted, indices) = eval.into_values();
         match sorted {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 2.0, 2.0, 2.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 2.0, 2.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
         match indices {
-            Value::Tensor(t) => assert_eq!(t.data, vec![3.0, 1.0, 2.0, 4.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![3.0, 1.0, 2.0, 4.0]),
             other => panic!("expected tensor indices, got {other:?}"),
         }
     }
@@ -1436,13 +1433,13 @@ pub(crate) mod tests {
         let (sorted, indices) = eval.into_values();
         match sorted {
             Value::Tensor(t) => {
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
                 assert_eq!(t.shape, tensor.shape);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
         match indices {
-            Value::Tensor(t) => assert!(t.data.is_empty()),
+            Value::Tensor(t) => assert!(t.materialize_f64().is_empty()),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -1458,11 +1455,14 @@ pub(crate) mod tests {
         .expect("evaluate");
         let (sorted, indices) = eval.into_values();
         match sorted {
-            Value::Tensor(t) => assert_eq!(t.data, tensor.data),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), tensor.materialize_f64()),
             other => panic!("expected tensor, got {other:?}"),
         }
         match indices {
-            Value::Tensor(t) => assert!(t.data.iter().all(|v| (*v - 1.0).abs() < f64::EPSILON)),
+            Value::Tensor(t) => assert!(t
+                .materialize_f64()
+                .iter()
+                .all(|v| (*v - 1.0).abs() < f64::EPSILON)),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -1529,18 +1529,18 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![3.0, 1.0, 2.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let eval = evaluate(Value::GpuTensor(handle), &[]).expect("evaluate");
             let (sorted, indices) = eval.into_values();
             match sorted {
-                Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 2.0, 3.0]),
+                Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0]),
                 other => panic!("expected tensor, got {other:?}"),
             }
             match indices {
-                Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 3.0, 1.0]),
+                Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![2.0, 3.0, 1.0]),
                 other => panic!("expected tensor, got {other:?}"),
             }
         });
@@ -1558,7 +1558,7 @@ pub(crate) mod tests {
         let (cpu_sorted, cpu_indices) = cpu_eval.into_values();
 
         let gpu_view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
@@ -1587,7 +1587,13 @@ pub(crate) mod tests {
             other => panic!("unexpected GPU indices value {other:?}"),
         };
 
-        assert_eq!(gpu_sorted_tensor.data, cpu_sorted_tensor.data);
-        assert_eq!(gpu_indices_tensor.data, cpu_indices_tensor.data);
+        assert_eq!(
+            gpu_sorted_tensor.materialize_f64(),
+            cpu_sorted_tensor.materialize_f64()
+        );
+        assert_eq!(
+            gpu_indices_tensor.materialize_f64(),
+            cpu_indices_tensor.materialize_f64()
+        );
     }
 }

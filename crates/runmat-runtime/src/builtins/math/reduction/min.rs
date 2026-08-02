@@ -2280,12 +2280,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_native_integer_reduction_preserves_uint64_values_and_indices() {
-        let mut input = Tensor::new_integer(
+        let input = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![u64::MAX - 1, u64::MAX, 3, 2]),
             vec![2, 2],
         )
         .expect("input");
-        input.data.clear();
         let (values, indices) = evaluate(Value::Tensor(input), &[])
             .expect("min")
             .into_pair();
@@ -2308,12 +2307,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_native_integer_abs_all_uses_exact_int64_minimum() {
-        let mut input = Tensor::new_integer(
+        let input = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I64(vec![i64::MIN, -3, 3]),
             vec![3, 1],
         )
         .expect("input");
-        input.data.clear();
         let args = vec![
             placeholder(),
             Value::from("all"),
@@ -2376,13 +2374,13 @@ pub(crate) mod tests {
         match values {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 3]);
-                assert_eq!(t.data, vec![3.0, 1.0, 5.0]);
+                assert_eq!(t.materialize_f64(), vec![3.0, 1.0, 5.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
         match indices {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![1.0, 1.0, 1.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 1.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -2452,13 +2450,13 @@ pub(crate) mod tests {
         match values {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data, vec![1.0, -2.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, -2.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
         match indices {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![1.0, 1.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 1.0]);
             }
             other => panic!("expected tensor indices, got {other:?}"),
         }
@@ -2495,18 +2493,60 @@ pub(crate) mod tests {
         match values {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
-                assert_eq!([t.data[0], t.data[3], t.data[6]], [1.0, 2.0, 2.0]);
-                assert_eq!([t.data[1], t.data[4], t.data[7]], [1.0, 3.0, 3.0]);
-                assert_eq!([t.data[2], t.data[5], t.data[8]], [1.0, 4.0, 5.0]);
+                assert_eq!(
+                    [
+                        t.materialize_f64()[0],
+                        t.materialize_f64()[3],
+                        t.materialize_f64()[6]
+                    ],
+                    [1.0, 2.0, 2.0]
+                );
+                assert_eq!(
+                    [
+                        t.materialize_f64()[1],
+                        t.materialize_f64()[4],
+                        t.materialize_f64()[7]
+                    ],
+                    [1.0, 3.0, 3.0]
+                );
+                assert_eq!(
+                    [
+                        t.materialize_f64()[2],
+                        t.materialize_f64()[5],
+                        t.materialize_f64()[8]
+                    ],
+                    [1.0, 4.0, 5.0]
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }
         match indices {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
-                assert_eq!([t.data[0], t.data[3], t.data[6]], [1.0, 2.0, 2.0]);
-                assert_eq!([t.data[1], t.data[4], t.data[7]], [1.0, 2.0, 2.0]);
-                assert_eq!([t.data[2], t.data[5], t.data[8]], [1.0, 1.0, 2.0]);
+                assert_eq!(
+                    [
+                        t.materialize_f64()[0],
+                        t.materialize_f64()[3],
+                        t.materialize_f64()[6]
+                    ],
+                    [1.0, 2.0, 2.0]
+                );
+                assert_eq!(
+                    [
+                        t.materialize_f64()[1],
+                        t.materialize_f64()[4],
+                        t.materialize_f64()[7]
+                    ],
+                    [1.0, 2.0, 2.0]
+                );
+                assert_eq!(
+                    [
+                        t.materialize_f64()[2],
+                        t.materialize_f64()[5],
+                        t.materialize_f64()[8]
+                    ],
+                    [1.0, 1.0, 2.0]
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -2630,13 +2670,13 @@ pub(crate) mod tests {
         let (values, indices) = eval.into_pair();
         match values {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![1.5, 1.0]);
+                assert_eq!(t.materialize_f64(), vec![1.5, 1.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
         match indices {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![2.0, 1.0]);
+                assert_eq!(t.materialize_f64(), vec![2.0, 1.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -2746,7 +2786,7 @@ pub(crate) mod tests {
 
         test_support::with_test_provider(|provider| {
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -2767,9 +2807,15 @@ pub(crate) mod tests {
                 other => panic!("expected tensor indices from cpu eval, got {other:?}"),
             };
             assert_eq!(gathered_vals.shape, expected_vals.shape);
-            assert_eq!(gathered_vals.data, expected_vals.data);
+            assert_eq!(
+                gathered_vals.materialize_f64(),
+                expected_vals.materialize_f64()
+            );
             assert_eq!(gathered_idx.shape, expected_idx.shape);
-            assert_eq!(gathered_idx.data, expected_idx.data);
+            assert_eq!(
+                gathered_idx.materialize_f64(),
+                expected_idx.materialize_f64()
+            );
         });
     }
 
@@ -2783,13 +2829,13 @@ pub(crate) mod tests {
         match values {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                assert_eq!(t.data, vec![1.0, 2.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
         match indices {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![2.0, 2.0]);
+                assert_eq!(t.materialize_f64(), vec![2.0, 2.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }

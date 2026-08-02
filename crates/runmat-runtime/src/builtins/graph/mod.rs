@@ -1700,14 +1700,13 @@ mod tests {
     }
 
     fn int_numeric(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
         Value::Tensor(tensor)
     }
 
     fn tensor_data(value: Value) -> Vec<f64> {
         match value {
-            Value::Tensor(t) => t.data,
+            Value::Tensor(t) => t.materialize_f64(),
             Value::Num(n) => vec![n],
             other => panic!("expected numeric value, got {other:?}"),
         }

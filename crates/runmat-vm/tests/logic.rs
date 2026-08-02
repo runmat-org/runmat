@@ -577,17 +577,17 @@ fn typed_complex_integer_relational_equality_preserves_exact_storage() {
 
     assert!(matches!(
         &vars[4],
-        Value::Tensor(tensor) if tensor.data == vec![1.0] && tensor.shape == vec![1, 1]
+        Value::Tensor(tensor) if tensor.materialize_f64() == vec![1.0] && tensor.shape == vec![1, 1]
     ));
     assert!(matches!(
         &vars[5],
-        Value::Tensor(tensor) if tensor.data == vec![0.0] && tensor.shape == vec![1, 1]
+        Value::Tensor(tensor) if tensor.materialize_f64() == vec![0.0] && tensor.shape == vec![1, 1]
     ));
     assert_eq!(vars[6], Value::Bool(true));
     assert_eq!(vars[7], Value::Bool(false));
     assert!(matches!(
         &vars[8],
-        Value::Tensor(tensor) if tensor.data == vec![0.0] && tensor.shape == vec![1, 1]
+        Value::Tensor(tensor) if tensor.materialize_f64() == vec![0.0] && tensor.shape == vec![1, 1]
     ));
     assert_eq!(vars[9], Value::Bool(true));
 }
@@ -1027,11 +1027,11 @@ fn typed_complex_integer_truthiness_uses_exact_paired_storage() {
     assert_eq!(vars[5], Value::Num(2.0));
     assert!(matches!(
         &vars[6],
-        Value::Tensor(tensor) if tensor.data == vec![1.0, 1.0]
+        Value::Tensor(tensor) if tensor.materialize_f64() == vec![1.0, 1.0]
     ));
     assert!(matches!(
         &vars[7],
-        Value::Tensor(tensor) if tensor.data == vec![2.0, 3.0]
+        Value::Tensor(tensor) if tensor.materialize_f64() == vec![2.0, 3.0]
     ));
     assert!(matches!(
         &vars[8],
@@ -1489,13 +1489,13 @@ fn full_densifies_sparse_storage_through_vm_dispatch() {
         &vars[1],
         Value::Tensor(tensor)
             if tensor.shape == vec![3, 2]
-                && tensor.data == vec![10.0, 0.0, 30.0, 0.0, 20.0, 0.0]
+                && tensor.materialize_f64() == vec![10.0, 0.0, 30.0, 0.0, 20.0, 0.0]
     ));
     assert!(matches!(
         &vars[2],
         Value::Tensor(tensor)
             if tensor.shape == vec![2, 2]
-                && tensor.data == vec![1.0, 0.0, 0.0, 2.0]
+                && tensor.materialize_f64() == vec![1.0, 0.0, 0.0, 2.0]
     ));
     assert!(!logical_truth(&vars[3]));
 }
@@ -1526,11 +1526,11 @@ fn sparse_slice_indexing_preserves_sparse_outputs() {
     .unwrap();
     assert!(matches!(
         &vars[1],
-        Value::Tensor(tensor) if tensor.shape == vec![3, 1] && tensor.data == vec![10.0, 0.0, 30.0]
+        Value::Tensor(tensor) if tensor.shape == vec![3, 1] && tensor.materialize_f64() == vec![10.0, 0.0, 30.0]
     ));
     assert!(matches!(
         &vars[2],
-        Value::Tensor(tensor) if tensor.shape == vec![1, 3] && tensor.data == vec![0.0, 0.0, 23.0]
+        Value::Tensor(tensor) if tensor.shape == vec![1, 3] && tensor.materialize_f64() == vec![0.0, 0.0, 23.0]
     ));
     assert!(matches!(
         &vars[3],
@@ -1543,30 +1543,30 @@ fn sparse_slice_indexing_preserves_sparse_outputs() {
     ));
     assert!(matches!(
         &vars[4],
-        Value::Tensor(tensor) if tensor.shape == vec![2, 2] && tensor.data == vec![10.0, 0.0, 0.0, 23.0]
+        Value::Tensor(tensor) if tensor.shape == vec![2, 2] && tensor.materialize_f64() == vec![10.0, 0.0, 0.0, 23.0]
     ));
     assert!(logical_truth(&vars[5]));
     assert!(matches!(
         &vars[6],
         Value::Tensor(tensor)
             if tensor.shape == vec![9, 1]
-                && tensor.data == vec![10.0, 0.0, 30.0, 0.0, 0.0, 0.0, 0.0, 23.0, 0.0]
+                && tensor.materialize_f64() == vec![10.0, 0.0, 30.0, 0.0, 0.0, 0.0, 0.0, 23.0, 0.0]
     ));
     assert!(logical_truth(&vars[7]));
     assert!(matches!(
         &vars[8],
-        Value::Tensor(tensor) if tensor.shape == vec![1, 2] && tensor.data == vec![10.0, 23.0]
+        Value::Tensor(tensor) if tensor.shape == vec![1, 2] && tensor.materialize_f64() == vec![10.0, 23.0]
     ));
     assert!(logical_truth(&vars[9]));
     assert!(matches!(
         &vars[10],
-        Value::Tensor(tensor) if tensor.shape == vec![3, 1] && tensor.data == vec![30.0, 0.0, 10.0]
+        Value::Tensor(tensor) if tensor.shape == vec![3, 1] && tensor.materialize_f64() == vec![30.0, 0.0, 10.0]
     ));
     assert!(matches!(
         &vars[11],
         Value::Tensor(tensor)
             if tensor.shape == vec![9, 1]
-                && tensor.data == vec![10.0, 0.0, 30.0, 0.0, 0.0, 0.0, 0.0, 23.0, 0.0]
+                && tensor.materialize_f64() == vec![10.0, 0.0, 30.0, 0.0, 0.0, 0.0, 0.0, 23.0, 0.0]
     ));
     assert!(logical_truth(&vars[12]));
 }
@@ -1634,11 +1634,11 @@ fn typed_sparse_find_preserves_exact_values_and_directional_order() {
     .expect("execute typed sparse find");
     assert!(matches!(
         &vars[1],
-        Value::Tensor(tensor) if tensor.shape == vec![2, 1] && tensor.data == vec![2.0, 1.0]
+        Value::Tensor(tensor) if tensor.shape == vec![2, 1] && tensor.materialize_f64() == vec![2.0, 1.0]
     ));
     assert!(matches!(
         &vars[2],
-        Value::Tensor(tensor) if tensor.shape == vec![2, 1] && tensor.data == vec![1.0, 2.0]
+        Value::Tensor(tensor) if tensor.shape == vec![2, 1] && tensor.materialize_f64() == vec![1.0, 2.0]
     ));
     assert!(matches!(
         &vars[3],
@@ -1661,7 +1661,7 @@ fn sparse_assignment_updates_scalar_and_selector_entries() {
     .expect("execute sparse assignment");
     assert!(matches!(
         &vars[1],
-        Value::Tensor(tensor) if tensor.data == vec![1.0, 2.0, 6.0, 4.0]
+        Value::Tensor(tensor) if tensor.materialize_f64() == vec![1.0, 2.0, 6.0, 4.0]
     ));
     assert!(matches!(&vars[2], Value::Num(value) if *value == 4.0));
     assert!(matches!(
@@ -1679,11 +1679,11 @@ fn sparse_assignment_updates_scalar_and_selector_entries() {
     .expect("execute sparse structural deletion");
     assert!(matches!(
         &deleted[1],
-        Value::Tensor(tensor) if tensor.shape == vec![3, 1] && tensor.data == vec![0.0, 2.0, 0.0]
+        Value::Tensor(tensor) if tensor.shape == vec![3, 1] && tensor.materialize_f64() == vec![0.0, 2.0, 0.0]
     ));
     assert!(matches!(
         &deleted[2],
-        Value::Tensor(tensor) if tensor.shape == vec![1, 1] && tensor.data == vec![2.0]
+        Value::Tensor(tensor) if tensor.shape == vec![1, 1] && tensor.materialize_f64() == vec![2.0]
     ));
     assert!(matches!(
         &deleted[4],
@@ -1693,7 +1693,7 @@ fn sparse_assignment_updates_scalar_and_selector_entries() {
     ));
     assert!(matches!(
         &deleted[6],
-        Value::Tensor(tensor) if tensor.shape == vec![2, 1] && tensor.data == vec![1.0, 3.0]
+        Value::Tensor(tensor) if tensor.shape == vec![2, 1] && tensor.materialize_f64() == vec![1.0, 3.0]
     ));
 
     let deletion_err = execute_source("s = sparse([1], [1], [5], 2, 2); s(1,1) = [];").unwrap_err();
@@ -1708,7 +1708,7 @@ fn sparse_assignment_updates_scalar_and_selector_entries() {
     .expect("execute expression-backed sparse row deletion");
     assert!(matches!(
         &expression_deleted[2],
-        Value::Tensor(tensor) if tensor.shape == vec![1, 1] && tensor.data == vec![2.0]
+        Value::Tensor(tensor) if tensor.shape == vec![1, 1] && tensor.materialize_f64() == vec![2.0]
     ));
 
     let all_deleted =
@@ -1746,7 +1746,7 @@ fn sparse_assignment_updates_scalar_and_selector_entries() {
     ));
     assert!(matches!(
         &grown[6],
-        Value::Tensor(tensor) if tensor.shape == vec![1, 4] && tensor.data == vec![1.0, 0.0, 0.0, 0.0]
+        Value::Tensor(tensor) if tensor.shape == vec![1, 4] && tensor.materialize_f64() == vec![1.0, 0.0, 0.0, 0.0]
     ));
 
     let selector_grown = execute_source(
@@ -1819,33 +1819,33 @@ fn sparse_arithmetic_interops_with_dense_and_scalar_values() {
         &vars[3],
         Value::Tensor(tensor)
             if tensor.shape == vec![3, 2]
-                && tensor.data == vec![10.0, 0.0, 35.0, 7.0, 0.0, 0.0]
+                && tensor.materialize_f64() == vec![10.0, 0.0, 35.0, 7.0, 0.0, 0.0]
     ));
     assert!(logical_truth(&vars[4]));
     assert!(matches!(
         &vars[5],
         Value::Tensor(tensor)
             if tensor.shape == vec![3, 2]
-                && tensor.data == vec![12.0, 2.0, 32.0, 2.0, 22.0, 2.0]
+                && tensor.materialize_f64() == vec![12.0, 2.0, 32.0, 2.0, 22.0, 2.0]
     ));
     assert!(matches!(
         &vars[6],
         Value::Tensor(tensor)
             if tensor.shape == vec![3, 2]
-                && tensor.data == vec![-9.0, 3.0, -25.0, 2.0, -16.0, 6.0]
+                && tensor.materialize_f64() == vec![-9.0, 3.0, -25.0, 2.0, -16.0, 6.0]
     ));
     assert!(matches!(
         &vars[8],
         Value::Tensor(tensor)
             if tensor.shape == vec![3, 2]
-                && tensor.data == vec![20.0, 0.0, 120.0, 0.0, 60.0, 0.0]
+                && tensor.materialize_f64() == vec![20.0, 0.0, 120.0, 0.0, 60.0, 0.0]
     ));
     assert!(logical_truth(&vars[9]));
     assert!(matches!(
         &vars[11],
         Value::Tensor(tensor)
             if tensor.shape == vec![3, 2]
-                && tensor.data == vec![30.0, 0.0, 90.0, 0.0, 60.0, 0.0]
+                && tensor.materialize_f64() == vec![30.0, 0.0, 90.0, 0.0, 60.0, 0.0]
     ));
     assert!(logical_truth(&vars[12]));
 }
@@ -1876,7 +1876,7 @@ fn sparse_arithmetic_handles_sparse_scalar_and_complex_interop() {
         &vars[4],
         Value::Tensor(tensor)
             if tensor.shape == vec![3, 2]
-                && tensor.data == vec![12.0, 2.0, 32.0, 2.0, 22.0, 2.0]
+                && tensor.materialize_f64() == vec![12.0, 2.0, 32.0, 2.0, 22.0, 2.0]
     ));
     assert!(logical_truth(&vars[5]));
 }

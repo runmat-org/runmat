@@ -310,8 +310,7 @@ mod tests {
     }
 
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         tensor
     }
 
@@ -345,7 +344,10 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 4]);
-                assert!(t.data.iter().all(|&v| (0.0..10.0).contains(&v)));
+                assert!(t
+                    .materialize_f64()
+                    .iter()
+                    .all(|&v| (0.0..10.0).contains(&v)));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -380,7 +382,10 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                assert!(t.data.iter().all(|&v| (-2.0..3.0).contains(&v)));
+                assert!(t
+                    .materialize_f64()
+                    .iter()
+                    .all(|&v| (-2.0..3.0).contains(&v)));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -421,7 +426,7 @@ mod tests {
         ];
         let result = block_on(unifrnd_builtin(args)).expect("unifrnd");
         let data = match result {
-            Value::Tensor(t) => t.data,
+            Value::Tensor(t) => t.materialize_f64(),
             other => panic!("expected tensor, got {other:?}"),
         };
         assert!(

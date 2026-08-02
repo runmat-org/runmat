@@ -3036,7 +3036,12 @@ mod tests {
             provider.free(&coordinates).ok();
             provider.free(&output).ok();
             assert_eq!(gathered.shape, expected.shape);
-            for (idx, (actual, expected)) in gathered.data.iter().zip(expected.data).enumerate() {
+            for (idx, (actual, expected)) in gathered
+                .data
+                .iter()
+                .zip(expected.materialize_f64())
+                .enumerate()
+            {
                 assert!(
                     (*actual - expected).abs() < 1.0e-10,
                     "gradient mismatch at {idx}: actual={actual} expected={expected}"

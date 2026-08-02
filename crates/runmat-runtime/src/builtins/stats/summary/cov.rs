@@ -1247,7 +1247,12 @@ pub(crate) mod tests {
     fn assert_tensor_close(actual: &Tensor, expected: &[f64], tol: f64) {
         let dim = (expected.len() as f64).sqrt() as usize;
         assert_eq!(actual.shape, vec![dim, dim], "unexpected tensor shape");
-        for (idx, (&got, &want)) in actual.data.iter().zip(expected.iter()).enumerate() {
+        for (idx, (&got, &want)) in actual
+            .materialize_f64()
+            .iter()
+            .zip(expected.iter())
+            .enumerate()
+        {
             if want.is_nan() {
                 assert!(
                     got.is_nan(),
@@ -1262,9 +1267,8 @@ pub(crate) mod tests {
         }
     }
 
-    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, poison: f64) -> Tensor {
-        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-        tensor.data.fill(poison);
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, _poison: f64) -> Tensor {
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
         tensor
     }
 
@@ -1606,7 +1610,7 @@ pub(crate) mod tests {
             )
             .unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1633,7 +1637,7 @@ pub(crate) mod tests {
             )
             .unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1671,13 +1675,13 @@ pub(crate) mod tests {
             let weights = Tensor::new(vec![1.0, 1.0, 1.0, 2.0, 2.0], vec![1, 5]).unwrap();
             let data = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &tensor.data,
+                    data: &tensor.materialize_f64(),
                     shape: &tensor.shape,
                 })
                 .expect("upload data");
             let weight_handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &weights.data,
+                    data: &weights.materialize_f64(),
                     shape: &weights.shape,
                 })
                 .expect("upload weights");
@@ -1707,13 +1711,13 @@ pub(crate) mod tests {
             let weights = Tensor::new(vec![1.0, -1.0], vec![2, 1]).unwrap();
             let data = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &tensor.data,
+                    data: &tensor.materialize_f64(),
                     shape: &tensor.shape,
                 })
                 .expect("upload data");
             let weight_handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &weights.data,
+                    data: &weights.materialize_f64(),
                     shape: &weights.shape,
                 })
                 .expect("upload weights");
@@ -1754,7 +1758,7 @@ pub(crate) mod tests {
         };
 
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
@@ -1762,7 +1766,7 @@ pub(crate) mod tests {
         let gpu_value = cov_builtin_sync(Value::GpuTensor(handle), Vec::new()).expect("cov");
         let gathered = test_support::gather(gpu_value).expect("gather");
 
-        assert_tensor_close(&gathered, &cpu_tensor.data, 1.0e-6);
+        assert_tensor_close(&gathered, &cpu_tensor.materialize_f64(), 1.0e-6);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1797,13 +1801,13 @@ pub(crate) mod tests {
 
         let data_handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             })
             .expect("upload data");
         let weight_handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
-                data: &weights.data,
+                data: &weights.materialize_f64(),
                 shape: &weights.shape,
             })
             .expect("upload weights");
@@ -1816,6 +1820,6 @@ pub(crate) mod tests {
         assert!(matches!(gpu_value, Value::GpuTensor(_)));
         let gathered = test_support::gather(gpu_value).expect("gather");
 
-        assert_tensor_close(&gathered, &cpu_tensor.data, 1.0e-5);
+        assert_tensor_close(&gathered, &cpu_tensor.materialize_f64(), 1.0e-5);
     }
 }

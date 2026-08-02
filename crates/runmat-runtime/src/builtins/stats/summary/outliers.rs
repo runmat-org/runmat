@@ -1103,14 +1103,12 @@ mod tests {
     }
 
     fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
         Value::Tensor(tensor)
     }
 
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, _poison: f64) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
         Value::Tensor(tensor)
     }
 
@@ -1223,7 +1221,7 @@ mod tests {
         ))
         .unwrap();
         assert!(
-            matches!(out, Value::Tensor(tensor) if tensor.data == vec![1.0, 2.0, -7.0, 4.0, 5.0])
+            matches!(out, Value::Tensor(tensor) if tensor.materialize_f64() == vec![1.0, 2.0, -7.0, 4.0, 5.0])
         );
     }
 
@@ -1316,7 +1314,7 @@ mod tests {
         let Value::OutputList(values) = out else {
             panic!("expected output list");
         };
-        assert!(matches!(&values[0], Value::Tensor(tensor) if tensor.data[2] == 4.0));
+        assert!(matches!(&values[0], Value::Tensor(tensor) if tensor.materialize_f64()[2] == 4.0));
         assert!(matches!(&values[1], Value::LogicalArray(mask) if mask.data[2] == 1));
     }
 
@@ -1324,14 +1322,16 @@ mod tests {
     fn filloutliers_supports_linear_fill() {
         let value = tensor(vec![1.0, 2.0, 100.0, 4.0, 5.0], vec![5, 1]);
         let out = block_on(filloutliers_builtin(value, vec![Value::from("linear")])).unwrap();
-        assert!(matches!(out, Value::Tensor(tensor) if (tensor.data[2] - 3.0).abs() < 1.0e-12));
+        assert!(
+            matches!(out, Value::Tensor(tensor) if (tensor.materialize_f64()[2] - 3.0).abs() < 1.0e-12)
+        );
     }
 
     #[test]
     fn filloutliers_supports_numeric_scalar_constant_fill() {
         let value = tensor(vec![1.0, 2.0, 100.0, 4.0, 5.0], vec![5, 1]);
         let out = block_on(filloutliers_builtin(value, vec![Value::Num(-1.0)])).unwrap();
-        assert!(matches!(out, Value::Tensor(tensor) if tensor.data[2] == -1.0));
+        assert!(matches!(out, Value::Tensor(tensor) if tensor.materialize_f64()[2] == -1.0));
     }
 
     #[test]
@@ -1342,7 +1342,7 @@ mod tests {
         );
         let out = block_on(filloutliers_builtin(value, vec![Value::from("center")])).unwrap();
         assert!(
-            matches!(out, Value::Tensor(tensor) if tensor.data[2] == 3.0 && tensor.data[6] == 12.0)
+            matches!(out, Value::Tensor(tensor) if tensor.materialize_f64()[2] == 3.0 && tensor.materialize_f64()[6] == 12.0)
         );
     }
 
@@ -1420,7 +1420,7 @@ mod tests {
             ],
         ))
         .unwrap();
-        assert!(matches!(out, Value::Tensor(tensor) if tensor.data[2] == 4.0));
+        assert!(matches!(out, Value::Tensor(tensor) if tensor.materialize_f64()[2] == 4.0));
     }
 
     #[test]

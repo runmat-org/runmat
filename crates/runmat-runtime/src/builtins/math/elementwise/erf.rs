@@ -417,7 +417,7 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 4]);
             for (got, input) in gathered
-                .data
+                .materialize_f64()
                 .iter()
                 .zip(tensor.as_f64_slice().expect("double input"))
             {
@@ -487,12 +487,12 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F32 => 2e-5,
         };
         for (got, expected) in gathered
-            .data
+            .materialize_f64()
             .iter()
             .zip(cpu.as_f64_slice().expect("double cpu result"))
         {
             approx_eq(*got, *expected, tol);
         }
-        assert_eq!(gathered.data[3], 0.0);
+        assert_eq!(gathered.materialize_f64()[3], 0.0);
     }
 }

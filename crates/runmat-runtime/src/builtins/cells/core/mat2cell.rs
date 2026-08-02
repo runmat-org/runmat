@@ -909,7 +909,10 @@ pub(crate) mod tests {
         let bottom_right = cell.data[3].clone();
         let gathered = test_support::gather(bottom_right).expect("gather");
         assert_eq!(gathered.shape, vec![2, 3]);
-        assert_eq!(gathered.data, vec![7.0, 8.0, 11.0, 12.0, 15.0, 16.0]);
+        assert_eq!(
+            gathered.materialize_f64(),
+            vec![7.0, 8.0, 11.0, 12.0, 15.0, 16.0]
+        );
     }
 
     #[test]
@@ -954,7 +957,7 @@ pub(crate) mod tests {
         assert_eq!(cell.data.len(), 3);
         let third = cell.data[2].clone();
         let gathered = test_support::gather(third).expect("gather");
-        assert_eq!(gathered.data, vec![4.0, 5.0, 6.0]);
+        assert_eq!(gathered.materialize_f64(), vec![4.0, 5.0, 6.0]);
         assert_eq!(gathered.shape, vec![1, 3]);
     }
 
@@ -972,7 +975,7 @@ pub(crate) mod tests {
         let second = cell.data[1].clone();
         let gathered = test_support::gather(second).expect("gather");
         assert_eq!(gathered.shape, vec![2, 1]);
-        assert_eq!(gathered.data, vec![3.0, 4.0]);
+        assert_eq!(gathered.materialize_f64(), vec![3.0, 4.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1020,7 +1023,7 @@ pub(crate) mod tests {
         let block = cell.data[index].clone();
         let gathered = test_support::gather(block).expect("gather");
         assert_eq!(gathered.shape, vec![2, 2, 1]);
-        assert_eq!(gathered.data, vec![8.0, 9.0, 11.0, 12.0]);
+        assert_eq!(gathered.materialize_f64(), vec![8.0, 9.0, 11.0, 12.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1039,7 +1042,7 @@ pub(crate) mod tests {
         assert_eq!(cell.shape, vec![2, 2]);
         let top_left = cell.data[0].clone();
         let gathered = test_support::gather(top_left).expect("gather");
-        assert_eq!(gathered.data.len(), 0);
+        assert_eq!(gathered.materialize_f64().len(), 0);
         assert_eq!(gathered.shape, vec![0, 1]);
     }
 
@@ -1059,7 +1062,7 @@ pub(crate) mod tests {
         let third = cell.data[2].clone();
         let gathered = test_support::gather(third).expect("gather");
         assert_eq!(gathered.shape, vec![1, 1]);
-        assert_eq!(gathered.data, vec![3.0]);
+        assert_eq!(gathered.materialize_f64(), vec![3.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1195,7 +1198,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new((1..=6).map(|v| v as f64).collect(), vec![3, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1211,7 +1214,7 @@ pub(crate) mod tests {
             assert_eq!(cell.shape, vec![2, 2]);
             let block = cell.data[3].clone();
             let gathered = test_support::gather(block).expect("gather");
-            assert_eq!(gathered.data, vec![5.0, 6.0]);
+            assert_eq!(gathered.materialize_f64(), vec![5.0, 6.0]);
             assert_eq!(gathered.shape, vec![2, 1]);
         });
     }
@@ -1232,7 +1235,7 @@ pub(crate) mod tests {
         .expect("cpu mat2cell");
 
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()
@@ -1261,7 +1264,7 @@ pub(crate) mod tests {
             let cpu_tensor = test_support::gather(cpu_val).expect("cpu gather");
             let gpu_tensor = test_support::gather(gpu_val).expect("gpu gather");
             assert_eq!(cpu_tensor.shape, gpu_tensor.shape);
-            assert_eq!(cpu_tensor.data, gpu_tensor.data);
+            assert_eq!(cpu_tensor.materialize_f64(), gpu_tensor.materialize_f64());
         }
     }
 }

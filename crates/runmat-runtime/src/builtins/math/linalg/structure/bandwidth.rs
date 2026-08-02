@@ -439,7 +439,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data, vec![0.0, 0.0]);
+                assert_eq!(t.materialize_f64(), vec![0.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -525,7 +525,7 @@ pub(crate) mod tests {
             bandwidth_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("bandwidth");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![1.0, 1.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -541,7 +541,7 @@ pub(crate) mod tests {
         .unwrap();
         let result = bandwidth_builtin(Value::Tensor(tensor), Vec::new()).expect("bandwidth");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 2.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 2.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -552,7 +552,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
         let result = bandwidth_builtin(Value::Tensor(tensor), Vec::new()).expect("bandwidth");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data, vec![0.0, 0.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![0.0, 0.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -564,7 +564,7 @@ pub(crate) mod tests {
             Tensor::new(vec![0.0, f64::NAN, 0.0, 0.0], vec![2, 2]).expect("tensor construction");
         let result = bandwidth_builtin(Value::Tensor(tensor), Vec::new()).expect("bandwidth");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 0.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 0.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -572,32 +572,30 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bandwidth_reads_typed_integer_storage_exactly() {
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             IntegerStorage::I16(vec![1, 0, 7, 0, 2, 0, 0, 5, 3]),
             vec![3, 3],
         )
         .expect("integer matrix");
-        tensor.data.fill(f64::NAN);
 
         let result = bandwidth_builtin(Value::Tensor(tensor), Vec::new()).expect("bandwidth");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 1.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![2.0, 1.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
 
     #[test]
     fn bandwidth_reads_wide_integer_storage_without_the_float_mirror() {
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             IntegerStorage::U64(vec![1, 0, u64::MAX, 1_u64 << 63, 1, 0, 0, 0, 1]),
             vec![3, 3],
         )
         .expect("integer matrix");
-        tensor.data.fill(0.0);
 
         let result = bandwidth_builtin(Value::Tensor(tensor), Vec::new()).expect("bandwidth");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 1.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![2.0, 1.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -609,7 +607,7 @@ pub(crate) mod tests {
         let result =
             bandwidth_builtin(Value::LogicalArray(logical), Vec::new()).expect("bandwidth");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 1.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 1.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -649,7 +647,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 2.0, 0.0, 0.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -657,7 +655,7 @@ pub(crate) mod tests {
                 bandwidth_builtin(Value::GpuTensor(handle), Vec::new()).expect("bandwidth");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 2]);
-            assert_eq!(gathered.data, vec![1.0, 0.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0]);
         });
     }
 
@@ -678,7 +676,7 @@ pub(crate) mod tests {
         .unwrap();
         let cpu = super::bandwidth_host_real_tensor(&tensor).expect("cpu bandwidth");
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
@@ -690,7 +688,7 @@ pub(crate) mod tests {
             bandwidth_builtin(Value::GpuTensor(handle.clone()), Vec::new()).expect("bandwidth");
         let gathered = test_support::gather(result).expect("gather");
         assert_eq!(gathered.shape, vec![1, 2]);
-        assert_eq!(gathered.data, vec![cpu.0 as f64, cpu.1 as f64]);
+        assert_eq!(gathered.materialize_f64(), vec![cpu.0 as f64, cpu.1 as f64]);
         let _ = provider.free(&handle);
     }
 

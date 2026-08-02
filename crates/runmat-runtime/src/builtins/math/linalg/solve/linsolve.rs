@@ -1278,8 +1278,8 @@ pub(crate) mod tests {
             linsolve_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new()).expect("linsolve");
         let t = test_support::gather(result).expect("gather");
         assert_eq!(t.shape, vec![2, 1]);
-        approx_eq(t.data[0], 1.0);
-        approx_eq(t.data[1], 2.0);
+        approx_eq(t.materialize_f64()[0], 1.0);
+        approx_eq(t.materialize_f64()[1], 2.0);
     }
 
     #[test]
@@ -1318,19 +1318,17 @@ pub(crate) mod tests {
     fn linsolve_reads_typed_integer_tensor_storage_exactly() {
         let _accel_guard = test_support::accel_test_lock();
         clear_accel_provider_state();
-        let mut a = Tensor::new_integer(IntegerStorage::U64(vec![2, 1, 1, 2]), vec![2, 2])
+        let a = Tensor::new_integer(IntegerStorage::U64(vec![2, 1, 1, 2]), vec![2, 2])
             .expect("integer lhs");
-        let mut b =
+        let b =
             Tensor::new_integer(IntegerStorage::U64(vec![4, 5]), vec![2, 1]).expect("integer rhs");
-        a.data.fill(0.0);
-        b.data.fill(0.0);
 
         let result =
             linsolve_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new()).expect("linsolve");
         let tensor = test_support::gather(result).expect("gather");
         assert_eq!(tensor.shape, vec![2, 1]);
-        approx_eq(tensor.data[0], 1.0);
-        approx_eq(tensor.data[1], 2.0);
+        approx_eq(tensor.materialize_f64()[0], 1.0);
+        approx_eq(tensor.materialize_f64()[1], 2.0);
     }
 
     #[test]
@@ -1338,9 +1336,8 @@ pub(crate) mod tests {
         let _accel_guard = test_support::accel_test_lock();
         clear_accel_provider_state();
 
-        let mut real_lhs = Tensor::new_integer(IntegerStorage::I64(vec![1, 0, 0, 1]), vec![2, 2])
+        let real_lhs = Tensor::new_integer(IntegerStorage::I64(vec![1, 0, 0, 1]), vec![2, 2])
             .expect("integer lhs");
-        real_lhs.data.fill(0.0);
         let complex_rhs = ComplexTensor::new(vec![(3.0, 4.0), (5.0, -6.0)], vec![2, 1]).unwrap();
         let result = linsolve_builtin(
             Value::Tensor(real_lhs),
@@ -1362,9 +1359,8 @@ pub(crate) mod tests {
             vec![2, 2],
         )
         .unwrap();
-        let mut real_rhs =
+        let real_rhs =
             Tensor::new_integer(IntegerStorage::U64(vec![7, 11]), vec![2, 1]).expect("integer rhs");
-        real_rhs.data.fill(0.0);
         let result = linsolve_builtin(
             Value::ComplexTensor(complex_lhs),
             Value::Tensor(real_rhs),
@@ -1383,37 +1379,32 @@ pub(crate) mod tests {
 
     #[test]
     fn linsolve_provider_host_helper_reads_typed_integer_storage_exactly() {
-        let mut a = Tensor::new_integer(IntegerStorage::U64(vec![2, 1, 1, 2]), vec![2, 2])
+        let a = Tensor::new_integer(IntegerStorage::U64(vec![2, 1, 1, 2]), vec![2, 2])
             .expect("integer lhs");
-        let mut b =
+        let b =
             Tensor::new_integer(IntegerStorage::U64(vec![4, 5]), vec![2, 1]).expect("integer rhs");
-        a.data.fill(0.0);
-        b.data.fill(0.0);
 
         let (solution, _rcond) =
             linsolve_host_real_for_provider(&a, &b, &ProviderLinsolveOptions::default())
                 .expect("provider helper");
         assert_eq!(solution.shape, vec![2, 1]);
-        approx_eq(solution.data[0], 1.0);
-        approx_eq(solution.data[1], 2.0);
+        approx_eq(solution.materialize_f64()[0], 1.0);
+        approx_eq(solution.materialize_f64()[1], 2.0);
     }
 
     #[test]
     fn linsolve_general_real_reads_typed_integer_storage_exactly() {
-        let mut a = Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 1, 0, 0, 1]), vec![3, 2])
+        let a = Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 1, 0, 0, 1]), vec![3, 2])
             .expect("integer lhs");
-        let mut b =
-            Tensor::new_integer(IntegerStorage::I16(vec![3, 2, 1]), vec![3, 1]).expect("rhs");
-        a.data.fill(f64::NAN);
-        b.data.fill(f64::NAN);
+        let b = Tensor::new_integer(IntegerStorage::I16(vec![3, 2, 1]), vec![3, 1]).expect("rhs");
 
         let (solution, _rcond) =
             linsolve_host_real_for_provider(&a, &b, &ProviderLinsolveOptions::default())
                 .expect("provider helper");
 
         assert_eq!(solution.shape, vec![2, 1]);
-        approx_eq(solution.data[0], 7.0 / 5.0);
-        approx_eq(solution.data[1], -2.0 / 5.0);
+        approx_eq(solution.materialize_f64()[0], 7.0 / 5.0);
+        approx_eq(solution.materialize_f64()[1], -2.0 / 5.0);
         assert!(solution.integer_storage().is_none());
     }
 
@@ -1421,15 +1412,13 @@ pub(crate) mod tests {
     fn linsolve_transa_reads_typed_integer_storage_exactly() {
         let _accel_guard = test_support::accel_test_lock();
         clear_accel_provider_state();
-        let mut a = Tensor::new_integer(
+        let a = Tensor::new_integer(
             IntegerStorage::I16(vec![3, 1, 0, 0, 4, 2, 0, 0, 5]),
             vec![3, 3],
         )
         .expect("integer lhs");
-        let mut b = Tensor::new_integer(IntegerStorage::I16(vec![5, 14, 23]), vec![3, 1])
+        let b = Tensor::new_integer(IntegerStorage::I16(vec![5, 14, 23]), vec![3, 1])
             .expect("integer rhs");
-        a.data.fill(f64::NAN);
-        b.data.fill(f64::NAN);
         let mut opts = StructValue::new();
         opts.fields.insert("LT".to_string(), Value::Bool(true));
         opts.fields.insert(
@@ -1458,7 +1447,11 @@ pub(crate) mod tests {
             &expected_b,
             ProviderLinsolveOptions::default(),
         );
-        for (actual, expected) in tensor.data.iter().zip(expected_tensor.data.iter()) {
+        for (actual, expected) in tensor
+            .materialize_f64()
+            .iter()
+            .zip(expected_tensor.materialize_f64().iter())
+        {
             approx_eq(*actual, *expected);
         }
         assert!(tensor.integer_storage().is_none());
@@ -1485,9 +1478,9 @@ pub(crate) mod tests {
         .expect("linsolve");
         let tensor = test_support::gather(result).expect("gather");
         assert_eq!(tensor.shape, vec![3, 1]);
-        approx_eq(tensor.data[0], 3.0);
-        approx_eq(tensor.data[1], 2.0);
-        approx_eq(tensor.data[2], 1.0);
+        approx_eq(tensor.materialize_f64()[0], 3.0);
+        approx_eq(tensor.materialize_f64()[1], 2.0);
+        approx_eq(tensor.materialize_f64()[2], 1.0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1521,7 +1514,11 @@ pub(crate) mod tests {
         let (expected_tensor, _) =
             host_linsolve_real(&a_transposed, &b, ProviderLinsolveOptions::default());
 
-        for (actual, expected) in tensor.data.iter().zip(expected_tensor.data.iter()) {
+        for (actual, expected) in tensor
+            .materialize_f64()
+            .iter()
+            .zip(expected_tensor.materialize_f64().iter())
+        {
             approx_eq(*actual, *expected);
         }
     }
@@ -1648,10 +1645,8 @@ pub(crate) mod tests {
         clear_accel_provider_state();
         let a = Tensor::new(vec![2.0, 0.0, 1.0, 3.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![2.0, 7.0], vec![2, 1]).unwrap();
-        let mut upper = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
-        upper.data.clear();
-        let mut rcond = Tensor::new_integer(IntegerStorage::U8(vec![0]), vec![1, 1]).unwrap();
-        rcond.data.clear();
+        let upper = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
+        let rcond = Tensor::new_integer(IntegerStorage::U8(vec![0]), vec![1, 1]).unwrap();
         let mut opts = StructValue::new();
         opts.fields.insert("UT".to_string(), Value::Tensor(upper));
         opts.fields
@@ -1665,8 +1660,8 @@ pub(crate) mod tests {
         let Value::Tensor(out) = result else {
             panic!("expected tensor output");
         };
-        approx_eq(out.data[0], -1.0 / 6.0);
-        approx_eq(out.data[1], 7.0 / 3.0);
+        approx_eq(out.materialize_f64()[0], -1.0 / 6.0);
+        approx_eq(out.materialize_f64()[1], 7.0 / 3.0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1719,15 +1714,15 @@ pub(crate) mod tests {
             other => panic!("unexpected solution value {other:?}"),
         };
         assert_eq!(solution_tensor.shape, vec![2, 1]);
-        approx_eq(solution_tensor.data[0], 1.0);
-        approx_eq(solution_tensor.data[1], 2.0);
+        approx_eq(solution_tensor.materialize_f64()[0], 1.0);
+        approx_eq(solution_tensor.materialize_f64()[1], 2.0);
 
         let rcond_value = match eval.reciprocal_condition() {
             Value::Num(r) => r,
             Value::GpuTensor(handle) => {
                 let gathered =
                     test_support::gather(Value::GpuTensor(handle.clone())).expect("gather rcond");
-                gathered.data[0]
+                gathered.materialize_f64()[0]
             }
             other => panic!("unexpected rcond value {other:?}"),
         };
@@ -1750,11 +1745,11 @@ pub(crate) mod tests {
             let cpu_tensor = test_support::gather(cpu).expect("cpu gather");
 
             let view_a = HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             };
             let view_b = HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             };
             let ha = provider.upload(&view_a).expect("upload A");
@@ -1771,7 +1766,11 @@ pub(crate) mod tests {
             let _ = provider.free(&hb);
 
             assert_eq!(gathered.shape, cpu_tensor.shape);
-            for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+            for (gpu, cpu) in gathered
+                .materialize_f64()
+                .iter()
+                .zip(cpu_tensor.materialize_f64().iter())
+            {
                 assert!((gpu - cpu).abs() < 1e-12);
             }
         });
@@ -1797,19 +1796,17 @@ pub(crate) mod tests {
     fn provider_upload_path_reads_typed_integer_storage_exactly() {
         test_support::with_test_provider(|provider| {
             provider.reset_telemetry();
-            let mut a = Tensor::new_integer(IntegerStorage::U64(vec![2, 1, 1, 2]), vec![2, 2])
+            let a = Tensor::new_integer(IntegerStorage::U64(vec![2, 1, 1, 2]), vec![2, 2])
                 .expect("integer lhs");
-            let mut b = Tensor::new_integer(IntegerStorage::U64(vec![4, 5]), vec![2, 1])
+            let b = Tensor::new_integer(IntegerStorage::U64(vec![4, 5]), vec![2, 1])
                 .expect("integer rhs");
-            a.data.fill(0.0);
-            b.data.fill(0.0);
 
             let result = linsolve_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new())
                 .expect("host provider linsolve");
             let tensor = test_support::gather(result).expect("gather");
             assert_eq!(tensor.shape, vec![2, 1]);
-            approx_eq(tensor.data[0], 1.0);
-            approx_eq(tensor.data[1], 2.0);
+            approx_eq(tensor.materialize_f64()[0], 1.0);
+            approx_eq(tensor.materialize_f64()[1], 2.0);
 
             let telemetry = provider.telemetry_snapshot();
             assert!(telemetry.linsolve.count >= 1);
@@ -1825,13 +1822,13 @@ pub(crate) mod tests {
             let b = Tensor::new(vec![4.0, 5.0], vec![2, 1]).unwrap();
             let ha = provider
                 .upload(&HostTensorView {
-                    data: &a.data,
+                    data: &a.materialize_f64(),
                     shape: &a.shape,
                 })
                 .expect("upload A");
             let hb = provider
                 .upload(&HostTensorView {
-                    data: &b.data,
+                    data: &b.materialize_f64(),
                     shape: &b.shape,
                 })
                 .expect("upload B");
@@ -1862,13 +1859,13 @@ pub(crate) mod tests {
             let b = Tensor::new(vec![6.0], vec![1, 1]).unwrap();
             let ha = provider
                 .upload(&HostTensorView {
-                    data: &a.data,
+                    data: &a.materialize_f64(),
                     shape: &a.shape,
                 })
                 .expect("upload A");
             let hb = provider
                 .upload(&HostTensorView {
-                    data: &b.data,
+                    data: &b.materialize_f64(),
                     shape: &b.shape,
                 })
                 .expect("upload B");
@@ -1880,7 +1877,7 @@ pub(crate) mod tests {
             )
             .expect("fallback linsolve");
             let gathered = test_support::gather(result).expect("gather fallback");
-            assert_eq!(gathered.data, vec![3.0]);
+            assert_eq!(gathered.materialize_f64(), vec![3.0]);
 
             let telemetry = provider.telemetry_snapshot();
             assert_eq!(telemetry.linsolve.count, 0);
@@ -1918,13 +1915,13 @@ pub(crate) mod tests {
 
         let ha = provider
             .upload(&HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             })
             .expect("upload B");
@@ -1945,7 +1942,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < 1e-4);
         }
 
@@ -1982,13 +1983,13 @@ pub(crate) mod tests {
 
         let ha = provider
             .upload(&HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             })
             .expect("upload B");
@@ -2004,7 +2005,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < 1e-4, "gpu={gpu} cpu={cpu}");
         }
 
@@ -2034,13 +2039,13 @@ pub(crate) mod tests {
 
         let ha = provider
             .upload(&HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             })
             .expect("upload B");
@@ -2107,13 +2112,13 @@ pub(crate) mod tests {
 
         let ha = provider
             .upload(&HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             })
             .expect("upload B");
@@ -2138,7 +2143,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < 1e-4, "gpu={gpu} cpu={cpu}");
         }
 
@@ -2174,13 +2183,13 @@ pub(crate) mod tests {
 
         let ha = provider
             .upload(&HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             })
             .expect("upload B");
@@ -2201,7 +2210,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < 1e-4, "gpu={gpu} cpu={cpu}");
         }
 
@@ -2248,13 +2261,13 @@ pub(crate) mod tests {
 
         let ha = provider
             .upload(&HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             })
             .expect("upload B");
@@ -2284,7 +2297,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < 1e-4, "gpu={gpu} cpu={cpu}");
         }
         assert!(
@@ -2333,13 +2350,13 @@ pub(crate) mod tests {
 
         let ha = provider
             .upload(&HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             })
             .expect("upload B");
@@ -2368,7 +2385,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < 1e-4, "gpu={gpu} cpu={cpu}");
         }
 
@@ -2407,13 +2428,13 @@ pub(crate) mod tests {
 
         let ha = provider
             .upload(&HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             })
             .expect("upload B");
@@ -2436,7 +2457,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < 1e-4, "gpu={gpu} cpu={cpu}");
         }
 
@@ -2476,13 +2501,13 @@ pub(crate) mod tests {
 
         let ha = provider
             .upload(&HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             })
             .expect("upload B");
@@ -2508,7 +2533,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < 1e-4, "gpu={gpu} cpu={cpu}");
         }
 
@@ -2548,13 +2577,13 @@ pub(crate) mod tests {
 
         let ha = provider
             .upload(&HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             })
             .expect("upload B");
@@ -2580,7 +2609,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < 1e-4, "gpu={gpu} cpu={cpu}");
         }
 
@@ -2624,13 +2657,13 @@ pub(crate) mod tests {
 
         let ha = provider
             .upload(&HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             })
             .expect("upload B");
@@ -2659,7 +2692,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < 1e-4, "gpu={gpu} cpu={cpu}");
         }
 
@@ -2695,13 +2732,13 @@ pub(crate) mod tests {
 
         let ha = provider
             .upload(&HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             })
             .expect("upload B");
@@ -2724,7 +2761,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < 1e-5);
         }
 
@@ -2766,13 +2807,13 @@ pub(crate) mod tests {
 
         let ha = provider
             .upload(&HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             })
             .expect("upload B");
@@ -2799,7 +2840,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < 1e-5);
         }
 
@@ -2834,11 +2879,11 @@ pub(crate) mod tests {
         let cpu_tensor = test_support::gather(cpu).expect("cpu gather");
 
         let view_a = HostTensorView {
-            data: &a.data,
+            data: &a.materialize_f64(),
             shape: &a.shape,
         };
         let view_b = HostTensorView {
-            data: &b.data,
+            data: &b.materialize_f64(),
             shape: &b.shape,
         };
         let ha = provider.upload(&view_a).expect("upload A");
@@ -2854,7 +2899,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < tol);
         }
     }

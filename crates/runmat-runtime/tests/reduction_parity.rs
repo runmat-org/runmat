@@ -60,12 +60,12 @@ fn mean_all_native_preserves_single_dtype_and_value() {
         "mean('all') should produce scalar"
     );
     assert_eq!(
-        scalar.dtype,
+        scalar.numeric_dtype(),
         NumericDType::F32,
         "mean(...,'native') should retain single dtype"
     );
     let expected = data.iter().map(|&v| v as f64).sum::<f64>() / (rows * cols) as f64;
-    assert_close(&scalar.data, &[expected], 1e-7);
+    assert_close(&scalar.materialize_f64(), &[expected], 1e-7);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -102,12 +102,12 @@ fn nlms_style_column_reductions_match_reference() {
         "sum along dim=1 should preserve column count"
     );
     assert_eq!(
-        sum_xx_tensor.dtype,
+        sum_xx_tensor.numeric_dtype(),
         NumericDType::F32,
         "sum(...,'native') should retain single dtype"
     );
     let expected_xx = column_sum_of_products(&x_vals, &x_vals, rows, cols);
-    assert_close(&sum_xx_tensor.data, &expected_xx, 1e-6);
+    assert_close(&sum_xx_tensor.materialize_f64(), &expected_xx, 1e-6);
 
     // sum(x .* W, 1, 'native')
     let xw = block_on(rt::call_builtin_async(
@@ -119,7 +119,7 @@ fn nlms_style_column_reductions_match_reference() {
     let sum_xw = block_on(rt::call_builtin_async("sum", &sum_xw_args)).expect("sum");
     let sum_xw_tensor = expect_tensor(sum_xw);
     assert_eq!(sum_xw_tensor.shape, vec![1, cols]);
-    assert_eq!(sum_xw_tensor.dtype, NumericDType::F32);
+    assert_eq!(sum_xw_tensor.numeric_dtype(), NumericDType::F32);
     let expected_xw = column_sum_of_products(&x_vals, &w_vals, rows, cols);
-    assert_close(&sum_xw_tensor.data, &expected_xw, 1e-6);
+    assert_close(&sum_xw_tensor.materialize_f64(), &expected_xw, 1e-6);
 }

@@ -1189,7 +1189,7 @@ pub(crate) mod tests {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, points.shape);
                 let expected = vec![-3.0, 2.0, 1.0, 0.0, 5.0];
-                assert_eq!(tensor.data, expected);
+                assert_eq!(tensor.materialize_f64(), expected);
             }
             other => panic!("expected tensor output, got {other:?}"),
         }
@@ -1234,7 +1234,7 @@ pub(crate) mod tests {
         .expect("polyval");
         match value {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.data, vec![0.25, 0.0, 0.25]);
+                assert_eq!(tensor.materialize_f64(), vec![0.25, 0.0, 0.25]);
             }
             other => panic!("expected tensor output, got {other:?}"),
         }
@@ -1242,14 +1242,9 @@ pub(crate) mod tests {
 
     #[test]
     fn polyval_typed_integer_coefficients_points_and_mu_cross_double_boundary_exactly() {
-        let mut coeffs =
-            Tensor::new_integer(IntegerStorage::I16(vec![1, 0, 0]), vec![1, 3]).unwrap();
-        coeffs.data.clear();
-        let mut points =
-            Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 2]), vec![1, 3]).unwrap();
-        points.data.clear();
-        let mut mu = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![1, 2]).unwrap();
-        mu.data.clear();
+        let coeffs = Tensor::new_integer(IntegerStorage::I16(vec![1, 0, 0]), vec![1, 3]).unwrap();
+        let points = Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 2]), vec![1, 3]).unwrap();
+        let mu = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![1, 2]).unwrap();
         let value = polyval_builtin(
             Value::Tensor(coeffs),
             Value::Tensor(points),
@@ -1262,7 +1257,7 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 3]);
-                assert_eq!(tensor.data, vec![0.25, 0.0, 0.25]);
+                assert_eq!(tensor.materialize_f64(), vec![0.25, 0.0, 0.25]);
                 assert!(tensor.integer_storage().is_none());
             }
             other => panic!("expected tensor output, got {other:?}"),
@@ -1294,7 +1289,7 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 3]);
-                assert_eq!(tensor.data, vec![0.25, 0.0, 0.25]);
+                assert_eq!(tensor.materialize_f64(), vec![0.25, 0.0, 0.25]);
             }
             other => panic!("expected tensor output, got {other:?}"),
         }
@@ -1305,16 +1300,13 @@ pub(crate) mod tests {
         let coeffs = Tensor::new(vec![1.0, -3.0, 2.0], vec![1, 3]).unwrap();
         let points = Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap();
         let mut st = StructValue::new();
-        let mut r = Tensor::new_integer(
+        let r = Tensor::new_integer(
             IntegerStorage::I16(vec![1, 0, 0, 0, 1, 0, 0, 0, 1]),
             vec![3, 3],
         )
         .unwrap();
-        r.data.clear();
-        let mut df = Tensor::new_integer(IntegerStorage::U16(vec![4]), vec![1, 1]).unwrap();
-        df.data.clear();
-        let mut normr = Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).unwrap();
-        normr.data.clear();
+        let df = Tensor::new_integer(IntegerStorage::U16(vec![4]), vec![1, 1]).unwrap();
+        let normr = Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).unwrap();
         st.fields.insert("R".to_string(), Value::Tensor(r));
         st.fields.insert("df".to_string(), Value::Tensor(df));
         st.fields.insert("normr".to_string(), Value::Tensor(normr));
@@ -1331,7 +1323,10 @@ pub(crate) mod tests {
         match delta {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 3]);
-                assert!(tensor.data.iter().all(|value| value.is_finite()));
+                assert!(tensor
+                    .materialize_f64()
+                    .iter()
+                    .all(|value| value.is_finite()));
             }
             other => panic!("expected tensor delta, got {other:?}"),
         }
@@ -1363,7 +1358,7 @@ pub(crate) mod tests {
         match delta {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 3]);
-                assert_eq!(tensor.data.len(), 3);
+                assert_eq!(tensor.materialize_f64().len(), 3);
             }
             other => panic!("expected tensor delta, got {other:?}"),
         }
@@ -1454,13 +1449,13 @@ pub(crate) mod tests {
             let points = Tensor::new(vec![-1.0, 0.0, 1.0], vec![3, 1]).unwrap();
             let coeff_handle = provider
                 .upload(&HostTensorView {
-                    data: &coeffs.data,
+                    data: &coeffs.materialize_f64(),
                     shape: &coeffs.shape,
                 })
                 .expect("upload coeff");
             let point_handle = provider
                 .upload(&HostTensorView {
-                    data: &points.data,
+                    data: &points.materialize_f64(),
                     shape: &points.shape,
                 })
                 .expect("upload points");
@@ -1473,7 +1468,7 @@ pub(crate) mod tests {
             match value {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-                    assert_eq!(gathered.data, vec![2.0, 1.0, 2.0]);
+                    assert_eq!(gathered.materialize_f64(), vec![2.0, 1.0, 2.0]);
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
             }
@@ -1493,13 +1488,13 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let coeff_handle = provider
             .upload(&HostTensorView {
-                data: &coeffs.data,
+                data: &coeffs.materialize_f64(),
                 shape: &coeffs.shape,
             })
             .expect("upload coeffs");
         let point_handle = provider
             .upload(&HostTensorView {
-                data: &points.data,
+                data: &points.materialize_f64(),
                 shape: &points.shape,
             })
             .expect("upload points");
@@ -1517,12 +1512,12 @@ pub(crate) mod tests {
         let gathered = test_support::gather(gpu_value).expect("gather");
 
         let coeff_complex: Vec<Complex64> = coeffs
-            .data
+            .materialize_f64()
             .iter()
             .map(|&c| Complex64::new(c, 0.0))
             .collect();
         let point_complex: Vec<Complex64> = points
-            .data
+            .materialize_f64()
             .iter()
             .map(|&x| Complex64::new(x, 0.0))
             .collect();
@@ -1530,7 +1525,7 @@ pub(crate) mod tests {
         let expected: Vec<f64> = expected_vals.iter().map(|c| c.re).collect();
 
         assert_eq!(gathered.shape, vec![4, 1]);
-        assert_eq!(gathered.data, expected);
+        assert_eq!(gathered.materialize_f64(), expected);
     }
 
     fn polyval_builtin(p: Value, x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

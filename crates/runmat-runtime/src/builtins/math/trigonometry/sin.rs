@@ -575,8 +575,8 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                assert!((t.data[0] - 0.0).abs() < 1e-12);
-                assert!((t.data[1] - 0.0).abs() < 1e-12);
+                assert!((t.materialize_f64()[0] - 0.0).abs() < 1e-12);
+                assert!((t.materialize_f64()[1] - 0.0).abs() < 1e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -585,19 +585,18 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I16(vec![0, 1, 2]),
             vec![3, 1],
         )
         .expect("integer tensor");
-        tensor.data.fill(0.0);
 
         let result = block_on(sin_builtin(Value::Tensor(tensor), Vec::new())).expect("sin");
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 1]);
                 let expected = [0.0, 1.0f64.sin(), 2.0f64.sin()];
-                for (actual, expected) in out.data.iter().zip(expected.iter()) {
+                for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expected).abs() < 1e-12);
                 }
                 assert!(out.integer_storage().is_none());
@@ -608,12 +607,11 @@ pub(crate) mod tests {
 
     #[test]
     fn sin_host_complex_conversion_reads_typed_integer_storage_exactly() {
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I64(vec![-3, 0, 5]),
             vec![3, 1],
         )
         .expect("integer tensor");
-        tensor.data.fill(f64::NAN);
 
         let result =
             block_on(convert_to_host_complex(Value::Tensor(tensor))).expect("complex conversion");
@@ -658,7 +656,7 @@ pub(crate) mod tests {
                 assert_eq!(t.shape, vec![1, 3]);
                 for (idx, ch) in ['a', 'b', 'c'].into_iter().enumerate() {
                     let expected = (ch as u32 as f64).sin();
-                    assert!((t.data[idx] - expected).abs() < 1e-12);
+                    assert!((t.materialize_f64()[idx] - expected).abs() < 1e-12);
                 }
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -671,15 +669,15 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = block_on(sin_builtin(Value::GpuTensor(handle), Vec::new())).expect("sin");
             let gathered = test_support::gather(result).expect("gather");
-            let expected: Vec<f64> = tensor.data.iter().map(|&v| v.sin()).collect();
+            let expected: Vec<f64> = tensor.materialize_f64().iter().map(|&v| v.sin()).collect();
             assert_eq!(gathered.shape, vec![4, 1]);
-            assert_eq!(gathered.data, expected);
+            assert_eq!(gathered.materialize_f64(), expected);
         });
     }
 
@@ -728,9 +726,10 @@ pub(crate) mod tests {
             match result {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-                    let expected: Vec<f64> = tensor.data.iter().map(|&v| v.sin()).collect();
+                    let expected: Vec<f64> =
+                        tensor.materialize_f64().iter().map(|&v| v.sin()).collect();
                     assert_eq!(gathered.shape, vec![4, 1]);
-                    assert_eq!(gathered.data, expected);
+                    assert_eq!(gathered.materialize_f64(), expected);
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
             }
@@ -792,7 +791,7 @@ pub(crate) mod tests {
                 panic!("expected gathered complex tensor, got {gathered:?}");
             };
             assert_eq!(out.shape, vec![2, 1]);
-            for (idx, &re) in input.data.iter().enumerate() {
+            for (idx, &re) in input.materialize_f64().iter().enumerate() {
                 assert!((out.data[idx].0 - re.sin()).abs() < 1e-12);
                 assert!(out.data[idx].1.abs() < 1e-12);
             }
@@ -804,7 +803,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let input = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
             let input_view = HostTensorView {
-                data: &input.data,
+                data: &input.materialize_f64(),
                 shape: &input.shape,
             };
             let input_handle = provider.upload(&input_view).expect("upload input");
@@ -829,7 +828,7 @@ pub(crate) mod tests {
                 panic!("expected gathered complex tensor, got {gathered:?}");
             };
             assert_eq!(out.shape, vec![2, 1]);
-            for (idx, &re) in input.data.iter().enumerate() {
+            for (idx, &re) in input.materialize_f64().iter().enumerate() {
                 assert!((out.data[idx].0 - re.sin()).abs() < 1e-12);
                 assert!(out.data[idx].1.abs() < 1e-12);
             }
@@ -842,7 +841,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -853,9 +852,10 @@ pub(crate) mod tests {
             .expect("sin");
             match result {
                 Value::Tensor(t) => {
-                    let expected: Vec<f64> = tensor.data.iter().map(|&v| v.sin()).collect();
+                    let expected: Vec<f64> =
+                        tensor.materialize_f64().iter().map(|&v| v.sin()).collect();
                     assert_eq!(t.shape, vec![2, 1]);
-                    assert_eq!(t.data, expected);
+                    assert_eq!(t.materialize_f64(), expected);
                 }
                 Value::GpuTensor(_) => panic!("expected host result"),
                 Value::Num(_) => panic!("expected vector output"),
@@ -887,9 +887,10 @@ pub(crate) mod tests {
         .expect("sin");
         match result {
             Value::Tensor(out) => {
-                let expected: Vec<f64> = tensor.data.iter().map(|&v| v.sin()).collect();
+                let expected: Vec<f64> =
+                    tensor.materialize_f64().iter().map(|&v| v.sin()).collect();
                 assert_eq!(out.shape, vec![2, 1]);
-                assert_eq!(out.data, expected);
+                assert_eq!(out.materialize_f64(), expected);
             }
             other => panic!("unexpected result {other:?}"),
         }
@@ -920,7 +921,7 @@ pub(crate) mod tests {
         let t = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap();
         let cpu = sin_real(Value::Tensor(t.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &t.data,
+            data: &t.materialize_f64(),
             shape: &t.shape,
         };
         let h = runmat_accelerate_api::provider()
@@ -936,7 +937,7 @@ pub(crate) mod tests {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
                 };
-                for (a, b) in gt.data.iter().zip(ct.data.iter()) {
+                for (a, b) in gt.materialize_f64().iter().zip(ct.materialize_f64().iter()) {
                     assert!((a - b).abs() < tol, "|{} - {}| >= {}", a, b, tol);
                 }
             }

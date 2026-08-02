@@ -692,8 +692,7 @@ pub(crate) mod tests {
     fn rng_typed_integer_tensor_seed_and_state_are_exact() {
         let seed =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("seed");
-        let mut seed = seed;
-        seed.data.clear();
+        let seed = seed;
         assert_eq!(
             parse_seed_scalar(&Value::Tensor(seed), "rng: seed").expect("typed seed"),
             u64::MAX
@@ -701,8 +700,7 @@ pub(crate) mod tests {
 
         let scalar_state =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("state");
-        let mut scalar_state = scalar_state;
-        scalar_state.data.clear();
+        let scalar_state = scalar_state;
         assert_eq!(
             parse_state_scalar(&Value::Tensor(scalar_state)).expect("typed state"),
             u64::MAX
@@ -713,8 +711,7 @@ pub(crate) mod tests {
             vec![1, 2],
         )
         .expect("state words");
-        let mut word_state = word_state;
-        word_state.data.clear();
+        let word_state = word_state;
         assert_eq!(
             parse_state_scalar(&Value::Tensor(word_state)).expect("typed state words"),
             u64::MAX
@@ -722,8 +719,7 @@ pub(crate) mod tests {
 
         let negative_seed =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("seed");
-        let mut negative_seed = negative_seed;
-        negative_seed.data.clear();
+        let negative_seed = negative_seed;
         assert!(parse_seed_scalar(&Value::Tensor(negative_seed), "rng: seed").is_err());
 
         let wide_word = Tensor::new_integer(
@@ -731,8 +727,7 @@ pub(crate) mod tests {
             vec![1, 2],
         )
         .expect("state word");
-        let mut wide_word = wide_word;
-        wide_word.data.clear();
+        let wide_word = wide_word;
         assert!(parse_state_scalar(&Value::Tensor(wide_word)).is_err());
     }
 

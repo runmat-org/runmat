@@ -424,15 +424,14 @@ mod tests {
         };
         let wn = match &values[1] {
             Value::Num(value) => vec![*value],
-            Value::Tensor(tensor) => tensor.data.clone(),
+            Value::Tensor(tensor) => tensor.materialize_f64().clone(),
             other => panic!("expected Wn, got {other:?}"),
         };
         (order, wn)
     }
 
     fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("typed integer tensor");
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, shape).expect("typed integer tensor");
         tensor
     }
 

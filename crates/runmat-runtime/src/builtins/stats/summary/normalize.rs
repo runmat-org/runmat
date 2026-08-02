@@ -1386,14 +1386,12 @@ mod tests {
     }
 
     fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
         Value::Tensor(tensor)
     }
 
     fn mirrorless_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
         Value::Tensor(tensor)
     }
 
@@ -1423,9 +1421,9 @@ mod tests {
     #[test]
     fn default_zscore_normalizes_first_non_singleton_dimension() {
         let out = expect_tensor(call(tensor(vec![1., 2., 3.], vec![3, 1]), vec![]).unwrap());
-        assert_close(out.data[0], -1.0);
-        assert_close(out.data[1], 0.0);
-        assert_close(out.data[2], 1.0);
+        assert_close(out.materialize_f64()[0], -1.0);
+        assert_close(out.materialize_f64()[1], 0.0);
+        assert_close(out.materialize_f64()[2], 1.0);
     }
 
     #[test]
@@ -1437,9 +1435,9 @@ mod tests {
             )
             .unwrap(),
         );
-        assert_close(out.data[0], -1.0);
-        assert_close(out.data[1], 0.0);
-        assert_close(out.data[2], 1.0);
+        assert_close(out.materialize_f64()[0], -1.0);
+        assert_close(out.materialize_f64()[1], 0.0);
+        assert_close(out.materialize_f64()[2], 1.0);
     }
 
     #[test]
@@ -1452,9 +1450,9 @@ mod tests {
             .unwrap(),
         );
         assert_eq!(out.shape, vec![3, 1]);
-        assert_close(out.data[0], -1.0);
-        assert_close(out.data[1], 0.0);
-        assert_close(out.data[2], 1.0);
+        assert_close(out.materialize_f64()[0], -1.0);
+        assert_close(out.materialize_f64()[1], 0.0);
+        assert_close(out.materialize_f64()[2], 1.0);
     }
 
     #[test]
@@ -1467,8 +1465,8 @@ mod tests {
             .unwrap(),
         );
         assert_eq!(out.shape, vec![3, 2]);
-        assert_close(out.data[0], -std::f64::consts::FRAC_1_SQRT_2);
-        assert_close(out.data[3], std::f64::consts::FRAC_1_SQRT_2);
+        assert_close(out.materialize_f64()[0], -std::f64::consts::FRAC_1_SQRT_2);
+        assert_close(out.materialize_f64()[3], std::f64::consts::FRAC_1_SQRT_2);
     }
 
     #[test]
@@ -1483,7 +1481,7 @@ mod tests {
             )
             .unwrap(),
         );
-        assert_eq!(out.data, vec![-1.0, 0.0, 1.0]);
+        assert_eq!(out.materialize_f64(), vec![-1.0, 0.0, 1.0]);
     }
 
     #[test]
@@ -1498,7 +1496,7 @@ mod tests {
             )
             .unwrap(),
         );
-        assert_eq!(out.data, vec![-1.0, 0.0, 1.0]);
+        assert_eq!(out.materialize_f64(), vec![-1.0, 0.0, 1.0]);
     }
 
     #[test]
@@ -1510,8 +1508,8 @@ mod tests {
             )
             .unwrap(),
         );
-        assert_close(out.data[0], 0.6);
-        assert_close(out.data[1], 0.8);
+        assert_close(out.materialize_f64()[0], 0.6);
+        assert_close(out.materialize_f64()[1], 0.8);
     }
 
     #[test]
@@ -1553,7 +1551,7 @@ mod tests {
             )
             .unwrap(),
         );
-        assert_eq!(n.data, reused.data);
+        assert_eq!(n.materialize_f64(), reused.materialize_f64());
     }
 
     #[test]
@@ -1570,7 +1568,7 @@ mod tests {
             )
             .unwrap(),
         );
-        assert_eq!(out.data, vec![0.0, 1.0, 2.0]);
+        assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 2.0]);
     }
 
     #[test]
@@ -1587,7 +1585,7 @@ mod tests {
             )
             .unwrap(),
         );
-        assert_eq!(out.data, vec![0.0, 1.0, 2.0]);
+        assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 2.0]);
     }
 
     #[test]
@@ -1601,7 +1599,7 @@ mod tests {
             values
         };
         let s = expect_tensor(values[2].clone());
-        assert_eq!(s.data, vec![0.0]);
+        assert_eq!(s.materialize_f64(), vec![0.0]);
 
         let reused = expect_tensor(
             call(
@@ -1615,7 +1613,7 @@ mod tests {
             )
             .unwrap(),
         );
-        assert!(reused.data.iter().all(|value| value.is_nan()));
+        assert!(reused.materialize_f64().iter().all(|value| value.is_nan()));
     }
 
     #[test]
@@ -1627,7 +1625,7 @@ mod tests {
             )
             .unwrap(),
         );
-        assert!(out.data.iter().all(|value| value.is_nan()));
+        assert!(out.materialize_f64().iter().all(|value| value.is_nan()));
     }
 
     #[test]
@@ -1646,9 +1644,9 @@ mod tests {
         assert_eq!(n.shape, vec![0, 3]);
         assert_eq!(c.shape, vec![0, 1]);
         assert_eq!(s.shape, vec![0, 1]);
-        assert!(n.data.is_empty());
-        assert!(c.data.is_empty());
-        assert!(s.data.is_empty());
+        assert!(n.materialize_f64().is_empty());
+        assert!(c.materialize_f64().is_empty());
+        assert!(s.materialize_f64().is_empty());
     }
 
     #[test]
@@ -1660,9 +1658,9 @@ mod tests {
             )
             .unwrap(),
         );
-        assert_eq!(out.data[0], -1.0);
-        assert!(out.data[1].is_nan());
-        assert_eq!(out.data[2], 1.0);
+        assert_eq!(out.materialize_f64()[0], -1.0);
+        assert!(out.materialize_f64()[1].is_nan());
+        assert_eq!(out.materialize_f64()[2], 1.0);
     }
 
     #[test]

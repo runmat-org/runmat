@@ -1182,12 +1182,11 @@ pub(crate) mod tests {
 
     #[test]
     fn body_query_and_numeric_scalar_read_typed_integer_storage_exactly() {
-        let mut text = Tensor::new_integer(
+        let text = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![u64::MAX]),
             vec![1, 1],
         )
         .expect("typed text tensor");
-        text.data.clear();
         let value = Value::Tensor(text.clone());
         assert_eq!(
             scalar_to_string(&value).expect("body text"),
@@ -1198,10 +1197,9 @@ pub(crate) mod tests {
             "18446744073709551615"
         );
 
-        let mut timeout =
+        let timeout =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![2026]), vec![1, 1])
                 .expect("typed timeout tensor");
-        timeout.data.clear();
         assert_eq!(
             numeric_scalar(&Value::Tensor(timeout), "timeout").expect("numeric scalar"),
             2026.0
@@ -1482,12 +1480,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webwrite_binary_payload_respected() {
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U8(vec![1, 2, 3, 255]),
             vec![4, 1],
         )
         .unwrap();
-        tensor.data.clear();
         let payload = Value::Tensor(tensor);
         let mut opts_struct = StructValue::new();
         opts_struct

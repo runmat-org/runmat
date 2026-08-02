@@ -235,7 +235,7 @@ mod tests {
         tensor: &Tensor,
     ) -> runmat_accelerate_api::GpuTensorHandle {
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         provider.upload(&view).expect("upload")
@@ -280,9 +280,8 @@ mod tests {
 
     #[test]
     fn typed_integer_tensor_checks_native_storage_not_f64_mirror() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::I32(vec![1, 2, 3, 4]), vec![2, 2]).unwrap();
-        tensor.data.fill(f64::NAN);
         assert_eq!(call(Value::Tensor(tensor)).unwrap(), Value::Bool(true));
     }
 

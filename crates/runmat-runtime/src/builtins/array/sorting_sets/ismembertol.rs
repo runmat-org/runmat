@@ -960,10 +960,8 @@ mod tests {
 
     #[test]
     fn typed_integer_inputs_are_compared_from_exact_storage() {
-        let mut a = Tensor::new_integer(IntegerStorage::I16(vec![10, 20, 30]), vec![1, 3]).unwrap();
-        let mut b = Tensor::new_integer(IntegerStorage::I16(vec![9, 31]), vec![1, 2]).unwrap();
-        a.data = vec![0.0, 0.0, 0.0];
-        b.data = vec![0.0, 0.0];
+        let a = Tensor::new_integer(IntegerStorage::I16(vec![10, 20, 30]), vec![1, 3]).unwrap();
+        let b = Tensor::new_integer(IntegerStorage::I16(vec![9, 31]), vec![1, 2]).unwrap();
 
         let result = eval(
             Value::Tensor(a),
@@ -1000,10 +998,8 @@ mod tests {
     fn typed_integer_tolerance_and_datascale_read_exact_storage() {
         let a = Tensor::new(vec![10.0, 20.0], vec![1, 2]).unwrap();
         let b = Tensor::new(vec![11.0, 24.0], vec![1, 2]).unwrap();
-        let mut tolerance = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).unwrap();
-        tolerance.data = vec![0.0];
-        let mut scale = Tensor::new_integer(IntegerStorage::U16(vec![1, 4]), vec![1, 2]).unwrap();
-        scale.data = vec![0.0, 0.0];
+        let tolerance = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).unwrap();
+        let scale = Tensor::new_integer(IntegerStorage::U16(vec![1, 4]), vec![1, 2]).unwrap();
 
         let result = eval(
             Value::Tensor(a),
@@ -1029,7 +1025,7 @@ mod tests {
             .unwrap()
             .into_pair();
         match loc {
-            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![0.0, 1.0, 3.0]),
+            Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![0.0, 1.0, 3.0]),
             other => panic!("expected tensor loc, got {other:?}"),
         }
     }
@@ -1075,11 +1071,11 @@ mod tests {
         };
         assert_eq!(cell.shape, vec![1, 2]);
         match &cell.data[0] {
-            Value::Tensor(indices) => assert_eq!(indices.data, vec![1.0, 2.0]),
+            Value::Tensor(indices) => assert_eq!(indices.materialize_f64(), vec![1.0, 2.0]),
             other => panic!("expected tensor indices, got {other:?}"),
         }
         match &cell.data[1] {
-            Value::Tensor(indices) => assert_eq!(indices.data, vec![0.0]),
+            Value::Tensor(indices) => assert_eq!(indices.materialize_f64(), vec![0.0]),
             other => panic!("expected tensor zero indices, got {other:?}"),
         }
     }
@@ -1105,12 +1101,12 @@ mod tests {
         assert_eq!(cell.shape, vec![2, 2]);
         let top_right = cell.get(0, 1).unwrap();
         match top_right {
-            Value::Tensor(indices) => assert_eq!(indices.data, vec![2.0]),
+            Value::Tensor(indices) => assert_eq!(indices.materialize_f64(), vec![2.0]),
             other => panic!("expected tensor indices, got {other:?}"),
         }
         let bottom_left = cell.get(1, 0).unwrap();
         match bottom_left {
-            Value::Tensor(indices) => assert_eq!(indices.data, vec![3.0]),
+            Value::Tensor(indices) => assert_eq!(indices.materialize_f64(), vec![3.0]),
             other => panic!("expected tensor indices, got {other:?}"),
         }
     }
@@ -1136,7 +1132,7 @@ mod tests {
         match loc {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 1]);
-                assert_eq!(tensor.data, vec![1.0, 0.0]);
+                assert_eq!(tensor.materialize_f64(), vec![1.0, 0.0]);
             }
             other => panic!("expected tensor loc, got {other:?}"),
         }
@@ -1144,12 +1140,8 @@ mod tests {
 
     #[test]
     fn by_rows_typed_integer_inputs_are_compared_from_exact_storage() {
-        let mut a =
-            Tensor::new_integer(IntegerStorage::U16(vec![10, 20, 30, 40]), vec![2, 2]).unwrap();
-        let mut b =
-            Tensor::new_integer(IntegerStorage::U16(vec![11, 21, 31, 41]), vec![2, 2]).unwrap();
-        a.data = vec![0.0, 0.0, 0.0, 0.0];
-        b.data = vec![0.0, 0.0, 0.0, 0.0];
+        let a = Tensor::new_integer(IntegerStorage::U16(vec![10, 20, 30, 40]), vec![2, 2]).unwrap();
+        let b = Tensor::new_integer(IntegerStorage::U16(vec![11, 21, 31, 41]), vec![2, 2]).unwrap();
 
         let result = eval(
             Value::Tensor(a),
@@ -1189,7 +1181,7 @@ mod tests {
         };
         assert_eq!(cell.shape, vec![1, 1]);
         match &cell.data[0] {
-            Value::Tensor(indices) => assert_eq!(indices.data, vec![1.0, 2.0]),
+            Value::Tensor(indices) => assert_eq!(indices.materialize_f64(), vec![1.0, 2.0]),
             other => panic!("expected tensor indices, got {other:?}"),
         }
     }
@@ -1223,13 +1215,13 @@ mod tests {
             let b = Tensor::new(vec![1.0 + 1e-13, 3.0], vec![2, 1]).unwrap();
             let handle_a = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &a.data,
+                    data: &a.materialize_f64(),
                     shape: &a.shape,
                 })
                 .expect("upload a");
             let handle_b = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &b.data,
+                    data: &b.materialize_f64(),
                     shape: &b.shape,
                 })
                 .expect("upload b");

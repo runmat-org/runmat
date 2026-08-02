@@ -441,7 +441,7 @@ pub(crate) mod tests {
             Tensor::new(vec![0.0, 1.0, 2.0, 2.0 - TWO_PI, 3.0 - TWO_PI], vec![1, 5]).unwrap();
         let out = as_tensor(unwrap_call(Value::Tensor(input), Vec::new()).unwrap());
         assert_eq!(out.shape, vec![1, 5]);
-        assert_close(&out.data, &[0.0, 1.0, 2.0, 2.0, 3.0]);
+        assert_close(&out.materialize_f64(), &[0.0, 1.0, 2.0, 2.0, 3.0]);
     }
 
     #[test]
@@ -453,7 +453,7 @@ pub(crate) mod tests {
         .unwrap();
         let out = as_tensor(unwrap_call(Value::Tensor(input), Vec::new()).unwrap());
         assert_eq!(out.shape, vec![3, 2]);
-        assert_close(&out.data, &[0.0, 1.0, 1.0, 0.0, -1.0, -1.0]);
+        assert_close(&out.materialize_f64(), &[0.0, 1.0, 1.0, 0.0, -1.0, -1.0]);
     }
 
     #[test]
@@ -474,7 +474,7 @@ pub(crate) mod tests {
             .unwrap(),
         );
         assert_eq!(out.shape, vec![2, 3]);
-        assert_close(&out.data, &[0.0, 0.0, 1.0, -1.0, 1.0, -1.0]);
+        assert_close(&out.materialize_f64(), &[0.0, 0.0, 1.0, -1.0, 1.0, -1.0]);
     }
 
     #[test]
@@ -482,7 +482,7 @@ pub(crate) mod tests {
         let input = Tensor::new(vec![0.0, 1.0, 1.0 - TWO_PI], vec![1, 3]).unwrap();
         let out = as_tensor(unwrap_call(Value::Tensor(input), vec![Value::Num(10.0)]).unwrap());
         assert_eq!(out.shape, vec![1, 3]);
-        assert_close(&out.data, &[0.0, 1.0, 1.0 - TWO_PI]);
+        assert_close(&out.materialize_f64(), &[0.0, 1.0, 1.0 - TWO_PI]);
     }
 
     #[test]
@@ -491,9 +491,9 @@ pub(crate) mod tests {
             Tensor::new(vec![0.0, f64::NAN, 1.0 - TWO_PI, 2.0 - TWO_PI], vec![1, 4]).unwrap();
         let out = as_tensor(unwrap_call(Value::Tensor(input), Vec::new()).unwrap());
         assert_eq!(out.shape, vec![1, 4]);
-        assert_eq!(out.data[0], 0.0);
-        assert!(out.data[1].is_nan());
-        assert_close(&out.data[2..], &[1.0 - TWO_PI, 2.0 - TWO_PI]);
+        assert_eq!(out.materialize_f64()[0], 0.0);
+        assert!(out.materialize_f64()[1].is_nan());
+        assert_close(&out.materialize_f64()[2..], &[1.0 - TWO_PI, 2.0 - TWO_PI]);
     }
 
     #[test]
@@ -501,14 +501,13 @@ pub(crate) mod tests {
         let input = LogicalArray::new(vec![0, 1, 0], vec![1, 3]).unwrap();
         let out = as_tensor(unwrap_call(Value::LogicalArray(input), Vec::new()).unwrap());
         assert_eq!(out.shape, vec![1, 3]);
-        assert_close(&out.data, &[0.0, 1.0, 0.0]);
+        assert_close(&out.materialize_f64(), &[0.0, 1.0, 0.0]);
     }
 
     #[test]
     fn unwrap_reads_authoritative_integer_storage_without_mirror() {
-        let mut input = Tensor::new_integer(IntegerStorage::I16(vec![7, 7]), vec![1, 2])
+        let input = Tensor::new_integer(IntegerStorage::I16(vec![7, 7]), vec![1, 2])
             .expect("integer input");
-        input.data.clear();
         let out = as_tensor(unwrap_call(Value::Tensor(input), Vec::new()).unwrap());
         assert_eq!(
             out.into_numeric_storage().expect("output storage"),
@@ -535,13 +534,13 @@ pub(crate) mod tests {
         crate::builtins::common::test_support::with_test_provider(|provider| {
             let input = Tensor::new(vec![0.0, 1.0, 1.0 - TWO_PI], vec![1, 3]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &input.data,
+                data: &input.materialize_f64(),
                 shape: &input.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let out = as_tensor(unwrap_call(Value::GpuTensor(handle), Vec::new()).unwrap());
             assert_eq!(out.shape, vec![1, 3]);
-            assert_close(&out.data, &[0.0, 1.0, 1.0]);
+            assert_close(&out.materialize_f64(), &[0.0, 1.0, 1.0]);
         });
     }
 }

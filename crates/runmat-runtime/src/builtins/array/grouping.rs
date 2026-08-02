@@ -2038,7 +2038,7 @@ mod tests {
         ))
         .unwrap();
         match out {
-            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![7.0, 4.0, 2.0, 8.0]),
+            Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![7.0, 4.0, 2.0, 8.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
 
@@ -2057,7 +2057,10 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![4, 2]);
-                assert_eq!(tensor.data, vec![5.0, 0.0, 0.0, 6.0, 0.0, 7.0, 3.0, 0.0]);
+                assert_eq!(
+                    tensor.materialize_f64(),
+                    vec![5.0, 0.0, 0.0, 6.0, 0.0, 7.0, 3.0, 0.0]
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -2065,17 +2068,13 @@ mod tests {
 
     #[test]
     fn accumarray_accepts_exact_integer_subscripts_data_and_size_vectors() {
-        let mut subs_tensor =
+        let subs_tensor =
             Tensor::new_integer(IntegerStorage::U16(vec![1, 3, 4, 2]), vec![4, 1]).unwrap();
-        subs_tensor.data = vec![0.0; 4];
         let subs = Value::Tensor(subs_tensor);
-        let mut data_tensor =
+        let data_tensor =
             Tensor::new_integer(IntegerStorage::I16(vec![10, 20, 30, 40]), vec![4, 1]).unwrap();
-        data_tensor.data = vec![0.0; 4];
         let data = Value::Tensor(data_tensor);
-        let mut size_tensor =
-            Tensor::new_integer(IntegerStorage::U8(vec![4, 1]), vec![1, 2]).unwrap();
-        size_tensor.data = vec![0.0; 2];
+        let size_tensor = Tensor::new_integer(IntegerStorage::U8(vec![4, 1]), vec![1, 2]).unwrap();
         let size = Value::Tensor(size_tensor);
 
         let out = block_on(accumarray_builtin(subs, data, vec![size])).unwrap();
@@ -2083,7 +2082,7 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![4, 1]);
-                assert_eq!(tensor.data, vec![10.0, 40.0, 20.0, 30.0]);
+                assert_eq!(tensor.materialize_f64(), vec![10.0, 40.0, 20.0, 30.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -2091,8 +2090,7 @@ mod tests {
 
     #[test]
     fn grouping_numeric_scalar_reads_typed_integer_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1]).unwrap();
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1]).unwrap();
 
         assert_eq!(
             value_as_numeric_scalar(&Value::Tensor(tensor)),
@@ -2102,9 +2100,7 @@ mod tests {
 
     #[test]
     fn grouping_name_selector_reads_typed_integer_storage_exactly() {
-        let mut selector =
-            Tensor::new_integer(IntegerStorage::U16(vec![2, 1]), vec![1, 2]).unwrap();
-        selector.data = vec![0.0, 0.0];
+        let selector = Tensor::new_integer(IntegerStorage::U16(vec![2, 1]), vec![1, 2]).unwrap();
 
         let selected = parse_name_selector(
             &Value::Tensor(selector),
@@ -2118,8 +2114,7 @@ mod tests {
 
     #[test]
     fn accumarray_empty_subscripts_read_typed_integer_storage() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 1]).unwrap();
-        tensor.data = vec![1.0];
+        let tensor = Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 1]).unwrap();
 
         assert_eq!(
             accumarray_subscripts(Value::Tensor(tensor)).unwrap(),
@@ -2129,8 +2124,7 @@ mod tests {
 
     #[test]
     fn accumarray_data_values_reads_typed_integer_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).unwrap();
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).unwrap();
 
         assert_eq!(
             accumarray_data_values(Value::Tensor(tensor), 3).unwrap(),
@@ -2169,10 +2163,10 @@ mod tests {
         .unwrap();
         match out {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.data[0], 1.0);
-                assert_eq!(tensor.data[1], 1.0);
-                assert_eq!(tensor.data[2], 2.0);
-                assert!(tensor.data[3].is_nan());
+                assert_eq!(tensor.materialize_f64()[0], 1.0);
+                assert_eq!(tensor.materialize_f64()[1], 1.0);
+                assert_eq!(tensor.materialize_f64()[2], 2.0);
+                assert!(tensor.materialize_f64()[3].is_nan());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -2190,21 +2184,21 @@ mod tests {
         let out = block_on(findgroups_builtin(groups.clone(), Vec::new())).unwrap();
         match out {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.data[0], 2.0);
-                assert_eq!(tensor.data[1], 1.0);
-                assert_eq!(tensor.data[2], 2.0);
-                assert!(tensor.data[3].is_nan());
+                assert_eq!(tensor.materialize_f64()[0], 2.0);
+                assert_eq!(tensor.materialize_f64()[1], 1.0);
+                assert_eq!(tensor.materialize_f64()[2], 2.0);
+                assert!(tensor.materialize_f64()[3].is_nan());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
         let counted = block_on(groupcounts_builtin(groups.clone(), Vec::new())).unwrap();
         match counted {
-            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0, 2.0]),
+            Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
         let indexed = block_on(grp2idx_builtin(groups)).unwrap();
         match indexed {
-            Value::Tensor(tensor) => assert!(tensor.data[3].is_nan()),
+            Value::Tensor(tensor) => assert!(tensor.materialize_f64()[3].is_nan()),
             other => panic!("expected tensor, got {other:?}"),
         }
 
@@ -2217,7 +2211,7 @@ mod tests {
         ))
         .unwrap();
         match empty_is_group {
-            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![2.0, 1.0]),
+            Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![2.0, 1.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -2235,13 +2229,13 @@ mod tests {
 
         let grouped = block_on(findgroups_builtin(groups.clone(), Vec::new())).unwrap();
         match grouped {
-            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0, 2.0, 1.0]),
+            Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 1.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
 
         let counted = block_on(groupcounts_builtin(groups, Vec::new())).unwrap();
         match counted {
-            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![2.0, 1.0]),
+            Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![2.0, 1.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -2283,9 +2277,8 @@ mod tests {
 
     #[test]
     fn combinations_preserves_typed_integer_columns_without_f64_mirror() {
-        let mut first =
+        let first =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 9]), vec![1, 2]).unwrap();
-        first.data = Vec::new();
         let out = block_on(combinations_builtin(
             Value::Tensor(first),
             vec![Value::StringArray(
@@ -2325,7 +2318,7 @@ mod tests {
         ))
         .unwrap();
         match out {
-            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![2.0, 6.0]),
+            Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![2.0, 6.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
 
@@ -2361,7 +2354,7 @@ mod tests {
         ))
         .unwrap();
         match out {
-            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![6.0, 4.0]),
+            Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![6.0, 4.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
 

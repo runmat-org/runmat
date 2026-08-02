@@ -497,7 +497,7 @@ mod tests {
         let back = ifftn_complex_tensor(freq, None).unwrap();
         assert_eq!(back.shape, vec![2, 2, 2]);
         for (idx, (re, im)) in back.data.iter().enumerate() {
-            assert!((*re - input.data[idx]).abs() < 1e-10);
+            assert!((*re - input.materialize_f64()[idx]).abs() < 1e-10);
             assert!(im.abs() < 1e-10);
         }
     }
@@ -518,7 +518,11 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2, 2]);
-                for (got, expected) in t.data.iter().zip(input.data.iter()) {
+                for (got, expected) in t
+                    .materialize_f64()
+                    .iter()
+                    .zip(input.materialize_f64().iter())
+                {
                     assert!((*got - *expected).abs() < 1e-10);
                 }
             }

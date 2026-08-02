@@ -572,7 +572,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 1]);
-                assert_eq!(t.data, vec![10.0, 11.0, 12.0]);
+                assert_eq!(t.materialize_f64(), vec![10.0, 11.0, 12.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -581,10 +581,8 @@ pub(crate) mod tests {
     #[test]
     fn sub2ind_typed_integer_subscripts_read_exact_storage() {
         let dims = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
-        let mut rows = Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 3]), vec![3, 1]).unwrap();
-        rows.data.clear();
-        let mut cols = Tensor::new_integer(IntegerStorage::I16(vec![4]), vec![1, 1]).unwrap();
-        cols.data.clear();
+        let rows = Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 3]), vec![3, 1]).unwrap();
+        let cols = Tensor::new_integer(IntegerStorage::I16(vec![4]), vec![1, 1]).unwrap();
 
         let result = sub2ind_builtin(
             Value::Tensor(dims),
@@ -595,7 +593,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![3, 1]);
-                assert_eq!(tensor.data, vec![10.0, 11.0, 12.0]);
+                assert_eq!(tensor.materialize_f64(), vec![10.0, 11.0, 12.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -616,7 +614,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data, vec![3.0, 11.0]);
+                assert_eq!(t.materialize_f64(), vec![3.0, 11.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -712,19 +710,19 @@ pub(crate) mod tests {
 
             let dims_handle = provider
                 .upload(&HostTensorView {
-                    data: &dims.data,
+                    data: &dims.materialize_f64(),
                     shape: &dims.shape,
                 })
                 .expect("upload dims");
             let rows_handle = provider
                 .upload(&HostTensorView {
-                    data: &rows.data,
+                    data: &rows.materialize_f64(),
                     shape: &rows.shape,
                 })
                 .expect("upload rows");
             let cols_handle = provider
                 .upload(&HostTensorView {
-                    data: &cols.data,
+                    data: &cols.materialize_f64(),
                     shape: &cols.shape,
                 })
                 .expect("upload cols");
@@ -739,7 +737,7 @@ pub(crate) mod tests {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).unwrap();
                     assert_eq!(gathered.shape, vec![3, 1]);
-                    assert_eq!(gathered.data, vec![10.0, 11.0, 12.0]);
+                    assert_eq!(gathered.materialize_f64(), vec![10.0, 11.0, 12.0]);
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
             }
@@ -769,13 +767,13 @@ pub(crate) mod tests {
 
         let rows_handle = provider
             .upload(&HostTensorView {
-                data: &rows.data,
+                data: &rows.materialize_f64(),
                 shape: &rows.shape,
             })
             .expect("upload rows");
         let cols_handle = provider
             .upload(&HostTensorView {
-                data: &cols.data,
+                data: &cols.materialize_f64(),
                 shape: &cols.shape,
             })
             .expect("upload cols");
@@ -793,6 +791,6 @@ pub(crate) mod tests {
             other => panic!("unexpected cpu result {other:?}"),
         };
         assert_eq!(gathered.shape, expected.shape);
-        assert_eq!(gathered.data, expected.data);
+        assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 }

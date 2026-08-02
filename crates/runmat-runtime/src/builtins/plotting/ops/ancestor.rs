@@ -519,7 +519,7 @@ mod tests {
             panic!("expected empty tensor for absent legend");
         };
         assert_eq!(tensor.shape, vec![0, 0]);
-        assert!(tensor.data.is_empty());
+        assert!(tensor.materialize_f64().is_empty());
     }
 
     #[test]
@@ -566,7 +566,7 @@ mod tests {
             panic!("expected empty tensor");
         };
         assert_eq!(tensor.shape, vec![0, 0]);
-        assert!(tensor.data.is_empty());
+        assert!(tensor.materialize_f64().is_empty());
     }
 
     #[test]
@@ -588,7 +588,7 @@ mod tests {
             panic!("expected tensor result");
         };
         assert_eq!(tensor.shape, vec![1, 1]);
-        assert_eq!(tensor.data[0], axes_handle);
+        assert_eq!(tensor.materialize_f64()[0], axes_handle);
     }
 
     #[test]
@@ -603,10 +603,8 @@ mod tests {
     #[test]
     fn typed_integer_tensor_handle_reads_storage_exactly() {
         let _guard = setup();
-        let mut handle =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U8(vec![0]), vec![1, 1])
-                .expect("typed handle");
-        handle.data.clear();
+        let handle = Tensor::new_integer(runmat_builtins::IntegerStorage::U8(vec![0]), vec![1, 1])
+            .expect("typed handle");
 
         assert_eq!(
             ancestor_builtin(vec![Value::Tensor(handle), Value::String("root".into())]).unwrap(),

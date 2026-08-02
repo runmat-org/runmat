@@ -929,9 +929,8 @@ pub(crate) mod tests {
 
     #[test]
     fn extractBetween_position_vectors_read_typed_integer_storage_exactly() {
-        let mut positions =
+        let positions =
             Tensor::new_integer(IntegerStorage::U16(vec![2, 4]), vec![1, 2]).expect("positions");
-        positions.data.clear();
 
         let parsed = BoundaryPositions::from_value(Value::Tensor(positions)).unwrap();
         assert_eq!(parsed.data, vec![2, 4]);

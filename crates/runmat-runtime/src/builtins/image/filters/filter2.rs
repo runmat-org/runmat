@@ -381,7 +381,7 @@ pub(crate) mod tests {
         let expected =
             apply_imfilter_tensor(&image, &kernel, &options, FILTER2_BUILTIN).expect("reference");
         assert_eq!(gathered.shape, expected.shape);
-        assert_eq!(gathered.data, expected.data);
+        assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -403,7 +403,7 @@ pub(crate) mod tests {
         let expected =
             apply_imfilter_tensor(&image, &kernel, &options, FILTER2_BUILTIN).expect("reference");
         assert_eq!(gathered.shape, expected.shape);
-        assert_eq!(gathered.data, expected.data);
+        assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -425,7 +425,7 @@ pub(crate) mod tests {
         let expected =
             apply_imfilter_tensor(&image, &kernel, &options, FILTER2_BUILTIN).expect("reference");
         assert_eq!(gathered.shape, expected.shape);
-        assert_eq!(gathered.data, expected.data);
+        assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -447,7 +447,7 @@ pub(crate) mod tests {
         let expected =
             apply_imfilter_tensor(&image, &kernel, &options, FILTER2_BUILTIN).expect("reference");
         assert_eq!(gathered.shape, expected.shape);
-        assert_eq!(gathered.data, expected.data);
+        assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -472,7 +472,10 @@ pub(crate) mod tests {
         let default_tensor = test_support::gather(default_value).expect("gather default");
         let corr_tensor = test_support::gather(corr_value).expect("gather corr");
         assert_eq!(default_tensor.shape, corr_tensor.shape);
-        assert_eq!(default_tensor.data, corr_tensor.data);
+        assert_eq!(
+            default_tensor.materialize_f64(),
+            corr_tensor.materialize_f64()
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -497,7 +500,10 @@ pub(crate) mod tests {
         let conv_first_tensor = test_support::gather(conv_first).expect("gather conv first");
         let shape_first_tensor = test_support::gather(shape_first).expect("gather shape first");
         assert_eq!(conv_first_tensor.shape, shape_first_tensor.shape);
-        assert_eq!(conv_first_tensor.data, shape_first_tensor.data);
+        assert_eq!(
+            conv_first_tensor.materialize_f64(),
+            shape_first_tensor.materialize_f64()
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -551,7 +557,7 @@ pub(crate) mod tests {
         .expect("expected logical reference");
 
         assert_eq!(gathered.shape, expected.shape);
-        assert_eq!(gathered.data, expected.data);
+        assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -580,7 +586,7 @@ pub(crate) mod tests {
             let kernel = tensor(vec![1.0, 0.0, -1.0, 2.0], 2, 2);
             let image = tensor(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
             let image_view = HostTensorView {
-                data: &image.data,
+                data: &image.materialize_f64(),
                 shape: &image.shape,
             };
             let image_handle = provider.upload(&image_view).expect("upload image");
@@ -599,7 +605,7 @@ pub(crate) mod tests {
             )
             .expect("ref");
             assert_eq!(gathered.shape, expected.shape);
-            assert_eq!(gathered.data, expected.data);
+            assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
         });
     }
 
@@ -610,11 +616,11 @@ pub(crate) mod tests {
             let kernel = tensor(vec![0.0, 1.0, -1.0, 0.0], 2, 2);
             let image = tensor(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
             let kernel_view = HostTensorView {
-                data: &kernel.data,
+                data: &kernel.materialize_f64(),
                 shape: &kernel.shape,
             };
             let image_view = HostTensorView {
-                data: &image.data,
+                data: &image.materialize_f64(),
                 shape: &image.shape,
             };
             let kernel_handle = provider.upload(&kernel_view).expect("upload kernel");
@@ -634,7 +640,7 @@ pub(crate) mod tests {
             )
             .expect("reference");
             assert_eq!(gathered.shape, expected.shape);
-            assert_eq!(gathered.data, expected.data);
+            assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
         });
     }
 
@@ -662,11 +668,11 @@ pub(crate) mod tests {
         );
 
         let kernel_view = HostTensorView {
-            data: &kernel.data,
+            data: &kernel.materialize_f64(),
             shape: &kernel.shape,
         };
         let image_view = HostTensorView {
-            data: &image.data,
+            data: &image.materialize_f64(),
             shape: &image.shape,
         };
 
@@ -690,12 +696,19 @@ pub(crate) mod tests {
         .expect("expected");
 
         assert_eq!(gpu_tensor.shape, expected.shape);
-        assert_eq!(gpu_tensor.data.len(), expected.data.len());
+        assert_eq!(
+            gpu_tensor.materialize_f64().len(),
+            expected.materialize_f64().len()
+        );
         let tol = match runmat_accelerate_api::provider().unwrap().precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (gpu, cpu) in gpu_tensor.data.iter().zip(expected.data.iter()) {
+        for (gpu, cpu) in gpu_tensor
+            .materialize_f64()
+            .iter()
+            .zip(expected.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < tol, "{gpu} vs {cpu}");
         }
 
@@ -728,11 +741,11 @@ pub(crate) mod tests {
         );
 
         let kernel_view = HostTensorView {
-            data: &kernel.data,
+            data: &kernel.materialize_f64(),
             shape: &kernel.shape,
         };
         let image_view = HostTensorView {
-            data: &image.data,
+            data: &image.materialize_f64(),
             shape: &image.shape,
         };
         let kernel_handle = provider.upload(&kernel_view).expect("upload kernel");
@@ -755,12 +768,19 @@ pub(crate) mod tests {
             .expect("expected host result");
 
         assert_eq!(gpu_tensor.shape, expected.shape);
-        assert_eq!(gpu_tensor.data.len(), expected.data.len());
+        assert_eq!(
+            gpu_tensor.materialize_f64().len(),
+            expected.materialize_f64().len()
+        );
         let tol = match runmat_accelerate_api::provider().unwrap().precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (gpu, cpu) in gpu_tensor.data.iter().zip(expected.data.iter()) {
+        for (gpu, cpu) in gpu_tensor
+            .materialize_f64()
+            .iter()
+            .zip(expected.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < tol, "{gpu} vs {cpu}");
         }
 

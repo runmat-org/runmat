@@ -1215,16 +1215,12 @@ mod tests {
 
     #[test]
     fn scalar_flag_accepts_typed_integer_tensor_scalars() {
-        let mut one =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![1]), vec![1, 1])
-                .expect("flag");
-        one.data.clear();
+        let one = Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![1]), vec![1, 1])
+            .expect("flag");
         assert_eq!(scalar_flag("mad", &Value::Tensor(one)).unwrap(), Some(1));
 
-        let mut two =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![2]), vec![1, 1])
-                .expect("flag");
-        two.data.clear();
+        let two = Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![2]), vec![1, 1])
+            .expect("flag");
         assert!(scalar_flag("mad", &Value::Tensor(two)).is_err());
     }
 
@@ -1238,20 +1234,18 @@ mod tests {
     fn tensor_values(value: Value) -> (Vec<f64>, Vec<usize>) {
         match value {
             Value::Num(num) => (vec![num], vec![1, 1]),
-            Value::Tensor(tensor) => (tensor.data, tensor.shape),
+            Value::Tensor(tensor) => (tensor.materialize_f64(), tensor.shape),
             other => panic!("expected numeric output, got {other:?}"),
         }
     }
 
     fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
         Value::Tensor(tensor)
     }
 
     fn mirrorless_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
         Value::Tensor(tensor)
     }
 

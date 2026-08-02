@@ -1275,9 +1275,8 @@ mod tests {
 
     #[test]
     fn optimoptions_numeric_options_read_typed_integer_storage_exactly() {
-        let mut max_iter =
+        let max_iter =
             Tensor::new_integer(IntegerStorage::U16(vec![5]), vec![1, 1]).expect("MaxIter");
-        max_iter.data = vec![0.0];
 
         let options = struct_result(
             run_optimoptions(vec![
@@ -1292,9 +1291,8 @@ mod tests {
 
     #[test]
     fn optimoptions_rejects_negative_typed_integer_options_exactly() {
-        let mut max_iter =
+        let max_iter =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("MaxIter");
-        max_iter.data = vec![5.0];
 
         let err = run_optimoptions(vec![
             Value::from("fsolve"),
@@ -1310,9 +1308,8 @@ mod tests {
 
     #[test]
     fn optimoptions_logical_options_read_typed_integer_storage_exactly() {
-        let mut gradient = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1])
+        let gradient = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1])
             .expect("SpecifyObjectiveGradient");
-        gradient.data.clear();
 
         let options = struct_result(
             run_optimoptions(vec![
@@ -1330,10 +1327,9 @@ mod tests {
 
     #[test]
     fn optimoptions_rejects_wide_typed_integer_logicals_despite_poisoned_mirror() {
-        let mut gradient =
+        let gradient =
             Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
                 .expect("SpecifyObjectiveGradient");
-        gradient.data = vec![1.0];
 
         let err = run_optimoptions(vec![
             Value::from("fminunc"),

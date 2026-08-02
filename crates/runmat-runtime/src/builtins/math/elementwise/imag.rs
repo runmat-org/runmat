@@ -298,12 +298,11 @@ pub(crate) mod tests {
 
     #[test]
     fn imag_typed_real_integer_tensor_zeros_from_storage_without_mirror() {
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![1, 9_223_372_036_854_775_809, u64::MAX]),
             vec![1, 3],
         )
         .expect("typed integer tensor");
-        tensor.data.clear();
 
         let result = imag_builtin(Value::Tensor(tensor)).expect("imag");
         let Value::Tensor(output) = result else {
@@ -324,7 +323,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![4, 1]);
-                assert!(t.data.iter().all(|v| *v == 0.0));
+                assert!(t.materialize_f64().iter().all(|v| *v == 0.0));
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -338,7 +337,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 3]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -353,7 +352,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                assert_eq!(t.data, vec![2.0, 4.5]);
+                assert_eq!(t.materialize_f64(), vec![2.0, 4.5]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -367,7 +366,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![0.0; 4]);
+                assert_eq!(t.materialize_f64(), vec![0.0; 4]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -381,7 +380,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data, vec![0.0, 0.0]);
+                assert_eq!(t.materialize_f64(), vec![0.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -411,14 +410,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = imag_builtin(Value::GpuTensor(handle)).expect("imag");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![4, 1]);
-            assert!(gathered.data.iter().all(|v| *v == 0.0));
+            assert!(gathered.materialize_f64().iter().all(|v| *v == 0.0));
         });
     }
 
@@ -438,7 +437,7 @@ pub(crate) mod tests {
             );
             let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
             assert_eq!(gathered.shape, vec![2, 1]);
-            assert_eq!(gathered.data, vec![2.0, 4.5]);
+            assert_eq!(gathered.materialize_f64(), vec![2.0, 4.5]);
         });
     }
 
@@ -452,7 +451,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![0.0, 1.0, -2.5, 4.0], vec![4, 1]).unwrap();
         let cpu = imag_real(Value::Tensor(tensor.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let h = runmat_accelerate_api::provider()
@@ -467,8 +466,15 @@ pub(crate) mod tests {
             other => panic!("unexpected cpu value {other:?}"),
         };
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        assert_eq!(gathered.data.len(), cpu_tensor.data.len());
-        for (g, c) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        assert_eq!(
+            gathered.materialize_f64().len(),
+            cpu_tensor.materialize_f64().len()
+        );
+        for (g, c) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((g - c).abs() < 1e-12, "imag mismatch {} vs {}", g, c);
         }
     }
@@ -491,6 +497,6 @@ pub(crate) mod tests {
             runmat_accelerate_api::GpuTensorStorage::Real
         );
         let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
-        assert_eq!(gathered.data, vec![2.0, 4.5]);
+        assert_eq!(gathered.materialize_f64(), vec![2.0, 4.5]);
     }
 }

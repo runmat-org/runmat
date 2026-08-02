@@ -1231,11 +1231,9 @@ mod tests {
 
     fn poisoned_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         let is_scalar = shape.iter().product::<usize>() == 1;
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         if is_scalar {
-            tensor.data.clear();
         } else {
-            tensor.data.fill(f64::NAN);
         }
         Value::Tensor(tensor)
     }

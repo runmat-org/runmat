@@ -936,14 +936,12 @@ mod tests {
     use runmat_builtins::{CellArray, IntegerStorage};
 
     fn poisoned_integer_scalar(storage: IntegerStorage) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
         Value::Tensor(tensor)
     }
 
     fn poisoned_integer_vector(storage: IntegerStorage, cols: usize) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![1, cols]).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, vec![1, cols]).expect("integer tensor");
         Value::Tensor(tensor)
     }
 
@@ -1092,10 +1090,10 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(indices.shape, vec![2, 2]);
-        assert_eq!(indices.data[0], 2.0);
-        assert!(indices.data[1].is_nan());
-        assert_eq!(indices.data[2], 1.0);
-        assert_eq!(indices.data[3], 1.0);
+        assert_eq!(indices.materialize_f64()[0], 2.0);
+        assert!(indices.materialize_f64()[1].is_nan());
+        assert_eq!(indices.materialize_f64()[2], 1.0);
+        assert_eq!(indices.materialize_f64()[3], 1.0);
     }
 
     #[tokio::test]

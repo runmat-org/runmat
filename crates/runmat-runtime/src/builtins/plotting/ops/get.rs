@@ -303,7 +303,9 @@ mod tests {
         let scale = get_builtin(vec![Value::Num(ax), Value::String("XScale".into())]).unwrap();
         let grid = get_builtin(vec![Value::Num(ax), Value::String("Grid".into())]).unwrap();
         assert_eq!(
-            runmat_builtins::Tensor::try_from(&xlim).unwrap().data,
+            runmat_builtins::Tensor::try_from(&xlim)
+                .unwrap()
+                .materialize_f64(),
             vec![1.0, 5.0]
         );
         assert_eq!(scale, Value::String("log".into()));

@@ -445,8 +445,7 @@ mod tests {
     }
 
     fn cleared_int_value(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
         Value::Tensor(tensor)
     }
 
@@ -543,10 +542,10 @@ mod tests {
         let Value::Tensor(handles) = output else {
             panic!("expected scatter matrix");
         };
-        assert!(handles.data[1].is_finite());
+        assert!(handles.materialize_f64()[1].is_finite());
         assert_eq!(
             get_builtin(vec![
-                Value::Num(handles.data[1]),
+                Value::Num(handles.materialize_f64()[1]),
                 Value::String("Marker".into())
             ])
             .unwrap(),
@@ -602,14 +601,14 @@ mod tests {
         let Value::Tensor(tensor) = value else {
             panic!("expected tensor");
         };
-        tensor.data[0]
+        tensor.materialize_f64()[0]
     }
 
-    fn tensor_data(value: &Value) -> &[f64] {
+    fn tensor_data(value: &Value) -> Vec<f64> {
         let Value::Tensor(tensor) = value else {
             panic!("expected tensor");
         };
-        &tensor.data
+        tensor.materialize_f64()
     }
 
     fn numeric_scalar(value: &Value) -> f64 {

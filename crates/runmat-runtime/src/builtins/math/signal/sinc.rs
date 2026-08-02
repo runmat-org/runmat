@@ -555,7 +555,7 @@ mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 6]);
-                assert_eq!(out.data, vec![0.0; 6]);
+                assert_eq!(out.materialize_f64(), vec![0.0; 6]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -592,7 +592,7 @@ mod tests {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 4]);
                 let expected = [0.0, 1.0, 0.0, 2.0 / std::f64::consts::PI];
-                for (got, want) in out.data.iter().zip(expected) {
+                for (got, want) in out.materialize_f64().iter().zip(expected) {
                     assert_close(*got, want);
                 }
             }
@@ -693,7 +693,7 @@ mod tests {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 3]);
                 let expected = [1.0, 2.0 / std::f64::consts::PI, 0.0];
-                for (got, want) in out.data.iter().zip(expected) {
+                for (got, want) in out.materialize_f64().iter().zip(expected) {
                     assert_close(*got, want);
                 }
             }
@@ -766,7 +766,7 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 0.5, 1.0], vec![1, 3]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -778,7 +778,7 @@ mod tests {
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 3]);
             let expected = [1.0, 2.0 / std::f64::consts::PI, 0.0];
-            for (got, want) in gathered.data.iter().zip(expected) {
+            for (got, want) in gathered.materialize_f64().iter().zip(expected) {
                 assert_close(*got, want);
             }
         });
@@ -826,7 +826,7 @@ mod tests {
         let tensor = Tensor::new(vec![0.0, 0.5, 1.0, 1.25, 2.0], vec![1, 5]).unwrap();
         let cpu = sinc_real(Value::Tensor(tensor.clone())).expect("cpu sinc");
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()
@@ -841,7 +841,11 @@ mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (got, want) in gathered.data.iter().zip(expected.data.iter()) {
+        for (got, want) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(expected.materialize_f64().iter())
+        {
             assert!((got - want).abs() < tol, "|{got} - {want}| >= {tol}");
         }
     }

@@ -384,9 +384,8 @@ mod tests {
 
     #[test]
     fn tick_label_parser_accepts_empty_typed_integer_tensor_without_mirror() {
-        let mut empty =
+        let empty =
             Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 0]).expect("empty");
-        empty.data.clear();
 
         assert_eq!(
             labels_from_value(&Value::Tensor(empty), "xticklabels").expect("labels"),

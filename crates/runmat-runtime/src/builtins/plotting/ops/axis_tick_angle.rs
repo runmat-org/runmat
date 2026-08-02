@@ -186,8 +186,7 @@ mod tests {
 
     #[test]
     fn axis_tick_angle_scalar_reads_typed_integer_storage_exactly() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::I16(vec![45]), vec![1, 1]).unwrap();
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![45]), vec![1, 1]).unwrap();
 
         assert_eq!(scalar_numeric_value(&Value::Tensor(tensor)), Some(45.0));
     }

@@ -1308,12 +1308,11 @@ mod tests {
 
     #[test]
     fn stackedplot_numeric_vector_reads_typed_integer_storage_exactly() {
-        let mut x = Tensor::new_integer(
+        let x = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U16(vec![1, 2, 3]),
             vec![1, 3],
         )
         .expect("typed x vector");
-        x.data.clear();
 
         assert_eq!(
             numeric_vector(&Value::Tensor(x), "X").expect("numeric vector"),
@@ -1323,12 +1322,11 @@ mod tests {
 
     #[test]
     fn stackedplot_columns_reads_typed_integer_storage_exactly() {
-        let mut y = Tensor::new_integer(
+        let y = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I16(vec![10, 20, 30, 40]),
             vec![2, 2],
         )
         .expect("typed y matrix");
-        y.data.clear();
 
         assert_eq!(
             tensor_plot_columns(&y).expect("plot columns"),
@@ -1416,7 +1414,7 @@ mod tests {
         .unwrap();
         let x = get_builtin(vec![Value::Num(handle), Value::String("XData".into())]).unwrap();
         match x {
-            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![10.0, 20.0, 30.0]),
+            Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![10.0, 20.0, 30.0]),
             other => panic!("unexpected XData {other:?}"),
         }
     }

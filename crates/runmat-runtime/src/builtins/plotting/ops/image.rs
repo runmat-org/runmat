@@ -612,12 +612,11 @@ mod tests {
     }
 
     fn typed_truecolor_tensor() -> Tensor {
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             IntegerStorage::U8(vec![255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255]),
             vec![2, 2, 3],
         )
         .expect("typed truecolor");
-        tensor.data.clear();
         tensor
     }
 

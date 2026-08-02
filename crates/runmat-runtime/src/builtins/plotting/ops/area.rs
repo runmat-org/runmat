@@ -779,12 +779,11 @@ mod tests {
 
     #[test]
     fn area_vector_from_tensor_reads_typed_integer_storage_exactly() {
-        let mut x = Tensor::new_integer(
+        let x = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I16(vec![-1, 0, 1]),
             vec![1, 3],
         )
         .expect("typed area x vector");
-        x.data.clear();
 
         assert_eq!(
             vector_from_tensor(&x).expect("area vector"),
@@ -795,12 +794,11 @@ mod tests {
 
     #[test]
     fn area_series_reads_typed_integer_storage_without_mirror() {
-        let mut y = Tensor::new_integer(
+        let y = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![1, 2, 3, 4]),
             vec![2, 2],
         )
         .expect("typed area matrix");
-        y.data.clear();
 
         let series = area_series_from_tensor(vec![1.0, 2.0], &y).expect("area series");
         assert_eq!(series[0], (vec![1.0, 2.0], None));

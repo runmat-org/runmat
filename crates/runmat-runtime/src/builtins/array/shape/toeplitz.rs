@@ -500,7 +500,7 @@ mod tests {
         };
         assert_eq!(tensor.shape, vec![3, 3]);
         assert_eq!(
-            tensor.data,
+            tensor.materialize_f64(),
             vec![1.0, 2.0, 3.0, 2.0, 1.0, 2.0, 3.0, 2.0, 1.0]
         );
     }
@@ -516,7 +516,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(tensor.shape, vec![3, 2]);
-        assert_eq!(tensor.data, vec![1.0, 2.0, 3.0, 4.0, 1.0, 2.0]);
+        assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0, 1.0, 2.0]);
     }
 
     #[test]
@@ -575,8 +575,7 @@ mod tests {
                     values[0].clone(),
                 ])
                 .expect("expected toeplitz storage");
-            let mut input = Tensor::new_integer(storage, vec![1, 3]).expect("integer vector");
-            input.data.clear();
+            let input = Tensor::new_integer(storage, vec![1, 3]).expect("integer vector");
             let Value::Tensor(output) =
                 block_on(toeplitz_builtin(vec![Value::Tensor(input)])).expect("toeplitz")
             else {
@@ -586,15 +585,13 @@ mod tests {
             assert_eq!(output.integer_storage(), Some(&expected));
         }
 
-        let mut column = Tensor::new_integer(IntegerStorage::U64(vec![7, u64::MAX]), vec![2, 1])
+        let column = Tensor::new_integer(IntegerStorage::U64(vec![7, u64::MAX]), vec![2, 1])
             .expect("column");
-        column.data.clear();
-        let mut row = Tensor::new_integer(
+        let row = Tensor::new_integer(
             IntegerStorage::U64(vec![7, 9_007_199_254_740_993]),
             vec![1, 2],
         )
         .expect("row");
-        row.data.clear();
         let Value::Tensor(output) = block_on(toeplitz_builtin(vec![
             Value::Tensor(column),
             Value::Tensor(row),

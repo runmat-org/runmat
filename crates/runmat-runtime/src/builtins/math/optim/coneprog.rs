@@ -1625,8 +1625,7 @@ mod tests {
     }
 
     fn poisoned_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         Value::Tensor(tensor)
     }
 
@@ -1682,8 +1681,8 @@ mod tests {
         let Value::Tensor(x) = &outputs[0] else {
             panic!("expected x");
         };
-        assert!((x.data[0] - 0.75).abs() < 1.0e-3, "{x:?}");
-        assert!(x.data[1].abs() < 1.0e-3, "{x:?}");
+        assert!((x.materialize_f64()[0] - 0.75).abs() < 1.0e-3, "{x:?}");
+        assert!(x.materialize_f64()[1].abs() < 1.0e-3, "{x:?}");
         assert!(matches!(&outputs[1], Value::Num(fval) if (*fval + 0.75).abs() < 1.0e-3));
         assert!(matches!(&outputs[2], Value::Num(flag) if *flag == 1.0));
         assert!(matches!(&outputs[3], Value::Struct(st) if st.fields.contains_key("algorithm")));
@@ -1693,7 +1692,10 @@ mod tests {
         let Value::Tensor(ineqlin) = lambda.fields.get("ineqlin").unwrap() else {
             panic!("expected ineqlin multipliers");
         };
-        assert!((ineqlin.data[0] - 1.0).abs() < 1.0e-2, "{ineqlin:?}");
+        assert!(
+            (ineqlin.materialize_f64()[0] - 1.0).abs() < 1.0e-2,
+            "{ineqlin:?}"
+        );
         assert!(lambda.fields.contains_key("soc"));
     }
 
@@ -1715,7 +1717,7 @@ mod tests {
         let Value::Tensor(x) = &outputs[0] else {
             panic!("expected x");
         };
-        assert!((x.data[1] + 0.25).abs() < 1.0e-3, "{x:?}");
+        assert!((x.materialize_f64()[1] + 0.25).abs() < 1.0e-3, "{x:?}");
         assert!(matches!(&outputs[2], Value::Num(flag) if *flag == 1.0));
     }
 
@@ -1763,7 +1765,7 @@ mod tests {
             ],
             4,
         );
-        assert!(matches!(&outputs[0], Value::Tensor(t) if t.data.is_empty()));
+        assert!(matches!(&outputs[0], Value::Tensor(t) if t.materialize_f64().is_empty()));
         assert!(matches!(&outputs[2], Value::Num(flag) if *flag == -2.0));
     }
 

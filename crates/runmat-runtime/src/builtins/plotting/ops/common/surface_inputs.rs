@@ -114,12 +114,12 @@ mod tests {
         let (x, y, z_out, rest) = parse_surface_call_args(vec![z.clone()], "surf").unwrap();
         let x = Tensor::try_from(&x).unwrap();
         let y = Tensor::try_from(&y).unwrap();
-        assert_eq!(x.data, vec![1.0, 2.0]);
-        assert_eq!(y.data, vec![1.0, 2.0]);
+        assert_eq!(x.materialize_f64(), vec![1.0, 2.0]);
+        assert_eq!(y.materialize_f64(), vec![1.0, 2.0]);
         assert!(rest.is_empty());
         assert_eq!(
-            Tensor::try_from(&z_out).unwrap().data,
-            Tensor::try_from(&z).unwrap().data
+            Tensor::try_from(&z_out).unwrap().materialize_f64(),
+            Tensor::try_from(&z).unwrap().materialize_f64()
         );
     }
 
@@ -131,8 +131,8 @@ mod tests {
         let (x, y, _, rest) = parse_surface_call_args_matlab_xy(vec![z], "surf").unwrap();
         let x = Tensor::try_from(&x).unwrap();
         let y = Tensor::try_from(&y).unwrap();
-        assert_eq!(x.data, vec![1.0, 2.0, 3.0, 4.0]);
-        assert_eq!(y.data, vec![1.0, 2.0, 3.0]);
+        assert_eq!(x.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(y.materialize_f64(), vec![1.0, 2.0, 3.0]);
         assert!(rest.is_empty());
     }
 
@@ -172,12 +172,11 @@ mod tests {
     }
 
     fn int_matrix(values: Vec<i16>, rows: usize, cols: usize) -> Tensor {
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I16(values),
             vec![rows, cols],
         )
         .expect("integer matrix");
-        tensor.data.clear();
         tensor
     }
 

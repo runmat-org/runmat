@@ -235,7 +235,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(out.shape, vec![1, 5]);
-        assert_eq!(out.data, vec![1.0, 0.0, -1.0, 0.0, 1.0]);
+        assert_eq!(out.materialize_f64(), vec![1.0, 0.0, -1.0, 0.0, 1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -246,7 +246,7 @@ mod tests {
         let Value::Tensor(out) = call(Value::LogicalArray(logical)).unwrap() else {
             panic!("expected tensor");
         };
-        assert_eq!(out.data, vec![1.0, -1.0]);
+        assert_eq!(out.materialize_f64(), vec![1.0, -1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -275,31 +275,30 @@ mod tests {
             let tensor = Tensor::new(vec![0.0, 0.5, 1.0], vec![1, 3]).unwrap();
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &tensor.data,
+                    data: &tensor.materialize_f64(),
                     shape: &tensor.shape,
                 })
                 .expect("upload");
             let Value::Tensor(out) = call(Value::GpuTensor(handle)).unwrap() else {
                 panic!("expected tensor");
             };
-            assert_eq!(out.data, vec![1.0, 0.0, -1.0]);
+            assert_eq!(out.materialize_f64(), vec![1.0, 0.0, -1.0]);
         });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn cospi_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I16(vec![-1, 0, 2]),
             vec![3, 1],
         )
         .expect("integer tensor");
-        tensor.data.fill(f64::NAN);
 
         match call(Value::Tensor(tensor)).expect("cospi") {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 1]);
-                assert_eq!(out.data, vec![-1.0, 1.0, 1.0]);
+                assert_eq!(out.materialize_f64(), vec![-1.0, 1.0, 1.0]);
                 assert!(out.integer_storage().is_none());
             }
             other => panic!("expected tensor result, got {other:?}"),

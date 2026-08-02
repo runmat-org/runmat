@@ -383,7 +383,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                let mut roots = t.data;
+                let mut roots = t.materialize_f64();
                 roots.sort_by(|a, b| a.partial_cmp(b).unwrap());
                 assert!((roots[0] - 1.0).abs() < 1e-10);
                 assert!((roots[1] - 2.0).abs() < 1e-10);
@@ -399,7 +399,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                let mut roots = t.data;
+                let mut roots = t.materialize_f64();
                 roots.sort_by(|a, b| a.partial_cmp(b).unwrap());
                 assert!((roots[0] - 1.0).abs() < 1e-10);
                 assert!((roots[1] - 2.0).abs() < 1e-10);
@@ -416,7 +416,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 1]);
-                assert!((t.data[0] - 4.0).abs() < 1e-10);
+                assert!((t.materialize_f64()[0] - 4.0).abs() < 1e-10);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -450,7 +450,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![4, 1]);
-                for &r in &t.data {
+                for &r in &t.materialize_f64() {
                     assert!(r.abs() < 1e-8);
                 }
             }
@@ -493,7 +493,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 1]);
-                assert!(t.data[0].abs() < 1e-12);
+                assert!(t.materialize_f64()[0].abs() < 1e-12);
             }
             other => panic!("expected real tensor, got {other:?}"),
         }
@@ -506,7 +506,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 1]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
         }
@@ -529,7 +529,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 1]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
         }
@@ -541,14 +541,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let coeffs = Tensor::new(vec![1.0, 0.0, -9.0, 0.0], vec![4, 1]).unwrap();
             let view = HostTensorView {
-                data: &coeffs.data,
+                data: &coeffs.materialize_f64(),
                 shape: &coeffs.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = roots_builtin(Value::GpuTensor(handle)).expect("roots");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![3, 1]);
-            let mut roots = gathered.data;
+            let mut roots = gathered.materialize_f64();
             roots.sort_by(|a, b| a.partial_cmp(b).unwrap());
             assert!((roots[0] + 3.0).abs() < 1e-9);
             assert!((roots[1]).abs() < 1e-9);

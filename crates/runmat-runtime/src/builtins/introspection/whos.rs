@@ -851,7 +851,7 @@ pub(crate) mod tests {
             .fields
             .get("size")
             .and_then(|value| match value {
-                Value::Tensor(t) => Some(t.data.clone()),
+                Value::Tensor(t) => Some(t.materialize_f64().clone()),
                 _ => None,
             })
     }
@@ -1147,7 +1147,7 @@ pub(crate) mod tests {
                 runmat_accelerate_api::ProviderPrecision::F32 => 4.0,
                 runmat_accelerate_api::ProviderPrecision::F64 => 8.0,
             };
-            assert_eq!(bytes, elem * tensor.data.len() as f64);
+            assert_eq!(bytes, elem * tensor.materialize_f64().len() as f64);
         });
     }
 
@@ -1176,7 +1176,7 @@ pub(crate) mod tests {
             let entries = structs_from_value(value);
             assert_eq!(entries.len(), 1);
             let bytes = field_bytes(&entries[0]).unwrap();
-            assert_eq!(bytes, tensor.data.len() as f64);
+            assert_eq!(bytes, tensor.materialize_f64().len() as f64);
         });
     }
 
@@ -1207,7 +1207,7 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F32 => 4.0,
             runmat_accelerate_api::ProviderPrecision::F64 => 8.0,
         };
-        let expected = elem * tensor.data.len() as f64;
+        let expected = elem * tensor.materialize_f64().len() as f64;
         assert!((bytes - expected).abs() < 1e-6);
     }
 
@@ -1284,8 +1284,7 @@ pub(crate) mod tests {
         let expected = [2, 4, 8, 16, 2, 4, 8, 16];
 
         for (storage, expected) in storages.into_iter().zip(expected) {
-            let mut tensor = Tensor::new_integer(storage, vec![1, 2]).expect("integer tensor");
-            tensor.data.clear();
+            let tensor = Tensor::new_integer(storage, vec![1, 2]).expect("integer tensor");
             assert_eq!(
                 value_memory_bytes(&Value::Tensor(tensor), &mut HashSet::new()).expect("bytes"),
                 expected

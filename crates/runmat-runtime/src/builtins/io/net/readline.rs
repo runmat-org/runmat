@@ -490,7 +490,7 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 0]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected empty 0x0 double, got {other:?}"),
         }
@@ -525,7 +525,7 @@ pub(crate) mod tests {
         match first {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 0]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected timeout as empty 0x0 double, got {other:?}"),
         }

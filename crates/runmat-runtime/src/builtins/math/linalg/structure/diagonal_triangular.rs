@@ -738,12 +738,11 @@ mod tests {
 
     #[test]
     fn dense_structure_predicates_read_typed_integer_storage_exactly() {
-        let mut lower = Tensor::new_integer(
+        let lower = Tensor::new_integer(
             IntegerStorage::I16(vec![1, 2, 3, 0, 4, 5, 0, 0, 6]),
             vec![3, 3],
         )
         .unwrap();
-        lower.data.clear();
 
         assert!(!expect_bool(
             call_isdiag(Value::Tensor(lower.clone())).unwrap()
@@ -772,12 +771,11 @@ mod tests {
 
     #[test]
     fn dense_structure_predicates_read_wide_integer_storage_without_float_mirror() {
-        let mut upper = Tensor::new_integer(
+        let upper = Tensor::new_integer(
             IntegerStorage::U64(vec![1, 0, 0, u64::MAX, 1_u64 << 63, 0, 0, 1, 1]),
             vec![3, 3],
         )
         .expect("upper triangular integer matrix");
-        upper.data.fill(0.0);
 
         assert!(!expect_bool(
             call_isdiag(Value::Tensor(upper.clone())).unwrap()
@@ -1097,7 +1095,7 @@ mod tests {
             let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &tensor.data,
+                    data: &tensor.materialize_f64(),
                     shape: &tensor.shape,
                 })
                 .unwrap();
@@ -1125,7 +1123,7 @@ mod tests {
         .unwrap();
         let handle = provider
             .upload(&HostTensorView {
-                data: &lower.data,
+                data: &lower.materialize_f64(),
                 shape: &lower.shape,
             })
             .expect("upload lower");

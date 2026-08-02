@@ -607,8 +607,7 @@ mod tests {
 
     fn typed_integer_range(storage: IntegerStorage) -> Value {
         let len = storage.len();
-        let mut tensor = Tensor::new_integer(storage, vec![1, len]).expect("integer range");
-        tensor.data = vec![-999.0; len];
+        let tensor = Tensor::new_integer(storage, vec![1, len]).expect("integer range");
         Value::Tensor(tensor)
     }
 
@@ -690,7 +689,7 @@ mod tests {
             range.integer_storage(),
             Some(&IntegerStorage::I16(vec![0, 1000]))
         );
-        assert_eq!(range.data, vec![-999.0, -999.0]);
+        assert_eq!(range.materialize_f64(), vec![-999.0, -999.0]);
     }
 
     #[test]

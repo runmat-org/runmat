@@ -280,7 +280,7 @@ mod tests {
             -1.3877787807814457e-17,
         ];
         assert_eq!(t.shape, vec![8, 1]);
-        for (got, want) in t.data.iter().zip(expected.iter()) {
+        for (got, want) in t.materialize_f64().iter().zip(expected.iter()) {
             assert!((got - want).abs() < 1e-12, "got {got}, want {want}");
         }
     }
@@ -308,14 +308,14 @@ mod tests {
         )
         .expect("gather blackman(0)");
         assert_eq!(zero.shape, vec![0, 1]);
-        assert!(zero.data.is_empty());
+        assert!(zero.materialize_f64().is_empty());
 
         let one = test_support::gather(
             block_on(blackman_builtin(Value::Num(1.0), Vec::new())).expect("blackman(1)"),
         )
         .expect("gather blackman(1)");
         assert_eq!(one.shape, vec![1, 1]);
-        assert_eq!(one.data, vec![1.0]);
+        assert_eq!(one.materialize_f64(), vec![1.0]);
     }
 
     #[test]
@@ -346,7 +346,7 @@ mod tests {
         )
         .expect("gather blackman periodic");
         assert_eq!(periodic.shape, vec![4, 1]);
-        assert!((periodic.data[1] - 0.34).abs() < 1e-12);
+        assert!((periodic.materialize_f64()[1] - 0.34).abs() < 1e-12);
 
         let single = test_support::gather(
             block_on(blackman_builtin(
@@ -356,7 +356,7 @@ mod tests {
             .expect("blackman single"),
         )
         .expect("gather blackman single");
-        assert_eq!(single.dtype, runmat_builtins::NumericDType::F32);
+        assert_eq!(single.numeric_dtype(), runmat_builtins::NumericDType::F32);
     }
 
     #[test]
@@ -366,7 +366,7 @@ mod tests {
                 block_on(blackman_builtin(Value::Num(8.0), Vec::new())).expect("blackman gpu");
             let tensor = test_support::gather(value).expect("gather");
             assert_eq!(tensor.shape, vec![8, 1]);
-            assert!((tensor.data[3] - 0.9203636180999081).abs() < 1e-12);
+            assert!((tensor.materialize_f64()[3] - 0.9203636180999081).abs() < 1e-12);
 
             let periodic_one = block_on(blackman_builtin(
                 Value::Num(1.0),
@@ -374,7 +374,7 @@ mod tests {
             ))
             .expect("blackman periodic len1 gpu");
             let periodic_one = test_support::gather(periodic_one).expect("gather periodic len1");
-            assert_eq!(periodic_one.data, vec![1.0]);
+            assert_eq!(periodic_one.materialize_f64(), vec![1.0]);
         });
     }
 }

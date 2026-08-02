@@ -398,12 +398,10 @@ mod tests {
     #[test]
     fn arity_bounds_read_typed_integer_tensor_storage_exactly() {
         let _guard = replace_call_counts(vec![(2, 1)]);
-        let mut min =
+        let min =
             Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("integer min");
-        let mut max =
+        let max =
             Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("integer max");
-        min.data.clear();
-        max.data.clear();
 
         let value = dispatch_narginchk(vec![Value::Tensor(min), Value::Tensor(max)])
             .expect("narginchk succeeds");

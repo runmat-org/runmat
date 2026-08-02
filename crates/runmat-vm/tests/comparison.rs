@@ -1,4 +1,4 @@
-use runmat_builtins::{IntValue, LogicalArray, Tensor, Value};
+use runmat_builtins::{IntValue, LogicalArray, Value};
 
 #[path = "support/mod.rs"]
 mod test_helpers;
@@ -21,11 +21,14 @@ fn tensor_scalar_gt_mask_feeds_elementwise_multiply() {
         Value::LogicalArray(LogicalArray { data, shape })
             if shape == &vec![2, 2] && data == &vec![0, 1, 1, 0]
     )));
-    assert!(vars.iter().any(|value| matches!(
-        value,
-        Value::Tensor(Tensor { data, shape, .. })
-            if shape == &vec![2, 2] && data == &vec![0.0, 30.0, 20.0, 0.0]
-    )));
+    assert!(vars.iter().any(|value| {
+        matches!(
+            value,
+            Value::Tensor(tensor)
+                if tensor.shape == vec![2, 2]
+                    && tensor.materialize_f64() == vec![0.0, 30.0, 20.0, 0.0]
+        )
+    }));
 }
 
 #[test]

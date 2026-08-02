@@ -2,7 +2,7 @@
 mod test_helpers;
 
 use futures::executor::block_on;
-use runmat_builtins::{IntegerStorage, NumericDType, Tensor, Value};
+use runmat_builtins::{IntegerStorage, Tensor, Value};
 use test_helpers::execute_source;
 
 fn unique_path(name: &str) -> std::path::PathBuf {
@@ -13,14 +13,7 @@ fn unique_path(name: &str) -> std::path::PathBuf {
 }
 
 fn tensor(data: &[f64], shape: Vec<usize>) -> Value {
-    Value::Tensor(Tensor {
-        data: data.to_vec(),
-        integer_data: None,
-        shape: shape.clone(),
-        rows: *shape.first().unwrap_or(&1),
-        cols: *shape.get(1).unwrap_or(&data.len()),
-        dtype: NumericDType::F64,
-    })
+    Value::Tensor(Tensor::new(data.to_vec(), shape).expect("test tensor"))
 }
 
 fn write_sample(path: &std::path::Path) {

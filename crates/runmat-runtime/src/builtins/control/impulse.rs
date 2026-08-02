@@ -866,14 +866,13 @@ mod tests {
 
     fn tensor_data(value: Value) -> Vec<f64> {
         match value {
-            Value::Tensor(tensor) => tensor.data,
+            Value::Tensor(tensor) => tensor.materialize_f64(),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
 
     fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         Value::Tensor(tensor)
     }
 
@@ -931,7 +930,7 @@ mod tests {
         match &outputs[1] {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 1]);
-                assert_eq!(tensor.data, vec![0.0, 0.1]);
+                assert_eq!(tensor.materialize_f64(), vec![0.0, 0.1]);
             }
             other => panic!("expected t tensor, got {other:?}"),
         }
@@ -1048,9 +1047,8 @@ mod tests {
             .properties
             .insert("OutputDelay".to_string(), Value::Num(0.0));
 
-        let mut final_time =
+        let final_time =
             Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("final time");
-        final_time.data.clear();
         let _guard = crate::output_count::push_output_count(Some(2));
         let result =
             run_impulse(Value::Object(object), vec![Value::Tensor(final_time)]).expect("impulse");

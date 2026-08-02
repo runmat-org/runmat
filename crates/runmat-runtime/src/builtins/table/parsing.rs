@@ -209,9 +209,8 @@ mod tests {
     #[test]
     fn table_usize_parsers_read_typed_integer_storage_exactly() {
         let exact = (1_u64 << 53) + 1;
-        let mut count =
+        let count =
             Tensor::new_integer(IntegerStorage::U64(vec![exact]), vec![1, 1]).expect("count");
-        count.data.fill(f64::NAN);
 
         let parsed = nonnegative_usize(&Value::Tensor(count), "head row count");
         if usize::BITS == 64 {
@@ -220,17 +219,15 @@ mod tests {
             assert!(parsed.is_err());
         }
 
-        let mut negative =
+        let negative =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("count");
-        negative.data.clear();
         assert!(nonnegative_usize(&Value::Tensor(negative), "head row count").is_err());
     }
 
     #[test]
     fn table_usize_parsers_ignore_poisoned_mirrors_for_every_integer_class() {
         for storage in integer_storages(&[2]) {
-            let mut count = Tensor::new_integer(storage, vec![1, 1]).expect("count");
-            count.data.fill(f64::NAN);
+            let count = Tensor::new_integer(storage, vec![1, 1]).expect("count");
             assert_eq!(
                 nonnegative_usize(&Value::Tensor(count), "count").unwrap(),
                 2
@@ -240,12 +237,11 @@ mod tests {
 
     #[test]
     fn option_empty_check_uses_typed_integer_storage_length() {
-        let mut scalar = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
-        scalar.data.clear();
+        let scalar = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
         assert!(!option_value_is_empty(&Value::Tensor(scalar)));
 
-        let mut empty = Tensor::new_integer(IntegerStorage::U8(Vec::new()), vec![0, 0]).unwrap();
-        empty.data.push(1.0);
+        let empty = Tensor::new_integer(IntegerStorage::U8(Vec::new()), vec![0, 0]).unwrap();
+        empty.materialize_f64().push(1.0);
         assert!(option_value_is_empty(&Value::Tensor(empty)));
     }
 

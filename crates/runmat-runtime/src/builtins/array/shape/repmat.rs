@@ -915,16 +915,13 @@ pub(crate) mod tests {
     #[test]
     fn repmat_parses_typed_integer_replication_factors_exactly() {
         let large = 9_007_199_254_740_993_u64;
-        let mut scalar = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).unwrap();
-        scalar.data.clear();
+        let scalar = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).unwrap();
         assert_eq!(
             block_on(parse_replication_scalar(&Value::Tensor(scalar))).unwrap(),
             large as usize
         );
 
-        let mut vector =
-            Tensor::new_integer(IntegerStorage::U64(vec![large, 0]), vec![1, 2]).unwrap();
-        vector.data.clear();
+        let vector = Tensor::new_integer(IntegerStorage::U64(vec![large, 0]), vec![1, 2]).unwrap();
         assert_eq!(
             block_on(parse_replication_vector(&Value::Tensor(vector))).unwrap(),
             vec![large as usize, 0]
@@ -938,12 +935,10 @@ pub(crate) mod tests {
 
     #[test]
     fn repmat_rejects_negative_typed_integer_replication_factors() {
-        let mut scalar = Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).unwrap();
-        scalar.data.clear();
+        let scalar = Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).unwrap();
         assert!(block_on(parse_replication_scalar(&Value::Tensor(scalar))).is_err());
 
-        let mut vector = Tensor::new_integer(IntegerStorage::I64(vec![2, -1]), vec![1, 2]).unwrap();
-        vector.data.clear();
+        let vector = Tensor::new_integer(IntegerStorage::I64(vec![2, -1]), vec![1, 2]).unwrap();
         assert!(block_on(parse_replication_vector(&Value::Tensor(vector))).is_err());
     }
 
@@ -1320,7 +1315,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1329,7 +1324,10 @@ pub(crate) mod tests {
                     .expect("repmat");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![4, 2]);
-            assert_eq!(gathered.data, vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0]);
+            assert_eq!(
+                gathered.materialize_f64(),
+                vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0]
+            );
         });
     }
 
@@ -1413,7 +1411,7 @@ pub(crate) mod tests {
         };
         let provider = runmat_accelerate_api::provider().expect("provider");
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
@@ -1424,6 +1422,6 @@ pub(crate) mod tests {
         .expect("repmat gpu");
         let gathered = test_support::gather(gpu_value).expect("gather");
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        assert_eq!(gathered.data, cpu_tensor.data);
+        assert_eq!(gathered.materialize_f64(), cpu_tensor.materialize_f64());
     }
 }

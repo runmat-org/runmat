@@ -768,12 +768,11 @@ pub(crate) mod tests {
 
     #[test]
     fn fprintf_format_tensor_reads_typed_integer_storage_exactly() {
-        let mut format = Tensor::new_integer(
+        let format = Tensor::new_integer(
             IntegerStorage::U16(vec![b'%' as u16, b'd' as u16]),
             vec![1, 2],
         )
         .expect("format tensor");
-        format.data.clear();
 
         assert_eq!(
             coerce_to_format_string(&Value::Tensor(format)).unwrap(),
@@ -783,9 +782,8 @@ pub(crate) mod tests {
 
     #[test]
     fn fprintf_fid_parser_reads_typed_integer_storage_exactly() {
-        let mut fid =
+        let fid =
             Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("fid tensor");
-        fid.data.clear();
         assert_eq!(parse_fid(&Value::Tensor(fid)).unwrap(), 7);
 
         let too_large =
@@ -807,8 +805,7 @@ pub(crate) mod tests {
         ];
 
         for storage in classes {
-            let mut fid = Tensor::new_integer(storage, vec![1, 1]).expect("typed fid");
-            fid.data = vec![f64::NAN];
+            let fid = Tensor::new_integer(storage, vec![1, 1]).expect("typed fid");
             assert_eq!(parse_fid(&Value::Tensor(fid)).unwrap(), 7);
         }
     }
@@ -887,7 +884,7 @@ pub(crate) mod tests {
 
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");

@@ -975,79 +975,70 @@ pub(crate) mod tests {
         let b = Tensor::new(vec![7.0, 9.0, 5.0], vec![1, 3]).unwrap();
         let eval = ismember_numeric_elements(a, b).expect("ismember");
         assert_eq!(eval.mask.data, vec![1, 1, 0, 1]);
-        assert_eq!(eval.loc.data, vec![3.0, 1.0, 0.0, 1.0]);
+        assert_eq!(eval.loc.materialize_f64(), vec![3.0, 1.0, 0.0, 1.0]);
     }
 
     #[test]
     fn integer_membership_uses_exact_values_for_elements_and_rows() {
-        let mut a = Tensor::new_integer(
+        let a = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993]),
             vec![3, 1],
         )
         .expect("input");
-        let mut b = Tensor::new_integer(
+        let b = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![0, u64::MAX]),
             vec![2, 1],
         )
         .expect("input");
-        a.data.clear();
-        b.data.clear();
         let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("ismember");
         assert_eq!(eval.mask.data, vec![1, 1, 0]);
-        assert_eq!(eval.loc.data, vec![2.0, 1.0, 0.0]);
+        assert_eq!(eval.loc.materialize_f64(), vec![2.0, 1.0, 0.0]);
 
-        let mut a = Tensor::new_integer(
+        let a = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I64(vec![i64::MAX, i64::MIN, 1, 2]),
             vec![2, 2],
         )
         .expect("input");
-        let mut b = Tensor::new_integer(
+        let b = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I64(vec![i64::MIN, 7, 2, 8]),
             vec![2, 2],
         )
         .expect("input");
-        a.data.clear();
-        b.data.clear();
         let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
             .expect("ismember rows");
         assert_eq!(eval.mask.data, vec![0, 1]);
-        assert_eq!(eval.loc.data, vec![0.0, 1.0]);
+        assert_eq!(eval.loc.materialize_f64(), vec![0.0, 1.0]);
     }
 
     #[test]
     fn mixed_integer_membership_reads_exact_storage_without_mirror() {
-        let mut a = Tensor::new_integer(
+        let a = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U16(vec![7, 2, 9, 7]),
             vec![4, 1],
         )
         .expect("input");
-        let mut b =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::I32(vec![2, 7]), vec![2, 1])
-                .expect("input");
-        a.data.clear();
-        b.data.clear();
+        let b = Tensor::new_integer(runmat_builtins::IntegerStorage::I32(vec![2, 7]), vec![2, 1])
+            .expect("input");
 
         let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("ismember");
         assert_eq!(eval.mask.data, vec![1, 1, 0, 1]);
-        assert_eq!(eval.loc.data, vec![2.0, 1.0, 0.0, 2.0]);
+        assert_eq!(eval.loc.materialize_f64(), vec![2.0, 1.0, 0.0, 2.0]);
 
-        let mut a = Tensor::new_integer(
+        let a = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U16(vec![1, 3, 2, 4]),
             vec![2, 2],
         )
         .expect("input");
-        let mut b = Tensor::new_integer(
+        let b = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I32(vec![3, 5, 4, 6]),
             vec![2, 2],
         )
         .expect("input");
-        a.data.clear();
-        b.data.clear();
 
         let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
             .expect("ismember rows");
         assert_eq!(eval.mask.data, vec![0, 1]);
-        assert_eq!(eval.loc.data, vec![0.0, 1.0]);
+        assert_eq!(eval.loc.materialize_f64(), vec![0.0, 1.0]);
     }
 
     #[test]
@@ -1068,7 +1059,7 @@ pub(crate) mod tests {
         let b = Tensor::new(vec![f64::NAN, 2.0], vec![1, 2]).unwrap();
         let eval = ismember_numeric_elements(a, b).expect("ismember");
         assert_eq!(eval.mask.data, vec![1, 0]);
-        assert_eq!(eval.loc.data, vec![1.0, 0.0]);
+        assert_eq!(eval.loc.materialize_f64(), vec![1.0, 0.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1078,7 +1069,7 @@ pub(crate) mod tests {
         let b = Tensor::new(vec![3.0, 5.0, 1.0, 4.0, 6.0, 2.0], vec![3, 2]).unwrap();
         let eval = ismember_numeric_rows(a, b).expect("ismember");
         assert_eq!(eval.mask.data, vec![1, 1, 1]);
-        assert_eq!(eval.loc.data, vec![3.0, 1.0, 3.0]);
+        assert_eq!(eval.loc.materialize_f64(), vec![3.0, 1.0, 3.0]);
         assert_eq!(eval.loc.shape, vec![3, 1]);
     }
 
@@ -1089,7 +1080,7 @@ pub(crate) mod tests {
         let b = ComplexTensor::new(vec![(0.0, 0.0), (1.0, 2.0)], vec![1, 2]).unwrap();
         let eval = ismember_complex_elements(a, b).expect("ismember");
         assert_eq!(eval.mask.data, vec![1, 1]);
-        assert_eq!(eval.loc.data, vec![2.0, 1.0]);
+        assert_eq!(eval.loc.materialize_f64(), vec![2.0, 1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1114,7 +1105,7 @@ pub(crate) mod tests {
         .unwrap();
         let eval = ismember_complex_rows(a, b).expect("ismember");
         assert_eq!(eval.mask.data, vec![1, 1]);
-        assert_eq!(eval.loc.data, vec![1.0, 3.0]);
+        assert_eq!(eval.loc.materialize_f64(), vec![1.0, 3.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1124,7 +1115,7 @@ pub(crate) mod tests {
         let b = CharArray::new(vec!['m', 'a', 'r', 'u'], 2, 2).unwrap();
         let eval = ismember_char_elements(a, b).expect("ismember");
         assert_eq!(eval.mask.data, vec![1, 0, 1, 1]);
-        assert_eq!(eval.loc.data, vec![2.0, 0.0, 4.0, 1.0]);
+        assert_eq!(eval.loc.materialize_f64(), vec![2.0, 0.0, 4.0, 1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1134,7 +1125,7 @@ pub(crate) mod tests {
         let b = CharArray::new(vec!['m', 'a', 'g', 'e', 't', 'l'], 3, 2).unwrap();
         let eval = ismember_char_rows(a, b).expect("ismember");
         assert_eq!(eval.mask.data, vec![1, 1]);
-        assert_eq!(eval.loc.data, vec![1.0, 3.0]);
+        assert_eq!(eval.loc.materialize_f64(), vec![1.0, 3.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1160,7 +1151,7 @@ pub(crate) mod tests {
         .unwrap();
         let eval = ismember_string_elements(a, b).expect("ismember");
         assert_eq!(eval.mask.data, vec![1, 1, 0]);
-        assert_eq!(eval.loc.data, vec![3.0, 1.0, 0.0]);
+        assert_eq!(eval.loc.materialize_f64(), vec![3.0, 1.0, 0.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1190,7 +1181,7 @@ pub(crate) mod tests {
         .unwrap();
         let eval = ismember_string_rows(a, b).expect("ismember");
         assert_eq!(eval.mask.data, vec![1, 1]);
-        assert_eq!(eval.loc.data, vec![1.0, 3.0]);
+        assert_eq!(eval.loc.materialize_f64(), vec![1.0, 3.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1222,7 +1213,7 @@ pub(crate) mod tests {
             other => panic!("expected logical array, got {other:?}"),
         }
         match loc {
-            Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 0.0, 1.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![2.0, 0.0, 1.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -1259,11 +1250,11 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 4.0], vec![4, 1]).unwrap();
             let set = Tensor::new(vec![4.0, 5.0], vec![2, 1]).unwrap();
             let view_a = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let view_b = runmat_accelerate_api::HostTensorView {
-                data: &set.data,
+                data: &set.materialize_f64(),
                 shape: &set.shape,
             };
             let handle_a = provider.upload(&view_a).expect("upload a");
@@ -1271,7 +1262,7 @@ pub(crate) mod tests {
             let eval = evaluate_sync(Value::GpuTensor(handle_a), Value::GpuTensor(handle_b), &[])
                 .expect("ismember");
             assert_eq!(eval.mask.data, vec![0, 1, 0, 1]);
-            assert_eq!(eval.loc.data, vec![0.0, 1.0, 0.0, 1.0]);
+            assert_eq!(eval.loc.materialize_f64(), vec![0.0, 1.0, 0.0, 1.0]);
         });
     }
 
@@ -1282,11 +1273,11 @@ pub(crate) mod tests {
             let rows = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
             let bank = Tensor::new(vec![1.0, 5.0, 3.0, 2.0, 6.0, 4.0], vec![3, 2]).unwrap();
             let view_a = runmat_accelerate_api::HostTensorView {
-                data: &rows.data,
+                data: &rows.materialize_f64(),
                 shape: &rows.shape,
             };
             let view_b = runmat_accelerate_api::HostTensorView {
-                data: &bank.data,
+                data: &bank.materialize_f64(),
                 shape: &bank.shape,
             };
             let handle_a = provider.upload(&view_a).expect("upload a");
@@ -1298,7 +1289,7 @@ pub(crate) mod tests {
             )
             .expect("ismember");
             assert_eq!(eval.mask.data, vec![1, 1]);
-            assert_eq!(eval.loc.data, vec![1.0, 3.0]);
+            assert_eq!(eval.loc.materialize_f64(), vec![1.0, 3.0]);
             let _ = provider.free(&handle_a);
             let _ = provider.free(&handle_b);
         });
@@ -1319,11 +1310,11 @@ pub(crate) mod tests {
 
         let provider = runmat_accelerate_api::provider().expect("provider");
         let view_a = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let view_b = HostTensorView {
-            data: &set.data,
+            data: &set.materialize_f64(),
             shape: &set.shape,
         };
         let handle_a = provider.upload(&view_a).expect("upload a");
@@ -1336,7 +1327,7 @@ pub(crate) mod tests {
         )
         .expect("gpu evaluate");
         assert_eq!(eval.mask.data, cpu_eval.mask.data);
-        assert_eq!(eval.loc.data, cpu_eval.loc.data);
+        assert_eq!(eval.loc.materialize_f64(), cpu_eval.loc.materialize_f64());
 
         let _ = provider.free(&handle_a);
         let _ = provider.free(&handle_b);
@@ -1346,11 +1337,11 @@ pub(crate) mod tests {
         let cpu_rows =
             ismember_numeric_from_tensors(matrix.clone(), bank.clone(), true).expect("cpu rows");
         let view_matrix = HostTensorView {
-            data: &matrix.data,
+            data: &matrix.materialize_f64(),
             shape: &matrix.shape,
         };
         let view_bank = HostTensorView {
-            data: &bank.data,
+            data: &bank.materialize_f64(),
             shape: &bank.shape,
         };
         let handle_matrix = provider.upload(&view_matrix).expect("upload matrix");
@@ -1362,7 +1353,10 @@ pub(crate) mod tests {
         )
         .expect("gpu rows evaluate");
         assert_eq!(eval_rows.mask.data, cpu_rows.mask.data);
-        assert_eq!(eval_rows.loc.data, cpu_rows.loc.data);
+        assert_eq!(
+            eval_rows.loc.materialize_f64(),
+            cpu_rows.loc.materialize_f64()
+        );
         let _ = provider.free(&handle_matrix);
         let _ = provider.free(&handle_bank);
     }
@@ -1390,6 +1384,6 @@ pub(crate) mod tests {
         let b = Tensor::new(vec![f64::NAN, 2.0], vec![2, 1]).unwrap();
         let eval = ismember_numeric_rows(a, b).expect("ismember");
         assert_eq!(eval.mask.data, vec![1, 0]);
-        assert_eq!(eval.loc.data, vec![1.0, 0.0]);
+        assert_eq!(eval.loc.materialize_f64(), vec![1.0, 0.0]);
     }
 }

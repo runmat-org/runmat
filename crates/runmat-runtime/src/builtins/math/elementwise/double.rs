@@ -561,7 +561,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![0.0, 1.0, 1.0, 0.0]);
+                assert_eq!(t.materialize_f64(), vec![0.0, 1.0, 1.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -575,7 +575,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data, vec![65.0, 66.0]);
+                assert_eq!(t.materialize_f64(), vec![65.0, 66.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -614,10 +614,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn double_tensor_reads_typed_integer_storage_and_clears_class() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]), vec![1, 2])
                 .unwrap();
-        tensor.data = vec![0.0, 0.0];
 
         let result = double_builtin(Value::Tensor(tensor), Vec::new()).expect("double");
         match result {
@@ -662,7 +661,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 2]);
-                assert_eq!(t.data, vec![0.0, 4.0, 0.0, 0.0, 0.0, -1.0]);
+                assert_eq!(t.materialize_f64(), vec![0.0, 4.0, 0.0, 0.0, 0.0, -1.0]);
             }
             other => panic!("expected dense tensor, got {other:?}"),
         }
@@ -683,9 +682,12 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.dtype, NumericDType::F64);
+                assert_eq!(t.numeric_dtype(), NumericDType::F64);
                 assert!(t.integer_storage().is_none());
-                assert_eq!(t.data, vec![0.0, i64::MIN as f64, i64::MAX as f64, 0.0]);
+                assert_eq!(
+                    t.materialize_f64(),
+                    vec![0.0, i64::MIN as f64, i64::MAX as f64, 0.0]
+                );
             }
             other => panic!("expected dense tensor, got {other:?}"),
         }
@@ -705,14 +707,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = double_builtin(Value::GpuTensor(handle), Vec::new()).expect("double");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, tensor.data);
+            assert_eq!(gathered.materialize_f64(), tensor.materialize_f64());
         });
     }
 
@@ -737,9 +739,12 @@ pub(crate) mod tests {
             let gathered =
                 test_support::gather(Value::GpuTensor(result_handle)).expect("gather double");
             assert_eq!(gathered.shape, vec![1, 2]);
-            assert_eq!(gathered.dtype, NumericDType::F64);
+            assert_eq!(gathered.numeric_dtype(), NumericDType::F64);
             assert!(gathered.integer_storage().is_none());
-            assert_eq!(gathered.data, vec![(1_u64 << 63) as f64, u64::MAX as f64]);
+            assert_eq!(
+                gathered.materialize_f64(),
+                vec![(1_u64 << 63) as f64, u64::MAX as f64]
+            );
         });
     }
 
@@ -762,7 +767,7 @@ pub(crate) mod tests {
             match result {
                 Value::GpuTensor(h) => {
                     let gathered = test_support::gather(Value::GpuTensor(h)).expect("gather");
-                    assert_eq!(gathered.data, tensor.data);
+                    assert_eq!(gathered.materialize_f64(), tensor.materialize_f64());
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
             }
@@ -775,7 +780,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![3.0], vec![1, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -788,7 +793,7 @@ pub(crate) mod tests {
                 Value::Num(n) => assert_eq!(n, 3.0),
                 Value::Tensor(t) => {
                     assert_eq!(t.shape, vec![1, 1]);
-                    assert_eq!(t.data, vec![3.0]);
+                    assert_eq!(t.materialize_f64(), vec![3.0]);
                 }
                 other => panic!("expected scalar host value, got {other:?}"),
             }
@@ -829,7 +834,7 @@ pub(crate) mod tests {
         let cpu_value = double_builtin(Value::Tensor(tensor.clone()), Vec::new()).unwrap();
 
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
@@ -839,10 +844,10 @@ pub(crate) mod tests {
         match cpu_value {
             Value::Tensor(ref ct) => {
                 assert_eq!(gathered.shape, ct.shape);
-                assert_eq!(gathered.data, ct.data);
+                assert_eq!(gathered.materialize_f64(), ct.materialize_f64());
             }
             Value::Num(n) => {
-                assert_eq!(gathered.data, vec![n]);
+                assert_eq!(gathered.materialize_f64(), vec![n]);
             }
             other => panic!("unexpected CPU reference value {other:?}"),
         }

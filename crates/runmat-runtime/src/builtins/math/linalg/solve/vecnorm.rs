@@ -701,9 +701,9 @@ mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 3]);
-                assert_close(out.data[0], (4.0f64 + 1.0 + 9.0).sqrt());
-                assert_close(out.data[1], (0.0f64 + 1.0 + 9.0).sqrt());
-                assert_close(out.data[2], 1.0);
+                assert_close(out.materialize_f64()[0], (4.0f64 + 1.0 + 9.0).sqrt());
+                assert_close(out.materialize_f64()[1], (0.0f64 + 1.0 + 9.0).sqrt());
+                assert_close(out.materialize_f64()[2], 1.0);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -721,8 +721,8 @@ mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
-                assert_close(out.data[0], 4.0);
-                assert_close(out.data[1], 6.0);
+                assert_close(out.materialize_f64()[0], 4.0);
+                assert_close(out.materialize_f64()[1], 6.0);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -824,9 +824,8 @@ mod tests {
 
     #[test]
     fn vecnorm_reads_typed_integer_storage_not_f64_mirror() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, 0]), vec![2, 1])
+        let tensor = Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, 0]), vec![2, 1])
             .expect("typed integer tensor");
-        tensor.data.fill(f64::NAN);
 
         let result = call(Value::Tensor(tensor), Vec::new()).expect("vecnorm");
         match result {
@@ -847,7 +846,7 @@ mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                assert_eq!(out.data, vec![1.0, 2.0, 3.0, 4.0]);
+                assert_eq!(out.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -860,8 +859,8 @@ mod tests {
         let result = call(Value::Tensor(tensor), Vec::new()).expect("vecnorm");
         match result {
             Value::Tensor(out) => {
-                assert!(out.data[0].is_nan());
-                assert_close(out.data[1], 5.0);
+                assert!(out.materialize_f64()[0].is_nan());
+                assert_close(out.materialize_f64()[1], 5.0);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -875,7 +874,7 @@ mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 3]);
-                assert_eq!(out.data, vec![0.0, 0.0, 0.0]);
+                assert_eq!(out.materialize_f64(), vec![0.0, 0.0, 0.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -918,9 +917,8 @@ mod tests {
     #[test]
     fn vecnorm_order_reads_typed_integer_tensor_storage_exactly() {
         let tensor = Tensor::new(vec![3.0, 4.0], vec![2, 1]).unwrap();
-        let mut order =
+        let order =
             Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("typed order");
-        order.data.clear();
 
         let result = call(Value::Tensor(tensor), vec![Value::Tensor(order)]).expect("vecnorm");
         match result {
@@ -942,8 +940,7 @@ mod tests {
             IntegerStorage::U64(vec![1]),
         ];
         for storage in storages {
-            let mut order = Tensor::new_integer(storage, vec![1, 1]).expect("order");
-            order.data = vec![f64::NAN];
+            let order = Tensor::new_integer(storage, vec![1, 1]).expect("order");
             assert!(matches!(
                 parse_order(&Value::Tensor(order)),
                 Ok(NormOrder::One)
@@ -953,18 +950,15 @@ mod tests {
 
     #[test]
     fn vecnorm_order_rejects_wide_integer_storage_instead_of_rounding() {
-        let mut wide = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+        let wide = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
             .expect("wide order");
-        wide.data = vec![1.0];
         assert!(parse_order(&Value::Tensor(wide)).is_err());
     }
 
     #[test]
     fn vecnorm_dim_reads_typed_integer_tensor_storage_exactly() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let mut dim =
-            Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("typed dim");
-        dim.data.clear();
+        let dim = Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("typed dim");
 
         let result = call(
             Value::Tensor(tensor),
@@ -974,16 +968,15 @@ mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
-                assert_close(out.data[0], 10.0f64.sqrt());
-                assert_close(out.data[1], 20.0f64.sqrt());
+                assert_close(out.materialize_f64()[0], 10.0f64.sqrt());
+                assert_close(out.materialize_f64()[1], 20.0f64.sqrt());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
 
         let wide = 9_007_199_254_740_993_u64;
-        let mut large_dim =
+        let large_dim =
             Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("large dim");
-        large_dim.data.clear();
         match usize::try_from(wide) {
             Ok(expected) => assert_eq!(parse_dim(&Value::Tensor(large_dim)).unwrap(), expected),
             Err(_) => assert!(parse_dim(&Value::Tensor(large_dim)).is_err()),
@@ -993,16 +986,14 @@ mod tests {
     #[test]
     fn vecnorm_rejects_negative_typed_integer_tensor_order_and_dim() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let mut order =
+        let order =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("typed order");
-        order.data.clear();
         let err = call(Value::Tensor(tensor.clone()), vec![Value::Tensor(order)]).unwrap_err();
         assert_eq!(err.identifier(), VECNORM_ERROR_INVALID_ARGUMENT.identifier);
         assert!(err.message().contains("positive numeric scalar"));
 
-        let mut dim =
+        let dim =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("typed dim");
-        dim.data.clear();
         let err = call(
             Value::Tensor(tensor),
             vec![Value::Num(2.0), Value::Tensor(dim)],
@@ -1033,8 +1024,8 @@ mod tests {
         let result = call(Value::Tensor(tensor), Vec::new()).expect("vecnorm");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.dtype, NumericDType::F32);
-                assert_eq!(out.data, vec![5.0, 13.0]);
+                assert_eq!(out.numeric_dtype(), NumericDType::F32);
+                assert_eq!(out.materialize_f64(), vec![5.0, 13.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1046,15 +1037,15 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![3.0, 4.0, 5.0, 12.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = call(Value::GpuTensor(handle), Vec::new()).expect("vecnorm");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 2]);
-            assert_close(gathered.data[0], 5.0);
-            assert_close(gathered.data[1], 13.0);
+            assert_close(gathered.materialize_f64()[0], 5.0);
+            assert_close(gathered.materialize_f64()[1], 13.0);
         });
     }
 
@@ -1085,14 +1076,18 @@ mod tests {
             return;
         };
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
         let result = call(Value::GpuTensor(handle), Vec::new()).expect("vecnorm");
         let gathered = test_support::gather(result).expect("gather");
         assert_eq!(gathered.shape, cpu.shape);
-        for (actual, expected) in gathered.data.iter().zip(cpu.data.iter()) {
+        for (actual, expected) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu.materialize_f64().iter())
+        {
             assert_close(*actual, *expected);
         }
     }

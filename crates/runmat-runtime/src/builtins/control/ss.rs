@@ -555,7 +555,7 @@ mod tests {
         match value {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, shape);
-                assert_eq!(tensor.data, data);
+                assert_eq!(tensor.materialize_f64(), data);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -634,8 +634,7 @@ mod tests {
     #[test]
     fn ss_typed_integer_matrices_and_sample_time_cross_double_boundary_exactly() {
         fn mirrorless_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-            let mut tensor = Tensor::new_integer(storage, shape).unwrap();
-            tensor.data.clear();
+            let tensor = Tensor::new_integer(storage, shape).unwrap();
             Value::Tensor(tensor)
         }
 
@@ -645,8 +644,7 @@ mod tests {
             mirrorless_integer_tensor(IntegerStorage::I8(vec![1, 0]), vec![1, 2]),
             mirrorless_integer_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
             vec![Value::from("Ts"), {
-                let mut ts = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).unwrap();
-                ts.data.clear();
+                let ts = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).unwrap();
                 Value::Tensor(ts)
             }],
         )
@@ -750,7 +748,7 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");

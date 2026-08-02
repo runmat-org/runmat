@@ -635,7 +635,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![2.0, 4.0, 6.0], vec![1, 3]).expect("tensor");
         let result = mrdivide_builtin(Value::Tensor(tensor), Value::Num(2.0)).expect("mrdivide");
         match result {
-            Value::Tensor(out) => assert_eq!(out.data, vec![1.0, 2.0, 3.0]),
+            Value::Tensor(out) => assert_eq!(out.materialize_f64(), vec![1.0, 2.0, 3.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -667,9 +667,8 @@ pub(crate) mod tests {
     #[test]
     fn mrdivide_complex_scalar_promotion_reads_typed_integer_storage_exactly() {
         let lhs = ComplexTensor::new(vec![(6.0, 4.0), (2.0, -8.0)], vec![1, 2]).unwrap();
-        let mut divisor =
+        let divisor =
             Tensor::new_integer(IntegerStorage::I64(vec![2]), vec![1, 1]).expect("integer scalar");
-        divisor.data.clear();
 
         let result =
             mrdivide_builtin(Value::ComplexTensor(lhs), Value::Tensor(divisor)).expect("mrdivide");
@@ -685,16 +684,14 @@ pub(crate) mod tests {
 
     #[test]
     fn mrdivide_host_real_reads_typed_integer_storage_exactly() {
-        let mut lhs =
+        let lhs =
             Tensor::new_integer(IntegerStorage::I16(vec![6, 10]), vec![1, 2]).expect("typed lhs");
-        let mut rhs =
+        let rhs =
             Tensor::new_integer(IntegerStorage::I16(vec![2]), vec![1, 1]).expect("typed divisor");
-        lhs.data.fill(f64::NAN);
-        rhs.data.fill(f64::NAN);
 
         let out = mrdivide_host_real_for_provider(&lhs, &rhs).expect("host mrdivide");
 
-        assert_eq!(out.data, vec![3.0, 5.0]);
+        assert_eq!(out.materialize_f64(), vec![3.0, 5.0]);
         assert!(out.integer_storage().is_none());
     }
 
@@ -709,7 +706,7 @@ pub(crate) mod tests {
         let gathered = test_support::gather(result).expect("gather");
         let expected = vec![3.0, 2.0, -2.0, -1.0];
         assert_eq!(gathered.shape, vec![2, 2]);
-        for (val, exp) in gathered.data.iter().zip(expected.into_iter()) {
+        for (val, exp) in gathered.materialize_f64().iter().zip(expected.into_iter()) {
             assert!((val - exp).abs() < 1e-12);
         }
     }
@@ -726,7 +723,11 @@ pub(crate) mod tests {
         let gathered = test_support::gather(result).expect("gather");
         let expected = host_mrdivide_real(&a, &b);
         assert_eq!(gathered.shape, expected.shape);
-        for (actual, expected) in gathered.data.iter().zip(expected.data.iter()) {
+        for (actual, expected) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(expected.materialize_f64().iter())
+        {
             assert!(
                 (actual - expected).abs() < 1e-10,
                 "actual={actual} expected={expected}"
@@ -792,11 +793,11 @@ pub(crate) mod tests {
             let cpu_tensor = test_support::gather(cpu).expect("cpu gather");
 
             let view_a = HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             };
             let view_b = HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             };
             let ha = provider.upload(&view_a).expect("upload A");
@@ -809,7 +810,11 @@ pub(crate) mod tests {
             let _ = provider.free(&hb);
 
             assert_eq!(gathered.shape, cpu_tensor.shape);
-            for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+            for (gpu, cpu) in gathered
+                .materialize_f64()
+                .iter()
+                .zip(cpu_tensor.materialize_f64().iter())
+            {
                 assert!((gpu - cpu).abs() < 1e-12);
             }
         });
@@ -823,13 +828,13 @@ pub(crate) mod tests {
             let b = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
             let ha = provider
                 .upload(&HostTensorView {
-                    data: &a.data,
+                    data: &a.materialize_f64(),
                     shape: &a.shape,
                 })
                 .expect("upload A");
             let hb = provider
                 .upload(&HostTensorView {
-                    data: &b.data,
+                    data: &b.materialize_f64(),
                     shape: &b.shape,
                 })
                 .expect("upload B");
@@ -856,13 +861,13 @@ pub(crate) mod tests {
             let scalar = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
             let hm = provider
                 .upload(&HostTensorView {
-                    data: &matrix.data,
+                    data: &matrix.materialize_f64(),
                     shape: &matrix.shape,
                 })
                 .expect("upload matrix");
             let hs = provider
                 .upload(&HostTensorView {
-                    data: &scalar.data,
+                    data: &scalar.materialize_f64(),
                     shape: &scalar.shape,
                 })
                 .expect("upload scalar");
@@ -871,7 +876,7 @@ pub(crate) mod tests {
                 mrdivide_eval(&Value::GpuTensor(hm.clone()), &Value::GpuTensor(hs.clone()))
                     .expect("fallback mrdivide");
             let gathered = test_support::gather(result).expect("gather fallback");
-            assert_eq!(gathered.data, vec![1.0, 2.0, 3.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 2.0, 3.0]);
 
             let telemetry = provider.telemetry_snapshot();
             assert_eq!(telemetry.mrdivide.count, 0);
@@ -906,11 +911,11 @@ pub(crate) mod tests {
         provider.reset_telemetry();
 
         let view_a = HostTensorView {
-            data: &a.data,
+            data: &a.materialize_f64(),
             shape: &a.shape,
         };
         let view_b = HostTensorView {
-            data: &b.data,
+            data: &b.materialize_f64(),
             shape: &b.shape,
         };
         let ha = provider.upload(&view_a).expect("upload A");
@@ -922,7 +927,10 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        assert!(gathered.data.iter().all(|value| value.is_finite()));
+        assert!(gathered
+            .materialize_f64()
+            .iter()
+            .all(|value| value.is_finite()));
 
         let telemetry = provider.telemetry_snapshot();
         assert_eq!(telemetry.mrdivide.count, 1);
@@ -954,11 +962,11 @@ pub(crate) mod tests {
         provider.reset_telemetry();
 
         let view_a = HostTensorView {
-            data: &a.data,
+            data: &a.materialize_f64(),
             shape: &a.shape,
         };
         let view_b = HostTensorView {
-            data: &b.data,
+            data: &b.materialize_f64(),
             shape: &b.shape,
         };
         let ha = provider.upload(&view_a).expect("upload A");
@@ -970,7 +978,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < 1e-4, "gpu={gpu} cpu={cpu}");
         }
 
@@ -999,11 +1011,11 @@ pub(crate) mod tests {
         let cpu_tensor = test_support::gather(cpu).expect("cpu gather");
 
         let view_a = HostTensorView {
-            data: &a.data,
+            data: &a.materialize_f64(),
             shape: &a.shape,
         };
         let view_b = HostTensorView {
-            data: &b.data,
+            data: &b.materialize_f64(),
             shape: &b.shape,
         };
         let ha = provider.upload(&view_a).expect("upload A");
@@ -1015,7 +1027,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < 1e-10);
         }
     }

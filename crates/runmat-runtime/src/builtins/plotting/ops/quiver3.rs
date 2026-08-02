@@ -873,9 +873,8 @@ mod tests {
     }
 
     fn int_vec_tensor(data: Vec<i16>) -> Tensor {
-        let mut tensor = Tensor::new_integer(IntegerStorage::I16(data.clone()), vec![data.len()])
+        let tensor = Tensor::new_integer(IntegerStorage::I16(data.clone()), vec![data.len()])
             .expect("integer tensor");
-        tensor.data.clear();
         tensor
     }
 
@@ -979,7 +978,7 @@ mod tests {
         let Value::Tensor(z_data) = z_data else {
             panic!("expected tensor zdata");
         };
-        assert_eq!(z_data.data, vec![4.0, 5.0]);
+        assert_eq!(z_data.materialize_f64(), vec![4.0, 5.0]);
     }
 
     #[test]

@@ -811,8 +811,7 @@ pub(crate) mod tests {
     }
 
     fn typed_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         tensor
     }
 
@@ -829,7 +828,10 @@ pub(crate) mod tests {
         let result =
             apply_imfilter_tensor(&image, &kernel, &options, IMFILTER_BUILTIN).expect("imfilter");
         assert_eq!(result.shape, vec![2, 2]);
-        assert!(result.data.iter().all(|&v| (v - 10.0).abs() < 1e-12));
+        assert!(result
+            .materialize_f64()
+            .iter()
+            .all(|&v| (v - 10.0).abs() < 1e-12));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -845,7 +847,7 @@ pub(crate) mod tests {
             apply_imfilter_tensor(&image, &kernel, &options, IMFILTER_BUILTIN).expect("imfilter");
         assert_eq!(result.shape, vec![2, 2]);
         let expected = [18.0, 24.0, 21.0, 27.0];
-        for (got, exp) in result.data.iter().zip(expected.iter()) {
+        for (got, exp) in result.materialize_f64().iter().zip(expected.iter()) {
             assert!((got - exp).abs() < 1e-12);
         }
     }
@@ -863,7 +865,7 @@ pub(crate) mod tests {
             apply_imfilter_tensor(&image, &kernel, &options, IMFILTER_BUILTIN).expect("imfilter");
         assert_eq!(result.shape, vec![3, 3]);
         let expected = [4.0, 14.0, 6.0, 11.0, 30.0, 11.0, 6.0, 14.0, 4.0];
-        for (got, exp) in result.data.iter().zip(expected.iter()) {
+        for (got, exp) in result.materialize_f64().iter().zip(expected.iter()) {
             assert!((got - exp).abs() < 1e-12);
         }
     }
@@ -880,7 +882,7 @@ pub(crate) mod tests {
         let result =
             apply_imfilter_tensor(&image, &kernel, &options, IMFILTER_BUILTIN).expect("imfilter");
         assert_eq!(result.shape, vec![1, 1]);
-        assert!((result.data[0] - 10.0).abs() < 1e-12);
+        assert!((result.materialize_f64()[0] - 10.0).abs() < 1e-12);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -903,10 +905,10 @@ pub(crate) mod tests {
             apply_imfilter_tensor(&image, &kernel, &conv_opts, IMFILTER_BUILTIN).expect("conv");
         assert_eq!(conv.shape, corr_flipped.shape);
         for ((a, b), c) in conv
-            .data
+            .materialize_f64()
             .iter()
-            .zip(corr_flipped.data.iter())
-            .zip(corr.data.iter())
+            .zip(corr_flipped.materialize_f64().iter())
+            .zip(corr.materialize_f64().iter())
         {
             assert!((a - b).abs() < 1e-12 || (a - c).abs() < 1e-8);
         }
@@ -926,7 +928,7 @@ pub(crate) mod tests {
         .expect("imfilter");
 
         assert_eq!(result.shape, vec![2, 2]);
-        assert_eq!(result.data, vec![2.0, 6.0, 4.0, 8.0]);
+        assert_eq!(result.materialize_f64(), vec![2.0, 6.0, 4.0, 8.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -941,7 +943,7 @@ pub(crate) mod tests {
         let result =
             apply_imfilter_tensor(&image, &kernel, &options, IMFILTER_BUILTIN).expect("imfilter");
         let expected = [5.0, 5.0, 5.0, 5.0];
-        for (got, exp) in result.data.iter().zip(expected.iter()) {
+        for (got, exp) in result.materialize_f64().iter().zip(expected.iter()) {
             assert!((got - exp).abs() < 1e-12);
         }
     }
@@ -953,11 +955,11 @@ pub(crate) mod tests {
             let image = simple_tensor(&[1.0, 4.0, 2.0, 5.0], 2, 2);
             let kernel = simple_tensor(&[1.0, 1.0, 1.0, 1.0], 2, 2);
             let image_view = HostTensorView {
-                data: &image.data,
+                data: &image.materialize_f64(),
                 shape: &image.shape,
             };
             let kernel_view = HostTensorView {
-                data: &kernel.data,
+                data: &kernel.materialize_f64(),
                 shape: &kernel.shape,
             };
             let image_handle = provider.upload(&image_view).expect("upload image");
@@ -971,7 +973,7 @@ pub(crate) mod tests {
             let gathered = test_support::gather(value).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
             let expected = [1.0, 5.0, 3.0, 12.0];
-            for (got, exp) in gathered.data.iter().zip(expected.iter()) {
+            for (got, exp) in gathered.materialize_f64().iter().zip(expected.iter()) {
                 assert!((got - exp).abs() < 1e-12);
             }
         });
@@ -983,7 +985,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let image = simple_tensor(&[1.0, 4.0, 2.0, 5.0], 2, 2);
             let image_view = HostTensorView {
-                data: &image.data,
+                data: &image.materialize_f64(),
                 shape: &image.shape,
             };
             let image_handle = provider.upload(&image_view).expect("upload image");
@@ -998,7 +1000,7 @@ pub(crate) mod tests {
             let gathered = test_support::gather(value).expect("gather");
 
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![2.0, 8.0, 4.0, 10.0]);
+            assert_eq!(gathered.materialize_f64(), vec![2.0, 8.0, 4.0, 10.0]);
         });
     }
 
@@ -1015,7 +1017,7 @@ pub(crate) mod tests {
         )
         .expect("imfilter");
         assert_eq!(result.shape, vec![2, 2]);
-        for value in result.data {
+        for value in result.materialize_f64() {
             assert!((value - (10.0 / 9.0)).abs() < 1e-12);
         }
     }
@@ -1033,7 +1035,7 @@ pub(crate) mod tests {
             apply_imfilter_tensor(&image, &kernel, &options, IMFILTER_BUILTIN).expect("imfilter");
         assert_eq!(result.shape, vec![3, 2]);
         let expected = [1.0, 5.0, 9.0, 6.0, 25.0, 35.0];
-        for (got, exp) in result.data.iter().zip(expected.iter()) {
+        for (got, exp) in result.materialize_f64().iter().zip(expected.iter()) {
             assert!((got - exp).abs() < 1e-12);
         }
     }
@@ -1060,16 +1062,19 @@ pub(crate) mod tests {
         .expect("imfilter builtin");
         let via_tensor = tensor::value_into_tensor_for("imfilter", via_builtin).expect("tensor");
         assert_eq!(manual_res.shape, via_tensor.shape);
-        for (a, b) in manual_res.data.iter().zip(via_tensor.data.iter()) {
+        for (a, b) in manual_res
+            .materialize_f64()
+            .iter()
+            .zip(via_tensor.materialize_f64().iter())
+        {
             assert!((a - b).abs() < 1e-12);
         }
     }
 
     #[test]
     fn parse_scalar_reads_typed_integer_tensor_exactly() {
-        let mut scalar =
+        let scalar =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("scalar");
-        scalar.data.clear();
         assert_eq!(
             parse_scalar(IMFILTER_BUILTIN, &Value::Tensor(scalar)).unwrap(),
             u64::MAX as f64
@@ -1123,7 +1128,7 @@ pub(crate) mod tests {
         .expect("imfilter");
         match result {
             Value::Tensor(t) => {
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
                 assert_eq!(t.shape, vec![0, 0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1170,11 +1175,11 @@ pub(crate) mod tests {
         .expect("cpu");
 
         let image_view = HostTensorView {
-            data: &image.data,
+            data: &image.materialize_f64(),
             shape: &image.shape,
         };
         let kernel_view = HostTensorView {
-            data: &kernel.data,
+            data: &kernel.materialize_f64(),
             shape: &kernel.shape,
         };
         let image_handle = provider.upload(&image_view).expect("upload image");
@@ -1193,7 +1198,11 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (a, b) in cpu.data.iter().zip(gathered.data.iter()) {
+        for (a, b) in cpu
+            .materialize_f64()
+            .iter()
+            .zip(gathered.materialize_f64().iter())
+        {
             assert!((a - b).abs() < tol, "|{} - {}| >= {}", a, b, tol);
         }
     }

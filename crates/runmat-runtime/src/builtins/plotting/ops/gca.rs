@@ -198,12 +198,11 @@ pub(crate) mod tests {
 
     #[test]
     fn gca_figure_handle_arg_reads_typed_integer_storage_exactly() {
-        let mut tensor = runmat_builtins::Tensor::new_integer(
+        let tensor = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::U32(vec![7]),
             vec![1, 1],
         )
         .unwrap();
-        tensor.data.clear();
 
         assert_eq!(
             figure_handle_arg(&Value::Tensor(tensor)).unwrap(),

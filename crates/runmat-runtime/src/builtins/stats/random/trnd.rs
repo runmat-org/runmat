@@ -346,7 +346,10 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![3, 1]);
-                assert!(tensor.data.iter().all(|value| value.is_finite()));
+                assert!(tensor
+                    .materialize_f64()
+                    .iter()
+                    .all(|value| value.is_finite()));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -418,7 +421,7 @@ mod tests {
         ]))
         .expect("trnd");
         let data = match out {
-            Value::Tensor(tensor) => tensor.data,
+            Value::Tensor(tensor) => tensor.materialize_f64(),
             other => panic!("expected tensor, got {other:?}"),
         };
         let mean = data.iter().sum::<f64>() / data.len() as f64;

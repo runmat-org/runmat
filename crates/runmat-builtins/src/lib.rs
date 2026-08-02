@@ -1467,7 +1467,7 @@ mod integer_storage_tests {
             tensor.integer_storage(),
             Some(&IntegerStorage::U64(vec![0, u64::MAX]))
         );
-        assert_eq!(tensor.data[1], u64::MAX as f64);
+        assert_eq!(tensor.materialize_f64()[1], u64::MAX as f64);
     }
 
     #[test]
@@ -1485,9 +1485,9 @@ mod integer_storage_tests {
 
         for (storage, dtype) in cases {
             let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
-            assert_eq!(tensor.dtype, dtype);
+            assert_eq!(tensor.numeric_dtype(), dtype);
             assert_eq!(
-                tensor.dtype.class_name(),
+                tensor.numeric_dtype().class_name(),
                 tensor.integer_storage().unwrap().class_name()
             );
         }
@@ -1497,12 +1497,16 @@ mod integer_storage_tests {
     fn single_constructor_preserves_f32_values_and_dtype_across_storage_migration() {
         let source = vec![f32::MIN_POSITIVE, 1.0 / 10.0, f32::MAX];
         let expected: Vec<f64> = source.iter().map(|&value| f64::from(value)).collect();
-        let tensor = Tensor::from_f32(source, vec![1, 3]).expect("single tensor");
+        let tensor = Tensor::from_f32(source.clone(), vec![1, 3]).expect("single tensor");
 
-        assert_eq!(tensor.dtype, NumericDType::F32);
+        assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
         assert_eq!(tensor.shape, vec![1, 3]);
-        assert_eq!(tensor.data, expected);
+        assert_eq!(tensor.materialize_f64(), expected);
         assert!(tensor.integer_storage().is_none());
+        assert_eq!(
+            tensor.into_numeric_storage(),
+            Ok(NumericStorage::F32(source))
+        );
     }
 
     #[test]
@@ -1838,13 +1842,9 @@ mod integer_storage_tests {
 
         for storage in cases {
             let dtype = storage.numeric_dtype();
-            let mut tensor =
+            let tensor =
                 Tensor::from_numeric_storage(storage.clone(), vec![1, 2]).expect("tensor bridge");
             assert_eq!(tensor.numeric_dtype(), dtype);
-            if tensor.integer_storage().is_some() {
-                tensor.dtype = NumericDType::F64;
-                assert_eq!(tensor.numeric_dtype(), dtype);
-            }
             assert_eq!(tensor.numeric_value_at(0), storage.value_at(0));
             assert_eq!(tensor.numeric_value_at(1), storage.value_at(1));
             assert_eq!(tensor.numeric_value_at(2), None);
@@ -1858,7 +1858,7 @@ mod integer_storage_tests {
             Tensor::new_with_dtype(vec![-2.2, 12.8, 99_999.0], vec![1, 3], NumericDType::I16)
                 .expect("typed tensor");
 
-        assert_eq!(tensor.dtype, NumericDType::I16);
+        assert_eq!(tensor.numeric_dtype(), NumericDType::I16);
         assert_eq!(
             tensor.integer_storage(),
             Some(&IntegerStorage::I16(vec![-2, 13, i16::MAX]))
@@ -1874,7 +1874,7 @@ mod integer_storage_tests {
             tensor.integer_storage().map(IntegerStorage::class_name),
             Some("int64")
         );
-        assert!(tensor.data.is_empty());
+        assert!(tensor.is_empty());
     }
 
     #[test]
@@ -1909,8 +1909,7 @@ mod integer_storage_tests {
 
         for storage in cases {
             let expected = storage.to_f64_vec();
-            let mut tensor = Tensor::new_integer(storage, vec![1, 2]).expect("integer tensor");
-            tensor.data.clear();
+            let tensor = Tensor::new_integer(storage, vec![1, 2]).expect("integer tensor");
 
             assert_eq!(tensor.get2(0, 0), Ok(expected[0]));
             assert_eq!(tensor.get2(0, 1), Ok(expected[1]));
@@ -1918,7 +1917,7 @@ mod integer_storage_tests {
     }
 
     #[test]
-    fn tensor_set2_updates_exact_integer_storage_and_repairs_poisoned_mirror() {
+    fn tensor_set2_updates_exact_integer_storage_without_a_mirror() {
         let cases = [
             IntegerStorage::I8(vec![0]),
             IntegerStorage::I16(vec![0]),
@@ -1933,7 +1932,6 @@ mod integer_storage_tests {
         for storage in cases {
             let expected = storage.cast_f64_assignment(-2.6);
             let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
-            tensor.data.fill(f64::NAN);
 
             tensor.set2(0, 0, -2.6).expect("integer assignment");
 
@@ -1941,9 +1939,12 @@ mod integer_storage_tests {
                 tensor
                     .integer_storage()
                     .and_then(|storage| storage.value_at(0)),
-                Some(expected)
+                Some(expected.clone())
             );
-            assert_eq!(tensor.data, tensor.integer_storage().unwrap().to_f64_vec());
+            assert_eq!(
+                tensor.numeric_value_at(0),
+                Some(NumericScalar::from(expected))
+            );
         }
     }
 
@@ -1969,13 +1970,12 @@ mod integer_storage_tests {
     }
 
     #[test]
-    fn reshape_and_display_use_integer_storage_when_mirror_is_missing() {
-        let mut tensor = Tensor::new_integer(
+    fn reshape_and_display_use_authoritative_integer_storage() {
+        let tensor = Tensor::new_integer(
             IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
             vec![2],
         )
         .expect("integer tensor");
-        tensor.data.clear();
 
         let tensor = tensor.reshape(vec![1, 2]).expect("reshape");
         assert_eq!(
@@ -2053,15 +2053,17 @@ mod integer_storage_tests {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tensor {
-    pub data: Vec<f64>,
-    /// Exact homogeneous integer backing storage during the integer-dtype
-    /// migration. Floating tensors leave this unset.
-    pub integer_data: Option<IntegerStorage>,
+    storage: TensorStorage,
     pub shape: Vec<usize>, // Column-major layout
     pub rows: usize,       // Compatibility for 2D usage
     pub cols: usize,       // Compatibility for 2D usage
-    /// Logical numeric class of this tensor; host storage remains f64.
-    pub dtype: NumericDType,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum TensorStorage {
+    F64(Vec<f64>),
+    F32(Vec<f32>),
+    Integer(IntegerStorage),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -2257,9 +2259,6 @@ impl Tensor {
     }
 
     /// Constructs a dense tensor from one authoritative native numeric buffer.
-    ///
-    /// During the field-migration phase this is the single boundary that
-    /// derives legacy public compatibility fields from native storage.
     pub fn from_numeric_storage(
         storage: NumericStorage,
         shape: Vec<usize>,
@@ -2272,10 +2271,9 @@ impl Tensor {
         } else {
             (0, 0)
         };
-        let dtype = storage.numeric_dtype();
-        let (data, integer_data) = match storage {
-            NumericStorage::F64(values) => (values, None),
-            NumericStorage::F32(values) => (values.into_iter().map(f64::from).collect(), None),
+        let storage = match storage {
+            NumericStorage::F64(values) => TensorStorage::F64(values),
+            NumericStorage::F32(values) => TensorStorage::F32(values),
             storage @ (NumericStorage::I8(_)
             | NumericStorage::I16(_)
             | NumericStorage::I32(_)
@@ -2287,16 +2285,14 @@ impl Tensor {
                 let integer_data = storage
                     .into_integer_storage()
                     .expect("integer NumericStorage variant");
-                (integer_data.to_f64_vec(), Some(integer_data))
+                TensorStorage::Integer(integer_data)
             }
         };
         Ok(Tensor {
-            data,
-            integer_data,
+            storage,
             shape,
             rows,
             cols,
-            dtype,
         })
     }
 
@@ -2336,26 +2332,32 @@ impl Tensor {
     }
 
     /// Construct a tensor backed by an exact homogeneous integer buffer.
-    ///
-    /// The floating `data` member is retained only as a compatibility view for
-    /// legacy numeric consumers. Integer-aware code must use `integer_data`.
     pub fn new_integer(storage: IntegerStorage, shape: Vec<usize>) -> Result<Self, String> {
         Self::from_numeric_storage(NumericStorage::from_integer_storage(storage), shape)
     }
 
     pub fn integer_storage(&self) -> Option<&IntegerStorage> {
-        self.integer_data.as_ref()
+        match &self.storage {
+            TensorStorage::Integer(storage) => Some(storage),
+            TensorStorage::F64(_) | TensorStorage::F32(_) => None,
+        }
     }
 
     pub fn numeric_dtype(&self) -> NumericDType {
-        self.integer_storage()
-            .map_or(self.dtype, IntegerStorage::numeric_dtype)
+        match &self.storage {
+            TensorStorage::F64(_) => NumericDType::F64,
+            TensorStorage::F32(_) => NumericDType::F32,
+            TensorStorage::Integer(storage) => storage.numeric_dtype(),
+        }
     }
 
     /// Returns the authoritative number of stored numeric elements.
     pub fn len(&self) -> usize {
-        self.integer_storage()
-            .map_or(self.data.len(), IntegerStorage::len)
+        match &self.storage {
+            TensorStorage::F64(values) => values.len(),
+            TensorStorage::F32(values) => values.len(),
+            TensorStorage::Integer(storage) => storage.len(),
+        }
     }
 
     /// Returns whether the authoritative numeric storage contains no elements.
@@ -2365,44 +2367,29 @@ impl Tensor {
 
     /// Borrows native double storage when this tensor's authoritative class is double.
     pub fn as_f64_slice(&self) -> Option<&[f64]> {
-        (self.integer_storage().is_none() && self.dtype == NumericDType::F64)
-            .then_some(self.data.as_slice())
+        match &self.storage {
+            TensorStorage::F64(values) => Some(values),
+            TensorStorage::F32(_) | TensorStorage::Integer(_) => None,
+        }
     }
 
     /// Explicitly materializes this tensor in the `f64` computation domain.
     ///
     /// Integer values outside the exact binary64 range may lose precision.
     pub fn materialize_f64(&self) -> Vec<f64> {
-        if let Some(storage) = self.integer_storage() {
-            return storage.to_f64_vec();
-        }
-        match self.dtype {
-            NumericDType::F64 => self.data.clone(),
-            NumericDType::F32 => self
-                .data
-                .iter()
-                .map(|&value| f64::from(value as f32))
-                .collect(),
-            dtype => panic!(
-                "{} tensor is missing authoritative integer storage",
-                dtype.class_name()
-            ),
+        match &self.storage {
+            TensorStorage::F64(values) => values.clone(),
+            TensorStorage::F32(values) => values.iter().copied().map(f64::from).collect(),
+            TensorStorage::Integer(storage) => storage.to_f64_vec(),
         }
     }
 
     /// Read one element without routing an integer through floating-point storage.
     pub fn numeric_value_at(&self, index: usize) -> Option<NumericScalar> {
-        if let Some(storage) = self.integer_storage() {
-            return storage.value_at(index).map(NumericScalar::from);
-        }
-        match self.dtype {
-            NumericDType::F64 => self.data.get(index).copied().map(NumericScalar::F64),
-            NumericDType::F32 => self
-                .data
-                .get(index)
-                .copied()
-                .map(|value| NumericScalar::F32(value as f32)),
-            _ => None,
+        match &self.storage {
+            TensorStorage::F64(values) => values.get(index).copied().map(NumericScalar::F64),
+            TensorStorage::F32(values) => values.get(index).copied().map(NumericScalar::F32),
+            TensorStorage::Integer(storage) => storage.value_at(index).map(NumericScalar::from),
         }
     }
 
@@ -2415,98 +2402,70 @@ impl Tensor {
         index: usize,
         value: NumericScalar,
     ) -> Result<(), String> {
-        if let Some(storage) = self.integer_data.as_mut() {
-            let exact = match value {
-                NumericScalar::F64(value) => storage.cast_f64_assignment(value),
-                NumericScalar::F32(value) => storage.cast_f64_assignment(f64::from(value)),
-                value => storage.cast_exact_assignment(
-                    &value
+        match &mut self.storage {
+            TensorStorage::F64(values) => {
+                let value = match value {
+                    NumericScalar::F64(value) => value,
+                    NumericScalar::F32(value) => f64::from(value),
+                    value => value
                         .into_int_value()
-                        .expect("non-floating numeric scalar is integer"),
-                ),
-            };
-            let compatibility_value = exact.to_f64();
-            storage.set_value(index, exact)?;
-            let destination = self
-                .data
-                .get_mut(index)
-                .ok_or_else(|| format!("Tensor index {index} out of bounds"))?;
-            *destination = compatibility_value;
-            return Ok(());
-        }
-
-        let value = match value {
-            NumericScalar::F64(value) => value,
-            NumericScalar::F32(value) => f64::from(value),
-            value => value
-                .into_int_value()
-                .expect("non-floating numeric scalar is integer")
-                .to_f64(),
-        };
-        let destination = self
-            .data
-            .get_mut(index)
-            .ok_or_else(|| format!("Tensor index {index} out of bounds"))?;
-        *destination = match self.dtype {
-            NumericDType::F64 => value,
-            NumericDType::F32 => f64::from(value as f32),
-            dtype => {
-                return Err(format!(
-                    "{} tensor is missing authoritative integer storage",
-                    dtype.class_name()
-                ))
+                        .expect("non-floating numeric scalar is integer")
+                        .to_f64(),
+                };
+                let destination = values
+                    .get_mut(index)
+                    .ok_or_else(|| format!("Tensor index {index} out of bounds"))?;
+                *destination = value;
             }
-        };
+            TensorStorage::F32(values) => {
+                let value = match value {
+                    NumericScalar::F64(value) => value as f32,
+                    NumericScalar::F32(value) => value,
+                    value => value
+                        .into_int_value()
+                        .expect("non-floating numeric scalar is integer")
+                        .to_f64() as f32,
+                };
+                let destination = values
+                    .get_mut(index)
+                    .ok_or_else(|| format!("Tensor index {index} out of bounds"))?;
+                *destination = value;
+            }
+            TensorStorage::Integer(storage) => {
+                let exact = match value {
+                    NumericScalar::F64(value) => storage.cast_f64_assignment(value),
+                    NumericScalar::F32(value) => storage.cast_f64_assignment(f64::from(value)),
+                    value => storage.cast_exact_assignment(
+                        &value
+                            .into_int_value()
+                            .expect("non-floating numeric scalar is integer"),
+                    ),
+                };
+                storage.set_value(index, exact)?;
+            }
+        }
         Ok(())
     }
 
-    /// Consumes transitional tensor fields into one native numeric buffer.
-    ///
-    /// This is the ownership bridge used while call sites migrate away from
-    /// direct access to the legacy public fields.
+    /// Consumes this tensor into one public all-class native numeric buffer.
     pub fn into_numeric_storage(self) -> Result<NumericStorage, String> {
-        let Self {
-            data,
-            integer_data,
-            shape,
-            dtype,
-            ..
-        } = self;
-        let storage = match integer_data {
-            Some(storage) => NumericStorage::from_integer_storage(storage),
-            None => match dtype {
-                NumericDType::F64 => NumericStorage::F64(data),
-                NumericDType::F32 => {
-                    NumericStorage::F32(data.into_iter().map(|value| value as f32).collect())
-                }
-                integer_dtype => {
-                    return Err(format!(
-                        "{} tensor is missing authoritative integer storage",
-                        integer_dtype.class_name()
-                    ));
-                }
-            },
+        let storage = match self.storage {
+            TensorStorage::F64(values) => NumericStorage::F64(values),
+            TensorStorage::F32(values) => NumericStorage::F32(values),
+            TensorStorage::Integer(storage) => NumericStorage::from_integer_storage(storage),
         };
-        storage.validate_shape(&shape)?;
+        storage.validate_shape(&self.shape)?;
         Ok(storage)
     }
 
     /// Change only shape metadata while retaining the underlying numeric storage.
     pub fn reshape(mut self, shape: Vec<usize>) -> Result<Self, String> {
-        let expected: usize = shape.iter().product();
-        if let Some(storage) = &self.integer_data {
-            if storage.len() != expected {
-                return Err(format!(
-                    "integer tensor data length {} doesn't match shape {:?} ({} elements)",
-                    storage.len(),
-                    shape,
-                    expected
-                ));
-            }
-        } else if self.data.len() != expected {
+        let expected = shape.iter().product::<usize>();
+        if self.len() != expected {
             return Err(format!(
-                "Tensor data length {} doesn't match shape {:?} ({} elements)",
-                self.data.len(),
+                "{} tensor data length {} doesn't match shape {:?} ({} elements)",
+                self.numeric_dtype().class_name(),
+                self.len(),
                 shape,
                 expected
             ));
@@ -2561,14 +2520,10 @@ impl Tensor {
         }
         // Column-major linearization: lin = row + col*rows
         let index = row + col * rows;
-        // This legacy API deliberately returns f64, but typed tensors must
-        // source that conversion from their authoritative integer buffer.
-        // The f64 mirror can be lossy (or absent in migration tests).
         Ok(self
-            .integer_data
-            .as_ref()
-            .and_then(|storage| storage.value_at(index))
-            .map_or_else(|| self.data[index], |value| value.to_f64()))
+            .numeric_value_at(index)
+            .expect("validated tensor index")
+            .materialize_f64())
     }
 
     pub fn set2(&mut self, row: usize, col: usize, value: f64) -> Result<(), String> {
@@ -2581,16 +2536,7 @@ impl Tensor {
         }
         // Column-major linearization
         let index = row + col * rows;
-        if let Some(storage) = &mut self.integer_data {
-            // Assignment to a MATLAB integer array rounds and saturates to
-            // its existing class. Rebuild the compatibility view from the
-            // exact result so it cannot become authoritative by accident.
-            storage.set_f64_assignment(index, value)?;
-            self.data = storage.to_f64_vec();
-        } else {
-            self.data[index] = value;
-        }
-        Ok(())
+        self.set_numeric_assignment_at(index, NumericScalar::F64(value))
     }
 
     pub fn scalar_to_tensor2(scalar: f64, rows: usize, cols: usize) -> Tensor {
@@ -3545,22 +3491,20 @@ fn write_nd_pages(
 impl fmt::Display for Tensor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let format_element = |idx: usize| {
-            self.integer_data
-                .as_ref()
-                .and_then(|storage| storage.value_at(idx))
-                .map(|value| value.decimal_string())
-                .unwrap_or_else(|| format_number(self.data[idx]))
+            let value = self
+                .numeric_value_at(idx)
+                .expect("display index is within tensor storage");
+            match value.into_int_value() {
+                Some(value) => value.decimal_string(),
+                None => format_number(value.materialize_f64()),
+            }
         };
 
         match self.shape.len() {
             0 | 1 => {
                 // Treat as row vector for display
                 write!(f, "[")?;
-                let len = self
-                    .integer_data
-                    .as_ref()
-                    .map_or(self.data.len(), IntegerStorage::len);
-                for i in 0..len {
+                for i in 0..self.len() {
                     if i > 0 {
                         write!(f, " ")?;
                     }

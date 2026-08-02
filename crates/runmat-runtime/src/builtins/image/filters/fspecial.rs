@@ -1253,7 +1253,7 @@ pub(crate) mod tests {
     fn fspecial_average_default() {
         let tensor = fspecial_host_tensor("average", Vec::new());
         assert_eq!(tensor.shape, vec![3, 3]);
-        for value in tensor.data {
+        for value in tensor.materialize_f64() {
             assert_close(value, 1.0 / 9.0, 1e-12);
         }
     }
@@ -1264,7 +1264,7 @@ pub(crate) mod tests {
         let args = vec![Value::from(5)];
         let tensor = fspecial_host_tensor("average", args);
         assert_eq!(tensor.shape, vec![5, 5]);
-        let sum: f64 = tensor.data.iter().sum();
+        let sum: f64 = tensor.materialize_f64().iter().sum();
         assert_close(sum, 1.0, 1e-12);
     }
 
@@ -1277,17 +1277,16 @@ pub(crate) mod tests {
         let tensor = fspecial_host_tensor("average", args);
         assert_eq!(tensor.shape, vec![4, 6]);
         let expected = 1.0 / (4.0 * 6.0);
-        for value in tensor.data {
+        for value in tensor.materialize_f64() {
             assert_close(value, expected, 1e-12);
         }
     }
 
     #[test]
     fn fspecial_lengths_preserve_typed_integer_tensor_bounds() {
-        let mut dims =
+        let dims =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![2, 4]), vec![1, 2])
                 .expect("dims");
-        dims.data.clear();
         assert_eq!(
             parse_lengths_strict(
                 &Value::Tensor(dims),
@@ -1391,7 +1390,7 @@ pub(crate) mod tests {
             0.083_819_505_802_211,
             0.011_343_736_558_495,
         ];
-        for (idx, value) in tensor.data.iter().enumerate() {
+        for (idx, value) in tensor.materialize_f64().iter().enumerate() {
             assert_close(*value, EXPECTED[idx], 1e-12);
         }
     }
@@ -1405,8 +1404,8 @@ pub(crate) mod tests {
         let center = tensor.rows / 2;
         let col = center;
         let idx = col * tensor.rows + center;
-        assert!(tensor.data[idx] > 0.0);
-        let sum: f64 = tensor.data.iter().sum();
+        assert!(tensor.materialize_f64()[idx] > 0.0);
+        let sum: f64 = tensor.materialize_f64().iter().sum();
         assert_close(sum, 1.0, 1e-5);
     }
 
@@ -1427,7 +1426,7 @@ pub(crate) mod tests {
             0.6666666666666667,
             0.16666666666666669,
         ];
-        for (idx, value) in t.data.iter().enumerate() {
+        for (idx, value) in t.materialize_f64().iter().enumerate() {
             assert_close(*value, expected[idx], 1e-7);
         }
     }
@@ -1437,7 +1436,7 @@ pub(crate) mod tests {
     fn fspecial_unsharp_default() {
         let t = fspecial_host_tensor("unsharp", Vec::new());
         assert_eq!(t.shape, vec![3, 3]);
-        let sum: f64 = t.data.iter().sum();
+        let sum: f64 = t.materialize_f64().iter().sum();
         assert_close(sum, 1.0, 1e-6);
     }
 
@@ -1446,11 +1445,11 @@ pub(crate) mod tests {
     fn fspecial_log_basic_properties() {
         let t = fspecial_host_tensor("log", vec![Value::from(5), Value::from(0.5)]);
         assert_eq!(t.shape, vec![5, 5]);
-        let sum: f64 = t.data.iter().sum();
+        let sum: f64 = t.materialize_f64().iter().sum();
         assert_close(sum, 0.0, 1e-12);
         let center = t.rows / 2;
         let idx = center * t.rows + center;
-        assert!(t.data[idx] < 0.0);
+        assert!(t.materialize_f64()[idx] < 0.0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1458,10 +1457,10 @@ pub(crate) mod tests {
     fn fspecial_disk_sum_is_one() {
         let t = fspecial_host_tensor("disk", vec![Value::from(5)]);
         assert_eq!(t.shape, vec![11, 11]);
-        let sum: f64 = t.data.iter().sum();
+        let sum: f64 = t.materialize_f64().iter().sum();
         assert_close(sum, 1.0, 1e-10);
         let idx = t.rows * (t.cols / 2) + t.rows / 2;
-        assert!(t.data[idx] > 0.0);
+        assert!(t.materialize_f64()[idx] > 0.0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1482,7 +1481,7 @@ pub(crate) mod tests {
     fn fspecial_motion_sum_is_one() {
         let t = fspecial_host_tensor("motion", vec![Value::from(15), Value::from(45.0)]);
         assert_eq!(t.shape, vec![15, 15]);
-        let sum: f64 = t.data.iter().sum();
+        let sum: f64 = t.materialize_f64().iter().sum();
         assert_close(sum, 1.0, 1e-10);
     }
 
@@ -1558,7 +1557,11 @@ pub(crate) mod tests {
                 other => panic!("unexpected result {other:?}"),
             };
         assert_eq!(gpu_tensor.shape, host_tensor.shape);
-        for (a, b) in gpu_tensor.data.iter().zip(host_tensor.data.iter()) {
+        for (a, b) in gpu_tensor
+            .materialize_f64()
+            .iter()
+            .zip(host_tensor.materialize_f64().iter())
+        {
             assert_close(*a, *b, 1e-6);
         }
     }

@@ -1086,8 +1086,7 @@ mod tests {
     }
 
     fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
         Value::Tensor(tensor)
     }
 
@@ -1117,7 +1116,7 @@ mod tests {
             panic!("expected B tensor");
         };
         assert_eq!(b.shape, vec![2, 1]);
-        assert!(b.data[1] < 0.0);
+        assert!(b.materialize_f64()[1] < 0.0);
         assert!(matches!(&values[1], Value::Num(value) if value.is_finite()));
         let Value::Struct(stats) = &values[2] else {
             panic!("expected stats struct");
@@ -1155,7 +1154,7 @@ mod tests {
             panic!("expected B tensor");
         };
         assert_eq!(b.shape, vec![2, 2]);
-        assert!(b.data.iter().all(|value| value.is_finite()));
+        assert!(b.materialize_f64().iter().all(|value| value.is_finite()));
     }
 
     #[test]
@@ -1175,7 +1174,7 @@ mod tests {
             panic!("expected B tensor");
         };
         assert_eq!(b.shape, vec![2, 1]);
-        assert!(b.data.iter().all(|value| value.is_finite()));
+        assert!(b.materialize_f64().iter().all(|value| value.is_finite()));
     }
 
     #[test]
@@ -1208,7 +1207,7 @@ mod tests {
         let Value::Tensor(class_names) = stats.fields.get("classNames").unwrap() else {
             panic!("expected numeric class names");
         };
-        assert_eq!(class_names.data, vec![1.0, 2.0, 3.0]);
+        assert_eq!(class_names.materialize_f64(), vec![1.0, 2.0, 3.0]);
     }
 
     #[test]
@@ -1296,7 +1295,7 @@ mod tests {
             panic!("expected B tensor");
         };
         assert_eq!(b.shape, vec![2, 1]);
-        assert!(b.data.iter().all(|value| value.is_finite()));
+        assert!(b.materialize_f64().iter().all(|value| value.is_finite()));
         assert!(matches!(&values[1], Value::Num(value) if value.is_finite()));
     }
 
@@ -1315,6 +1314,6 @@ mod tests {
             panic!("expected B tensor");
         };
         assert_eq!(b.shape, vec![2, 1]);
-        assert!(b.data.iter().all(|value| value.is_finite()));
+        assert!(b.materialize_f64().iter().all(|value| value.is_finite()));
     }
 }

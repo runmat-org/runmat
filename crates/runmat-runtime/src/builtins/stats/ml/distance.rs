@@ -1634,14 +1634,12 @@ mod tests {
     }
 
     fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
         Value::Tensor(tensor)
     }
 
     fn cleared_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
         Value::Tensor(tensor)
     }
 
@@ -1656,7 +1654,7 @@ mod tests {
     fn pdist_default_and_cityblock_use_condensed_order() {
         let x = tensor(vec![0.0, 3.0, 4.0, 0.0, 0.0, 4.0, 0.0, 2.0], 4, 2);
         let out = block_on(pdist_builtin(x.clone(), Vec::new())).unwrap();
-        let data = tensor_out(out).data;
+        let data = tensor_out(out).materialize_f64();
         assert!((data[0] - 5.0).abs() < 1.0e-10);
         assert!((data[1] - 4.0).abs() < 1.0e-10);
         assert!((data[2] - 2.0).abs() < 1.0e-10);
@@ -1665,7 +1663,10 @@ mod tests {
         assert!((data[5] - 20.0_f64.sqrt()).abs() < 1.0e-10);
 
         let out = block_on(pdist_builtin(x, vec![Value::from("cityblock")])).unwrap();
-        assert_eq!(tensor_out(out).data, vec![7.0, 4.0, 2.0, 5.0, 5.0, 6.0]);
+        assert_eq!(
+            tensor_out(out).materialize_f64(),
+            vec![7.0, 4.0, 2.0, 5.0, 5.0, 6.0]
+        );
     }
 
     #[test]
@@ -1676,14 +1677,14 @@ mod tests {
             vec![Value::from("minkowski"), Value::Num(1.0)],
         ))
         .unwrap();
-        assert_eq!(tensor_out(out).data, vec![7.0, 4.0, 5.0]);
+        assert_eq!(tensor_out(out).materialize_f64(), vec![7.0, 4.0, 5.0]);
 
         let out = block_on(pdist_builtin(
             x,
             vec![Value::from("seuclidean"), tensor(vec![1.0, 4.0], 1, 2)],
         ))
         .unwrap();
-        assert!((tensor_out(out).data[0] - 10.0_f64.sqrt()).abs() < 1.0e-10);
+        assert!((tensor_out(out).materialize_f64()[0] - 10.0_f64.sqrt()).abs() < 1.0e-10);
 
         let out = block_on(pdist2_builtin(
             tensor(vec![0.0, 3.0, 0.0, 4.0], 2, 2),
@@ -1691,7 +1692,7 @@ mod tests {
             vec![Value::from("seuclidean")],
         ))
         .unwrap();
-        assert!((tensor_out(out).data[0] - 4.5_f64.sqrt()).abs() < 1.0e-10);
+        assert!((tensor_out(out).materialize_f64()[0] - 4.5_f64.sqrt()).abs() < 1.0e-10);
     }
 
     #[test]
@@ -1705,7 +1706,7 @@ mod tests {
             ],
         ))
         .unwrap();
-        assert_eq!(tensor_out(out).data, vec![7.0, 4.0, 5.0]);
+        assert_eq!(tensor_out(out).materialize_f64(), vec![7.0, 4.0, 5.0]);
 
         let out = block_on(pdist_builtin(
             int_tensor(IntegerStorage::I16(vec![0, 3, 4, 0, 4, 0]), 3, 2),
@@ -1715,7 +1716,7 @@ mod tests {
             ],
         ))
         .unwrap();
-        assert!((tensor_out(out).data[0] - 10.0_f64.sqrt()).abs() < 1.0e-10);
+        assert!((tensor_out(out).materialize_f64()[0] - 10.0_f64.sqrt()).abs() < 1.0e-10);
 
         let out = block_on(pdist_builtin(
             int_tensor(IntegerStorage::I16(vec![0, 1, 0, 2]), 2, 2),
@@ -1725,14 +1726,14 @@ mod tests {
             ],
         ))
         .unwrap();
-        assert!((tensor_out(out).data[0] - 5.0_f64.sqrt()).abs() < 1.0e-10);
+        assert!((tensor_out(out).materialize_f64()[0] - 5.0_f64.sqrt()).abs() < 1.0e-10);
     }
 
     #[test]
     fn nan_rows_propagate_and_invalid_covariance_is_rejected() {
         let x = tensor(vec![0.0, f64::NAN, 0.0, 1.0], 2, 2);
         let out = block_on(pdist_builtin(x, vec![Value::from("hamming")])).unwrap();
-        assert!(tensor_out(out).data[0].is_nan());
+        assert!(tensor_out(out).materialize_f64()[0].is_nan());
 
         let err = block_on(pdist_builtin(
             tensor(vec![0.0, 1.0, 0.0, 1.0], 2, 2),
@@ -1755,7 +1756,7 @@ mod tests {
             vec![Value::from("squaredeuclidean")],
         ))
         .unwrap();
-        assert_eq!(tensor_out(out).data, vec![1.0, 1.0, 9.0, 1.0]);
+        assert_eq!(tensor_out(out).materialize_f64(), vec![1.0, 1.0, 9.0, 1.0]);
 
         let out = block_on(pdist2_builtin(
             x,
@@ -1769,7 +1770,7 @@ mod tests {
         .unwrap();
         let tensor = tensor_out(out);
         assert_eq!(tensor.shape, vec![1, 2]);
-        assert_eq!(tensor.data, vec![1.0, 1.0]);
+        assert_eq!(tensor.materialize_f64(), vec![1.0, 1.0]);
     }
 
     #[test]
@@ -1786,7 +1787,7 @@ mod tests {
         .unwrap();
         let tensor = tensor_out(out);
         assert_eq!(tensor.shape, vec![1, 2]);
-        assert_eq!(tensor.data, vec![1.0, 1.0]);
+        assert_eq!(tensor.materialize_f64(), vec![1.0, 1.0]);
 
         assert!(parse_positive_integer(
             PDIST2_NAME,
@@ -1820,8 +1821,8 @@ mod tests {
         let dist = tensor_out(values[1].clone());
         assert_eq!(idx.shape, vec![2, 2]);
         assert_eq!(dist.shape, vec![2, 2]);
-        assert_eq!(idx.data, vec![1.0, 3.0, 2.0, 2.0]);
-        assert_eq!(dist.data, vec![1.0, 1.0, 1.0, 2.0]);
+        assert_eq!(idx.materialize_f64(), vec![1.0, 3.0, 2.0, 2.0]);
+        assert_eq!(dist.materialize_f64(), vec![1.0, 1.0, 1.0, 2.0]);
     }
 
     #[test]
@@ -1841,7 +1842,7 @@ mod tests {
         .unwrap();
         let idx = tensor_out(out);
         assert_eq!(idx.shape, vec![1, 2]);
-        assert_eq!(idx.data, vec![1.0, 2.0]);
+        assert_eq!(idx.materialize_f64(), vec![1.0, 2.0]);
 
         let out = block_on(knnsearch_builtin(
             x,
@@ -1862,7 +1863,7 @@ mod tests {
             panic!("expected tensor in cell");
         };
         assert_eq!(tied.shape, vec![1, 3]);
-        assert_eq!(tied.data, vec![1.0, 2.0, 3.0]);
+        assert_eq!(tied.materialize_f64(), vec![1.0, 2.0, 3.0]);
     }
 
     #[test]
@@ -1886,7 +1887,7 @@ mod tests {
         .unwrap();
         let idx = tensor_out(out);
         assert_eq!(idx.shape, vec![2, 2]);
-        assert_eq!(idx.data, vec![1.0, 3.0, 2.0, 2.0]);
+        assert_eq!(idx.materialize_f64(), vec![1.0, 3.0, 2.0, 2.0]);
     }
 
     #[test]
@@ -1901,8 +1902,14 @@ mod tests {
         let Value::OutputList(values) = out else {
             panic!("expected output list");
         };
-        assert_eq!(tensor_out(values[0].clone()).data, vec![1.0, 3.0]);
-        assert_eq!(tensor_out(values[1].clone()).data, vec![1.0, 1.0]);
+        assert_eq!(
+            tensor_out(values[0].clone()).materialize_f64(),
+            vec![1.0, 3.0]
+        );
+        assert_eq!(
+            tensor_out(values[1].clone()).materialize_f64(),
+            vec![1.0, 1.0]
+        );
 
         let out = block_on(knnsearch_builtin(
             tensor(vec![0.0, 2.0], 2, 1),
@@ -1962,7 +1969,7 @@ mod tests {
         let matrix = tensor_out(block_on(squareform_builtin(vector, Vec::new())).unwrap());
         assert_eq!(matrix.shape, vec![4, 4]);
         assert_eq!(
-            matrix.data,
+            matrix.materialize_f64(),
             vec![
                 0.0,
                 5.0,
@@ -1987,7 +1994,7 @@ mod tests {
             tensor_out(block_on(squareform_builtin(Value::Tensor(matrix), Vec::new())).unwrap());
         assert_eq!(vector.shape, vec![1, 6]);
         assert_eq!(
-            vector.data,
+            vector.materialize_f64(),
             vec![
                 5.0,
                 4.0,
@@ -2005,14 +2012,14 @@ mod tests {
         let matrix = tensor_out(block_on(squareform_builtin(vector, Vec::new())).unwrap());
         assert_eq!(matrix.shape, vec![3, 3]);
         assert_eq!(
-            matrix.data,
+            matrix.materialize_f64(),
             vec![0.0, 5.0, 4.0, 5.0, 0.0, 2.0, 4.0, 2.0, 0.0]
         );
 
         let matrix = poisoned_int_tensor(IntegerStorage::U8(vec![0, 5, 4, 5, 0, 2, 4, 2, 0]), 3, 3);
         let vector = tensor_out(block_on(squareform_builtin(matrix, Vec::new())).unwrap());
         assert_eq!(vector.shape, vec![1, 3]);
-        assert_eq!(vector.data, vec![5.0, 4.0, 2.0]);
+        assert_eq!(vector.materialize_f64(), vec![5.0, 4.0, 2.0]);
     }
 
     #[test]
@@ -2025,7 +2032,7 @@ mod tests {
             ],
         ))
         .unwrap();
-        assert!((tensor_out(out).data[0] - 10.0_f64.sqrt()).abs() < 1.0e-10);
+        assert!((tensor_out(out).materialize_f64()[0] - 10.0_f64.sqrt()).abs() < 1.0e-10);
     }
 
     #[test]

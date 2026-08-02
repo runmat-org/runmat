@@ -267,7 +267,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -275,7 +275,7 @@ pub(crate) mod tests {
             match result {
                 Value::Tensor(host) => {
                     assert_eq!(host.shape, tensor.shape);
-                    assert_eq!(host.data, tensor.data);
+                    assert_eq!(host.materialize_f64(), tensor.materialize_f64());
                 }
                 other => panic!("expected tensor result, got {other:?}"),
             }
@@ -289,7 +289,7 @@ pub(crate) mod tests {
             let data = vec![0.0, 1.0, 1.0, 0.0];
             let tensor = Tensor::new(data.clone(), vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -311,7 +311,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![7.0, 8.0], vec![2, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -325,7 +325,7 @@ pub(crate) mod tests {
             match first {
                 Value::Tensor(t) => {
                     assert_eq!(t.shape, vec![2, 1]);
-                    assert_eq!(t.data, tensor.data);
+                    assert_eq!(t.materialize_f64(), tensor.materialize_f64());
                 }
                 other => panic!("expected tensor in cell, got {other:?}"),
             }
@@ -340,7 +340,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![3.5, -1.25], vec![2, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -356,7 +356,7 @@ pub(crate) mod tests {
                 panic!("missing tensor field");
             };
             assert_eq!(host.shape, vec![2, 1]);
-            assert_eq!(host.data, tensor.data);
+            assert_eq!(host.materialize_f64(), tensor.materialize_f64());
             let Some(Value::String(label)) = gathered.fields.get("label") else {
                 panic!("missing label");
             };
@@ -421,7 +421,7 @@ pub(crate) mod tests {
             Ok(provider) => {
                 let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
                 let view = HostTensorView {
-                    data: &tensor.data,
+                    data: &tensor.materialize_f64(),
                     shape: &tensor.shape,
                 };
                 let handle = provider.upload(&view).expect("upload");
@@ -432,7 +432,7 @@ pub(crate) mod tests {
                 match outputs.into_iter().next().unwrap() {
                     Value::Tensor(host) => {
                         assert_eq!(host.shape, tensor.shape);
-                        assert_eq!(host.data, tensor.data);
+                        assert_eq!(host.materialize_f64(), tensor.materialize_f64());
                     }
                     other => panic!("expected tensor value, got {other:?}"),
                 }

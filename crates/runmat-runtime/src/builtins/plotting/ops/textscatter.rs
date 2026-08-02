@@ -1474,12 +1474,11 @@ mod tests {
     }
 
     fn int_tensor(values: Vec<i16>, rows: usize, cols: usize) -> Tensor {
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             runmat_builtins::IntegerStorage::I16(values),
             vec![rows, cols],
         )
         .expect("integer tensor");
-        tensor.data.clear();
         tensor
     }
 
@@ -1584,7 +1583,7 @@ mod tests {
             &get_builtin(vec![Value::Num(handle), Value::String("XData".into())]).unwrap(),
         )
         .unwrap();
-        assert_eq!(x.data, vec![1.0, 2.0, 3.0]);
+        assert_eq!(x.materialize_f64(), vec![1.0, 2.0, 3.0]);
     }
 
     #[test]
@@ -1626,7 +1625,7 @@ mod tests {
             &get_builtin(vec![Value::Num(handle), Value::String("ZData".into())]).unwrap(),
         )
         .unwrap();
-        assert_eq!(z.data, vec![100.0, 200.0]);
+        assert_eq!(z.materialize_f64(), vec![100.0, 200.0]);
     }
 
     #[test]

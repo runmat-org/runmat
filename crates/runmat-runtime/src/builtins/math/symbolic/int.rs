@@ -608,9 +608,8 @@ mod tests {
     #[tokio::test]
     async fn option_validation_reads_typed_integer_scalar_tensor() {
         let expr = SymbolicExpr::function(SymbolicFunction::Cos, x());
-        let mut option_value =
+        let option_value =
             Tensor::new_integer(IntegerStorage::I8(vec![1]), vec![1, 1]).expect("option value");
-        option_value.data.clear();
 
         let err = int_builtin(
             Value::Symbolic(expr),

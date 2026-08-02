@@ -1040,15 +1040,13 @@ pub(crate) mod tests {
 
     #[test]
     fn degree_parser_reads_typed_integer_scalar_storage_exactly() {
-        let mut degree =
+        let degree =
             Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).expect("typed degree");
-        degree.data.clear();
 
         assert_eq!(parse_degree(&Value::Tensor(degree)).unwrap(), 3);
 
-        let mut negative = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
+        let negative = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
             .expect("negative degree");
-        negative.data.clear();
         assert!(parse_degree(&Value::Tensor(negative)).is_err());
     }
 
@@ -1150,8 +1148,8 @@ pub(crate) mod tests {
         match eval.coefficients() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert!((t.data[0] - 1.5).abs() < 1e-10);
-                assert!((t.data[1] - 2.0).abs() < 1e-10);
+                assert!((t.materialize_f64()[0] - 1.5).abs() < 1e-10);
+                assert!((t.materialize_f64()[1] - 2.0).abs() < 1e-10);
             }
             other => panic!("expected tensor coefficients, got {other:?}"),
         }
@@ -1161,8 +1159,7 @@ pub(crate) mod tests {
     fn polyfit_typed_integer_vectors_degree_and_weights_cross_double_boundary_exactly() {
         let x = Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 2, 3]), vec![4, 1]).unwrap();
         let y = Tensor::new_integer(IntegerStorage::I16(vec![2, 4, 6, 8]), vec![4, 1]).unwrap();
-        let mut degree = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
-        degree.data.clear();
+        let degree = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
         let weights =
             Tensor::new_integer(IntegerStorage::U16(vec![1, 1, 1, 1]), vec![1, 4]).unwrap();
         let eval = evaluate(
@@ -1175,8 +1172,8 @@ pub(crate) mod tests {
         match eval.coefficients() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert!((t.data[0] - 2.0).abs() < 1e-10);
-                assert!((t.data[1] - 2.0).abs() < 1e-10);
+                assert!((t.materialize_f64()[0] - 2.0).abs() < 1e-10);
+                assert!((t.materialize_f64()[1] - 2.0).abs() < 1e-10);
                 assert!(t.integer_storage().is_none());
             }
             other => panic!("expected tensor coefficients, got {other:?}"),
@@ -1206,8 +1203,8 @@ pub(crate) mod tests {
         match eval.mu() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert!((t.data[0]).abs() < 1e-10);
-                assert!(t.data[1].abs() > 0.0);
+                assert!((t.materialize_f64()[0]).abs() < 1e-10);
+                assert!(t.materialize_f64()[1].abs() > 0.0);
             }
             other => panic!("expected tensor mu, got {other:?}"),
         }
@@ -1286,12 +1283,12 @@ pub(crate) mod tests {
             let x = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
             let y = Tensor::new(vec![1.0, 3.0, 7.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &x.data,
+                data: &x.materialize_f64(),
                 shape: &x.shape,
             };
             let x_handle = provider.upload(&view).expect("upload");
             let view_y = runmat_accelerate_api::HostTensorView {
-                data: &y.data,
+                data: &y.materialize_f64(),
                 shape: &y.shape,
             };
             let y_handle = provider.upload(&view_y).expect("upload");
@@ -1315,15 +1312,15 @@ pub(crate) mod tests {
             let weights = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
 
             let x_view = runmat_accelerate_api::HostTensorView {
-                data: &x.data,
+                data: &x.materialize_f64(),
                 shape: &x.shape,
             };
             let y_view = runmat_accelerate_api::HostTensorView {
-                data: &y.data,
+                data: &y.materialize_f64(),
                 shape: &y.shape,
             };
             let w_view = runmat_accelerate_api::HostTensorView {
-                data: &weights.data,
+                data: &weights.materialize_f64(),
                 shape: &weights.shape,
             };
 
@@ -1382,11 +1379,11 @@ pub(crate) mod tests {
 
         let trait_provider = runmat_accelerate_api::provider().expect("wgpu provider registered");
         let x_view = runmat_accelerate_api::HostTensorView {
-            data: &x.data,
+            data: &x.materialize_f64(),
             shape: &x.shape,
         };
         let y_view = runmat_accelerate_api::HostTensorView {
-            data: &y.data,
+            data: &y.materialize_f64(),
             shape: &y.shape,
         };
         let x_handle = trait_provider.upload(&x_view).expect("upload x");
@@ -1412,7 +1409,11 @@ pub(crate) mod tests {
             other => panic!("expected tensor coefficients, got {other:?}"),
         };
         assert_eq!(cpu_coeff.shape, gpu_coeff.shape);
-        for (a, b) in cpu_coeff.data.iter().zip(gpu_coeff.data.iter()) {
+        for (a, b) in cpu_coeff
+            .materialize_f64()
+            .iter()
+            .zip(gpu_coeff.materialize_f64().iter())
+        {
             assert!((a - b).abs() < 1e-9, "coeff mismatch {a} vs {b}");
         }
 
@@ -1425,7 +1426,11 @@ pub(crate) mod tests {
             other => panic!("expected tensor mu, got {other:?}"),
         };
         assert_eq!(cpu_mu.shape, gpu_mu.shape);
-        for (a, b) in cpu_mu.data.iter().zip(gpu_mu.data.iter()) {
+        for (a, b) in cpu_mu
+            .materialize_f64()
+            .iter()
+            .zip(gpu_mu.materialize_f64().iter())
+        {
             assert!((a - b).abs() < 1e-9, "mu mismatch {a} vs {b}");
         }
 
@@ -1446,7 +1451,11 @@ pub(crate) mod tests {
             other => panic!("expected tensor R, got {other:?}"),
         };
         assert_eq!(cpu_r.shape, gpu_r.shape);
-        for (a, b) in cpu_r.data.iter().zip(gpu_r.data.iter()) {
+        for (a, b) in cpu_r
+            .materialize_f64()
+            .iter()
+            .zip(gpu_r.materialize_f64().iter())
+        {
             assert!((a - b).abs() < 1e-9, "R mismatch {a} vs {b}");
         }
         let cpu_df = match cpu_stats.fields.get("df").expect("df present") {

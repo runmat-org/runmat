@@ -3643,9 +3643,8 @@ mod tests {
             &Value::Tensor(Tensor::new_2d(vec![1.0, -1.0], 1, 2).unwrap())
         )
         .is_err());
-        let mut typed_indices =
+        let typed_indices =
             Tensor::new_integer(IntegerStorage::U16(vec![2, 4]), vec![1, 2]).unwrap();
-        typed_indices.data.fill(f64::NAN);
         assert_eq!(
             usize_vec_from_value(INTERFACE_NAME, &Value::Tensor(typed_indices)).unwrap(),
             vec![2, 4]
@@ -3669,12 +3668,11 @@ mod tests {
             maximum.decimal_string()
         );
 
-        let mut scalar = Tensor::new_integer(
+        let scalar = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![u64::MAX]),
             vec![1, 1],
         )
         .expect("scalar tensor");
-        scalar.data.clear();
         assert_eq!(
             value_to_json(INTERFACE_NAME, &Value::Tensor(scalar))
                 .expect("scalar tensor json")
@@ -3682,12 +3680,11 @@ mod tests {
             u64::MAX.to_string()
         );
 
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![42, u64::MAX]),
             vec![1, 2],
         )
         .expect("tensor");
-        tensor.data.clear();
         assert_eq!(
             value_to_json(INTERFACE_NAME, &Value::Tensor(tensor))
                 .expect("tensor json")
@@ -4007,7 +4004,7 @@ run:
             panic!("expected values tensor");
         };
         assert_eq!(values.shape, vec![1]);
-        assert_eq!(values.data, vec![42.0]);
+        assert_eq!(values.materialize_f64(), vec![42.0]);
         assert!(field_object
             .properties
             .contains_key(FEA_STUDY_CONTEXT_JSON_PROPERTY));
@@ -4047,10 +4044,9 @@ run:
         } else {
             u32::MAX as u64
         };
-        let mut typed =
+        let typed =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![wide]), vec![1, 1])
                 .expect("typed integer");
-        typed.data.clear();
 
         assert_eq!(
             usize_from_value(STUDY_NAME, &Value::Tensor(typed)).expect("typed integer"),

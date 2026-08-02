@@ -709,11 +709,11 @@ mod tests {
             .unwrap_or_else(|| panic!("missing {name}"))
     }
 
-    fn tensor_data(value: &Value) -> (&[f64], &[usize]) {
+    fn tensor_data(value: &Value) -> (Vec<f64>, Vec<usize>) {
         let Value::Tensor(tensor) = value else {
             panic!("expected tensor");
         };
-        (&tensor.data, &tensor.shape)
+        (tensor.materialize_f64(), tensor.shape.clone())
     }
 
     fn cell_text(value: &Value, row: usize, col: usize) -> String {
@@ -771,19 +771,17 @@ mod tests {
 
     #[test]
     fn importdata_headerlines_reads_typed_integer_storage_exactly() {
-        let mut header_lines =
+        let header_lines =
             Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![2]), vec![1, 1])
                 .expect("header lines");
-        header_lines.data.clear();
         assert_eq!(
             parse_header_lines(&Value::Tensor(header_lines)).expect("header lines"),
             2
         );
 
-        let mut negative =
+        let negative =
             Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![-1]), vec![1, 1])
                 .expect("negative header lines");
-        negative.data.clear();
         assert!(parse_header_lines(&Value::Tensor(negative)).is_err());
 
         assert_eq!(
@@ -807,8 +805,7 @@ mod tests {
         ];
 
         for storage in classes {
-            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("header lines");
-            tensor.data = vec![f64::NAN];
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("header lines");
             assert_eq!(parse_header_lines(&Value::Tensor(tensor)).unwrap(), 2);
         }
     }

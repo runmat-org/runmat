@@ -1557,7 +1557,7 @@ mod tests {
         let Value::Tensor(tensor) = output_value(value, col) else {
             panic!("expected tensor");
         };
-        tensor.data
+        tensor.materialize_f64()
     }
 
     fn text_column(value: &Value, col: usize) -> Vec<String> {
@@ -1588,17 +1588,15 @@ mod tests {
 
     #[test]
     fn textscan_scalar_parsers_read_typed_integer_storage_exactly() {
-        let mut header = Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1])
+        let header = Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1])
             .expect("typed header lines");
-        header.data.clear();
         assert_eq!(
             nonnegative_usize(&Value::Tensor(header), "HeaderLines").unwrap(),
             2
         );
 
-        let mut invalid = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
+        let invalid = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
             .expect("typed invalid count");
-        invalid.data.clear();
         assert!(nonnegative_usize(&Value::Tensor(invalid), "HeaderLines").is_err());
         assert_eq!(
             nonnegative_usize(&Value::Int(IntValue::U64(u64::MAX)), "HeaderLines").ok(),
@@ -1606,17 +1604,13 @@ mod tests {
         );
         assert!(nonnegative_usize(&Value::Num(1.0e300), "HeaderLines").is_err());
 
-        let mut fid =
-            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("typed fid");
-        fid.data.clear();
+        let fid = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("typed fid");
         assert_eq!(numeric_fid(&Value::Tensor(fid)), Some(7));
         assert_eq!(numeric_fid(&Value::Int(IntValue::U32(7))), Some(7));
         assert_eq!(numeric_fid(&Value::Int(IntValue::U64(u64::MAX))), None);
 
-        let mut fid_too_large =
-            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
-                .expect("typed fid");
-        fid_too_large.data.clear();
+        let fid_too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("typed fid");
         assert_eq!(numeric_fid(&Value::Tensor(fid_too_large)), None);
     }
 
@@ -1698,7 +1692,7 @@ mod tests {
             panic!("expected collected numeric group");
         };
         assert_eq!(group.shape, vec![1, 2]);
-        assert_eq!(group.data, vec![1.0, 2.0]);
+        assert_eq!(group.materialize_f64(), vec![1.0, 2.0]);
         assert_eq!(text_column(&out, 1), vec!["hello, world".to_string()]);
     }
 
@@ -1763,7 +1757,7 @@ mod tests {
             panic!("expected collected numeric group");
         };
         assert_eq!(group.shape, vec![2, 2]);
-        assert_eq!(group.data, vec![1.0, 3.0, 2.0, 4.0]);
+        assert_eq!(group.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

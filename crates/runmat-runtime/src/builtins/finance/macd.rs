@@ -372,9 +372,8 @@ mod tests {
                 data.push(row_values[col]);
             }
         }
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::I16(data), vec![rows, 4]).expect("integer matrix");
-        tensor.data.fill(f64::NAN);
         Value::Tensor(tensor)
     }
 
@@ -408,11 +407,11 @@ mod tests {
             .unwrap(),
         );
         assert_eq!(out.shape, vec![5, 1]);
-        assert_close(out.data[0], 0.0);
-        assert_close(out.data[1], 0.075);
-        assert_close(out.data[2], 0.283125);
-        assert_close(out.data[3], 0.743578125);
-        assert_close(out.data[4], 1.697244140625);
+        assert_close(out.materialize_f64()[0], 0.0);
+        assert_close(out.materialize_f64()[1], 0.075);
+        assert_close(out.materialize_f64()[2], 0.283125);
+        assert_close(out.materialize_f64()[3], 0.743578125);
+        assert_close(out.materialize_f64()[4], 1.697244140625);
     }
 
     #[test]
@@ -432,17 +431,16 @@ mod tests {
         );
         assert_eq!(out.shape, vec![5, 1]);
         assert!(out.integer_storage().is_none());
-        assert_close(out.data[0], 0.0);
-        assert_close(out.data[1], 0.075);
-        assert_close(out.data[2], 0.283125);
-        assert_close(out.data[3], 0.743578125);
-        assert_close(out.data[4], 1.697244140625);
+        assert_close(out.materialize_f64()[0], 0.0);
+        assert_close(out.materialize_f64()[1], 0.075);
+        assert_close(out.materialize_f64()[2], 0.283125);
+        assert_close(out.materialize_f64()[3], 0.743578125);
+        assert_close(out.materialize_f64()[4], 1.697244140625);
     }
 
     #[test]
     fn tensor_shape_for_reads_scalar_typed_integer_storage_without_mirror() {
-        let mut input = Tensor::new_integer(IntegerStorage::U8(vec![7]), Vec::new()).unwrap();
-        input.data.clear();
+        let input = Tensor::new_integer(IntegerStorage::U8(vec![7]), Vec::new()).unwrap();
 
         assert_eq!(tensor_shape_for(&input), vec![1, 1]);
     }
@@ -469,11 +467,11 @@ mod tests {
         let signal = expect_tensor(values[1].clone());
         assert_eq!(macd.shape, vec![5, 1]);
         assert_eq!(signal.shape, vec![5, 1]);
-        assert_close(signal.data[0], 0.0);
-        assert_close(signal.data[1], 0.015);
-        assert_close(signal.data[2], 0.068625);
-        assert_close(signal.data[3], 0.203615625);
-        assert_close(signal.data[4], 0.502341328125);
+        assert_close(signal.materialize_f64()[0], 0.0);
+        assert_close(signal.materialize_f64()[1], 0.015);
+        assert_close(signal.materialize_f64()[2], 0.068625);
+        assert_close(signal.materialize_f64()[3], 0.203615625);
+        assert_close(signal.materialize_f64()[4], 0.502341328125);
     }
 
     #[test]
@@ -505,8 +503,8 @@ mod tests {
         let signal = expect_tensor(values[1].clone());
         assert_eq!(macd.shape, vec![0, 1]);
         assert_eq!(signal.shape, vec![0, 1]);
-        assert!(macd.data.is_empty());
-        assert!(signal.data.is_empty());
+        assert!(macd.materialize_f64().is_empty());
+        assert!(signal.materialize_f64().is_empty());
     }
 
     #[test]
@@ -525,10 +523,10 @@ mod tests {
             .unwrap(),
         );
         assert_eq!(out.shape, vec![4, 1]);
-        assert_eq!(out.data[0], 0.0);
-        assert!(out.data[1].is_nan());
-        assert!(out.data[2].is_nan());
-        assert!(out.data[3].is_nan());
+        assert_eq!(out.materialize_f64()[0], 0.0);
+        assert!(out.materialize_f64()[1].is_nan());
+        assert!(out.materialize_f64()[2].is_nan());
+        assert!(out.materialize_f64()[3].is_nan());
     }
 
     #[test]
@@ -557,8 +555,8 @@ mod tests {
         assert_eq!(variables.fields.len(), 1);
         let close = expect_tensor(variables.fields.get("Close").cloned().unwrap());
         assert_eq!(close.shape, vec![3, 1]);
-        assert_close(close.data[1], 0.075);
-        assert_close(close.data[2], 0.283125);
+        assert_close(close.materialize_f64()[1], 0.075);
+        assert_close(close.materialize_f64()[2], 0.283125);
     }
 
     #[test]

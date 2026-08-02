@@ -15,7 +15,7 @@ fn zeros_single_uses_f32_dtype() {
     match result {
         Value::Tensor(t) => {
             assert_eq!(t.shape, vec![2, 3]);
-            assert_eq!(t.dtype, NumericDType::F32);
+            assert_eq!(t.numeric_dtype(), NumericDType::F32);
         }
         other => panic!("expected tensor result, got {other:?}"),
     }
@@ -35,7 +35,7 @@ fn ones_single_uses_f32_dtype() {
     match result {
         Value::Tensor(t) => {
             assert_eq!(t.shape, vec![3, 4]);
-            assert_eq!(t.dtype, NumericDType::F32);
+            assert_eq!(t.numeric_dtype(), NumericDType::F32);
         }
         other => panic!("expected tensor result, got {other:?}"),
     }
@@ -53,7 +53,7 @@ fn zeros_like_proto_preserves_numeric_dtype() {
     match result {
         Value::Tensor(t) => {
             assert_eq!(t.shape, proto.shape);
-            assert_eq!(t.dtype, NumericDType::F32);
+            assert_eq!(t.numeric_dtype(), NumericDType::F32);
         }
         other => panic!("expected tensor result, got {other:?}"),
     }
@@ -399,7 +399,7 @@ fn randn_single_sets_f32_dtype() {
     match result {
         Value::Tensor(t) => {
             assert_eq!(t.shape, vec![4, 5]);
-            assert_eq!(t.dtype, NumericDType::F32);
+            assert_eq!(t.numeric_dtype(), NumericDType::F32);
         }
         other => panic!("expected tensor result, got {other:?}"),
     }
@@ -417,7 +417,7 @@ fn randn_like_proto_preserves_dtype() {
     match result {
         Value::Tensor(t) => {
             assert_eq!(t.shape, proto.shape);
-            assert_eq!(t.dtype, NumericDType::F32);
+            assert_eq!(t.numeric_dtype(), NumericDType::F32);
         }
         other => panic!("expected tensor result, got {other:?}"),
     }
@@ -449,7 +449,7 @@ fn gpu_array_single_roundtrip_preserves_dtype() {
         match gathered {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, host.shape);
-                assert_eq!(t.dtype, expected_dtype);
+                assert_eq!(t.numeric_dtype(), expected_dtype);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -464,7 +464,7 @@ fn gpu_array_single_roundtrip_preserves_dtype() {
         match direct_eval {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, host.shape);
-                assert_eq!(t.dtype, expected_dtype);
+                assert_eq!(t.numeric_dtype(), expected_dtype);
             }
             other => panic!("expected tensor from gather::evaluate, got {other:?}"),
         }
@@ -474,7 +474,7 @@ fn gpu_array_single_roundtrip_preserves_dtype() {
         match builtin_gathered {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, host.shape);
-                assert_eq!(t.dtype, expected_dtype);
+                assert_eq!(t.numeric_dtype(), expected_dtype);
             }
             other => panic!("expected tensor result from builtin gather, got {other:?}"),
         }

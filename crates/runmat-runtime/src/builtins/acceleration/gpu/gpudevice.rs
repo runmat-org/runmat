@@ -399,9 +399,8 @@ pub(crate) mod tests {
     #[test]
     fn gpu_device_index_parser_reads_typed_integer_storage_exactly() {
         test_support::with_test_provider(|_| {
-            let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1])
+            let tensor = Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1])
                 .expect("integer tensor");
-            tensor.data.clear();
 
             let value = call(vec![Value::Tensor(tensor)]).expect("gpuDevice");
             assert!(matches!(value, Value::Struct(_)));

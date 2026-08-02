@@ -575,9 +575,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_from_typed_integer_tensor_reads_exact_storage_without_mirror() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![82, 0x10FFFF]), vec![1, 2])
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![82, 0x10FFFF]), vec![1, 2])
             .expect("typed tensor");
-        tensor.data.clear();
 
         let result = char_builtin(vec![Value::Tensor(tensor)]).expect("char");
         match result {
@@ -593,9 +592,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_rejects_negative_typed_integer_storage_without_mirror() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("typed tensor");
-        tensor.data.clear();
 
         let err = error_message(char_builtin(vec![Value::Tensor(tensor)]).expect_err("char"));
         assert!(
@@ -607,9 +605,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_rejects_out_of_range_uint64_storage_without_mirror() {
-        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![0x110000]), vec![1, 1])
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![0x110000]), vec![1, 1])
             .expect("typed tensor");
-        tensor.data.clear();
 
         let err = error_message(char_builtin(vec![Value::Tensor(tensor)]).expect_err("char"));
         assert!(
@@ -686,7 +683,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![82.0, 85.0, 78.0], vec![1, 3]).expect("tensor");
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -787,7 +784,7 @@ pub(crate) mod tests {
         let cpu = char_builtin(vec![Value::Tensor(tensor.clone())]).expect("char cpu");
 
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()

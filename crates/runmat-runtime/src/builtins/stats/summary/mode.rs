@@ -1309,7 +1309,7 @@ pub(crate) mod tests {
                 match entry {
                     Value::Tensor(t) => {
                         assert_eq!(t.shape, vec![2, 1]);
-                        assert_eq!(t.data, vec![1.0, 2.0]);
+                        assert_eq!(t.materialize_f64(), vec![1.0, 2.0]);
                     }
                     other => panic!("expected tensor inside cell, got {other:?}"),
                 }
@@ -1329,7 +1329,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 3]);
-                assert_eq!(t.data, vec![2.0, 3.0, 4.0]);
+                assert_eq!(t.materialize_f64(), vec![2.0, 3.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1347,7 +1347,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 1]);
-                assert_eq!(t.data, vec![1.0, 2.0, 1.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 1.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1360,14 +1360,13 @@ pub(crate) mod tests {
             vec![3, 3],
         )
         .unwrap();
-        let mut dim = Tensor::new_integer(IntegerStorage::U8(vec![2]), vec![1, 1]).unwrap();
-        dim.data.clear();
+        let dim = Tensor::new_integer(IntegerStorage::U8(vec![2]), vec![1, 1]).unwrap();
 
         let result = mode_call(Value::Tensor(tensor), vec![Value::Tensor(dim)]).expect("mode");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 1]);
-                assert_eq!(t.data, vec![1.0, 2.0, 1.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 1.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1387,7 +1386,7 @@ pub(crate) mod tests {
                 match entry {
                     Value::Tensor(t) => {
                         assert_eq!(t.shape, vec![1, 1]);
-                        assert_eq!(t.data, vec![2.0]);
+                        assert_eq!(t.materialize_f64(), vec![2.0]);
                     }
                     other => panic!("expected tensor in cell, got {other:?}"),
                 }
@@ -1420,7 +1419,7 @@ pub(crate) mod tests {
                 match entry {
                     Value::Tensor(t) => {
                         assert_eq!(t.shape, vec![0, 1]);
-                        assert!(t.data.is_empty());
+                        assert!(t.materialize_f64().is_empty());
                     }
                     other => panic!("expected empty tensor in cell, got {other:?}"),
                 }
@@ -1553,16 +1552,14 @@ pub(crate) mod tests {
     #[test]
     fn mode_integer_class_materialization_reads_exact_storage() {
         let wide = u64::MAX - 1;
-        let mut scalar = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).unwrap();
-        scalar.data.clear();
+        let scalar = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).unwrap();
         assert_eq!(
             tensor_into_integer_class_value(scalar, IntKind::U64).expect("scalar"),
             Value::Int(IntValue::U64(wide))
         );
 
-        let mut vector =
+        let vector =
             Tensor::new_integer(IntegerStorage::U64(vec![wide, wide - 1]), vec![1, 2]).unwrap();
-        vector.data.clear();
         let result = tensor_into_integer_class_array_value(vector, IntKind::U64).expect("vector");
         assert_eq!(
             expect_tensor(&result).integer_storage(),
@@ -1705,7 +1702,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let source = Tensor::new(vec![1.0, 2.0, 2.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &source.data,
+                data: &source.materialize_f64(),
                 shape: &source.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1716,7 +1713,7 @@ pub(crate) mod tests {
             let logical_source = Tensor::new(vec![0.0, 1.0, 1.0], vec![3, 1]).unwrap();
             let logical_handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &logical_source.data,
+                    data: &logical_source.materialize_f64(),
                     shape: &logical_source.shape,
                 })
                 .expect("upload logical");
@@ -1736,14 +1733,14 @@ pub(crate) mod tests {
         match &outputs[0] {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 1]);
-                assert_eq!(t.data, vec![1.0, 2.0, 3.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
         match &outputs[1] {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 1]);
-                assert_eq!(t.data, vec![1.0, 1.0, 1.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 1.0]);
             }
             other => panic!("expected tensor of frequencies, got {other:?}"),
         }

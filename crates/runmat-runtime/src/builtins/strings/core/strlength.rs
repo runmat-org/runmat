@@ -247,9 +247,9 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 1]);
-                assert_eq!(tensor.data.len(), 2);
-                assert_eq!(tensor.data[0], 5.0);
-                assert!(tensor.data[1].is_nan());
+                assert_eq!(tensor.materialize_f64().len(), 2);
+                assert_eq!(tensor.materialize_f64()[0], 5.0);
+                assert!(tensor.materialize_f64()[1].is_nan());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -264,7 +264,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 1]);
-                assert_eq!(tensor.data, vec![3.0, 5.0]);
+                assert_eq!(tensor.materialize_f64(), vec![3.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -295,7 +295,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 2]);
-                assert_eq!(tensor.data, vec![3.0, 5.0]);
+                assert_eq!(tensor.materialize_f64(), vec![3.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -318,10 +318,10 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 3]);
-                assert_eq!(tensor.data.len(), 3);
-                assert_eq!(tensor.data[0], 5.0);
-                assert_eq!(tensor.data[1], 4.0);
-                assert!(tensor.data[2].is_nan());
+                assert_eq!(tensor.materialize_f64().len(), 3);
+                assert_eq!(tensor.materialize_f64()[0], 5.0);
+                assert_eq!(tensor.materialize_f64()[1], 4.0);
+                assert!(tensor.materialize_f64()[2].is_nan());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -339,7 +339,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 2]);
-                assert_eq!(tensor.data, vec![2.0, 1.0, 3.0, 0.0]);
+                assert_eq!(tensor.materialize_f64(), vec![2.0, 1.0, 3.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -354,7 +354,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 1]);
-                assert_eq!(tensor.data, vec![3.0, 5.0]);
+                assert_eq!(tensor.materialize_f64(), vec![3.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }

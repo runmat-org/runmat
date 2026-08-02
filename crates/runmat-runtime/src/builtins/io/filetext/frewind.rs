@@ -333,14 +333,11 @@ pub(crate) mod tests {
         assert_eq!(parse_fid(&Value::Int(IntValue::U16(7))).unwrap(), 7);
         assert!(parse_fid(&Value::Int(IntValue::U64(u64::MAX))).is_err());
 
-        let mut fid_tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1])
+        let fid_tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1])
             .expect("typed fid tensor");
-        fid_tensor.data.clear();
         assert_eq!(parse_fid(&Value::Tensor(fid_tensor)).unwrap(), 7);
-        let mut fid_too_large =
-            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
-                .expect("typed fid tensor");
-        fid_too_large.data.clear();
+        let fid_too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("typed fid tensor");
         assert!(parse_fid(&Value::Tensor(fid_too_large)).is_err());
     }
 
@@ -357,8 +354,7 @@ pub(crate) mod tests {
             IntegerStorage::U64(vec![7]),
         ];
         for storage in classes {
-            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed fid");
-            tensor.data = vec![f64::NAN];
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed fid");
             assert_eq!(parse_fid(&Value::Tensor(tensor)).unwrap(), 7);
         }
     }
@@ -389,7 +385,7 @@ pub(crate) mod tests {
         let second = run_fread(&Value::Num(fid as f64), &[Value::from("uint8")]).expect("fread");
         assert_eq!(second.count(), 3);
         match second.data() {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 2.0, 3.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0]),
             other => panic!("unexpected value {other:?}"),
         }
 

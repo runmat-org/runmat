@@ -1617,8 +1617,7 @@ mod tests {
     }
 
     fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        let mut tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
         Value::Tensor(tensor)
     }
 
@@ -1662,10 +1661,10 @@ mod tests {
         let Value::OutputList(values) = predicted else {
             panic!("expected output list");
         };
-        assert_eq!(tensor(&values[0]).data, vec![0.0, 1.0]);
+        assert_eq!(tensor(&values[0]).materialize_f64(), vec![0.0, 1.0]);
         assert_eq!(tensor(&values[1]).shape, vec![2, 2]);
         assert_eq!(tensor(&values[2]).shape, vec![2, 1]);
-        assert_eq!(tensor(&values[3]).data, vec![1.0, 2.0]);
+        assert_eq!(tensor(&values[3]).materialize_f64(), vec![1.0, 2.0]);
     }
 
     #[test]
@@ -1693,7 +1692,7 @@ mod tests {
             Vec::new(),
         ))
         .unwrap();
-        assert_eq!(tensor(&predicted).data, vec![0.0, 1.0]);
+        assert_eq!(tensor(&predicted).materialize_f64(), vec![0.0, 1.0]);
     }
 
     #[test]
@@ -1755,7 +1754,7 @@ mod tests {
         );
         assert_eq!(model.properties.get("NumSplits"), Some(&Value::Num(0.0)));
         let classes = tensor(model.properties.get("ClassNames").unwrap());
-        assert_eq!(classes.data, vec![5.0, 2.0]);
+        assert_eq!(classes.materialize_f64(), vec![5.0, 2.0]);
     }
 
     #[test]
@@ -1776,7 +1775,7 @@ mod tests {
             Some(&Value::Num(3.0))
         );
         assert_eq!(
-            tensor(model.properties.get("ClassNames").unwrap()).data,
+            tensor(model.properties.get("ClassNames").unwrap()).materialize_f64(),
             vec![0.0, 1.0]
         );
 

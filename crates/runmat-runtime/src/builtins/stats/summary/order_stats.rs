@@ -675,7 +675,7 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![3, 1]);
-                assert_eq!(tensor.data, vec![1.75, 3.0, 5.0]);
+                assert_eq!(tensor.materialize_f64(), vec![1.75, 3.0, 5.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -688,7 +688,7 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 2]);
-                assert_eq!(tensor.data, vec![2.0, 15.0]);
+                assert_eq!(tensor.materialize_f64(), vec![2.0, 15.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -701,10 +701,10 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![4, 1]);
-                assert_eq!(tensor.data[0], 1.0);
-                assert_eq!(tensor.data[1], 2.5);
-                assert_eq!(tensor.data[2], 2.5);
-                assert!(tensor.data[3].is_nan());
+                assert_eq!(tensor.materialize_f64()[0], 1.0);
+                assert_eq!(tensor.materialize_f64()[1], 2.5);
+                assert_eq!(tensor.materialize_f64()[2], 2.5);
+                assert!(tensor.materialize_f64()[3].is_nan());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -751,14 +751,14 @@ mod tests {
                 match &values[0] {
                     Value::Tensor(tensor) => {
                         assert_eq!(tensor.shape, vec![3, 2]);
-                        assert_eq!(tensor.data, vec![3.0, 1.5, 1.5, 1.5, 1.5, 3.0]);
+                        assert_eq!(tensor.materialize_f64(), vec![3.0, 1.5, 1.5, 1.5, 1.5, 3.0]);
                     }
                     other => panic!("expected rank tensor, got {other:?}"),
                 }
                 match &values[1] {
                     Value::Tensor(tensor) => {
                         assert_eq!(tensor.shape, vec![1, 2]);
-                        assert_eq!(tensor.data, vec![6.0, 6.0]);
+                        assert_eq!(tensor.materialize_f64(), vec![6.0, 6.0]);
                     }
                     other => panic!("expected tieadj tensor, got {other:?}"),
                 }
@@ -769,11 +769,8 @@ mod tests {
 
     #[test]
     fn quantile_typed_integer_input_and_probability_read_exact_storage() {
-        let mut x =
-            Tensor::new_integer(IntegerStorage::I16(vec![1, 3, 9, 27]), vec![4, 1]).unwrap();
-        let mut p = Tensor::new_integer(IntegerStorage::U8(vec![0, 1]), vec![1, 2]).unwrap();
-        x.data.clear();
-        p.data.clear();
+        let x = Tensor::new_integer(IntegerStorage::I16(vec![1, 3, 9, 27]), vec![4, 1]).unwrap();
+        let p = Tensor::new_integer(IntegerStorage::U8(vec![0, 1]), vec![1, 2]).unwrap();
 
         let out = block_on(quantile::quantile_builtin(
             Value::Tensor(x),
@@ -783,7 +780,7 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 1]);
-                assert_eq!(tensor.data, vec![1.0, 27.0]);
+                assert_eq!(tensor.materialize_f64(), vec![1.0, 27.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -791,14 +788,12 @@ mod tests {
 
     #[test]
     fn prctile_typed_integer_input_and_percentiles_read_exact_storage() {
-        let mut x = Tensor::new_integer(
+        let x = Tensor::new_integer(
             IntegerStorage::I16(vec![10, 30, 50, 70, 20, 40, 60, 80]),
             vec![4, 2],
         )
         .unwrap();
-        let mut p = Tensor::new_integer(IntegerStorage::U8(vec![25, 50, 75]), vec![1, 3]).unwrap();
-        x.data.fill(0.0);
-        p.data.fill(50.0);
+        let p = Tensor::new_integer(IntegerStorage::U8(vec![25, 50, 75]), vec![1, 3]).unwrap();
 
         let out = block_on(prctile::prctile_builtin(
             Value::Tensor(x),
@@ -809,7 +804,7 @@ mod tests {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![3, 2]);
                 let expected = [25.0, 40.0, 55.0, 35.0, 50.0, 65.0];
-                for (actual, expect) in tensor.data.iter().zip(expected.iter()) {
+                for (actual, expect) in tensor.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expect).abs() < 1.0e-12, "{actual} vs {expect}");
                 }
             }
@@ -819,9 +814,8 @@ mod tests {
 
     #[test]
     fn tiedrank_typed_integer_matrix_reads_exact_storage() {
-        let mut x =
+        let x =
             Tensor::new_integer(IntegerStorage::I16(vec![3, 1, 1, 2, 2, 5]), vec![3, 2]).unwrap();
-        x.data.fill(0.0);
 
         let _guard = crate::output_count::push_output_count(Some(2));
         let out = block_on(tiedrank::tiedrank_builtin(Value::Tensor(x))).unwrap();
@@ -831,14 +825,14 @@ mod tests {
                 match &values[0] {
                     Value::Tensor(tensor) => {
                         assert_eq!(tensor.shape, vec![3, 2]);
-                        assert_eq!(tensor.data, vec![3.0, 1.5, 1.5, 1.5, 1.5, 3.0]);
+                        assert_eq!(tensor.materialize_f64(), vec![3.0, 1.5, 1.5, 1.5, 1.5, 3.0]);
                     }
                     other => panic!("expected rank tensor, got {other:?}"),
                 }
                 match &values[1] {
                     Value::Tensor(tensor) => {
                         assert_eq!(tensor.shape, vec![1, 2]);
-                        assert_eq!(tensor.data, vec![6.0, 6.0]);
+                        assert_eq!(tensor.materialize_f64(), vec![6.0, 6.0]);
                     }
                     other => panic!("expected tieadj tensor, got {other:?}"),
                 }
@@ -850,14 +844,12 @@ mod tests {
     #[test]
     fn tiedrank_uint64_distinguishes_values_beyond_f64_precision() {
         let base = 1_u64 << 53;
-        let mut x =
-            Tensor::new_integer(IntegerStorage::U64(vec![base, base + 1, base]), vec![3, 1])
-                .unwrap();
-        x.data.clear();
+        let x = Tensor::new_integer(IntegerStorage::U64(vec![base, base + 1, base]), vec![3, 1])
+            .unwrap();
 
         let out = block_on(tiedrank::tiedrank_builtin(Value::Tensor(x))).unwrap();
         match out {
-            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.5, 3.0, 1.5]),
+            Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.5, 3.0, 1.5]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }

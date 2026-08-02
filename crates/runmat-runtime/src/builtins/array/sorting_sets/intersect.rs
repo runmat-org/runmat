@@ -1743,27 +1743,25 @@ pub(crate) mod tests {
         )
         .expect("intersect");
         let values = tensor::value_into_tensor_for("intersect", eval.values_value()).unwrap();
-        assert_eq!(values.data, vec![1.0, 7.0]);
+        assert_eq!(values.materialize_f64(), vec![1.0, 7.0]);
         let ia = tensor::value_into_tensor_for("intersect", eval.ia_value()).unwrap();
         let ib = tensor::value_into_tensor_for("intersect", eval.ib_value()).unwrap();
-        assert_eq!(ia.data, vec![4.0, 2.0]);
-        assert_eq!(ib.data, vec![2.0, 1.0]);
+        assert_eq!(ia.materialize_f64(), vec![4.0, 2.0]);
+        assert_eq!(ib.materialize_f64(), vec![2.0, 1.0]);
     }
 
     #[test]
     fn intersect_preserves_exact_integer_elements_and_rows() {
-        let mut a = Tensor::new_integer(
+        let a = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993]),
             vec![3, 1],
         )
         .expect("input");
-        let mut b = Tensor::new_integer(
+        let b = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![0, u64::MAX]),
             vec![2, 1],
         )
         .expect("input");
-        a.data.clear();
-        b.data.clear();
         let (values, ia, ib) = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
             .expect("intersect")
             .into_triple();
@@ -1777,42 +1775,38 @@ pub(crate) mod tests {
         let Value::Tensor(ia) = ia else {
             panic!("indices");
         };
-        assert_eq!(ia.data, vec![2.0, 1.0]);
+        assert_eq!(ia.materialize_f64(), vec![2.0, 1.0]);
         let Value::Tensor(ib) = ib else {
             panic!("indices");
         };
-        assert_eq!(ib.data, vec![1.0, 2.0]);
+        assert_eq!(ib.materialize_f64(), vec![1.0, 2.0]);
     }
 
     #[test]
     fn intersect_mixed_integer_classes_read_exact_storage_without_mirror() {
-        let mut a = Tensor::new_integer(IntegerStorage::U16(vec![7, 2, 9, 7]), vec![4, 1]).unwrap();
-        let mut b = Tensor::new_integer(IntegerStorage::I32(vec![2, 7]), vec![2, 1]).unwrap();
-        a.data.clear();
-        b.data.clear();
+        let a = Tensor::new_integer(IntegerStorage::U16(vec![7, 2, 9, 7]), vec![4, 1]).unwrap();
+        let b = Tensor::new_integer(IntegerStorage::I32(vec![2, 7]), vec![2, 1]).unwrap();
 
         let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("intersect");
         let values = tensor::value_into_tensor_for("intersect", eval.values_value()).unwrap();
-        assert_eq!(values.data, vec![2.0, 7.0]);
+        assert_eq!(values.materialize_f64(), vec![2.0, 7.0]);
         let ia = tensor::value_into_tensor_for("intersect", eval.ia_value()).unwrap();
         let ib = tensor::value_into_tensor_for("intersect", eval.ib_value()).unwrap();
-        assert_eq!(ia.data, vec![2.0, 1.0]);
-        assert_eq!(ib.data, vec![1.0, 2.0]);
+        assert_eq!(ia.materialize_f64(), vec![2.0, 1.0]);
+        assert_eq!(ib.materialize_f64(), vec![1.0, 2.0]);
 
-        let mut a = Tensor::new_integer(IntegerStorage::U16(vec![1, 3, 2, 4]), vec![2, 2]).unwrap();
-        let mut b = Tensor::new_integer(IntegerStorage::I32(vec![3, 5, 4, 6]), vec![2, 2]).unwrap();
-        a.data.clear();
-        b.data.clear();
+        let a = Tensor::new_integer(IntegerStorage::U16(vec![1, 3, 2, 4]), vec![2, 2]).unwrap();
+        let b = Tensor::new_integer(IntegerStorage::I32(vec![3, 5, 4, 6]), vec![2, 2]).unwrap();
 
         let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
             .expect("intersect rows");
         let values = tensor::value_into_tensor_for("intersect", eval.values_value()).unwrap();
         assert_eq!(values.shape, vec![1, 2]);
-        assert_eq!(values.data, vec![3.0, 4.0]);
+        assert_eq!(values.materialize_f64(), vec![3.0, 4.0]);
         let ia = tensor::value_into_tensor_for("intersect", eval.ia_value()).unwrap();
         let ib = tensor::value_into_tensor_for("intersect", eval.ib_value()).unwrap();
-        assert_eq!(ia.data, vec![2.0]);
-        assert_eq!(ib.data, vec![1.0]);
+        assert_eq!(ia.materialize_f64(), vec![2.0]);
+        assert_eq!(ib.materialize_f64(), vec![1.0]);
     }
 
     #[test]
@@ -1849,11 +1843,11 @@ pub(crate) mod tests {
         )
         .expect("intersect");
         let values = tensor::value_into_tensor_for("intersect", eval.values_value()).unwrap();
-        assert_eq!(values.data, vec![4.0, 1.0, 3.0]);
+        assert_eq!(values.materialize_f64(), vec![4.0, 1.0, 3.0]);
         let ia = tensor::value_into_tensor_for("intersect", eval.ia_value()).unwrap();
         let ib = tensor::value_into_tensor_for("intersect", eval.ib_value()).unwrap();
-        assert_eq!(ia.data, vec![1.0, 4.0, 5.0]);
-        assert_eq!(ib.data, vec![2.0, 4.0, 1.0]);
+        assert_eq!(ia.materialize_f64(), vec![1.0, 4.0, 5.0]);
+        assert_eq!(ib.materialize_f64(), vec![2.0, 4.0, 1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1871,12 +1865,12 @@ pub(crate) mod tests {
         )
         .expect("intersect");
         let values = tensor::value_into_tensor_for("intersect", eval.values_value()).unwrap();
-        assert_eq!(values.data.len(), 1);
-        assert!(values.data[0].is_nan());
+        assert_eq!(values.materialize_f64().len(), 1);
+        assert!(values.materialize_f64()[0].is_nan());
         let ia = tensor::value_into_tensor_for("intersect", eval.ia_value()).unwrap();
         let ib = tensor::value_into_tensor_for("intersect", eval.ib_value()).unwrap();
-        assert_eq!(ia.data, vec![1.0]);
-        assert_eq!(ib.data, vec![2.0]);
+        assert_eq!(ia.materialize_f64(), vec![1.0]);
+        assert_eq!(ib.materialize_f64(), vec![2.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1903,15 +1897,14 @@ pub(crate) mod tests {
         }
         let ia = tensor::value_into_tensor_for("intersect", eval.ia_value()).unwrap();
         let ib = tensor::value_into_tensor_for("intersect", eval.ib_value()).unwrap();
-        assert_eq!(ia.data, vec![1.0, 2.0]);
-        assert_eq!(ib.data, vec![3.0, 1.0]);
+        assert_eq!(ia.materialize_f64(), vec![1.0, 2.0]);
+        assert_eq!(ib.materialize_f64(), vec![3.0, 1.0]);
     }
 
     #[test]
     fn intersect_complex_real_alignment_reads_typed_integer_storage_exactly() {
-        let mut real =
+        let real =
             Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, -7, 3]), vec![3, 1]).unwrap();
-        real.data = vec![f64::NAN, f64::INFINITY, f64::NEG_INFINITY];
         let complex = ComplexTensor::new(vec![(-7.0, 0.0), (4.0, 0.0)], vec![2, 1]).unwrap();
 
         let eval = evaluate_sync(Value::Tensor(real), Value::ComplexTensor(complex), &[])
@@ -1923,8 +1916,8 @@ pub(crate) mod tests {
         assert_eq!(im, 0.0);
         let ia = tensor::value_into_tensor_for("intersect", eval.ia_value()).unwrap();
         let ib = tensor::value_into_tensor_for("intersect", eval.ib_value()).unwrap();
-        assert_eq!(ia.data, vec![2.0]);
-        assert_eq!(ib.data, vec![1.0]);
+        assert_eq!(ia.materialize_f64(), vec![2.0]);
+        assert_eq!(ib.materialize_f64(), vec![1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1943,11 +1936,11 @@ pub(crate) mod tests {
         .expect("intersect rows");
         let values = tensor::value_into_tensor_for("intersect", eval.values_value()).unwrap();
         assert_eq!(values.shape, vec![1, 2]);
-        assert_eq!(values.data, vec![1.0, 2.0]);
+        assert_eq!(values.materialize_f64(), vec![1.0, 2.0]);
         let ia = tensor::value_into_tensor_for("intersect", eval.ia_value()).unwrap();
         let ib = tensor::value_into_tensor_for("intersect", eval.ib_value()).unwrap();
-        assert_eq!(ia.data, vec![1.0]);
-        assert_eq!(ib.data, vec![1.0]);
+        assert_eq!(ia.materialize_f64(), vec![1.0]);
+        assert_eq!(ib.materialize_f64(), vec![1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1977,8 +1970,8 @@ pub(crate) mod tests {
         }
         let ia = tensor::value_into_tensor_for("intersect", eval.ia_value()).unwrap();
         let ib = tensor::value_into_tensor_for("intersect", eval.ib_value()).unwrap();
-        assert_eq!(ia.data, vec![3.0, 1.0]);
-        assert_eq!(ib.data, vec![1.0, 2.0]);
+        assert_eq!(ia.materialize_f64(), vec![3.0, 1.0]);
+        assert_eq!(ib.materialize_f64(), vec![1.0, 2.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2012,8 +2005,8 @@ pub(crate) mod tests {
         }
         let ia = tensor::value_into_tensor_for("intersect", eval.ia_value()).unwrap();
         let ib = tensor::value_into_tensor_for("intersect", eval.ib_value()).unwrap();
-        assert_eq!(ia.data, vec![2.0, 3.0]);
-        assert_eq!(ib.data, vec![3.0, 1.0]);
+        assert_eq!(ia.materialize_f64(), vec![2.0, 3.0]);
+        assert_eq!(ib.materialize_f64(), vec![3.0, 1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2108,11 +2101,11 @@ pub(crate) mod tests {
             let a = Tensor::new(vec![4.0, 1.0, 2.0, 1.0], vec![4, 1]).unwrap();
             let b = Tensor::new(vec![2.0, 5.0, 1.0], vec![3, 1]).unwrap();
             let view_a = HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             };
             let view_b = HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             };
             let handle_a = provider.upload(&view_a).expect("upload A");
@@ -2120,11 +2113,11 @@ pub(crate) mod tests {
             let eval = evaluate_sync(Value::GpuTensor(handle_a), Value::GpuTensor(handle_b), &[])
                 .expect("intersect");
             let values = tensor::value_into_tensor_for("intersect", eval.values_value()).unwrap();
-            assert_eq!(values.data, vec![1.0, 2.0]);
+            assert_eq!(values.materialize_f64(), vec![1.0, 2.0]);
             let ia = tensor::value_into_tensor_for("intersect", eval.ia_value()).unwrap();
             let ib = tensor::value_into_tensor_for("intersect", eval.ib_value()).unwrap();
-            assert_eq!(ia.data, vec![2.0, 3.0]);
-            assert_eq!(ib.data, vec![3.0, 1.0]);
+            assert_eq!(ia.materialize_f64(), vec![2.0, 3.0]);
+            assert_eq!(ib.materialize_f64(), vec![3.0, 1.0]);
         });
     }
 
@@ -2144,12 +2137,12 @@ pub(crate) mod tests {
         .unwrap();
         let (_c, ia) = eval.clone().into_pair();
         let ia_tensor = tensor::value_into_tensor_for("intersect", ia).unwrap();
-        assert_eq!(ia_tensor.data, vec![1.0, 3.0]);
+        assert_eq!(ia_tensor.materialize_f64(), vec![1.0, 3.0]);
         let (_c, ia2, ib2) = eval.into_triple();
         let ia_tensor2 = tensor::value_into_tensor_for("intersect", ia2).unwrap();
         let ib_tensor2 = tensor::value_into_tensor_for("intersect", ib2).unwrap();
-        assert_eq!(ia_tensor2.data, vec![1.0, 3.0]);
-        assert_eq!(ib_tensor2.data, vec![2.0, 1.0]);
+        assert_eq!(ia_tensor2.materialize_f64(), vec![1.0, 3.0]);
+        assert_eq!(ib_tensor2.materialize_f64(), vec![2.0, 1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2178,11 +2171,11 @@ pub(crate) mod tests {
 
         let provider = runmat_accelerate_api::provider().expect("provider");
         let view_a = HostTensorView {
-            data: &a.data,
+            data: &a.materialize_f64(),
             shape: &a.shape,
         };
         let view_b = HostTensorView {
-            data: &b.data,
+            data: &b.materialize_f64(),
             shape: &b.shape,
         };
         let handle_a = provider.upload(&view_a).expect("upload A");
@@ -2194,8 +2187,8 @@ pub(crate) mod tests {
         let gpu_ia = tensor::value_into_tensor_for("intersect", gpu_eval.ia_value()).unwrap();
         let gpu_ib = tensor::value_into_tensor_for("intersect", gpu_eval.ib_value()).unwrap();
 
-        assert_eq!(gpu_values.data, cpu_values.data);
-        assert_eq!(gpu_ia.data, cpu_ia.data);
-        assert_eq!(gpu_ib.data, cpu_ib.data);
+        assert_eq!(gpu_values.materialize_f64(), cpu_values.materialize_f64());
+        assert_eq!(gpu_ia.materialize_f64(), cpu_ia.materialize_f64());
+        assert_eq!(gpu_ib.materialize_f64(), cpu_ib.materialize_f64());
     }
 }

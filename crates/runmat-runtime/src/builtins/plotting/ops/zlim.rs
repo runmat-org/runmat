@@ -126,6 +126,6 @@ mod tests {
         .unwrap();
         let queried = zlim_builtin(Vec::new()).unwrap();
         let tensor = runmat_builtins::Tensor::try_from(&queried).unwrap();
-        assert_eq!(tensor.data, vec![-1.0, 1.0]);
+        assert_eq!(tensor.materialize_f64(), vec![-1.0, 1.0]);
     }
 }

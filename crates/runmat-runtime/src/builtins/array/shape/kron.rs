@@ -758,7 +758,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![4, 4]);
                 assert_eq!(
-                    t.data,
+                    t.materialize_f64(),
                     vec![
                         0.0, 6.0, 0.0, 18.0, 5.0, 7.0, 15.0, 21.0, 0.0, 12.0, 0.0, 24.0, 10.0,
                         14.0, 20.0, 28.0
@@ -778,7 +778,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![3.0, 6.0, 9.0, 12.0]);
+                assert_eq!(t.materialize_f64(), vec![3.0, 6.0, 9.0, 12.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -943,9 +943,8 @@ pub(crate) mod tests {
 
     #[test]
     fn kron_complex_path_reads_typed_integer_storage_exactly() {
-        let mut left = Tensor::new_integer(IntegerStorage::I64(vec![-3, 5]), vec![1, 2])
+        let left = Tensor::new_integer(IntegerStorage::I64(vec![-3, 5]), vec![1, 2])
             .expect("integer tensor");
-        left.data.fill(f64::NAN);
         let right = ComplexTensor::new(vec![(2.0, -1.0)], vec![1, 1]).unwrap();
 
         let result = kron_builtin(Value::Tensor(left), Value::ComplexTensor(right), Vec::new())
@@ -971,7 +970,10 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 4]);
-                assert_eq!(t.data, vec![1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0]);
+                assert_eq!(
+                    t.materialize_f64(),
+                    vec![1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0]
+                );
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -991,7 +993,7 @@ pub(crate) mod tests {
                     .chars()
                     .flat_map(|ch| [ch as u32 as f64, 2.0 * ch as u32 as f64])
                     .collect();
-                assert_eq!(t.data, expected);
+                assert_eq!(t.materialize_f64(), expected);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1031,11 +1033,11 @@ pub(crate) mod tests {
             let a = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
             let b = Tensor::new(vec![0.0, 6.0, 5.0, 7.0], vec![2, 2]).unwrap();
             let view_a = HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             };
             let view_b = HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             };
             let handle_a = provider.upload(&view_a).expect("upload a");
@@ -1053,7 +1055,7 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![4, 4]);
             assert_eq!(
-                gathered.data,
+                gathered.materialize_f64(),
                 vec![
                     0.0, 6.0, 0.0, 18.0, 5.0, 7.0, 15.0, 21.0, 0.0, 12.0, 0.0, 24.0, 10.0, 14.0,
                     20.0, 28.0
@@ -1068,7 +1070,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let gpu_tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
             let view = HostTensorView {
-                data: &gpu_tensor.data,
+                data: &gpu_tensor.materialize_f64(),
                 shape: &gpu_tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1091,7 +1093,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 4]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1121,11 +1123,11 @@ pub(crate) mod tests {
 
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view_a = HostTensorView {
-            data: &a.data,
+            data: &a.materialize_f64(),
             shape: &a.shape,
         };
         let view_b = HostTensorView {
-            data: &b.data,
+            data: &b.materialize_f64(),
             shape: &b.shape,
         };
         let handle_a = provider.upload(&view_a).expect("upload a");
@@ -1141,9 +1143,9 @@ pub(crate) mod tests {
 
         assert_eq!(gpu_tensor.shape, cpu_tensor.shape);
         for (idx, (g, c)) in gpu_tensor
-            .data
+            .materialize_f64()
             .iter()
-            .zip(cpu_tensor.data.iter())
+            .zip(cpu_tensor.materialize_f64().iter())
             .enumerate()
         {
             assert!(

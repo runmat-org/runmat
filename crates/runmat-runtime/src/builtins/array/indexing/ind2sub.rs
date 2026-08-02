@@ -466,14 +466,14 @@ pub(crate) mod tests {
                 match &values[0] {
                     Value::Tensor(t) => {
                         assert_eq!(t.shape, vec![1, 3]);
-                        assert_eq!(t.data, vec![1.0, 2.0, 3.0]);
+                        assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0]);
                     }
                     other => panic!("expected tensor rows, got {other:?}"),
                 }
                 match &values[1] {
                     Value::Tensor(t) => {
                         assert_eq!(t.shape, vec![1, 3]);
-                        assert_eq!(t.data, vec![3.0, 3.0, 3.0]);
+                        assert_eq!(t.materialize_f64(), vec![3.0, 3.0, 3.0]);
                     }
                     other => panic!("expected tensor cols, got {other:?}"),
                 }
@@ -537,9 +537,8 @@ pub(crate) mod tests {
     #[test]
     fn ind2sub_linear_indices_read_typed_integer_storage_exactly() {
         let dims = Tensor::new(vec![2.0, 3.0, 4.0], vec![1, 3]).unwrap();
-        let mut idx =
+        let idx =
             Tensor::new_integer(IntegerStorage::U16(vec![3, 11]), vec![1, 2]).expect("indices");
-        idx.data = vec![0.0, 0.0];
 
         let result =
             ind2sub_builtin(Value::Tensor(dims), Value::Tensor(idx)).expect("ind2sub result");
@@ -568,12 +567,10 @@ pub(crate) mod tests {
         let out_of_range = max + 1;
         assert_eq!(max as f64, out_of_range as f64);
 
-        let mut dims =
+        let dims =
             Tensor::new_integer(IntegerStorage::U64(vec![max]), vec![1, 1]).expect("typed dims");
-        dims.data = vec![max as f64];
-        let mut index = Tensor::new_integer(IntegerStorage::U64(vec![out_of_range]), vec![1, 1])
+        let index = Tensor::new_integer(IntegerStorage::U64(vec![out_of_range]), vec![1, 1])
             .expect("typed index");
-        index.data = vec![max as f64];
 
         let err = ind2sub_builtin(Value::Tensor(dims), Value::Tensor(index))
             .expect_err("wide index should remain out of range");
@@ -662,7 +659,7 @@ pub(crate) mod tests {
             let dims = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
             let idx_tensor = Tensor::new(vec![10.0, 11.0], vec![2, 1]).unwrap();
             let view = HostTensorView {
-                data: &idx_tensor.data,
+                data: &idx_tensor.materialize_f64(),
                 shape: &idx_tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload indices");
@@ -681,10 +678,10 @@ pub(crate) mod tests {
                     }
                     let rows = test_support::gather(values[0].clone()).expect("gather rows");
                     assert_eq!(rows.shape, vec![2, 1]);
-                    assert_eq!(rows.data, vec![1.0, 2.0]);
+                    assert_eq!(rows.materialize_f64(), vec![1.0, 2.0]);
                     let cols = test_support::gather(values[1].clone()).expect("gather cols");
                     assert_eq!(cols.shape, vec![2, 1]);
-                    assert_eq!(cols.data, vec![4.0, 4.0]);
+                    assert_eq!(cols.materialize_f64(), vec![4.0, 4.0]);
                 }
                 other => panic!("expected cell output, got {other:?}"),
             }
@@ -717,7 +714,7 @@ pub(crate) mod tests {
 
         let provider = runmat_accelerate_api::provider().unwrap();
         let view = HostTensorView {
-            data: &idx_tensor.data,
+            data: &idx_tensor.materialize_f64(),
             shape: &idx_tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload indices");
@@ -740,7 +737,7 @@ pub(crate) mod tests {
             let host_cpu = test_support::gather(cpu_val.clone()).expect("gather cpu");
             let host_gpu = test_support::gather(gpu_val.clone()).expect("gather gpu");
             assert_eq!(host_cpu.shape, host_gpu.shape);
-            assert_eq!(host_cpu.data, host_gpu.data);
+            assert_eq!(host_cpu.materialize_f64(), host_gpu.materialize_f64());
         }
     }
 }

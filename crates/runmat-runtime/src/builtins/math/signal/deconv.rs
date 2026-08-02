@@ -579,8 +579,7 @@ pub(crate) mod tests {
     }
 
     fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("typed integer tensor");
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(storage, shape).expect("typed integer tensor");
         tensor
     }
 
@@ -632,7 +631,7 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(q) => {
                 assert_eq!(q.shape, vec![1, 3]);
-                assert_eq!(q.data, vec![1.0, 2.0, 1.0]);
+                assert_eq!(q.materialize_f64(), vec![1.0, 2.0, 1.0]);
             }
             other => panic!("expected tensor quotient, got {other:?}"),
         }
@@ -712,7 +711,7 @@ pub(crate) mod tests {
                 // Accept either scalar complex or tensor form depending on trimming.
             }
             Value::Tensor(r) => {
-                assert!(r.data.iter().all(|v| v.abs() <= 1e-9));
+                assert!(r.materialize_f64().iter().all(|v| v.abs() <= 1e-9));
             }
             other => panic!("unexpected remainder {other:?}"),
         }
@@ -730,7 +729,7 @@ pub(crate) mod tests {
         .expect("evaluate");
 
         let quotient = match eval.quotient() {
-            Value::Tensor(t) => t.data,
+            Value::Tensor(t) => t.materialize_f64(),
             other => panic!("unexpected quotient {other:?}"),
         };
         let remainder = real_vector(eval.remainder());
@@ -777,11 +776,11 @@ pub(crate) mod tests {
             let numerator = Tensor::new(vec![1.0, 3.0, 3.0, 1.0], vec![1, 4]).unwrap();
             let denominator = Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap();
             let n_view = HostTensorView {
-                data: &numerator.data,
+                data: &numerator.materialize_f64(),
                 shape: &numerator.shape,
             };
             let d_view = HostTensorView {
-                data: &denominator.data,
+                data: &denominator.materialize_f64(),
                 shape: &denominator.shape,
             };
             let n_handle = provider.upload(&n_view).expect("upload numerator");
@@ -794,7 +793,7 @@ pub(crate) mod tests {
                 Value::GpuTensor(handle) => {
                     let gathered =
                         test_support::gather(Value::GpuTensor(handle)).expect("gather quotient");
-                    assert_eq!(gathered.data, vec![1.0, 2.0, 1.0]);
+                    assert_eq!(gathered.materialize_f64(), vec![1.0, 2.0, 1.0]);
                 }
                 other => panic!("expected GPU quotient, got {other:?}"),
             }
@@ -821,13 +820,13 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider registered");
         let num_handle = provider
             .upload(&HostTensorView {
-                data: &numerator.data,
+                data: &numerator.materialize_f64(),
                 shape: &numerator.shape,
             })
             .expect("upload numerator");
         let den_handle = provider
             .upload(&HostTensorView {
-                data: &denominator.data,
+                data: &denominator.materialize_f64(),
                 shape: &denominator.shape,
             })
             .expect("upload denominator");
@@ -849,12 +848,12 @@ pub(crate) mod tests {
 
     fn real_vector(value: Value) -> Vec<f64> {
         match value {
-            Value::Tensor(t) => t.data,
+            Value::Tensor(t) => t.materialize_f64(),
             Value::Num(n) => vec![n],
             Value::GpuTensor(handle) => {
                 let gathered =
                     test_support::gather(Value::GpuTensor(handle)).expect("gather gpu output");
-                gathered.data
+                gathered.materialize_f64()
             }
             Value::Complex(re, im) => {
                 assert!(im.abs() <= 1e-9);

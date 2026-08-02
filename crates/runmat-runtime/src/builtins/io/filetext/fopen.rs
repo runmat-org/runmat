@@ -1172,28 +1172,28 @@ pub(crate) mod tests {
 
         let list_eval = run_evaluate(&[Value::from("all")]).expect("fopen all");
         let list = list_eval.as_list().expect("list result");
-        assert!(!list.handles.data.is_empty());
+        assert!(!list.handles.materialize_f64().is_empty());
         assert!(list
             .handles
-            .data
+            .materialize_f64()
             .iter()
             .any(|v| (*v - fid).abs() < f64::EPSILON));
 
         if let Value::Cell(names) = &list.names {
-            assert_eq!(names.data.len(), list.handles.data.len());
-            assert_eq!(names.rows, list.handles.data.len());
+            assert_eq!(names.data.len(), list.handles.materialize_f64().len());
+            assert_eq!(names.rows, list.handles.materialize_f64().len());
             assert_eq!(names.cols, 1);
         } else {
             panic!("expected cell array for names");
         }
         if let Value::Cell(machinefmts) = &list.machinefmts {
-            assert_eq!(machinefmts.rows, list.handles.data.len());
+            assert_eq!(machinefmts.rows, list.handles.materialize_f64().len());
             assert_eq!(machinefmts.cols, 1);
         } else {
             panic!("expected cell array for machine formats");
         }
         if let Value::Cell(encodings) = &list.encodings {
-            assert_eq!(encodings.rows, list.handles.data.len());
+            assert_eq!(encodings.rows, list.handles.materialize_f64().len());
             assert_eq!(encodings.cols, 1);
         } else {
             panic!("expected cell array for encodings");
@@ -1228,8 +1228,8 @@ pub(crate) mod tests {
         let list_eval =
             run_evaluate(&[Value::from("all"), Value::from("ieee-be")]).expect("fopen all filter");
         let list = list_eval.as_list().expect("list result");
-        assert_eq!(list.handles.data.len(), 1);
-        assert!((list.handles.data[0] - be_fid).abs() < f64::EPSILON);
+        assert_eq!(list.handles.materialize_f64().len(), 1);
+        assert!((list.handles.materialize_f64()[0] - be_fid).abs() < f64::EPSILON);
 
         let _ = registry::close(native_fid as i32);
         let _ = registry::close(be_fid as i32);

@@ -528,7 +528,7 @@ mod tests {
         assert_eq!((out.rows, out.cols), (2, 3));
         let dense = out.to_dense().unwrap();
         assert_eq!(dense.shape, vec![2, 3]);
-        assert_eq!(dense.data, vec![0.0, 1.0, 2.0, 0.0, 0.0, 1.0]);
+        assert_eq!(dense.materialize_f64(), vec![0.0, 1.0, 2.0, 0.0, 0.0, 1.0]);
     }
 
     #[test]
@@ -547,7 +547,7 @@ mod tests {
         assert_eq!((out.rows, out.cols), (3, 1));
         let dense = out.to_dense().unwrap();
         assert_eq!(dense.shape, vec![3, 1]);
-        assert_eq!(dense.data, vec![0.0, 2.0, 1.0]);
+        assert_eq!(dense.materialize_f64(), vec![0.0, 2.0, 1.0]);
     }
 
     #[test]
@@ -567,7 +567,7 @@ mod tests {
         assert_eq!((out.rows, out.cols), (3, 2));
         let dense = out.to_dense().unwrap();
         assert_eq!(dense.shape, vec![3, 2]);
-        assert_eq!(dense.data, vec![0.0, 2.0, 0.0, 1.0, 0.0, 1.0]);
+        assert_eq!(dense.materialize_f64(), vec![0.0, 2.0, 0.0, 1.0, 0.0, 1.0]);
     }
 
     #[test]
@@ -607,7 +607,7 @@ mod tests {
         assert_eq!((sparse.rows, sparse.cols), (1, 2));
         let dense = sparse.to_dense().unwrap();
         assert_eq!(dense.shape, vec![1, 2]);
-        assert_eq!(dense.data, vec![1.0, 0.0]);
+        assert_eq!(dense.materialize_f64(), vec![1.0, 0.0]);
     }
 
     #[test]
@@ -620,7 +620,7 @@ mod tests {
         assert_eq!(out.cols, 4);
         let dense = out.to_dense().unwrap();
         assert_eq!(dense.shape, vec![1, 4]);
-        assert_eq!(dense.data, vec![2.0, 2.0, 2.0, 1.0]);
+        assert_eq!(dense.materialize_f64(), vec![2.0, 2.0, 2.0, 1.0]);
     }
 
     #[test]

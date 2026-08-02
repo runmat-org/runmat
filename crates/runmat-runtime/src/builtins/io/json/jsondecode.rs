@@ -615,7 +615,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 3]);
-                assert_eq!(tensor.data, vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
+                assert_eq!(tensor.materialize_f64(), vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
             }
             other => panic!("expected tensor, got {:?}", other),
         }
@@ -629,7 +629,10 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 2, 2]);
-                assert_eq!(tensor.data, vec![1.0, 5.0, 3.0, 7.0, 2.0, 6.0, 4.0, 8.0]);
+                assert_eq!(
+                    tensor.materialize_f64(),
+                    vec![1.0, 5.0, 3.0, 7.0, 2.0, 6.0, 4.0, 8.0]
+                );
             }
             other => panic!("expected tensor, got {:?}", other),
         }
@@ -645,7 +648,7 @@ pub(crate) mod tests {
                 assert_eq!(tensor.shape, vec![1]);
                 assert_eq!(tensor.rows(), 1);
                 assert_eq!(tensor.cols(), 1);
-                assert_eq!(tensor.data, vec![42.0]);
+                assert_eq!(tensor.materialize_f64(), vec![42.0]);
             }
             other => panic!("expected tensor, got {:?}", other),
         }
@@ -735,7 +738,7 @@ pub(crate) mod tests {
                 match cell.get(1, 1).unwrap() {
                     Value::Tensor(t) => {
                         assert_eq!(t.shape, vec![0, 0]);
-                        assert!(t.data.is_empty());
+                        assert!(t.materialize_f64().is_empty());
                     }
                     other => panic!("expected empty tensor, got {:?}", other),
                 }
@@ -789,7 +792,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![0, 0]);
-                assert!(tensor.data.is_empty());
+                assert!(tensor.materialize_f64().is_empty());
             }
             other => panic!("expected empty tensor, got {:?}", other),
         }
@@ -824,7 +827,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2]);
-                assert_eq!(tensor.data, vec![1.0, 2.0]);
+                assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0]);
             }
             other => panic!("expected tensor, got {:?}", other),
         }
@@ -838,7 +841,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2]);
-                assert_eq!(tensor.data, vec![1.0, 2.0]);
+                assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0]);
             }
             other => panic!("expected tensor, got {:?}", other),
         }
@@ -856,8 +859,11 @@ pub(crate) mod tests {
         let decoded = block_on(jsondecode_builtin(encoded)).expect("decode");
         match decoded {
             Value::Tensor(result) => {
-                assert_eq!(result.data.len(), tensor.data.len());
-                assert_eq!(result.data, tensor.data);
+                assert_eq!(
+                    result.materialize_f64().len(),
+                    tensor.materialize_f64().len()
+                );
+                assert_eq!(result.materialize_f64(), tensor.materialize_f64());
             }
             other => panic!("expected tensor, got {:?}", other),
         }

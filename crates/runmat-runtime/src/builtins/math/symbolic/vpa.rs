@@ -487,8 +487,7 @@ mod tests {
             IntegerStorage::U32(vec![12]),
             IntegerStorage::U64(vec![12]),
         ] {
-            let mut precision = Tensor::new_integer(storage, vec![1, 1]).expect("precision");
-            precision.data.fill(f64::NAN);
+            let precision = Tensor::new_integer(storage, vec![1, 1]).expect("precision");
 
             let value = block_on(vpa_builtin(
                 Value::Num(std::f64::consts::PI),
@@ -579,9 +578,8 @@ mod tests {
 
     #[test]
     fn vpa_rejects_negative_typed_integer_tensor_precision() {
-        let mut precision =
+        let precision =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("precision");
-        precision.data.clear();
 
         let err =
             block_on(vpa_builtin(Value::Num(1.0), vec![Value::Tensor(precision)])).unwrap_err();

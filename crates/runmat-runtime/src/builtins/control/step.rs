@@ -932,7 +932,7 @@ mod tests {
 
     fn tensor_data(value: Value) -> Vec<f64> {
         match value {
-            Value::Tensor(tensor) => tensor.data,
+            Value::Tensor(tensor) => tensor.materialize_f64(),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -1055,9 +1055,8 @@ mod tests {
     #[test]
     fn step_scalar_final_time_reads_typed_integer_storage_length_exactly() {
         let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
-        let mut final_time =
+        let final_time =
             Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("final time");
-        final_time.data.clear();
         let _guard = crate::output_count::push_output_count(Some(2));
         let result = run_step(sys, vec![Value::Tensor(final_time)]).expect("step");
         let Value::OutputList(outputs) = result else {
@@ -1082,8 +1081,7 @@ mod tests {
         ];
 
         for storage in storages {
-            let mut sample_time = Tensor::new_integer(storage, vec![1, 1]).expect("sample time");
-            sample_time.data.fill(f64::NAN);
+            let sample_time = Tensor::new_integer(storage, vec![1, 1]).expect("sample time");
             let mut object = ObjectInstance::new("tf".to_string());
             object
                 .properties
