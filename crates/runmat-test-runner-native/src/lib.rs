@@ -10,6 +10,6 @@ mod error;
 
 pub use error::{NativeRunnerError, NativeRunnerResult};
 pub use worker::{
-    LocalBackend, LocalBackendConfig, LocalSession, ProcessBackend, ProcessBackendConfig,
-    ProcessSession,
+    run_core_worker_stdio, LocalBackend, LocalBackendConfig, LocalSession, ProcessBackend,
+    ProcessBackendConfig, ProcessSession,
 };

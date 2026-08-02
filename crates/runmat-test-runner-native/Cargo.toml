@@ -13,7 +13,7 @@ runmat-test = { workspace = true }
 runmat-test-runner = { workspace = true }
 runmat-package = { workspace = true }
 runmat-core = { workspace = true }
-tokio = { workspace = true, features = ["fs", "io-util", "macros", "process", "rt", "sync", "time"] }
+tokio = { workspace = true, features = ["fs", "io-std", "io-util", "macros", "process", "rt", "sync", "time"] }
 sha2 = { workspace = true }
 log = { workspace = true }
 thiserror = { workspace = true }
