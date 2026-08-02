@@ -526,20 +526,24 @@ impl WgpuProvider {
         let perm_matrix_tensor = host_tensor_from_value("qr", eval.permutation_matrix())?;
         let perm_vector_tensor = host_tensor_from_value("qr", eval.permutation_vector())?;
 
+        let q_data = q_tensor.materialize_f64();
+        let r_data = r_tensor.materialize_f64();
+        let perm_matrix_data = perm_matrix_tensor.materialize_f64();
+        let perm_vector_data = perm_vector_tensor.materialize_f64();
         let q = self.upload_exec(&HostTensorView {
-            data: &q_tensor.data,
+            data: &q_data,
             shape: &q_tensor.shape,
         })?;
         let r = self.upload_exec(&HostTensorView {
-            data: &r_tensor.data,
+            data: &r_data,
             shape: &r_tensor.shape,
         })?;
         let perm_matrix = self.upload_exec(&HostTensorView {
-            data: &perm_matrix_tensor.data,
+            data: &perm_matrix_data,
             shape: &perm_matrix_tensor.shape,
         })?;
         let perm_vector = self.upload_exec(&HostTensorView {
-            data: &perm_vector_tensor.data,
+            data: &perm_vector_data,
             shape: &perm_vector_tensor.shape,
         })?;
 
@@ -613,8 +617,9 @@ impl WgpuProvider {
         .await
         .map_err(|err| runtime_flow_to_anyhow("chol", err))?;
         let factor_tensor = host_tensor_from_value("chol", eval.factor())?;
+        let factor_data = factor_tensor.materialize_f64();
         let factor = self.upload_exec(&HostTensorView {
-            data: &factor_tensor.data,
+            data: &factor_data,
             shape: &factor_tensor.shape,
         })?;
         Ok(ProviderCholResult {

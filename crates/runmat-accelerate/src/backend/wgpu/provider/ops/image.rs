@@ -521,7 +521,7 @@ impl WgpuProvider {
         let result =
             runtime_apply_imfilter_tensor(&image_tensor, &kernel_tensor, options, "imfilter")
                 .map_err(|err| anyhow!("{err}"))?;
-        let data_owned = result.data;
+        let data_owned = result.materialize_f64();
         let shape_owned = result.shape;
         let view = HostTensorView {
             data: &data_owned,
