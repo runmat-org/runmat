@@ -516,17 +516,20 @@ fn sparse_dense_scalar_result(
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
     checked_len(&sparse.shape(), builtin)?;
-    let mut dense = sparse
+    let dense = sparse
         .to_dense()
         .map_err(|err| map_internal_error(builtin, err))?;
-    for value in &mut dense.data {
+    let mut out = dense.materialize_f64();
+    for value in &mut out {
         *value = if sparse_is_lhs {
             combine(*value, scalar)
         } else {
             combine(scalar, *value)
         };
     }
-    Ok(Value::Tensor(dense))
+    Tensor::new(out, dense.shape)
+        .map(Value::Tensor)
+        .map_err(|err| map_internal_error(builtin, err))
 }
 
 fn scale_sparse(sparse: &SparseTensor, scalar: f64, builtin: &'static str) -> BuiltinResult<Value> {
@@ -630,10 +633,11 @@ fn sparse_dense_full(
             format!("sparse and dense sizes are not compatible: {err}"),
         )
     })?;
+    let dense_values = tensor::tensor_values_f64_cow(dense);
     let mut out = vec![0.0; plan.len()];
     for (out_idx, sparse_idx, dense_idx) in plan.iter() {
         let sparse_value = sparse_value_by_linear(sparse, sparse_idx);
-        let dense_value = dense.data[dense_idx];
+        let dense_value = dense_values[dense_idx];
         out[out_idx] = if sparse_is_lhs {
             combine(sparse_value, dense_value)
         } else {
@@ -682,6 +686,7 @@ fn sparse_dense_times_preserve_sparse(
     _sparse_is_lhs: bool,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
+    let dense_values = tensor::tensor_values_f64_cow(dense);
     let mut col_ptrs = Vec::with_capacity(sparse.cols.saturating_add(1));
     let mut row_indices = Vec::new();
     let mut values = Vec::new();
@@ -690,7 +695,7 @@ fn sparse_dense_times_preserve_sparse(
         for entry in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
             let row = sparse.row_indices[entry];
             let dense_idx = dense_index_for_sparse_position(dense, row, col);
-            let value = sparse.values[entry] * dense.data[dense_idx];
+            let value = sparse.values[entry] * dense_values[dense_idx];
             if value != 0.0 {
                 row_indices.push(row);
                 values.push(value);
@@ -792,13 +797,16 @@ pub(crate) fn map_sparse_real_values(
     let implicit_zero = map(0.0)?;
     if implicit_zero != 0.0 {
         checked_len(&sparse.shape(), builtin)?;
-        let mut dense = sparse
+        let dense = sparse
             .to_dense()
             .map_err(|err| map_internal_error(builtin, err))?;
-        for value in &mut dense.data {
+        let mut out = dense.materialize_f64();
+        for value in &mut out {
             *value = map(*value)?;
         }
-        return Ok(Value::Tensor(dense));
+        return Tensor::new(out, dense.shape)
+            .map(Value::Tensor)
+            .map_err(|err| map_internal_error(builtin, err));
     }
 
     let mut col_ptrs = Vec::with_capacity(sparse.cols.saturating_add(1));
@@ -859,6 +867,12 @@ mod tests {
         }
     }
 
+    fn double_values(tensor: &Tensor) -> &[f64] {
+        tensor
+            .as_f64_slice()
+            .expect("sparse floating arithmetic returns a double tensor")
+    }
+
     #[test]
     fn sparse_sparse_addition_preserves_sparse_union() {
         let result = expect_sparse(
@@ -889,7 +903,7 @@ mod tests {
             .expect("sparse plus dense"),
         );
         assert_eq!(result.shape, vec![3, 2]);
-        assert_eq!(result.data, vec![11.0, 2.0, 33.0, 4.0, 25.0, 6.0]);
+        assert_eq!(double_values(&result), [11.0, 2.0, 33.0, 4.0, 25.0, 6.0]);
     }
 
     #[test]
@@ -904,7 +918,7 @@ mod tests {
             .expect("dense minus sparse"),
         );
         assert_eq!(result.shape, vec![3, 2]);
-        assert_eq!(result.data, vec![-9.0, 2.0, -27.0, 4.0, -15.0, 6.0]);
+        assert_eq!(double_values(&result), [-9.0, 2.0, -27.0, 4.0, -15.0, 6.0]);
     }
 
     #[test]
@@ -953,10 +967,11 @@ mod tests {
             .expect("sparse times dense with nan"),
         );
         assert_eq!(result.shape, vec![3, 2]);
-        assert_eq!(result.data[0], 10.0);
-        assert!(result.data[1].is_nan());
-        assert_eq!(result.data[2], 90.0);
-        assert_eq!(result.data[4], 100.0);
+        let values = double_values(&result);
+        assert_eq!(values[0], 10.0);
+        assert!(values[1].is_nan());
+        assert_eq!(values[2], 90.0);
+        assert_eq!(values[4], 100.0);
     }
 
     #[test]
@@ -974,7 +989,10 @@ mod tests {
                 .expect("zero-changing map"),
         );
         assert_eq!(complemented.shape, vec![3, 2]);
-        assert_eq!(complemented.data, vec![-9.0, 1.0, -29.0, 1.0, -19.0, 1.0]);
+        assert_eq!(
+            double_values(&complemented),
+            [-9.0, 1.0, -29.0, 1.0, -19.0, 1.0]
+        );
     }
 
     #[test]
@@ -1007,10 +1025,11 @@ mod tests {
             .expect("sparse times inf"),
         );
         assert_eq!(result.shape, vec![3, 2]);
-        assert!(result.data[1].is_nan());
-        assert!(result.data[3].is_nan());
-        assert!(result.data[5].is_nan());
-        assert!(result.data[0].is_infinite());
+        let values = double_values(&result);
+        assert!(values[1].is_nan());
+        assert!(values[3].is_nan());
+        assert!(values[5].is_nan());
+        assert!(values[0].is_infinite());
     }
 
     #[test]
@@ -1092,9 +1111,10 @@ mod tests {
             )
             .expect("sparse plus char"),
         );
-        assert_eq!(result.data[0], 75.0);
-        assert_eq!(result.data[1], 66.0);
-        assert_eq!(result.data[2], 97.0);
+        let values = double_values(&result);
+        assert_eq!(values[0], 75.0);
+        assert_eq!(values[1], 66.0);
+        assert_eq!(values[2], 97.0);
     }
 
     #[test]
