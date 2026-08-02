@@ -4,7 +4,7 @@ use runmat_accelerate_api::{GpuTensorHandle, ProviderHermitianKind};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntegerStorage, LogicalArray, Tensor, Value,
+    ComplexTensor, IntegerStorage, LogicalArray, NumericScalar, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -471,10 +471,8 @@ fn is_hermitian_real(tensor: &Tensor, mode: HermitianMode, tol: f64) -> bool {
     if let Some(storage) = tensor.integer_storage() {
         return is_hermitian_integer(storage, rows, cols, mode, tol);
     }
-    let data = &tensor.data;
-
     for col in 0..cols {
-        let diag = data[col + col * rows];
+        let diag = floating_value_at(tensor, col + col * rows);
         if diag.is_nan() {
             return false;
         }
@@ -482,8 +480,8 @@ fn is_hermitian_real(tensor: &Tensor, mode: HermitianMode, tol: f64) -> bool {
             return false;
         }
         for row in 0..col {
-            let a = data[row + col * rows];
-            let b = data[col + row * rows];
+            let a = floating_value_at(tensor, row + col * rows);
+            let b = floating_value_at(tensor, col + row * rows);
             let target = match mode {
                 HermitianMode::Hermitian => b,
                 HermitianMode::Skew => -b,
@@ -494,6 +492,17 @@ fn is_hermitian_real(tensor: &Tensor, mode: HermitianMode, tol: f64) -> bool {
         }
     }
     true
+}
+
+fn floating_value_at(tensor: &Tensor, index: usize) -> f64 {
+    match tensor
+        .numeric_value_at(index)
+        .expect("tensor storage length matches shape")
+    {
+        NumericScalar::F64(value) => value,
+        NumericScalar::F32(value) => f64::from(value),
+        _ => unreachable!("integer storage dispatches before floating comparison"),
+    }
 }
 
 fn is_hermitian_integer(
@@ -654,7 +663,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{
-        IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, ResolveContext, Type,
+        IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, NumericStorage,
+        ResolveContext, Type,
     };
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -754,6 +764,17 @@ pub(crate) mod tests {
         let result =
             ishermitian_builtin(Value::Tensor(exact_match), Vec::new()).expect("ishermitian");
         assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn ishermitian_real_reads_native_single_storage() {
+        let tensor =
+            Tensor::from_numeric_storage(NumericStorage::F32(vec![1.0, 2.0, 2.0, 3.0]), vec![2, 2])
+                .unwrap();
+        assert_eq!(
+            ishermitian_builtin(Value::Tensor(tensor), Vec::new()).unwrap(),
+            Value::Bool(true)
+        );
     }
 
     #[test]

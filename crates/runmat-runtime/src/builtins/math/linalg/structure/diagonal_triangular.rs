@@ -5,7 +5,7 @@ use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, ProviderBandwidth
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, LogicalArray, SparseTensor, Tensor, Value,
+    ComplexTensor, IntValue, LogicalArray, NumericStorage, SparseTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -451,18 +451,25 @@ fn matrix_from_real_tensor(tensor: Tensor, ctx: BuiltinContext) -> BuiltinResult
             "tensor shape exceeds backing data length",
         ));
     }
-    if let Some(storage) = tensor.integer_storage() {
-        return Ok(MatrixInput::DenseInteger {
+    match tensor
+        .into_numeric_storage()
+        .map_err(|error| runtime_error_with_detail(ctx, ctx.internal, error))?
+    {
+        NumericStorage::F64(data) => Ok(MatrixInput::DenseReal { rows, cols, data }),
+        NumericStorage::F32(data) => Ok(MatrixInput::DenseReal {
             rows,
             cols,
-            data: storage.exact_values(),
-        });
+            data: data.into_iter().map(f64::from).collect(),
+        }),
+        storage => Ok(MatrixInput::DenseInteger {
+            rows,
+            cols,
+            data: storage
+                .into_integer_storage()
+                .expect("non-floating numeric storage is integer")
+                .exact_values(),
+        }),
     }
-    Ok(MatrixInput::DenseReal {
-        rows,
-        cols,
-        data: tensor.data,
-    })
 }
 
 fn matrix_from_complex_tensor(
@@ -631,7 +638,9 @@ mod tests {
     use runmat_accelerate_api::{
         AccelDownloadFuture, AccelProvider, HostTensorOwned, HostTensorView,
     };
-    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage, ResolveContext, Type};
+    use runmat_builtins::{
+        IntValue, IntegerComplexStorage, IntegerStorage, NumericStorage, ResolveContext, Type,
+    };
 
     use crate::builtins::common::test_support;
 
@@ -736,6 +745,22 @@ mod tests {
         .unwrap();
         lower.data.clear();
 
+        assert!(!expect_bool(
+            call_isdiag(Value::Tensor(lower.clone())).unwrap()
+        ));
+        assert!(expect_bool(
+            call_istril(Value::Tensor(lower.clone())).unwrap()
+        ));
+        assert!(!expect_bool(call_istriu(Value::Tensor(lower)).unwrap()));
+    }
+
+    #[test]
+    fn dense_structure_predicates_read_native_single_storage() {
+        let lower = Tensor::from_numeric_storage(
+            NumericStorage::F32(vec![1.0, 2.0, 3.0, 0.0, 4.0, 5.0, 0.0, 0.0, 6.0]),
+            vec![3, 3],
+        )
+        .unwrap();
         assert!(!expect_bool(
             call_isdiag(Value::Tensor(lower.clone())).unwrap()
         ));
