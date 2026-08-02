@@ -1,6 +1,6 @@
 use crate::bytecode::EndExpr;
 use crate::indexing::selectors::{
-    index_scalar_from_value, materialize_index_value, IndexScalar, SliceSelector,
+    index_scalar_from_value, materialize_index_value, numeric_tensor_indices, SliceSelector,
 };
 use crate::interpreter::errors::mex;
 use runmat_builtins::Value;
@@ -556,37 +556,10 @@ where
                         }
                     }
                     Value::Tensor(idx_t) => {
-                        let len = idx_t.shape.iter().product::<usize>();
                         if spec.dims == 1 {
                             linear_output_shape = Some(idx_t.shape.clone());
                         }
-                        let mut vv = Vec::with_capacity(len);
-                        if let Some(storage) = idx_t.integer_storage() {
-                            for index in 0..len {
-                                let scalar = IndexScalar::from_int(
-                                    &storage
-                                        .value_at(index)
-                                        .expect("integer tensor storage length must match shape"),
-                                );
-                                let index = scalar.positive_usize().ok_or_else(|| {
-                                    mex("IndexOutOfBounds", "Index out of bounds")
-                                })?;
-                                vv.push(index);
-                            }
-                        } else {
-                            for &val in &idx_t.data {
-                                let idx = exact_index_from_f64(val).ok_or_else(|| {
-                                    mex(
-                                        "UnsupportedIndexType",
-                                        "Index values must be positive integers or logical values",
-                                    )
-                                })?;
-                                if idx < 1 {
-                                    return Err(mex("IndexOutOfBounds", "Index out of bounds"));
-                                }
-                                vv.push(idx as usize);
-                            }
-                        }
+                        let vv = numeric_tensor_indices(idx_t, None)?;
                         selectors.push(ExprSel::Indices(vv));
                     }
                     _ => return Err(mex("UnsupportedIndexType", "Unsupported index type")),
@@ -895,9 +868,8 @@ mod tests {
     fn expr_integer_index_vectors_use_exact_storage_for_all_classes() {
         macro_rules! assert_indices {
             ($storage:expr) => {{
-                let mut indices =
+                let indices =
                     Tensor::new_integer($storage, vec![1, 2]).expect("typed integer index tensor");
-                indices.data.clear();
                 let numeric = vec![Value::Tensor(indices)];
                 let plan = futures::executor::block_on(build_expr_index_plan(
                     ExprPlanSpec {
@@ -930,10 +902,9 @@ mod tests {
     }
 
     #[test]
-    fn expr_integer_index_vectors_reject_wide_values_from_poisoned_mirrors() {
-        let mut indices = Tensor::new_integer(IntegerStorage::U64(vec![1, u64::MAX]), vec![1, 2])
+    fn expr_integer_index_vectors_reject_wide_values() {
+        let indices = Tensor::new_integer(IntegerStorage::U64(vec![1, u64::MAX]), vec![1, 2])
             .expect("typed integer index tensor");
-        indices.data.fill(2.0);
         let numeric = vec![Value::Tensor(indices)];
 
         let err = futures::executor::block_on(build_expr_index_plan(

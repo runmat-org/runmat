@@ -1,6 +1,6 @@
 use crate::indexing::plan::total_len_from_shape;
 use crate::interpreter::errors::mex;
-use runmat_builtins::{IntValue, IntegerStorage, Value};
+use runmat_builtins::{IntValue, NumericScalar, Tensor, Value};
 use runmat_runtime::{
     builtins::common::{shape::is_scalar_shape, tensor},
     dispatcher::gather_if_needed_async,
@@ -130,19 +130,31 @@ fn checked_positive_index(scalar: IndexScalar, upper_bound: Option<usize>) -> Vm
     Ok(index)
 }
 
-fn integer_tensor_indices(
-    storage: &IntegerStorage,
+pub(crate) fn numeric_tensor_indices(
+    tensor: &Tensor,
     upper_bound: Option<usize>,
 ) -> VmResult<Vec<usize>> {
-    let mut indices = Vec::with_capacity(storage.len());
-    for index in 0..storage.len() {
-        let value = storage
-            .value_at(index)
-            .expect("integer storage length must match its indexed values");
-        indices.push(checked_positive_index(
-            IndexScalar::from_int(&value),
-            upper_bound,
-        )?);
+    let mut indices = Vec::with_capacity(tensor.len());
+    for index in 0..tensor.len() {
+        let scalar = match tensor
+            .numeric_value_at(index)
+            .expect("numeric tensor storage length must match its shape")
+        {
+            NumericScalar::F64(value) => exact_index_from_f64(value).map(IndexScalar::Signed),
+            NumericScalar::F32(value) => {
+                exact_index_from_f64(f64::from(value)).map(IndexScalar::Signed)
+            }
+            value => value
+                .into_int_value()
+                .map(|value| IndexScalar::from_int(&value)),
+        }
+        .ok_or_else(|| {
+            mex(
+                "UnsupportedIndexType",
+                "Index values must be positive integers or logical values",
+            )
+        })?;
+        indices.push(checked_positive_index(scalar, upper_bound)?);
     }
     Ok(indices)
 }
@@ -176,26 +188,7 @@ pub async fn indices_from_value_linear(value: &Value, total_len: usize) -> VmRes
         value
     };
     match value {
-        Value::Tensor(idx_t) => {
-            if let Some(storage) = idx_t.integer_storage() {
-                return integer_tensor_indices(storage, Some(total_len));
-            }
-            let len = idx_t.shape.iter().product::<usize>();
-            let mut indices = Vec::with_capacity(len);
-            for &val in &idx_t.data {
-                let idx = exact_index_from_f64(val).ok_or_else(|| {
-                    mex(
-                        "UnsupportedIndexType",
-                        "Index values must be positive integers or logical values",
-                    )
-                })?;
-                if idx < 1 || (idx as usize) > total_len {
-                    return Err(mex("IndexOutOfBounds", "Index out of bounds"));
-                }
-                indices.push(idx as usize);
-            }
-            Ok(indices)
-        }
+        Value::Tensor(idx_t) => numeric_tensor_indices(idx_t, Some(total_len)),
         Value::LogicalArray(la) => {
             if la.data.len() != total_len {
                 return Err(mex(
@@ -249,27 +242,8 @@ async fn selector_from_value_dim_with_bounds(
         value
     };
     match value {
-        Value::Tensor(idx_t) => {
-            if let Some(storage) = idx_t.integer_storage() {
-                return integer_tensor_indices(storage, require_in_bounds.then_some(dim_len))
-                    .map(SliceSelector::Indices);
-            }
-            let len = idx_t.shape.iter().product::<usize>();
-            let mut indices = Vec::with_capacity(len);
-            for &val in &idx_t.data {
-                let idx = exact_index_from_f64(val).ok_or_else(|| {
-                    mex(
-                        "UnsupportedIndexType",
-                        "Index values must be positive integers or logical values",
-                    )
-                })?;
-                if idx < 1 || (require_in_bounds && (idx as usize) > dim_len) {
-                    return Err(mex("IndexOutOfBounds", "Index out of bounds"));
-                }
-                indices.push(idx as usize);
-            }
-            Ok(SliceSelector::Indices(indices))
-        }
+        Value::Tensor(idx_t) => numeric_tensor_indices(idx_t, require_in_bounds.then_some(dim_len))
+            .map(SliceSelector::Indices),
         Value::LogicalArray(la) => {
             if la.data.len() != dim_len {
                 return Err(mex(
@@ -322,25 +296,7 @@ pub async fn build_slice_selectors(
         })?;
         let materialized = materialize_index_value(value).await?;
         if let Value::Tensor(idx_t) = &materialized {
-            let indices = if let Some(storage) = idx_t.integer_storage() {
-                integer_tensor_indices(storage, Some(total_len))?
-            } else {
-                let len = idx_t.shape.iter().product::<usize>();
-                let mut indices = Vec::with_capacity(len);
-                for &val in &idx_t.data {
-                    let idx = exact_index_from_f64(val).ok_or_else(|| {
-                        mex(
-                            "UnsupportedIndexType",
-                            "Index values must be positive integers or logical values",
-                        )
-                    })?;
-                    if idx < 1 || (idx as usize) > total_len {
-                        return Err(mex("IndexOutOfBounds", "Index out of bounds"));
-                    }
-                    indices.push(idx as usize);
-                }
-                indices
-            };
+            let indices = numeric_tensor_indices(idx_t, Some(total_len))?;
             selectors.push(SliceSelector::LinearIndices {
                 values: indices,
                 output_shape: idx_t.shape.clone(),
@@ -499,39 +455,35 @@ mod tests {
     #[test]
     fn scalar_integer_tensor_indices_use_exact_integer_storage() {
         let exact = (1_u64 << 53) + 1;
-        let mut tensor = Tensor::new_integer(IntegerStorage::U64(vec![exact]), vec![1, 1])
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![exact]), vec![1, 1])
             .expect("scalar uint64 tensor");
-        tensor.data.clear();
         let err = futures::executor::block_on(indices_from_value_linear(&Value::Tensor(tensor), 8))
             .expect_err("huge scalar integer tensor index should be out of bounds");
         assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
     }
 
     #[test]
-    fn integer_index_vectors_use_exact_storage_without_f64_mirrors() {
+    fn integer_index_vectors_use_exact_storage() {
         let wide = (1_u64 << 53) + 1;
-        let mut indices = Tensor::new_integer(IntegerStorage::U64(vec![2, wide]), vec![1, 2])
+        let indices = Tensor::new_integer(IntegerStorage::U64(vec![2, wide]), vec![1, 2])
             .expect("uint64 index tensor");
-        indices.data.clear();
 
         let error =
             futures::executor::block_on(indices_from_value_linear(&Value::Tensor(indices), 3))
                 .expect_err("wide exact uint64 vector index must not be ignored");
         assert_eq!(error.identifier(), Some("RunMat:IndexOutOfBounds"));
 
-        let mut signed = Tensor::new_integer(IntegerStorage::I64(vec![1, i64::MIN]), vec![1, 2])
+        let signed = Tensor::new_integer(IntegerStorage::I64(vec![1, i64::MIN]), vec![1, 2])
             .expect("int64 index tensor");
-        signed.data.clear();
         let error = futures::executor::block_on(selector_from_value_dim(&Value::Tensor(signed), 2))
             .expect_err("signed boundary index must remain out of bounds");
         assert_eq!(error.identifier(), Some("RunMat:IndexOutOfBounds"));
     }
 
     #[test]
-    fn integer_index_vector_selectors_preserve_typed_values_without_mirror() {
-        let mut indices = Tensor::new_integer(IntegerStorage::U16(vec![2, 1]), vec![1, 2])
+    fn integer_index_vector_selectors_preserve_typed_values() {
+        let indices = Tensor::new_integer(IntegerStorage::U16(vec![2, 1]), vec![1, 2])
             .expect("uint16 index tensor");
-        indices.data.clear();
 
         let selector =
             futures::executor::block_on(selector_from_value_dim(&Value::Tensor(indices), 2))
