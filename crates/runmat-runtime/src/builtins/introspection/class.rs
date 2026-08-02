@@ -90,10 +90,7 @@ pub(crate) fn class_name_for_value(value: &Value) -> String {
             || "double".to_string(),
             |storage| storage.class_name().to_string(),
         ),
-        Value::Tensor(tensor) => tensor.integer_storage().map_or_else(
-            || tensor.dtype.class_name().to_string(),
-            |storage| storage.class_name().to_string(),
-        ),
+        Value::Tensor(tensor) => tensor.numeric_dtype().class_name().to_string(),
         Value::SparseTensor(sparse) => sparse.class_name().to_string(),
         Value::Int(iv) => iv.class_name().to_string(),
         Value::Bool(_) | Value::LogicalArray(_) => "logical".to_string(),

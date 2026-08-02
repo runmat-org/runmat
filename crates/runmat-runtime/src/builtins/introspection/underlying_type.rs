@@ -197,10 +197,7 @@ fn is_underlying_type_builtin(value: Value, typename: Value) -> BuiltinResult<Va
 /// Return the canonical underlying MATLAB data type for a runtime value.
 pub(crate) fn underlying_type_for_value(value: &Value) -> String {
     match value {
-        Value::Tensor(tensor) => tensor.integer_storage().map_or_else(
-            || tensor.dtype.class_name().to_string(),
-            |storage| storage.class_name().to_string(),
-        ),
+        Value::Tensor(tensor) => tensor.numeric_dtype().class_name().to_string(),
         Value::SparseTensor(sparse) => sparse.class_name().to_string(),
         Value::ComplexTensor(tensor) => tensor.integer_data.as_ref().map_or_else(
             || "double".to_string(),
