@@ -5,7 +5,7 @@
 //! when GPU providers lack a dedicated kernel.
 
 use once_cell::sync::Lazy;
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -410,11 +410,7 @@ fn upload_tensor(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     tensor: Tensor,
 ) -> BuiltinResult<Value> {
-    let view = HostTensorView {
-        data: &tensor.data,
-        shape: &tensor.shape,
-    };
-    let handle = provider.upload(&view).map_err(|e| {
+    let handle = gpu_helpers::upload_tensor(provider, &tensor).map_err(|e| {
         factorial_error_with_detail(
             &FACTORIAL_ERROR_INTERNAL,
             format!("failed to upload GPU result: {e}"),
@@ -428,6 +424,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, ResolveContext, Tensor, Type};
 
     fn factorial_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

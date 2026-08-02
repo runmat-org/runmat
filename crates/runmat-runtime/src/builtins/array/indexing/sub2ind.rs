@@ -402,10 +402,7 @@ fn compute_indices(
 }
 
 fn tensor_element_len(tensor: &Tensor) -> usize {
-    tensor
-        .integer_storage()
-        .map(|storage| storage.len())
-        .unwrap_or(tensor.data.len())
+    tensor.len()
 }
 
 enum SubscriptValue {

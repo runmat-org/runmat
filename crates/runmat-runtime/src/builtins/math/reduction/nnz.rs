@@ -379,7 +379,7 @@ struct Mask {
 fn mask_from_value(value: &Value) -> BuiltinResult<Mask> {
     match value {
         Value::Tensor(tensor) => {
-            let shape = canonical_shape(&tensor.shape, tensor.data.len());
+            let shape = canonical_shape(&tensor.shape, tensor.len());
             let values = tensor::tensor_values_f64_cow(tensor);
             let bits = values
                 .iter()

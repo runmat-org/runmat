@@ -568,8 +568,7 @@ pub async fn parse_coefficients(
                 )
             })?;
             ensure_vector_shape(label, &tensor.shape, builtin)?;
-            tensor
-                .data
+            tensor::tensor_into_values_f64(tensor)
                 .into_iter()
                 .map(|re| Complex64::new(re, 0.0))
                 .collect()
