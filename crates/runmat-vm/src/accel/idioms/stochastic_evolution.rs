@@ -242,8 +242,9 @@ fn upload_tensor_view(
             })
             .map_err(|e| crate::interpreter::errors::mex("UploadFailed", &e.to_string()));
     }
+    let data = tensor.materialize_f64();
     let view = runmat_accelerate_api::HostTensorView {
-        data: &tensor.data,
+        data: &data,
         shape: &tensor.shape,
     };
     provider

@@ -820,7 +820,7 @@ impl<'a> GraphBuilder<'a> {
             return false;
         };
         match info.constant.as_ref() {
-            Some(Value::Tensor(t)) => t.data.is_empty(),
+            Some(Value::Tensor(t)) => t.is_empty(),
             Some(Value::LogicalArray(l)) => l.data.is_empty(),
             Some(Value::String(s)) => s.is_empty(),
             Some(Value::StringArray(sa)) => sa.data.is_empty(),
@@ -840,7 +840,7 @@ impl<'a> GraphBuilder<'a> {
         match info.constant.as_ref() {
             Some(Value::Num(value)) => value.is_finite(),
             Some(Value::Int(_)) | Some(Value::Bool(_)) => true,
-            Some(Value::Tensor(t)) => t.data.len() == 1,
+            Some(Value::Tensor(t)) => t.len() == 1,
             Some(Value::LogicalArray(l)) => l.data.len() == 1,
             _ => false,
         }
@@ -1060,12 +1060,11 @@ impl<'a> GraphBuilder<'a> {
 /// Read a tensor element used as structural metadata without consulting the
 /// compatibility f64 mirror for typed integer tensors.
 fn tensor_dimension_at(tensor: &runmat_builtins::Tensor, index: usize) -> Option<usize> {
-    if let Some(storage) = tensor.integer_storage() {
-        return storage
-            .value_at(index)
-            .and_then(|value| value.try_to_usize());
+    let scalar = tensor.numeric_value_at(index)?;
+    if let Some(value) = scalar.into_int_value() {
+        return value.try_to_usize();
     }
-    let value = *tensor.data.get(index)?;
+    let value = scalar.materialize_f64();
     if !value.is_finite() || value < 0.0 {
         return None;
     }
@@ -1131,11 +1130,10 @@ mod tests {
     use runmat_builtins::{IntValue, IntegerStorage, Tensor};
 
     #[test]
-    fn structural_tensor_dimensions_ignore_poisoned_float_mirrors_for_all_integer_classes() {
+    fn structural_tensor_dimensions_read_all_integer_classes_exactly() {
         macro_rules! assert_dimensions {
             ($storage:expr) => {{
-                let mut tensor = Tensor::new_integer($storage, vec![1, 2]).expect("dimensions");
-                tensor.data.fill(f64::NAN);
+                let tensor = Tensor::new_integer($storage, vec![1, 2]).expect("dimensions");
                 assert_eq!(tensor_dimension_at(&tensor, 0), Some(2));
                 assert_eq!(tensor_dimension_at(&tensor, 1), Some(3));
             }};
