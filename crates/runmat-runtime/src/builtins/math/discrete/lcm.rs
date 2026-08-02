@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, IntegerStorage, NumericDType, Tensor, Type, Value,
+    IntValue, IntegerStorage, NumericDType, NumericStorage, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -164,19 +164,6 @@ impl NumericClass {
             Self::I8 | Self::I16 | Self::I32 | Self::I64 | Self::U64 => None,
         }
     }
-
-    fn from_integer_storage(storage: &IntegerStorage) -> Self {
-        match storage {
-            IntegerStorage::I8(_) => Self::I8,
-            IntegerStorage::I16(_) => Self::I16,
-            IntegerStorage::I32(_) => Self::I32,
-            IntegerStorage::I64(_) => Self::I64,
-            IntegerStorage::U8(_) => Self::U8,
-            IntegerStorage::U16(_) => Self::U16,
-            IntegerStorage::U32(_) => Self::U32,
-            IntegerStorage::U64(_) => Self::U64,
-        }
-    }
 }
 
 struct LcmInput {
@@ -272,56 +259,98 @@ impl LcmInput {
     }
 
     fn from_tensor(tensor: Tensor) -> BuiltinResult<Self> {
-        if let Some(storage) = tensor.integer_storage() {
-            let class = NumericClass::from_integer_storage(storage);
-            let data = storage
-                .exact_values()
-                .into_iter()
-                .map(positive_integer_from_int_value)
-                .collect::<BuiltinResult<Vec<_>>>()?;
-            return Ok(Self {
-                data,
-                shape: tensor.shape,
-                class,
-                native_integer_storage: true,
-            });
-        }
-        let class = match tensor.dtype {
-            NumericDType::F64 => NumericClass::Double,
-            NumericDType::F32 => NumericClass::Single,
-            NumericDType::I8 => NumericClass::I8,
-            NumericDType::I16 => NumericClass::I16,
-            NumericDType::I32 => NumericClass::I32,
-            NumericDType::I64 => NumericClass::I64,
-            NumericDType::U8 => NumericClass::U8,
-            NumericDType::U16 => NumericClass::U16,
-            NumericDType::U32 => NumericClass::U32,
-            NumericDType::U64 => NumericClass::U64,
+        let shape = tensor.shape.clone();
+        let storage = tensor
+            .into_numeric_storage()
+            .map_err(|err| error_with_detail(&LCM_ERROR_INTERNAL, err))?;
+        let (data, class, native_integer_storage) = match storage {
+            NumericStorage::F64(values) => (
+                values
+                    .into_iter()
+                    .map(positive_integer_from_f64)
+                    .collect::<BuiltinResult<Vec<_>>>()?,
+                NumericClass::Double,
+                false,
+            ),
+            NumericStorage::F32(values) => (
+                values
+                    .into_iter()
+                    .map(|value| positive_integer_from_f64(f64::from(value)))
+                    .collect::<BuiltinResult<Vec<_>>>()?,
+                NumericClass::Single,
+                false,
+            ),
+            NumericStorage::I8(values) => (
+                values
+                    .into_iter()
+                    .map(|value| positive_integer_from_i128(i128::from(value)))
+                    .collect::<BuiltinResult<Vec<_>>>()?,
+                NumericClass::I8,
+                true,
+            ),
+            NumericStorage::I16(values) => (
+                values
+                    .into_iter()
+                    .map(|value| positive_integer_from_i128(i128::from(value)))
+                    .collect::<BuiltinResult<Vec<_>>>()?,
+                NumericClass::I16,
+                true,
+            ),
+            NumericStorage::I32(values) => (
+                values
+                    .into_iter()
+                    .map(|value| positive_integer_from_i128(i128::from(value)))
+                    .collect::<BuiltinResult<Vec<_>>>()?,
+                NumericClass::I32,
+                true,
+            ),
+            NumericStorage::I64(values) => (
+                values
+                    .into_iter()
+                    .map(|value| positive_integer_from_i128(i128::from(value)))
+                    .collect::<BuiltinResult<Vec<_>>>()?,
+                NumericClass::I64,
+                true,
+            ),
+            NumericStorage::U8(values) => (
+                values
+                    .into_iter()
+                    .map(|value| positive_integer_from_u128(u128::from(value)))
+                    .collect::<BuiltinResult<Vec<_>>>()?,
+                NumericClass::U8,
+                true,
+            ),
+            NumericStorage::U16(values) => (
+                values
+                    .into_iter()
+                    .map(|value| positive_integer_from_u128(u128::from(value)))
+                    .collect::<BuiltinResult<Vec<_>>>()?,
+                NumericClass::U16,
+                true,
+            ),
+            NumericStorage::U32(values) => (
+                values
+                    .into_iter()
+                    .map(|value| positive_integer_from_u128(u128::from(value)))
+                    .collect::<BuiltinResult<Vec<_>>>()?,
+                NumericClass::U32,
+                true,
+            ),
+            NumericStorage::U64(values) => (
+                values
+                    .into_iter()
+                    .map(|value| positive_integer_from_u128(u128::from(value)))
+                    .collect::<BuiltinResult<Vec<_>>>()?,
+                NumericClass::U64,
+                true,
+            ),
         };
-        let data = tensor
-            .data
-            .into_iter()
-            .map(positive_integer_from_f64)
-            .collect::<BuiltinResult<Vec<_>>>()?;
         Ok(Self {
             data,
-            shape: tensor.shape,
+            shape,
             class,
-            native_integer_storage: false,
+            native_integer_storage,
         })
-    }
-}
-
-fn positive_integer_from_int_value(value: IntValue) -> BuiltinResult<u128> {
-    match value {
-        IntValue::I8(value) => positive_integer_from_i128(i128::from(value)),
-        IntValue::I16(value) => positive_integer_from_i128(i128::from(value)),
-        IntValue::I32(value) => positive_integer_from_i128(i128::from(value)),
-        IntValue::I64(value) => positive_integer_from_i128(i128::from(value)),
-        IntValue::U8(value) => positive_integer_from_u128(u128::from(value)),
-        IntValue::U16(value) => positive_integer_from_u128(u128::from(value)),
-        IntValue::U32(value) => positive_integer_from_u128(u128::from(value)),
-        IntValue::U64(value) => positive_integer_from_u128(u128::from(value)),
     }
 }
 
