@@ -1075,8 +1075,7 @@ fn variable_selector(value: &Value) -> BuiltinResult<Vec<String>> {
             .iter()
             .map(|value| text_scalar(value, "variable selector"))
             .collect(),
-        Value::Tensor(tensor) => Ok(tensor
-            .data
+        Value::Tensor(tensor) => Ok(tensor_utils::tensor_values_f64(tensor)
             .iter()
             .map(|v| {
                 let index = *v as usize;

@@ -67,7 +67,7 @@ fn handle_predicate_value(value: &Value, builtin: &'static str) -> Value {
     match value {
         Value::Tensor(tensor) => {
             let data = tensor
-                .data
+                .materialize_f64()
                 .iter()
                 .map(|&handle| u8::from(handle_is_graphics(handle, builtin)))
                 .collect();
@@ -112,6 +112,21 @@ mod tests {
                 assert_eq!(logical.shape, vec![2, 1]);
                 assert_eq!(logical.data, vec![0, 0]);
             }
+            other => panic!("expected logical array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn isgraphics_vectorizes_typed_handles_without_a_floating_mirror() {
+        let mut handles = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(vec![-1, -2]),
+            vec![2, 1],
+        )
+        .unwrap();
+        handles.data.clear();
+        let result = isgraphics_builtin(vec![Value::Tensor(handles)]).unwrap();
+        match result {
+            Value::LogicalArray(logical) => assert_eq!(logical.data, vec![0, 0]),
             other => panic!("expected logical array, got {other:?}"),
         }
     }

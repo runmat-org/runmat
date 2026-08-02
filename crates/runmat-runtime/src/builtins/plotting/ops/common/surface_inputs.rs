@@ -258,7 +258,7 @@ pub async fn axis_sources_from_xy_values(
                 other => Tensor::try_from(&other)
                     .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?,
             };
-            if x_tensor.data.is_empty() || y_tensor.data.is_empty() {
+            if x_tensor.is_empty() || y_tensor.is_empty() {
                 return Err(plotting_error(
                     builtin,
                     format!("{builtin}: axis vectors must be non-empty"),

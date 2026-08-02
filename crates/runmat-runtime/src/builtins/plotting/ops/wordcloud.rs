@@ -691,10 +691,11 @@ fn counts_by_columns(words: Vec<String>, counts: Tensor) -> BuiltinResult<WordCl
         ));
     }
     let mut sizes = Vec::with_capacity(counts.cols);
+    let count_values = counts.materialize_f64();
     for col in 0..counts.cols {
         let mut sum = 0.0;
         for row in 0..counts.rows {
-            let value = counts.data[row + col * counts.rows];
+            let value = count_values[row + col * counts.rows];
             if !value.is_finite() || value < 0.0 {
                 return Err(wordcloud_error("counts must be finite nonnegative values"));
             }
@@ -713,7 +714,7 @@ fn categorical_counts(object: &ObjectInstance) -> BuiltinResult<WordCloudData> {
         .and_then(words_from_word_vector)?;
     let codes = tensor_property(object, "Codes", "categorical")?;
     let mut sizes = vec![0.0; categories.len()];
-    for code in codes.data {
+    for code in codes.materialize_f64() {
         if code.is_nan() {
             continue;
         }

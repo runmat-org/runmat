@@ -363,16 +363,17 @@ fn render_sphere_plot(x: Tensor, y: Tensor, z: Tensor) -> BuiltinResult<()> {
 fn tensor_to_plot_grid(tensor: Tensor) -> BuiltinResult<Vec<Vec<f64>>> {
     let rows = tensor.rows;
     let cols = tensor.cols;
-    if rows == 0 || cols == 0 || tensor.data.len() != rows * cols {
+    if rows == 0 || cols == 0 || tensor.len() != rows * cols {
         return Err(sphere_error(
             &SPHERE_ERROR_INTERNAL,
             "coordinate tensor has invalid shape",
         ));
     }
+    let values = tensor.materialize_f64();
     let mut grid = vec![vec![0.0; rows]; cols];
     for (col, col_values) in grid.iter_mut().enumerate() {
         for (row, cell) in col_values.iter_mut().enumerate() {
-            *cell = tensor.data[row + rows * col];
+            *cell = values[row + rows * col];
         }
     }
     Ok(grid)

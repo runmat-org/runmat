@@ -4841,12 +4841,12 @@ fn apply_image_property(
         match key {
             "xdata" => {
                 if let Ok(tensor) = Tensor::try_from(value) {
-                    surface.x_data = tensor.data;
+                    surface.x_data = tensor.materialize_f64();
                 }
             }
             "ydata" => {
                 if let Ok(tensor) = Tensor::try_from(value) {
-                    surface.y_data = tensor.data;
+                    surface.y_data = tensor.materialize_f64();
                 }
             }
             "cdatamapping" => {

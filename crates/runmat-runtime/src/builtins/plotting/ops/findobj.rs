@@ -493,18 +493,25 @@ fn values_match(property: &str, actual: &Value, expected: &Value) -> bool {
             &left.data.iter().collect::<String>() == right
         }
         (Value::Tensor(left), Value::Tensor(right)) => {
-            left.shape == right.shape
-                && left
-                    .data
-                    .iter()
-                    .zip(&right.data)
-                    .all(|(left, right)| numbers_equal(*left, *right))
+            left.shape == right.shape && tensor_values_match(left, right)
         }
         (Value::StringArray(left), Value::StringArray(right)) => {
             left.shape == right.shape && left.data == right.data
         }
         _ => false,
     }
+}
+
+fn tensor_values_match(left: &Tensor, right: &Tensor) -> bool {
+    let dtype = left.numeric_dtype();
+    if dtype == right.numeric_dtype() && !matches!(dtype, NumericDType::F64 | NumericDType::F32) {
+        return (0..left.len())
+            .all(|index| left.numeric_value_at(index) == right.numeric_value_at(index));
+    }
+    left.materialize_f64()
+        .iter()
+        .zip(right.materialize_f64())
+        .all(|(left, right)| numbers_equal(*left, right))
 }
 
 fn numbers_equal(left: f64, right: f64) -> bool {
@@ -669,6 +676,21 @@ mod tests {
 
         assert_eq!(handles, vec![11.0, 13.0]);
         assert_eq!(rest.len(), 1);
+    }
+
+    #[test]
+    fn findobj_tensor_property_equality_preserves_wide_integer_exactness() {
+        let left = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_992]), vec![1, 1])
+                .unwrap(),
+        );
+        let right = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .unwrap(),
+        );
+
+        assert!(!values_match("UserData", &left, &right));
+        assert!(values_match("UserData", &left, &left));
     }
 
     #[test]
