@@ -1,7 +1,7 @@
 use crate::indexing::selectors::IndexScalar;
 use crate::interpreter::errors::mex;
-use runmat_builtins::{CellArray, StructValue, Tensor, Value};
-use runmat_runtime::builtins::common::tensor::{tensor_element_len, tensor_value_f64};
+use runmat_builtins::{CellArray, NumericScalar, StructValue, Tensor, Value};
+use runmat_runtime::builtins::common::tensor::tensor_element_len;
 use runmat_runtime::RuntimeError;
 
 const CELL_END_PLUS_TAG_MASK: u64 = 0xffff_ffff_0000_0000;
@@ -38,6 +38,19 @@ fn parse_positive_cell_index(index: IndexScalar) -> Result<usize, RuntimeError> 
         .ok_or_else(|| mex("CellIndexOutOfBounds", "Cell index out of bounds"))
 }
 
+fn index_scalar_from_numeric(value: NumericScalar) -> Result<IndexScalar, RuntimeError> {
+    match value {
+        NumericScalar::F64(value) => exact_index_from_f64(value).map(IndexScalar::Signed),
+        NumericScalar::F32(value) => {
+            exact_index_from_f64(f64::from(value)).map(IndexScalar::Signed)
+        }
+        value => value
+            .into_int_value()
+            .map(|value| IndexScalar::from_int(&value)),
+    }
+    .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))
+}
+
 fn parse_cell_index_value(value: &Value) -> Result<usize, RuntimeError> {
     let index = match value {
         Value::Num(n) => IndexScalar::Signed(
@@ -48,15 +61,10 @@ fn parse_cell_index_value(value: &Value) -> Result<usize, RuntimeError> {
         Value::Tensor(t)
             if tensor_element_len(t) == 1 && t.shape.iter().product::<usize>() == 1 =>
         {
-            if let Some(storage) = t.integer_storage() {
-                let value = storage.value_at(0).expect("scalar integer storage");
-                IndexScalar::from_int(&value)
-            } else {
-                IndexScalar::Signed(
-                    exact_index_from_f64(t.data[0])
-                        .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?,
-                )
-            }
+            index_scalar_from_numeric(
+                t.numeric_value_at(0)
+                    .expect("validated scalar numeric tensor storage"),
+            )?
         }
         other => {
             let n: f64 = other
@@ -81,17 +89,18 @@ fn parse_cell_index_value_for_len(value: &Value, len: usize) -> Result<usize, Ru
                 return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
             }
         }
-        Value::Tensor(t)
-            if t.integer_storage().is_none()
-                && t.data.len() == 1
-                && t.shape.iter().product::<usize>() == 1 =>
-        {
-            let scalar = tensor_value_f64(t, 0);
-            if let Some(idx) = resolve_cell_end_relative_index(scalar, len)? {
-                return Ok(idx);
-            }
-            if scalar.is_nan() {
-                return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
+        Value::Tensor(t) if t.len() == 1 && t.shape.iter().product::<usize>() == 1 => {
+            let value = t
+                .numeric_value_at(0)
+                .expect("validated scalar numeric tensor storage");
+            if matches!(value, NumericScalar::F64(_) | NumericScalar::F32(_)) {
+                let scalar = value.materialize_f64();
+                if let Some(idx) = resolve_cell_end_relative_index(scalar, len)? {
+                    return Ok(idx);
+                }
+                if scalar.is_nan() {
+                    return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
+                }
             }
         }
         _ => {}
@@ -101,24 +110,14 @@ fn parse_cell_index_value_for_len(value: &Value, len: usize) -> Result<usize, Ru
 
 fn parse_cell_index_values_for_assignment(value: &Value) -> Result<Vec<usize>, RuntimeError> {
     match value {
-        Value::Tensor(t) if tensor_element_len(t) > 1 => {
-            if let Some(storage) = t.integer_storage() {
-                return storage
-                    .exact_values()
-                    .into_iter()
-                    .map(|raw| parse_positive_cell_index(IndexScalar::from_int(&raw)))
-                    .collect();
-            }
-            t.data
-                .iter()
-                .map(|&raw| {
-                    parse_positive_cell_index(IndexScalar::Signed(
-                        exact_index_from_f64(raw)
-                            .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?,
-                    ))
-                })
-                .collect()
-        }
+        Value::Tensor(t) if tensor_element_len(t) > 1 => (0..t.len())
+            .map(|index| {
+                parse_positive_cell_index(index_scalar_from_numeric(
+                    t.numeric_value_at(index)
+                        .expect("validated numeric tensor storage"),
+                )?)
+            })
+            .collect(),
         _ => Ok(vec![parse_cell_index_value(value)?]),
     }
 }
@@ -158,7 +157,7 @@ fn resolve_cell_end_relative_index(value: f64, len: usize) -> Result<Option<usiz
 }
 
 fn is_empty_tensor(value: &Value) -> bool {
-    matches!(value, Value::Tensor(t) if t.data.is_empty() || t.rows == 0 || t.cols == 0)
+    matches!(value, Value::Tensor(t) if t.is_empty() || t.rows == 0 || t.cols == 0)
 }
 
 fn row_major_pos_from_linear(ca: &CellArray, idx: usize) -> Result<usize, RuntimeError> {
@@ -344,24 +343,12 @@ pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Valu
                     let idx = parse_cell_index_value_for_len(&indices[0], ca.data.len())?;
                     return Ok(vec![index_cell_value(ca, &[idx])?]);
                 }
-                if let Some(storage) = t.integer_storage() {
-                    return storage
-                        .exact_values()
-                        .into_iter()
-                        .map(|val| {
-                            let idx = parse_positive_cell_index(IndexScalar::from_int(&val))?;
-                            index_cell_value(ca, &[idx])
-                        })
-                        .collect();
-                }
-                t.data
-                    .iter()
-                    .map(|&val| {
-                        let idx = parse_positive_cell_index(IndexScalar::Signed(
-                            exact_index_from_f64(val).ok_or_else(|| {
-                                mex("CellIndexType", "Unsupported cell index type")
-                            })?,
-                        ))?;
+                (0..t.len())
+                    .map(|index| {
+                        let idx = parse_positive_cell_index(index_scalar_from_numeric(
+                            t.numeric_value_at(index)
+                                .expect("validated numeric tensor storage"),
+                        )?)?;
                         index_cell_value(ca, &[idx])
                     })
                     .collect()
@@ -823,12 +810,10 @@ mod tests {
             2,
         )
         .expect("2d cell");
-        let mut row =
+        let row =
             Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("row selector");
-        row.data[0] = 1.0;
-        let mut col =
+        let col =
             Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("col selector");
-        col.data[0] = 2.0;
 
         let values = expand_cell_indices(&cell, &[Value::Tensor(row), Value::Tensor(col)])
             .expect("typed integer selectors should use exact storage");
@@ -836,12 +821,11 @@ mod tests {
     }
 
     #[test]
-    fn cell_scalar_indices_ignore_poisoned_integer_tensor_mirrors_for_all_classes() {
+    fn cell_scalar_indices_read_all_integer_classes_exactly() {
         let cell = CellArray::new(vec![Value::Num(10.0), Value::Num(20.0)], 1, 2).expect("cell");
         macro_rules! assert_index {
             ($storage:expr) => {{
-                let mut index = Tensor::new_integer($storage, vec![1, 1]).expect("index");
-                index.data = vec![1.0];
+                let index = Tensor::new_integer($storage, vec![1, 1]).expect("index");
                 let values = expand_cell_indices(&cell, &[Value::Tensor(index)])
                     .expect("exact typed scalar index");
                 assert_eq!(values, vec![Value::Num(20.0)]);
@@ -866,9 +850,8 @@ mod tests {
             3,
         )
         .expect("cell");
-        let mut indices =
+        let indices =
             Tensor::new_integer(IntegerStorage::U16(vec![3, 1]), vec![1, 2]).expect("indices");
-        indices.data = vec![1.0, 2.0];
 
         let values = expand_cell_indices(&cell, &[Value::Tensor(indices)])
             .expect("typed integer vector indices should use exact storage");
@@ -876,7 +859,21 @@ mod tests {
     }
 
     #[test]
-    fn typed_integer_cell_subscripts_use_storage_when_mirror_is_cleared() {
+    fn expand_cell_indices_accepts_native_single_vector_indices() {
+        let cell = CellArray::new(
+            vec![Value::Num(10.0), Value::Num(20.0), Value::Num(30.0)],
+            1,
+            3,
+        )
+        .expect("cell");
+        let indices = Tensor::from_f32(vec![3.0, 1.0], vec![1, 2]).expect("single indices");
+        let values = expand_cell_indices(&cell, &[Value::Tensor(indices)])
+            .expect("native-single vector indices");
+        assert_eq!(values, vec![Value::Num(30.0), Value::Num(10.0)]);
+    }
+
+    #[test]
+    fn typed_integer_cell_subscripts_use_exact_storage() {
         let cell = CellArray::new(
             vec![Value::Num(10.0), Value::Num(20.0), Value::Num(30.0)],
             1,
@@ -884,37 +881,32 @@ mod tests {
         )
         .expect("cell");
 
-        let mut scalar = Tensor::new_integer(IntegerStorage::U64(vec![3]), vec![1, 1])
+        let scalar = Tensor::new_integer(IntegerStorage::U64(vec![3]), vec![1, 1])
             .expect("wide scalar selector");
-        scalar.data.clear();
-        let values = expand_cell_indices(&cell, &[Value::Tensor(scalar)])
-            .expect("typed scalar selector with cleared mirror");
+        let values =
+            expand_cell_indices(&cell, &[Value::Tensor(scalar)]).expect("typed scalar selector");
         assert_eq!(values, vec![Value::Num(30.0)]);
 
-        let mut vector = Tensor::new_integer(IntegerStorage::I64(vec![3, 1]), vec![1, 2])
+        let vector = Tensor::new_integer(IntegerStorage::I64(vec![3, 1]), vec![1, 2])
             .expect("signed vector selector");
-        vector.data.clear();
         assert_eq!(
             resolve_cell_assignment_positions(&cell, &[Value::Tensor(vector)])
-                .expect("typed vector selector with cleared mirror"),
+                .expect("typed vector selector"),
             vec![3, 1]
         );
 
-        let mut wide =
-            Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1])
-                .expect("wide unsigned selector");
-        wide.data = vec![1.0];
+        let wide = Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1])
+            .expect("wide unsigned selector");
         let err = expand_cell_indices(&cell, &[Value::Tensor(wide)])
-            .expect_err("wide uint64 index must not use its poisoned mirror");
+            .expect_err("wide uint64 index must remain exact");
         assert_eq!(err.identifier(), Some("RunMat:CellIndexOutOfBounds"));
     }
 
     #[test]
-    fn typed_integer_cell_subscript_bounds_do_not_fall_back_to_poisoned_mirror() {
+    fn typed_integer_cell_subscript_bounds_use_exact_storage() {
         let cell = CellArray::new(vec![Value::Num(10.0)], 1, 1).expect("cell");
-        let mut index = Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN]), vec![1, 1])
+        let index = Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN]), vec![1, 1])
             .expect("signed edge selector");
-        index.data = vec![1.0];
 
         let err = expand_cell_indices(&cell, &[Value::Tensor(index)])
             .expect_err("signed edge index must be rejected from exact storage");
