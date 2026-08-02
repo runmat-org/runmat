@@ -4,7 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, IntegerStorage, Tensor, Value,
+    CharArray, ComplexTensor, IntValue, IntegerStorage, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -132,6 +132,22 @@ async fn abs_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn abs_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
+        let provider = runmat_accelerate_api::provider_for_handle(&handle).ok_or_else(|| {
+            builtin_error_with_detail(
+                &ABS_ERROR_INTERNAL,
+                "GPU provider unavailable for integer input",
+            )
+        })?;
+        let tensor = gpu_helpers::gather_tensor_async(&handle)
+            .await
+            .map_err(|err| builtin_error_with_detail(&ABS_ERROR_INTERNAL, err.to_string()))?;
+        let output = abs_tensor(tensor)?;
+        return match gpu_helpers::upload_tensor(provider, &output) {
+            Ok(out) => Ok(Value::GpuTensor(out)),
+            Err(_) => Ok(tensor::tensor_into_value(output)),
+        };
+    }
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_abs(&handle).await {
             return Ok(Value::GpuTensor(out));
@@ -150,12 +166,24 @@ fn abs_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn abs_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    if let Some(storage) = tensor.integer_storage() {
-        return Tensor::new_integer(abs_integer_storage(storage), tensor.shape.clone())
-            .map_err(|e| builtin_error_with_detail(&ABS_ERROR_INTERNAL, e));
-    }
-    let data = tensor.data.iter().map(|&v| v.abs()).collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone())
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| builtin_error_with_detail(&ABS_ERROR_INTERNAL, e))?;
+    let output = match storage {
+        NumericStorage::F64(values) => {
+            NumericStorage::F64(values.into_iter().map(f64::abs).collect())
+        }
+        NumericStorage::F32(values) => {
+            NumericStorage::F32(values.into_iter().map(f32::abs).collect())
+        }
+        integer => NumericStorage::from_integer_storage(abs_integer_storage(
+            &integer
+                .into_integer_storage()
+                .expect("integer NumericStorage variant"),
+        )),
+    };
+    Tensor::from_numeric_storage(output, shape)
         .map_err(|e| builtin_error_with_detail(&ABS_ERROR_INTERNAL, e))
 }
 
@@ -234,7 +262,7 @@ pub(crate) mod tests {
         .is_ok()
             && runmat_accelerate_api::provider().is_some()
     }
-    use runmat_builtins::{IntValue, ResolveContext, Tensor, Type};
+    use runmat_builtins::{IntValue, IntegerComplexStorage, ResolveContext, Tensor, Type};
 
     fn abs_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::abs_builtin(value))
@@ -296,6 +324,27 @@ pub(crate) mod tests {
             abs_builtin(Value::Int(IntValue::I64(i64::MIN))).expect("abs"),
             Value::Int(IntValue::I64(i64::MAX))
         );
+    }
+
+    #[test]
+    fn abs_preserves_native_single_and_rejects_typed_complex_integer() {
+        let single = Tensor::from_f32(vec![-2.5, 0.0, 3.25], vec![1, 3]).unwrap();
+        let output = abs_tensor(single).unwrap();
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![2.5, 0.0, 3.25])
+        );
+
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![3, -4]),
+            IntegerStorage::I16(vec![4, 3]),
+        )
+        .unwrap();
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).unwrap();
+        let error = abs_builtin(Value::ComplexTensor(tensor)).unwrap_err();
+        assert!(error
+            .message()
+            .contains("complex numbers with integer types"));
     }
 
     #[test]
@@ -419,6 +468,39 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![4, 1]);
             assert_eq!(gathered.data, vec![2.0, 1.0, 0.0, 3.0]);
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn abs_gpu_preserves_exact_integer_class_and_values() {
+        test_support::with_test_provider(|provider| {
+            let values = [i64::MIN, -9_007_199_254_740_993, 0, i64::MAX];
+            let shape = [2usize, 2usize];
+            let handle = provider
+                .upload_integer(&runmat_accelerate_api::HostIntegerTensorView {
+                    data: runmat_accelerate_api::HostIntegerDataView::I64(&values),
+                    shape: &shape,
+                })
+                .expect("upload integer gpu tensor");
+            let result = abs_builtin(Value::GpuTensor(handle)).expect("abs");
+            let Value::GpuTensor(ref output_handle) = result else {
+                panic!("expected resident integer gpu tensor");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(output_handle),
+                Some(runmat_accelerate_api::IntegerElementType::I64)
+            );
+            let gathered = test_support::gather(result).expect("gather");
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::I64(vec![
+                    i64::MAX,
+                    9_007_199_254_740_993,
+                    0,
+                    i64::MAX,
+                ]))
+            );
         });
     }
 
