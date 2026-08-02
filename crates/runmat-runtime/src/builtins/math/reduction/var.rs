@@ -43,7 +43,7 @@ const VAR_PARAM_A: BuiltinParamDescriptor = BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Input array.",
+    description: "Single- or double-precision input array.",
 };
 
 const VAR_PARAM_W: BuiltinParamDescriptor = BuiltinParamDescriptor {
@@ -66,8 +66,9 @@ const VAR_PARAM_NANFLAG: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "nanflag",
     ty: BuiltinParamType::StringScalar,
     arity: BuiltinParamArity::Optional,
-    default: Some("\"includenan\""),
-    description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+    default: Some("\"includemissing\""),
+    description:
+        "Missing-value mode: \"includemissing\"/\"includenan\" or \"omitmissing\"/\"omitnan\".",
 };
 
 const VAR_INPUTS_A: [BuiltinParamDescriptor; 1] = [VAR_PARAM_A];
@@ -142,14 +143,14 @@ const VAR_SIGNATURES: [BuiltinSignatureDescriptor; 11] = [
 const VAR_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.VAR.INVALID_ARGUMENT",
     identifier: Some("RunMat:var:InvalidArgument"),
-    when: "Argument grammar, dimensions, normalization flags, or nanflags are invalid.",
+    when: "Argument grammar, dimensions, normalization, or missing-value selectors are invalid.",
     message: "var: invalid argument",
 };
 
 const VAR_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.VAR.INVALID_INPUT",
     identifier: Some("RunMat:var:InvalidInput"),
-    when: "Input values cannot be converted to supported var reduction domains.",
+    when: "Input values are outside the supported floating var reduction domains, including integer data.",
     message: "var: invalid input",
 };
 
@@ -277,19 +278,35 @@ enum NormParse {
     name = "var",
     category = "math/reduction",
     summary = "Compute sample or population variance across array data.",
-    keywords = "var,variance,statistics,gpu,omitnan,all",
+    keywords = "var,variance,statistics,gpu,omitmissing,omitnan,all",
     accel = "reduction",
     type_resolver(var_type),
     descriptor(crate::builtins::math::reduction::var::VAR_DESCRIPTOR),
     builtin_path = "crate::builtins::math::reduction::var"
 )]
 pub(crate) async fn var_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    reject_integer_data_input(&value)?;
     let parsed = parse_arguments(&rest).await?;
     match value {
         Value::GpuTensor(handle) => var_gpu(handle, &parsed).await,
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(var_complex_unsupported_default()),
         other => var_host(other, &parsed),
     }
+}
+
+fn reject_integer_data_input(value: &Value) -> BuiltinResult<()> {
+    let is_integer = match value {
+        Value::Int(_) => true,
+        Value::Tensor(tensor) => tensor.integer_storage().is_some(),
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle).is_some(),
+        _ => false,
+    };
+    if is_integer {
+        return Err(var_invalid_input(
+            "var: integer data inputs are not supported",
+        ));
+    }
+    Ok(())
 }
 
 async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
@@ -306,12 +323,12 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
 
         if let Some(crate::builtins::common::arg_tokens::ArgToken::String(text)) = tokens.get(idx) {
             match text.as_str() {
-                "omitnan" => {
+                "omitmissing" | "omitnan" => {
                     nan_mode = ReductionNaN::Omit;
                     idx += 1;
                     continue;
                 }
-                "includenan" => {
+                "includemissing" | "includenan" => {
                     nan_mode = ReductionNaN::Include;
                     idx += 1;
                     continue;
@@ -333,12 +350,12 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
 
         if let Some(keyword) = keyword_of(arg) {
             match keyword.as_str() {
-                "omitnan" => {
+                "omitmissing" | "omitnan" => {
                     nan_mode = ReductionNaN::Omit;
                     idx += 1;
                     continue;
                 }
-                "includenan" => {
+                "includemissing" | "includenan" => {
                     nan_mode = ReductionNaN::Include;
                     idx += 1;
                     continue;
@@ -526,10 +543,14 @@ fn var_tensor(
     normalization: VarNormalization,
     nan_mode: ReductionNaN,
 ) -> BuiltinResult<Tensor> {
-    let (dims, had_request) = resolve_axes(&tensor.shape, axes)?;
+    let (dims, _) = resolve_axes(&tensor.shape, axes)?;
     if dims.is_empty() {
-        if had_request && tensor::is_scalar_tensor(&tensor) {
+        if tensor::is_scalar_tensor(&tensor) {
             return var_scalar_tensor(&tensor, nan_mode);
+        }
+        if !matches!(axes, VarAxes::Default) {
+            return tensor::zeros_with_dtype(&tensor.shape, tensor.numeric_dtype())
+                .map_err(|error| var_internal_error(format!("var: {error}")));
         }
         return Ok(tensor);
     }
@@ -746,10 +767,10 @@ async fn var_gpu_reduce(
     handle: &GpuTensorHandle,
     args: &ParsedArguments,
 ) -> Option<GpuTensorHandle> {
-    let (dims, had_request) = resolve_axes(&handle.shape, &args.axes).ok()?;
+    let (dims, _) = resolve_axes(&handle.shape, &args.axes).ok()?;
     let elements = tensor::element_count(&handle.shape);
     if dims.is_empty() {
-        if had_request && elements == 1 {
+        if elements == 1 || !matches!(args.axes, VarAxes::Default) {
             return None;
         }
         return Some(handle.clone());
@@ -841,11 +862,32 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
 
     fn var_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::var_builtin(value, rest))
+    }
+
+    fn values(tensor: &Tensor) -> Vec<f64> {
+        tensor.materialize_f64()
+    }
+
+    fn integer_inputs() -> Vec<Value> {
+        vec![
+            IntegerStorage::I8(vec![0, 2, 4]),
+            IntegerStorage::I16(vec![0, 2, 4]),
+            IntegerStorage::I32(vec![0, 2, 4]),
+            IntegerStorage::I64(vec![0, 2, 4]),
+            IntegerStorage::U8(vec![0, 2, 4]),
+            IntegerStorage::U16(vec![0, 2, 4]),
+            IntegerStorage::U32(vec![0, 2, 4]),
+            IntegerStorage::U64(vec![0, 2, 4]),
+        ]
+        .into_iter()
+        .map(|storage| {
+            Value::Tensor(Tensor::new_integer(storage, vec![3, 1]).expect("integer tensor"))
+        })
+        .collect()
     }
 
     #[test]
@@ -864,9 +906,8 @@ pub(crate) mod tests {
 
     #[test]
     fn var_typed_integer_tensor_normalization_reads_exact_storage() {
-        let mut normalization =
+        let normalization =
             Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("normalization");
-        normalization.data = vec![0.0];
 
         assert!(matches!(
             parse_normalization(&Value::Tensor(normalization)),
@@ -932,7 +973,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 3]);
-                assert_eq!(out.data, vec![4.5, 4.5, 4.5]);
+                assert_eq!(values(&out), vec![4.5, 4.5, 4.5]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -947,31 +988,37 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
-                assert_eq!(out.data, vec![1.0, 1.0]);
+                assert_eq!(values(&out), vec![1.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
 
     #[test]
-    fn var_reads_typed_integer_tensor_storage_exactly() {
-        let mut tensor =
-            Tensor::new_integer(IntegerStorage::I16(vec![0, 2, 4]), vec![1, 3]).expect("tensor");
-        tensor.data = vec![0.0, 0.0, 0.0];
-
-        let result = var_builtin(Value::Tensor(tensor), Vec::new()).expect("var");
-
-        assert_eq!(result, Value::Num(4.0));
+    fn var_rejects_every_integer_data_class_for_all_argument_forms() {
+        let forms = [
+            Vec::new(),
+            vec![Value::Int(IntValue::I32(0)), Value::Int(IntValue::I32(2))],
+            vec![Value::Int(IntValue::I32(0)), Value::from("all")],
+            vec![Value::Int(IntValue::I32(0)), Value::from("omitmissing")],
+        ];
+        for input in integer_inputs() {
+            for args in &forms {
+                let err = var_builtin(input.clone(), args.clone()).expect_err("integer data");
+                assert_eq!(err.identifier(), VAR_ERROR_INVALID_INPUT.identifier);
+                assert!(err.message().contains("integer data inputs"));
+            }
+        }
+        let err =
+            var_builtin(Value::Int(IntValue::I16(42)), Vec::new()).expect_err("integer scalar");
+        assert_eq!(err.identifier(), VAR_ERROR_INVALID_INPUT.identifier);
     }
 
     #[test]
-    fn var_reads_typed_integer_population_flag_tensor_exactly() {
-        let mut tensor =
-            Tensor::new_integer(IntegerStorage::I16(vec![0, 2, 4]), vec![1, 3]).expect("tensor");
-        tensor.data = vec![0.0, 0.0, 0.0];
-        let mut normalization =
+    fn var_accepts_typed_integer_population_control_exactly() {
+        let tensor = Tensor::new(vec![0.0, 2.0, 4.0], vec![1, 3]).expect("tensor");
+        let normalization =
             Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("normalization");
-        normalization.data = vec![0.0];
 
         let result =
             var_builtin(Value::Tensor(tensor), vec![Value::Tensor(normalization)]).expect("var");
@@ -1010,7 +1057,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 3, 1]);
-                for value in &out.data {
+                for value in values(&out) {
                     assert!((value - (37.0 / 3.0)).abs() < 1e-12);
                 }
             }
@@ -1028,8 +1075,8 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
-                for value in &out.data {
-                    assert!((*value - 0.5).abs() < 1e-12);
+                for value in values(&out) {
+                    assert!((value - 0.5).abs() < 1e-12);
                 }
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1073,7 +1120,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
-                assert_eq!(out.data, vec![1.0, 1.0]);
+                assert_eq!(values(&out), vec![1.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1101,17 +1148,42 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn var_missing_aliases_match_nan_aliases() {
+        let tensor = Tensor::new(vec![1.0, f64::NAN, 5.0], vec![3, 1]).unwrap();
+        let omit_nan =
+            var_builtin(Value::Tensor(tensor.clone()), vec![Value::from("omitnan")]).unwrap();
+        let omit_missing = var_builtin(
+            Value::Tensor(tensor.clone()),
+            vec![Value::from("omitmissing")],
+        )
+        .unwrap();
+        assert_eq!(omit_nan, omit_missing);
+        let include_nan = var_builtin(
+            Value::Tensor(tensor.clone()),
+            vec![Value::from("includenan")],
+        )
+        .unwrap();
+        let include_missing =
+            var_builtin(Value::Tensor(tensor), vec![Value::from("includemissing")]).unwrap();
+        assert!(matches!(include_nan, Value::Num(value) if value.is_nan()));
+        assert!(matches!(include_missing, Value::Num(value) if value.is_nan()));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn var_dimension_greater_than_ndims_returns_input() {
+    fn var_dimension_greater_than_ndims_returns_same_shaped_zeros() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let result = var_builtin(
-            Value::Tensor(tensor.clone()),
+            Value::Tensor(tensor),
             vec![Value::Int(IntValue::I32(0)), Value::Int(IntValue::I32(5))],
         )
         .expect("var");
         match result {
-            Value::Tensor(out) => assert_eq!(out, tensor),
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(values(&out), vec![0.0, 0.0, 0.0]);
+            }
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -1121,15 +1193,31 @@ pub(crate) mod tests {
     fn var_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result = var_builtin(Value::GpuTensor(handle), Vec::new()).expect("var");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 3]);
-            assert_eq!(gathered.data, vec![4.5, 4.5, 4.5]);
+            assert_eq!(values(&gathered), vec![4.5, 4.5, 4.5]);
+        });
+    }
+
+    #[test]
+    fn var_gpu_rejects_integer_data_before_provider_dispatch() {
+        test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload_integer(&runmat_accelerate_api::HostIntegerTensorView {
+                    data: runmat_accelerate_api::HostIntegerDataView::U64(&[0, 2, u64::MAX]),
+                    shape: &[3, 1],
+                })
+                .expect("upload integer");
+            let err = var_builtin(
+                Value::GpuTensor(handle.clone()),
+                vec![Value::Int(IntValue::I32(0)), Value::from("all")],
+            )
+            .expect_err("integer GPU data");
+            assert_eq!(err.identifier(), VAR_ERROR_INVALID_INPUT.identifier);
+            assert!(err.message().contains("integer data inputs"));
+            provider.free(&handle).ok();
         });
     }
 
@@ -1138,11 +1226,7 @@ pub(crate) mod tests {
     fn var_gpu_omit_nan_falls_back_to_host() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![f64::NAN, 2.0, f64::NAN, 4.0], vec![2, 2]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result =
                 var_builtin(Value::GpuTensor(handle), vec![Value::from("omitnan")]).expect("var");
             let gathered = test_support::gather(result).expect("gather");
@@ -1158,7 +1242,7 @@ pub(crate) mod tests {
             match cpu {
                 Value::Tensor(expected) => {
                     assert_eq!(gathered.shape, expected.shape);
-                    for (a, b) in gathered.data.iter().zip(expected.data.iter()) {
+                    for (a, b) in values(&gathered).iter().zip(values(&expected).iter()) {
                         if b.is_nan() {
                             assert!(a.is_nan());
                         } else {
@@ -1188,14 +1272,8 @@ pub(crate) mod tests {
             },
         )
         .unwrap();
-        let view = HostTensorView {
-            data: &tensor.data,
-            shape: &tensor.shape,
-        };
-        let handle = runmat_accelerate_api::provider()
-            .unwrap()
-            .upload(&view)
-            .unwrap();
+        let provider = runmat_accelerate_api::provider().unwrap();
+        let handle = gpu_helpers::upload_tensor(provider.as_ref(), &tensor).unwrap();
         let gpu = block_on(var_gpu(
             handle,
             &ParsedArguments {
@@ -1209,7 +1287,7 @@ pub(crate) mod tests {
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
                 assert_eq!(ct.shape, gt.shape);
-                for (a, b) in ct.data.iter().zip(gt.data.iter()) {
+                for (a, b) in values(&ct).iter().zip(values(&gt).iter()) {
                     assert!((a - b).abs() < 1e-6);
                 }
             }
