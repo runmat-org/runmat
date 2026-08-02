@@ -5910,6 +5910,8 @@ dependencies = [
  "runmat-time",
  "runmat-turbine",
  "runmat-vm",
+ "serde_json",
+ "sha2",
  "stacker",
  "tempfile",
  "tokio",
@@ -6457,6 +6459,7 @@ dependencies = [
 name = "runmat-test"
 version = "0.6.1"
 dependencies = [
+ "futures",
  "serde",
  "serde_json",
  "sha2",

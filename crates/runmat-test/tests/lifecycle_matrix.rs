@@ -179,11 +179,13 @@ fn cooperative_cancellation_skips_setup_and_body_but_runs_safe_test_teardown() {
     let mut events = Vec::new();
     let mut sink =
         runmat_test::event::SequencedEventSink::new(case.context.run_id.clone(), &mut events);
-    let outcome = LifecycleEngine::new(runmat_test::event::RedactionPolicy::new(
-        Vec::<String>::new(),
-        1024,
-    ))
-    .execute(&case, &mut executor, &AlwaysCancelled, &mut sink);
+    let outcome = futures::executor::block_on(
+        LifecycleEngine::new(runmat_test::event::RedactionPolicy::new(
+            Vec::<String>::new(),
+            1024,
+        ))
+        .execute(&case, &mut executor, &AlwaysCancelled, &mut sink),
+    );
 
     assert_eq!(executor.calls, ["teardown"]);
     assert_eq!(

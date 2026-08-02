@@ -6,6 +6,7 @@ wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 pub mod abi;
 mod diagnostic_path;
 mod error;
+mod executable;
 mod execution;
 mod fusion;
 mod profiling;
@@ -17,6 +18,7 @@ mod value_metadata;
 mod workspace;
 
 pub use error::{runtime_error_telemetry_failure_info, RunError};
+pub use executable::*;
 pub use execution::*;
 pub use fusion::*;
 pub use runmat_parser::CompatMode;

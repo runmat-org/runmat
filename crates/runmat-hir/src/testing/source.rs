@@ -44,7 +44,7 @@ pub(super) fn source_stem(relative_path: &str) -> String {
 
 pub(super) fn is_test_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
-    lower.starts_with("test") || lower.ends_with("test")
+    lower.starts_with("test") || lower.ends_with("test") || lower.ends_with("tests")
 }
 
 fn line_column(source: &str, byte: usize) -> (u32, u32) {

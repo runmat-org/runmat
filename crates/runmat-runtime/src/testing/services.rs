@@ -9,6 +9,7 @@ use crate::BuiltinResult;
 
 pub type RunSuiteFuture = Pin<Box<dyn Future<Output = BuiltinResult<Value>>>>;
 pub type RunSuiteService = dyn Fn(Value) -> RunSuiteFuture;
+pub type RunTestsService = dyn Fn(Vec<Value>) -> RunSuiteFuture;
 
 /// Runtime-facing ports supplied by the active Core execution composition.
 ///
@@ -17,6 +18,7 @@ pub type RunSuiteService = dyn Fn(Value) -> RunSuiteFuture;
 #[derive(Clone)]
 pub struct RuntimeTestServices {
     run_suite: Rc<RunSuiteService>,
+    run_tests: Rc<RunTestsService>,
 }
 
 impl std::fmt::Debug for RuntimeTestServices {
@@ -28,9 +30,13 @@ impl std::fmt::Debug for RuntimeTestServices {
 }
 
 impl RuntimeTestServices {
-    pub fn new(run_suite: impl Fn(Value) -> RunSuiteFuture + 'static) -> Self {
+    pub fn new(
+        run_suite: impl Fn(Value) -> RunSuiteFuture + 'static,
+        run_tests: impl Fn(Vec<Value>) -> RunSuiteFuture + 'static,
+    ) -> Self {
         Self {
             run_suite: Rc::new(run_suite),
+            run_tests: Rc::new(run_tests),
         }
     }
 }
@@ -69,15 +75,36 @@ pub async fn run_test_suite(suite: Value) -> BuiltinResult<Value> {
     (service.run_suite)(suite).await
 }
 
+pub async fn run_tests(args: Vec<Value>) -> BuiltinResult<Value> {
+    let service = TEST_SERVICES_STACK.with(|stack| stack.borrow().last().cloned());
+    let Some(service) = service else {
+        return Err(
+            crate::build_runtime_error("runtests requires an active Core test executor")
+                .with_identifier("RunMat:Testing:RequiresExecutor")
+                .with_builtin("runtests")
+                .build(),
+        );
+    };
+    (service.run_tests)(args).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn service_installation_is_scoped_and_async_safe() {
-        let _guard = install_test_services(RuntimeTestServices::new(|suite| {
-            Box::pin(async move { Ok(suite) })
-        }));
+        let _guard = install_test_services(RuntimeTestServices::new(
+            |suite| Box::pin(async move { Ok(suite) }),
+            |args| {
+                Box::pin(async move {
+                    let count = args.len();
+                    Ok(Value::Cell(
+                        runmat_builtins::CellArray::new(args, 1, count).unwrap(),
+                    ))
+                })
+            },
+        ));
         let suite = Value::String("suite".into());
         assert_eq!(
             futures::executor::block_on(run_test_suite(suite.clone())).unwrap(),

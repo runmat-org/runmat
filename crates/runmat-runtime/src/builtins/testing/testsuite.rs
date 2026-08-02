@@ -19,9 +19,9 @@ fn testsuite_type(_args: &[Type], _context: &ResolveContext) -> Type {
 )]
 async fn testsuite(args: Vec<Value>) -> BuiltinResult<Value> {
     crate::testing::ensure_testing_classes();
-    let plan = crate::builtins::diagnostics::runtests::resolve_runtests_plan(args).await?;
-    let values = plan
-        .cases
+    let resolved = crate::builtins::diagnostics::runtests::resolve_runtests_targets(args).await?;
+    let values = resolved
+        .targets
         .into_iter()
         .map(|case| {
             let mut object = ObjectInstance::new(crate::testing::TEST_SUITE_CLASS.into());

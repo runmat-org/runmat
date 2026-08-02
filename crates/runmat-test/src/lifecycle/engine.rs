@@ -32,7 +32,7 @@ impl LifecycleEngine {
         Self { redaction }
     }
 
-    pub fn execute<E, S, C>(
+    pub async fn execute<E, S, C>(
         &self,
         case: &LifecycleCase,
         executor: &mut E,
@@ -90,7 +90,8 @@ impl LifecycleEngine {
                 &mut dynamic_teardowns,
                 &mut next_teardown_order,
                 &mut executed,
-            );
+            )
+            .await;
             if state.abort_test {
                 break;
             }
@@ -120,7 +121,8 @@ impl LifecycleEngine {
                     &mut dynamic_teardowns,
                     &mut next_teardown_order,
                     &mut executed,
-                );
+                )
+                .await;
             }
         }
 
@@ -147,7 +149,8 @@ impl LifecycleEngine {
                     &mut dynamic_teardowns,
                     &mut next_teardown_order,
                     &mut executed,
-                );
+                )
+                .await;
             }
             for teardown in case
                 .declared_teardowns
@@ -167,7 +170,8 @@ impl LifecycleEngine {
                     &mut dynamic_teardowns,
                     &mut next_teardown_order,
                     &mut executed,
-                );
+                )
+                .await;
             }
         }
 
@@ -190,7 +194,7 @@ impl LifecycleEngine {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn invoke<E: TestExecutor, S: EventSink>(
+    async fn invoke<E: TestExecutor, S: EventSink>(
         &self,
         case: &LifecycleCase,
         phase: ExecutionPhase,
@@ -213,11 +217,12 @@ impl LifecycleEngine {
             procedure: procedure_identity.clone(),
         });
         executed.push(procedure_identity.clone());
-        let response = executor.execute(&ExecutionRequest {
+        let request = ExecutionRequest {
             context: case.context.clone(),
             phase,
             procedure: procedure.clone(),
-        });
+        };
+        let response = executor.execute(&request).await;
         let completed = match response {
             Ok(response) => {
                 self.apply_response(

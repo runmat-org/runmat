@@ -1,7 +1,7 @@
 //! MATLAB-compatible `runtests` discovery and result helpers.
 //!
-//! Runtime owns argument parsing, filesystem discovery, and result shaping. The
-//! VM owns execution because test files run compiled RunMat source.
+//! Runtime owns MATLAB argument parsing, filesystem target resolution, and
+//! result shaping. Core owns semantic discovery and execution.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ObjectArray, ObjectInstance, ResolveContext, Type, Value,
+    ResolveContext, Type, Value,
 };
 use runmat_hir::RUNTESTS_BUILTIN_NAME;
 use runmat_macros::runtime_builtin;
@@ -62,11 +62,11 @@ const RUNTESTS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     },
 ];
 
-pub const RUNTESTS_ERROR_REQUIRES_VM: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RUNTESTS.REQUIRES_VM",
-    identifier: Some("RunMat:runtests:RequiresVm"),
-    when: "`runtests` is dispatched outside an active VM workspace frame.",
-    message: "runtests: requires VM workspace context",
+pub const RUNTESTS_ERROR_REQUIRES_EXECUTOR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RUNTESTS.REQUIRES_EXECUTOR",
+    identifier: Some("RunMat:Testing:RequiresExecutor"),
+    when: "`runtests` is dispatched outside an active Core test executor.",
+    message: "runtests: requires an active Core test executor",
 };
 
 pub const RUNTESTS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -97,20 +97,12 @@ pub const RUNTESTS_ERROR_FILE_READ: BuiltinErrorDescriptor = BuiltinErrorDescrip
     message: "runtests: failed to read test file",
 };
 
-pub const RUNTESTS_ERROR_WORKSPACE_STATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RUNTESTS.WORKSPACE_STATE",
-    identifier: Some("RunMat:runtests:WorkspaceStateFailed"),
-    when: "The VM cannot isolate or restore the caller workspace around a test case.",
-    message: "runtests: workspace isolation failed",
-};
-
-pub const RUNTESTS_ERRORS: [BuiltinErrorDescriptor; 6] = [
-    RUNTESTS_ERROR_REQUIRES_VM,
+pub const RUNTESTS_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    RUNTESTS_ERROR_REQUIRES_EXECUTOR,
     RUNTESTS_ERROR_INVALID_INPUT,
     RUNTESTS_ERROR_UNSUPPORTED_OPTION,
     RUNTESTS_ERROR_TARGET_NOT_FOUND,
     RUNTESTS_ERROR_FILE_READ,
-    RUNTESTS_ERROR_WORKSPACE_STATE,
 ];
 
 pub const RUNTESTS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -148,7 +140,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RunTestCase {
+pub struct ResolvedTestTarget {
     pub name: String,
     pub source_path: PathBuf,
     pub display_name: String,
@@ -156,17 +148,8 @@ pub struct RunTestCase {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RunTestsPlan {
-    pub cases: Vec<RunTestCase>,
-}
-
-#[derive(Debug, Clone)]
-pub struct RunTestOutcome {
-    pub name: String,
-    pub source_path: PathBuf,
-    pub passed: bool,
-    pub duration_seconds: f64,
-    pub details: String,
+pub struct ResolvedTestTargets {
+    pub targets: Vec<ResolvedTestTarget>,
 }
 
 #[derive(Debug, Default)]
@@ -186,8 +169,8 @@ struct RunTestsOptions {
     type_resolver(runtests_type),
     builtin_path = "crate::builtins::diagnostics::runtests"
 )]
-pub async fn runtests_builtin(_args: Vec<Value>) -> BuiltinResult<Value> {
-    requires_vm_workspace_context()
+pub async fn runtests_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    crate::testing::run_tests(args).await
 }
 
 fn runtests_type(_args: &[Type], _context: &ResolveContext) -> Type {
@@ -197,11 +180,7 @@ fn runtests_type(_args: &[Type], _context: &ResolveContext) -> Type {
     }
 }
 
-pub fn requires_vm_workspace_context() -> BuiltinResult<Value> {
-    Err(runtests_error(&RUNTESTS_ERROR_REQUIRES_VM))
-}
-
-pub async fn resolve_runtests_plan(args: Vec<Value>) -> BuiltinResult<RunTestsPlan> {
+pub async fn resolve_runtests_targets(args: Vec<Value>) -> BuiltinResult<ResolvedTestTargets> {
     let gathered = gather_values(args).await?;
     let options = parse_options(gathered)?;
     let mut paths = BTreeSet::new();
@@ -254,7 +233,7 @@ pub async fn resolve_runtests_plan(args: Vec<Value>) -> BuiltinResult<RunTestsPl
             if !matches_filters(&file_name, &options.filters) {
                 continue;
             }
-            cases.push(RunTestCase {
+            cases.push(ResolvedTestTarget {
                 name: file_name,
                 source_path: display_path.clone(),
                 display_name: path_to_string(&display_path),
@@ -268,7 +247,7 @@ pub async fn resolve_runtests_plan(args: Vec<Value>) -> BuiltinResult<RunTestsPl
                 {
                     continue;
                 }
-                cases.push(RunTestCase {
+                cases.push(ResolvedTestTarget {
                     name,
                     source_path: display_path.clone(),
                     display_name: path_to_string(&display_path),
@@ -278,48 +257,7 @@ pub async fn resolve_runtests_plan(args: Vec<Value>) -> BuiltinResult<RunTestsPl
         }
     }
 
-    Ok(RunTestsPlan { cases })
-}
-
-pub fn runtests_result_value(outcomes: Vec<RunTestOutcome>) -> BuiltinResult<Value> {
-    let mut values = outcomes
-        .into_iter()
-        .map(test_result_object)
-        .collect::<BuiltinResult<Vec<_>>>()?;
-    if values.len() == 1 {
-        Ok(values.remove(0))
-    } else {
-        ObjectArray::row("matlab.unittest.TestResult", values)
-            .map(Value::ObjectArray)
-            .map_err(|err| runtests_error_detail(&RUNTESTS_ERROR_INVALID_INPUT, err))
-    }
-}
-
-pub fn workspace_state_error(detail: impl AsRef<str>) -> RuntimeError {
-    runtests_error_detail(&RUNTESTS_ERROR_WORKSPACE_STATE, detail)
-}
-
-fn test_result_object(outcome: RunTestOutcome) -> BuiltinResult<Value> {
-    let mut obj = ObjectInstance::new("matlab.unittest.TestResult".to_string());
-    obj.properties
-        .insert("Name".to_string(), Value::String(outcome.name));
-    obj.properties.insert(
-        "TestFile".to_string(),
-        Value::String(path_to_string(&outcome.source_path)),
-    );
-    obj.properties
-        .insert("Passed".to_string(), Value::Bool(outcome.passed));
-    obj.properties
-        .insert("Failed".to_string(), Value::Bool(!outcome.passed));
-    obj.properties
-        .insert("Incomplete".to_string(), Value::Bool(false));
-    obj.properties.insert(
-        "Duration".to_string(),
-        Value::Num(outcome.duration_seconds.max(0.0)),
-    );
-    obj.properties
-        .insert("Details".to_string(), Value::String(outcome.details));
-    Ok(Value::Object(obj))
+    Ok(ResolvedTestTargets { targets: cases })
 }
 
 async fn gather_values(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
@@ -552,7 +490,7 @@ fn is_test_file(path: &Path) -> bool {
         return false;
     };
     let lower = stem.to_ascii_lowercase();
-    lower.starts_with("test") || lower.ends_with("test")
+    lower.starts_with("test") || lower.ends_with("test") || lower.ends_with("tests")
 }
 
 fn test_name_for_path(path: &Path) -> String {
@@ -595,10 +533,6 @@ fn function_test_names(source: &str) -> Vec<String> {
     names.sort();
     names.dedup();
     names
-}
-
-fn runtests_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
-    runtests_error_detail(error, "")
 }
 
 fn runtests_error_detail(
@@ -674,49 +608,6 @@ mod tests {
             value_to_strings(&Value::Cell(cell)).unwrap(),
             vec!["testOne".to_string(), "testTwo".to_string()]
         );
-    }
-
-    #[test]
-    fn result_value_returns_test_result_objects() {
-        let value = runtests_result_value(vec![RunTestOutcome {
-            name: "testSmoke".to_string(),
-            source_path: PathBuf::from("/tmp/testSmoke.m"),
-            passed: true,
-            duration_seconds: 0.1,
-            details: String::new(),
-        }])
-        .expect("result");
-        let Value::Object(obj) = value else {
-            panic!("expected object result");
-        };
-        assert!(obj.is_class("matlab.unittest.TestResult"));
-        assert_eq!(obj.properties.get("Passed"), Some(&Value::Bool(true)));
-    }
-
-    #[test]
-    fn result_value_returns_object_array_for_multiple_results() {
-        let value = runtests_result_value(vec![
-            RunTestOutcome {
-                name: "testA".to_string(),
-                source_path: PathBuf::from("/tmp/testA.m"),
-                passed: true,
-                duration_seconds: 0.0,
-                details: String::new(),
-            },
-            RunTestOutcome {
-                name: "testB".to_string(),
-                source_path: PathBuf::from("/tmp/testB.m"),
-                passed: false,
-                duration_seconds: 0.0,
-                details: "failed".to_string(),
-            },
-        ])
-        .expect("result");
-        let Value::ObjectArray(array) = value else {
-            panic!("expected object-array result");
-        };
-        assert_eq!(array.class_name(), "matlab.unittest.TestResult");
-        assert_eq!(array.shape(), &[1, 2]);
     }
 
     #[test]

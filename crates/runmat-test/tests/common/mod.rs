@@ -8,7 +8,8 @@ use runmat_test::descriptor::{
 };
 use runmat_test::event::{RedactionPolicy, SequencedEventSink, TestEvent};
 use runmat_test::executor::{
-    ExecutionFailure, ExecutionFault, ExecutionRequest, ExecutionResponse, TestExecutor,
+    ExecutionFailure, ExecutionFault, ExecutionFuture, ExecutionRequest, ExecutionResponse,
+    TestExecutor,
 };
 use runmat_test::identity::{RunId, TestId, TestIdentityInput};
 use runmat_test::lifecycle::{
@@ -110,15 +111,14 @@ impl FakeExecutor {
 }
 
 impl TestExecutor for FakeExecutor {
-    fn execute(
-        &mut self,
-        request: &ExecutionRequest,
-    ) -> Result<ExecutionResponse, ExecutionFailure> {
+    fn execute<'a>(&'a mut self, request: &'a ExecutionRequest) -> ExecutionFuture<'a> {
         self.calls.push(request.procedure.semantic_path.clone());
-        self.responses
+        let response = self
+            .responses
             .get(&request.procedure.semantic_path)
             .cloned()
-            .unwrap_or_else(|| Ok(ExecutionResponse::default()))
+            .unwrap_or_else(|| Ok(ExecutionResponse::default()));
+        Box::pin(async move { response })
     }
 }
 
@@ -129,6 +129,11 @@ pub fn execute(
     let engine = LifecycleEngine::new(RedactionPolicy::new(["secret".into()], 1024));
     let mut events = Vec::new();
     let mut sequenced = SequencedEventSink::new(case.context.run_id.clone(), &mut events);
-    let outcome = engine.execute(case, executor, &NeverCancelled, &mut sequenced);
+    let outcome = futures::executor::block_on(engine.execute(
+        case,
+        executor,
+        &NeverCancelled,
+        &mut sequenced,
+    ));
     (outcome, events)
 }

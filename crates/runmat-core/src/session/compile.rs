@@ -759,6 +759,81 @@ pub(super) async fn companion_source_statements_from_handoff_async(
 }
 
 impl RunMatSession {
+    /// Compile one immutable source/revision product without executing it or
+    /// publishing its functions into the interactive session.
+    pub async fn compile_executable_unit(
+        &mut self,
+        source: crate::ExecutableSource,
+        program_revision: Option<runmat_test::plan::ProgramRevision>,
+    ) -> std::result::Result<crate::ExecutableUnit, RunError> {
+        if let (Some(requested), Some(installed)) =
+            (program_revision.as_ref(), self.project_revision())
+        {
+            if requested.graph_digest != installed.graph_digest.to_string() {
+                return Err(RunError::Runtime(
+                    build_runtime_error(
+                        "executable source revision does not match the installed project",
+                    )
+                    .with_identifier("RunMat:ExecutableRevisionMismatch")
+                    .build(),
+                ));
+            }
+        }
+
+        let previous_source_name = self.active_source_name.clone();
+        let previous_source_fullpath_name = self.active_source_fullpath_name.clone();
+        let previous_pending = self.pending_companion_source_discovery.take();
+        self.active_source_name = source.relative_path.clone();
+        self.active_source_fullpath_name = Some(source.relative_path.clone());
+
+        let companion_result = if let Some(handoff) = self.project_handoff.as_ref() {
+            companion_source_statements_from_handoff_async(
+                &source.relative_path,
+                self.compat_mode,
+                handoff,
+            )
+            .await
+        } else {
+            discover_companion_source_statements_async(&source.relative_path, self.compat_mode)
+                .await
+        };
+        let result = match companion_result {
+            Ok(companion) => {
+                self.pending_companion_source_discovery = Some(companion);
+                self.compile_input(&source.text)
+            }
+            Err(error) => Err(RunError::Runtime(
+                build_runtime_error(format!("project composition failed: {error}"))
+                    .with_identifier("RunMat:ProjectComposition")
+                    .build(),
+            )),
+        };
+
+        self.active_source_name = previous_source_name;
+        self.active_source_fullpath_name = previous_source_fullpath_name;
+        self.pending_companion_source_discovery = previous_pending;
+
+        let prepared = result?;
+        let source_map = crate::ExecutableSourceMap::new(
+            self.source_pool
+                .entries()
+                .map(|(source_id, entry)| crate::SourceMapEntry {
+                    source_id: source_id.0,
+                    display_name: entry.name.to_string(),
+                    full_path: entry.fullpath_name.as_ref().map(ToString::to_string),
+                    text: entry.text.to_string(),
+                })
+                .collect(),
+        );
+        let revision = crate::ExecutableRevision::derive(&source, program_revision);
+        Ok(crate::ExecutableUnit::new(
+            source,
+            revision,
+            source_map,
+            prepared.bytecode,
+        ))
+    }
+
     #[cfg(test)]
     pub(crate) fn compile_input_for_source_name(
         &mut self,

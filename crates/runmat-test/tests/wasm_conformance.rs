@@ -3,7 +3,7 @@ use runmat_test::descriptor::{
     FixtureScope, ProcedureDescriptor, ProcedureKind, SourceDescriptor, SourceSpan,
 };
 use runmat_test::event::{RedactionPolicy, SequencedEventSink};
-use runmat_test::executor::{ExecutionFailure, ExecutionRequest, ExecutionResponse, TestExecutor};
+use runmat_test::executor::{ExecutionFuture, ExecutionRequest, ExecutionResponse, TestExecutor};
 use runmat_test::identity::{TestId, TestIdentityInput};
 use runmat_test::lifecycle::{
     ExecutionPhase, FixtureScopeKey, LifecycleCase, LifecycleEngine, LifecycleStep, NeverCancelled,
@@ -66,11 +66,13 @@ fn canonical_fixture() {
     let mut executor = ConformanceExecutor;
     let mut events = Vec::new();
     let mut sink = SequencedEventSink::new(run_id, &mut events);
-    let outcome = LifecycleEngine::new(RedactionPolicy::new(["secret".into()], 1_024)).execute(
-        &case,
-        &mut executor,
-        &NeverCancelled,
-        &mut sink,
+    let outcome = futures::executor::block_on(
+        LifecycleEngine::new(RedactionPolicy::new(["secret".into()], 1_024)).execute(
+            &case,
+            &mut executor,
+            &NeverCancelled,
+            &mut sink,
+        ),
     );
     let bytes = serde_json::to_vec(&(outcome, events)).unwrap();
     assert_eq!(
@@ -82,10 +84,7 @@ fn canonical_fixture() {
 struct ConformanceExecutor;
 
 impl TestExecutor for ConformanceExecutor {
-    fn execute(
-        &mut self,
-        request: &ExecutionRequest,
-    ) -> Result<ExecutionResponse, ExecutionFailure> {
+    fn execute<'a>(&'a mut self, request: &'a ExecutionRequest) -> ExecutionFuture<'a> {
         let commands = match request.procedure.semantic_path.as_str() {
             "setup" => vec![TestCommand::AddTeardown {
                 scope: FixtureScopeKey {
@@ -107,14 +106,15 @@ impl TestExecutor for ConformanceExecutor {
             }],
             _ => Vec::new(),
         };
-        Ok(ExecutionResponse {
+        let response = ExecutionResponse {
             commands,
             output: if request.phase == ExecutionPhase::TestBody {
                 "captured secret".into()
             } else {
                 String::new()
             },
-        })
+        };
+        Box::pin(async move { Ok(response) })
     }
 }
 

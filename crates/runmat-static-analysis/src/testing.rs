@@ -31,10 +31,10 @@ pub fn discover_frozen_tests(
         .filter_map(|source| source.relative_path.rsplit('/').next())
         .filter_map(|file| file.strip_suffix(".m"))
         .map(str::to_owned)
-        // `functiontests` is a semantic suite factory. Runtime compatibility
-        // is implemented in the testing layer; discovery must still be able
-        // to lower a canonical `functiontests(localfunctions)` factory without
-        // executing either call.
+        // These form the canonical semantic suite factory. Runtime
+        // compatibility is implemented in the testing layer; discovery must
+        // lower `functiontests(localfunctions)` without executing either call
+        // and without depending on native inventory registration.
         .chain(std::iter::once("functiontests".to_owned()))
         .collect::<HashSet<_>>();
     let context = LoweringContext::empty()
