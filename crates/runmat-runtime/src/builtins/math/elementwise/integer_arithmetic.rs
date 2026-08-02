@@ -71,7 +71,7 @@ fn apply_integer_remainder_scalar(
 ) -> Result<Option<Value>, String> {
     let Some(scalar) = real_scalar(other) else {
         return Err(format!(
-            "{builtin}: integer arrays can only be combined with scalar double or logical values"
+            "{builtin}: integer arrays can only be combined with scalar double values"
         ));
     };
     let exact_scalar = exact_integer_scalar(integer.target, scalar);
@@ -259,7 +259,7 @@ pub(crate) fn try_integer_binary(
 
     let Some(scalar) = real_scalar(other) else {
         return Err(format!(
-            "{builtin}: integer arrays can only be combined with scalar double or logical values"
+            "{builtin}: integer arrays can only be combined with scalar double values"
         ));
     };
     apply_integer_scalar(&integer, scalar, integer_is_left, operation)
@@ -334,13 +334,7 @@ fn integer_operand(value: &Value) -> Option<IntegerOperand<'_>> {
 fn real_scalar(value: &Value) -> Option<f64> {
     match value {
         Value::Num(value) => Some(*value),
-        Value::Bool(value) => Some(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.integer_storage().is_none() && tensor.data.len() == 1 => {
-            tensor.data.first().copied()
-        }
-        Value::LogicalArray(array) if array.data.len() == 1 => {
-            Some(if array.data[0] == 0 { 0.0 } else { 1.0 })
-        }
+        Value::Tensor(tensor) if tensor.len() == 1 => tensor.as_f64_slice()?.first().copied(),
         _ => None,
     }
 }
@@ -806,9 +800,61 @@ fn integer_values_into_value(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::LogicalArray;
 
     fn integer(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
+    }
+
+    fn integer_class_cases() -> [(IntValue, IntegerStorage); 8] {
+        [
+            (IntValue::I8(2), IntegerStorage::I8(vec![2, 3])),
+            (IntValue::I16(2), IntegerStorage::I16(vec![2, 3])),
+            (IntValue::I32(2), IntegerStorage::I32(vec![2, 3])),
+            (IntValue::I64(2), IntegerStorage::I64(vec![2, 3])),
+            (IntValue::U8(2), IntegerStorage::U8(vec![2, 3])),
+            (IntValue::U16(2), IntegerStorage::U16(vec![2, 3])),
+            (IntValue::U32(2), IntegerStorage::U32(vec![2, 3])),
+            (IntValue::U64(2), IntegerStorage::U64(vec![2, 3])),
+        ]
+    }
+
+    #[test]
+    fn every_integer_class_rejects_ordered_logical_scalar_and_array_arithmetic() {
+        let logical_array =
+            Value::LogicalArray(LogicalArray::new(vec![1], vec![1, 1]).expect("logical scalar"));
+        for (scalar, storage) in integer_class_cases() {
+            let scalar = Value::Int(scalar);
+            let array = integer(storage, vec![1, 2]);
+            let logical_scalar = Value::Bool(true);
+            for (lhs, rhs) in [
+                (&scalar, &logical_scalar),
+                (&logical_scalar, &scalar),
+                (&array, &logical_array),
+                (&logical_array, &array),
+            ] {
+                let binary =
+                    try_integer_binary(lhs, rhs, IntegerBinaryOp::Add, "plus").unwrap_err();
+                assert!(binary.contains("scalar double"));
+                let remainder =
+                    try_integer_remainder(lhs, rhs, IntegerRemainderOp::Rem, "rem").unwrap_err();
+                assert!(remainder.contains("scalar double"));
+            }
+        }
+    }
+
+    #[test]
+    fn integer_arithmetic_rejects_scalar_single_tensor_partner() {
+        let single = Value::Tensor(Tensor::from_f32(vec![1.0], vec![1, 1]).unwrap());
+        let error = try_integer_binary(
+            &Value::Int(IntValue::I16(2)),
+            &single,
+            IntegerBinaryOp::Add,
+            "plus",
+        )
+        .unwrap_err();
+
+        assert!(error.contains("scalar double"));
     }
 
     #[test]
