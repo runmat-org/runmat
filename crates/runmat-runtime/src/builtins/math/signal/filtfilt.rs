@@ -575,8 +575,7 @@ async fn gpu_filter_pass(
         other => tensor::value_to_tensor(&other)
             .map_err(|e| filtfilt_error_with_detail(&FILTFILT_ERROR_INTERNAL, e))?,
     };
-    Ok(tensor
-        .data
+    Ok(tensor::tensor_into_values_f64(tensor)
         .into_iter()
         .map(|re| Complex::new(re, 0.0))
         .collect())

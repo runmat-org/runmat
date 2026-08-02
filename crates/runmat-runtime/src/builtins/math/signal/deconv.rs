@@ -1,7 +1,6 @@
 //! MATLAB-compatible `deconv` builtin with GPU-aware semantics for RunMat.
 
 use num_complex::Complex;
-use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -553,11 +552,7 @@ fn finalize_real(data: Vec<f64>, shape: Vec<usize>, prefer_gpu: bool) -> Builtin
             );
         }
         if let Some(provider) = runmat_accelerate_api::provider() {
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            if let Ok(handle) = provider.upload(&view) {
+            if let Ok(handle) = gpu_helpers::upload_tensor(provider, &tensor) {
                 return Ok(Value::GpuTensor(handle));
             }
         }

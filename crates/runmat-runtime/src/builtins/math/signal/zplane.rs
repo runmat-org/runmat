@@ -340,7 +340,7 @@ async fn complex_matrix(value: Value) -> BuiltinResult<ComplexMatrixInput> {
         })?;
     match value {
         Value::Tensor(tensor) => {
-            validate_sos_matrix_shape(&tensor.shape, tensor.data.len())?;
+            validate_sos_matrix_shape(&tensor.shape, tensor.len())?;
             let rows = tensor.rows;
             let cols = tensor.cols;
             let values = tensor::tensor_into_values_f64(tensor);

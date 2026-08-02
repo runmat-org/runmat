@@ -790,7 +790,7 @@ impl InitialState {
                                     map_control_flow_with_builtin(flow, BUILTIN_NAME),
                                 )
                             })?;
-                    if !tensor.data.is_empty() {
+                    if tensor.len() != 0 {
                         return Err(filter_error_with_detail(
                             &FILTER_ERROR_INVALID_INITIAL_STATE,
                             format!(
@@ -826,8 +826,7 @@ impl InitialState {
                     );
                     let detail = match other {
                         Value::Tensor(t)
-                            if t.data.is_empty()
-                                && !shapes_compatible(expected_shape, &t.shape) =>
+                            if t.len() == 0 && !shapes_compatible(expected_shape, &t.shape) =>
                         {
                             msg.clone()
                         }

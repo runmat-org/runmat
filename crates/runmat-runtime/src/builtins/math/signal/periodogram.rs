@@ -921,7 +921,7 @@ fn frequency_vector(nfft: usize, units: FrequencyUnits, range: FrequencyRange) -
 
 fn is_empty(value: &Value) -> bool {
     match value {
-        Value::Tensor(t) => t.data.is_empty(),
+        Value::Tensor(t) => t.len() == 0,
         Value::ComplexTensor(t) => t.data.is_empty(),
         _ => false,
     }

@@ -610,7 +610,7 @@ fn parse_cutoff(value: Value) -> BuiltinResult<Vec<f64>> {
                 butter_error_with_detail(&BUTTER_ERROR_INVALID_FREQUENCY, detail)
             })?;
             ensure_vector_shape("Wn", &tensor.shape)?;
-            tensor.data
+            tensor::tensor_into_values_f64(tensor)
         }
         other => {
             return Err(butter_error_with_detail(

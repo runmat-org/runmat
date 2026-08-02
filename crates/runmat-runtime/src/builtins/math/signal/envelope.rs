@@ -430,7 +430,7 @@ fn scalar_signal_input(value: f64) -> BuiltinResult<SignalInput> {
 }
 
 fn tensor_to_signal_input(tensor: Tensor) -> BuiltinResult<SignalInput> {
-    let len = tensor.data.len();
+    let len = tensor.len();
     let shape_meta = tensor.shape.clone();
     let data = tensor::tensor_into_values_f64(tensor);
     if data.is_empty() || data.iter().any(|value| !value.is_finite()) {
