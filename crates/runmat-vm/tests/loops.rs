@@ -87,3 +87,31 @@ fn stochastic_evolution_loop_emits_instruction() {
         .iter()
         .any(|instr| matches!(instr, Instr::StochasticEvolution)));
 }
+
+#[test]
+fn stochastic_evolution_loop_preserves_native_single_state() {
+    let vars = execute_program(
+        "
+        M = 2;
+        S = ones(M, 1, 'single');
+        drift = single(0.1);
+        scale = single(0);
+        for t = 1:3
+            Z = randn(M, 1, 'single');
+            S = S .* exp(drift + scale .* Z);
+        end
+        ",
+    );
+    let runmat_builtins::Value::Tensor(state) = &vars[1] else {
+        panic!("expected evolved tensor state, got {:?}", vars[1]);
+    };
+    assert_eq!(state.numeric_dtype(), runmat_builtins::NumericDType::F32);
+    let factor = (0.1f32).exp();
+    let expected = factor * factor * factor;
+    for index in 0..state.len() {
+        assert_eq!(
+            state.numeric_value_at(index),
+            Some(runmat_builtins::NumericScalar::F32(expected))
+        );
+    }
+}

@@ -72,12 +72,10 @@ async fn scalar_from_value_scalar(value: &Value, label: &str) -> Result<f64, Run
     match value {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
-        Value::Tensor(t) if t.data.len() == 1 => Ok(tensor_value_f64(t, 0)),
-        Value::Tensor(t) => Err(format!(
-            "{label}: expected scalar tensor, got {} elements",
-            t.data.len()
-        )
-        .into()),
+        Value::Tensor(t) if t.len() == 1 => Ok(tensor_value_f64(t, 0)),
+        Value::Tensor(t) => {
+            Err(format!("{label}: expected scalar tensor, got {} elements", t.len()).into())
+        }
         Value::GpuTensor(_) => {
             let gathered = runmat_runtime::dispatcher::gather_if_needed_async(value)
                 .await
@@ -85,12 +83,10 @@ async fn scalar_from_value_scalar(value: &Value, label: &str) -> Result<f64, Run
             match gathered {
                 Value::Num(n) => Ok(n),
                 Value::Int(i) => Ok(i.to_f64()),
-                Value::Tensor(t) if t.data.len() == 1 => Ok(tensor_value_f64(&t, 0)),
-                Value::Tensor(t) => Err(format!(
-                    "{label}: expected scalar tensor, got {} elements",
-                    t.data.len()
-                )
-                .into()),
+                Value::Tensor(t) if t.len() == 1 => Ok(tensor_value_f64(&t, 0)),
+                Value::Tensor(t) => {
+                    Err(format!("{label}: expected scalar tensor, got {} elements", t.len()).into())
+                }
                 other => Err(format!("{label}: expected numeric scalar, got {:?}", other).into()),
             }
         }
@@ -150,8 +146,19 @@ async fn ensure_gpu_tensor_for_stochastic(
     RuntimeError,
 > {
     match value {
-        Value::GpuTensor(handle) => Ok((handle.clone(), None)),
+        Value::GpuTensor(handle) => {
+            if runmat_accelerate_api::handle_integer_type(handle).is_some()
+                || runmat_accelerate_api::handle_is_logical(handle)
+            {
+                return Err(crate::interpreter::errors::mex(
+                    "UnsupportedType",
+                    "stochastic_evolution: optimized evolution requires single or double state",
+                ));
+            }
+            Ok((handle.clone(), None))
+        }
         Value::Tensor(tensor) => {
+            ensure_floating_state_tensor(tensor)?;
             let handle = upload_tensor_view(provider, tensor)?;
             Ok((handle.clone(), Some(handle)))
         }
@@ -161,6 +168,7 @@ async fn ensure_gpu_tensor_for_stochastic(
                 .map_err(|e| format!("stochastic_evolution: {e}"))?;
             match gathered {
                 Value::Tensor(t) => {
+                    ensure_floating_state_tensor(&t)?;
                     let handle = upload_tensor_view(provider, &t)?;
                     Ok((handle.clone(), Some(handle)))
                 }
@@ -169,12 +177,30 @@ async fn ensure_gpu_tensor_for_stochastic(
                         "stochastic_evolution",
                         other,
                     )?;
+                    ensure_floating_state_tensor(&tensor)?;
                     let handle = upload_tensor_view(provider, &tensor)?;
                     Ok((handle.clone(), Some(handle)))
                 }
             }
         }
     }
+}
+
+#[cfg(feature = "native-accel")]
+fn ensure_floating_state_tensor(tensor: &runmat_builtins::Tensor) -> Result<(), RuntimeError> {
+    if matches!(
+        tensor.numeric_dtype(),
+        runmat_builtins::NumericDType::F64 | runmat_builtins::NumericDType::F32
+    ) {
+        return Ok(());
+    }
+    Err(crate::interpreter::errors::mex(
+        "UnsupportedType",
+        &format!(
+            "stochastic_evolution: optimized evolution requires single or double state, got {}",
+            tensor.numeric_dtype().class_name()
+        ),
+    ))
 }
 
 #[cfg(feature = "native-accel")]
@@ -227,15 +253,16 @@ fn upload_tensor_view(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "native-accel")]
+    use super::ensure_floating_state_tensor;
     use super::{parse_integer_steps, scalar_from_value_scalar};
     use futures::executor::block_on;
     use runmat_builtins::{IntegerStorage, Tensor, Value};
 
     #[test]
     fn scalar_from_value_scalar_reads_typed_integer_storage_exactly() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::I16(vec![-3]), vec![1, 1]).expect("scalar tensor");
-        tensor.data[0] = 0.0;
 
         assert_eq!(
             block_on(scalar_from_value_scalar(&Value::Tensor(tensor), "drift")).unwrap(),
@@ -244,11 +271,10 @@ mod tests {
     }
 
     #[test]
-    fn typed_integer_steps_ignore_poisoned_float_mirrors_for_all_integer_classes() {
+    fn typed_integer_steps_accept_all_integer_classes() {
         macro_rules! assert_steps {
             ($storage:expr) => {{
-                let mut tensor = Tensor::new_integer($storage, vec![1, 1]).expect("steps");
-                tensor.data[0] = f64::NAN;
+                let tensor = Tensor::new_integer($storage, vec![1, 1]).expect("steps");
                 assert_eq!(
                     parse_integer_steps(&Value::Tensor(tensor))
                         .expect("typed integer steps")
@@ -266,5 +292,17 @@ mod tests {
         assert_steps!(IntegerStorage::U16(vec![7]));
         assert_steps!(IntegerStorage::U32(vec![7]));
         assert_steps!(IntegerStorage::U64(vec![7]));
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn optimized_provider_state_rejects_integer_host_storage() {
+        let integer =
+            Tensor::new_integer(IntegerStorage::U64(vec![7]), vec![1, 1]).expect("integer state");
+        let err = ensure_floating_state_tensor(&integer).expect_err("integer state");
+        assert!(err.to_string().contains("requires single or double state"));
+
+        let single = Tensor::from_f32(vec![1.0], vec![1, 1]).expect("single state");
+        ensure_floating_state_tensor(&single).expect("single state");
     }
 }
