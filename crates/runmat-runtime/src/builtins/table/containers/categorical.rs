@@ -1,4 +1,5 @@
 use super::*;
+use runmat_builtins::NumericScalar;
 
 pub(crate) fn categorical_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     let source = args
@@ -262,26 +263,14 @@ pub(crate) fn categorical_labels(value: &Value) -> BuiltinResult<Vec<String>> {
             .into_iter()
             .map(|value| normalize_category_label(&value))
             .collect()),
-        Value::Tensor(tensor) => {
-            if let Some(storage) = tensor.integer_storage() {
-                return Ok(storage
-                    .exact_values()
-                    .iter()
-                    .map(runmat_builtins::IntValue::decimal_string)
-                    .collect());
-            }
-            Ok(tensor
-                .data
-                .iter()
-                .map(|value| {
-                    if value.is_nan() {
-                        String::new()
-                    } else {
-                        format_key_number(*value)
-                    }
-                })
-                .collect())
-        }
+        Value::Tensor(tensor) => (0..tensor.len())
+            .map(|index| {
+                tensor
+                    .numeric_value_at(index)
+                    .ok_or_else(|| invalid_variable("categorical: invalid numeric tensor storage"))
+                    .map(categorical_numeric_label)
+            })
+            .collect(),
         Value::LogicalArray(array) => Ok(array
             .data
             .iter()
@@ -492,21 +481,40 @@ fn normalize_category_label(value: &str) -> String {
     value.to_string()
 }
 
+fn categorical_numeric_label(value: NumericScalar) -> String {
+    match value {
+        NumericScalar::F64(value) => {
+            if value.is_nan() {
+                String::new()
+            } else {
+                format_key_number(value)
+            }
+        }
+        NumericScalar::F32(value) => {
+            if value.is_nan() {
+                String::new()
+            } else {
+                format_key_number(f64::from(value))
+            }
+        }
+        value => value
+            .into_int_value()
+            .map(|value| value.decimal_string())
+            .unwrap_or_default(),
+    }
+}
+
 fn categorical_object_labels(object: &ObjectInstance) -> BuiltinResult<Vec<String>> {
     let categories = categorical_categories(object)?;
     let codes = categorical_codes(object)?;
-    if let Some(storage) = codes.integer_storage() {
-        return Ok(storage
-            .exact_values()
-            .iter()
-            .map(|code| category_label_for_integer_code(code, &categories).unwrap_or_default())
-            .collect());
-    }
-    Ok(codes
-        .data
-        .iter()
-        .map(|code| category_label_for_code(*code, &categories).unwrap_or_default())
-        .collect())
+    (0..codes.len())
+        .map(|index| {
+            codes
+                .numeric_value_at(index)
+                .ok_or_else(|| invalid_variable("categorical: invalid numeric code storage"))
+                .map(|code| category_label_for_numeric_code(code, &categories).unwrap_or_default())
+        })
+        .collect()
 }
 
 pub(crate) fn categorical_categories(object: &ObjectInstance) -> BuiltinResult<Vec<String>> {
@@ -553,6 +561,16 @@ fn category_label_for_integer_code(
         .and_then(|index| index.checked_sub(1))
         .and_then(|index| categories.get(index))
         .cloned()
+}
+
+fn category_label_for_numeric_code(code: NumericScalar, categories: &[String]) -> Option<String> {
+    match code {
+        NumericScalar::F64(code) => category_label_for_code(code, categories),
+        NumericScalar::F32(code) => category_label_for_code(f64::from(code), categories),
+        code => code
+            .into_int_value()
+            .and_then(|code| category_label_for_integer_code(&code, categories)),
+    }
 }
 
 struct CategoricalCompareBase {
@@ -604,27 +622,14 @@ fn categorical_compare_operand(
         Value::Object(object) if object.is_class(CATEGORICAL_CLASS) => {
             let object_categories = categorical_categories(object)?;
             let codes = categorical_codes(object)?;
-            let mapped = if let Some(storage) = codes.integer_storage() {
-                storage
-                    .exact_values()
-                    .iter()
-                    .map(|code| {
-                        category_label_for_integer_code(code, &object_categories).and_then(
-                            |label| categories.iter().position(|category| category == &label),
-                        )
-                    })
-                    .collect()
-            } else {
-                codes
-                    .data
-                    .iter()
-                    .map(|code| {
-                        category_label_for_code(*code, &object_categories).and_then(|label| {
-                            categories.iter().position(|category| category == &label)
-                        })
-                    })
-                    .collect()
-            };
+            let mapped = (0..codes.len())
+                .map(|index| {
+                    codes
+                        .numeric_value_at(index)
+                        .and_then(|code| category_label_for_numeric_code(code, &object_categories))
+                        .and_then(|label| categories.iter().position(|category| category == &label))
+                })
+                .collect();
             Ok(CategoricalCompareOperand {
                 codes: mapped,
                 shape: codes.shape,
@@ -690,17 +695,15 @@ mod tests {
     }
 
     #[test]
-    fn categorical_metadata_ignores_poisoned_mirrors_for_every_integer_class() {
+    fn categorical_metadata_preserves_every_integer_class() {
         for storage in integer_storages(&[2]) {
-            let mut values = Tensor::new_integer(storage.clone(), vec![1, 1]).unwrap();
-            values.data.fill(f64::NAN);
+            let values = Tensor::new_integer(storage.clone(), vec![1, 1]).unwrap();
             assert_eq!(
                 categorical_labels(&Value::Tensor(values)).unwrap(),
                 vec!["2"]
             );
 
-            let mut codes = Tensor::new_integer(storage, vec![1, 1]).unwrap();
-            codes.data.fill(f64::NAN);
+            let codes = Tensor::new_integer(storage, vec![1, 1]).unwrap();
             let mut object = ObjectInstance::new(CATEGORICAL_CLASS.to_string());
             object
                 .properties
@@ -723,5 +726,30 @@ mod tests {
                 Value::Bool(true)
             ));
         }
+    }
+
+    #[test]
+    fn categorical_metadata_reads_native_single_values_and_codes() {
+        let values = Tensor::from_f32(vec![1.25, f32::NAN], vec![1, 2]).unwrap();
+        assert_eq!(
+            categorical_labels(&Value::Tensor(values)).unwrap(),
+            vec!["1.25", ""]
+        );
+
+        let codes = Tensor::from_f32(vec![2.0, f32::NAN, 1.5], vec![1, 3]).unwrap();
+        let mut object = ObjectInstance::new(CATEGORICAL_CLASS.to_string());
+        object
+            .properties
+            .insert("Codes".to_string(), Value::Tensor(codes));
+        object.properties.insert(
+            "Categories".to_string(),
+            Value::StringArray(
+                StringArray::new(vec!["one".into(), "two".into()], vec![1, 2]).unwrap(),
+            ),
+        );
+        assert_eq!(
+            categorical_object_labels(&object).unwrap(),
+            vec!["two", "", ""]
+        );
     }
 }
