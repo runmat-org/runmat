@@ -2041,6 +2041,34 @@ mod integer_storage_tests {
     }
 
     #[test]
+    fn complex_storage_gather_preserves_native_component_class() {
+        let single = ComplexStorage::F32(vec![(1.0, -1.0), (2.0, -2.0), (3.0, -3.0)]);
+        assert_eq!(
+            single.gather(&[2, 0]),
+            Ok(ComplexStorage::F32(vec![(3.0, -3.0), (1.0, -1.0)]))
+        );
+
+        let integer = ComplexStorage::Integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![1, 9_007_199_254_740_993, u64::MAX]),
+                IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993, 1]),
+            )
+            .expect("complex uint64 storage"),
+        );
+        assert_eq!(
+            integer.gather(&[2, 1]),
+            Ok(ComplexStorage::Integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+                    IntegerStorage::U64(vec![1, 9_007_199_254_740_993]),
+                )
+                .expect("gathered complex uint64 storage"),
+            ))
+        );
+        assert!(integer.gather(&[3]).is_err());
+    }
+
+    #[test]
     fn complex_floating_reconstruction_preserves_requested_class() {
         let values = vec![(1.0, -2.0), (3.5, 4.25)];
         let single = ComplexTensor::from_f64_values_with_dtype(
@@ -3584,6 +3612,54 @@ impl ComplexStorage {
                 .into_iter()
                 .zip(storage.imag.to_f64_vec())
                 .collect(),
+        }
+    }
+
+    pub fn gather(&self, indices: &[usize]) -> Result<Self, String> {
+        match self {
+            Self::F64(values) => indices
+                .iter()
+                .map(|&index| {
+                    values
+                        .get(index)
+                        .copied()
+                        .ok_or_else(|| format!("complex storage index {index} out of bounds"))
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map(Self::F64),
+            Self::F32(values) => indices
+                .iter()
+                .map(|&index| {
+                    values
+                        .get(index)
+                        .copied()
+                        .ok_or_else(|| format!("complex storage index {index} out of bounds"))
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map(Self::F32),
+            Self::Integer(storage) => {
+                let real = indices
+                    .iter()
+                    .map(|&index| {
+                        storage
+                            .real
+                            .value_at(index)
+                            .ok_or_else(|| format!("complex storage index {index} out of bounds"))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let imag = indices
+                    .iter()
+                    .map(|&index| {
+                        storage
+                            .imag
+                            .value_at(index)
+                            .ok_or_else(|| format!("complex storage index {index} out of bounds"))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let real = storage.real.from_exact_values_like(real)?;
+                let imag = storage.imag.from_exact_values_like(imag)?;
+                IntegerComplexStorage::new(real, imag).map(Self::Integer)
+            }
         }
     }
 }

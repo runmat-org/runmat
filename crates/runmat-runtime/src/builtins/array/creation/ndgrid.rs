@@ -6,7 +6,7 @@ use runmat_accelerate_api::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, NumericDType,
+    ComplexStorage, ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericDType,
     NumericStorage, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
@@ -250,9 +250,9 @@ fn try_provider_outputs(
 
     let mut axes = Vec::with_capacity(parsed.output_count);
     for axis in parsed.axes.iter().take(parsed.output_count) {
-        if matches!(axis.class, OutputClass::Complex)
+        if matches!(axis.class(), OutputClass::Complex)
             || matches!(
-                axis.class,
+                axis.class(),
                 OutputClass::Real(
                     NumericDType::I8
                         | NumericDType::I16
@@ -267,7 +267,7 @@ fn try_provider_outputs(
         {
             return Ok(None);
         }
-        let Some(handle) = axis.gpu_real.as_ref() else {
+        let Some(handle) = axis.gpu_real() else {
             return Ok(None);
         };
         axes.push(ProviderNdgridAxis { handle });
@@ -294,7 +294,7 @@ fn try_provider_outputs(
         .into_iter()
         .enumerate()
         .map(|(dim, handle)| {
-            annotate_provider_output(&handle, parsed.axes[dim].class);
+            annotate_provider_output(&handle, parsed.axes[dim].class());
             NdgridOutput::Gpu(handle)
         })
         .collect();
@@ -399,12 +399,37 @@ enum OutputResidency {
 
 #[derive(Clone)]
 struct AxisData {
-    values: Vec<(f64, f64)>,
     len: usize,
-    class: OutputClass,
-    numeric_storage: Option<NumericStorage>,
-    integer_data: Option<IntegerComplexStorage>,
-    gpu_real: Option<GpuTensorHandle>,
+    storage: AxisStorage,
+}
+
+#[derive(Clone)]
+enum AxisStorage {
+    Numeric(NumericStorage),
+    Logical(Vec<u8>),
+    Complex(ComplexStorage),
+    GpuReal {
+        handle: GpuTensorHandle,
+        class: OutputClass,
+    },
+}
+
+impl AxisData {
+    fn class(&self) -> OutputClass {
+        match &self.storage {
+            AxisStorage::Numeric(storage) => OutputClass::Real(storage.numeric_dtype()),
+            AxisStorage::Logical(_) => OutputClass::Logical,
+            AxisStorage::Complex(_) => OutputClass::Complex,
+            AxisStorage::GpuReal { class, .. } => *class,
+        }
+    }
+
+    fn gpu_real(&self) -> Option<&GpuTensorHandle> {
+        match &self.storage {
+            AxisStorage::GpuReal { handle, .. } => Some(handle),
+            AxisStorage::Numeric(_) | AxisStorage::Logical(_) | AxisStorage::Complex(_) => None,
+        }
+    }
 }
 
 async fn axis_from_value(
@@ -420,12 +445,8 @@ async fn axis_from_value(
         Value::Int(value) => Ok(integer_scalar_axis(value)),
         Value::Bool(value) => Ok(logical_scalar_axis(value)),
         Value::Complex(re, im) => Ok(AxisData {
-            values: vec![(re, im)],
             len: 1,
-            class: OutputClass::Complex,
-            numeric_storage: None,
-            integer_data: None,
-            gpu_real: None,
+            storage: AxisStorage::Complex(ComplexStorage::F64(vec![(re, im)])),
         }),
         Value::ComplexTensor(tensor) => axis_from_complex_tensor(tensor, index),
         Value::GpuTensor(handle) => {
@@ -445,12 +466,8 @@ async fn axis_from_value(
                     )
                 };
                 return Ok(AxisData {
-                    values: Vec::new(),
                     len: vector_len_from_shape(&handle.shape),
-                    class,
-                    numeric_storage: None,
-                    integer_data: None,
-                    gpu_real: Some(handle),
+                    storage: AxisStorage::GpuReal { handle, class },
                 });
             }
 
@@ -462,12 +479,8 @@ async fn axis_from_value(
                 Value::Num(value) => Ok(real_scalar_axis(value, NumericDType::F64)),
                 Value::Bool(value) => Ok(logical_scalar_axis(value)),
                 Value::Complex(re, im) => Ok(AxisData {
-                    values: vec![(re, im)],
                     len: 1,
-                    class: OutputClass::Complex,
-                    numeric_storage: None,
-                    integer_data: None,
-                    gpu_real: None,
+                    storage: AxisStorage::Complex(ComplexStorage::F64(vec![(re, im)])),
                 }),
                 other => Err(ndgrid_error_with_detail(
                     &NDGRID_ERROR_INVALID_AXIS,
@@ -496,36 +509,23 @@ fn real_scalar_axis(value: f64, dtype: NumericDType) -> AxisData {
         _ => unreachable!("real scalar axes use a floating dtype"),
     };
     AxisData {
-        values: Vec::new(),
         len: 1,
-        class: OutputClass::Real(dtype),
-        numeric_storage: Some(storage),
-        integer_data: None,
-        gpu_real: None,
+        storage: AxisStorage::Numeric(storage),
     }
 }
 
 fn integer_scalar_axis(value: IntValue) -> AxisData {
     let storage = NumericStorage::from(IntegerStorage::from_scalar(value));
-    let dtype = storage.numeric_dtype();
     AxisData {
-        values: Vec::new(),
         len: 1,
-        class: OutputClass::Real(dtype),
-        numeric_storage: Some(storage),
-        integer_data: None,
-        gpu_real: None,
+        storage: AxisStorage::Numeric(storage),
     }
 }
 
 fn logical_scalar_axis(value: bool) -> AxisData {
     AxisData {
-        values: vec![(if value { 1.0 } else { 0.0 }, 0.0)],
         len: 1,
-        class: OutputClass::Logical,
-        numeric_storage: None,
-        integer_data: None,
-        gpu_real: None,
+        storage: AxisStorage::Logical(vec![u8::from(value)]),
     }
 }
 
@@ -544,14 +544,9 @@ fn axis_from_tensor(tensor: Tensor, index: usize) -> BuiltinResult<AxisData> {
         .into_numeric_storage()
         .map_err(|err| ndgrid_error_with_detail(&NDGRID_ERROR_INTERNAL, err))?;
     let len = storage.len();
-    let dtype = storage.numeric_dtype();
     Ok(AxisData {
         len,
-        values: Vec::new(),
-        class: OutputClass::Real(dtype),
-        numeric_storage: Some(storage),
-        integer_data: None,
-        gpu_real: None,
+        storage: AxisStorage::Numeric(storage),
     })
 }
 
@@ -566,18 +561,10 @@ fn axis_from_logical(logical: LogicalArray, index: usize) -> BuiltinResult<AxisD
             ),
         ));
     }
-    let values = logical
-        .data
-        .into_iter()
-        .map(|value| (if value != 0 { 1.0 } else { 0.0 }, 0.0))
-        .collect::<Vec<_>>();
+    let values = logical.data;
     Ok(AxisData {
         len: values.len(),
-        values,
-        class: OutputClass::Logical,
-        numeric_storage: None,
-        integer_data: None,
-        gpu_real: None,
+        storage: AxisStorage::Logical(values),
     })
 }
 
@@ -593,18 +580,9 @@ fn axis_from_complex_tensor(tensor: ComplexTensor, index: usize) -> BuiltinResul
         ));
     }
     let len = tensor::complex_tensor_element_len(&tensor);
-    let values = if tensor.integer_storage().is_some() {
-        Vec::new()
-    } else {
-        tensor.materialize_f64()
-    };
     Ok(AxisData {
         len,
-        values,
-        class: OutputClass::Complex,
-        numeric_storage: None,
-        integer_data: tensor.integer_storage().cloned(),
-        gpu_real: None,
+        storage: AxisStorage::Complex(tensor.into_complex_storage()),
     })
 }
 
@@ -626,7 +604,7 @@ fn vector_len_from_shape(shape: &[usize]) -> usize {
 }
 
 async fn axis_to_host_async(axis: &AxisData) -> BuiltinResult<AxisData> {
-    let Some(handle) = axis.gpu_real.as_ref() else {
+    let Some(handle) = axis.gpu_real() else {
         return Ok(axis.clone());
     };
     match gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await? {
@@ -636,12 +614,8 @@ async fn axis_to_host_async(axis: &AxisData) -> BuiltinResult<AxisData> {
         Value::Num(value) => Ok(real_scalar_axis(value, NumericDType::F64)),
         Value::Bool(value) => Ok(logical_scalar_axis(value)),
         Value::Complex(re, im) => Ok(AxisData {
-            values: vec![(re, im)],
             len: 1,
-            class: OutputClass::Complex,
-            numeric_storage: None,
-            integer_data: None,
-            gpu_real: None,
+            storage: AxisStorage::Complex(ComplexStorage::F64(vec![(re, im)])),
         }),
         other => Err(ndgrid_error_with_detail(
             &NDGRID_ERROR_INTERNAL,
@@ -680,63 +654,19 @@ fn build_host_outputs(
     outputs
         .try_reserve_exact(output_count)
         .map_err(|err| ndgrid_error_with_detail(&NDGRID_ERROR_INTERNAL, err.to_string()))?;
-    for axis in axes.iter().take(output_count) {
-        let mut data = Vec::new();
-        data.try_reserve_exact(total)
+    for (dim, axis) in axes.iter().take(output_count).enumerate() {
+        let mut indices = Vec::new();
+        indices
+            .try_reserve_exact(total)
             .map_err(|err| ndgrid_error_with_detail(&NDGRID_ERROR_INTERNAL, err.to_string()))?;
+        for linear_idx in 0..total {
+            indices.push(coordinate_for_dim(linear_idx, output_shape, &strides, dim));
+        }
         outputs.push(GridOutput {
             shape: output_shape.to_vec(),
-            data,
-            class: axis.class,
-            numeric_storage: axis
-                .numeric_storage
-                .as_ref()
-                .map(|storage| storage.zeros_like(total)),
-            integer_data: axis.integer_data.clone(),
-            integer_values: axis
-                .integer_data
-                .as_ref()
-                .map(|_| (Vec::with_capacity(total), Vec::with_capacity(total))),
+            storage: GridStorage::from_axis(axis),
+            indices,
         });
-    }
-
-    for linear_idx in 0..total {
-        for dim in 0..output_count {
-            let coord = coordinate_for_dim(linear_idx, output_shape, &strides, dim);
-            let output = &mut outputs[dim];
-            if let (Some(storage), Some((real, imag))) = (
-                axes[dim].integer_data.as_ref(),
-                output.integer_values.as_mut(),
-            ) {
-                real.push(
-                    storage
-                        .real
-                        .value_at(coord)
-                        .expect("axis coordinate is in bounds"),
-                );
-                imag.push(
-                    storage
-                        .imag
-                        .value_at(coord)
-                        .expect("axis coordinate is in bounds"),
-                );
-            } else if let (Some(storage), Some(output_storage)) = (
-                axes[dim].numeric_storage.as_ref(),
-                output.numeric_storage.as_mut(),
-            ) {
-                output_storage
-                    .set_value(
-                        linear_idx,
-                        storage
-                            .value_at(coord)
-                            .expect("axis coordinate is in bounds"),
-                    )
-                    .expect("axis and output numeric classes match");
-            } else {
-                let value = axes[dim].values.get(coord).copied().unwrap_or((0.0, 0.0));
-                output.data.push(value);
-            }
-        }
     }
 
     Ok(outputs)
@@ -768,16 +698,40 @@ fn coordinate_for_dim(idx: usize, shape: &[usize], strides: &[usize], dim: usize
 
 struct GridOutput {
     shape: Vec<usize>,
-    data: Vec<(f64, f64)>,
-    class: OutputClass,
-    numeric_storage: Option<NumericStorage>,
-    integer_data: Option<IntegerComplexStorage>,
-    integer_values: Option<(Vec<IntValue>, Vec<IntValue>)>,
+    storage: GridStorage,
+    indices: Vec<usize>,
+}
+
+enum GridStorage {
+    Numeric(NumericStorage),
+    Logical(Vec<u8>),
+    Complex(ComplexStorage),
+}
+
+impl GridStorage {
+    fn from_axis(axis: &AxisData) -> Self {
+        match &axis.storage {
+            AxisStorage::Numeric(storage) => Self::Numeric(storage.clone()),
+            AxisStorage::Logical(values) => Self::Logical(values.clone()),
+            AxisStorage::Complex(storage) => Self::Complex(storage.clone()),
+            AxisStorage::GpuReal { .. } => {
+                unreachable!("ndgrid host output construction requires a gathered axis")
+            }
+        }
+    }
+
+    fn class(&self) -> OutputClass {
+        match self {
+            Self::Numeric(storage) => OutputClass::Real(storage.numeric_dtype()),
+            Self::Logical(_) => OutputClass::Logical,
+            Self::Complex(_) => OutputClass::Complex,
+        }
+    }
 }
 
 impl GridOutput {
     fn to_value(&self, residency: OutputResidency) -> BuiltinResult<Value> {
-        match self.class {
+        match self.storage.class() {
             OutputClass::Real(dtype) => self.to_numeric_value(dtype, residency),
             OutputClass::Logical => self.to_logical_value(residency),
             OutputClass::Complex => self.to_complex_value(residency),
@@ -789,16 +743,22 @@ impl GridOutput {
         dtype: NumericDType,
         residency: OutputResidency,
     ) -> BuiltinResult<Value> {
-        let storage = self.numeric_storage.as_ref().ok_or_else(|| {
-            ndgrid_error_with_detail(&NDGRID_ERROR_INTERNAL, "missing numeric output storage")
-        })?;
+        let GridStorage::Numeric(storage) = &self.storage else {
+            return Err(ndgrid_error_with_detail(
+                &NDGRID_ERROR_INTERNAL,
+                "numeric output has nonnumeric authoritative storage",
+            ));
+        };
+        let storage = storage
+            .gather(&self.indices)
+            .map_err(|err| ndgrid_error_with_detail(&NDGRID_ERROR_INTERNAL, err))?;
         if storage.numeric_dtype() != dtype {
             return Err(ndgrid_error_with_detail(
                 &NDGRID_ERROR_INTERNAL,
                 "numeric output storage class mismatch",
             ));
         }
-        let tensor = Tensor::from_numeric_storage(storage.clone(), self.shape.clone())
+        let tensor = Tensor::from_numeric_storage(storage, self.shape.clone())
             .map_err(|err| ndgrid_error_with_detail(&NDGRID_ERROR_INTERNAL, err))?;
         match residency {
             OutputResidency::Host if dtype != NumericDType::F32 => {
@@ -828,17 +788,22 @@ impl GridOutput {
     }
 
     fn to_logical_value(&self, residency: OutputResidency) -> BuiltinResult<Value> {
+        let GridStorage::Logical(values) = &self.storage else {
+            return Err(ndgrid_error_with_detail(
+                &NDGRID_ERROR_INTERNAL,
+                "logical output has nonlogical authoritative storage",
+            ));
+        };
         let mut data = Vec::new();
-        data.try_reserve_exact(self.data.len())
+        data.try_reserve_exact(self.indices.len())
             .map_err(|err| ndgrid_error_with_detail(&NDGRID_ERROR_INTERNAL, err.to_string()))?;
-        for &(re, im) in &self.data {
-            if im != 0.0 {
-                return Err(ndgrid_error_with_detail(
+        for &index in &self.indices {
+            data.push(*values.get(index).ok_or_else(|| {
+                ndgrid_error_with_detail(
                     &NDGRID_ERROR_INTERNAL,
-                    "cannot represent complex values in a logical output",
-                ));
-            }
-            data.push(if re != 0.0 { 1 } else { 0 });
+                    format!("logical axis index {index} out of bounds"),
+                )
+            })?);
         }
         let logical = LogicalArray::new(data, self.shape.clone())
             .map_err(|err| ndgrid_error_with_detail(&NDGRID_ERROR_INTERNAL, err))?;
@@ -852,37 +817,24 @@ impl GridOutput {
     }
 
     fn to_complex_value(&self, residency: OutputResidency) -> BuiltinResult<Value> {
-        if let (Some(prototype), Some((real, imag))) =
-            (self.integer_data.as_ref(), self.integer_values.as_ref())
-        {
-            let real = prototype
-                .real
-                .from_exact_values_like(real.clone())
-                .map_err(|err| ndgrid_error_with_detail(&NDGRID_ERROR_INTERNAL, err))?;
-            let imag = prototype
-                .imag
-                .from_exact_values_like(imag.clone())
-                .map_err(|err| ndgrid_error_with_detail(&NDGRID_ERROR_INTERNAL, err))?;
-            let storage = IntegerComplexStorage::new(real, imag)
-                .map_err(|err| ndgrid_error_with_detail(&NDGRID_ERROR_INTERNAL, err))?;
-            let tensor = ComplexTensor::new_integer(storage, self.shape.clone())
-                .map_err(|err| ndgrid_error_with_detail(&NDGRID_ERROR_INTERNAL, err))?;
-            return match residency {
-                OutputResidency::Host => Ok(Value::ComplexTensor(tensor)),
-                OutputResidency::Gpu { .. } => Err(ndgrid_error_with_detail(
-                    &NDGRID_ERROR_INTERNAL,
-                    "GPU-resident typed complex integer outputs are not supported",
-                )),
-            };
-        }
-        let mut data = Vec::new();
-        data.try_reserve_exact(self.data.len())
-            .map_err(|err| ndgrid_error_with_detail(&NDGRID_ERROR_INTERNAL, err.to_string()))?;
-        data.extend_from_slice(&self.data);
-        let tensor = ComplexTensor::new(data, self.shape.clone())
+        let GridStorage::Complex(storage) = &self.storage else {
+            return Err(ndgrid_error_with_detail(
+                &NDGRID_ERROR_INTERNAL,
+                "complex output has noncomplex authoritative storage",
+            ));
+        };
+        let storage = storage
+            .gather(&self.indices)
+            .map_err(|err| ndgrid_error_with_detail(&NDGRID_ERROR_INTERNAL, err))?;
+        let is_integer = matches!(storage, ComplexStorage::Integer(_));
+        let tensor = ComplexTensor::from_complex_storage(storage, self.shape.clone())
             .map_err(|err| ndgrid_error_with_detail(&NDGRID_ERROR_INTERNAL, err))?;
         match residency {
             OutputResidency::Host => Ok(complex_tensor_into_value(tensor)),
+            OutputResidency::Gpu { .. } if is_integer => Err(ndgrid_error_with_detail(
+                &NDGRID_ERROR_INTERNAL,
+                "GPU-resident typed complex integer outputs are not supported",
+            )),
             OutputResidency::Gpu { device_id } => to_complex_gpu_tensor_value(tensor, device_id),
         }
     }
@@ -1028,6 +980,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerComplexStorage;
 
     fn eval(args: &[Value], outputs: Option<usize>) -> BuiltinResult<NdgridEval> {
         block_on(evaluate(args, outputs))
@@ -1141,6 +1094,22 @@ mod tests {
         };
         assert_eq!(out.shape, vec![2, 1]);
         assert_eq!(out.materialize_f64(), vec![(1.0, 2.0), (3.0, -4.0)]);
+    }
+
+    #[test]
+    fn ndgrid_preserves_native_complex_single_storage() {
+        let x = ComplexTensor::from_f32(vec![(1.25, -2.5), (3.75, 4.5)], vec![1, 2]).unwrap();
+        let y = tensor(vec![10.0, 20.0], vec![1, 2]);
+        let eval = eval(&[Value::ComplexTensor(x), Value::Tensor(y)], Some(2)).expect("ndgrid");
+        let Value::ComplexTensor(output) = output(&eval, 0).expect("X") else {
+            panic!("expected complex single output");
+        };
+        assert_eq!(output.numeric_dtype(), NumericDType::F32);
+        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(
+            output.as_f32_slice(),
+            Some(&[(1.25, -2.5), (3.75, 4.5), (1.25, -2.5), (3.75, 4.5),][..])
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
