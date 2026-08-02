@@ -1040,16 +1040,16 @@ fn format_tensor_value(
     idx: usize,
     options: &DlmWriteOptions,
 ) -> BuiltinResult<String> {
-    if let Some(storage) = tensor.integer_storage() {
-        let value = storage
-            .value_at(idx)
-            .expect("integer storage mirrors tensor shape");
+    let value = tensor
+        .numeric_value_at(idx)
+        .expect("index within authoritative numeric storage");
+    if let Some(value) = value.into_int_value() {
         if !options.precision_explicit {
             return Ok(value.decimal_string());
         }
         return format_numeric(value.to_f64(), &options.precision);
     }
-    format_numeric(tensor.data[idx], &options.precision)
+    format_numeric(value.materialize_f64(), &options.precision)
 }
 
 fn c_format(value: f64, spec: &str) -> BuiltinResult<String> {

@@ -315,8 +315,10 @@ fn parse_offset(value: &Value, context: &str) -> BuiltinResult<usize> {
                     format!("csvwrite: {context} must be a scalar, got {} elements", len),
                 ));
             }
-            if let Some(storage) = t.integer_storage() {
-                let value = storage.value_at(0).expect("one-element integer storage");
+            let value = t
+                .numeric_value_at(0)
+                .expect("one-element authoritative numeric storage");
+            if let Some(value) = value.into_int_value() {
                 return value.try_to_usize().ok_or_else(|| {
                     csvwrite_error_with(
                         &CSVWRITE_ERROR_OFFSETS,
@@ -324,7 +326,7 @@ fn parse_offset(value: &Value, context: &str) -> BuiltinResult<usize> {
                     )
                 });
             }
-            coerce_offset_from_float(t.data[0], context)
+            coerce_offset_from_float(value.materialize_f64(), context)
         }
         Value::LogicalArray(logical) => {
             if logical.data.len() != 1 {
@@ -519,13 +521,13 @@ fn format_numeric(value: f64) -> String {
 }
 
 fn format_tensor_value(tensor: &Tensor, idx: usize) -> String {
-    if let Some(storage) = tensor.integer_storage() {
-        return storage
-            .value_at(idx)
-            .expect("integer storage mirrors tensor shape")
-            .decimal_string();
+    let value = tensor
+        .numeric_value_at(idx)
+        .expect("index within authoritative numeric storage");
+    if let Some(value) = value.into_int_value() {
+        return value.decimal_string();
     }
-    format_numeric(tensor.data[idx])
+    format_numeric(value.materialize_f64())
 }
 
 fn trim_trailing_zeros(mut value: String) -> String {

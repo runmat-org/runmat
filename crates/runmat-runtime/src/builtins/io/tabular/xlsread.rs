@@ -832,7 +832,7 @@ fn parse_range(value: &Value) -> BuiltinResult<RangeSpec> {
             if let Some(storage) = t.integer_storage() {
                 parse_integer_range(&storage.exact_values())
             } else {
-                parse_numeric_range(t.data.as_slice())
+                parse_numeric_range(&t.materialize_f64())
             }
         }
         _ => Err(xlsread_error_with(

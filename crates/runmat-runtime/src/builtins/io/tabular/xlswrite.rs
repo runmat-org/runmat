@@ -1264,17 +1264,15 @@ impl XlsTable {
         let cols = tensor.cols();
         checked_cell_count(rows, cols, "numeric array")?;
         let mut cells = Vec::with_capacity(rows * cols);
-        if let Some(storage) = tensor.integer_storage() {
-            let values = storage.exact_values();
-            for row in 0..rows {
-                for col in 0..cols {
-                    cells.push(CellValue::Integer(values[row + col * rows].clone()));
-                }
-            }
-        } else {
-            for row in 0..rows {
-                for col in 0..cols {
-                    cells.push(CellValue::Number(tensor.data[row + col * rows]));
+        for row in 0..rows {
+            for col in 0..cols {
+                let value = tensor
+                    .numeric_value_at(row + col * rows)
+                    .expect("index within authoritative numeric storage");
+                if let Some(value) = value.into_int_value() {
+                    cells.push(CellValue::Integer(value));
+                } else {
+                    cells.push(CellValue::Number(value.materialize_f64()));
                 }
             }
         }

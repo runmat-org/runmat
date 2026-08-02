@@ -607,13 +607,13 @@ impl MatrixData {
             MatrixData::Numeric(tensor) => {
                 let rows = tensor.rows();
                 let idx = row + col * rows;
-                if let Some(storage) = tensor.integer_storage() {
-                    return storage
-                        .value_at(idx)
-                        .expect("integer storage mirrors tensor shape")
-                        .decimal_string();
+                let value = tensor
+                    .numeric_value_at(idx)
+                    .expect("index within authoritative numeric storage");
+                if let Some(value) = value.into_int_value() {
+                    return value.decimal_string();
                 }
-                format_numeric(tensor.data[idx], options.decimal_separator)
+                format_numeric(value.materialize_f64(), options.decimal_separator)
             }
             MatrixData::Text { rows, data, .. } => {
                 if *rows == 0 {

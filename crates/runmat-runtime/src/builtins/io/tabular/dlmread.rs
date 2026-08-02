@@ -549,9 +549,7 @@ fn is_range_candidate(value: &Value) -> bool {
 }
 
 fn tensor_len(tensor: &Tensor) -> usize {
-    tensor
-        .integer_storage()
-        .map_or(tensor.data.len(), |storage| storage.len())
+    tensor.len()
 }
 
 fn looks_like_range_string(text: &str) -> bool {

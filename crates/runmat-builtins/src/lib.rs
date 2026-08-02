@@ -1185,6 +1185,24 @@ impl NumericScalar {
             | Self::U64(_) => true,
         }
     }
+
+    /// Explicitly materializes this scalar in the `f64` computation domain.
+    ///
+    /// Integer values outside the exact binary64 range may lose precision.
+    pub fn materialize_f64(self) -> f64 {
+        match self {
+            Self::F64(value) => value,
+            Self::F32(value) => f64::from(value),
+            Self::I8(value) => f64::from(value),
+            Self::I16(value) => f64::from(value),
+            Self::I32(value) => f64::from(value),
+            Self::I64(value) => value as f64,
+            Self::U8(value) => f64::from(value),
+            Self::U16(value) => f64::from(value),
+            Self::U32(value) => f64::from(value),
+            Self::U64(value) => value as f64,
+        }
+    }
 }
 
 impl NumericStorageView<'_> {
@@ -1589,6 +1607,29 @@ mod integer_storage_tests {
         assert!(!NumericScalar::F32(f32::INFINITY).is_finite());
         assert!(NumericScalar::I64(i64::MIN).is_finite());
         assert!(NumericScalar::U64(u64::MAX).is_finite());
+    }
+
+    #[test]
+    fn numeric_scalar_f64_materialization_is_explicit_for_every_native_class() {
+        let cases = [
+            (NumericScalar::F64(64.25), 64.25),
+            (NumericScalar::F32(32.25), 32.25),
+            (NumericScalar::I8(-8), -8.0),
+            (NumericScalar::I16(-16), -16.0),
+            (NumericScalar::I32(-32), -32.0),
+            (NumericScalar::I64(-64), -64.0),
+            (NumericScalar::U8(8), 8.0),
+            (NumericScalar::U16(16), 16.0),
+            (NumericScalar::U32(32), 32.0),
+            (NumericScalar::U64(64), 64.0),
+        ];
+        for (value, expected) in cases {
+            assert_eq!(value.materialize_f64(), expected);
+        }
+        assert_eq!(
+            NumericScalar::U64(9_007_199_254_740_993).materialize_f64(),
+            9_007_199_254_740_992.0
+        );
     }
 
     #[test]
