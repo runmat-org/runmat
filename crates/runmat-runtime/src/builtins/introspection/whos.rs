@@ -573,17 +573,9 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> BuiltinResult
             .map(|s| s.encode_utf16().count().saturating_mul(2))
             .sum(),
         Value::Symbolic(expr) => expr.to_string().encode_utf16().count().saturating_mul(2),
-        // `whos` reports the MATLAB array payload size, not the size of
-        // RunMat's compatibility mirror. Integer arrays retain an f64 mirror
-        // internally, but their visible class determines their byte count.
-        Value::Tensor(t) => t.integer_storage().map_or_else(
-            || t.data.len().saturating_mul(t.dtype.byte_size()),
-            |storage| {
-                storage
-                    .len()
-                    .saturating_mul(integer_storage_element_bytes(storage))
-            },
-        ),
+        // `whos` reports the authoritative MATLAB array payload size, not any
+        // transitional compatibility representation.
+        Value::Tensor(t) => t.len().saturating_mul(t.numeric_dtype().byte_size()),
         Value::SparseTensor(t) => {
             let value_bytes = t.integer_storage().map_or_else(
                 || t.values.len().saturating_mul(std::mem::size_of::<f64>()),
@@ -1299,6 +1291,15 @@ pub(crate) mod tests {
                 expected
             );
         }
+    }
+
+    #[test]
+    fn whos_memory_bytes_use_native_single_width() {
+        let tensor = Tensor::from_f32(vec![1.0, 2.0, 3.0], vec![1, 3]).expect("single tensor");
+        assert_eq!(
+            value_memory_bytes(&Value::Tensor(tensor), &mut HashSet::new()).expect("bytes"),
+            12
+        );
     }
 
     #[test]
