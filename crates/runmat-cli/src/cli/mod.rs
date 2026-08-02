@@ -2,6 +2,7 @@ mod package;
 mod parse;
 mod remote;
 mod root;
+mod test;
 mod value_types;
 
 pub use package::{
@@ -14,4 +15,5 @@ pub use remote::{
     RemoteCommand,
 };
 pub use root::{Cli, CliOverrideSources, Commands, ConfigCommand, ConfigFormat, GcCommand};
+pub use test::{TestArgs, TestIsolationArg, TestReportArg};
 pub use value_types::{CaptureFiguresMode, ColorMode, FigureSize, GcPreset, LogLevel, OptLevel};

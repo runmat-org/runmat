@@ -5,6 +5,15 @@ use std::process::ExitCode;
 #[tokio::main]
 async fn main() -> ExitCode {
     let args = std::env::args_os().collect::<Vec<_>>();
+    if args.len() == 2 && args[1] == "--__runmat-test-worker" {
+        return match runmat::commands::test::worker::run_stdio().await {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("runmat test worker failed: {error:#}");
+                ExitCode::from(2)
+            }
+        };
+    }
     let requested_color = runmat::presentation::requested_color_mode(&args).unwrap_or_default();
     let matches = runmat::Cli::command()
         .color(runmat::presentation::clap_color_choice(requested_color))
@@ -23,13 +32,17 @@ async fn main() -> ExitCode {
     let exit_code = match runmat::run_cli(cli, sources).await {
         Ok(()) => 0,
         Err(err) => {
-            if err
-                .downcast_ref::<runmat::AlreadyReportedCliError>()
-                .is_none()
-            {
-                eprintln!("{}: {err}", runmat::presentation::stderr().error("Error"));
+            if let Some(status) = err.downcast_ref::<runmat::commands::test::TestCommandError>() {
+                status.code()
+            } else {
+                if err
+                    .downcast_ref::<runmat::AlreadyReportedCliError>()
+                    .is_none()
+                {
+                    eprintln!("{}: {err}", runmat::presentation::stderr().error("Error"));
+                }
+                1
             }
-            1
         }
     };
     exit_after_native_cad_if_needed(exit_code);

@@ -16,7 +16,7 @@ name = "runmat"
 path = "src/main.rs"
 
 [dependencies]
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
+tokio = { workspace = true, features = ["io-std", "io-util", "macros", "rt-multi-thread", "signal"] }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -68,6 +68,10 @@ runmat-filesystem = { version = "=0.6.1", path = "../runmat-filesystem" }
 runmat-telemetry = { version = "=0.6.1", path = "../runmat-telemetry" }
 runmat-static-analysis = { version = "=0.6.1", path = "../runmat-static-analysis" }
 runmat-server-client = { workspace = true }
+runmat-test = { workspace = true }
+runmat-test-runner = { workspace = true }
+runmat-test-runner-native = { workspace = true }
+sha2 = { workspace = true }
 
 [features]
 # High-level feature toggles (default build keeps everything enabled)

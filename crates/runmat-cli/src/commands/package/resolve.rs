@@ -28,6 +28,21 @@ pub(super) async fn resolve(
     cli: &Cli,
     intent: SourceAcquisitionIntent,
 ) -> Result<NativeResolvedProject> {
+    resolve_with_groups(
+        args,
+        cli,
+        intent,
+        [DependencyGroup::Runtime].into_iter().collect(),
+    )
+    .await
+}
+
+async fn resolve_with_groups(
+    args: &PackageProjectArgs,
+    cli: &Cli,
+    intent: SourceAcquisitionIntent,
+    groups: BTreeSet<DependencyGroup>,
+) -> Result<NativeResolvedProject> {
     let manifest = canonical_manifest(&args.manifest_path)?;
     let lock_path = manifest
         .parent()
@@ -60,7 +75,7 @@ pub(super) async fn resolve(
             target: target_lexicon::HOST.to_string(),
             default_server_origin,
             default_registry_index,
-            groups: [DependencyGroup::Runtime].into_iter().collect(),
+            groups,
             root_features: BTreeSet::new(),
             host_capabilities: native_capabilities(),
             source_intent: intent,
@@ -133,6 +148,21 @@ pub(super) async fn resolve(
         _cache_lease: cache_lease,
         _provider: provider,
     })
+}
+
+pub(crate) async fn resolve_for_test_manifest(
+    manifest_path: PathBuf,
+    cli: &Cli,
+) -> Result<NativeResolvedProject> {
+    resolve_with_groups(
+        &PackageProjectArgs { manifest_path },
+        cli,
+        SourceAcquisitionIntent::Execute,
+        [DependencyGroup::Runtime, DependencyGroup::Test]
+            .into_iter()
+            .collect(),
+    )
+    .await
 }
 
 fn now_ms() -> u64 {

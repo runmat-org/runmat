@@ -1,0 +1,14 @@
+[package]
+name = "cli-test-fixture"
+
+[sources]
+roots = ["src"]
+
+[test-dependencies]
+test-helper = { path = "deps/test-helper" }
+
+[test]
+roots = ["tests"]
+jobs = 1
+isolation = "process"
+timeout-ms = 10000

@@ -10,6 +10,7 @@ use crate::cli::remote::{FsCommand, OrgCommand, ProjectCommand, RemoteCommand};
 use crate::cli::value_types::{CaptureFiguresMode, FigureSize, GcPreset, LogLevel, OptLevel};
 use crate::cli::ColorMode;
 use crate::cli::PackageCommand;
+use crate::cli::TestArgs;
 
 #[derive(Parser, Clone)]
 #[command(
@@ -349,6 +350,8 @@ pub enum Commands {
         #[command(subcommand)]
         package_command: PackageCommand,
     },
+    /// Discover and run MATLAB-compatible tests
+    Test(TestArgs),
 }
 
 #[derive(Subcommand, Clone)]

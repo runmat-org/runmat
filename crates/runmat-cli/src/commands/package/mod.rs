@@ -12,7 +12,10 @@ mod server_transport;
 mod tree;
 mod vendor;
 
-pub(crate) use resolve::{install_project_for_source, resolve_for_source};
+pub(crate) use resolve::{
+    install_project_for_source, resolve_for_source, resolve_for_test_manifest,
+    NativeResolvedProject,
+};
 
 use crate::cli::{Cli, PackageCommand};
 use anyhow::Result;
