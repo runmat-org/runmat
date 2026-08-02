@@ -9,7 +9,8 @@ use regex::Regex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, IntValue, IntegerStorage, NumericDType, NumericStorage, StructValue, Value,
+    CharArray, ComplexStorage, IntValue, IntegerStorage, NumericDType, NumericStorage, StructValue,
+    Value,
 };
 use runmat_filesystem::{metadata_async, write_async};
 use runmat_macros::runtime_builtin;
@@ -732,8 +733,8 @@ fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray
             Value::Num(n) => Ok(MatArray {
                 class: MatClass::Double,
                 dims: vec![1, 1],
-                data: MatData::Double {
-                    real: vec![n],
+                data: MatData::Numeric {
+                    real: NumericStorage::F64(vec![n]),
                     imag: None,
                 },
             }),
@@ -742,8 +743,8 @@ fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray
                 Ok(MatArray {
                     class,
                     dims: vec![1, 1],
-                    data: MatData::Integer {
-                        storage: integer_storage_from_scalar(i),
+                    data: MatData::Numeric {
+                        real: NumericStorage::from(integer_storage_from_scalar(i)),
                         imag: None,
                     },
                 })
@@ -761,50 +762,52 @@ fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray
                     .into_numeric_storage()
                     .map_err(|error| save_error_with(&SAVE_ERROR_IO, format!("save: {error}")))?;
                 let class = tensor_dtype_mat_class(storage.numeric_dtype());
-                let data = match storage {
-                    NumericStorage::F64(real) => MatData::Double { real, imag: None },
-                    NumericStorage::F32(real) => MatData::Numeric {
-                        real: real.into_iter().map(f64::from).collect(),
-                        imag: None,
-                    },
-                    storage => MatData::Integer {
-                        storage: storage
-                            .into_integer_storage()
-                            .expect("non-floating numeric storage is integer"),
-                        imag: None,
-                    },
+                let data = MatData::Numeric {
+                    real: storage,
+                    imag: None,
                 };
                 Ok(MatArray { class, dims, data })
             }
             Value::Complex(re, im) => Ok(MatArray {
                 class: MatClass::Double,
                 dims: vec![1, 1],
-                data: MatData::Double {
-                    real: vec![re],
-                    imag: Some(vec![im]),
+                data: MatData::Numeric {
+                    real: NumericStorage::F64(vec![re]),
+                    imag: Some(NumericStorage::F64(vec![im])),
                 },
             }),
             Value::ComplexTensor(t) => {
-                if let Some(storage) = t.integer_storage() {
-                    return Ok(MatArray {
-                        class: integer_storage_mat_class(&storage.real),
-                        dims: canonical_dims(&t.shape),
-                        data: MatData::Integer {
-                            storage: storage.real.clone(),
-                            imag: Some(storage.imag.clone()),
-                        },
-                    });
-                }
-                let mut real = Vec::with_capacity(t.materialize_f64().len());
-                let mut imag = Vec::with_capacity(t.materialize_f64().len());
-                for (re, im) in &t.materialize_f64() {
-                    real.push(*re);
-                    imag.push(*im);
-                }
+                let dims = canonical_dims(&t.shape);
+                let (class, real, imag) = match t.into_complex_storage() {
+                    ComplexStorage::F64(values) => {
+                        let (real, imag): (Vec<_>, Vec<_>) = values.into_iter().unzip();
+                        (
+                            MatClass::Double,
+                            NumericStorage::F64(real),
+                            NumericStorage::F64(imag),
+                        )
+                    }
+                    ComplexStorage::F32(values) => {
+                        let (real, imag): (Vec<_>, Vec<_>) = values.into_iter().unzip();
+                        (
+                            MatClass::Single,
+                            NumericStorage::F32(real),
+                            NumericStorage::F32(imag),
+                        )
+                    }
+                    ComplexStorage::Integer(storage) => {
+                        let class = integer_storage_mat_class(&storage.real);
+                        (
+                            class,
+                            NumericStorage::from(storage.real),
+                            NumericStorage::from(storage.imag),
+                        )
+                    }
+                };
                 Ok(MatArray {
-                    class: MatClass::Double,
-                    dims: canonical_dims(&t.shape),
-                    data: MatData::Double {
+                    class,
+                    dims,
+                    data: MatData::Numeric {
                         real,
                         imag: Some(imag),
                     },
@@ -816,8 +819,15 @@ fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray
                 data: MatData::Logical { data: la.data },
             }),
             Value::SparseTensor(sparse) => {
-                let integer_data = sparse.integer_storage().cloned();
-                let values = sparse.materialize_f64();
+                let values = match sparse.integer_storage() {
+                    Some(storage) => NumericStorage::from(storage.clone()),
+                    None => NumericStorage::F64(
+                        sparse
+                            .as_f64_slice()
+                            .expect("floating sparse storage must expose f64 values")
+                            .to_vec(),
+                    ),
+                };
                 Ok(MatArray {
                     class: MatClass::Sparse,
                     dims: vec![sparse.rows, sparse.cols],
@@ -826,7 +836,6 @@ fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray
                         cols: sparse.cols,
                         col_ptrs: sparse.col_ptrs,
                         row_indices: sparse.row_indices,
-                        integer_data,
                         values,
                     },
                 })
@@ -1044,13 +1053,6 @@ fn build_matrix_bytes(array: &MatArray, name: Option<&str>) -> BuiltinResult<Vec
     let mut buf = Vec::new();
 
     let (flags0, flags1) = match &array.data {
-        MatData::Double { imag, .. } => {
-            let mut f0 = array.class.class_code();
-            if imag.is_some() {
-                f0 |= FLAG_COMPLEX;
-            }
-            (f0, 0u32)
-        }
         MatData::Numeric { imag, .. } => {
             let mut f0 = array.class.class_code();
             if imag.is_some() {
@@ -1058,24 +1060,8 @@ fn build_matrix_bytes(array: &MatArray, name: Option<&str>) -> BuiltinResult<Vec
             }
             (f0, 0u32)
         }
-        MatData::Integer { imag, .. } => {
-            let mut f0 = array.class.class_code();
-            if imag.is_some() {
-                f0 |= FLAG_COMPLEX;
-            }
-            (f0, 0u32)
-        }
         MatData::Logical { .. } => ((array.class.class_code()) | FLAG_LOGICAL, 0u32),
-        MatData::Sparse {
-            integer_data,
-            values,
-            ..
-        } => (
-            array.class.class_code(),
-            integer_data
-                .as_ref()
-                .map_or(values.len(), IntegerStorage::len) as u32,
-        ),
+        MatData::Sparse { values, .. } => (array.class.class_code(), values.len() as u32),
         _ => (array.class.class_code(), 0u32),
     };
 
@@ -1094,39 +1080,23 @@ fn build_matrix_bytes(array: &MatArray, name: Option<&str>) -> BuiltinResult<Vec
     write_subelement(&mut buf, MI_INT8, name_bytes);
 
     match &array.data {
-        MatData::Double { real, imag } => {
-            let mut real_bytes = Vec::with_capacity(real.len() * 8);
-            for v in real {
-                real_bytes.extend_from_slice(&v.to_le_bytes());
-            }
-            write_subelement(&mut buf, MI_DOUBLE, &real_bytes);
-            if let Some(imag) = imag {
-                let mut imag_bytes = Vec::with_capacity(imag.len() * 8);
-                for v in imag {
-                    imag_bytes.extend_from_slice(&v.to_le_bytes());
-                }
-                write_subelement(&mut buf, MI_DOUBLE, &imag_bytes);
-            }
-        }
         MatData::Numeric { real, imag } => {
-            let (data_type, real_bytes) = encode_numeric_payload(array.class, real)?;
+            if tensor_dtype_mat_class(real.numeric_dtype()) != array.class {
+                return Err(save_error_with(
+                    &SAVE_ERROR_IO,
+                    "save: numeric MAT class does not match authoritative storage",
+                ));
+            }
+            let (data_type, real_bytes) = encode_numeric_storage(real)?;
             write_subelement(&mut buf, data_type, &real_bytes);
             if let Some(imag) = imag {
-                let (imag_type, imag_bytes) = encode_numeric_payload(array.class, imag)?;
-                write_subelement(&mut buf, imag_type, &imag_bytes);
-            }
-        }
-        MatData::Integer { storage, imag } => {
-            let (data_type, bytes) = encode_integer_payload(storage);
-            write_subelement(&mut buf, data_type, &bytes);
-            if let Some(imag) = imag {
-                if imag.class_name() != storage.class_name() || imag.len() != storage.len() {
+                if imag.numeric_dtype() != real.numeric_dtype() || imag.len() != real.len() {
                     return Err(save_error_with(
                         &SAVE_ERROR_IO,
-                        "save: complex integer components must have matching class and length",
+                        "save: complex numeric components must have matching class and length",
                     ));
                 }
-                let (imag_type, imag_bytes) = encode_integer_payload(imag);
+                let (imag_type, imag_bytes) = encode_numeric_storage(imag)?;
                 write_subelement(&mut buf, imag_type, &imag_bytes);
             }
         }
@@ -1181,7 +1151,6 @@ fn build_matrix_bytes(array: &MatArray, name: Option<&str>) -> BuiltinResult<Vec
         MatData::Sparse {
             col_ptrs,
             row_indices,
-            integer_data,
             values,
             ..
         } => {
@@ -1189,126 +1158,51 @@ fn build_matrix_bytes(array: &MatArray, name: Option<&str>) -> BuiltinResult<Vec
             write_subelement(&mut buf, MI_INT32, &ir_bytes);
             let jc_bytes = encode_usize_i32_payload(col_ptrs, "sparse column pointer")?;
             write_subelement(&mut buf, MI_INT32, &jc_bytes);
-            if let Some(storage) = integer_data {
-                let (value_type, value_bytes) = encode_integer_payload(storage);
-                write_subelement(&mut buf, value_type, &value_bytes);
-            } else {
-                let mut value_bytes = Vec::with_capacity(values.len() * 8);
-                for value in values {
-                    value_bytes.extend_from_slice(&value.to_le_bytes());
-                }
-                write_subelement(&mut buf, MI_DOUBLE, &value_bytes);
-            }
+            let (value_type, value_bytes) = encode_numeric_storage(values)?;
+            write_subelement(&mut buf, value_type, &value_bytes);
         }
     }
 
     Ok(buf)
 }
 
-fn encode_integer_payload(storage: &IntegerStorage) -> (u32, Vec<u8>) {
+fn encode_numeric_storage(storage: &NumericStorage) -> BuiltinResult<(u32, Vec<u8>)> {
     macro_rules! encode {
         ($values:expr, $data_type:expr) => {{
             let mut bytes = Vec::with_capacity(std::mem::size_of_val($values.as_slice()));
             for value in $values {
                 bytes.extend_from_slice(&value.to_le_bytes());
             }
-            ($data_type, bytes)
+            Ok(($data_type, bytes))
         }};
     }
 
     match storage {
-        IntegerStorage::I8(values) => (MI_INT8, values.iter().map(|value| *value as u8).collect()),
-        IntegerStorage::U8(values) => (MI_UINT8, values.clone()),
-        IntegerStorage::I16(values) => encode!(values, MI_INT16),
-        IntegerStorage::U16(values) => encode!(values, MI_UINT16),
-        IntegerStorage::I32(values) => encode!(values, MI_INT32),
-        IntegerStorage::U32(values) => encode!(values, MI_UINT32),
-        IntegerStorage::I64(values) => encode!(values, MI_INT64),
-        IntegerStorage::U64(values) => encode!(values, MI_UINT64),
-    }
-}
-
-fn encode_numeric_payload(class: MatClass, values: &[f64]) -> BuiltinResult<(u32, Vec<u8>)> {
-    let mut bytes = Vec::new();
-    let data_type = match class {
-        MatClass::Single => {
-            bytes.reserve(values.len() * 4);
-            for value in values {
-                bytes.extend_from_slice(&(*value as f32).to_le_bytes());
-            }
-            MI_SINGLE
-        }
-        MatClass::Int8 => {
-            bytes.reserve(values.len());
-            for value in values {
-                bytes.push(*value as i8 as u8);
-            }
-            MI_INT8
-        }
-        MatClass::UInt8 => {
-            bytes.reserve(values.len());
-            for value in values {
-                bytes.push(*value as u8);
-            }
-            MI_UINT8
-        }
-        MatClass::Int16 => {
-            bytes.reserve(values.len() * 2);
-            for value in values {
-                bytes.extend_from_slice(&(*value as i16).to_le_bytes());
-            }
-            MI_INT16
-        }
-        MatClass::UInt16 => {
-            bytes.reserve(values.len() * 2);
-            for value in values {
-                bytes.extend_from_slice(&(*value as u16).to_le_bytes());
-            }
-            MI_UINT16
-        }
-        MatClass::Int32 => {
-            bytes.reserve(values.len() * 4);
-            for value in values {
-                bytes.extend_from_slice(&(*value as i32).to_le_bytes());
-            }
-            MI_INT32
-        }
-        MatClass::UInt32 => {
-            bytes.reserve(values.len() * 4);
-            for value in values {
-                bytes.extend_from_slice(&(*value as u32).to_le_bytes());
-            }
-            MI_UINT32
-        }
-        MatClass::Int64 => {
-            bytes.reserve(values.len() * 8);
-            for value in values {
-                bytes.extend_from_slice(&(*value as i64).to_le_bytes());
-            }
-            MI_INT64
-        }
-        MatClass::UInt64 => {
-            bytes.reserve(values.len() * 8);
-            for value in values {
-                bytes.extend_from_slice(&(*value as u64).to_le_bytes());
-            }
-            MI_UINT64
-        }
-        MatClass::Double => {
-            bytes.reserve(values.len() * 8);
+        NumericStorage::F64(values) => {
+            let mut bytes = Vec::with_capacity(values.len() * 8);
             for value in values {
                 bytes.extend_from_slice(&value.to_le_bytes());
             }
-            MI_DOUBLE
+            Ok((MI_DOUBLE, bytes))
         }
-        _ => {
-            return Err(save_error_with(
-                &SAVE_ERROR_UNSUPPORTED,
-                "save: unsupported numeric MAT class",
-            ))
+        NumericStorage::F32(values) => {
+            let mut bytes = Vec::with_capacity(values.len() * 4);
+            for value in values {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+            Ok((MI_SINGLE, bytes))
         }
-    };
-    Ok((data_type, bytes))
+        NumericStorage::I8(values) => {
+            Ok((MI_INT8, values.iter().map(|value| *value as u8).collect()))
+        }
+        NumericStorage::U8(values) => Ok((MI_UINT8, values.clone())),
+        NumericStorage::I16(values) => encode!(values, MI_INT16),
+        NumericStorage::U16(values) => encode!(values, MI_UINT16),
+        NumericStorage::I32(values) => encode!(values, MI_INT32),
+        NumericStorage::U32(values) => encode!(values, MI_UINT32),
+        NumericStorage::I64(values) => encode!(values, MI_INT64),
+        NumericStorage::U64(values) => encode!(values, MI_UINT64),
+    }
 }
 
 fn encode_usize_i32_payload(values: &[usize], label: &str) -> BuiltinResult<Vec<u8>> {
