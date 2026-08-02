@@ -1,12 +1,14 @@
 //! Student's t random variates.
 
+use runmat_accelerate_api::{GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Tensor, Type, Value,
+    NumericDType, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random;
 use crate::builtins::common::random_args::extract_dims;
 use crate::builtins::common::tensor;
@@ -110,29 +112,103 @@ fn trnd_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     builtin_path = "crate::builtins::stats::random::trnd"
 )]
 pub(crate) async fn trnd_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let (nu, shape) = parse_args(args).await?;
+    let (nu, shape, output_precision, gpu_source) = parse_args(args).await?;
     let len = tensor::element_count(&shape);
-    let data = random::generate_student_t(&nu.data, len, BUILTIN_NAME)?;
-    Tensor::new(data, shape)
-        .map(tensor::tensor_into_value)
-        .map_err(|err| trnd_error(&ERROR_INTERNAL, format!("trnd: {err}")))
+    let data = random::generate_student_t(&nu, len, BUILTIN_NAME)?;
+    build_output(data, shape, output_precision, gpu_source)
 }
 
-async fn parse_args(args: Vec<Value>) -> BuiltinResult<(Tensor, Vec<usize>)> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OutputPrecision {
+    Double,
+    Single,
+}
+
+fn output_precision(value: &Value) -> OutputPrecision {
+    match value {
+        Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32 => {
+            OutputPrecision::Single
+        }
+        Value::GpuTensor(handle)
+            if runmat_accelerate_api::handle_integer_type(handle).is_none()
+                && !runmat_accelerate_api::handle_is_logical(handle)
+                && runmat_accelerate_api::handle_precision(handle)
+                    == Some(ProviderPrecision::F32) =>
+        {
+            OutputPrecision::Single
+        }
+        _ => OutputPrecision::Double,
+    }
+}
+
+fn build_output(
+    data: Vec<f64>,
+    shape: Vec<usize>,
+    output_precision: OutputPrecision,
+    gpu_source: Option<GpuTensorHandle>,
+) -> BuiltinResult<Value> {
+    let tensor = match output_precision {
+        OutputPrecision::Double => Tensor::new(data, shape),
+        OutputPrecision::Single => {
+            Tensor::from_f32(data.into_iter().map(|value| value as f32).collect(), shape)
+        }
+    }
+    .map_err(|err| trnd_error(&ERROR_INTERNAL, format!("trnd: {err}")))?;
+
+    if let Some(source) = gpu_source {
+        let provider = runmat_accelerate_api::provider_for_handle(&source)
+            .or_else(runmat_accelerate_api::provider)
+            .ok_or_else(|| {
+                trnd_error(
+                    &ERROR_INTERNAL,
+                    "trnd: no acceleration provider registered for GPU output",
+                )
+            })?;
+        let handle = gpu_helpers::upload_tensor(provider, &tensor)
+            .map_err(|err| trnd_error(&ERROR_INTERNAL, format!("trnd: {err}")))?;
+        runmat_accelerate_api::set_handle_precision(
+            &handle,
+            match output_precision {
+                OutputPrecision::Double => ProviderPrecision::F64,
+                OutputPrecision::Single => ProviderPrecision::F32,
+            },
+        );
+        return Ok(gpu_helpers::resident_gpu_value(handle));
+    }
+
+    match output_precision {
+        OutputPrecision::Double => Ok(tensor::tensor_into_value(tensor)),
+        OutputPrecision::Single => Ok(Value::Tensor(tensor)),
+    }
+}
+
+async fn parse_args(
+    args: Vec<Value>,
+) -> BuiltinResult<(
+    Vec<f64>,
+    Vec<usize>,
+    OutputPrecision,
+    Option<GpuTensorHandle>,
+)> {
     if args.is_empty() {
         return Err(trnd_error(
             &ERROR_INVALID_ARGUMENT,
             "trnd: nu argument is required",
         ));
     }
+    let output_precision = output_precision(&args[0]);
+    let gpu_source = match &args[0] {
+        Value::GpuTensor(handle) => Some(handle.clone()),
+        _ => None,
+    };
     let nu_value = gather_if_needed_async(&args[0])
         .await
         .map_err(|err| trnd_error(&ERROR_INVALID_ARGUMENT, format!("trnd: {err}")))?;
     let nu = tensor::value_into_tensor_for(BUILTIN_NAME, nu_value)
         .map_err(|err| trnd_error(&ERROR_INVALID_ARGUMENT, format!("trnd: {err}")))?;
-    let nu = tensor::integer_tensor_to_f64(nu)
-        .map_err(|err| trnd_error(&ERROR_INVALID_ARGUMENT, format!("trnd: {err}")))?;
-    if nu.data.iter().any(|value| value.is_nan() || *value <= 0.0) {
+    let nu_shape = nu.shape.clone();
+    let nu = tensor::tensor_into_values_f64(nu);
+    if nu.iter().any(|value| value.is_nan() || *value <= 0.0) {
         return Err(trnd_error(
             &ERROR_INVALID_ARGUMENT,
             "trnd: nu must contain positive degrees of freedom",
@@ -140,17 +216,17 @@ async fn parse_args(args: Vec<Value>) -> BuiltinResult<(Tensor, Vec<usize>)> {
     }
 
     let shape = if args.len() == 1 {
-        normalize_shape(nu.shape.clone())
+        normalize_shape(nu_shape.clone())
     } else {
         parse_shape_args(&args[1..]).await?
     };
-    if nu.data.len() != 1 && normalize_shape(nu.shape.clone()) != shape {
+    if nu.len() != 1 && normalize_shape(nu_shape) != shape {
         return Err(trnd_error(
             &ERROR_INVALID_ARGUMENT,
             "trnd: requested size must match non-scalar nu",
         ));
     }
-    Ok((nu, shape))
+    Ok((nu, shape, output_precision, gpu_source))
 }
 
 async fn parse_shape_args(rest: &[Value]) -> BuiltinResult<Vec<usize>> {
@@ -204,10 +280,8 @@ mod tests {
         random::reset_rng();
     }
 
-    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
-        tensor
+    fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        Tensor::new_integer(storage, shape).expect("integer tensor")
     }
 
     #[test]
@@ -267,7 +341,7 @@ mod tests {
     fn trnd_reads_typed_integer_nu_and_size_exactly() {
         let _guard = random::test_lock().lock().unwrap();
         reset();
-        let nu = poisoned_int_tensor(IntegerStorage::U16(vec![5, 6, 7]), vec![3, 1]);
+        let nu = integer_tensor(IntegerStorage::U16(vec![5, 6, 7]), vec![3, 1]);
         let out = block_on(trnd_builtin(vec![Value::Tensor(nu)])).expect("trnd");
         match out {
             Value::Tensor(tensor) => {
@@ -277,14 +351,52 @@ mod tests {
             other => panic!("expected tensor, got {other:?}"),
         }
 
-        let nu = poisoned_int_tensor(IntegerStorage::I16(vec![5]), vec![1, 1]);
-        let size = poisoned_int_tensor(IntegerStorage::U64(vec![2, 3]), vec![1, 2]);
+        let nu = integer_tensor(IntegerStorage::I16(vec![5]), vec![1, 1]);
+        let size = integer_tensor(IntegerStorage::U64(vec![2, 3]), vec![1, 2]);
         let out =
             block_on(trnd_builtin(vec![Value::Tensor(nu), Value::Tensor(size)])).expect("trnd");
         match out {
             Value::Tensor(tensor) => assert_eq!(tensor.shape, vec![2, 3]),
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn trnd_preserves_native_single_output() {
+        let _guard = random::test_lock().lock().unwrap();
+        reset();
+        let nu = Tensor::from_f32(vec![5.0, 6.0], vec![2, 1]).unwrap();
+        let out = block_on(trnd_builtin(vec![Value::Tensor(nu)])).expect("single trnd");
+        let Value::Tensor(tensor) = out else {
+            panic!("expected native-single tensor");
+        };
+        assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
+        assert_eq!(tensor.shape, vec![2, 1]);
+        assert!(tensor
+            .materialize_f64()
+            .iter()
+            .all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn trnd_gpu_input_returns_resident_output_with_matching_precision() {
+        let _guard = random::test_lock().lock().unwrap();
+        reset();
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let nu = Tensor::from_f32(vec![5.0, 6.0], vec![2, 1]).unwrap();
+            let input = gpu_helpers::upload_tensor(provider, &nu).expect("upload single parameter");
+            runmat_accelerate_api::set_handle_precision(&input, ProviderPrecision::F32);
+            let out = block_on(trnd_builtin(vec![Value::GpuTensor(input)]))
+                .expect("resident single trnd");
+            let Value::GpuTensor(handle) = out else {
+                panic!("expected resident GPU output");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&handle),
+                Some(ProviderPrecision::F32)
+            );
+            assert_eq!(handle.shape, vec![2, 1]);
+        });
     }
 
     #[test]
