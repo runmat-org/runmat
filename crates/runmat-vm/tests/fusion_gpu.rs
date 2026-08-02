@@ -2967,7 +2967,7 @@ fn mod_real_expected(a: f64, b: f64) -> f64 {
         return f64::NAN;
     }
     if b == 0.0 {
-        return f64::NAN;
+        return a;
     }
     if !a.is_finite() && b.is_finite() {
         return f64::NAN;

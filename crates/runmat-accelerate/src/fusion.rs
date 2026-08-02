@@ -2978,9 +2978,10 @@ fn builtin_expr(
             let rhs = exprs.get(inputs.get(1)?).cloned()?;
             // When rhs is infinite and lhs is finite, MATLAB sign-corrects: returns lhs when
             // signs match, rhs (±Inf) when they differ. The general formula produces NaN here
-            // (inf * 0 = NaN), so we must short-circuit.
+            // (inf * 0 = NaN), so we must short-circuit. A zero divisor is a separate
+            // documented convention: mod(lhs, 0) returns lhs.
             return Some(format!(
-                "select(({lhs} - {rhs} * floor({lhs} / {rhs})), select({rhs}, {lhs}, ({lhs} == 0.0 || sign({lhs}) == sign({rhs}))), (isInf({rhs}) && isFinite({lhs})))"
+                "select(select(({lhs} - {rhs} * floor({lhs} / {rhs})), select({rhs}, {lhs}, ({lhs} == 0.0 || sign({lhs}) == sign({rhs}))), (isInf({rhs}) && isFinite({lhs}))), {lhs}, ({rhs} == 0.0))"
             ));
         }
         "rem" => {

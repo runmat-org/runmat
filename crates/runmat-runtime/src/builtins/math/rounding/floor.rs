@@ -1,10 +1,10 @@
 //! MATLAB-compatible `floor` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
+    CharArray, ComplexTensor, NumericDType, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -262,23 +262,35 @@ fn floor_numeric(value: Value, strategy: FloorStrategy) -> BuiltinResult<Value> 
     Ok(tensor::tensor_into_value(floored))
 }
 
-fn floor_tensor(mut tensor: Tensor, strategy: FloorStrategy) -> BuiltinResult<Tensor> {
-    if tensor.integer_storage().is_some() {
-        if matches!(strategy, FloorStrategy::Integer) {
-            return Ok(tensor);
-        }
-        let shape = tensor.shape.clone();
-        let data = tensor::tensor_into_values_f64(tensor)
-            .into_iter()
-            .map(|value| apply_floor_scalar(value, strategy))
-            .collect::<Vec<_>>();
-        return Tensor::new(data, shape)
-            .map_err(|err| builtin_error_with_detail(&FLOOR_ERROR_INTERNAL, err));
-    }
-    for value in &mut tensor.data {
-        *value = apply_floor_scalar(*value, strategy);
-    }
-    Ok(tensor)
+fn floor_tensor(tensor: Tensor, strategy: FloorStrategy) -> BuiltinResult<Tensor> {
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|err| builtin_error_with_detail(&FLOOR_ERROR_INTERNAL, err))?;
+    let output = match storage {
+        NumericStorage::F64(values) => NumericStorage::F64(
+            values
+                .into_iter()
+                .map(|value| apply_floor_scalar(value, strategy))
+                .collect(),
+        ),
+        NumericStorage::F32(values) => NumericStorage::F32(
+            values
+                .into_iter()
+                .map(|value| apply_floor_scalar(f64::from(value), strategy) as f32)
+                .collect(),
+        ),
+        integer if matches!(strategy, FloorStrategy::Integer) => integer,
+        integer => NumericStorage::F64(
+            integer
+                .materialize_f64()
+                .into_iter()
+                .map(|value| apply_floor_scalar(value, strategy))
+                .collect(),
+        ),
+    };
+    Tensor::from_numeric_storage(output, shape)
+        .map_err(|err| builtin_error_with_detail(&FLOOR_ERROR_INTERNAL, err))
 }
 
 fn floor_complex_tensor(ct: ComplexTensor, strategy: FloorStrategy) -> BuiltinResult<Value> {
@@ -549,13 +561,12 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
         Value::Tensor(tensor) => {
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider
-                .upload(&view)
+            let dtype = tensor.numeric_dtype();
+            let handle = gpu_helpers::upload_tensor(provider, &tensor)
                 .map_err(|e| builtin_error_with_detail(&FLOOR_ERROR_INTERNAL, e.to_string()))?;
+            if dtype == NumericDType::F32 {
+                runmat_accelerate_api::set_handle_precision(&handle, ProviderPrecision::F32);
+            }
             Ok(Value::GpuTensor(handle))
         }
         Value::Num(n) => {
@@ -607,6 +618,17 @@ pub(crate) mod tests {
             error.message().contains(needle),
             "unexpected error: {}",
             error.message()
+        );
+    }
+
+    #[test]
+    fn floor_tensor_preserves_native_single_storage() {
+        let input = Tensor::from_f32(vec![1.75, -1.25], vec![1, 2]).unwrap();
+        let output = floor_tensor(input, FloorStrategy::Integer).unwrap();
+
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![1.0, -2.0])
         );
     }
 

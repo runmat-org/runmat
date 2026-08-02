@@ -4,7 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
+    ComplexTensor, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -245,16 +245,25 @@ fn rem_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 fn compute_rem_real(a: &Tensor, b: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&a.shape, &b.shape)
         .map_err(|err| rem_error_with_detail(&REM_ERROR_SIZE_MISMATCH, err))?;
+    let dtype = if a.numeric_dtype() == NumericDType::F32 && b.numeric_dtype() == NumericDType::F32
+    {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
+    };
     if plan.is_empty() {
-        let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
+        let tensor = Tensor::new_with_dtype(Vec::new(), plan.output_shape().to_vec(), dtype)
             .map_err(|e| rem_error_with_detail(&REM_ERROR_INTERNAL, e))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
     let mut result = vec![0.0f64; plan.len()];
     for (out_idx, idx_a, idx_b) in plan.iter() {
-        result[out_idx] = rem_real_scalar(a.data[idx_a], b.data[idx_b]);
+        result[out_idx] = rem_real_scalar(
+            tensor::tensor_value_f64(a, idx_a),
+            tensor::tensor_value_f64(b, idx_b),
+        );
     }
-    let tensor = Tensor::new(result, plan.output_shape().to_vec())
+    let tensor = Tensor::new_with_dtype(result, plan.output_shape().to_vec(), dtype)
         .map_err(|e| rem_error_with_detail(&REM_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))
 }
@@ -467,6 +476,30 @@ pub(crate) mod tests {
 
     fn rem_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
         block_on(super::rem_builtin(lhs, rhs))
+    }
+
+    #[test]
+    fn rem_real_arrays_preserve_native_single_storage_including_empty() {
+        let lhs = Tensor::from_f32(vec![5.5, -5.5], vec![1, 2]).unwrap();
+        let rhs = Tensor::from_f32(vec![2.0, 2.0], vec![1, 2]).unwrap();
+        let output = compute_rem_real(&lhs, &rhs).unwrap();
+        let Value::Tensor(output) = output else {
+            panic!("expected native-single tensor")
+        };
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            runmat_builtins::NumericStorage::F32(vec![1.5, -1.5])
+        );
+
+        let lhs = Tensor::from_f32(Vec::new(), vec![0, 2]).unwrap();
+        let rhs = Tensor::from_f32(Vec::new(), vec![0, 2]).unwrap();
+        let Value::Tensor(output) = compute_rem_real(&lhs, &rhs).unwrap() else {
+            panic!("expected empty native-single tensor")
+        };
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            runmat_builtins::NumericStorage::F32(Vec::new())
+        );
     }
 
     fn assert_error_contains(error: RuntimeError, needle: &str) {

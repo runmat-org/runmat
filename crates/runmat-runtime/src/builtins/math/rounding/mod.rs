@@ -6,11 +6,11 @@ pub(crate) mod floor;
 pub(crate) mod rem;
 pub(crate) mod round;
 
-use runmat_accelerate_api::GpuTensorHandle;
+use runmat_accelerate_api::{GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
+    ComplexTensor, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -55,7 +55,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     workgroup_size: None,
     accepts_nan_mode: false,
     notes:
-        "Providers can keep mod on-device by composing elem_div → unary_floor → elem_mul → elem_sub for matching shapes. Future backends may expose a dedicated elem_mod hook.",
+        "Native integer providers may execute exact mod directly; floating fallback gathers and reuploads when a dedicated semantically complete provider hook is unavailable.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::rounding")]
@@ -71,12 +71,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
                 .first()
                 .ok_or(FusionError::MissingInput(0))?;
             let b = ctx.inputs.get(1).ok_or(FusionError::MissingInput(1))?;
-            Ok(format!("{a} - {b} * floor({a} / {b})"))
+            Ok(format!(
+                "select({a} - {b} * floor({a} / {b}), {a}, {b} == 0.0)"
+            ))
         },
     }),
     reduction: None,
     emits_nan: true,
-    notes: "Fusion generates floor(a / b) followed by a - b * q; providers may substitute specialised kernels when available.",
+    notes: "Fusion applies a - b * floor(a / b), including the documented mod(a, 0) = a convention; providers may substitute specialised kernels when available.",
 };
 
 const BUILTIN_NAME: &str = "mod";
@@ -194,41 +196,35 @@ async fn mod_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<V
                 return Ok(gpu_helpers::resident_gpu_value(out));
             }
         }
-    } else if a.device_id == b.device_id {
-        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&a) {
-            if a.shape == b.shape {
-                if let Ok(div) = provider.elem_div(&a, &b).await {
-                    match provider.unary_floor(&div).await {
-                        Ok(floored) => match provider.elem_mul(&b, &floored).await {
-                            Ok(mul) => match provider.elem_sub(&a, &mul).await {
-                                Ok(out) => {
-                                    let _ = provider.free(&div);
-                                    let _ = provider.free(&floored);
-                                    let _ = provider.free(&mul);
-                                    return Ok(gpu_helpers::resident_gpu_value(out));
-                                }
-                                Err(_) => {
-                                    let _ = provider.free(&mul);
-                                    let _ = provider.free(&floored);
-                                    let _ = provider.free(&div);
-                                }
-                            },
-                            Err(_) => {
-                                let _ = provider.free(&floored);
-                                let _ = provider.free(&div);
-                            }
-                        },
-                        Err(_) => {
-                            let _ = provider.free(&div);
-                        }
-                    }
-                }
-            }
-        }
     }
     let left = gpu_helpers::gather_tensor_async(&a).await?;
     let right = gpu_helpers::gather_tensor_async(&b).await?;
-    mod_host(Value::Tensor(left), Value::Tensor(right))
+    let result = mod_host(Value::Tensor(left), Value::Tensor(right))?;
+    if a.device_id == b.device_id {
+        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&a) {
+            return upload_mod_result(provider, result);
+        }
+    }
+    Ok(result)
+}
+
+fn upload_mod_result(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    value: Value,
+) -> BuiltinResult<Value> {
+    let tensor = match value {
+        Value::Tensor(tensor) => tensor,
+        Value::Num(value) => Tensor::new(vec![value], vec![1, 1])
+            .map_err(|err| mod_error_with_detail(&MOD_ERROR_INTERNAL, err))?,
+        other => return Ok(other),
+    };
+    let dtype = tensor.numeric_dtype();
+    let handle = gpu_helpers::upload_tensor(provider, &tensor)
+        .map_err(|err| mod_error_with_detail(&MOD_ERROR_INTERNAL, err))?;
+    if dtype == NumericDType::F32 {
+        runmat_accelerate_api::set_handle_precision(&handle, ProviderPrecision::F32);
+    }
+    Ok(gpu_helpers::resident_gpu_value(handle))
 }
 
 fn mod_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
@@ -251,18 +247,24 @@ fn mod_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 fn compute_mod_real(a: &Tensor, b: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&a.shape, &b.shape)
         .map_err(|err| mod_error_with_detail(&MOD_ERROR_SIZE_MISMATCH, err))?;
+    let dtype = if a.numeric_dtype() == NumericDType::F32 && b.numeric_dtype() == NumericDType::F32
+    {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
+    };
     if plan.is_empty() {
-        let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
+        let tensor = Tensor::new_with_dtype(Vec::new(), plan.output_shape().to_vec(), dtype)
             .map_err(|e| mod_error_with_detail(&MOD_ERROR_INTERNAL, e))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
     let mut result = vec![0.0f64; plan.len()];
     for (out_idx, idx_a, idx_b) in plan.iter() {
-        let aval = a.data[idx_a];
-        let bval = b.data[idx_b];
+        let aval = tensor::tensor_value_f64(a, idx_a);
+        let bval = tensor::tensor_value_f64(b, idx_b);
         result[out_idx] = mod_real_scalar(aval, bval);
     }
-    let tensor = Tensor::new(result, plan.output_shape().to_vec())
+    let tensor = Tensor::new_with_dtype(result, plan.output_shape().to_vec(), dtype)
         .map_err(|e| mod_error_with_detail(&MOD_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))
 }
@@ -291,7 +293,7 @@ fn mod_real_scalar(a: f64, b: f64) -> f64 {
         return f64::NAN;
     }
     if b == 0.0 {
-        return f64::NAN;
+        return a;
     }
     if !a.is_finite() && b.is_finite() {
         return f64::NAN;
@@ -491,6 +493,30 @@ pub(crate) mod tests {
         block_on(super::mod_builtin(lhs, rhs))
     }
 
+    #[test]
+    fn mod_real_arrays_preserve_native_single_storage_including_empty() {
+        let lhs = Tensor::from_f32(vec![5.5, -5.5], vec![1, 2]).unwrap();
+        let rhs = Tensor::from_f32(vec![2.0, 2.0], vec![1, 2]).unwrap();
+        let output = compute_mod_real(&lhs, &rhs).unwrap();
+        let Value::Tensor(output) = output else {
+            panic!("expected native-single tensor")
+        };
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            runmat_builtins::NumericStorage::F32(vec![1.5, 0.5])
+        );
+
+        let lhs = Tensor::from_f32(Vec::new(), vec![0, 2]).unwrap();
+        let rhs = Tensor::from_f32(Vec::new(), vec![0, 2]).unwrap();
+        let Value::Tensor(output) = compute_mod_real(&lhs, &rhs).unwrap() else {
+            panic!("expected empty native-single tensor")
+        };
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            runmat_builtins::NumericStorage::F32(Vec::new())
+        );
+    }
+
     fn assert_error_contains(error: RuntimeError, needle: &str) {
         assert!(
             error.message().contains(needle),
@@ -592,11 +618,11 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn mod_zero_divisor_returns_nan() {
+    fn mod_zero_divisor_returns_dividend() {
         let result = mod_builtin(Value::Num(3.0), Value::Num(0.0)).expect("mod");
         match result {
-            Value::Num(v) => assert!(v.is_nan()),
-            other => panic!("expected NaN, got {other:?}"),
+            Value::Num(v) => assert_eq!(v, 3.0),
+            other => panic!("expected dividend, got {other:?}"),
         }
     }
 
