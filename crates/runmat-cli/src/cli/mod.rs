@@ -15,5 +15,5 @@ pub use remote::{
     RemoteCommand,
 };
 pub use root::{Cli, CliOverrideSources, Commands, ConfigCommand, ConfigFormat, GcCommand};
-pub use test::{TestArgs, TestIsolationArg, TestReportArg};
+pub use test::{TestArgs, TestCoverageFormatArg, TestIsolationArg, TestReportArg};
 pub use value_types::{CaptureFiguresMode, ColorMode, FigureSize, GcPreset, LogLevel, OptLevel};

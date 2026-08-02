@@ -53,10 +53,23 @@ pub enum TestEventPayload {
         attempt: u32,
         artifact: Artifact,
     },
+    Plugin {
+        plugin: String,
+        hook: String,
+        status: PluginStatus,
+        message: Option<String>,
+    },
     TestFinished {
         result: AttemptResult,
     },
     RunFinished {
         result: RunResult,
     },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginStatus {
+    Completed,
+    Failed,
 }

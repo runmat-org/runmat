@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use futures::stream::{self, StreamExt};
+use runmat_test::coverage::{merge_aggregates, merge_coverage, CoverageAggregate};
 use runmat_test::event::TestEventPayload;
 use runmat_test::identity::TestId;
 use runmat_test::plan::TestPlan;
@@ -55,7 +56,9 @@ pub struct CoordinatedRun {
     pub events: Vec<runmat_test::event::TestEvent>,
     pub reports: Vec<RenderedReport>,
     pub infrastructure_failures: usize,
+    pub plugin_failures: usize,
     pub isolation: IsolationMode,
+    pub coverage: CoverageAggregate,
 }
 
 #[derive(Clone, Debug)]
@@ -194,9 +197,11 @@ impl Coordinator {
 
         let mut tests = Vec::new();
         let mut infrastructure_failures = 0;
+        let mut coverage = Vec::new();
         for (_, run) in runs {
             infrastructure_failures += run.infrastructure_failures;
             tests.extend(run.result.tests);
+            coverage.push(run.coverage);
             for event in run.events {
                 if !matches!(
                     event.payload,
@@ -212,6 +217,8 @@ impl Coordinator {
         })?;
         let events = state.finish();
         let reports = reporters.finish(&result)?;
+        let coverage =
+            merge_aggregates(coverage).map_err(|error| RunnerError::Protocol(error.to_string()))?;
         telemetry.event(
             "test.run.finished",
             &TelemetryFields::default()
@@ -223,7 +230,9 @@ impl Coordinator {
             events,
             reports,
             infrastructure_failures,
+            plugin_failures: 0,
             isolation,
+            coverage,
         })
     }
 
@@ -250,6 +259,7 @@ impl Coordinator {
         let mut results = Vec::new();
         let mut infrastructure_failures = 0;
         let mut abort_reason = None;
+        let mut coverage = Vec::new();
 
         telemetry.event(
             "test.run.started",
@@ -339,7 +349,12 @@ impl Coordinator {
                     .await;
                     let (execution, infrastructure_failure, lost_session) = match race {
                         ExecutionRace::Completed(Ok(execution)) => {
-                            validate_execution(&test_id, attempt_number, &execution)?;
+                            validate_execution(
+                                &test_id,
+                                attempt_number,
+                                &plan.program_revision.canonical_identity(),
+                                &execution,
+                            )?;
                             (execution, false, false)
                         }
                         ExecutionRace::Completed(Err(error)) => {
@@ -360,6 +375,7 @@ impl Coordinator {
                                 WorkerExecution {
                                     result: attempt,
                                     events: Vec::new(),
+                                    coverage: Vec::new(),
                                 },
                                 true,
                                 true,
@@ -404,6 +420,7 @@ impl Coordinator {
                     if lost_session {
                         session = None;
                     }
+                    coverage.extend(execution.coverage.iter().cloned());
                     for event in execution.events {
                         state.forward(event)?;
                     }
@@ -448,6 +465,8 @@ impl Coordinator {
         })?;
         let events = state.finish();
         let reports = reporters.finish(&result)?;
+        let coverage =
+            merge_coverage(coverage).map_err(|error| RunnerError::Protocol(error.to_string()))?;
         telemetry.event(
             "test.run.finished",
             &TelemetryFields::default()
@@ -459,7 +478,9 @@ impl Coordinator {
             events,
             reports,
             infrastructure_failures,
+            plugin_failures: 0,
             isolation,
+            coverage,
         })
     }
 }
@@ -485,12 +506,23 @@ fn group_submission(submission: &RunSubmission, group: &super::queue::GroupQueue
 fn validate_execution(
     test_id: &TestId,
     attempt: u32,
+    program_revision: &str,
     execution: &WorkerExecution,
 ) -> RunnerResult<()> {
     if execution.result.test_id != *test_id || execution.result.attempt != attempt {
         return Err(RunnerError::Protocol(format!(
             "worker completed the wrong test or attempt for '{}'",
             test_id.as_str()
+        )));
+    }
+    if let Some(fragment) = execution
+        .coverage
+        .iter()
+        .find(|fragment| fragment.program_revision != program_revision)
+    {
+        return Err(RunnerError::Protocol(format!(
+            "worker coverage revision '{}' does not match plan revision '{}'",
+            fragment.program_revision, program_revision
         )));
     }
     Ok(())

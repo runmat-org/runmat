@@ -1,12 +1,14 @@
 mod common;
 
 use futures::executor::block_on;
+use runmat_test::coverage::{CoverageFragment, CoverageMetric, CoverageSite};
 use runmat_test::identity::FixtureGroupId;
 use runmat_test::result::TerminalDisposition;
 use runmat_test_runner::host::NeverCancelled;
 use runmat_test_runner::reporter::ReporterFanout;
 use runmat_test_runner::telemetry::NoopTelemetry;
-use runmat_test_runner::{Coordinator, CoordinatorConfig};
+use runmat_test_runner::{Coordinator, CoordinatorConfig, RunnerError};
+use std::collections::BTreeMap;
 
 use common::{passed, plan, FakeBackend, PendingClock, Step};
 
@@ -88,4 +90,50 @@ fn parallel_jobs_allocate_independent_fixture_group_sessions() {
         backend.executions.borrow()[0].0,
         backend.executions.borrow()[1].0
     );
+}
+
+#[test]
+fn rejects_coverage_from_a_different_program_revision() {
+    let submission = plan(&["covered"]);
+    let test_id = submission.plan.tests().next().unwrap().id.clone();
+    let mut execution = passed(test_id, 1);
+    execution.coverage.push(CoverageFragment {
+        program_revision: "stale-program".into(),
+        plan_revision: "executable".into(),
+        sites: vec![CoverageSite {
+            id: "site".into(),
+            counter_key: 1,
+            metric: CoverageMetric::Statement,
+            owner_identity: "root".into(),
+            relative_path: "tests/sample.m".into(),
+            semantic_path: "covered".into(),
+            source_id: 0,
+            start_byte: 0,
+            end_byte: 1,
+            start_line: 1,
+            start_column: 1,
+            end_line: 1,
+            end_column: 2,
+            instrumented: true,
+            unsupported_reason: None,
+        }],
+        counts: BTreeMap::from([(1, 1)]),
+    });
+    let backend = FakeBackend::new([Step::Result(Ok(execution))]);
+    let mut reporters = ReporterFanout::default();
+
+    let error = block_on(Coordinator::new(CoordinatorConfig::default()).unwrap().run(
+        submission,
+        &backend,
+        &PendingClock,
+        &NeverCancelled,
+        &NoopTelemetry,
+        &mut reporters,
+    ))
+    .unwrap_err();
+
+    assert!(matches!(
+        error,
+        RunnerError::Protocol(message) if message.contains("stale-program")
+    ));
 }

@@ -1,6 +1,7 @@
 #![cfg(target_arch = "wasm32")]
 
 use js_sys::{Object, Promise, Reflect};
+use runmat_test::coverage::{CoverageFragment, CoverageMetric, CoverageSite};
 use runmat_test::descriptor::{
     ProcedureDescriptor, ProcedureKind, SourceDescriptor, SourceSpan, TestDescriptor,
 };
@@ -17,26 +18,31 @@ use wasm_bindgen_test::wasm_bindgen_test;
 #[wasm_bindgen_test]
 async fn portable_coordinator_runs_through_the_javascript_backend_port() {
     let (plan, snapshot, test_id) = fixture();
+    let program_revision = plan.program_revision.canonical_identity();
     let input = to_js(&serde_json::json!({
         "plan": plan,
         "snapshot": snapshot,
         "options": {
             "isolation": "session",
             "jobs": 1,
-            "reports": ["json"]
+            "reports": ["json"],
+            "coverage": {
+                "formats": ["json", "lcov"]
+            }
         }
     }));
-    let backend = fake_backend(test_id);
+    let backend = fake_backend(test_id, program_revision);
     let output = runmat_wasm::run_tests(input, backend).await.unwrap();
     let value: serde_json::Value = serde_wasm_bindgen::from_value(output).unwrap();
 
     assert_eq!(value["result"]["state"]["disposition"], "passed");
     assert_eq!(value["result"]["tests"].as_array().unwrap().len(), 1);
-    assert_eq!(value["reports"].as_array().unwrap().len(), 1);
+    assert_eq!(value["reports"].as_array().unwrap().len(), 3);
+    assert_eq!(value["coverage"]["counts"]["site"], 1);
     assert_eq!(value["isolation"], "session");
 }
 
-fn fake_backend(test_id: TestId) -> JsValue {
+fn fake_backend(test_id: TestId, program_revision: String) -> JsValue {
     let backend = Object::new();
     set_function(
         &backend,
@@ -71,6 +77,28 @@ fn fake_backend(test_id: TestId) -> JsValue {
                     abort_run: false,
                 },
                 events: Vec::new(),
+                coverage: vec![CoverageFragment {
+                    program_revision: program_revision.clone(),
+                    plan_revision: "sha256:fake-plan".into(),
+                    sites: vec![CoverageSite {
+                        id: "site".into(),
+                        counter_key: 1,
+                        metric: CoverageMetric::Statement,
+                        owner_identity: "root".into(),
+                        relative_path: "src/example.m".into(),
+                        semantic_path: "example".into(),
+                        source_id: 0,
+                        start_byte: 0,
+                        end_byte: 1,
+                        start_line: 1,
+                        start_column: 1,
+                        end_line: 1,
+                        end_column: 2,
+                        instrumented: true,
+                        unsupported_reason: None,
+                    }],
+                    counts: std::collections::BTreeMap::from([(1, 1)]),
+                }],
             };
             Promise::resolve(&to_js(&execution))
         }) as Box<dyn Fn(JsValue, JsValue) -> Promise>),

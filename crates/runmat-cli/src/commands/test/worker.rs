@@ -26,6 +26,7 @@ pub async fn run_stdio() -> Result<()> {
             WorkerCapability::StrongIsolation,
             WorkerCapability::CapturedOutput,
             WorkerCapability::Artifacts,
+            WorkerCapability::Coverage,
         ],
     );
     let first = read_request(&mut input, local.limits)
@@ -148,6 +149,7 @@ pub async fn run_stdio() -> Result<()> {
                             &mut output,
                             &WorkerResponse::Completed {
                                 result: attempt.result,
+                                coverage: attempt.coverage,
                             },
                             limits,
                         )

@@ -8,6 +8,7 @@ pub struct ProtocolLimits {
     pub max_output_bytes_per_attempt: u32,
     pub max_diagnostics_per_attempt: u32,
     pub max_artifacts_per_attempt: u32,
+    pub max_coverage_sites_per_attempt: u32,
 }
 
 impl Default for ProtocolLimits {
@@ -19,6 +20,7 @@ impl Default for ProtocolLimits {
             max_output_bytes_per_attempt: 1024 * 1024,
             max_diagnostics_per_attempt: 10_000,
             max_artifacts_per_attempt: 1_000,
+            max_coverage_sites_per_attempt: 1_000_000,
         }
     }
 }

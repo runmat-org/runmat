@@ -44,6 +44,7 @@ impl ProcessBackend {
                 WorkerCapability::StrongIsolation,
                 WorkerCapability::CapturedOutput,
                 WorkerCapability::Artifacts,
+                WorkerCapability::Coverage,
             ],
         );
         let host = HostCapabilities::new([IsolationMode::Process], config.max_workers)
@@ -279,8 +280,12 @@ impl WorkerBackend for ProcessBackend {
                     .map_err(native_backend_error)?
                 {
                     WorkerResponse::Event { event } => events.push(event),
-                    WorkerResponse::Completed { result } => {
-                        return Ok(Some(WorkerExecution { result, events }));
+                    WorkerResponse::Completed { result, coverage } => {
+                        return Ok(Some(WorkerExecution {
+                            result,
+                            events,
+                            coverage,
+                        }));
                     }
                     WorkerResponse::Rejected { .. } => return Ok(None),
                     response => {
@@ -347,12 +352,16 @@ async fn read_execution(
             .map_err(|error| with_stderr(native_backend_error(error), session))?
         {
             WorkerResponse::Event { event } => events.push(event),
-            WorkerResponse::Completed { result }
+            WorkerResponse::Completed { result, coverage }
                 if result.test_id == *expected_test && result.attempt == expected_attempt =>
             {
-                return Ok(WorkerExecution { result, events });
+                return Ok(WorkerExecution {
+                    result,
+                    events,
+                    coverage,
+                });
             }
-            WorkerResponse::Completed { result } => {
+            WorkerResponse::Completed { result, .. } => {
                 return Err(BackendError::new(
                     BackendErrorKind::MalformedProtocol,
                     format!(

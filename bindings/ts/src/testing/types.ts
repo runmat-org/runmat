@@ -1,5 +1,6 @@
 export type TestIsolation = "auto" | "worker" | "session" | "none";
 export type TestReportFormat = "human" | "json" | "junit" | "tap";
+export type CoverageReportFormat = "json" | "lcov" | "cobertura" | "html";
 
 export interface FrozenTestSubmission {
   plan: Record<string, unknown>;
@@ -15,6 +16,14 @@ export interface BrowserTestRunOptions {
   shardIndex?: number;
   shardCount?: number;
   reports?: TestReportFormat[];
+  coverage?: {
+    enabled?: boolean;
+    formats?: CoverageReportFormat[];
+    roots?: string[];
+    exclude?: string[];
+    includeGenerated?: boolean;
+    includeVendor?: boolean;
+  };
 }
 
 export interface BrowserTestRunInput extends FrozenTestSubmission {
@@ -40,7 +49,9 @@ export interface BrowserTestRunOutput {
   events: unknown[];
   reports: RenderedTestReport[];
   infrastructureFailures: number;
+  pluginFailures: number;
   isolation: Exclude<TestIsolation, "auto">;
+  coverage: CoverageAggregate;
 }
 
 export interface RunMatTestNative {
@@ -65,6 +76,38 @@ export interface RunMatTestSession {
 export interface WorkerExecution {
   result: unknown;
   events: unknown[];
+  coverage?: CoverageFragment[];
+}
+
+export interface CoverageFragment {
+  program_revision: string;
+  plan_revision: string;
+  sites: CoverageSite[];
+  counts: Record<string, number>;
+}
+
+export interface CoverageAggregate {
+  program_revision: string | null;
+  sites: CoverageSite[];
+  counts: Record<string, number>;
+}
+
+export interface CoverageSite {
+  id: string;
+  counter_key: string;
+  metric: "function" | "statement" | "decision" | "condition" | "mcdc_condition";
+  owner_identity: string;
+  relative_path: string;
+  semantic_path: string;
+  source_id: number;
+  start_byte: number;
+  end_byte: number;
+  start_line: number;
+  start_column: number;
+  end_line: number;
+  end_column: number;
+  instrumented: boolean;
+  unsupported_reason: string | null;
 }
 
 export interface BrowserWorkerBackendPort {

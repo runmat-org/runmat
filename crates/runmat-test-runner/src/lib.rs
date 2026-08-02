@@ -2,8 +2,10 @@
 
 pub mod artifact;
 pub mod coordinator;
+pub mod coverage;
 mod error;
 pub mod host;
+pub mod plugin;
 pub mod reporter;
 pub mod schedule;
 pub mod telemetry;

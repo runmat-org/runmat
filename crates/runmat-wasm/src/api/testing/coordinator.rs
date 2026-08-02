@@ -1,3 +1,5 @@
+use runmat_test_runner::coverage::CoverageReportFormat;
+use runmat_test_runner::plugin::{CoveragePlugin, PluginFanout};
 use runmat_test_runner::reporter::{
     HumanReporter, JsonReporter, JunitReporter, ReporterFanout, TapReporter,
 };
@@ -9,7 +11,7 @@ use crate::wire::errors::js_error;
 
 use super::backend::JsWorkerBackend;
 use super::clock::{BrowserCancellation, BrowserClock};
-use super::wire::{BrowserReport, BrowserRunInput, BrowserRunOutput};
+use super::wire::{BrowserCoverageFormat, BrowserReport, BrowserRunInput, BrowserRunOutput};
 
 /// Run a complete immutable test plan through the portable Rust coordinator.
 /// JavaScript owns only worker construction, transport, termination, and host
@@ -19,6 +21,7 @@ pub async fn run_tests(input: JsValue, backend: JsValue) -> Result<JsValue, JsVa
     let input: BrowserRunInput = serde_wasm_bindgen::from_value(input)
         .map_err(|error| js_error(&format!("Browser test input is invalid: {error}")))?;
     let report_formats = input.options.reports.clone();
+    let coverage_options = input.options.coverage.clone();
     let (submission, config) = input
         .into_parts()
         .map_err(|error| js_error(&error.to_string()))?;
@@ -35,7 +38,7 @@ pub async fn run_tests(input: JsValue, backend: JsValue) -> Result<JsValue, JsVa
             BrowserReport::Tap => reporters.push(TapReporter),
         }
     }
-    let run = coordinator
+    let mut run = coordinator
         .run(
             submission,
             &worker_backend,
@@ -46,12 +49,40 @@ pub async fn run_tests(input: JsValue, backend: JsValue) -> Result<JsValue, JsVa
         )
         .await
         .map_err(|error| js_error(&error.to_string()))?;
+    if coverage_options.is_requested() {
+        let formats = if coverage_options.formats.is_empty() {
+            vec![CoverageReportFormat::Json, CoverageReportFormat::Html]
+        } else {
+            coverage_options
+                .formats
+                .into_iter()
+                .map(|format| match format {
+                    BrowserCoverageFormat::Json => CoverageReportFormat::Json,
+                    BrowserCoverageFormat::Lcov => CoverageReportFormat::Lcov,
+                    BrowserCoverageFormat::Cobertura => CoverageReportFormat::Cobertura,
+                    BrowserCoverageFormat::Html => CoverageReportFormat::Html,
+                })
+                .collect()
+        };
+        let filter = runmat_test::coverage::CoverageFilter {
+            roots: coverage_options.roots,
+            exclude: coverage_options.exclude,
+            include_generated: coverage_options.include_generated,
+            include_vendor: coverage_options.include_vendor,
+        };
+        let mut plugins = PluginFanout::default();
+        plugins.push(CoveragePlugin::new(filter, formats));
+        plugins.apply(&mut run);
+    }
+    let coverage = run.coverage.clone();
     serde_wasm_bindgen::to_value(&BrowserRunOutput {
         result: run.result,
         events: run.events,
         reports: run.reports.into_iter().map(Into::into).collect(),
         infrastructure_failures: run.infrastructure_failures,
+        plugin_failures: run.plugin_failures,
         isolation: run.isolation,
+        coverage,
     })
     .map_err(|error| {
         js_error(&format!(

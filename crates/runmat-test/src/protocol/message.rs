@@ -31,9 +31,19 @@ pub enum WorkerRequest {
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum WorkerResponse {
     Handshake(ProtocolHandshake),
-    Ready { run_id: RunId },
-    Event { event: TestEvent },
-    Completed { result: AttemptResult },
-    Rejected { code: String, message: String },
+    Ready {
+        run_id: RunId,
+    },
+    Event {
+        event: TestEvent,
+    },
+    Completed {
+        result: AttemptResult,
+        coverage: Vec<crate::coverage::CoverageFragment>,
+    },
+    Rejected {
+        code: String,
+        message: String,
+    },
     ShutdownComplete,
 }

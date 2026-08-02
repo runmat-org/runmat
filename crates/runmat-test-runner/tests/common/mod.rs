@@ -273,6 +273,7 @@ pub fn passed(test_id: TestId, attempt: u32) -> WorkerExecution {
             abort_run: false,
         },
         events: Vec::new(),
+        coverage: Vec::new(),
     }
 }
 

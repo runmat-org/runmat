@@ -107,6 +107,7 @@ fn cancelled_execution(cancellation: &CancellationRequest, escalation: &str) -> 
             format!("test {label}: {} ({escalation})", cancellation.reason),
         ),
         events: Vec::new(),
+        coverage: Vec::new(),
     }
 }
 use futures::future::{select, Either};

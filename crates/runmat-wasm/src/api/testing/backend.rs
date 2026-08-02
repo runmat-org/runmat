@@ -43,6 +43,7 @@ impl JsWorkerBackend {
                         WorkerCapability::SessionIsolation,
                         WorkerCapability::CapturedOutput,
                         WorkerCapability::Artifacts,
+                        WorkerCapability::Coverage,
                     ],
                 ),
             },

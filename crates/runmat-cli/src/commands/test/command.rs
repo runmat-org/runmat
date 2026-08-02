@@ -1,12 +1,14 @@
 use std::collections::BTreeSet;
 
 use anyhow::{Context, Result};
-use runmat_config::project::{ProjectTestIsolation, ProjectTestReport};
+use runmat_config::project::{ProjectCoverageFormat, ProjectTestIsolation, ProjectTestReport};
 use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_test::discovery::DiscoveryDiagnosticSeverity;
 use runmat_test::result::TerminalDisposition;
 use runmat_test_runner::artifact::persist_reports;
+use runmat_test_runner::coverage::CoverageReportFormat;
 use runmat_test_runner::host::IsolationMode;
+use runmat_test_runner::plugin::{CoveragePlugin, PluginFanout};
 use runmat_test_runner::reporter::{
     HumanReporter, JsonReporter, JunitReporter, ReporterFanout, TapReporter,
 };
@@ -20,7 +22,7 @@ use runmat_test_runner_native::{
     LocalBackend, LocalBackendConfig, ProcessBackend, ProcessBackendConfig,
 };
 
-use crate::cli::{Cli, TestArgs, TestIsolationArg, TestReportArg};
+use crate::cli::{Cli, TestArgs, TestCoverageFormatArg, TestIsolationArg, TestReportArg};
 use crate::presentation;
 
 use super::discovery::prepare;
@@ -133,7 +135,7 @@ async fn execute_inner(args: TestArgs, cli: &Cli) -> Result<()> {
     };
     let submission = RunSubmission::new(plan, prepared.snapshot)?;
     let coordinator = Coordinator::new(config)?;
-    let run = match isolation {
+    let mut run = match isolation {
         IsolationMode::Auto | IsolationMode::Process => {
             let mut backend_config = ProcessBackendConfig::same_binary(
                 std::env::current_exe().context("failed to locate the runmat executable")?,
@@ -179,6 +181,53 @@ async fn execute_inner(args: TestArgs, cli: &Cli) -> Result<()> {
     };
     signal_task.abort();
 
+    if coverage_requested(&args, prepared.test_config.coverage.enabled) {
+        let coverage_config = &prepared.test_config.coverage;
+        let roots = if args.coverage_roots.is_empty() {
+            coverage_config
+                .roots
+                .iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect()
+        } else {
+            args.coverage_roots
+                .iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect()
+        };
+        let exclude = coverage_config
+            .exclude
+            .iter()
+            .chain(args.coverage_exclude.iter())
+            .cloned()
+            .collect();
+        let filter = runmat_test::coverage::CoverageFilter {
+            roots,
+            exclude,
+            include_generated: args.coverage_include_generated || coverage_config.include_generated,
+            include_vendor: args.coverage_include_vendor || coverage_config.include_vendor,
+        };
+        let formats = coverage_formats(&args, &coverage_config.formats);
+        let mut plugins = PluginFanout::default();
+        plugins.push(CoveragePlugin::new(filter, formats));
+        plugins.apply(&mut run);
+        for event in &run.events {
+            if let runmat_test::event::TestEventPayload::Plugin {
+                plugin,
+                status: runmat_test::event::PluginStatus::Failed,
+                message,
+                ..
+            } = &event.payload
+            {
+                eprintln!(
+                    "{}: plugin {plugin} failed: {}",
+                    presentation::stderr().error("Error"),
+                    message.as_deref().unwrap_or("unknown plugin failure")
+                );
+            }
+        }
+    }
+
     for report in &run.reports {
         if report.name == "test-results.txt" {
             print!("{}", String::from_utf8_lossy(&report.bytes));
@@ -204,10 +253,50 @@ async fn execute_inner(args: TestArgs, cli: &Cli) -> Result<()> {
     if run.result.state.disposition == TerminalDisposition::Cancelled {
         return Err(TestCommandError::new(130).into());
     }
-    if run.infrastructure_failures > 0 {
+    if run.infrastructure_failures > 0 || run.plugin_failures > 0 {
         return Err(TestCommandError::new(2).into());
     }
     Err(TestCommandError::new(1).into())
+}
+
+fn coverage_requested(args: &TestArgs, configured: bool) -> bool {
+    configured
+        || args.coverage
+        || !args.coverage_formats.is_empty()
+        || !args.coverage_roots.is_empty()
+        || !args.coverage_exclude.is_empty()
+        || args.coverage_include_generated
+        || args.coverage_include_vendor
+}
+
+fn coverage_formats(
+    args: &TestArgs,
+    configured: &[ProjectCoverageFormat],
+) -> Vec<CoverageReportFormat> {
+    if !args.coverage_formats.is_empty() {
+        return args
+            .coverage_formats
+            .iter()
+            .map(|format| match format {
+                TestCoverageFormatArg::Json => CoverageReportFormat::Json,
+                TestCoverageFormatArg::Lcov => CoverageReportFormat::Lcov,
+                TestCoverageFormatArg::Cobertura => CoverageReportFormat::Cobertura,
+                TestCoverageFormatArg::Html => CoverageReportFormat::Html,
+            })
+            .collect();
+    }
+    if configured.is_empty() {
+        return vec![CoverageReportFormat::Json, CoverageReportFormat::Html];
+    }
+    configured
+        .iter()
+        .map(|format| match format {
+            ProjectCoverageFormat::Json => CoverageReportFormat::Json,
+            ProjectCoverageFormat::Lcov => CoverageReportFormat::Lcov,
+            ProjectCoverageFormat::Cobertura => CoverageReportFormat::Cobertura,
+            ProjectCoverageFormat::Html => CoverageReportFormat::Html,
+        })
+        .collect()
 }
 
 async fn run_coordinator<B>(

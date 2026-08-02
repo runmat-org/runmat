@@ -6,4 +6,6 @@ use serde::{Deserialize, Serialize};
 pub struct WorkerExecution {
     pub result: AttemptResult,
     pub events: Vec<TestEvent>,
+    #[serde(default)]
+    pub coverage: Vec<runmat_test::coverage::CoverageFragment>,
 }

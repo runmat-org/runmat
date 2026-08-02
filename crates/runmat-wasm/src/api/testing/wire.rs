@@ -48,6 +48,7 @@ pub(super) struct BrowserRunOptions {
     pub shard_index: Option<u32>,
     pub shard_count: Option<u32>,
     pub reports: Vec<BrowserReport>,
+    pub coverage: BrowserCoverageOptions,
 }
 
 impl Default for BrowserRunOptions {
@@ -61,6 +62,7 @@ impl Default for BrowserRunOptions {
             shard_index: None,
             shard_count: None,
             reports: vec![BrowserReport::Human],
+            coverage: BrowserCoverageOptions::default(),
         }
     }
 }
@@ -74,6 +76,37 @@ pub(super) enum BrowserReport {
     Tap,
 }
 
+#[derive(Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+pub(super) struct BrowserCoverageOptions {
+    pub enabled: bool,
+    pub formats: Vec<BrowserCoverageFormat>,
+    pub roots: Vec<String>,
+    pub exclude: Vec<String>,
+    pub include_generated: bool,
+    pub include_vendor: bool,
+}
+
+impl BrowserCoverageOptions {
+    pub fn is_requested(&self) -> bool {
+        self.enabled
+            || !self.formats.is_empty()
+            || !self.roots.is_empty()
+            || !self.exclude.is_empty()
+            || self.include_generated
+            || self.include_vendor
+    }
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(super) enum BrowserCoverageFormat {
+    Json,
+    Lcov,
+    Cobertura,
+    Html,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct BrowserRunOutput {
@@ -81,7 +114,9 @@ pub(super) struct BrowserRunOutput {
     pub events: Vec<runmat_test::event::TestEvent>,
     pub reports: Vec<RenderedReportWire>,
     pub infrastructure_failures: usize,
+    pub plugin_failures: usize,
     pub isolation: IsolationMode,
+    pub coverage: runmat_test::coverage::CoverageAggregate,
 }
 
 #[derive(Serialize)]

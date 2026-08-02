@@ -43,6 +43,22 @@ impl ProjectTestConfig {
                 }
             }
         }
+        for path in &self.coverage.roots {
+            if !is_relative_without_parent(path) {
+                messages.push(format!(
+                    "[test.coverage].roots entries must be relative and cannot contain `..`: {}",
+                    path.display()
+                ));
+            }
+        }
+        if self
+            .coverage
+            .exclude
+            .iter()
+            .any(|pattern| pattern.trim().is_empty())
+        {
+            messages.push("[test.coverage].exclude entries must be non-empty".into());
+        }
         if self.jobs == Some(0) {
             messages.push("[test].jobs must be greater than zero".into());
         }
@@ -143,6 +159,10 @@ pub struct ProjectTestCoverage {
     pub formats: Vec<ProjectCoverageFormat>,
     pub roots: Vec<PathBuf>,
     pub exclude: Vec<String>,
+    #[serde(rename = "include-generated")]
+    pub include_generated: bool,
+    #[serde(rename = "include-vendor")]
+    pub include_vendor: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -220,6 +240,8 @@ enabled = true
 formats = ["json", "lcov", "cobertura", "html"]
 roots = ["src"]
 exclude = ["vendor/**"]
+include-generated = false
+include-vendor = false
 
 [test.shard]
 index = 1

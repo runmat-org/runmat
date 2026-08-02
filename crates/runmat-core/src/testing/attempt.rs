@@ -22,6 +22,7 @@ use super::source_catalog::TestSourceCatalog;
 pub struct CoreTestAttempt {
     pub result: AttemptResult,
     pub events: Vec<TestEvent>,
+    pub coverage: Vec<runmat_test::coverage::CoverageFragment>,
 }
 
 struct AtomicCancellation(Arc<AtomicBool>);
@@ -119,6 +120,7 @@ impl RunMatSession {
         };
         let mut events = Vec::new();
         let mut sink = SequencedEventSink::new(plan.run_id.clone(), &mut events);
+        let coverage = runmat_vm::coverage::CoverageSession::start();
         let outcome = lifecycle
             .execute(
                 &case,
@@ -128,9 +130,11 @@ impl RunMatSession {
             )
             .await;
         drop(sink);
+        let coverage = executor.coverage_fragments(&coverage.counts());
         Ok(CoreTestAttempt {
             result: outcome.attempt,
             events,
+            coverage,
         })
     }
 }

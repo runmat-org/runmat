@@ -20,6 +20,7 @@ pub struct CoreTestRun {
     pub plan: runmat_test::plan::TestPlan,
     pub results: Vec<TestResult>,
     pub events: Vec<TestEvent>,
+    pub coverage: Vec<runmat_test::coverage::CoverageFragment>,
 }
 
 impl RunMatSession {
@@ -50,6 +51,7 @@ impl RunMatSession {
         let mut sink = SequencedEventSink::new(plan.run_id.clone(), &mut events);
         let mut results = Vec::new();
         let mut abort_run = false;
+        let coverage = runmat_vm::coverage::CoverageSession::start();
 
         sink.emit(TestEventPayload::RunStarted);
         'suites: for suite in &plan.suites {
@@ -110,10 +112,12 @@ impl RunMatSession {
         };
         sink.emit(TestEventPayload::RunFinished { result: run_result });
         drop(sink);
+        let coverage = executor.coverage_fragments(&coverage.counts());
         Ok(CoreTestRun {
             plan,
             results,
             events,
+            coverage,
         })
     }
 }

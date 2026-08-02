@@ -63,7 +63,10 @@ impl LocalBackend {
                 host,
                 handshake: runmat_test::protocol::ProtocolHandshake::current(
                     "runmat-native-local-coordinator",
-                    Vec::new(),
+                    vec![
+                        runmat_test::protocol::WorkerCapability::CapturedOutput,
+                        runmat_test::protocol::WorkerCapability::Coverage,
+                    ],
                 ),
             },
             shared_none: Mutex::new(None),
@@ -357,6 +360,7 @@ fn worker_loop(
                     .map(|attempt| WorkerExecution {
                         result: attempt.result,
                         events: attempt.events,
+                        coverage: attempt.coverage,
                     })
                     .map_err(|error| rejected(error.to_string()));
                 let _ = result.send(Some(completed));

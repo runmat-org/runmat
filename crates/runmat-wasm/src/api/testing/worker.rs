@@ -47,6 +47,7 @@ struct TestAttemptInput {
 struct SerializableAttempt {
     result: runmat_test::result::AttemptResult,
     events: Vec<runmat_test::event::TestEvent>,
+    coverage: Vec<runmat_test::coverage::CoverageFragment>,
 }
 
 impl From<runmat_core::testing::CoreTestAttempt> for SerializableAttempt {
@@ -54,6 +55,7 @@ impl From<runmat_core::testing::CoreTestAttempt> for SerializableAttempt {
         Self {
             result: value.result,
             events: value.events,
+            coverage: value.coverage,
         }
     }
 }

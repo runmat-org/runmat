@@ -55,6 +55,31 @@ impl<'a> CoreTestExecutor<'a> {
         }
     }
 
+    pub(super) fn coverage_fragments(
+        &self,
+        counts: &BTreeMap<u64, u64>,
+    ) -> Vec<runmat_test::coverage::CoverageFragment> {
+        let program_revision = self.catalog.revision().canonical_identity();
+        self.units
+            .values()
+            .map(|unit| {
+                let unit_counts = unit
+                    .coverage_plan()
+                    .sites()
+                    .iter()
+                    .filter_map(|site| {
+                        counts
+                            .get(&site.counter_key)
+                            .copied()
+                            .map(|count| (site.counter_key, count))
+                    })
+                    .collect();
+                unit.coverage_plan()
+                    .fragment(program_revision.clone(), unit_counts)
+            })
+            .collect()
+    }
+
     async fn execute_request(
         &mut self,
         request: &ExecutionRequest,

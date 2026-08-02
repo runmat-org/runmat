@@ -42,6 +42,10 @@ pub fn negotiate(
             .limits
             .max_artifacts_per_attempt
             .min(remote.limits.max_artifacts_per_attempt),
+        max_coverage_sites_per_attempt: local
+            .limits
+            .max_coverage_sites_per_attempt
+            .min(remote.limits.max_coverage_sites_per_attempt),
     })
 }
 
@@ -169,7 +173,22 @@ fn validate_response(
     limits: ProtocolLimits,
 ) -> Result<(), TestDomainError> {
     match response {
-        WorkerResponse::Completed { result } => check_attempt(result, limits),
+        WorkerResponse::Completed { result, coverage } => {
+            check_attempt(result, limits)?;
+            let actual = coverage
+                .iter()
+                .map(|fragment| fragment.sites.len())
+                .sum::<usize>();
+            let limit = limits.max_coverage_sites_per_attempt as usize;
+            if actual > limit {
+                return Err(TestDomainError::ProtocolCollectionTooLarge {
+                    field: "attempt.coverage.sites",
+                    actual,
+                    limit,
+                });
+            }
+            Ok(())
+        }
         WorkerResponse::Event { event } => match &event.payload {
             crate::event::TestEventPayload::TestFinished { result } => {
                 check_attempt(result, limits)

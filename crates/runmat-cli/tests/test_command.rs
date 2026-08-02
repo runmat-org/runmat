@@ -11,8 +11,10 @@ fn fixture() -> PathBuf {
 fn run(arguments: &[&str], report_dir: &Path) -> Output {
     let workspace = tempfile::tempdir().expect("temporary test workspace");
     copy_tree(&fixture(), workspace.path());
+    let cache = workspace.path().join(".runmat-package-cache");
     Command::new(env!("CARGO_BIN_EXE_runmat"))
         .current_dir(workspace.path())
+        .env("RUNMAT_PACKAGE_CACHE_DIR", cache)
         .args([
             "--color",
             "never",
@@ -91,6 +93,47 @@ fn explicit_native_session_and_none_modes_execute_without_claiming_process_isola
             "{isolation}: {output:#?}"
         );
     }
+}
+
+#[test]
+fn process_workers_merge_backend_coverage_and_emit_all_formats() {
+    let reports = tempfile::tempdir().unwrap();
+    let output = run(
+        &[
+            "--name",
+            "testPasses",
+            "--coverage-format",
+            "json",
+            "--coverage-format",
+            "lcov",
+            "--coverage-format",
+            "cobertura",
+            "--coverage-format",
+            "html",
+        ],
+        reports.path(),
+    );
+    assert!(output.status.success(), "{output:#?}");
+    for name in [
+        "coverage.json",
+        "coverage.lcov",
+        "coverage.xml",
+        "coverage.html",
+    ] {
+        assert!(
+            find_named(reports.path(), name).is_some(),
+            "{name}: {output:#?}"
+        );
+    }
+    let path = find_named(reports.path(), "coverage.json").unwrap();
+    let coverage: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    assert!(
+        coverage["sites"]
+            .as_array()
+            .is_some_and(|sites| !sites.is_empty()),
+        "{coverage:#?}"
+    );
 }
 
 #[test]

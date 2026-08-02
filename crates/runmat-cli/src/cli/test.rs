@@ -44,6 +44,30 @@ pub struct TestArgs {
     #[arg(long = "report", value_enum)]
     pub reports: Vec<TestReportArg>,
 
+    /// Collect backend-independent function and statement coverage
+    #[arg(long)]
+    pub coverage: bool,
+
+    /// Emit a coverage report format (repeatable)
+    #[arg(long = "coverage-format", value_enum)]
+    pub coverage_formats: Vec<TestCoverageFormatArg>,
+
+    /// Include coverage only below this project-relative root (repeatable)
+    #[arg(long = "coverage-root", value_name = "DIRECTORY")]
+    pub coverage_roots: Vec<PathBuf>,
+
+    /// Exclude a project-relative coverage glob (repeatable)
+    #[arg(long = "coverage-exclude", value_name = "GLOB")]
+    pub coverage_exclude: Vec<String>,
+
+    /// Include generated/build output in coverage
+    #[arg(long)]
+    pub coverage_include_generated: bool,
+
+    /// Include vendored dependencies in coverage
+    #[arg(long)]
+    pub coverage_include_vendor: bool,
+
     /// Directory for machine reports and captured artifacts
     #[arg(long = "report-dir", default_value = "test-results")]
     pub report_dir: PathBuf,
@@ -75,4 +99,12 @@ pub enum TestReportArg {
     Json,
     Junit,
     Tap,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum TestCoverageFormatArg {
+    Json,
+    Lcov,
+    Cobertura,
+    Html,
 }

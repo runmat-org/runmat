@@ -4,7 +4,7 @@ mod replay;
 mod sequence;
 mod sink;
 
-pub use model::{TestEvent, TestEventPayload};
+pub use model::{PluginStatus, TestEvent, TestEventPayload};
 pub use redact::{RedactedText, RedactionPolicy};
 pub use replay::{replay, ReplayedEvents};
 pub use sequence::SequencedEventSink;
