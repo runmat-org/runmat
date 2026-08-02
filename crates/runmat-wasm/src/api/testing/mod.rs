@@ -4,4 +4,4 @@ mod coordinator;
 mod wire;
 mod worker;
 
-pub use coordinator::run_tests;
+pub use coordinator::{run_tests, run_tests_with_events};

@@ -3,6 +3,7 @@ import {
   type BrowserTestRunnerOptions
 } from "./runner.js";
 import type {
+  BrowserTestEvent,
   BrowserTestRunInput,
   BrowserTestRunOutput
 } from "./types.js";
@@ -14,12 +15,21 @@ interface CoordinatorRequest {
   reason?: string;
 }
 
-interface CoordinatorResponse {
+interface CoordinatorResultResponse {
   id: number;
+  type: "result";
   ok: boolean;
   output?: BrowserTestRunOutput;
   error?: string;
 }
+
+interface CoordinatorEventResponse {
+  id: number;
+  type: "event";
+  event: BrowserTestEvent;
+}
+
+type CoordinatorResponse = CoordinatorResultResponse | CoordinatorEventResponse;
 
 export interface TestCoordinatorScope {
   addEventListener(
@@ -72,7 +82,14 @@ export function installRunMatTestCoordinatorHost(
     const cancellation = new AbortController();
     const runner = new BrowserTestRunner({
       ...options,
-      signal: cancellation.signal
+      signal: cancellation.signal,
+      onEvent: (testEvent) => {
+        scope.postMessage({
+          id: request.id,
+          type: "event",
+          event: testEvent
+        });
+      }
     });
     const promise = runner.run(request.input);
     active = { id: request.id, cancellation, promise };
@@ -89,6 +106,7 @@ export class BrowserTestCoordinatorClient {
         id: number;
         resolve(output: BrowserTestRunOutput): void;
         reject(error: Error): void;
+        onEvent?: (event: BrowserTestEvent) => void;
       }
     | undefined;
 
@@ -98,6 +116,10 @@ export class BrowserTestCoordinatorClient {
       (event: MessageEvent<CoordinatorResponse>) => {
         const response = event.data;
         if (!this.active || this.active.id !== response.id) return;
+        if (response.type === "event") {
+          this.active.onEvent?.(response.event);
+          return;
+        }
         const active = this.active;
         this.active = undefined;
         if (response.ok && response.output) {
@@ -117,14 +139,15 @@ export class BrowserTestCoordinatorClient {
 
   run(
     input: BrowserTestRunInput,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    onEvent?: (event: BrowserTestEvent) => void
   ): Promise<BrowserTestRunOutput> {
     if (this.active) {
       return Promise.reject(new Error("test coordinator already has an active run"));
     }
     const id = this.nextId++;
     const promise = new Promise<BrowserTestRunOutput>((resolve, reject) => {
-      this.active = { id, resolve, reject };
+      this.active = { id, resolve, reject, onEvent };
     });
     if (signal) {
       const cancel = () => {
@@ -162,10 +185,11 @@ async function respond(
   promise: Promise<BrowserTestRunOutput>
 ): Promise<void> {
   try {
-    scope.postMessage({ id, ok: true, output: await promise });
+    scope.postMessage({ id, type: "result", ok: true, output: await promise });
   } catch (error) {
     scope.postMessage({
       id,
+      type: "result",
       ok: false,
       error: error instanceof Error ? error.message : String(error)
     });

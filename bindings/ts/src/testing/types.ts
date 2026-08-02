@@ -46,7 +46,7 @@ export interface BrowserTestRunOutput {
     };
     tests: unknown[];
   };
-  events: unknown[];
+  events: BrowserTestEvent[];
   reports: RenderedTestReport[];
   infrastructureFailures: number;
   pluginFailures: number;
@@ -54,10 +54,17 @@ export interface BrowserTestRunOutput {
   coverage: CoverageAggregate;
 }
 
+export type BrowserTestEvent = Record<string, unknown>;
+
 export interface RunMatTestNative {
   runTests(
     input: BrowserTestRunInput,
     backend: BrowserWorkerBackendPort
+  ): Promise<BrowserTestRunOutput>;
+  runTestsWithEvents?(
+    input: BrowserTestRunInput,
+    backend: BrowserWorkerBackendPort,
+    observer: (event: BrowserTestEvent) => void
   ): Promise<BrowserTestRunOutput>;
 }
 

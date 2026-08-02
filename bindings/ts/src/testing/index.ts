@@ -25,6 +25,7 @@ export type {
   BrowserTestRunInput,
   BrowserTestRunOptions,
   BrowserTestRunOutput,
+  BrowserTestEvent,
   BrowserWorkerBackendPort,
   BrowserWorkerHandle,
   CoverageAggregate,

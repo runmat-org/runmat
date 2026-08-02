@@ -5,6 +5,7 @@ import {
 import type {
   BrowserTestRunInput,
   BrowserTestRunOutput,
+  BrowserTestEvent,
   RunMatTestNative
 } from "./types.js";
 
@@ -12,6 +13,7 @@ export interface BrowserTestRunnerOptions
   extends BrowserWorkerBackendOptions {
   native: RunMatTestNative;
   artifactStore?: BrowserTestArtifactStore;
+  onEvent?: (event: BrowserTestEvent) => void;
 }
 
 export interface BrowserTestArtifactStore {
@@ -30,7 +32,17 @@ export class BrowserTestRunner {
       requestedIsolation: input.options?.isolation
     });
     try {
-      const output = await this.options.native.runTests(input, backend);
+      const output =
+        this.options.onEvent && this.options.native.runTestsWithEvents
+          ? await this.options.native.runTestsWithEvents(
+              input,
+              backend,
+              this.options.onEvent
+            )
+          : await this.options.native.runTests(input, backend);
+      if (this.options.onEvent && !this.options.native.runTestsWithEvents) {
+        for (const event of output.events) this.options.onEvent(event);
+      }
       if (this.options.artifactStore) {
         await Promise.all(
           output.reports.map((report) =>

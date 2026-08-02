@@ -29,3 +29,12 @@ pub trait Reporter {
     fn event(&mut self, event: &TestEvent) -> RunnerResult<()>;
     fn finish(&mut self, result: &RunResult) -> RunnerResult<RenderedReport>;
 }
+
+/// A live projection of canonical coordinator events.
+///
+/// Observers cannot finish reports or mutate result state. Product hosts use
+/// this narrow port to stream events while reporters remain responsible only
+/// for rendered artifacts.
+pub trait EventObserver {
+    fn event(&mut self, event: &TestEvent) -> RunnerResult<()>;
+}
