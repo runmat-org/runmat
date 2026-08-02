@@ -2,7 +2,7 @@
 //!
 //! Implements element-wise and matrix operations following MATLAB semantics.
 
-use crate::builtins::common::linalg;
+use crate::builtins::common::{linalg, tensor};
 use crate::BuiltinResult;
 use runmat_builtins::Tensor;
 
@@ -15,10 +15,11 @@ pub fn matrix_add(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
         ));
     }
 
-    let data: Vec<f64> = a
-        .data
+    let a_values = tensor::tensor_values_f64_cow(a);
+    let b_values = tensor::tensor_values_f64_cow(b);
+    let data: Vec<f64> = a_values
         .iter()
-        .zip(b.data.iter())
+        .zip(b_values.iter())
         .map(|(x, y)| x + y)
         .collect();
 
@@ -34,10 +35,11 @@ pub fn matrix_sub(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
         ));
     }
 
-    let data: Vec<f64> = a
-        .data
+    let a_values = tensor::tensor_values_f64_cow(a);
+    let b_values = tensor::tensor_values_f64_cow(b);
+    let data: Vec<f64> = a_values
         .iter()
-        .zip(b.data.iter())
+        .zip(b_values.iter())
         .map(|(x, y)| x - y)
         .collect();
 
