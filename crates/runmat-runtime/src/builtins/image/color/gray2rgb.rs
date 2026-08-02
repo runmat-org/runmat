@@ -10,7 +10,6 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::common::tensor as tensor_helpers;
 use crate::builtins::image::color::common;
 use crate::builtins::image::color::type_resolvers::gray2rgb_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -146,13 +145,14 @@ async fn gray2rgb_builtin(gray: Value, rest: Vec<Value>) -> BuiltinResult<Value>
     let (rows, cols) = common::grayscale_shape(&tensor, NAME)
         .map_err(|err| gray2rgb_map_error(err, &GRAY2RGB_ERROR_INVALID_INPUT))?;
     let pixels = rows * cols;
-    let grayscale = tensor_helpers::tensor_values_f64(&tensor);
-    let mut data = vec![0.0; pixels * 3];
-    for channel in 0..3 {
-        data[channel * pixels..(channel + 1) * pixels].copy_from_slice(&grayscale);
-    }
-    let out = common::tensor_with_dtype(data, vec![rows, cols, 3], tensor.dtype, NAME)
-        .map_err(|err| gray2rgb_map_error(err, &GRAY2RGB_ERROR_INTERNAL))?;
+    let indices: Vec<usize> = (0..3).flat_map(|_| 0..pixels).collect();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|err| gray2rgb_error_with_message(err, &GRAY2RGB_ERROR_INTERNAL))?
+        .gather(&indices)
+        .map_err(|err| gray2rgb_error_with_message(err, &GRAY2RGB_ERROR_INTERNAL))?;
+    let out = runmat_builtins::Tensor::from_numeric_storage(storage, vec![rows, cols, 3])
+        .map_err(|err| gray2rgb_error_with_message(err, &GRAY2RGB_ERROR_INTERNAL))?;
     Ok(common::image_value_from_tensor(out))
 }
 
@@ -174,34 +174,39 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(out.shape, vec![2, 2, 3]);
-        assert_eq!(out.dtype, NumericDType::U8);
+        assert_eq!(out.numeric_dtype(), NumericDType::U8);
         assert_eq!(
-            out.data,
+            out.materialize_f64(),
             vec![1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0]
         );
     }
 
     #[test]
     fn reads_typed_integer_grayscale_storage_exactly() {
-        let mut gray =
-            Tensor::new_integer(IntegerStorage::U8(vec![1, 2, 3, 4]), vec![2, 2]).unwrap();
-        gray.data = vec![255.0, 255.0, 255.0, 255.0];
+        let values = vec![u64::MAX - 1, u64::MAX];
+        let gray = Tensor::new_integer(IntegerStorage::U64(values.clone()), vec![1, 2]).unwrap();
 
         let Value::Tensor(out) = call(Value::Tensor(gray)).expect("gray2rgb") else {
             panic!("expected tensor");
         };
-        assert_eq!(out.shape, vec![2, 2, 3]);
-        assert_eq!(out.dtype, NumericDType::U8);
+        assert_eq!(out.shape, vec![1, 2, 3]);
+        assert_eq!(out.numeric_dtype(), NumericDType::U64);
         assert_eq!(
             out.integer_storage(),
-            Some(&IntegerStorage::U8(vec![
-                1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4
-            ]))
+            Some(&IntegerStorage::U64(
+                [values.as_slice(), values.as_slice(), values.as_slice(),].concat()
+            ))
         );
-        assert_eq!(
-            out.data,
-            vec![1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0]
-        );
+    }
+
+    #[test]
+    fn preserves_native_single_storage() {
+        let gray = Tensor::from_f32(vec![0.25, 0.5], vec![1, 2]).unwrap();
+        let Value::Tensor(out) = call(Value::Tensor(gray)).expect("gray2rgb") else {
+            panic!("expected tensor");
+        };
+        assert_eq!(out.numeric_dtype(), NumericDType::F32);
+        assert_eq!(out.materialize_f64(), vec![0.25, 0.5, 0.25, 0.5, 0.25, 0.5]);
     }
 
     #[test]

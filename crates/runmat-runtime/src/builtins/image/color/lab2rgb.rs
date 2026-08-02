@@ -142,15 +142,30 @@ async fn lab2rgb_builtin(lab: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if !rest.is_empty() {
         return Err(lab2rgb_error(&LAB2RGB_ERROR_TOO_MANY_INPUTS));
     }
+    let logical_input = match &lab {
+        Value::Bool(_) | Value::LogicalArray(_) => true,
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_logical(handle),
+        _ => false,
+    };
     let tensor = common::gather_tensor(NAME, lab)
         .await
         .map_err(|err| lab2rgb_map_error(err, &LAB2RGB_ERROR_INVALID_INPUT))?;
     let layout = common::color_layout(&tensor, NAME)
         .map_err(|err| lab2rgb_map_error(err, &LAB2RGB_ERROR_INVALID_INPUT))?;
-    let dtype = match tensor.dtype {
-        NumericDType::F32 => NumericDType::F32,
-        _ => NumericDType::F64,
-    };
+    let dtype = tensor.numeric_dtype();
+    if logical_input || !matches!(dtype, NumericDType::F32 | NumericDType::F64) {
+        return Err(lab2rgb_error_with_message(
+            format!(
+                "lab2rgb: {} input is not supported; expected single or double",
+                if logical_input {
+                    "logical"
+                } else {
+                    dtype.class_name()
+                }
+            ),
+            &LAB2RGB_ERROR_INVALID_INPUT,
+        ));
+    }
     let values = common::tensor_values_f64(&tensor);
     let mut data = vec![0.0; values.len()];
     for pixel in 0..layout.pixels() {
@@ -213,12 +228,11 @@ fn cast_float(value: f64, dtype: NumericDType) -> f64 {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, Tensor};
+    use runmat_builtins::{IntegerStorage, LogicalArray, Tensor};
 
     fn call(tensor: Tensor) -> BuiltinResult<Tensor> {
-        let Value::Tensor(out) =
-            block_on(lab2rgb_builtin(Value::Tensor(tensor), Vec::new())).expect("lab2rgb")
-        else {
+        let value = block_on(lab2rgb_builtin(Value::Tensor(tensor), Vec::new()))?;
+        let Value::Tensor(out) = value else {
             panic!("expected tensor");
         };
         Ok(out)
@@ -231,19 +245,18 @@ mod tests {
         );
     }
 
-    fn typed_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
-        tensor
+    fn values(tensor: &Tensor) -> Vec<f64> {
+        tensor.materialize_f64()
     }
 
     #[test]
     fn converts_white_lab_to_rgb() {
         let lab = Tensor::new(vec![100.0, 0.0, 0.0], vec![1, 1, 3]).unwrap();
         let out = call(lab).unwrap();
-        assert_close(out.data[0], 1.0, 1e-4);
-        assert_close(out.data[1], 1.0, 1e-4);
-        assert_close(out.data[2], 1.0, 1e-4);
+        let values = values(&out);
+        assert_close(values[0], 1.0, 1e-4);
+        assert_close(values[1], 1.0, 1e-4);
+        assert_close(values[2], 1.0, 1e-4);
     }
 
     #[test]
@@ -259,7 +272,7 @@ mod tests {
         let out = call(lab).unwrap();
         assert_eq!(out.shape, vec![4, 3]);
         let expected = vec![0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
-        for (actual, expected) in out.data.iter().zip(expected) {
+        for (actual, expected) in values(&out).iter().zip(expected) {
             assert_close(*actual, expected, 1e-3);
         }
     }
@@ -269,22 +282,33 @@ mod tests {
         let lab = Tensor::new_with_dtype(vec![100.0, 0.0, 0.0], vec![1, 1, 3], NumericDType::F32)
             .unwrap();
         let out = call(lab).unwrap();
-        assert_eq!(out.dtype, NumericDType::F32);
-        assert_close(out.data[0], 1.0, 1e-4);
-        assert_close(out.data[1], 1.0, 1e-4);
-        assert_close(out.data[2], 1.0, 1e-4);
+        assert_eq!(out.numeric_dtype(), NumericDType::F32);
+        let values = values(&out);
+        assert_close(values[0], 1.0, 1e-4);
+        assert_close(values[1], 1.0, 1e-4);
+        assert_close(values[2], 1.0, 1e-4);
     }
 
     #[test]
-    fn lab2rgb_reads_typed_integer_lab_storage_exactly() {
-        let lab = typed_tensor(IntegerStorage::I16(vec![100, 0, 0]), vec![1, 1, 3]);
+    fn lab2rgb_rejects_every_integer_class_and_logical() {
+        for storage in [
+            IntegerStorage::I8(vec![0; 3]),
+            IntegerStorage::I16(vec![0; 3]),
+            IntegerStorage::I32(vec![0; 3]),
+            IntegerStorage::I64(vec![0; 3]),
+            IntegerStorage::U8(vec![0; 3]),
+            IntegerStorage::U16(vec![0; 3]),
+            IntegerStorage::U32(vec![0; 3]),
+            IntegerStorage::U64(vec![0; 3]),
+        ] {
+            let lab = Tensor::new_integer(storage, vec![1, 1, 3]).unwrap();
+            let err = call(lab).unwrap_err();
+            assert_eq!(err.identifier(), LAB2RGB_ERROR_INVALID_INPUT.identifier);
+        }
 
-        let out = call(lab).unwrap();
-
-        assert_eq!(out.dtype, NumericDType::F64);
-        assert_close(out.data[0], 1.0, 1e-4);
-        assert_close(out.data[1], 1.0, 1e-4);
-        assert_close(out.data[2], 1.0, 1e-4);
+        let logical = LogicalArray::new(vec![1, 0, 0], vec![1, 1, 3]).unwrap();
+        let err = block_on(lab2rgb_builtin(Value::LogicalArray(logical), Vec::new())).unwrap_err();
+        assert_eq!(err.identifier(), LAB2RGB_ERROR_INVALID_INPUT.identifier);
     }
 
     #[test]
