@@ -2,9 +2,7 @@
 //!
 //! The implementation mirrors the modern RunMat builtin blueprint with GPU-aware semantics.
 
-use runmat_accelerate_api::{
-    GpuTensorHandle, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
-};
+use runmat_accelerate_api::{GpuTensorHandle, HostIntegerDataView, HostIntegerTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -21,7 +19,7 @@ use crate::builtins::common::spec::{
     FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
     ShapeRequirements,
 };
-use crate::builtins::common::tensor;
+use crate::builtins::common::{gpu_helpers, tensor};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::fill")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -723,11 +721,7 @@ fn fill_like_gpu(
         }
 
         let tensor = make_real_tensor_from_value(value, shape)?;
-        let view = HostTensorView {
-            data: &tensor.data,
-            shape: &tensor.shape,
-        };
-        if let Ok(uploaded) = provider.upload(&view) {
+        if let Ok(uploaded) = gpu_helpers::upload_tensor(provider, &tensor) {
             return Ok(Value::GpuTensor(uploaded));
         }
         return Ok(tensor::tensor_into_value(tensor));

@@ -1,6 +1,6 @@
 //! MATLAB-compatible `find` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::{HostTensorView, ProviderFindResult};
+use runmat_accelerate_api::ProviderFindResult;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -1000,11 +1000,7 @@ fn integer_storage_from_scalar(value: &IntValue) -> IntegerStorage {
 fn tensor_to_value(tensor: Tensor, prefer_gpu: bool) -> Value {
     if prefer_gpu {
         if let Some(provider) = runmat_accelerate_api::provider() {
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            if let Ok(handle) = provider.upload(&view) {
+            if let Ok(handle) = gpu_helpers::upload_tensor(provider, &tensor) {
                 return Value::GpuTensor(handle);
             }
         }
@@ -1017,6 +1013,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, IntValue, Type};
 
     fn find_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

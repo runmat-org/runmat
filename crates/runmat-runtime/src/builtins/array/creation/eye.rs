@@ -1,6 +1,6 @@
 //! MATLAB-compatible `eye` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::tensor;
+use crate::builtins::common::{gpu_helpers, tensor};
 use runmat_builtins::ResolveContext;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::eye")]
@@ -496,11 +496,7 @@ async fn eye_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> Result<Value
         }
 
         if let Ok(host) = identity_tensor(&shape_vec) {
-            let view = HostTensorView {
-                data: &host.data,
-                shape: &host.shape,
-            };
-            if let Ok(gpu) = provider.upload(&view) {
+            if let Ok(gpu) = gpu_helpers::upload_tensor(provider, &host) {
                 return Ok(Value::GpuTensor(gpu));
             }
         }

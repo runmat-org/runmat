@@ -1,6 +1,6 @@
 //! MATLAB-compatible `randperm` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -16,7 +16,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::tensor;
+use crate::builtins::common::{gpu_helpers, tensor};
 use runmat_builtins::ResolveContext;
 use runmat_builtins::Type;
 
@@ -446,11 +446,7 @@ fn randperm_gpu(handle: &GpuTensorHandle, n: usize, k: usize) -> crate::BuiltinR
 
     let tensor = randperm_tensor(n, k)?;
     if let Some(provider) = runmat_accelerate_api::provider() {
-        let view = HostTensorView {
-            data: &tensor.data,
-            shape: &tensor.shape,
-        };
-        if let Ok(device) = provider.upload(&view) {
+        if let Ok(device) = gpu_helpers::upload_tensor(provider, &tensor) {
             return Ok(Value::GpuTensor(device));
         }
     }
@@ -554,6 +550,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
+    use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::IntegerStorage;
 
     fn randperm_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
