@@ -183,7 +183,7 @@ pub(super) async fn padsequences_builtin(
     check_pad_elements(total)?;
     let mut data = Vec::with_capacity(total);
     for seq in padded {
-        data.extend(seq.data);
+        data.extend(seq.materialize_f64());
     }
     tensor_value(data, output_shape, "padsequences")
 }

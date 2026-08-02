@@ -9,7 +9,7 @@ use runmat_analysis_fea::ComputeBackend;
 use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ClassDef, MethodDef, ObjectInstance, Tensor, Value,
+    ClassDef, MethodDef, NumericScalar, ObjectInstance, Tensor, Value,
 };
 use runmat_geometry_core::GeometryAsset;
 use runmat_macros::runtime_builtin;
@@ -2860,26 +2860,24 @@ fn value_to_json(builtin: &'static str, value: &Value) -> BuiltinResult<serde_js
                 .map(serde_json::Value::String)
                 .collect(),
         )),
-        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
-            match tensor.integer_storage() {
-                Some(storage) => Ok(int_value_to_json(
-                    &storage.value_at(0).expect("integer storage index is valid"),
-                )),
-                None => json_number(builtin, tensor.data[0]),
-            }
-        }
-        Value::Tensor(tensor) => Ok(serde_json::Value::Array(match tensor.integer_storage() {
-            Some(storage) => storage
-                .exact_values()
-                .iter()
-                .map(int_value_to_json)
-                .collect(),
-            None => tensor
-                .data
-                .iter()
-                .map(|value| json_number(builtin, *value))
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => numeric_scalar_to_json(
+            builtin,
+            tensor
+                .numeric_value_at(0)
+                .expect("validated scalar tensor storage"),
+        ),
+        Value::Tensor(tensor) => Ok(serde_json::Value::Array(
+            (0..tensor.len())
+                .map(|index| {
+                    numeric_scalar_to_json(
+                        builtin,
+                        tensor
+                            .numeric_value_at(index)
+                            .expect("validated tensor storage"),
+                    )
+                })
                 .collect::<BuiltinResult<Vec<_>>>()?,
-        })),
+        )),
         Value::Cell(cell) => Ok(serde_json::Value::Array(
             cell.data
                 .iter()
@@ -2913,6 +2911,21 @@ fn value_to_json(builtin: &'static str, value: &Value) -> BuiltinResult<serde_js
             builtin,
             &ERROR_INPUT,
             format!("cannot convert value to FEA JSON payload: {other:?}"),
+        )),
+    }
+}
+
+fn numeric_scalar_to_json(
+    builtin: &'static str,
+    value: NumericScalar,
+) -> BuiltinResult<serde_json::Value> {
+    match value {
+        NumericScalar::F64(value) => json_number(builtin, value),
+        NumericScalar::F32(value) => json_number(builtin, f64::from(value)),
+        value => Ok(int_value_to_json(
+            &value
+                .into_int_value()
+                .expect("non-floating numeric scalar is integer"),
         )),
     }
 }

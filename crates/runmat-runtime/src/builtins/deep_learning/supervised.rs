@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use runmat_builtins::{ObjectInstance, StructValue, Tensor, Value};
+use runmat_builtins::{NumericScalar, ObjectInstance, StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::{builtins::common::tensor, BuiltinResult};
@@ -503,21 +503,15 @@ fn label_strings(value: &Value, function: &'static str) -> BuiltinResult<Option<
                     ));
                 }
             };
-            let mut labels = Vec::with_capacity(codes.data.len());
-            for code in &codes.data {
-                if code.is_nan() {
-                    return Err(deep_learning_error(
+            let mut labels = Vec::with_capacity(codes.len());
+            for index in 0..codes.len() {
+                let code = codes.numeric_value_at(index).ok_or_else(|| {
+                    deep_learning_error(
                         function,
-                        format!("{function}: classification labels must not be missing"),
-                    ));
-                }
-                if *code < 1.0 || code.fract().abs() > f64::EPSILON {
-                    return Err(deep_learning_error(
-                        function,
-                        format!("{function}: categorical Codes must be positive integers"),
-                    ));
-                }
-                let idx = *code as usize - 1;
+                        format!("{function}: categorical Codes storage is invalid"),
+                    )
+                })?;
+                let idx = categorical_code_index(code, function)?;
                 let Some(label) = categories.get(idx) else {
                     return Err(deep_learning_error(
                         function,
@@ -529,6 +523,40 @@ fn label_strings(value: &Value, function: &'static str) -> BuiltinResult<Option<
             Ok(Some(labels))
         }
         _ => Ok(None),
+    }
+}
+
+fn categorical_code_index(code: NumericScalar, function: &'static str) -> BuiltinResult<usize> {
+    match code {
+        NumericScalar::F64(code) => {
+            if code.is_nan() {
+                return Err(deep_learning_error(
+                    function,
+                    format!("{function}: classification labels must not be missing"),
+                ));
+            }
+            if code < 1.0 || code.fract().abs() > f64::EPSILON {
+                return Err(deep_learning_error(
+                    function,
+                    format!("{function}: categorical Codes must be positive integers"),
+                ));
+            }
+            Ok(code as usize - 1)
+        }
+        NumericScalar::F32(code) => {
+            categorical_code_index(NumericScalar::F64(f64::from(code)), function)
+        }
+        code => code
+            .into_int_value()
+            .and_then(|code| code.try_to_usize())
+            .filter(|code| *code >= 1)
+            .map(|code| code - 1)
+            .ok_or_else(|| {
+                deep_learning_error(
+                    function,
+                    format!("{function}: categorical Codes must be positive integers"),
+                )
+            }),
     }
 }
 
