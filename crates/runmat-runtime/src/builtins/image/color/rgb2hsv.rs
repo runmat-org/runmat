@@ -142,21 +142,34 @@ async fn rgb2hsv_builtin(rgb: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         .map_err(|err| rgb2hsv_map_error(err, &RGB2HSV_ERROR_INVALID_INPUT))?;
     let layout = common::color_layout(&tensor, NAME)
         .map_err(|err| rgb2hsv_map_error(err, &RGB2HSV_ERROR_INVALID_INPUT))?;
-    let dtype = common::image_output_dtype(tensor.dtype);
+    let input_dtype = tensor.numeric_dtype();
+    if !matches!(
+        input_dtype,
+        NumericDType::F32 | NumericDType::F64 | NumericDType::U8 | NumericDType::U16
+    ) {
+        return Err(rgb2hsv_error_with_message(
+            format!(
+                "rgb2hsv: {} input is not supported; expected single, double, uint8, or uint16",
+                input_dtype.class_name()
+            ),
+            &RGB2HSV_ERROR_INVALID_INPUT,
+        ));
+    }
+    let dtype = common::image_output_dtype(input_dtype);
     let values = common::tensor_values_f64(&tensor);
     let mut data = vec![0.0; values.len()];
     for pixel in 0..layout.pixels() {
         let r = common::clamp01(common::unit_value(
             values[layout.index(pixel, 0)],
-            tensor.dtype,
+            input_dtype,
         ));
         let g = common::clamp01(common::unit_value(
             values[layout.index(pixel, 1)],
-            tensor.dtype,
+            input_dtype,
         ));
         let b = common::clamp01(common::unit_value(
             values[layout.index(pixel, 2)],
-            tensor.dtype,
+            input_dtype,
         ));
         let (h, s, v) = rgb_to_hsv_unit(r, g, b);
         data[layout.index(pixel, 0)] = cast_float(h, dtype);
@@ -215,10 +228,8 @@ mod tests {
         );
     }
 
-    fn typed_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(f64::NAN);
-        tensor
+    fn values(tensor: &Tensor) -> Vec<f64> {
+        tensor.materialize_f64()
     }
 
     #[test]
@@ -226,9 +237,10 @@ mod tests {
         let rgb = Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 1, 3]).unwrap();
         let out = call(rgb).unwrap();
         assert_eq!(out.shape, vec![1, 1, 3]);
-        assert_close(out.data[0], 0.0);
-        assert_close(out.data[1], 1.0);
-        assert_close(out.data[2], 1.0);
+        let values = values(&out);
+        assert_close(values[0], 0.0);
+        assert_close(values[1], 1.0);
+        assert_close(values[2], 1.0);
     }
 
     #[test]
@@ -254,7 +266,7 @@ mod tests {
             1.0,
             0.5,
         ];
-        for (actual, expected) in out.data.iter().zip(expected) {
+        for (actual, expected) in values(&out).iter().zip(expected) {
             assert_close(*actual, expected);
         }
     }
@@ -264,22 +276,55 @@ mod tests {
         let rgb = Tensor::new_with_dtype(vec![128.0, 64.0, 32.0], vec![1, 1, 3], NumericDType::U8)
             .unwrap();
         let out = call(rgb).unwrap();
-        assert_eq!(out.dtype, NumericDType::F64);
-        assert_close(out.data[0], 1.0 / 18.0);
-        assert_close(out.data[1], 0.75);
-        assert_close(out.data[2], 128.0 / 255.0);
+        assert_eq!(out.numeric_dtype(), NumericDType::F64);
+        let values = values(&out);
+        assert_close(values[0], 1.0 / 18.0);
+        assert_close(values[1], 0.75);
+        assert_close(values[2], 128.0 / 255.0);
     }
 
     #[test]
     fn rgb2hsv_reads_typed_integer_rgb_storage_exactly() {
-        let rgb = typed_tensor(IntegerStorage::U8(vec![255, 0, 0]), vec![1, 1, 3]);
+        let rgb = Tensor::new_integer(IntegerStorage::U8(vec![255, 0, 0]), vec![1, 1, 3]).unwrap();
 
         let out = call(rgb).unwrap();
 
-        assert_eq!(out.dtype, NumericDType::F64);
-        assert_close(out.data[0], 0.0);
-        assert_close(out.data[1], 1.0);
-        assert_close(out.data[2], 1.0);
+        assert_eq!(out.numeric_dtype(), NumericDType::F64);
+        let values = values(&out);
+        assert_close(values[0], 0.0);
+        assert_close(values[1], 1.0);
+        assert_close(values[2], 1.0);
+    }
+
+    #[test]
+    fn rgb2hsv_preserves_single_and_accepts_uint16() {
+        let single = Tensor::from_f32(vec![1.0, 0.0, 0.0], vec![1, 1, 3]).unwrap();
+        let single_out = call(single).expect("single RGB");
+        assert_eq!(single_out.numeric_dtype(), NumericDType::F32);
+        assert_eq!(values(&single_out), vec![0.0, 1.0, 1.0]);
+
+        let uint16 =
+            Tensor::new_integer(IntegerStorage::U16(vec![65535, 0, 0]), vec![1, 1, 3]).unwrap();
+        let uint16_out = call(uint16).expect("uint16 RGB");
+        assert_eq!(uint16_out.numeric_dtype(), NumericDType::F64);
+        assert_eq!(values(&uint16_out), vec![0.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn rgb2hsv_rejects_unsupported_integer_classes() {
+        for storage in [
+            IntegerStorage::I8(vec![0; 3]),
+            IntegerStorage::I16(vec![0; 3]),
+            IntegerStorage::I32(vec![0; 3]),
+            IntegerStorage::I64(vec![0; 3]),
+            IntegerStorage::U32(vec![0; 3]),
+            IntegerStorage::U64(vec![0; 3]),
+        ] {
+            let input = Tensor::new_integer(storage, vec![1, 1, 3]).unwrap();
+            let err = block_on(rgb2hsv_builtin(Value::Tensor(input), Vec::new()))
+                .expect_err("unsupported integer class");
+            assert_eq!(err.identifier(), RGB2HSV_ERROR_INVALID_INPUT.identifier);
+        }
     }
 
     #[test]
