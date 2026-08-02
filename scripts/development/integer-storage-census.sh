@@ -58,7 +58,31 @@ count_metric \
 count_metric \
   runtime_floating_materialization \
   crates/runmat-runtime/src \
-  'tensor_values_f64|to_f64_vec|to_f64\(' \
+  'materialize_f64|tensor_values_f64|to_f64_vec|to_f64\(' \
+  crates/runmat-runtime/src
+
+count_metric \
+  runtime_direct_materialize_f64 \
+  crates/runmat-runtime/src \
+  'materialize_f64' \
+  crates/runmat-runtime/src
+
+count_metric \
+  runtime_tensor_values_f64 \
+  crates/runmat-runtime/src \
+  'tensor_values_f64' \
+  crates/runmat-runtime/src
+
+count_metric \
+  runtime_to_f64_vec \
+  crates/runmat-runtime/src \
+  'to_f64_vec' \
+  crates/runmat-runtime/src
+
+count_metric \
+  runtime_scalar_to_f64 \
+  crates/runmat-runtime/src \
+  'to_f64\(' \
   crates/runmat-runtime/src
 
 count_metric \
