@@ -2,9 +2,7 @@
 
 use std::collections::HashSet;
 
-use runmat_accelerate_api::{
-    AccelProvider, GpuTensorHandle, HostTensorView, ProviderPrecision, ReductionFlavor,
-};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, ProviderPrecision, ReductionFlavor};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -400,7 +398,7 @@ fn sum_native_integer(value: &Value, parsed: &ParsedArguments) -> BuiltinResult<
 
 fn numeric_dtype_from_value(value: &Value) -> Option<NumericDType> {
     match value {
-        Value::Tensor(t) => Some(t.dtype),
+        Value::Tensor(t) => Some(t.numeric_dtype()),
         Value::GpuTensor(handle) => {
             let precision = runmat_accelerate_api::handle_precision(handle).or_else(|| {
                 runmat_accelerate_api::provider_for_handle(handle)
@@ -1347,12 +1345,7 @@ fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
             "sum: no acceleration provider available to honour GPU output",
         ));
     };
-    let view = HostTensorView {
-        data: &tensor.data,
-        shape: &tensor.shape,
-    };
-    let handle = provider
-        .upload(&view)
+    let handle = gpu_helpers::upload_tensor(provider, &tensor)
         .map_err(|e| sum_internal_error(format!("sum: failed to upload GPU result: {e}")))?;
     Ok(Value::GpuTensor(handle))
 }
@@ -1376,7 +1369,11 @@ fn real_to_complex(value: Value) -> BuiltinResult<Value> {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(t) => {
-            let data: Vec<(f64, f64)> = t.data.iter().map(|&v| (v, 0.0)).collect();
+            let data: Vec<(f64, f64)> = t
+                .materialize_f64()
+                .into_iter()
+                .map(|value| (value, 0.0))
+                .collect();
             let tensor = ComplexTensor::new(data, t.shape.clone())
                 .map_err(|e| sum_internal_error(format!("sum: {e}")))?;
             Ok(complex_tensor_into_value(tensor))
@@ -1444,6 +1441,10 @@ pub(crate) mod tests {
         block_on(super::sum_builtin(value, rest))
     }
 
+    fn values(tensor: &Tensor) -> Vec<f64> {
+        tensor.materialize_f64()
+    }
+
     #[test]
     fn sum_type_reduces_first_dim() {
         let out = sum_type(
@@ -1509,7 +1510,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 3]);
-                assert_eq!(out.data, vec![5.0, 7.0, 9.0]);
+                assert_eq!(values(&out), vec![5.0, 7.0, 9.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1524,7 +1525,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
-                assert_eq!(out.data, vec![6.0, 15.0]);
+                assert_eq!(values(&out), vec![6.0, 15.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1532,16 +1533,14 @@ pub(crate) mod tests {
 
     #[test]
     fn sum_double_path_reads_typed_integer_storage_exactly() {
-        let mut tensor =
-            Tensor::new_integer(IntegerStorage::I16(vec![1, 4, 2, 5, 3, 6]), vec![2, 3])
-                .expect("tensor");
-        tensor.data.fill(f64::NAN);
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, 4, 2, 5, 3, 6]), vec![2, 3])
+            .expect("tensor");
 
         let result = sum_builtin(Value::Tensor(tensor), Vec::new()).expect("sum");
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 3]);
-                assert_eq!(out.data, vec![5.0, 7.0, 9.0]);
+                assert_eq!(values(&out), vec![5.0, 7.0, 9.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1569,7 +1568,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 4, 1]);
-                assert_eq!(out.data, vec![48.0, 66.0, 84.0, 102.0]);
+                assert_eq!(values(&out), vec![48.0, 66.0, 84.0, 102.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1617,10 +1616,8 @@ pub(crate) mod tests {
 
     #[test]
     fn sum_native_integer_tensor_forms_read_typed_storage_exactly() {
-        let mut tensor =
-            Tensor::new_integer(IntegerStorage::I16(vec![1, 4, 2, 5, 3, 6]), vec![2, 3])
-                .expect("tensor");
-        tensor.data.clear();
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, 4, 2, 5, 3, 6]), vec![2, 3])
+            .expect("tensor");
 
         let result = sum_builtin(Value::Tensor(tensor), vec![Value::from("native")]).expect("sum");
         match result {
@@ -1634,9 +1631,8 @@ pub(crate) mod tests {
             other => panic!("expected tensor result, got {other:?}"),
         }
 
-        let mut tensor = Tensor::new_integer(IntegerStorage::U16(vec![10, 20, 30, 40]), vec![2, 2])
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![10, 20, 30, 40]), vec![2, 2])
             .expect("tensor");
-        tensor.data.clear();
         let result = sum_builtin(
             Value::Tensor(tensor),
             vec![Value::from("all"), Value::from("native")],
@@ -1644,15 +1640,12 @@ pub(crate) mod tests {
         .expect("sum all");
         assert_eq!(result, Value::Int(IntValue::U16(100)));
 
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             IntegerStorage::I16((1..=12).map(|value| value as i16).collect()),
             vec![2, 3, 2],
         )
         .expect("tensor");
-        tensor.data.clear();
-        let mut dims =
-            Tensor::new_integer(IntegerStorage::U8(vec![1, 3]), vec![1, 2]).expect("dims");
-        dims.data.clear();
+        let dims = Tensor::new_integer(IntegerStorage::U8(vec![1, 3]), vec![1, 2]).expect("dims");
 
         let result = sum_builtin(
             Value::Tensor(tensor),
@@ -1673,9 +1666,8 @@ pub(crate) mod tests {
 
     #[test]
     fn sum_native_template_reads_typed_integer_scalar_storage_exactly() {
-        let mut tensor =
+        let tensor =
             Tensor::new_integer(IntegerStorage::I32(vec![-9]), vec![1, 1]).expect("tensor");
-        tensor.data.clear();
         let meta = InputMeta {
             class: InputClass::Integer(IntClass::I32),
             device: DevicePreference::Host,
@@ -1743,15 +1735,11 @@ pub(crate) mod tests {
     fn sum_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result = sum_builtin(Value::GpuTensor(handle), Vec::new()).expect("sum");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 3]);
-            assert_eq!(gathered.data, vec![5.0, 7.0, 9.0]);
+            assert_eq!(values(&gathered), vec![5.0, 7.0, 9.0]);
         });
     }
 
@@ -1760,15 +1748,11 @@ pub(crate) mod tests {
     fn sum_gpu_row_vector_auto_dim() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 4]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result = sum_builtin(Value::GpuTensor(handle), Vec::new()).expect("sum");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 1]);
-            assert_eq!(gathered.data, vec![10.0]);
+            assert_eq!(values(&gathered), vec![10.0]);
         });
     }
 
@@ -1778,16 +1762,12 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor =
                 Tensor::new((1..=8).map(|v| v as f64).collect::<Vec<_>>(), vec![2, 4]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result =
                 sum_builtin(Value::GpuTensor(handle), vec![Value::from("all")]).expect("sum");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 1]);
-            assert_eq!(gathered.data, vec![36.0]);
+            assert_eq!(values(&gathered), vec![36.0]);
         });
     }
 
@@ -1810,7 +1790,7 @@ pub(crate) mod tests {
                 Value::GpuTensor(h) => {
                     let gathered = test_support::gather(Value::GpuTensor(h)).expect("gather");
                     assert_eq!(gathered.shape, vec![1, 2]);
-                    assert_eq!(gathered.data, vec![3.0, 7.0]);
+                    assert_eq!(values(&gathered), vec![3.0, 7.0]);
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
             }
@@ -1904,14 +1884,7 @@ pub(crate) mod tests {
             },
         )
         .unwrap();
-        let view = HostTensorView {
-            data: &t.data,
-            shape: &t.shape,
-        };
-        let h = runmat_accelerate_api::provider()
-            .unwrap()
-            .upload(&view)
-            .unwrap();
+        let h = gpu_helpers::upload_tensor(runmat_accelerate_api::provider().unwrap(), &t).unwrap();
         let gpu = block_on(sum_gpu(
             h,
             &ParsedArguments {
@@ -1925,7 +1898,7 @@ pub(crate) mod tests {
         match cpu {
             Value::Tensor(ct) => {
                 assert_eq!(gathered.shape, ct.shape);
-                assert_eq!(gathered.data, ct.data);
+                assert_eq!(values(&gathered), values(&ct));
             }
             other => panic!("unexpected shapes {other:?}"),
         }
