@@ -79,6 +79,11 @@ pub fn ensure_testing_classes() {
             Some("handle"),
             &[],
         );
+        register_plain_class(
+            "matlab.unittest.plugins.CodeCoveragePlugin",
+            Some("matlab.unittest.plugins.TestRunnerPlugin"),
+            &["Folders", "IncludingSubfolders"],
+        );
     });
 }
 

@@ -96,7 +96,18 @@ async fn run(runner: Value, suite: Value) -> BuiltinResult<Value> {
     if !runmat_builtins::is_class_or_subclass(&handle.class_name, TEST_RUNNER_CLASS) {
         return Err(runner_error("TestRunner.run requires a TestRunner handle"));
     }
-    crate::testing::run_test_suite(suite).await
+    let plugins = runmat_gc::gc_with_value(&handle.target, |target| {
+        let Value::Object(object) = target else {
+            return None;
+        };
+        match object.properties.get("Plugins") {
+            Some(Value::Cell(plugins)) => Some(plugins.data.clone()),
+            _ => Some(Vec::new()),
+        }
+    })
+    .map_err(|error| runner_error(format!("failed to read runner plugins: {error}")))?
+    .ok_or_else(|| runner_error("TestRunner plugin storage is invalid"))?;
+    crate::testing::run_test_suite(suite, plugins).await
 }
 
 fn set_plugins(runner: &Value, plugins: Vec<Value>) -> BuiltinResult<()> {

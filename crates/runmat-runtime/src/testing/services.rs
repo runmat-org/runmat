@@ -8,7 +8,7 @@ use runmat_builtins::Value;
 use crate::BuiltinResult;
 
 pub type RunSuiteFuture = Pin<Box<dyn Future<Output = BuiltinResult<Value>>>>;
-pub type RunSuiteService = dyn Fn(Value) -> RunSuiteFuture;
+pub type RunSuiteService = dyn Fn(Value, Vec<Value>) -> RunSuiteFuture;
 pub type RunTestsService = dyn Fn(Vec<Value>) -> RunSuiteFuture;
 pub type DiscoverTestsService = dyn Fn(Vec<Value>) -> RunSuiteFuture;
 
@@ -33,7 +33,7 @@ impl std::fmt::Debug for RuntimeTestServices {
 
 impl RuntimeTestServices {
     pub fn new(
-        run_suite: impl Fn(Value) -> RunSuiteFuture + 'static,
+        run_suite: impl Fn(Value, Vec<Value>) -> RunSuiteFuture + 'static,
         run_tests: impl Fn(Vec<Value>) -> RunSuiteFuture + 'static,
         discover_tests: impl Fn(Vec<Value>) -> RunSuiteFuture + 'static,
     ) -> Self {
@@ -66,7 +66,7 @@ pub fn install_test_services(services: RuntimeTestServices) -> TestServicesGuard
     TestServicesGuard
 }
 
-pub async fn run_test_suite(suite: Value) -> BuiltinResult<Value> {
+pub async fn run_test_suite(suite: Value, plugins: Vec<Value>) -> BuiltinResult<Value> {
     let service = TEST_SERVICES_STACK.with(|stack| stack.borrow().last().cloned());
     let Some(service) = service else {
         return Err(crate::build_runtime_error(
@@ -76,7 +76,7 @@ pub async fn run_test_suite(suite: Value) -> BuiltinResult<Value> {
         .with_builtin("matlab.unittest.TestRunner.run")
         .build());
     };
-    (service.run_suite)(suite).await
+    (service.run_suite)(suite, plugins).await
 }
 
 pub async fn run_tests(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -112,7 +112,7 @@ mod tests {
     #[test]
     fn service_installation_is_scoped_and_async_safe() {
         let _guard = install_test_services(RuntimeTestServices::new(
-            |suite| Box::pin(async move { Ok(suite) }),
+            |suite, _plugins| Box::pin(async move { Ok(suite) }),
             |args| {
                 Box::pin(async move {
                     let count = args.len();
@@ -132,7 +132,7 @@ mod tests {
         ));
         let suite = Value::String("suite".into());
         assert_eq!(
-            futures::executor::block_on(run_test_suite(suite.clone())).unwrap(),
+            futures::executor::block_on(run_test_suite(suite.clone(), Vec::new())).unwrap(),
             suite
         );
     }

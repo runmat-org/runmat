@@ -150,6 +150,7 @@ pub struct ResolvedTestTarget {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedTestTargets {
     pub targets: Vec<ResolvedTestTarget>,
+    pub coverage: bool,
 }
 
 #[derive(Debug, Default)]
@@ -158,6 +159,7 @@ struct RunTestsOptions {
     targets: Vec<String>,
     base_folders: Vec<String>,
     filters: Vec<String>,
+    coverage: bool,
 }
 
 #[runtime_builtin(
@@ -257,7 +259,10 @@ pub async fn resolve_runtests_targets(args: Vec<Value>) -> BuiltinResult<Resolve
         }
     }
 
-    Ok(ResolvedTestTargets { targets: cases })
+    Ok(ResolvedTestTargets {
+        targets: cases,
+        coverage: options.coverage,
+    })
 }
 
 async fn gather_values(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
@@ -313,10 +318,7 @@ fn parse_options(args: Vec<Value>) -> BuiltinResult<RunTestsOptions> {
                 }
             }
             "coverage" => {
-                return Err(runtests_error_detail(
-                    &RUNTESTS_ERROR_UNSUPPORTED_OPTION,
-                    "coverage collection is not part of the current runtests slice",
-                ));
+                options.coverage = value_to_bool(value)?;
             }
             other => {
                 return Err(runtests_error_detail(
@@ -578,6 +580,13 @@ mod tests {
         .expect("parse options");
         assert_eq!(opts.targets, vec!["tests"]);
         assert!(opts.include_subfolders);
+    }
+
+    #[test]
+    fn parse_accepts_coverage_collection() {
+        let options =
+            parse_options(vec![Value::String("Coverage".into()), Value::Bool(true)]).unwrap();
+        assert!(options.coverage);
     }
 
     #[test]
