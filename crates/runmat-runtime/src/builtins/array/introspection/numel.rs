@@ -190,17 +190,15 @@ fn parse_dimension_args(args: &[Value]) -> crate::BuiltinResult<Vec<usize>> {
             }
             Value::Tensor(t) => {
                 ensure_dim_vector(t)?;
-                if t.data.is_empty() {
+                if t.is_empty() {
                     return Err(numel_error(
                         "numel: dimension vector must contain at least one element",
                     ));
                 }
                 let parsed = match tensor::integer_tensor_dimension_vector(t, "numel", false) {
                     Some(parsed) => parsed.map_err(numel_error)?,
-                    None => t
-                        .data
-                        .iter()
-                        .map(|&raw| parse_dim_scalar(raw))
+                    None => (0..t.len())
+                        .map(|index| parse_dim_scalar(tensor::tensor_value_f64(t, index)))
                         .collect::<crate::BuiltinResult<Vec<_>>>()?,
                 };
                 dims.extend(parsed);
@@ -325,6 +323,13 @@ pub(crate) mod tests {
         let result =
             numel_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).expect("numel");
         assert_eq!(result, Value::Num(8.0));
+    }
+
+    #[test]
+    fn numel_dimension_vector_reads_native_single_storage() {
+        let dims = Tensor::from_f32(vec![1.0, 3.0], vec![1, 2]).unwrap();
+        let parsed = parse_dimension_args(&[Value::Tensor(dims)]).expect("parse dims");
+        assert_eq!(parsed, vec![1, 3]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

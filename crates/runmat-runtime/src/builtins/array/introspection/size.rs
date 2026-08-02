@@ -288,17 +288,15 @@ fn parse_dim_selection(arg: &Value) -> crate::BuiltinResult<DimSelection> {
         }
         Value::Tensor(t) => {
             ensure_dim_vector(t)?;
-            if t.data.is_empty() {
+            if t.is_empty() {
                 return Err(size_error(
                     "size: dimension vector must contain at least one element",
                 ));
             }
             let dims = match tensor::integer_tensor_dimension_vector(t, "size", false) {
                 Some(parsed) => parsed.map_err(size_error)?,
-                None => t
-                    .data
-                    .iter()
-                    .map(|&raw| parse_dim_scalar(raw))
+                None => (0..t.len())
+                    .map(|index| parse_dim_scalar(tensor::tensor_value_f64(t, index)))
                     .collect::<crate::BuiltinResult<Vec<_>>>()?,
             };
             Ok(DimSelection::Multiple(dims))
@@ -498,6 +496,15 @@ pub(crate) mod tests {
         let dims = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).expect("dims");
         match parse_dim_selection(&Value::Tensor(dims)).expect("parse dims") {
             DimSelection::Multiple(parsed) => assert_eq!(parsed, vec![large as usize]),
+            DimSelection::Single(_) => panic!("expected vector dimension selection"),
+        }
+    }
+
+    #[test]
+    fn size_dimension_vector_reads_native_single_storage() {
+        let dims = Tensor::from_f32(vec![1.0, 3.0], vec![1, 2]).unwrap();
+        match parse_dim_selection(&Value::Tensor(dims)).expect("parse dims") {
+            DimSelection::Multiple(parsed) => assert_eq!(parsed, vec![1, 3]),
             DimSelection::Single(_) => panic!("expected vector dimension selection"),
         }
     }
