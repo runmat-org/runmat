@@ -252,9 +252,7 @@ fn parse_order_tensor(builtin: &'static str, tensor: &Tensor) -> crate::BuiltinR
             format!("{builtin}: order must be a row or column vector"),
         ));
     }
-    let len = tensor
-        .integer_storage()
-        .map_or(tensor.data.len(), |storage| storage.len());
+    let len = tensor.len();
     if len == 0 {
         return Err(permute_error(
             builtin,
@@ -282,7 +280,8 @@ fn parse_order_tensor(builtin: &'static str, tensor: &Tensor) -> crate::BuiltinR
         return Ok(order);
     }
 
-    for &entry in &tensor.data {
+    for index in 0..len {
+        let entry = tensor::tensor_value_f64(tensor, index);
         if !entry.is_finite() {
             return Err(permute_error(
                 builtin,
@@ -762,6 +761,15 @@ pub(crate) mod tests {
         assert!(
             err.to_string().contains("positive integers"),
             "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn permute_order_parser_reads_native_single_storage() {
+        let order = Tensor::from_f32(vec![2.0, 1.0], vec![1, 2]).expect("single order");
+        assert_eq!(
+            parse_order_argument("permute", Value::Tensor(order)).expect("parse order"),
+            vec![2, 1]
         );
     }
 
