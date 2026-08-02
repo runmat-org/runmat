@@ -14,7 +14,8 @@ use runmat_accelerate_api::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, IntegerStorage, StringArray, Tensor, Value,
+    CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericStorage,
+    StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -463,13 +464,31 @@ pub fn unique_numeric_from_tensor(
     tensor: Tensor,
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
-    if let Some(storage) = tensor.integer_storage() {
-        return unique_integer(storage, tensor.shape.clone(), opts);
+    let shape = tensor.shape.clone();
+    match tensor
+        .into_numeric_storage()
+        .map_err(|e| unique_internal_error(format!("unique: {e}")))?
+    {
+        NumericStorage::F64(values) => unique_floating(values, shape, opts),
+        NumericStorage::F32(values) => unique_floating(values, shape, opts),
+        storage => {
+            let integer = storage
+                .into_integer_storage()
+                .map_err(|_| unique_internal_error("unique: expected integer storage"))?;
+            unique_integer(&integer, shape, opts)
+        }
     }
+}
+
+fn unique_floating<T: UniqueFloat>(
+    values: Vec<T>,
+    shape: Vec<usize>,
+    opts: &UniqueOptions,
+) -> crate::BuiltinResult<UniqueEvaluation> {
     if opts.rows {
-        unique_numeric_rows(tensor, opts)
+        unique_floating_rows(values, shape, opts)
     } else {
-        unique_numeric_elements(tensor, opts)
+        unique_floating_elements(values, opts)
     }
 }
 
@@ -655,14 +674,13 @@ fn unique_integer_rows(
     Ok(UniqueEvaluation::new(Value::Tensor(output), ia, ic))
 }
 
-fn unique_numeric_elements(
-    tensor: Tensor,
+fn unique_floating_elements<T: UniqueFloat>(
+    input: Vec<T>,
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
-    let values = tensor::tensor_values_f64_cow(&tensor);
-    let len = values.len();
+    let len = input.len();
     if len == 0 {
-        let values = Tensor::new(Vec::new(), vec![0, 1])
+        let values = Tensor::from_numeric_storage(T::numeric_storage(Vec::new()), vec![0, 1])
             .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
         let ia = Tensor::new(Vec::new(), vec![0, 1])
             .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
@@ -675,12 +693,12 @@ fn unique_numeric_elements(
         ));
     }
 
-    let mut entries = Vec::<NumericElementEntry>::new();
+    let mut entries = Vec::<FloatingElementEntry<T>>::new();
     let mut map: HashMap<u64, usize> = HashMap::new();
     let mut element_entry_index = Vec::with_capacity(len);
 
-    for (idx, &value) in values.iter().enumerate() {
-        let key = canonicalize_f64(value);
+    for (idx, &value) in input.iter().enumerate() {
+        let key = value.canonical_key();
         match map.get(&key) {
             Some(&entry_idx) => {
                 entries[entry_idx].last = idx;
@@ -688,7 +706,7 @@ fn unique_numeric_elements(
             }
             None => {
                 let entry_idx = entries.len();
-                entries.push(NumericElementEntry {
+                entries.push(FloatingElementEntry {
                     value,
                     first: idx,
                     last: idx,
@@ -701,7 +719,7 @@ fn unique_numeric_elements(
 
     let mut order: Vec<usize> = (0..entries.len()).collect();
     if opts.order == UniqueOrder::Sorted {
-        order.sort_by(|&a, &b| compare_f64(entries[a].value, entries[b].value));
+        order.sort_by(|&a, &b| entries[a].value.compare(entries[b].value));
     }
 
     let mut entry_to_position = vec![0usize; entries.len()];
@@ -727,8 +745,9 @@ fn unique_numeric_elements(
         ic.push((pos + 1) as f64);
     }
 
-    let value_tensor = Tensor::new(values, vec![order.len(), 1])
-        .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
+    let value_tensor =
+        Tensor::from_numeric_storage(T::numeric_storage(values), vec![order.len(), 1])
+            .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![order.len(), 1])
         .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
     let ic_tensor =
@@ -741,22 +760,22 @@ fn unique_numeric_elements(
     ))
 }
 
-fn unique_numeric_rows(
-    tensor: Tensor,
+fn unique_floating_rows<T: UniqueFloat>(
+    input: Vec<T>,
+    shape: Vec<usize>,
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
-    if tensor.shape.len() != 2 {
+    if shape.len() != 2 {
         return Err(unique_error_with(
             &UNIQUE_ERROR_ROWS_REQUIRES_2D_MATRIX,
             UNIQUE_ERROR_ROWS_REQUIRES_2D_MATRIX.message,
         ));
     }
-    let rows = tensor.shape[0];
-    let cols = tensor.shape[1];
-    let tensor_values = tensor::tensor_values_f64_cow(&tensor);
+    let rows = shape[0];
+    let cols = shape[1];
 
     if rows == 0 || cols == 0 {
-        let values = Tensor::new(Vec::new(), vec![0, cols])
+        let values = Tensor::from_numeric_storage(T::numeric_storage(Vec::new()), vec![0, cols])
             .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
         let ia = Tensor::new(Vec::new(), vec![0, 1])
             .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
@@ -769,17 +788,17 @@ fn unique_numeric_rows(
         ));
     }
 
-    let mut entries = Vec::<NumericRowEntry>::new();
-    let mut map: HashMap<NumericRowKey, usize> = HashMap::new();
+    let mut entries = Vec::<FloatingRowEntry<T>>::new();
+    let mut map: HashMap<FloatingRowKey, usize> = HashMap::new();
     let mut row_entry_index = Vec::with_capacity(rows);
 
     for r in 0..rows {
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows;
-            row_values.push(tensor_values[idx]);
+            row_values.push(input[idx]);
         }
-        let key = NumericRowKey::from_slice(&row_values);
+        let key = FloatingRowKey::from_slice(&row_values);
         match map.get(&key) {
             Some(&entry_idx) => {
                 entries[entry_idx].last = r;
@@ -787,7 +806,7 @@ fn unique_numeric_rows(
             }
             None => {
                 let entry_idx = entries.len();
-                entries.push(NumericRowEntry {
+                entries.push(FloatingRowEntry {
                     row_data: row_values.clone(),
                     first: r,
                     last: r,
@@ -800,7 +819,7 @@ fn unique_numeric_rows(
 
     let mut order: Vec<usize> = (0..entries.len()).collect();
     if opts.order == UniqueOrder::Sorted {
-        order.sort_by(|&a, &b| compare_numeric_rows(&entries[a].row_data, &entries[b].row_data));
+        order.sort_by(|&a, &b| compare_floating_rows(&entries[a].row_data, &entries[b].row_data));
     }
 
     let mut entry_to_position = vec![0usize; entries.len()];
@@ -809,7 +828,7 @@ fn unique_numeric_rows(
     }
 
     let unique_rows_count = order.len();
-    let mut values = vec![0.0f64; unique_rows_count * cols];
+    let mut values = vec![T::default(); unique_rows_count * cols];
     for (row_pos, &entry_idx) in order.iter().enumerate() {
         let row = &entries[entry_idx].row_data;
         for (col, value) in row.iter().enumerate().take(cols) {
@@ -834,8 +853,9 @@ fn unique_numeric_rows(
         ic.push((pos + 1) as f64);
     }
 
-    let value_tensor = Tensor::new(values, vec![unique_rows_count, cols])
-        .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
+    let value_tensor =
+        Tensor::from_numeric_storage(T::numeric_storage(values), vec![unique_rows_count, cols])
+            .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![unique_rows_count, 1])
         .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
     let ic_tensor = Tensor::new(ic, vec![rows, 1])
@@ -852,21 +872,38 @@ fn unique_complex_from_tensor(
     tensor: ComplexTensor,
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
-    if opts.rows {
-        unique_complex_rows(tensor, opts)
-    } else {
-        unique_complex_elements(tensor, opts)
+    let shape = tensor.shape.clone();
+    match tensor.into_complex_storage() {
+        ComplexStorage::F64(values) => unique_floating_complex(values, shape, opts),
+        ComplexStorage::F32(values) => unique_floating_complex(values, shape, opts),
+        ComplexStorage::Integer(_) => Err(unique_error_with(
+            &UNIQUE_ERROR_UNSUPPORTED_INPUT_TYPE,
+            "unique: complex integer arrays are not supported",
+        )),
     }
 }
 
-fn unique_complex_elements(
-    tensor: ComplexTensor,
+fn unique_floating_complex<T: UniqueFloat>(
+    values: Vec<(T, T)>,
+    shape: Vec<usize>,
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
-    let len = tensor.materialize_f64().len();
+    if opts.rows {
+        unique_complex_rows(values, shape, opts)
+    } else {
+        unique_complex_elements(values, opts)
+    }
+}
+
+fn unique_complex_elements<T: UniqueFloat>(
+    input: Vec<(T, T)>,
+    opts: &UniqueOptions,
+) -> crate::BuiltinResult<UniqueEvaluation> {
+    let len = input.len();
     if len == 0 {
-        let values = ComplexTensor::new(Vec::new(), vec![0, 1])
-            .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
+        let values =
+            ComplexTensor::from_complex_storage(T::complex_storage(Vec::new()), vec![0, 1])
+                .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
         let ia = Tensor::new(Vec::new(), vec![0, 1])
             .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
         let ic = Tensor::new(Vec::new(), vec![0, 1])
@@ -878,11 +915,11 @@ fn unique_complex_elements(
         ));
     }
 
-    let mut entries = Vec::<ComplexElementEntry>::new();
+    let mut entries = Vec::<ComplexElementEntry<T>>::new();
     let mut map: HashMap<ComplexKey, usize> = HashMap::new();
     let mut element_entry_index = Vec::with_capacity(len);
 
-    for (idx, &value) in tensor.materialize_f64().iter().enumerate() {
+    for (idx, &value) in input.iter().enumerate() {
         let key = ComplexKey::new(value);
         match map.get(&key) {
             Some(&entry_idx) => {
@@ -930,8 +967,9 @@ fn unique_complex_elements(
         ic.push((pos + 1) as f64);
     }
 
-    let value_tensor = ComplexTensor::new(values, vec![order.len(), 1])
-        .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
+    let value_tensor =
+        ComplexTensor::from_complex_storage(T::complex_storage(values), vec![order.len(), 1])
+            .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![order.len(), 1])
         .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
     let ic_tensor =
@@ -944,22 +982,24 @@ fn unique_complex_elements(
     ))
 }
 
-fn unique_complex_rows(
-    tensor: ComplexTensor,
+fn unique_complex_rows<T: UniqueFloat>(
+    input: Vec<(T, T)>,
+    shape: Vec<usize>,
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
-    if tensor.shape.len() != 2 {
+    if shape.len() != 2 {
         return Err(unique_error_with(
             &UNIQUE_ERROR_ROWS_REQUIRES_2D_MATRIX,
             UNIQUE_ERROR_ROWS_REQUIRES_2D_MATRIX.message,
         ));
     }
-    let rows = tensor.shape[0];
-    let cols = tensor.shape[1];
+    let rows = shape[0];
+    let cols = shape[1];
 
     if rows == 0 || cols == 0 {
-        let values = ComplexTensor::new(Vec::new(), vec![rows, cols])
-            .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
+        let values =
+            ComplexTensor::from_complex_storage(T::complex_storage(Vec::new()), vec![rows, cols])
+                .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
         let ia = Tensor::new(Vec::new(), vec![0, 1])
             .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
         let ic = Tensor::new(Vec::new(), vec![rows, 1])
@@ -971,7 +1011,7 @@ fn unique_complex_rows(
         ));
     }
 
-    let mut entries = Vec::<ComplexRowEntry>::new();
+    let mut entries = Vec::<ComplexRowEntry<T>>::new();
     let mut map: HashMap<Vec<ComplexKey>, usize> = HashMap::new();
     let mut row_entry_index = Vec::with_capacity(rows);
 
@@ -980,7 +1020,7 @@ fn unique_complex_rows(
         let mut key_row = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows;
-            let value = tensor.materialize_f64()[idx];
+            let value = input[idx];
             row_values.push(value);
             key_row.push(ComplexKey::new(value));
         }
@@ -1013,7 +1053,7 @@ fn unique_complex_rows(
     }
 
     let unique_rows_count = order.len();
-    let mut values = vec![(0.0, 0.0); unique_rows_count * cols];
+    let mut values = vec![(T::default(), T::default()); unique_rows_count * cols];
     for (row_pos, &entry_idx) in order.iter().enumerate() {
         let row = &entries[entry_idx].row_data;
         for (col, value) in row.iter().enumerate().take(cols) {
@@ -1038,8 +1078,11 @@ fn unique_complex_rows(
         ic.push((pos + 1) as f64);
     }
 
-    let value_tensor = ComplexTensor::new(values, vec![unique_rows_count, cols])
-        .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
+    let value_tensor = ComplexTensor::from_complex_storage(
+        T::complex_storage(values),
+        vec![unique_rows_count, cols],
+    )
+    .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![unique_rows_count, 1])
         .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
     let ic_tensor = Tensor::new(ic, vec![rows, 1])
@@ -1440,8 +1483,8 @@ fn unique_string_rows(
 }
 
 #[derive(Debug)]
-struct NumericElementEntry {
-    value: f64,
+struct FloatingElementEntry<T> {
+    value: T,
     first: usize,
     last: usize,
 }
@@ -1461,24 +1504,24 @@ struct IntegerRowEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct NumericRowKey(Vec<u64>);
+struct FloatingRowKey(Vec<u64>);
 
-impl NumericRowKey {
-    fn from_slice(values: &[f64]) -> Self {
-        NumericRowKey(values.iter().map(|&v| canonicalize_f64(v)).collect())
+impl FloatingRowKey {
+    fn from_slice<T: UniqueFloat>(values: &[T]) -> Self {
+        Self(values.iter().map(|&value| value.canonical_key()).collect())
     }
 }
 
 #[derive(Debug, Clone)]
-struct NumericRowEntry {
-    row_data: Vec<f64>,
+struct FloatingRowEntry<T> {
+    row_data: Vec<T>,
     first: usize,
     last: usize,
 }
 
 #[derive(Debug)]
-struct ComplexElementEntry {
-    value: (f64, f64),
+struct ComplexElementEntry<T> {
+    value: (T, T),
     first: usize,
     last: usize,
 }
@@ -1490,17 +1533,17 @@ struct ComplexKey {
 }
 
 impl ComplexKey {
-    fn new(value: (f64, f64)) -> Self {
+    fn new<T: UniqueFloat>(value: (T, T)) -> Self {
         Self {
-            re: canonicalize_f64(value.0),
-            im: canonicalize_f64(value.1),
+            re: value.0.canonical_key(),
+            im: value.1.canonical_key(),
         }
     }
 }
 
 #[derive(Debug, Clone)]
-struct ComplexRowEntry {
-    row_data: Vec<(f64, f64)>,
+struct ComplexRowEntry<T> {
+    row_data: Vec<(T, T)>,
     first: usize,
     last: usize,
 }
@@ -1555,7 +1598,78 @@ fn canonicalize_f64(value: f64) -> u64 {
     }
 }
 
-fn compare_f64(a: f64, b: f64) -> Ordering {
+fn canonicalize_f32(value: f32) -> u64 {
+    if value.is_nan() {
+        u64::from(0x7fc0_0000u32)
+    } else if value == 0.0 {
+        0u64
+    } else {
+        u64::from(value.to_bits())
+    }
+}
+
+trait UniqueFloat: Copy + Default + PartialOrd + std::fmt::Debug {
+    fn canonical_key(self) -> u64;
+    fn compare(self, other: Self) -> Ordering;
+    fn is_nan(self) -> bool;
+    fn hypot(self, other: Self) -> Self;
+    fn numeric_storage(values: Vec<Self>) -> NumericStorage;
+    fn complex_storage(values: Vec<(Self, Self)>) -> ComplexStorage;
+}
+
+impl UniqueFloat for f64 {
+    fn canonical_key(self) -> u64 {
+        canonicalize_f64(self)
+    }
+
+    fn compare(self, other: Self) -> Ordering {
+        compare_float(self, other)
+    }
+
+    fn is_nan(self) -> bool {
+        f64::is_nan(self)
+    }
+
+    fn hypot(self, other: Self) -> Self {
+        f64::hypot(self, other)
+    }
+
+    fn numeric_storage(values: Vec<Self>) -> NumericStorage {
+        NumericStorage::F64(values)
+    }
+
+    fn complex_storage(values: Vec<(Self, Self)>) -> ComplexStorage {
+        ComplexStorage::F64(values)
+    }
+}
+
+impl UniqueFloat for f32 {
+    fn canonical_key(self) -> u64 {
+        canonicalize_f32(self)
+    }
+
+    fn compare(self, other: Self) -> Ordering {
+        compare_float(self, other)
+    }
+
+    fn is_nan(self) -> bool {
+        f32::is_nan(self)
+    }
+
+    fn hypot(self, other: Self) -> Self {
+        f32::hypot(self, other)
+    }
+
+    fn numeric_storage(values: Vec<Self>) -> NumericStorage {
+        NumericStorage::F32(values)
+    }
+
+    fn complex_storage(values: Vec<(Self, Self)>) -> ComplexStorage {
+        ComplexStorage::F32(values)
+    }
+}
+
+fn compare_float<T: UniqueFloat>(a: T, b: T) -> Ordering {
     if a.is_nan() {
         if b.is_nan() {
             Ordering::Equal
@@ -1569,9 +1683,9 @@ fn compare_f64(a: f64, b: f64) -> Ordering {
     }
 }
 
-fn compare_numeric_rows(a: &[f64], b: &[f64]) -> Ordering {
+fn compare_floating_rows<T: UniqueFloat>(a: &[T], b: &[T]) -> Ordering {
     for (lhs, rhs) in a.iter().zip(b.iter()) {
-        let ord = compare_f64(*lhs, *rhs);
+        let ord = lhs.compare(*rhs);
         if ord != Ordering::Equal {
             return ord;
         }
@@ -1589,11 +1703,11 @@ fn compare_integer_rows(a: &[IntValue], b: &[IntValue]) -> Ordering {
     Ordering::Equal
 }
 
-fn complex_is_nan(value: (f64, f64)) -> bool {
+fn complex_is_nan<T: UniqueFloat>(value: (T, T)) -> bool {
     value.0.is_nan() || value.1.is_nan()
 }
 
-fn compare_complex(a: (f64, f64), b: (f64, f64)) -> Ordering {
+fn compare_complex<T: UniqueFloat>(a: (T, T), b: (T, T)) -> Ordering {
     match (complex_is_nan(a), complex_is_nan(b)) {
         (true, true) => Ordering::Equal,
         (true, false) => Ordering::Greater,
@@ -1601,20 +1715,20 @@ fn compare_complex(a: (f64, f64), b: (f64, f64)) -> Ordering {
         (false, false) => {
             let mag_a = a.0.hypot(a.1);
             let mag_b = b.0.hypot(b.1);
-            let mag_cmp = compare_f64(mag_a, mag_b);
+            let mag_cmp = mag_a.compare(mag_b);
             if mag_cmp != Ordering::Equal {
                 return mag_cmp;
             }
-            let re_cmp = compare_f64(a.0, b.0);
+            let re_cmp = a.0.compare(b.0);
             if re_cmp != Ordering::Equal {
                 return re_cmp;
             }
-            compare_f64(a.1, b.1)
+            a.1.compare(b.1)
         }
     }
 }
 
-fn compare_complex_rows(a: &[(f64, f64)], b: &[(f64, f64)]) -> Ordering {
+fn compare_complex_rows<T: UniqueFloat>(a: &[(T, T)], b: &[(T, T)]) -> Ordering {
     for (lhs, rhs) in a.iter().zip(b.iter()) {
         let ord = compare_complex(*lhs, *rhs);
         if ord != Ordering::Equal {
@@ -2024,6 +2138,80 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn unique_preserves_native_single_elements_and_rows() {
+        let elements = Tensor::from_f32(vec![3.0, 1.0, 3.0, 2.0], vec![4, 1]).unwrap();
+        let values = evaluate_sync(Value::Tensor(elements), &[])
+            .expect("unique single elements")
+            .into_values_value();
+        let Value::Tensor(values) = values else {
+            panic!("expected native single values");
+        };
+        assert_eq!(
+            values.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![1.0, 2.0, 3.0])
+        );
+
+        let rows = Tensor::from_f32(vec![2.0, 1.0, 2.0, 20.0, 10.0, 20.0], vec![3, 2]).unwrap();
+        let values = evaluate_sync(Value::Tensor(rows), &[Value::from("rows")])
+            .expect("unique single rows")
+            .into_values_value();
+        let Value::Tensor(values) = values else {
+            panic!("expected native single rows");
+        };
+        assert_eq!(values.shape, vec![2, 2]);
+        assert_eq!(
+            values.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![1.0, 2.0, 10.0, 20.0])
+        );
+    }
+
+    #[test]
+    fn unique_preserves_native_complex_single_elements_and_rows() {
+        let elements = ComplexTensor::from_f32(
+            vec![(1.0, 1.0), (0.0, 2.0), (1.0, -1.0), (0.0, 2.0)],
+            vec![4, 1],
+        )
+        .unwrap();
+        let values = evaluate_sync(Value::ComplexTensor(elements), &[])
+            .expect("unique complex single elements")
+            .into_values_value();
+        let Value::ComplexTensor(values) = values else {
+            panic!("expected native complex single values");
+        };
+        assert_eq!(
+            values.as_f32_slice(),
+            Some(&[(1.0, -1.0), (1.0, 1.0), (0.0, 2.0)][..])
+        );
+
+        let rows = ComplexTensor::from_f32(
+            vec![
+                (2.0, 0.0),
+                (1.0, 1.0),
+                (2.0, 0.0),
+                (20.0, 0.0),
+                (10.0, -1.0),
+                (20.0, 0.0),
+            ],
+            vec![3, 2],
+        )
+        .unwrap();
+        let values = evaluate_sync(
+            Value::ComplexTensor(rows),
+            &[Value::from("rows"), Value::from("stable")],
+        )
+        .expect("unique complex single rows")
+        .into_values_value();
+        let Value::ComplexTensor(values) = values else {
+            panic!("expected native complex single rows");
+        };
+        assert_eq!(values.shape, vec![2, 2]);
+        assert_eq!(
+            values.as_f32_slice(),
+            Some(&[(2.0, 0.0), (1.0, 1.0), (20.0, 0.0), (10.0, -1.0),][..])
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_handles_logical_arrays() {
@@ -2253,7 +2441,7 @@ pub(crate) mod tests {
         let opts = parse_options(&[]).expect("options");
         let input =
             Tensor::new_integer(IntegerStorage::U16(vec![7, 2, 7, 9]), vec![4, 1]).expect("input");
-        let (values, ia, ic) = unique_numeric_elements(input, &opts)
+        let (values, ia, ic) = unique_numeric_from_tensor(input, &opts)
             .expect("unique numeric elements")
             .into_triple();
         let Value::Tensor(values) = values else {
@@ -2271,7 +2459,8 @@ pub(crate) mod tests {
 
         let rows = Tensor::new_integer(IntegerStorage::U16(vec![1, 3, 1, 2, 4, 2]), vec![3, 2])
             .expect("rows");
-        let (values, ia, ic) = unique_numeric_rows(rows, &opts)
+        let row_opts = parse_options(&[Value::from("rows")]).expect("row options");
+        let (values, ia, ic) = unique_numeric_from_tensor(rows, &row_opts)
             .expect("unique numeric rows")
             .into_triple();
         let Value::Tensor(values) = values else {
