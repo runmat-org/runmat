@@ -5,7 +5,11 @@
 use crate::builtins::common::shape::normalize_scalar_shape;
 use crate::builtins::common::tensor as tensor_utils;
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::{ComplexTensor, IntegerComplexStorage, SparseTensor, Tensor, Value};
+use runmat_accelerate_api::HostIntegerDataOwned;
+use runmat_builtins::{
+    ComplexTensor, IntValue, IntegerComplexStorage, NumericScalar, NumericStorage, SparseTensor,
+    Tensor, Value,
+};
 
 fn indexing_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).build()
@@ -48,26 +52,24 @@ fn positive_platform_index(value: f64) -> Option<usize> {
 }
 
 fn tensor_scalar_value(tensor: &Tensor, index: usize) -> Result<Value, RuntimeError> {
-    if let Some(storage) = tensor.integer_storage() {
-        let value = storage.value_at(index).ok_or_else(|| {
-            indexing_error_with_identifier(
-                "Integer scalar index out of bounds",
-                "RunMat:IndexOutOfBounds",
-            )
-        })?;
-        return Ok(Value::Int(value));
+    match tensor.numeric_value_at(index).ok_or_else(|| {
+        indexing_error_with_identifier(
+            "Tensor scalar index out of bounds",
+            "RunMat:IndexOutOfBounds",
+        )
+    })? {
+        NumericScalar::F64(value) => Ok(Value::Num(value)),
+        NumericScalar::F32(value) => {
+            Tensor::from_numeric_storage(NumericStorage::F32(vec![value]), vec![1, 1])
+                .map(Value::Tensor)
+                .map_err(indexing_error)
+        }
+        value => Ok(Value::Int(
+            value
+                .into_int_value()
+                .expect("non-floating numeric scalar is integer"),
+        )),
     }
-    tensor
-        .data
-        .get(index)
-        .copied()
-        .map(Value::Num)
-        .ok_or_else(|| {
-            indexing_error_with_identifier(
-                "Tensor scalar index out of bounds",
-                "RunMat:IndexOutOfBounds",
-            )
-        })
 }
 
 fn complex_tensor_scalar_value(
@@ -246,26 +248,17 @@ pub fn matrix_get_row(tensor: &Tensor, row: usize) -> Result<Tensor, RuntimeErro
         ));
     }
 
-    if let Some(storage) = tensor.integer_storage() {
-        let values = (0..tensor.cols())
-            .map(|col| storage.value_at((row - 1) + col * tensor.rows()))
-            .collect::<Option<Vec<_>>>()
-            .ok_or_else(|| indexing_error("integer storage is inconsistent"))?;
-        return Tensor::new_integer(
-            storage
-                .from_same_class_values(values)
-                .map_err(indexing_error)?,
-            vec![1, tensor.cols()],
-        )
-        .map_err(indexing_error);
-    }
-
-    // Column-major: row slice picks every element spaced by rows across columns
-    let mut row_data = Vec::with_capacity(tensor.cols());
-    for c in 0..tensor.cols() {
-        row_data.push(tensor.data[(row - 1) + c * tensor.rows()]);
-    }
-    Tensor::new_2d(row_data, 1, tensor.cols()).map_err(|err| indexing_error(err))
+    let rows = tensor.rows();
+    let cols = tensor.cols();
+    let indices = (0..cols)
+        .map(|col| (row - 1) + col * rows)
+        .collect::<Vec<_>>();
+    tensor
+        .clone()
+        .into_numeric_storage()
+        .and_then(|storage| storage.gather(&indices))
+        .and_then(|storage| Tensor::from_numeric_storage(storage, vec![1, cols]))
+        .map_err(indexing_error)
 }
 
 /// Get a column from a tensor
@@ -282,26 +275,15 @@ pub fn matrix_get_col(tensor: &Tensor, col: usize) -> Result<Tensor, RuntimeErro
         ));
     }
 
-    if let Some(storage) = tensor.integer_storage() {
-        let start = (col - 1) * tensor.rows();
-        let values = (0..tensor.rows())
-            .map(|row| storage.value_at(start + row))
-            .collect::<Option<Vec<_>>>()
-            .ok_or_else(|| indexing_error("integer storage is inconsistent"))?;
-        return Tensor::new_integer(
-            storage
-                .from_same_class_values(values)
-                .map_err(indexing_error)?,
-            vec![tensor.rows(), 1],
-        )
-        .map_err(indexing_error);
-    }
-
-    let mut col_data = Vec::with_capacity(tensor.rows());
-    for row in 0..tensor.rows() {
-        col_data.push(tensor.data[row + (col - 1) * tensor.rows()]);
-    }
-    Tensor::new_2d(col_data, tensor.rows(), 1).map_err(|err| indexing_error(err))
+    let rows = tensor.rows();
+    let start = (col - 1) * rows;
+    let indices = (0..rows).map(|row| start + row).collect::<Vec<_>>();
+    tensor
+        .clone()
+        .into_numeric_storage()
+        .and_then(|storage| storage.gather(&indices))
+        .and_then(|storage| Tensor::from_numeric_storage(storage, vec![rows, 1]))
+        .map_err(indexing_error)
 }
 
 /// Array indexing operation (used by all interpreters/compilers)
@@ -311,9 +293,11 @@ pub fn matrix_get_col(tensor: &Tensor, col: usize) -> Result<Tensor, RuntimeErro
 pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, RuntimeError> {
     match base {
         Value::GpuTensor(h) => {
-            let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-                indexing_error("Cannot index value of type GpuTensor without a provider")
-            })?;
+            let provider = runmat_accelerate_api::provider_for_handle(h)
+                .or_else(runmat_accelerate_api::provider)
+                .ok_or_else(|| {
+                    indexing_error("Cannot index value of type GpuTensor without a provider")
+                })?;
             if indices.is_empty() {
                 return Err(indexing_error("At least one index is required"));
             }
@@ -328,8 +312,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                     ));
                 }
                 let lin0 = idx - 1; // 0-based
-                let val = gpu_index_scalar(provider, h, lin0).await?;
-                return Ok(Value::Num(val));
+                return gpu_index_scalar(provider, h, lin0).await;
             } else if indices.len() == 2 {
                 let row = positive_integer_index(indices[0], "RunMat:IndexOutOfBounds")?;
                 let col = positive_integer_index(indices[1], "RunMat:IndexOutOfBounds")?;
@@ -342,8 +325,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                     ));
                 }
                 let lin0 = (row - 1) + (col - 1) * rows;
-                let val = gpu_index_scalar(provider, h, lin0).await?;
-                return Ok(Value::Num(val));
+                return gpu_index_scalar(provider, h, lin0).await;
             }
             Err(indexing_error_with_identifier(
                 format!("Cannot index value of type {base:?}"),
@@ -584,7 +566,30 @@ async fn gpu_index_scalar(
     provider: &dyn runmat_accelerate_api::AccelProvider,
     handle: &runmat_accelerate_api::GpuTensorHandle,
     lin0: usize,
-) -> Result<f64, RuntimeError> {
+) -> Result<Value, RuntimeError> {
+    if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+        let host = provider
+            .download_integer(handle)
+            .await
+            .map_err(|e| indexing_error(format!("gpu integer index: {e}")))?;
+        let value = match host.data {
+            HostIntegerDataOwned::I8(values) => values.get(lin0).copied().map(IntValue::I8),
+            HostIntegerDataOwned::I16(values) => values.get(lin0).copied().map(IntValue::I16),
+            HostIntegerDataOwned::I32(values) => values.get(lin0).copied().map(IntValue::I32),
+            HostIntegerDataOwned::I64(values) => values.get(lin0).copied().map(IntValue::I64),
+            HostIntegerDataOwned::U8(values) => values.get(lin0).copied().map(IntValue::U8),
+            HostIntegerDataOwned::U16(values) => values.get(lin0).copied().map(IntValue::U16),
+            HostIntegerDataOwned::U32(values) => values.get(lin0).copied().map(IntValue::U32),
+            HostIntegerDataOwned::U64(values) => values.get(lin0).copied().map(IntValue::U64),
+        }
+        .ok_or_else(|| {
+            indexing_error_with_identifier(
+                "GPU integer scalar index out of bounds",
+                "RunMat:IndexOutOfBounds",
+            )
+        })?;
+        return Ok(Value::Int(value));
+    }
     #[cfg(target_arch = "wasm32")]
     {
         let host = provider
@@ -598,12 +603,13 @@ async fn gpu_index_scalar(
                 host.data.len()
             )));
         }
-        Ok(host.data[lin0])
+        Ok(Value::Num(host.data[lin0]))
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
         provider
             .read_scalar(handle, lin0)
+            .map(Value::Num)
             .map_err(|e| indexing_error(format!("gpu index: {e}")))
     }
 }
@@ -611,10 +617,11 @@ async fn gpu_index_scalar(
 #[cfg(test)]
 mod tests {
     use super::{matrix_get_col, matrix_get_row, matrix_set_element, perform_indexing};
+    use crate::builtins::common::{gpu_helpers, test_support};
     use futures::executor::block_on;
     use runmat_builtins::{
         CellArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
-        SparseTensor, StringArray, Tensor, Value,
+        NumericStorage, SparseTensor, StringArray, Tensor, Value,
     };
 
     fn sparse_scalar_value(value: Value) -> f64 {
@@ -753,12 +760,11 @@ mod tests {
 
     #[test]
     fn dense_integer_scalar_indexing_preserves_the_exact_value() {
-        let mut tensor = Tensor::new_integer(
+        let tensor = Tensor::new_integer(
             IntegerStorage::U64(vec![9_223_372_036_854_775_809, u64::MAX]),
             vec![1, 2],
         )
         .expect("tensor");
-        tensor.data.clear();
 
         assert_eq!(
             block_on(perform_indexing(&Value::Tensor(tensor), &[2.0])).expect("scalar index"),
@@ -812,13 +818,119 @@ mod tests {
             Some(&IntegerStorage::U64(vec![large, u64::MAX]))
         );
 
-        tensor.data.fill(f64::NAN);
         matrix_set_element(&mut tensor, 1, 2, -4.2).unwrap();
         assert_eq!(
             tensor.integer_storage(),
             Some(&IntegerStorage::U64(vec![large, u64::MAX, 0, 4]))
         );
-        assert_eq!(tensor.data, tensor.integer_storage().unwrap().to_f64_vec());
+    }
+
+    #[test]
+    fn dense_single_scalar_row_and_column_indexing_preserve_class() {
+        let tensor = Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let scalar = block_on(perform_indexing(&Value::Tensor(tensor.clone()), &[2.0]))
+            .expect("single scalar");
+        let Value::Tensor(scalar) = scalar else {
+            panic!("single scalar must retain tensor class");
+        };
+        assert_eq!(
+            scalar.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![2.0])
+        );
+        assert_eq!(
+            matrix_get_row(&tensor, 2)
+                .unwrap()
+                .into_numeric_storage()
+                .unwrap(),
+            NumericStorage::F32(vec![2.0, 4.0])
+        );
+        assert_eq!(
+            matrix_get_col(&tensor, 2)
+                .unwrap()
+                .into_numeric_storage()
+                .unwrap(),
+            NumericStorage::F32(vec![3.0, 4.0])
+        );
+    }
+
+    #[test]
+    fn dense_integer_row_and_column_indexing_preserve_every_class() {
+        let cases = vec![
+            IntegerStorage::I8(vec![1, 2, 3, 4]),
+            IntegerStorage::I16(vec![1, 2, 3, 4]),
+            IntegerStorage::I32(vec![1, 2, 3, 4]),
+            IntegerStorage::I64(vec![1, 2, 3, i64::MAX]),
+            IntegerStorage::U8(vec![1, 2, 3, 4]),
+            IntegerStorage::U16(vec![1, 2, 3, 4]),
+            IntegerStorage::U32(vec![1, 2, 3, 4]),
+            IntegerStorage::U64(vec![1, 2, 3, u64::MAX]),
+        ];
+        for storage in cases {
+            let tensor = Tensor::new_integer(storage.clone(), vec![2, 2]).unwrap();
+            let expected_row = storage
+                .from_same_class_values(vec![
+                    storage.value_at(1).unwrap(),
+                    storage.value_at(3).unwrap(),
+                ])
+                .unwrap();
+            let expected_col = storage
+                .from_same_class_values(vec![
+                    storage.value_at(2).unwrap(),
+                    storage.value_at(3).unwrap(),
+                ])
+                .unwrap();
+            assert_eq!(
+                matrix_get_row(&tensor, 2).unwrap().integer_storage(),
+                Some(&expected_row)
+            );
+            assert_eq!(
+                matrix_get_col(&tensor, 2).unwrap().integer_storage(),
+                Some(&expected_col)
+            );
+        }
+    }
+
+    #[test]
+    fn gpu_integer_scalar_indexing_preserves_every_exact_class() {
+        test_support::with_test_provider(|provider| {
+            let cases = vec![
+                (IntegerStorage::I8(vec![0, i8::MIN]), IntValue::I8(i8::MIN)),
+                (
+                    IntegerStorage::I16(vec![0, i16::MIN]),
+                    IntValue::I16(i16::MIN),
+                ),
+                (
+                    IntegerStorage::I32(vec![0, i32::MIN]),
+                    IntValue::I32(i32::MIN),
+                ),
+                (
+                    IntegerStorage::I64(vec![0, i64::MIN]),
+                    IntValue::I64(i64::MIN),
+                ),
+                (IntegerStorage::U8(vec![0, u8::MAX]), IntValue::U8(u8::MAX)),
+                (
+                    IntegerStorage::U16(vec![0, u16::MAX]),
+                    IntValue::U16(u16::MAX),
+                ),
+                (
+                    IntegerStorage::U32(vec![0, u32::MAX]),
+                    IntValue::U32(u32::MAX),
+                ),
+                (
+                    IntegerStorage::U64(vec![0, u64::MAX]),
+                    IntValue::U64(u64::MAX),
+                ),
+            ];
+            for (storage, expected) in cases {
+                let tensor = Tensor::new_integer(storage, vec![1, 2]).unwrap();
+                let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
+                assert_eq!(
+                    block_on(perform_indexing(&Value::GpuTensor(handle), &[2.0]))
+                        .expect("gpu scalar"),
+                    Value::Int(expected)
+                );
+            }
+        });
     }
 
     #[test]
