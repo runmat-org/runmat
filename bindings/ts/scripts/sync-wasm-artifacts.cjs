@@ -1,7 +1,5 @@
 #!/usr/bin/env node
 
-const INCLUDE_BUNDLER_ARTIFACTS = false;
-
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
@@ -37,10 +35,10 @@ async function copyTree(src, dest) {
 async function main() {
   const repoRoot = path.join(__dirname, "..");
   const copies = [
-    ...(INCLUDE_BUNDLER_ARTIFACTS ? [{
+    {
       src: path.join(repoRoot, "pkg"),
       dest: path.join(repoRoot, "dist", "pkg"),
-    }] : []),
+    },
     {
       src: path.join(repoRoot, "pkg-web"),
       dest: path.join(repoRoot, "dist", "pkg-web"),
