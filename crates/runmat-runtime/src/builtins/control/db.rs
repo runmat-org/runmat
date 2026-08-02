@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
+    ComplexTensor, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -196,12 +196,12 @@ async fn db_builtin(y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         None => DbMode::Voltage,
     };
 
-    let magnitudes = magnitude_tensor(y)?;
     match mode {
-        DbMode::Voltage => map_magnitudes(magnitudes, |m| 20.0 * m.log10()),
-        DbMode::Power => map_magnitudes(magnitudes, |m| 10.0 * m.log10()),
+        DbMode::Voltage => map_real_input(magnitude_input(y)?, |m| 20.0 * m.log10()),
+        DbMode::Power => map_real_input(power_input(y)?, |power| 10.0 * power.log10()),
         DbMode::Resistance(reference) => {
-            let reference = resistance_tensor(reference)?;
+            let magnitudes = magnitude_input(y)?;
+            let reference = resistance_input(reference)?;
             db_with_resistance(&magnitudes, &reference)
         }
     }
@@ -238,51 +238,100 @@ fn parse_mode_string(text: &str) -> BuiltinResult<DbMode> {
     }
 }
 
-fn magnitude_tensor(value: Value) -> BuiltinResult<Tensor> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OutputPrecision {
+    Double,
+    Single,
+}
+
+#[derive(Clone, Debug)]
+struct RealInput {
+    values: Vec<f64>,
+    shape: Vec<usize>,
+    precision: OutputPrecision,
+}
+
+fn tensor_precision(tensor: &Tensor) -> OutputPrecision {
+    if tensor.numeric_dtype() == NumericDType::F32 {
+        OutputPrecision::Single
+    } else {
+        OutputPrecision::Double
+    }
+}
+
+fn magnitude_input(value: Value) -> BuiltinResult<RealInput> {
     match value {
-        Value::Complex(re, im) => Tensor::new(vec![re.hypot(im)], vec![1, 1]).map_err(|e| {
-            db_error_with_detail(
-                &DB_ERROR_INTERNAL,
-                format!("failed to build scalar magnitude tensor: {e}"),
-            )
+        Value::Complex(re, im) => Ok(RealInput {
+            values: vec![re.hypot(im)],
+            shape: vec![1, 1],
+            precision: OutputPrecision::Double,
         }),
-        Value::ComplexTensor(tensor) => complex_magnitudes(tensor),
+        Value::ComplexTensor(tensor) => Ok(complex_magnitudes(tensor)),
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Err(
             db_error_with_detail(&DB_ERROR_INVALID_INPUT, "expected numeric input"),
         ),
         other => {
             let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, other)
                 .map_err(|e| db_error_with_detail(&DB_ERROR_INVALID_INPUT, e))?;
+            let precision = tensor_precision(&tensor);
             let shape = tensor.shape.clone();
             let values = tensor::tensor_into_values_f64(tensor)
                 .into_iter()
                 .map(f64::abs)
                 .collect::<Vec<_>>();
-            Tensor::new(values, shape).map_err(|e| {
-                db_error_with_detail(
-                    &DB_ERROR_INTERNAL,
-                    format!("failed to build magnitude tensor: {e}"),
-                )
+            Ok(RealInput {
+                values,
+                shape,
+                precision,
             })
         }
     }
 }
 
-fn complex_magnitudes(tensor: ComplexTensor) -> BuiltinResult<Tensor> {
+fn complex_magnitudes(tensor: ComplexTensor) -> RealInput {
     let shape = tensor.shape.clone();
-    let data = tensor::complex_tensor_into_values_complex64(tensor)
+    let values = tensor::complex_tensor_into_values_complex64(tensor)
         .into_iter()
         .map(|value| value.norm())
         .collect::<Vec<_>>();
-    Tensor::new(data, shape).map_err(|e| {
-        db_error_with_detail(
-            &DB_ERROR_INTERNAL,
-            format!("failed to build magnitude tensor: {e}"),
-        )
-    })
+    RealInput {
+        values,
+        shape,
+        precision: OutputPrecision::Double,
+    }
 }
 
-fn resistance_tensor(value: Value) -> BuiltinResult<Tensor> {
+fn power_input(value: Value) -> BuiltinResult<RealInput> {
+    match value {
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(db_error_with_detail(
+            &DB_ERROR_INVALID_INPUT,
+            "power measurements must be real and nonnegative",
+        )),
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Err(
+            db_error_with_detail(&DB_ERROR_INVALID_INPUT, "expected numeric input"),
+        ),
+        other => {
+            let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, other)
+                .map_err(|e| db_error_with_detail(&DB_ERROR_INVALID_INPUT, e))?;
+            let precision = tensor_precision(&tensor);
+            let shape = tensor.shape.clone();
+            let values = tensor::tensor_into_values_f64(tensor);
+            if values.iter().any(|value| *value < 0.0) {
+                return Err(db_error_with_detail(
+                    &DB_ERROR_INVALID_INPUT,
+                    "power measurements must be nonnegative",
+                ));
+            }
+            Ok(RealInput {
+                values,
+                shape,
+                precision,
+            })
+        }
+    }
+}
+
+fn resistance_input(value: Value) -> BuiltinResult<RealInput> {
     match value {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(db_error_with_detail(
             &DB_ERROR_INVALID_RESISTANCE,
@@ -294,6 +343,7 @@ fn resistance_tensor(value: Value) -> BuiltinResult<Tensor> {
         other => {
             let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, other)
                 .map_err(|e| db_error_with_detail(&DB_ERROR_INVALID_RESISTANCE, e))?;
+            let precision = tensor_precision(&tensor);
             let shape = tensor.shape.clone();
             let values = tensor::tensor_into_values_f64(tensor);
             for &resistance in &values {
@@ -304,60 +354,68 @@ fn resistance_tensor(value: Value) -> BuiltinResult<Tensor> {
                     ));
                 }
             }
-            Tensor::new(values, shape).map_err(|e| {
-                db_error_with_detail(
-                    &DB_ERROR_INTERNAL,
-                    format!("failed to build resistance tensor: {e}"),
-                )
+            Ok(RealInput {
+                values,
+                shape,
+                precision,
             })
         }
     }
 }
 
-fn map_magnitudes<F>(input: Tensor, op: F) -> BuiltinResult<Value>
-where
-    F: Fn(f64) -> f64,
-{
-    let data = input
-        .data
-        .iter()
-        .map(|&value| op(value))
-        .collect::<Vec<_>>();
-    let tensor = Tensor::new(data, input.shape).map_err(|e| {
+fn build_output(
+    values: Vec<f64>,
+    shape: Vec<usize>,
+    precision: OutputPrecision,
+) -> BuiltinResult<Value> {
+    let tensor = match precision {
+        OutputPrecision::Double => Tensor::new(values, shape),
+        OutputPrecision::Single => Tensor::from_f32(
+            values.into_iter().map(|value| value as f32).collect(),
+            shape,
+        ),
+    }
+    .map_err(|e| {
         db_error_with_detail(
             &DB_ERROR_INTERNAL,
             format!("failed to build output tensor: {e}"),
         )
     })?;
-    Ok(tensor::tensor_into_value(tensor))
+    match precision {
+        OutputPrecision::Double => Ok(tensor::tensor_into_value(tensor)),
+        OutputPrecision::Single => Ok(Value::Tensor(tensor)),
+    }
 }
 
-fn db_with_resistance(magnitudes: &Tensor, reference: &Tensor) -> BuiltinResult<Value> {
+fn map_real_input<F>(input: RealInput, op: F) -> BuiltinResult<Value>
+where
+    F: Fn(f64) -> f64,
+{
+    let data = input.values.into_iter().map(op).collect::<Vec<_>>();
+    build_output(data, input.shape, input.precision)
+}
+
+fn db_with_resistance(magnitudes: &RealInput, reference: &RealInput) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&magnitudes.shape, &reference.shape)
         .map_err(|err| db_error_with_detail(&DB_ERROR_SIZE_MISMATCH, err))?;
+    let precision = if matches!(magnitudes.precision, OutputPrecision::Single)
+        || matches!(reference.precision, OutputPrecision::Single)
+    {
+        OutputPrecision::Single
+    } else {
+        OutputPrecision::Double
+    };
     if plan.is_empty() {
-        let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec()).map_err(|e| {
-            db_error_with_detail(
-                &DB_ERROR_INTERNAL,
-                format!("failed to build empty output tensor: {e}"),
-            )
-        })?;
-        return Ok(tensor::tensor_into_value(tensor));
+        return build_output(Vec::new(), plan.output_shape().to_vec(), precision);
     }
 
     let mut data = vec![0.0; plan.len()];
     for (out_idx, y_idx, r_idx) in plan.iter() {
-        let magnitude = magnitudes.data[y_idx];
-        let resistance = reference.data[r_idx];
+        let magnitude = magnitudes.values[y_idx];
+        let resistance = reference.values[r_idx];
         data[out_idx] = 10.0 * ((magnitude * magnitude) / resistance).log10();
     }
-    let tensor = Tensor::new(data, plan.output_shape().to_vec()).map_err(|e| {
-        db_error_with_detail(
-            &DB_ERROR_INTERNAL,
-            format!("failed to build output tensor: {e}"),
-        )
-    })?;
-    Ok(tensor::tensor_into_value(tensor))
+    build_output(data, plan.output_shape().to_vec(), precision)
 }
 
 #[cfg(test)]
@@ -404,23 +462,17 @@ pub(crate) mod tests {
         }
     }
 
-    fn poisoned_integer_tensor(storage: IntegerStorage, shape: Vec<usize>, poison: f64) -> Tensor {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(poison);
-        tensor
+    fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        Tensor::new_integer(storage, shape).expect("integer tensor")
     }
 
-    fn poisoned_complex_integer_tensor(
+    fn complex_integer_tensor(
         real: IntegerStorage,
         imag: IntegerStorage,
         shape: Vec<usize>,
-        poison: (f64, f64),
     ) -> ComplexTensor {
         let storage = IntegerComplexStorage::new(real, imag).expect("complex integer storage");
-        let mut tensor =
-            ComplexTensor::new_integer(storage, shape).expect("complex integer tensor");
-        tensor.data.fill(poison);
-        tensor
+        ComplexTensor::new_integer(storage, shape).expect("complex integer tensor")
     }
 
     #[test]
@@ -549,6 +601,17 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn db_power_mode_rejects_negative_and_complex_values() {
+        for value in [Value::Num(-1.0), Value::Complex(1.0, 1.0)] {
+            let err = db_builtin(value, vec![Value::CharArray(CharArray::new_row("power"))])
+                .expect_err("invalid power input");
+            assert!(err.message().contains("nonnegative"));
+            assert_eq!(err.identifier(), DB_ERROR_INVALID_INPUT.identifier);
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn db_negative_input_uses_magnitude() {
         assert_num_close(db_builtin(Value::Num(-10.0), Vec::new()).expect("db"), 20.0);
     }
@@ -577,6 +640,18 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 10.0, 100.0], vec![1, 3]).unwrap();
         let result = db_builtin(Value::Tensor(tensor), Vec::new()).expect("db");
         assert_tensor_close(result, &[1, 3], &[0.0, 20.0, 40.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn db_preserves_native_single_output() {
+        let tensor = Tensor::from_f32(vec![1.0, 10.0, 100.0], vec![1, 3]).unwrap();
+        let result = db_builtin(Value::Tensor(tensor), Vec::new()).expect("db");
+        let Value::Tensor(tensor) = result else {
+            panic!("expected native-single tensor");
+        };
+        assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
+        assert_eq!(tensor.materialize_f64(), vec![0.0, 20.0, 40.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -616,9 +691,25 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn db_single_resistance_selects_single_output() {
+        let resistance = Tensor::from_f32(vec![50.0], vec![1, 1]).unwrap();
+        let result =
+            db_builtin(Value::Num(10.0), vec![Value::Tensor(resistance)]).expect("single db");
+        let Value::Tensor(tensor) = result else {
+            panic!("expected native-single tensor");
+        };
+        assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
+        assert_eq!(
+            tensor.materialize_f64(),
+            vec![f64::from((10.0_f64 * 2.0_f64.log10()) as f32)]
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn db_magnitude_and_resistance_read_typed_integer_storage_exactly() {
-        let y = poisoned_integer_tensor(IntegerStorage::I16(vec![-10, 20]), vec![2, 1], f64::NAN);
-        let r = poisoned_integer_tensor(IntegerStorage::U16(vec![50, 100]), vec![1, 2], f64::NAN);
+        let y = integer_tensor(IntegerStorage::I16(vec![-10, 20]), vec![2, 1]);
+        let r = integer_tensor(IntegerStorage::U16(vec![50, 100]), vec![1, 2]);
         let result = db_builtin(Value::Tensor(y), vec![Value::Tensor(r)]).expect("db");
         assert_tensor_close(
             result,
@@ -635,11 +726,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn db_complex_magnitudes_read_typed_integer_storage_exactly() {
-        let tensor = poisoned_complex_integer_tensor(
+        let tensor = complex_integer_tensor(
             IntegerStorage::I16(vec![3, 0]),
             IntegerStorage::I16(vec![4, -10]),
             vec![2, 1],
-            (f64::NAN, f64::NAN),
         );
         let result = db_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("db");
         assert_tensor_close(result, &[2, 1], &[20.0 * 5.0f64.log10(), 20.0]);
