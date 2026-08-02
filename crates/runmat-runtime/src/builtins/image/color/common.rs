@@ -126,20 +126,6 @@ pub(crate) fn grayscale_shape(
     ))
 }
 
-pub(crate) fn dtype_max(dtype: NumericDType) -> f64 {
-    match dtype {
-        NumericDType::I8 => i8::MAX as f64,
-        NumericDType::I16 => i16::MAX as f64,
-        NumericDType::I32 => i32::MAX as f64,
-        NumericDType::I64 => i64::MAX as f64,
-        NumericDType::U8 => 255.0,
-        NumericDType::U16 => 65535.0,
-        NumericDType::U32 => u32::MAX as f64,
-        NumericDType::U64 => u64::MAX as f64,
-        NumericDType::F32 | NumericDType::F64 => 1.0,
-    }
-}
-
 pub(crate) fn unit_value(value: f64, dtype: NumericDType) -> f64 {
     match dtype {
         NumericDType::I8 => (value - i8::MIN as f64) / (u8::MAX as f64),
