@@ -1,5 +1,5 @@
 use crate::graph::{AccelGraph, AccelNode, AccelOpCategory, ValueId};
-use runmat_builtins::{IntValue, Tensor, Type, Value};
+use runmat_builtins::{IntValue, NumericScalar, Tensor, Type, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReductionBehavior {
@@ -169,19 +169,16 @@ mod tests {
 
     #[test]
     fn reduction_tensor_dims_read_typed_integer_storage_exactly() {
-        let mut dims =
-            Tensor::new_integer(IntegerStorage::U16(vec![2, 3]), vec![1, 2]).expect("dims");
-        dims.data.fill(f64::NAN);
+        let dims = Tensor::new_integer(IntegerStorage::U16(vec![2, 3]), vec![1, 2]).expect("dims");
 
         assert_eq!(parse_tensor_dims(&dims), Some(vec![2, 3]));
     }
 
     #[test]
-    fn reduction_tensor_dims_ignore_poisoned_float_mirrors_for_all_integer_classes() {
+    fn reduction_tensor_dims_read_all_integer_classes_exactly() {
         macro_rules! assert_dims {
             ($storage:expr) => {{
-                let mut dims = Tensor::new_integer($storage, vec![1, 2]).expect("dims");
-                dims.data.fill(f64::NAN);
+                let dims = Tensor::new_integer($storage, vec![1, 2]).expect("dims");
                 assert_eq!(parse_tensor_dims(&dims), Some(vec![2, 3]));
             }};
         }
@@ -198,13 +195,11 @@ mod tests {
 
     #[test]
     fn reduction_tensor_dims_reject_invalid_typed_integer_storage() {
-        let mut zero = Tensor::new_integer(IntegerStorage::U8(vec![0]), vec![1, 1]).expect("zero");
-        zero.data[0] = 1.0;
+        let zero = Tensor::new_integer(IntegerStorage::U8(vec![0]), vec![1, 1]).expect("zero");
         assert_eq!(parse_tensor_dims(&zero), None);
 
-        let mut negative =
+        let negative =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("negative");
-        negative.data[0] = 1.0;
         assert_eq!(parse_tensor_dims(&negative), None);
     }
 }
@@ -221,29 +216,19 @@ fn parse_single_float(value: f64) -> Option<Vec<usize>> {
 }
 
 fn parse_tensor_dims(tensor: &Tensor) -> Option<Vec<usize>> {
-    if tensor.data.is_empty() {
+    if tensor.is_empty() {
         return None;
     }
-    if let Some(storage) = tensor.integer_storage() {
-        let mut dims = Vec::with_capacity(storage.len());
-        for index in 0..storage.len() {
-            let parsed = storage.value_at(index).and_then(|value| {
-                value
-                    .try_to_usize()
-                    .filter(|raw| *raw >= 1)
-                    .map(|raw| vec![raw])
-            })?;
-            dims.extend(parsed);
-        }
-        return if dims.is_empty() { None } else { Some(dims) };
-    }
-    let mut dims = Vec::with_capacity(tensor.data.len());
-    for value in &tensor.data {
-        if let Some(parsed) = parse_single_float(*value) {
-            dims.extend(parsed);
-        } else {
-            return None;
-        }
+    let mut dims = Vec::with_capacity(tensor.len());
+    for index in 0..tensor.len() {
+        let parsed = match tensor.numeric_value_at(index)? {
+            NumericScalar::F64(value) => parse_single_float(value),
+            NumericScalar::F32(value) => parse_single_float(f64::from(value)),
+            value => value
+                .into_int_value()
+                .and_then(|value| parse_single_int(&value)),
+        }?;
+        dims.extend(parsed);
     }
     if dims.is_empty() {
         None

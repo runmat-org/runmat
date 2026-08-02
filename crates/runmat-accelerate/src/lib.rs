@@ -477,7 +477,7 @@ impl Planner {
     /// Example decision hook: execute elementwise add on GPU if large enough.
     pub fn choose_elem_add(&self, a: &Tensor, b: &Tensor) -> ExecutionTarget {
         if let Some(bk) = &self.backend {
-            if a.data.len() >= 1 << 16 && a.rows() == b.rows() && a.cols() == b.cols() {
+            if a.len() >= 1 << 16 && a.rows() == b.rows() && a.cols() == b.cols() {
                 return ExecutionTarget::Gpu(bk.device_info());
             }
         }

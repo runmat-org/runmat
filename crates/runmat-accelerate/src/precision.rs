@@ -6,7 +6,7 @@ use std::env;
 /// Return the logical numeric dtype associated with the provided value, if any.
 pub fn value_numeric_dtype(value: &Value) -> Option<NumericDType> {
     match value {
-        Value::Tensor(t) => Some(t.dtype),
+        Value::Tensor(t) => Some(t.numeric_dtype()),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => Some(NumericDType::F64),
         Value::LogicalArray(_) | Value::CharArray(_) => Some(NumericDType::F64),
         Value::GpuTensor(_) => None, // already resident; assume provider handled dtype
@@ -16,7 +16,7 @@ pub fn value_numeric_dtype(value: &Value) -> Option<NumericDType> {
 
 /// Return the logical dtype represented by a tensor.
 pub fn tensor_numeric_dtype(tensor: &Tensor) -> NumericDType {
-    tensor.dtype
+    tensor.numeric_dtype()
 }
 
 fn parse_bool(s: &str) -> Option<bool> {
