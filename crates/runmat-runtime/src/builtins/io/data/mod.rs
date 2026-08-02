@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, ObjectInstance, StructValue, Tensor, Value,
+    IntValue, NumericScalar, ObjectInstance, StructValue, Tensor, Value,
 };
 use runmat_filesystem::data_contract::{DataChunkDescriptor, DataChunkUploadRequest};
 use runmat_macros::runtime_builtin;
@@ -2415,48 +2415,50 @@ fn parse_shape_from_value(value: &Value) -> BuiltinResult<Vec<usize>> {
         Value::Tensor(t) => {
             let len = tensor_utils::tensor_element_len(t);
             let mut out = Vec::with_capacity(len);
-            if let Some(storage) = t.integer_storage() {
-                for index in 0..storage.len() {
-                    let value = storage.value_at(index).expect("integer storage length");
-                    out.push(value.try_to_usize().ok_or_else(|| {
-                        data_error("shape dimensions must be non-negative integers")
-                    })?);
-                }
-            } else {
-                for v in &t.data {
-                    if !v.is_finite()
-                        || *v < 0.0
-                        || v.fract() != 0.0
-                        || *v > usize::MAX as f64
-                        || (usize::BITS == 64 && *v == usize::MAX as f64)
-                    {
-                        return Err(data_error(
-                            "shape dimensions must be non-negative finite integers within platform limits",
-                        ));
-                    }
-                    out.push(*v as usize);
-                }
+            for index in 0..len {
+                let value = t
+                    .numeric_value_at(index)
+                    .ok_or_else(|| data_error("shape dimensions require valid numeric storage"))?;
+                out.push(numeric_dimension_to_usize(value).ok_or_else(|| {
+                    data_error(
+                        "shape dimensions must be non-negative finite integers within platform limits",
+                    )
+                })?);
             }
             Ok(out)
         }
-        Value::Num(v) => {
-            if !v.is_finite()
-                || *v < 0.0
-                || v.fract() != 0.0
-                || *v > usize::MAX as f64
-                || (usize::BITS == 64 && *v == usize::MAX as f64)
-            {
-                return Err(data_error(
+        Value::Num(v) => floating_dimension_to_usize(*v)
+            .map(|value| vec![value])
+            .ok_or_else(|| {
+                data_error(
                     "shape dimensions must be non-negative finite integers within platform limits",
-                ));
-            }
-            Ok(vec![*v as usize])
-        }
+                )
+            }),
         Value::Int(v) => v
             .try_to_usize()
             .map(|n| vec![n])
             .ok_or_else(|| data_error("shape dimensions must be non-negative integers")),
         _ => Err(data_error("shape must be a numeric vector")),
+    }
+}
+
+fn floating_dimension_to_usize(value: f64) -> Option<usize> {
+    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 {
+        return None;
+    }
+    let integer = value as u128;
+    (integer <= usize::MAX as u128 && integer as f64 == value)
+        .then(|| usize::try_from(integer).ok())
+        .flatten()
+}
+
+fn numeric_dimension_to_usize(value: NumericScalar) -> Option<usize> {
+    match value {
+        NumericScalar::F64(value) => floating_dimension_to_usize(value),
+        NumericScalar::F32(value) => floating_dimension_to_usize(f64::from(value)),
+        value => value
+            .into_int_value()
+            .and_then(|value| value.try_to_usize()),
     }
 }
 
@@ -2799,15 +2801,9 @@ fn parse_dim_range(value: &Value, extent: usize) -> BuiltinResult<DimRange> {
             end: extent,
         }),
         Value::Num(n) => {
-            if !n.is_finite()
-                || *n < 1.0
-                || n.fract() != 0.0
-                || *n > usize::MAX as f64
-                || (usize::BITS == 64 && *n == usize::MAX as f64)
-            {
-                return Err(data_error("INVALID_SLICE: index out of bounds"));
-            }
-            let idx = (*n as usize) - 1;
+            let idx = floating_dimension_to_usize(*n)
+                .and_then(|index| index.checked_sub(1))
+                .ok_or_else(|| data_error("INVALID_SLICE: index out of bounds"))?;
             if idx >= extent {
                 return Err(data_error("INVALID_SLICE: index out of bounds"));
             }
@@ -2829,54 +2825,23 @@ fn parse_dim_range(value: &Value, extent: usize) -> BuiltinResult<DimRange> {
             })
         }
         Value::Tensor(t) if tensor_utils::tensor_element_len(t) == 2 => {
-            if let Some(storage) = t.integer_storage() {
-                let Some(start) = storage
-                    .value_at(0)
-                    .and_then(|value| value.try_to_usize())
-                    .and_then(|index| index.checked_sub(1))
-                else {
-                    return Err(data_error("INVALID_SLICE: range out of bounds"));
-                };
-                let Some(end_inclusive) = storage
-                    .value_at(1)
-                    .and_then(|value| value.try_to_usize())
-                    .and_then(|index| index.checked_sub(1))
-                else {
-                    return Err(data_error("INVALID_SLICE: range out of bounds"));
-                };
-                if end_inclusive < start || end_inclusive >= extent {
-                    return Err(data_error("INVALID_SLICE: range out of bounds"));
-                }
-                Ok(DimRange {
-                    start,
-                    end: end_inclusive + 1,
-                })
-            } else {
-                let start_raw = t.data[0];
-                let end_raw = t.data[1];
-                if !start_raw.is_finite()
-                    || !end_raw.is_finite()
-                    || start_raw < 1.0
-                    || end_raw < 1.0
-                    || start_raw.fract() != 0.0
-                    || end_raw.fract() != 0.0
-                    || start_raw > usize::MAX as f64
-                    || end_raw > usize::MAX as f64
-                    || (usize::BITS == 64
-                        && (start_raw == usize::MAX as f64 || end_raw == usize::MAX as f64))
-                {
-                    return Err(data_error("INVALID_SLICE: range out of bounds"));
-                }
-                let start = start_raw as usize - 1;
-                let end_inclusive = end_raw as usize - 1;
-                if end_inclusive < start || end_inclusive >= extent {
-                    return Err(data_error("INVALID_SLICE: range out of bounds"));
-                }
-                Ok(DimRange {
-                    start,
-                    end: end_inclusive + 1,
-                })
+            let start = t
+                .numeric_value_at(0)
+                .and_then(numeric_dimension_to_usize)
+                .and_then(|index| index.checked_sub(1))
+                .ok_or_else(|| data_error("INVALID_SLICE: range out of bounds"))?;
+            let end_inclusive = t
+                .numeric_value_at(1)
+                .and_then(numeric_dimension_to_usize)
+                .and_then(|index| index.checked_sub(1))
+                .ok_or_else(|| data_error("INVALID_SLICE: range out of bounds"))?;
+            if end_inclusive < start || end_inclusive >= extent {
+                return Err(data_error("INVALID_SLICE: range out of bounds"));
             }
+            Ok(DimRange {
+                start,
+                end: end_inclusive + 1,
+            })
         }
         _ => Err(data_error(
             "INVALID_SLICE: dimension must be ':', scalar index, or [start end] range",
@@ -3154,6 +3119,10 @@ mod tests {
     use super::*;
     use runmat_builtins::IntValue;
 
+    fn tensor_values(tensor: &Tensor) -> Vec<f64> {
+        tensor.materialize_f64()
+    }
+
     #[test]
     fn typed_data_slice_indices_do_not_saturate_through_i64() {
         let extent = usize::MAX;
@@ -3185,37 +3154,33 @@ mod tests {
             runmat_builtins::IntegerStorage::U64(vec![2, 3]),
         ];
         for storage in cases {
-            let mut shape = Tensor::new_integer(storage.clone(), vec![1, 2]).expect("shape");
-            shape.data = vec![999.0, 1_001.0];
+            let shape = Tensor::new_integer(storage.clone(), vec![1, 2]).expect("shape");
             assert_eq!(
                 parse_shape_from_value(&Value::Tensor(shape)).expect("shape"),
                 vec![2, 3]
             );
 
-            let mut range = Tensor::new_integer(storage, vec![1, 2]).expect("range");
-            range.data = vec![999.0, 1_001.0];
+            let range = Tensor::new_integer(storage, vec![1, 2]).expect("range");
             let parsed = parse_dim_range(&Value::Tensor(range), 5).expect("range");
             assert_eq!(parsed.start, 1);
             assert_eq!(parsed.end, 3);
         }
 
-        let mut negative =
+        let negative =
             Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![-1]), vec![1, 1])
                 .expect("shape");
-        negative.data.clear();
         assert!(parse_shape_from_value(&Value::Tensor(negative)).is_err());
 
-        let mut invalid = Tensor::new_integer(
+        let invalid = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U64(vec![u64::MAX, u64::MAX]),
             vec![1, 2],
         )
         .expect("range");
-        invalid.data.clear();
         assert!(parse_dim_range(&Value::Tensor(invalid), 5).is_err());
     }
 
     #[test]
-    fn data_shape_and_slice_double_parsers_reject_fractional_and_unrepresentable_bounds() {
+    fn data_shape_and_slice_floating_parsers_reject_fractional_and_unrepresentable_bounds() {
         assert!(parse_shape_from_value(&Value::Num(1.5)).is_err());
         let boundary_shape = parse_shape_from_value(&Value::Num(usize::MAX as f64));
         if usize::BITS == 64 {
@@ -3227,6 +3192,14 @@ mod tests {
 
         let fractional_shape = Tensor::new(vec![2.0, 3.25], vec![1, 2]).expect("shape");
         assert!(parse_shape_from_value(&Value::Tensor(fractional_shape)).is_err());
+        let single_shape = Tensor::from_f32(vec![2.0, 3.0], vec![1, 2]).expect("single shape");
+        assert_eq!(
+            parse_shape_from_value(&Value::Tensor(single_shape)).expect("single shape"),
+            vec![2, 3]
+        );
+        let fractional_single_shape =
+            Tensor::from_f32(vec![2.0, 3.25], vec![1, 2]).expect("fractional single shape");
+        assert!(parse_shape_from_value(&Value::Tensor(fractional_single_shape)).is_err());
 
         assert!(parse_dim_range(&Value::Num(1.5), 5).is_err());
         let boundary_range = parse_dim_range(&Value::Num(usize::MAX as f64), usize::MAX);
@@ -3240,6 +3213,9 @@ mod tests {
 
         let fractional_range = Tensor::new(vec![1.0, 3.5], vec![1, 2]).expect("range");
         assert!(parse_dim_range(&Value::Tensor(fractional_range), 5).is_err());
+        let single_range = Tensor::from_f32(vec![2.0, 3.0], vec![1, 2]).expect("single range");
+        let parsed = parse_dim_range(&Value::Tensor(single_range), 5).expect("single range");
+        assert_eq!((parsed.start, parsed.end), (1, 3));
 
         let too_large_range = Tensor::new(vec![1.0, usize::MAX as f64], vec![1, 2]).expect("range");
         let tensor_boundary = parse_dim_range(&Value::Tensor(too_large_range), usize::MAX);
@@ -3702,7 +3678,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(t.shape, vec![2, 2]);
-        assert_eq!(t.data, vec![1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(tensor_values(&t), vec![1.0, 2.0, 3.0, 4.0]);
     }
 
     #[test]
@@ -3765,7 +3741,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(t.shape, vec![2, 3]);
-        assert_eq!(t.data, vec![10.0, 11.0, 12.0, 13.0, 14.0, 15.0]);
+        assert_eq!(tensor_values(&t), vec![10.0, 11.0, 12.0, 13.0, 14.0, 15.0]);
     }
 
     #[test]
@@ -4251,7 +4227,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(t.shape, vec![3, 1]);
-        assert_eq!(t.data, vec![7.0, 7.0, 7.0]);
+        assert_eq!(tensor_values(&t), vec![7.0, 7.0, 7.0]);
     }
 
     #[test]
@@ -4308,9 +4284,7 @@ mod tests {
             .expect("create dataset");
             let arr = call_builtin("Dataset.array", &[ds, Value::String("samples".to_string())])
                 .expect("array");
-            let mut input =
-                Tensor::new_integer(storage.clone(), vec![2, 1]).expect("integer tensor");
-            input.data.clear();
+            let input = Tensor::new_integer(storage.clone(), vec![2, 1]).expect("integer tensor");
             call_builtin("DataArray.write", &[arr.clone(), Value::Tensor(input)])
                 .expect("write integer array");
 
@@ -4382,12 +4356,11 @@ mod tests {
             )
             .expect("slice"),
         );
-        let mut replacement = Tensor::new_integer(
+        let replacement = Tensor::new_integer(
             IntegerStorage::U64(vec![1_u64 << 63, u64::MAX - 1]),
             vec![1, 2],
         )
         .expect("replacement");
-        replacement.data.clear();
         call_builtin(
             "DataArray.write",
             &[arr.clone(), slice, Value::Tensor(replacement)],
