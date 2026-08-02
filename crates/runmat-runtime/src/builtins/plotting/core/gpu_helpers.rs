@@ -2,7 +2,7 @@
 
 use futures::executor::block_on;
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{NumericScalar, Tensor, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::{gather_if_needed_async, value_contains_gpu, BuiltinResult};
@@ -64,7 +64,12 @@ pub async fn axis_bounds_async(
     let tensor = gather_tensor_from_gpu_async(handle.clone(), context).await?;
     let mut min_val = f64::INFINITY;
     let mut max_val = f64::NEG_INFINITY;
-    for &v in &tensor.data {
+    for index in 0..tensor.len() {
+        let v = numeric_scalar_to_f64(
+            tensor
+                .numeric_value_at(index)
+                .expect("tensor storage length matches shape"),
+        );
         if v.is_finite() {
             min_val = min_val.min(v);
             max_val = max_val.max(v);
@@ -103,15 +108,25 @@ pub async fn value_to_scalar_async(mut value: Value, context: &'static str) -> B
     match value {
         Value::Num(n) => Ok(n),
         Value::Int(i) => Ok(i.to_f64()),
-        Value::Tensor(t) => {
-            t.data.first().copied().ok_or_else(|| {
-                plotting_error(context, format!("{context}: expected scalar result"))
-            })
-        }
+        Value::Tensor(t) => t
+            .numeric_value_at(0)
+            .map(numeric_scalar_to_f64)
+            .ok_or_else(|| plotting_error(context, format!("{context}: expected scalar result"))),
         _ => Err(plotting_error(
             context,
             format!("{context}: expected numeric scalar result"),
         )),
+    }
+}
+
+fn numeric_scalar_to_f64(value: NumericScalar) -> f64 {
+    match value {
+        NumericScalar::F64(value) => value,
+        NumericScalar::F32(value) => f64::from(value),
+        value => value
+            .into_int_value()
+            .expect("non-floating numeric scalar is integer")
+            .to_f64(),
     }
 }
 
@@ -171,4 +186,29 @@ pub async fn gpu_xyz_bounds_async(
         Vec3::new(min_x, min_y, min_z),
         Vec3::new(max_x, max_y, max_z),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::{IntegerStorage, NumericStorage};
+
+    #[test]
+    fn value_to_scalar_reads_authoritative_single_and_integer_storage() {
+        let single =
+            Tensor::from_numeric_storage(NumericStorage::F32(vec![1.25]), vec![1, 1]).unwrap();
+        assert_eq!(
+            block_on(value_to_scalar_async(Value::Tensor(single), "test")).unwrap(),
+            1.25
+        );
+
+        let mut integer =
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .unwrap();
+        integer.data.clear();
+        assert_eq!(
+            block_on(value_to_scalar_async(Value::Tensor(integer), "test")).unwrap(),
+            9_007_199_254_740_993_u64 as f64
+        );
+    }
 }

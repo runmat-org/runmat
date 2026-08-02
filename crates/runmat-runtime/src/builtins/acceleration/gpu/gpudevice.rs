@@ -4,7 +4,7 @@ use runmat_accelerate_api::{ApiDeviceInfo, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, StructValue, Value,
+    IntValue, NumericScalar, StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -281,9 +281,17 @@ fn parse_device_index(value: &Value) -> BuiltinResult<Option<u32>> {
         }
         Value::Tensor(t) => match tensor::tensor_element_len(t) {
             0 => Ok(None),
-            1 => match t.integer_storage().and_then(|storage| storage.value_at(0)) {
-                Some(value) => integer_to_index(&value),
-                None => num_to_index(t.data[0]),
+            1 => match t
+                .numeric_value_at(0)
+                .expect("tensor storage length matches shape")
+            {
+                NumericScalar::F64(value) => num_to_index(value),
+                NumericScalar::F32(value) => num_to_index(f64::from(value)),
+                value => integer_to_index(
+                    &value
+                        .into_int_value()
+                        .expect("non-floating numeric scalar is integer"),
+                ),
             },
             _ => Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into()),
         },
@@ -341,7 +349,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, ResolveContext, Tensor, Type};
+    use runmat_builtins::{IntegerStorage, NumericStorage, ResolveContext, Tensor, Type};
 
     fn call(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(gpu_device_builtin(args))
@@ -402,6 +410,16 @@ pub(crate) mod tests {
                 .expect("integer tensor");
             let err = call(vec![Value::Tensor(negative)]).unwrap_err().to_string();
             assert_eq!(err, GPU_DEVICE_ERROR_INVALID_INDEX.message);
+        });
+    }
+
+    #[test]
+    fn gpu_device_index_parser_reads_native_single_storage() {
+        test_support::with_test_provider(|_| {
+            let tensor = Tensor::from_numeric_storage(NumericStorage::F32(vec![1.0]), vec![1, 1])
+                .expect("single tensor");
+            let value = call(vec![Value::Tensor(tensor)]).expect("gpuDevice");
+            assert!(matches!(value, Value::Struct(_)));
         });
     }
 

@@ -10,9 +10,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::tensor as tensor_utils;
+use crate::builtins::common::{gpu_helpers, tensor as tensor_utils};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, PagefunOp, PagefunRequest};
+use runmat_accelerate_api::{GpuTensorHandle, PagefunOp, PagefunRequest};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -652,11 +652,7 @@ impl FinalOutput {
                         }
                     }
                     if let Some(provider) = runmat_accelerate_api::provider() {
-                        let view = HostTensorView {
-                            data: &tensor.data,
-                            shape: &tensor.shape,
-                        };
-                        if let Ok(handle) = provider.upload(&view) {
+                        if let Ok(handle) = gpu_helpers::upload_tensor(provider, &tensor) {
                             return Ok(Value::GpuTensor(handle));
                         }
                     }
@@ -1100,6 +1096,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, IntegerStorage, ResolveContext, StringArray, Type};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
