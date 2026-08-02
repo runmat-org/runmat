@@ -473,12 +473,11 @@ async fn parse_polynomial(context: &str, label: &str, value: Value) -> BuiltinRe
             let tensor = tensor::logical_to_tensor(&logical).map_err(polyder_error)?;
             ensure_vector_shape(context, label, &tensor.shape)?;
             let orientation = orientation_from_shape(&tensor.shape);
-            if tensor.data.is_empty() {
+            if tensor.is_empty() {
                 (vec![Complex64::new(0.0, 0.0)], orientation)
             } else {
                 (
-                    tensor
-                        .data
+                    tensor::tensor_values_f64(&tensor)
                         .into_iter()
                         .map(|re| Complex64::new(re, 0.0))
                         .collect(),

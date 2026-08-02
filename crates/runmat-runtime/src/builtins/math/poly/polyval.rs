@@ -1005,8 +1005,9 @@ fn finalize_real(data: Vec<f64>, shape: &[usize], prefer_gpu: bool) -> BuiltinRe
         .map_err(|e| polyval_error(format!("polyval: failed to build tensor: {e}")))?;
     if prefer_gpu {
         if let Some(provider) = runmat_accelerate_api::provider() {
+            let data = tensor::tensor_values_f64_cow(&tensor);
             let view = HostTensorView {
-                data: &tensor.data,
+                data: data.as_ref(),
                 shape: &tensor.shape,
             };
             if let Ok(handle) = provider.upload(&view) {
@@ -1047,9 +1048,7 @@ fn is_vector_shape(shape: &[usize]) -> bool {
 }
 
 fn tensor_element_len(tensor: &Tensor) -> usize {
-    tensor
-        .integer_storage()
-        .map_or(tensor.data.len(), |storage| storage.len())
+    tensor.len()
 }
 
 fn complex_tensor_element_len(tensor: &ComplexTensor) -> usize {

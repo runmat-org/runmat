@@ -523,7 +523,7 @@ async fn real_vector(context: &str, label: &str, value: Value) -> BuiltinResult<
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical).map_err(polyfit_error)?;
             ensure_vector_shape(context, label, &tensor.shape)?;
-            Ok(tensor.data)
+            Ok(tensor::tensor_values_f64(&tensor))
         }
         Value::Num(n) => Ok(vec![n]),
         Value::Int(i) => Ok(vec![i.to_f64()]),
@@ -572,8 +572,7 @@ async fn complex_vector(
             let tensor = tensor::logical_to_tensor(&logical).map_err(polyfit_error)?;
             ensure_vector_shape(context, label, &tensor.shape)?;
             Ok((
-                tensor
-                    .data
+                tensor::tensor_values_f64(&tensor)
                     .iter()
                     .map(|&x| Complex64::new(x, 0.0))
                     .collect(),
