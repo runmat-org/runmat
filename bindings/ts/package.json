@@ -16,11 +16,6 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
-    "dist/pkg/runmat_wasm.js",
-    "dist/pkg/runmat_wasm_bg.js",
-    "dist/pkg/runmat_wasm.d.ts",
-    "dist/pkg/runmat_wasm_bg.wasm",
-    "dist/pkg/runmat_wasm_bg.wasm.d.ts",
     "dist/pkg-web/runmat_wasm_web.js",
     "dist/pkg-web/runmat_wasm_web.d.ts",
     "dist/pkg-web/runmat_wasm_web_bg.wasm",
@@ -83,7 +78,6 @@
       "types": "./dist/testing/*.d.ts",
       "import": "./dist/testing/*.js"
     },
-    "./pkg/*": "./dist/pkg/*",
     "./pkg-web/*": "./dist/pkg-web/*",
     "./lsp/*": "./dist/lsp/*"
   },

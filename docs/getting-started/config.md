@@ -2,7 +2,7 @@
 title: "Configuration Reference"
 category: "Getting Started"
 section: "1.5"
-last_updated: "May 30, 2026"
+last_updated: "August 2, 2026"
 ---
 
 # Configuration Reference
@@ -126,6 +126,43 @@ runmat run studies/bracket_static.fea
 runmat benchmark main --iterations 25 --jit
 ```
 
+## Desktop Project Reference
+
+Desktop project behavior is stored in the same canonical `runmat.toml` or `runmat.json` document as package, source, test, and runtime configuration. RunMat parses, validates, migrates, and updates these settings through one Rust configuration authority in native, CLI, and WASM/browser hosts; an update preserves sections and comments owned by other subsystems.
+
+When a legacy `.runmat` file is present, RunMat performs one finite promotion into the canonical project document. Existing canonical values win, missing legacy and unowned values are merged even when the destination is `runmat.json`, and `.runmat` is removed only after the canonical write is read back successfully; later reads and writes use only the canonical file.
+
+```toml
+[desktop.artifacts]
+root = ".artifacts"
+
+[desktop.run_history]
+mode = "budgeted"
+trace = true
+logs = "all"
+
+[desktop.script]
+clear_workspace_before_run = true
+clear_figures_before_run = true
+
+[desktop.notebook]
+on_error = "stop"
+rerun_after_cancel = "remaining"
+```
+
+| Section and key | Type | Default | Allowed values / notes |
+| --- | --- | --- | --- |
+| `desktop.artifacts.root` | string | `".artifacts"` | Project-relative subdirectory; absolute paths, `..`, and overlap with RunMat configuration/internal-state paths are rejected. |
+| `desktop.run_history.mode` | string | `"budgeted"` | `off`, `budgeted`, `full`. |
+| `desktop.run_history.trace` | boolean | `true` | Persists the trace channel with retained runs. |
+| `desktop.run_history.logs` | string | `"all"` | `off`, `errors`, `all`. |
+| `desktop.script.clear_workspace_before_run` | boolean | `true` | Clears workspace state before a script run. |
+| `desktop.script.clear_figures_before_run` | boolean | `true` | Clears figures before a script run. |
+| `desktop.notebook.on_error` | string | `"stop"` | `stop`, `continue`. |
+| `desktop.notebook.rerun_after_cancel` | string | `"remaining"` | `remaining`, `all`. |
+
+Device and user-experience preferences are intentionally not project configuration. Command-window placement is stored per device; internal-artifact visibility and notebook workspace auto-restore are stored per user and project; background runtime diagnosis is explicit, default-off, account-level consent stored by RunMat Server. These preferences never alter the package graph, static analysis, type/shape analysis, or reproducible runtime configuration.
+
 ## Runtime Reference
 
 All runtime settings are under `[runtime]`. Runtime settings control the behavior of the RunMat runtime.
@@ -225,6 +262,7 @@ See [MATLAB Language Compatability](/docs/runtime/getting-started/compatability)
 | `format`     | string  | `"png"` | `png`, `svg`, `pdf`, `html`.     |
 | `dpi`        | integer | `300`   | Raster export DPI.               |
 | `output_dir` | string  | unset   | Default export output directory. |
+| `scene_budget_bytes` | integer | `8388608` | Maximum serialized figure-scene payload size used by Desktop/browser export and replay. |
 
 
 ### `[runtime.fea]`

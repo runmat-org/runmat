@@ -258,6 +258,16 @@ pub fn initialize_acceleration_provider_with(options: &AccelerateInitOptions) {
     }
 }
 
+/// Replace the global acceleration provider using the supplied options.
+///
+/// This is intended for long-lived hosts whose project configuration can change between runtime
+/// sessions. Clearing the default selection does not invalidate providers that own live handles;
+/// the acceleration API retains those device owners until their handles are no longer needed.
+pub fn reinitialize_acceleration_provider_with(options: &AccelerateInitOptions) {
+    runmat_accelerate_api::clear_provider();
+    initialize_acceleration_provider_with(options);
+}
+
 #[cfg(feature = "wgpu")]
 fn announce_wgpu_provider(provider: &WgpuProvider) {
     let info = provider.device_info_struct();

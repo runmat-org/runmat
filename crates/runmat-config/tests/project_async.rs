@@ -66,6 +66,11 @@ roots = ["src"]
         "/workspace/deps/helper/src/+helper/add.m",
         "function out = add(a, b)\nout = a + b;\nend",
     );
+    write(
+        &provider,
+        "/workspace/tests/test_main.m",
+        "function tests = test_main\ntests = functiontests(localfunctions);\nend",
+    );
     let _provider = replace_provider(Arc::new(provider));
 
     block_on(async {
@@ -119,6 +124,11 @@ fn async_manifest_validation_does_not_consult_the_native_filesystem() {
         }"#,
     );
     write(&provider, "/browser/virtual-src/main.m", "answer = 42;");
+    write(
+        &provider,
+        "/browser/tests/test_main.m",
+        "function tests = test_main\ntests = functiontests(localfunctions);\nend",
+    );
     let _provider = replace_provider(Arc::new(provider));
 
     block_on(async {

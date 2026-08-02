@@ -83,8 +83,7 @@ impl ConfigLoader {
 
     /// Render runtime config into TOML/JSON text matching the output file contract.
     pub fn render_runtime_config(config: &RunMatRuntimeConfig, path: &Path) -> Result<String> {
-        let format = file::format_from_path(path)?;
-        file::render_runtime_config(config, format)
+        file::render_runtime_config(config, path)
     }
 
     /// Generate a sample configuration file

@@ -33,7 +33,7 @@ verbosee = true
 
     let err = ConfigLoader::load_from_file(&config_path)
         .expect_err("unknown runtime keys should fail validation");
-    assert!(err.to_string().contains("Failed to parse TOML config"));
+    assert!(format!("{err:#}").contains("verbosee"));
 }
 
 #[test]
@@ -43,9 +43,11 @@ fn runtime_loader_ignores_desktop_section() {
     std::fs::write(
         &config_path,
         r#"
-[desktop]
-artifact_root = ".cache/artifacts"
-notebook_run_mode = "continue_on_error"
+[desktop.artifacts]
+root = ".cache/artifacts"
+
+[desktop.notebook]
+on_error = "continue"
 
 [runtime]
 callstack_limit = 64
@@ -54,6 +56,27 @@ callstack_limit = 64
     .unwrap();
 
     let runtime = ConfigLoader::load_from_file(&config_path).unwrap();
+    assert_eq!(runtime.runtime.callstack_limit, 64);
+}
+
+#[test]
+fn runtime_loader_migrates_legacy_acceleration_setting() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_path = temp_dir.path().join("runmat.toml");
+    std::fs::write(
+        &config_path,
+        r#"
+[desktop]
+enable_gpu = false
+
+[runtime]
+callstack_limit = 64
+"#,
+    )
+    .unwrap();
+
+    let runtime = ConfigLoader::load_from_file(&config_path).unwrap();
+    assert!(!runtime.accelerate.enabled);
     assert_eq!(runtime.runtime.callstack_limit, 64);
 }
 

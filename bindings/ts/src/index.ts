@@ -218,6 +218,70 @@ export type LanguageCompatMode = "matlab" | "strict";
 type RunMatPresetLogLevel = "trace" | "debug" | "info" | "warn" | "error";
 export type RunMatLogLevel = RunMatPresetLogLevel | (string & Record<never, never>);
 
+export type RunmatConfigFormat = "toml" | "json";
+export type DesktopRunHistoryMode = "off" | "budgeted" | "full";
+export type DesktopRunLogMode = "off" | "errors" | "all";
+export type DesktopNotebookOnError = "stop" | "continue";
+export type DesktopNotebookRerunAfterCancel = "remaining" | "all";
+
+export interface ResolvedDesktopConfig {
+  artifacts: {
+    root: string;
+  };
+  run_history: {
+    mode: DesktopRunHistoryMode;
+    trace: boolean;
+    logs: DesktopRunLogMode;
+  };
+  script: {
+    clear_workspace_before_run: boolean;
+    clear_figures_before_run: boolean;
+  };
+  notebook: {
+    on_error: DesktopNotebookOnError;
+    rerun_after_cancel: DesktopNotebookRerunAfterCancel;
+  };
+}
+
+export interface ResolvedRunmatConfig {
+  desktop: ResolvedDesktopConfig;
+  runtime: Record<string, unknown> & {
+    accelerate: Record<string, unknown> & { enabled: boolean };
+    plotting: Record<string, unknown> & {
+      export?: Record<string, unknown> & { scene_budget_bytes: number };
+    };
+  };
+}
+
+export interface RunmatConfigPatch {
+  desktop?: {
+    artifacts?: { root?: string };
+    run_history?: {
+      mode?: DesktopRunHistoryMode;
+      trace?: boolean;
+      logs?: DesktopRunLogMode;
+    };
+    script?: {
+      clear_workspace_before_run?: boolean;
+      clear_figures_before_run?: boolean;
+    };
+    notebook?: {
+      on_error?: DesktopNotebookOnError;
+      rerun_after_cancel?: DesktopNotebookRerunAfterCancel;
+    };
+  };
+  runtime?: {
+    accelerate_enabled?: boolean;
+    scene_budget_bytes?: number;
+  };
+}
+
+export interface LegacyRunmatConfigMigration {
+  source: string;
+  changed: boolean;
+  removedKeys: string[];
+}
+
 export type WasmInitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface RunMatInitOptions {
@@ -1173,7 +1237,12 @@ export interface GeometryScenePickResult {
 
 
 interface RunMatNativeModule {
-  default: (module?: WasmInitInput | Promise<WasmInitInput>) => Promise<unknown>;
+  default: (
+    module?:
+      | { module_or_path: WasmInitInput | Promise<WasmInitInput> }
+      | WasmInitInput
+      | Promise<WasmInitInput>
+  ) => Promise<unknown>;
   initRunMat(options: NativeInitOptions): Promise<RunMatNativeSession>;
   buildGitSnapshot?: (
     repository: string,
@@ -1190,6 +1259,21 @@ interface RunMatNativeModule {
     backend: unknown,
     observer: (event: Record<string, unknown>) => void
   ) => Promise<unknown>;
+  resolveRunmatConfig?: (source: string, format: RunmatConfigFormat) => ResolvedRunmatConfig;
+  patchRunmatConfig?: (
+    source: string,
+    format: RunmatConfigFormat,
+    patch: RunmatConfigPatch
+  ) => string;
+  migrateLegacyRunmatConfig?: (
+    source: string,
+    format: RunmatConfigFormat
+  ) => LegacyRunmatConfigMigration;
+  migrateLegacyRunmatConfigInto?: (
+    legacySource: string,
+    destinationSource: string,
+    format: RunmatConfigFormat
+  ) => LegacyRunmatConfigMigration;
   decodePackageLock?: (input: string) => unknown;
   encodePackageLock?: (value: unknown) => string;
   handoffFromFrozenProject?: (project: unknown) => unknown;
@@ -1291,12 +1375,14 @@ async function loadNativeModule(wasmModule?: WasmInitInput): Promise<RunMatNativ
   if (!loadPromise) {
     loadPromise = (async () => {
       const moduleBaseUrl = import.meta.url;
-      const wasmModuleUrl = `${moduleBaseUrl.slice(0, moduleBaseUrl.lastIndexOf("/") + 1)}pkg/runmat_wasm.js`;
+      const wasmModuleUrl = `${moduleBaseUrl.slice(0, moduleBaseUrl.lastIndexOf("/") + 1)}pkg-web/runmat_wasm_web.js`;
       const native = (await import(
         /* webpackIgnore: true */ wasmModuleUrl
       )) as unknown as RunMatNativeModule;
       if (typeof native.default === "function") {
-        await native.default(wasmModule);
+        await native.default(
+          wasmModule === undefined ? undefined : { module_or_path: wasmModule }
+        );
       }
       return native;
     })();
@@ -1411,6 +1497,48 @@ export async function runTestsWithEvents(
   const native = await loadNativeModule();
   requireNativeFunction(native, "runTestsWithEvents");
   return native.runTestsWithEvents(input, backend, observer);
+}
+
+export async function resolveRunmatConfig(
+  source: string,
+  format: RunmatConfigFormat
+): Promise<ResolvedRunmatConfig> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "resolveRunmatConfig");
+  return native.resolveRunmatConfig(source, format);
+}
+
+export async function patchRunmatConfig(
+  source: string,
+  format: RunmatConfigFormat,
+  patch: RunmatConfigPatch
+): Promise<string> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "patchRunmatConfig");
+  return native.patchRunmatConfig(source, format, patch);
+}
+
+export async function migrateLegacyRunmatConfig(
+  source: string,
+  format: RunmatConfigFormat
+): Promise<LegacyRunmatConfigMigration> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "migrateLegacyRunmatConfig");
+  return native.migrateLegacyRunmatConfig(source, format);
+}
+
+export async function migrateLegacyRunmatConfigInto(
+  legacySource: string,
+  destinationSource: string,
+  format: RunmatConfigFormat
+): Promise<LegacyRunmatConfigMigration> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "migrateLegacyRunmatConfigInto");
+  return native.migrateLegacyRunmatConfigInto(
+    legacySource,
+    destinationSource,
+    format
+  );
 }
 
 export async function createBrowserProjectResolver(

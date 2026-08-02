@@ -10,6 +10,10 @@ import {
   exportWorkspaceState,
   importWorkspaceState,
   resetPlotState,
+  resolveRunmatConfig,
+  patchRunmatConfig,
+  migrateLegacyRunmatConfig,
+  migrateLegacyRunmatConfigInto,
   createWorkspaceHoverProvider,
   createFusionPlanAdapter,
   decodePackageLock,
@@ -1009,6 +1013,44 @@ describe("browser project handoff and lock codecs", () => {
     await session.clearProjectHandoff();
     expect(install).toHaveBeenCalledWith(handoff);
     expect(clear).toHaveBeenCalledOnce();
+  });
+});
+
+describe("canonical config authority", () => {
+  afterEach(() => {
+    __internals.setNativeModuleOverride(null);
+  });
+
+  it("delegates resolve, patch, and migration to the Rust/WASM exports", async () => {
+    const resolved = {
+      desktop: { artifacts: { root: ".artifacts" } },
+      runtime: { accelerate: { enabled: true } },
+    };
+    const migration = {
+      source: '[desktop.artifacts]\nroot = ".artifacts"\n',
+      changed: true,
+      removedKeys: ["artifact_root"],
+    };
+    const native: NativeModule = {
+      default: async () => {},
+      initRunMat: async () => createMockNativeSession(),
+      resolveRunmatConfig: vi.fn(() => resolved),
+      patchRunmatConfig: vi.fn(() => "patched"),
+      migrateLegacyRunmatConfig: vi.fn(() => migration),
+      migrateLegacyRunmatConfigInto: vi.fn(() => migration),
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    await expect(resolveRunmatConfig("source", "toml")).resolves.toBe(resolved);
+    await expect(patchRunmatConfig("source", "toml", {})).resolves.toBe(
+      "patched"
+    );
+    await expect(
+      migrateLegacyRunmatConfig("source", "toml")
+    ).resolves.toBe(migration);
+    await expect(
+      migrateLegacyRunmatConfigInto("legacy", "canonical", "toml")
+    ).resolves.toBe(migration);
   });
 });
 

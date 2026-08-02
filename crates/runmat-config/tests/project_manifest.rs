@@ -76,9 +76,11 @@ version = "0.1.0"
 [sources]
 roots = ["src"]
 
-[desktop]
-artifact_root = ".artifacts"
-notebook_run_mode = "stop_on_error"
+[desktop.artifacts]
+root = ".artifacts"
+
+[desktop.notebook]
+on_error = "stop"
 "#,
     )
     .expect("manifest with desktop section should parse");
@@ -119,15 +121,47 @@ fn parses_json_manifest_with_runtime_test_and_desktop_sections() {
             "runtime": { "verbose": true },
             "test": {
                 "roots": ["tests"],
-                "reports": { "junit": "artifacts/junit.xml" }
+                "reports": ["junit"]
             },
-            "desktop": { "artifact_root": ".artifacts" }
+            "desktop": { "artifacts": { "root": ".artifacts" } }
         }"#,
     )
     .expect("JSON manifest with product-owned sections should parse");
 
     assert_eq!(parsed.package.name, "demo");
     assert_eq!(parsed.sources.roots, vec![std::path::PathBuf::from("src")]);
+}
+
+#[test]
+fn desktop_and_runtime_settings_do_not_change_the_static_project_manifest() {
+    let base = r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+"#;
+    let with_product_settings = format!(
+        r#"{base}
+[desktop.artifacts]
+root = "custom-artifacts"
+
+[desktop.run_history]
+mode = "full"
+trace = false
+logs = "errors"
+
+[runtime.accelerate]
+enabled = false
+
+[runtime.plotting.export]
+scene_budget_bytes = 4096
+"#
+    );
+    let base_manifest = parse_project_manifest_toml(base).expect("parse base project manifest");
+    let configured_manifest = parse_project_manifest_toml(&with_product_settings)
+        .expect("parse project manifest with product settings");
+    assert_eq!(configured_manifest, base_manifest);
 }
 
 #[test]

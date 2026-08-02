@@ -10,6 +10,7 @@ _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/r
 * Added consistent TTY-aware ANSI styling throughout human-facing CLI diagnostics, help, logs, headings, progress, and summaries, with per-stream detection, `--color=auto|always|never`, `NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE`, `FORCE_COLOR`, and `TERM=dumb` support while keeping structured, raw, and program-owned output plain.
 * Added immutable RunMat Server project dependencies with exact snapshot/tree locking, transactional native and browser caches, shared WASM-safe validation and read-only mounts, explicit update/offline/frozen behavior, origin-scoped authentication, and safe replay of previously authorized cached snapshots.
 * Added first-class package composition and MATLAB-compatible testing across the CLI, Core, LSP, WASM/npm, browser Web Workers, and Desktop: deterministic locks and frozen project handoffs; path, Git, Server snapshot, and registry dependencies; authenticated shared native transports and private-package key handling; semantic script/function/class test discovery; immutable test plans; process/worker isolation, cancellation, retries, reports, artifacts, plugins, and backend-independent interpreter/JIT/WASM coverage.
+* Unified Desktop project and runtime configuration under the canonical Rust `runmat-config` parser, validator, migration, and comment-preserving patch authority across CLI/runtime loading, Tauri, Server migration, and WASM/browser hosts; added nested artifact, run-history, script, notebook, acceleration, and figure-scene settings; made configured artifact roots authoritative throughout Desktop persistence; separated account, device, and project-local preferences; and removed the legacy TypeScript TOML parser/writer and obsolete prototype settings.
 
 ## [v0.6.0](https://github.com/runmat-org/runmat/compare/v0.5.6...v0.6.0) - July 2026
 
@@ -254,7 +255,7 @@ A major compiler and runtime revision. RunMat now resolves MATLAB language seman
 
 #### Added
 - Add runnable Agent code blocks — RunMat/MATLAB-style snippets in Agent answers now render with editor controls, can be copied, and can be sent directly to runtime execution
-- Add project-scoped Agent persistence so projects can restore Agent state through Desktop project settings such as `persist_agents` in `runmat.toml`
+- Add project-scoped Agent persistence so projects can restore Agent state automatically
 - Add local-to-cloud project conversion support for Agent and history flows that need a cloud project
 
 #### Changed
