@@ -10202,6 +10202,59 @@ end
 }
 
 #[test]
+fn testsuite_and_testrunner_share_semantic_core_discovery_and_selection() {
+    let _guard = cwd_lock();
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let _cwd = push_cwd(tmp.path());
+    std::fs::write(
+        tmp.path().join("selectionTests.m"),
+        r#"
+function tests = selectionTests()
+  tests = functiontests(localfunctions);
+end
+
+function testAlpha(testCase)
+  testCase.verifyFail('alpha must not be selected');
+end
+
+function testBeta(testCase)
+  testCase.verifyTrue(true);
+end
+"#,
+    )
+    .expect("write function test file");
+
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        "suite = testsuite('selectionTests.m', 'Name', 'testBeta'); runner = matlab.unittest.TestRunner.withTextOutput(); results = runner.run(suite);",
+    )
+    .expect("exec succeeds");
+    assert!(
+        outcome.diagnostics.is_empty(),
+        "semantic suite execution should succeed: {:?}",
+        outcome.diagnostics
+    );
+    let suite = outcome_named_upsert_value(&outcome, "suite").expect("suite should be assigned");
+    let runmat_builtins::Value::Object(suite) = suite else {
+        panic!("expected selected scalar TestSuite, got {suite:?}");
+    };
+    assert_eq!(
+        suite.properties.get("ProcedureName"),
+        Some(&runmat_builtins::Value::String("testBeta".into()))
+    );
+    let results =
+        outcome_named_upsert_value(&outcome, "results").expect("results should be assigned");
+    let runmat_builtins::Value::Object(result) = results else {
+        panic!("expected selected scalar TestResult, got {results:?}");
+    };
+    assert_eq!(
+        result.properties.get("Passed"),
+        Some(&runmat_builtins::Value::Bool(true))
+    );
+}
+
+#[test]
 fn runtests_rejects_parallel_execution_option() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = execute_text_request(&mut session, "results = runtests('UseParallel', true);")

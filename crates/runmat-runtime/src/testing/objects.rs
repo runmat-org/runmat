@@ -29,7 +29,14 @@ pub fn test_suite_object(test: &TestDescriptor) -> Value {
         .insert("Name".into(), Value::String(test.display_name.clone()));
     object.properties.insert(
         "ProcedureName".into(),
-        Value::String(test.procedure.display_name.clone()),
+        Value::String(
+            test.procedure
+                .display_name
+                .rsplit('/')
+                .next()
+                .unwrap_or(test.procedure.display_name.as_str())
+                .to_owned(),
+        ),
     );
     object.properties.insert(
         "TestFile".into(),

@@ -17,7 +17,6 @@ struct CompileContext<'a> {
     vars_ptr: Value,
     function_registry: &'a FunctionRegistry,
     module: &'a mut JITModule,
-    runmat_call_semantic_function_id: FuncId,
     runmat_call_semantic_function_outputs_id: FuncId,
     runmat_call_semantic_function_values_id: FuncId,
     runmat_call_semantic_function_expanded_values_id: FuncId,
@@ -28,7 +27,6 @@ struct CompileContext<'a> {
 
 #[derive(Clone, Copy)]
 pub(crate) struct RuntimeCallIds {
-    pub runmat_call_semantic_function_id: FuncId,
     pub runmat_call_semantic_function_outputs_id: FuncId,
     pub runmat_call_semantic_function_values_id: FuncId,
     pub runmat_call_semantic_function_expanded_values_id: FuncId,
@@ -299,7 +297,6 @@ impl BytecodeCompiler {
             vars_ptr,
             function_registry,
             module,
-            runmat_call_semantic_function_id: runtime_call_ids.runmat_call_semantic_function_id,
             runmat_call_semantic_function_outputs_id: runtime_call_ids
                 .runmat_call_semantic_function_outputs_id,
             runmat_call_semantic_function_values_id: runtime_call_ids
@@ -667,29 +664,19 @@ impl BytecodeCompiler {
                             }
                         }
 
-                        let args = Self::pop_call_args(&mut local_stack, *arg_count)?;
-
-                        if *out_count == 1 {
-                            let result = Self::call_semantic_function_jit(
-                                builder,
-                                ctx.module,
-                                ctx.runmat_call_semantic_function_id,
-                                function.0,
-                                &args,
-                            )?;
+                        let args = Self::pop_call_arg_entries(&mut local_stack, *arg_count)?;
+                        let results = Self::call_semantic_function_values_jit(
+                            builder,
+                            ctx.module,
+                            ctx.runmat_call_semantic_function_values_id,
+                            function.0,
+                            &args,
+                            *out_count,
+                        )?;
+                        for result in results {
                             local_stack.push(result);
-                        } else {
-                            let results = Self::call_semantic_function_multi_jit(
-                                builder,
-                                ctx.module,
-                                ctx.runmat_call_semantic_function_outputs_id,
-                                function.0,
-                                &args,
-                                *out_count,
-                            )?;
-                            for result in results {
-                                local_stack.push(result);
-                            }
+                        }
+                        if *out_count > 1 {
                             pc += 1;
                         }
                     }
@@ -748,7 +735,7 @@ impl BytecodeCompiler {
                                 *out_count,
                             )?
                         } else {
-                            let args = Self::pop_non_expanding_call_args(&mut local_stack, specs)?;
+                            let args = Self::pop_call_arg_entries(&mut local_stack, specs.len())?;
                             Self::call_semantic_function_values_jit(
                                 builder,
                                 ctx.module,
@@ -1107,6 +1094,18 @@ impl BytecodeCompiler {
         Ok(args)
     }
 
+    fn pop_call_arg_entries(
+        stack: &mut StackSimulator,
+        arg_count: usize,
+    ) -> Result<Vec<StackEntry>> {
+        let mut args = Vec::with_capacity(arg_count);
+        for _ in 0..arg_count {
+            args.push(stack.pop_entry()?);
+        }
+        args.reverse();
+        Ok(args)
+    }
+
     fn pop_non_expanding_call_args(
         stack: &mut StackSimulator,
         specs: &[ArgSpec],
@@ -1204,88 +1203,6 @@ impl BytecodeCompiler {
         }
         let name = fallback_policy.resolution_name_for(identity)?;
         function_registry.resolve_name(&name)
-    }
-
-    fn call_semantic_function_jit(
-        builder: &mut FunctionBuilder,
-        module: &mut JITModule,
-        runmat_call_semantic_function_id: FuncId,
-        function_id: usize,
-        args: &[Value],
-    ) -> Result<Value> {
-        let args_slot = if !args.is_empty() {
-            let slot = builder.create_sized_stack_slot(StackSlotData::new(
-                StackSlotKind::ExplicitSlot,
-                (args.len() * 8) as u32,
-                8,
-            ));
-            let args_ptr = builder.ins().stack_addr(types::I64, slot, 0);
-
-            for (i, &arg) in args.iter().enumerate() {
-                let offset = builder.ins().iconst(types::I64, (i * 8) as i64);
-                let arg_addr = builder.ins().iadd(args_ptr, offset);
-                builder.ins().store(MemFlags::new(), arg, arg_addr, 0);
-            }
-
-            Some((args_ptr, slot))
-        } else {
-            None
-        };
-
-        let runtime_fn =
-            module.declare_func_in_func(runmat_call_semantic_function_id, builder.func);
-        let result_slot =
-            builder.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 8, 3));
-        let result_ptr = builder.ins().stack_addr(types::I64, result_slot, 0);
-        let function_id = builder.ins().iconst(types::I64, function_id as i64);
-
-        let call_args = if let Some((args_ptr, _)) = args_slot {
-            vec![
-                function_id,
-                args_ptr,
-                builder.ins().iconst(types::I32, args.len() as i64),
-                result_ptr,
-            ]
-        } else {
-            vec![
-                function_id,
-                builder.ins().iconst(types::I64, 0),
-                builder.ins().iconst(types::I32, 0),
-                result_ptr,
-            ]
-        };
-
-        let call = builder.ins().call(runtime_fn, &call_args);
-        let status = builder.inst_results(call)[0];
-        let zero = builder.ins().iconst(types::I32, 0);
-        let is_error = builder.ins().icmp(IntCC::NotEqual, status, zero);
-
-        let error_block = builder.create_block();
-        let success_block = builder.create_block();
-        let after_block = builder.create_block();
-
-        builder
-            .ins()
-            .brif(is_error, error_block, &[], success_block, &[]);
-
-        builder.switch_to_block(error_block);
-        builder.ins().return_(&[status]);
-
-        builder.switch_to_block(success_block);
-        let success_result = builder
-            .ins()
-            .load(types::F64, MemFlags::new(), result_ptr, 0);
-        builder.ins().jump(after_block, &[success_result]);
-
-        builder.switch_to_block(after_block);
-        builder.append_block_param(after_block, types::F64);
-        let result = builder.block_params(after_block)[0];
-
-        builder.seal_block(error_block);
-        builder.seal_block(success_block);
-        builder.seal_block(after_block);
-
-        Ok(result)
     }
 
     fn call_semantic_function_multi_jit(
@@ -1386,32 +1303,6 @@ impl BytecodeCompiler {
         Ok(results)
     }
 
-    fn store_turbine_value_num_args(
-        builder: &mut FunctionBuilder,
-        args: &[Value],
-    ) -> Option<Value> {
-        if args.is_empty() {
-            return None;
-        }
-        let slot = builder.create_sized_stack_slot(StackSlotData::new(
-            StackSlotKind::ExplicitSlot,
-            (args.len() * 16) as u32,
-            8,
-        ));
-        let args_ptr = builder.ins().stack_addr(types::I64, slot, 0);
-        for (i, &arg) in args.iter().enumerate() {
-            let base_offset = (i * 16) as i64;
-            let tag_offset = builder.ins().iconst(types::I64, base_offset);
-            let tag_addr = builder.ins().iadd(args_ptr, tag_offset);
-            let payload_offset = builder.ins().iconst(types::I64, base_offset + 8);
-            let payload_addr = builder.ins().iadd(args_ptr, payload_offset);
-            let num_tag = builder.ins().iconst(types::I32, 1);
-            builder.ins().store(MemFlags::new(), num_tag, tag_addr, 0);
-            builder.ins().store(MemFlags::new(), arg, payload_addr, 0);
-        }
-        Some(args_ptr)
-    }
-
     fn store_turbine_value_arg_entries(
         builder: &mut FunctionBuilder,
         args: &[StackEntry],
@@ -1488,10 +1379,10 @@ impl BytecodeCompiler {
         module: &mut JITModule,
         runmat_call_semantic_function_values_id: FuncId,
         function_id: usize,
-        args: &[Value],
+        args: &[StackEntry],
         out_count: usize,
     ) -> Result<Vec<Value>> {
-        let args_ptr = Self::store_turbine_value_num_args(builder, args)
+        let args_ptr = Self::store_turbine_value_arg_entries(builder, args)
             .unwrap_or_else(|| builder.ins().iconst(types::I64, 0));
         let runtime_fn =
             module.declare_func_in_func(runmat_call_semantic_function_values_id, builder.func);
@@ -1524,10 +1415,7 @@ impl BytecodeCompiler {
             .ins()
             .brif(is_error, error_block, &[], success_block, &[]);
         builder.switch_to_block(error_block);
-        let error_results: Vec<_> = (0..out_count)
-            .map(|_| builder.ins().f64const(0.0))
-            .collect();
-        builder.ins().jump(after_block, &error_results);
+        builder.ins().return_(&[status]);
         builder.switch_to_block(success_block);
         let mut success_results = Vec::with_capacity(out_count);
         for i in 0..out_count {

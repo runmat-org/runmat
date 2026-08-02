@@ -10,6 +10,7 @@ use crate::BuiltinResult;
 pub type RunSuiteFuture = Pin<Box<dyn Future<Output = BuiltinResult<Value>>>>;
 pub type RunSuiteService = dyn Fn(Value) -> RunSuiteFuture;
 pub type RunTestsService = dyn Fn(Vec<Value>) -> RunSuiteFuture;
+pub type DiscoverTestsService = dyn Fn(Vec<Value>) -> RunSuiteFuture;
 
 /// Runtime-facing ports supplied by the active Core execution composition.
 ///
@@ -19,6 +20,7 @@ pub type RunTestsService = dyn Fn(Vec<Value>) -> RunSuiteFuture;
 pub struct RuntimeTestServices {
     run_suite: Rc<RunSuiteService>,
     run_tests: Rc<RunTestsService>,
+    discover_tests: Rc<DiscoverTestsService>,
 }
 
 impl std::fmt::Debug for RuntimeTestServices {
@@ -33,10 +35,12 @@ impl RuntimeTestServices {
     pub fn new(
         run_suite: impl Fn(Value) -> RunSuiteFuture + 'static,
         run_tests: impl Fn(Vec<Value>) -> RunSuiteFuture + 'static,
+        discover_tests: impl Fn(Vec<Value>) -> RunSuiteFuture + 'static,
     ) -> Self {
         Self {
             run_suite: Rc::new(run_suite),
             run_tests: Rc::new(run_tests),
+            discover_tests: Rc::new(discover_tests),
         }
     }
 }
@@ -88,6 +92,19 @@ pub async fn run_tests(args: Vec<Value>) -> BuiltinResult<Value> {
     (service.run_tests)(args).await
 }
 
+pub async fn discover_tests(args: Vec<Value>) -> BuiltinResult<Value> {
+    let service = TEST_SERVICES_STACK.with(|stack| stack.borrow().last().cloned());
+    let Some(service) = service else {
+        return Err(
+            crate::build_runtime_error("testsuite requires an active Core test executor")
+                .with_identifier("RunMat:Testing:RequiresExecutor")
+                .with_builtin("testsuite")
+                .build(),
+        );
+    };
+    (service.discover_tests)(args).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -102,6 +119,14 @@ mod tests {
                     Ok(Value::Cell(
                         runmat_builtins::CellArray::new(args, 1, count).unwrap(),
                     ))
+                })
+            },
+            |args| {
+                Box::pin(async move {
+                    Ok(args
+                        .into_iter()
+                        .next()
+                        .unwrap_or_else(|| Value::OutputList(Vec::new())))
                 })
             },
         ));

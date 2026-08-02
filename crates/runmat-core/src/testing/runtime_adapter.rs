@@ -10,18 +10,24 @@ pub(crate) fn services(
     compat: CompatMode,
     project: Option<runmat_package::FrozenProjectHandoff>,
 ) -> runmat_runtime::testing::RuntimeTestServices {
+    let run_project = project.clone();
     let run = move |args: Vec<Value>| {
-        let project = project.clone();
+        let project = run_project.clone();
         Box::pin(async move { run_arguments(compat, project, args).await })
             as runmat_runtime::testing::RunSuiteFuture
     };
     let suite_run = run.clone();
+    let discover_project = project;
     runmat_runtime::testing::RuntimeTestServices::new(
         move |suite| {
             let args = suite_targets(suite);
             suite_run(args)
         },
         run,
+        move |args| {
+            let project = discover_project.clone();
+            Box::pin(async move { discover_arguments(compat, project, args).await })
+        },
     )
 }
 
@@ -30,6 +36,61 @@ async fn run_arguments(
     project: Option<runmat_package::FrozenProjectHandoff>,
     args: Vec<Value>,
 ) -> runmat_runtime::BuiltinResult<Value> {
+    let (snapshot, selected_names) = snapshot_from_arguments(project.as_ref(), args).await?;
+    let mut session = configured_session(compat, project)?;
+    let run = session
+        .run_test_snapshot(
+            &snapshot,
+            &TestSelector {
+                names: selected_names,
+                ..TestSelector::default()
+            },
+        )
+        .await
+        .map_err(domain_error)?;
+    result_value(&run)
+}
+
+async fn discover_arguments(
+    compat: CompatMode,
+    project: Option<runmat_package::FrozenProjectHandoff>,
+    args: Vec<Value>,
+) -> runmat_runtime::BuiltinResult<Value> {
+    let (snapshot, selected_names) = snapshot_from_arguments(project.as_ref(), args).await?;
+    let session = configured_session(compat, project)?;
+    let discovery = session
+        .discover_tests(&snapshot)
+        .map_err(domain_error)?
+        .select(&TestSelector {
+            names: selected_names,
+            ..TestSelector::default()
+        });
+    let values = discovery
+        .suites
+        .into_iter()
+        .flat_map(|suite| suite.tests)
+        .map(|test| {
+            let mut value = runmat_runtime::testing::test_suite_object(&test);
+            if let Value::Object(object) = &mut value {
+                object.properties.insert(
+                    "TestFile".into(),
+                    Value::String(display_source_path(&test.procedure.source)),
+                );
+            }
+            value
+        })
+        .collect();
+    runmat_runtime::testing::object_array_or_scalar(
+        runmat_runtime::testing::TEST_SUITE_CLASS,
+        values,
+    )
+    .map_err(|error| runtime_error("RunMat:Testing:SuiteProjection", error))
+}
+
+async fn snapshot_from_arguments(
+    project: Option<&runmat_package::FrozenProjectHandoff>,
+    args: Vec<Value>,
+) -> runmat_runtime::BuiltinResult<(FrozenTestRunSnapshot, Vec<String>)> {
     let resolved =
         runmat_runtime::builtins::diagnostics::runtests::resolve_runtests_targets(args).await?;
     let mut sources = BTreeMap::new();
@@ -71,7 +132,6 @@ async fn run_arguments(
     }
 
     let (graph_digest, source_digest) = project
-        .as_ref()
         .map(|handoff| {
             let revision = handoff.revision();
             (
@@ -90,6 +150,13 @@ async fn run_arguments(
         Vec::new(),
     )
     .map_err(domain_error)?;
+    Ok((snapshot, selected_names))
+}
+
+fn configured_session(
+    compat: CompatMode,
+    project: Option<runmat_package::FrozenProjectHandoff>,
+) -> runmat_runtime::BuiltinResult<RunMatSession> {
     let mut session = RunMatSession::with_options(false, false).map_err(|error| {
         runtime_error("RunMat:Testing:SessionInitialization", error.to_string())
     })?;
@@ -99,17 +166,7 @@ async fn run_arguments(
             .install_project_handoff(project)
             .map_err(|error| runtime_error("RunMat:Testing:ProjectHandoff", error.to_string()))?;
     }
-    let run = session
-        .run_test_snapshot(
-            &snapshot,
-            &TestSelector {
-                names: selected_names,
-                ..TestSelector::default()
-            },
-        )
-        .await
-        .map_err(domain_error)?;
-    result_value(&run)
+    Ok(session)
 }
 
 fn result_value(run: &super::CoreTestRun) -> runmat_runtime::BuiltinResult<Value> {
@@ -167,23 +224,38 @@ fn display_source_path(source: &runmat_test::descriptor::SourceDescriptor) -> St
 }
 
 fn suite_targets(suite: Value) -> Vec<Value> {
-    match suite {
-        Value::Object(object) => object
-            .properties
-            .get("TestFile")
-            .cloned()
-            .into_iter()
-            .collect(),
-        Value::ObjectArray(array) => array
-            .data()
-            .iter()
-            .filter_map(|value| match value {
-                Value::Object(object) => object.properties.get("TestFile").cloned(),
-                _ => None,
-            })
-            .collect(),
-        value => vec![value],
+    let objects = match suite {
+        Value::Object(object) => vec![Value::Object(object)],
+        Value::ObjectArray(array) => array.data().to_vec(),
+        value => return vec![value],
+    };
+    let mut files = Vec::new();
+    let mut procedures = Vec::new();
+    for value in objects {
+        let Value::Object(object) = value else {
+            continue;
+        };
+        if let Some(file) = object.properties.get("TestFile") {
+            files.push(file.clone());
+        }
+        if let Some(procedure) = object.properties.get("ProcedureName") {
+            procedures.push(procedure.clone());
+        }
     }
+    let mut args = vec![cell_value(files)];
+    if !procedures.is_empty() {
+        args.push(Value::String("Name".into()));
+        args.push(cell_value(procedures));
+    }
+    args
+}
+
+fn cell_value(values: Vec<Value>) -> Value {
+    let count = values.len();
+    Value::Cell(
+        runmat_builtins::CellArray::new(values, 1, count)
+            .expect("runtime test target rows have valid dimensions"),
+    )
 }
 
 fn domain_error(error: runmat_test::TestDomainError) -> runmat_runtime::RuntimeError {

@@ -21,7 +21,7 @@ use log::{debug, error, info, warn};
 use runmat_builtins::Value;
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_vm::{ArgSpec, Bytecode, FunctionRegistry, Instr, InterpreterOutcome};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::env;
 use std::future::Future;
 use std::hash::{Hash, Hasher};
@@ -82,6 +82,19 @@ impl RuntimeContext {
 
 thread_local! {
     static RUNTIME_CONTEXT: Cell<*const RuntimeContext> = Cell::new(std::ptr::null());
+    static LAST_JIT_RUNTIME_ERROR: RefCell<Option<RuntimeError>> = const { RefCell::new(None) };
+}
+
+fn record_jit_runtime_error(error: TurbineError) {
+    if let TurbineError::ExecutionError(error) = error {
+        LAST_JIT_RUNTIME_ERROR.with(|slot| {
+            *slot.borrow_mut() = Some(error);
+        });
+    }
+}
+
+fn take_jit_runtime_error() -> Option<RuntimeError> {
+    LAST_JIT_RUNTIME_ERROR.with(|slot| slot.borrow_mut().take())
 }
 
 struct RuntimeContextGuard {
@@ -114,20 +127,6 @@ fn with_runtime_context<R>(f: impl FnOnce(&RuntimeContext) -> R) -> Option<R> {
 
 fn runtime_function_registry() -> Option<FunctionRegistry> {
     with_runtime_context(|context| context.function_registry.clone())
-}
-
-fn declare_host_semantic_call_in_module(module: &mut JITModule) -> FuncId {
-    let mut sig = module.make_signature();
-    let pointer_type = module.isa().pointer_type();
-    sig.params.push(AbiParam::new(types::I64)); // function id
-    sig.params.push(AbiParam::new(pointer_type)); // args_ptr
-    sig.params.push(AbiParam::new(types::I32)); // args_len
-    sig.params.push(AbiParam::new(pointer_type)); // result_ptr
-    sig.returns.push(AbiParam::new(types::I32)); // status
-
-    module
-        .declare_function("runmat_call_semantic_function", Linkage::Import, &sig)
-        .expect("Failed to declare runmat_call_semantic_function")
 }
 
 fn declare_host_semantic_call_outputs_in_module(module: &mut JITModule) -> FuncId {
@@ -288,7 +287,6 @@ pub struct TurbineEngine {
     profiler: HotspotProfiler,
     target_isa: codegen::isa::OwnedTargetIsa,
     compiler: BytecodeCompiler,
-    runmat_call_semantic_function_id: FuncId,
     runmat_call_semantic_function_outputs_id: FuncId,
     runmat_call_semantic_function_values_id: FuncId,
     runmat_call_semantic_function_expanded_values_id: FuncId,
@@ -449,7 +447,6 @@ impl TurbineEngine {
         let mut module = JITModule::new(builder);
 
         // Declare the external function on the module using the expert's pattern
-        let runmat_call_semantic_function_id = declare_host_semantic_call_in_module(&mut module);
         let runmat_call_semantic_function_outputs_id =
             declare_host_semantic_call_outputs_in_module(&mut module);
         let _runmat_call_semantic_function_value_id =
@@ -476,7 +473,6 @@ impl TurbineEngine {
             profiler: HotspotProfiler::new(),
             target_isa,
             compiler: BytecodeCompiler::new(),
-            runmat_call_semantic_function_id,
             runmat_call_semantic_function_outputs_id,
             runmat_call_semantic_function_values_id,
             runmat_call_semantic_function_expanded_values_id,
@@ -557,7 +553,6 @@ impl TurbineEngine {
                 function_registry: &bytecode.function_registry(),
                 module: &mut self.module,
                 runtime_call_ids: RuntimeCallIds {
-                    runmat_call_semantic_function_id: self.runmat_call_semantic_function_id,
                     runmat_call_semantic_function_outputs_id: self
                         .runmat_call_semantic_function_outputs_id,
                     runmat_call_semantic_function_values_id: self
@@ -639,6 +634,7 @@ impl TurbineEngine {
         // Execute the JIT compiled function
         let _runtime_context =
             enter_runtime_context(RuntimeContext::new(function_registry.clone()));
+        let _ = take_jit_runtime_error();
         let result = unsafe {
             // Cast function pointer to correct signature: fn(*mut TurbineValue, usize) -> i32
             let jit_fn: extern "C" fn(*mut TurbineValue, usize) -> i32 =
@@ -654,6 +650,9 @@ impl TurbineEngine {
         }
 
         if result != 0 {
+            if let Some(error) = take_jit_runtime_error() {
+                return Err(TurbineError::ExecutionError(error));
+            }
             return Err(execution_error(format!(
                 "JIT execution failed with status code {result}"
             )));
@@ -701,6 +700,9 @@ impl TurbineEngine {
                 &function_registry,
             ) {
                 Ok(result) => return Ok((result, true)),
+                Err(TurbineError::ExecutionError(error)) => {
+                    return Err(TurbineError::ExecutionError(error));
+                }
                 Err(err) => {
                     warn!(
                         "JIT execution failed for cached function, falling back to interpreter: {err}"
@@ -720,6 +722,9 @@ impl TurbineEngine {
                         &function_registry,
                     ) {
                         Ok(result) => return Ok((result, true)),
+                        Err(TurbineError::ExecutionError(error)) => {
+                            return Err(TurbineError::ExecutionError(error));
+                        }
                         Err(err) => {
                             warn!(
                                 "JIT execution failed after compilation, falling back to interpreter: {err}"
@@ -1431,6 +1436,7 @@ pub extern "C" fn runmat_call_semantic_function_value(
         Ok(()) => 0,
         Err(err) => {
             error!("TurbineValue semantic function call failed: {err}");
+            record_jit_runtime_error(err);
             1
         }
     }
@@ -1476,6 +1482,7 @@ pub extern "C" fn runmat_call_semantic_function_values(
         Ok(outputs) => outputs,
         Err(err) => {
             error!("TurbineValue semantic function outputs call failed: {err}");
+            record_jit_runtime_error(err);
             return 1;
         }
     };

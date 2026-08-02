@@ -499,6 +499,9 @@ pub(crate) async fn rethrow_builtin(e: Value) -> crate::BuiltinResult<Value> {
 pub(crate) async fn new_handle_object_builtin(class_name: String) -> crate::BuiltinResult<Value> {
     // Create an underlying object instance and wrap it in a handle
     let obj = create_class_object(class_name.clone()).await?;
+    if matches!(obj, Value::HandleObject(_)) {
+        return Ok(obj);
+    }
     let gc = runmat_gc::gc_allocate(obj).map_err(|e| format!("gc: {e}"))?;
     Ok(Value::HandleObject(runmat_builtins::HandleRef {
         class_name,

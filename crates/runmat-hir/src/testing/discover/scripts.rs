@@ -1,6 +1,8 @@
-use runmat_test::descriptor::ProcedureKind;
+use runmat_test::descriptor::{
+    FixtureDescriptor, FixtureScope, ProcedureDescriptor, ProcedureKind,
+};
 use runmat_test::discovery::{DiscoveredSuite, TestDiscovery};
-use runmat_test::identity::{FixtureGroupId, SuiteId};
+use runmat_test::identity::{FixtureGroupId, FixtureId, SuiteId};
 
 use crate::{DefPath, DefPathSegment, FunctionKind, PackageName, QualifiedName, Span, SymbolName};
 
@@ -139,6 +141,7 @@ pub(super) fn discover(
                 )
             })
             .collect();
+        let fixtures = function_fixtures(source, suite_id.as_str(), &group_id, &stem);
         discovery.suites.push(DiscoveredSuite {
             id: suite_id,
             fixture_group_id: group_id,
@@ -151,8 +154,71 @@ pub(super) fn discover(
                     end: source.source_text.len(),
                 },
             ),
-            fixtures: Vec::new(),
+            fixtures,
             tests,
         });
     }
+}
+
+fn function_fixtures(
+    source: &crate::testing::SemanticTestSource<'_>,
+    suite_identity: &str,
+    group_id: &FixtureGroupId,
+    stem: &str,
+) -> Vec<FixtureDescriptor> {
+    let procedure = |name: &str| {
+        source.assembly.functions.iter().find_map(|function| {
+            let leaf = function_leaf(&function.name.0);
+            if !leaf.eq_ignore_ascii_case(name)
+                || !matches!(function.kind, FunctionKind::Named)
+                || function.enclosing_class.is_some()
+            {
+                return None;
+            }
+            let path = DefPath {
+                package: PackageName(source.owner_identity.to_owned()),
+                module: QualifiedName(vec![SymbolName(stem.to_owned())]),
+                item: vec![DefPathSegment::Function(SymbolName(leaf.to_owned()))],
+            };
+            let semantic_path = def_path_string(&path);
+            Some(ProcedureDescriptor {
+                semantic_path: semantic_path.clone(),
+                display_name: leaf.to_owned(),
+                kind: ProcedureKind::Function,
+                source: source_descriptor(source, semantic_path, function.span),
+            })
+        })
+    };
+
+    [
+        (
+            "suite",
+            FixtureScope::Suite,
+            procedure("setupOnce"),
+            procedure("teardownOnce"),
+        ),
+        (
+            "test",
+            FixtureScope::Test,
+            procedure("setup"),
+            procedure("teardown"),
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(name, scope, setup, teardown)| {
+        if setup.is_none() && teardown.is_none() {
+            return None;
+        }
+        let semantic_identity = format!("{stem}/function-fixture/{name}");
+        Some(FixtureDescriptor {
+            id: FixtureId::derive(suite_identity, &semantic_identity),
+            group_id: group_id.clone(),
+            display_name: format!("{name} fixture"),
+            scope,
+            setup,
+            teardown,
+            dependencies: Vec::new(),
+        })
+    })
+    .collect()
 }

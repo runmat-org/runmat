@@ -47,6 +47,7 @@ use crate::{
 
 mod compile;
 mod config;
+mod executable;
 mod init;
 mod project;
 mod run;

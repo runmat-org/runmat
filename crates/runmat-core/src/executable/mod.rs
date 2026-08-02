@@ -1,3 +1,5 @@
+#[cfg(feature = "jit")]
+mod backend;
 mod coverage;
 mod invocation;
 mod revision;

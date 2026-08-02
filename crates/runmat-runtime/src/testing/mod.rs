@@ -13,6 +13,6 @@ pub use objects::{
     test_result_object, test_suite_object, TEST_CASE_CLASS, TEST_RESULT_CLASS, TEST_SUITE_CLASS,
 };
 pub use services::{
-    install_test_services, run_test_suite, run_tests, RunSuiteFuture, RuntimeTestServices,
-    TestServicesGuard,
+    discover_tests, install_test_services, run_test_suite, run_tests, RunSuiteFuture,
+    RuntimeTestServices, TestServicesGuard,
 };
