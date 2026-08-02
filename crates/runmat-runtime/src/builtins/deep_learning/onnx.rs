@@ -1,4 +1,4 @@
-use runmat_builtins::{ObjectInstance, Tensor, Value};
+use runmat_builtins::{NumericDType, NumericStorage, ObjectInstance, Tensor, Value};
 use runmat_macros::runtime_builtin;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -14,6 +14,7 @@ const EXPORT_ONNX: &str = "exportONNXNetwork";
 const DEFAULT_OPSET_VERSION: i64 = 14;
 const MIN_SUPPORTED_OPSET_VERSION: i64 = 13;
 const MAX_SUPPORTED_OPSET_VERSION: i64 = 20;
+const ONNX_FLOAT: i32 = 1;
 const ONNX_DOUBLE: i32 = 11;
 
 #[derive(Debug)]
@@ -41,6 +42,7 @@ struct ExportGraph {
     initializers: Vec<Initializer>,
     input: ValueInfo,
     output: ValueInfo,
+    dtype: NumericDType,
 }
 
 #[derive(Debug)]
@@ -56,7 +58,7 @@ struct Node {
 struct Initializer {
     name: String,
     dims: Vec<i64>,
-    data: Vec<f64>,
+    data: NumericStorage,
 }
 
 #[derive(Debug)]
@@ -236,6 +238,7 @@ fn build_export_graph(
     let mut current_tensor = input_name.clone();
     let mut current_features = None;
     let mut saw_input = false;
+    let mut export_dtype = None;
 
     for (idx, layer_value) in layers.iter().enumerate() {
         let Value::Object(layer) = layer_value else {
@@ -273,7 +276,7 @@ fn build_export_graph(
                     ));
                 }
                 let bias = model::tensor_property(layer, "Bias", EXPORT_ONNX)?;
-                if bias.data.len() != weights.rows {
+                if bias.len() != weights.rows {
                     return Err(deep_learning_error(
                         EXPORT_ONNX,
                         format!(
@@ -292,15 +295,19 @@ fn build_export_graph(
                 }
                 let weight_name = format!("{layer_name}.Weights");
                 let bias_name = format!("{layer_name}.Bias");
+                let weight_rows = weights.rows;
+                let weight_cols = weights.cols;
+                export_dtype = Some(merge_export_dtype(export_dtype, weights.numeric_dtype()));
+                export_dtype = Some(merge_export_dtype(export_dtype, bias.numeric_dtype()));
                 initializers.push(Initializer {
                     name: weight_name.clone(),
-                    dims: vec![weights.rows as i64, weights.cols as i64],
-                    data: tensor_to_row_major_2d(&weights),
+                    dims: vec![weight_rows as i64, weight_cols as i64],
+                    data: tensor_to_row_major_2d(weights)?,
                 });
                 initializers.push(Initializer {
                     name: bias_name.clone(),
-                    dims: vec![weights.rows as i64],
-                    data: bias.data.clone(),
+                    dims: vec![weight_rows as i64],
+                    data: tensor_storage(bias)?,
                 });
                 let next_tensor = format!("{layer_name}/Gemm");
                 nodes.push(Node {
@@ -413,6 +420,7 @@ fn build_export_graph(
             batch_size: options.batch_size,
             features: output_features,
         },
+        dtype: export_dtype.unwrap_or(NumericDType::F64),
     })
 }
 
@@ -464,16 +472,32 @@ fn network_name(network: &ObjectInstance, property: &str) -> BuiltinResult<Optio
     }
 }
 
-fn tensor_to_row_major_2d(tensor: &Tensor) -> Vec<f64> {
+fn merge_export_dtype(current: Option<NumericDType>, dtype: NumericDType) -> NumericDType {
+    if current == Some(NumericDType::F64) || dtype == NumericDType::F64 {
+        NumericDType::F64
+    } else {
+        NumericDType::F32
+    }
+}
+
+fn tensor_storage(tensor: Tensor) -> BuiltinResult<NumericStorage> {
+    tensor
+        .into_numeric_storage()
+        .map_err(|err| deep_learning_error(EXPORT_ONNX, format!("exportONNXNetwork: {err}")))
+}
+
+fn tensor_to_row_major_2d(tensor: Tensor) -> BuiltinResult<NumericStorage> {
     let rows = tensor.rows;
     let cols = tensor.cols;
-    let mut out = Vec::with_capacity(rows * cols);
+    let mut indices = Vec::with_capacity(rows * cols);
     for row in 0..rows {
         for col in 0..cols {
-            out.push(tensor.data[row + col * rows]);
+            indices.push(row + col * rows);
         }
     }
-    out
+    tensor_storage(tensor)?
+        .reorder(&indices)
+        .map_err(|err| deep_learning_error(EXPORT_ONNX, format!("exportONNXNetwork: {err}")))
 }
 
 fn encode_model(graph: &ExportGraph, opset_version: i64) -> Vec<u8> {
@@ -499,10 +523,10 @@ fn encode_graph(graph: &ExportGraph) -> Vec<u8> {
     }
     put_string_field(&mut out, 2, "RunMatExportedNetwork");
     for initializer in &graph.initializers {
-        put_message_field(&mut out, 5, &encode_initializer(initializer));
+        put_message_field(&mut out, 5, &encode_initializer(initializer, graph.dtype));
     }
-    put_message_field(&mut out, 11, &encode_value_info(&graph.input));
-    put_message_field(&mut out, 12, &encode_value_info(&graph.output));
+    put_message_field(&mut out, 11, &encode_value_info(&graph.input, graph.dtype));
+    put_message_field(&mut out, 12, &encode_value_info(&graph.output, graph.dtype));
     out
 }
 
@@ -539,31 +563,49 @@ fn encode_attribute(attribute: &Attribute) -> Vec<u8> {
     out
 }
 
-fn encode_initializer(initializer: &Initializer) -> Vec<u8> {
+fn onnx_dtype(dtype: NumericDType) -> i32 {
+    match dtype {
+        NumericDType::F32 => ONNX_FLOAT,
+        NumericDType::F64 => ONNX_DOUBLE,
+        _ => unreachable!("ONNX export normalizes learned tensors to floating point"),
+    }
+}
+
+fn encode_initializer(initializer: &Initializer, dtype: NumericDType) -> Vec<u8> {
     let mut out = Vec::new();
     for dim in &initializer.dims {
         put_varint_field(&mut out, 1, *dim as u64);
     }
-    put_varint_field(&mut out, 2, ONNX_DOUBLE as u64);
+    put_varint_field(&mut out, 2, onnx_dtype(dtype) as u64);
     put_string_field(&mut out, 8, &initializer.name);
-    let mut raw = Vec::with_capacity(initializer.data.len() * 8);
-    for value in &initializer.data {
-        raw.extend_from_slice(&value.to_le_bytes());
+    let mut raw = Vec::with_capacity(initializer.data.len() * dtype.byte_size());
+    match dtype {
+        NumericDType::F64 => {
+            for value in initializer.data.materialize_f64() {
+                raw.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+        NumericDType::F32 => {
+            for value in initializer.data.materialize_f32() {
+                raw.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+        _ => unreachable!("ONNX export normalizes learned tensors to floating point"),
     }
     put_bytes_field(&mut out, 9, &raw);
     out
 }
 
-fn encode_value_info(info: &ValueInfo) -> Vec<u8> {
+fn encode_value_info(info: &ValueInfo, dtype: NumericDType) -> Vec<u8> {
     let mut out = Vec::new();
     put_string_field(&mut out, 1, &info.name);
-    put_message_field(&mut out, 2, &encode_type(info));
+    put_message_field(&mut out, 2, &encode_type(info, dtype));
     out
 }
 
-fn encode_type(info: &ValueInfo) -> Vec<u8> {
+fn encode_type(info: &ValueInfo, dtype: NumericDType) -> Vec<u8> {
     let mut tensor = Vec::new();
-    put_varint_field(&mut tensor, 1, ONNX_DOUBLE as u64);
+    put_varint_field(&mut tensor, 1, onnx_dtype(dtype) as u64);
     put_message_field(&mut tensor, 2, &encode_shape(info));
     let mut out = Vec::new();
     put_message_field(&mut out, 1, &tensor);
@@ -658,16 +700,66 @@ mod tests {
             .any(|window| window == expected.as_slice())
     }
 
+    fn has_varint_field(bytes: &[u8], field: u32, value: u64) -> bool {
+        let mut expected = Vec::new();
+        put_varint(&mut expected, (field as u64) << 3);
+        put_varint(&mut expected, value);
+        bytes
+            .windows(expected.len())
+            .any(|window| window == expected.as_slice())
+    }
+
     #[test]
     fn initializer_name_uses_tensor_proto_name_field() {
         let initializer = Initializer {
             name: "fc.Weights".to_string(),
             dims: vec![2, 3],
-            data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            data: NumericStorage::F64(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
         };
-        let encoded = encode_initializer(&initializer);
+        let encoded = encode_initializer(&initializer, NumericDType::F64);
 
         assert!(has_length_delimited_field(&encoded, 8, b"fc.Weights"));
         assert!(!has_length_delimited_field(&encoded, 4, b"fc.Weights"));
+    }
+
+    #[test]
+    fn initializer_encodes_native_single_type_and_raw_width() {
+        let initializer = Initializer {
+            name: "fc.Bias".to_string(),
+            dims: vec![2],
+            data: NumericStorage::F32(vec![1.25, -2.5]),
+        };
+        let encoded = encode_initializer(&initializer, NumericDType::F32);
+        let raw = [1.25_f32.to_le_bytes(), (-2.5_f32).to_le_bytes()].concat();
+
+        assert!(has_varint_field(&encoded, 2, ONNX_FLOAT as u64));
+        assert!(has_length_delimited_field(&encoded, 9, &raw));
+    }
+
+    #[test]
+    fn mixed_floating_initializers_promote_graph_to_double() {
+        assert_eq!(
+            merge_export_dtype(Some(NumericDType::F32), NumericDType::F64),
+            NumericDType::F64
+        );
+        assert_eq!(
+            merge_export_dtype(Some(NumericDType::F64), NumericDType::F32),
+            NumericDType::F64
+        );
+        assert_eq!(
+            merge_export_dtype(Some(NumericDType::F32), NumericDType::F32),
+            NumericDType::F32
+        );
+    }
+
+    #[test]
+    fn row_major_conversion_preserves_native_single_storage() {
+        let tensor = Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
+        let storage = tensor_to_row_major_2d(tensor).unwrap();
+
+        assert_eq!(
+            storage,
+            NumericStorage::F32(vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0])
+        );
     }
 }
