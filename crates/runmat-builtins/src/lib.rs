@@ -1155,6 +1155,36 @@ impl NumericScalar {
     pub fn class_name(self) -> &'static str {
         self.numeric_dtype().class_name()
     }
+
+    pub fn is_zero(self) -> bool {
+        match self {
+            Self::F64(value) => value == 0.0,
+            Self::F32(value) => value == 0.0,
+            Self::I8(value) => value == 0,
+            Self::I16(value) => value == 0,
+            Self::I32(value) => value == 0,
+            Self::I64(value) => value == 0,
+            Self::U8(value) => value == 0,
+            Self::U16(value) => value == 0,
+            Self::U32(value) => value == 0,
+            Self::U64(value) => value == 0,
+        }
+    }
+
+    pub fn is_finite(self) -> bool {
+        match self {
+            Self::F64(value) => value.is_finite(),
+            Self::F32(value) => value.is_finite(),
+            Self::I8(_)
+            | Self::I16(_)
+            | Self::I32(_)
+            | Self::I64(_)
+            | Self::U8(_)
+            | Self::U16(_)
+            | Self::U32(_)
+            | Self::U64(_) => true,
+        }
+    }
 }
 
 impl NumericStorageView<'_> {
@@ -1534,6 +1564,31 @@ mod integer_storage_tests {
 
         assert!(cases[9].0.set_value(0, NumericScalar::F64(1.0)).is_err());
         assert!(cases[9].0.set_value(1, NumericScalar::U64(1)).is_err());
+    }
+
+    #[test]
+    fn numeric_scalar_zero_and_finite_predicates_cover_every_native_class() {
+        let zeros = [
+            NumericScalar::F64(-0.0),
+            NumericScalar::F32(-0.0),
+            NumericScalar::I8(0),
+            NumericScalar::I16(0),
+            NumericScalar::I32(0),
+            NumericScalar::I64(0),
+            NumericScalar::U8(0),
+            NumericScalar::U16(0),
+            NumericScalar::U32(0),
+            NumericScalar::U64(0),
+        ];
+        assert!(zeros.into_iter().all(NumericScalar::is_zero));
+        assert!(zeros.into_iter().all(NumericScalar::is_finite));
+
+        assert!(!NumericScalar::F64(f64::NAN).is_zero());
+        assert!(!NumericScalar::F32(f32::INFINITY).is_zero());
+        assert!(!NumericScalar::F64(f64::NAN).is_finite());
+        assert!(!NumericScalar::F32(f32::INFINITY).is_finite());
+        assert!(NumericScalar::I64(i64::MIN).is_finite());
+        assert!(NumericScalar::U64(u64::MAX).is_finite());
     }
 
     #[test]

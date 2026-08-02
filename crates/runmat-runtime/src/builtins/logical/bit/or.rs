@@ -248,20 +248,16 @@ async fn logical_buffer_from(name: &str, value: Value) -> BuiltinResult<LogicalB
 
 fn tensor_to_logical_buffer(tensor: Tensor) -> BuiltinResult<LogicalBuffer> {
     let shape = tensor.shape.clone();
-    let mapped = if let Some(storage) = tensor.integer_storage() {
-        (0..storage.len())
-            .map(|index| {
-                u8::from(
-                    !storage
-                        .value_at(index)
-                        .expect("typed integer storage is structurally valid")
-                        .is_zero(),
-                )
-            })
-            .collect()
-    } else {
-        tensor.data.into_iter().map(logical_from_f64).collect()
-    };
+    let mapped = (0..tensor.len())
+        .map(|index| {
+            u8::from(
+                !tensor
+                    .numeric_value_at(index)
+                    .expect("tensor storage is structurally valid")
+                    .is_zero(),
+            )
+        })
+        .collect();
     Ok(LogicalBuffer {
         data: mapped,
         shape,

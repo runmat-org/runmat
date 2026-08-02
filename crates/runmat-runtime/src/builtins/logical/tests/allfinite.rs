@@ -172,10 +172,12 @@ fn allfinite_host(value: Value) -> BuiltinResult<Value> {
 }
 
 fn tensor_all_finite(tensor: &Tensor) -> bool {
-    if tensor.integer_storage().is_some() {
-        return true;
-    }
-    tensor.data.iter().all(|value| value.is_finite())
+    (0..tensor.len()).all(|index| {
+        tensor
+            .numeric_value_at(index)
+            .expect("tensor storage is structurally valid")
+            .is_finite()
+    })
 }
 
 fn sparse_all_finite(sparse: &SparseTensor) -> bool {

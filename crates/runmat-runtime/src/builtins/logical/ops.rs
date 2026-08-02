@@ -332,10 +332,15 @@ struct LogicalBuffer {
 
 impl LogicalBuffer {
     fn from_real_tensor(tensor: &Tensor) -> Self {
-        let bits: Vec<u8> = tensor
-            .data
-            .iter()
-            .map(|&v| if v != 0.0 { 1 } else { 0 })
+        let bits: Vec<u8> = (0..tensor.len())
+            .map(|index| {
+                u8::from(
+                    !tensor
+                        .numeric_value_at(index)
+                        .expect("tensor storage is structurally valid")
+                        .is_zero(),
+                )
+            })
             .collect();
         let shape = canonical_shape(&tensor.shape, bits.len());
         Self { bits, shape }
