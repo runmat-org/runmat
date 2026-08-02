@@ -1,5 +1,7 @@
 use runmat_builtins::{IntValue, LiteralValue, ResolveContext, Value};
 
+use crate::builtins::common::tensor;
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum ArgToken {
     Number(f64),
@@ -47,7 +49,8 @@ fn token_from_value(value: &Value) -> ArgToken {
             if let Some(storage) = tensor.integer_storage() {
                 return token_from_integer_storage(storage, &tensor.shape);
             }
-            token_from_tensor(&tensor.data, &tensor.shape)
+            let values = tensor::tensor_values_f64_cow(tensor);
+            token_from_tensor(values.as_ref(), &tensor.shape)
         }
         Value::LogicalArray(arr) => token_from_logical(&arr.data, &arr.shape),
         _ => ArgToken::Unknown,
@@ -109,7 +112,9 @@ fn is_vector_shape(shape: &[usize]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntValue, IntegerStorage, LiteralValue, ResolveContext, Tensor};
+    use runmat_builtins::{
+        IntValue, IntegerStorage, LiteralValue, NumericStorage, ResolveContext, Tensor,
+    };
 
     #[test]
     fn tokens_from_context_lowercases_strings() {
@@ -163,6 +168,20 @@ mod tests {
             vec![ArgToken::Vector(vec![
                 ArgToken::Number(1.0),
                 ArgToken::Number(2.0)
+            ])]
+        );
+    }
+
+    #[test]
+    fn tokens_from_values_reads_native_single_storage() {
+        let tensor =
+            Tensor::from_numeric_storage(NumericStorage::F32(vec![1.25, -2.5]), vec![1, 2])
+                .unwrap();
+        assert_eq!(
+            tokens_from_values(&[Value::Tensor(tensor)]),
+            vec![ArgToken::Vector(vec![
+                ArgToken::Number(1.25),
+                ArgToken::Number(-2.5),
             ])]
         );
     }

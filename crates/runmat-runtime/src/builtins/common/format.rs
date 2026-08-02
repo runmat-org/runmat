@@ -1080,7 +1080,8 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
                     output.push(Value::Int(integer_storage_value(storage, index)));
                 }
             } else {
-                for &elem in &tensor.data {
+                let values = tensor::tensor_values_f64_cow(&tensor);
+                for &elem in values.as_ref() {
                     output.push(Value::Num(elem));
                 }
             }
@@ -1192,7 +1193,8 @@ fn int_value_to_decimal(value: &IntValue) -> String {
 mod tests {
     use super::*;
     use runmat_builtins::{
-        get_display_format, set_display_format, FormatMode, IntegerComplexStorage,
+        get_display_format, set_display_format, FormatMode, IntegerComplexStorage, NumericStorage,
+        Tensor,
     };
 
     #[test]
@@ -1246,6 +1248,17 @@ mod tests {
             .expect("formatted integer values"),
             format!("{} ffffffffffffffff {}", u64::MAX, 1_u64 << 63)
         );
+    }
+
+    #[test]
+    fn native_single_tensors_flatten_from_authoritative_storage() {
+        let tensor =
+            Tensor::from_numeric_storage(NumericStorage::F32(vec![1.25, -2.5]), vec![1, 2])
+                .expect("single tensor");
+        let flattened =
+            futures::executor::block_on(flatten_arguments(&[Value::Tensor(tensor)], "sprintf"))
+                .expect("flattened arguments");
+        assert_eq!(flattened, vec![Value::Num(1.25), Value::Num(-2.5)]);
     }
 
     #[test]

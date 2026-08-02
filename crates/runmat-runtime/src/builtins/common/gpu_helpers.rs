@@ -5,6 +5,7 @@ use runmat_accelerate_api::{
 use runmat_builtins::{ComplexTensor, IntegerStorage, Tensor, Value};
 
 use crate::build_runtime_error;
+use crate::builtins::common::tensor;
 
 /// Download a GPU tensor handle to host memory, returning a dense `Tensor`.
 ///
@@ -103,9 +104,10 @@ pub fn upload_tensor(
             })
             .map_err(|error| error.to_string())
     } else {
+        let data = tensor::tensor_values_f64_cow(tensor);
         provider
             .upload(&HostTensorView {
-                data: &tensor.data,
+                data: data.as_ref(),
                 shape: &tensor.shape,
             })
             .map_err(|error| error.to_string())
