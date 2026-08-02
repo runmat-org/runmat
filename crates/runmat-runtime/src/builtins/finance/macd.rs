@@ -241,12 +241,13 @@ fn compute_macd(close: &Tensor, include_signal: bool) -> BuiltinResult<(Tensor, 
     } else {
         None
     };
+    let dtype = close.numeric_dtype();
     Ok((
-        Tensor::new_with_dtype(macd, vec![rows, cols], close.dtype)
+        Tensor::new_with_dtype(macd, vec![rows, cols], dtype)
             .map_err(|err| macd_internal(format!("macd: {err}")))?,
         signal
             .map(|signal| {
-                Tensor::new_with_dtype(signal, vec![rows, cols], close.dtype)
+                Tensor::new_with_dtype(signal, vec![rows, cols], dtype)
                     .map_err(|err| macd_internal(format!("macd: {err}")))
             })
             .transpose()?,
@@ -346,7 +347,7 @@ fn macd_error(identifier: &'static str, message: impl Into<String>) -> RuntimeEr
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, Value};
+    use runmat_builtins::{IntegerStorage, NumericDType, NumericScalar, Value};
 
     use crate::builtins::table::{table_from_columns, table_variables};
 
@@ -558,6 +559,44 @@ mod tests {
         assert_eq!(close.shape, vec![3, 1]);
         assert_close(close.data[1], 0.075);
         assert_close(close.data[2], 0.283125);
+    }
+
+    #[test]
+    fn table_input_preserves_native_single_close_class() {
+        let single_column = |values: Vec<f64>| {
+            Value::Tensor(
+                Tensor::new_with_dtype(values, vec![3, 1], NumericDType::F32)
+                    .expect("single table variable"),
+            )
+        };
+        let table = table_from_columns(
+            vec![
+                "High".to_string(),
+                "Low".to_string(),
+                "Open".to_string(),
+                "Close".to_string(),
+            ],
+            vec![
+                single_column(vec![2.0, 3.0, 4.0]),
+                single_column(vec![0.5, 1.5, 2.5]),
+                single_column(vec![1.0, 2.0, 3.0]),
+                single_column(vec![1.0, 2.0, 4.0]),
+            ],
+        )
+        .expect("single table");
+
+        let Value::Object(object) = call(table).expect("macd") else {
+            panic!("expected table output");
+        };
+        let variables = table_variables(&object).expect("output variables");
+        let close = expect_tensor(variables.fields.get("Close").cloned().expect("Close"));
+        assert_eq!(close.numeric_dtype(), NumericDType::F32);
+        for (index, expected) in [0.0_f32, 0.075, 0.283125].into_iter().enumerate() {
+            assert_eq!(
+                close.numeric_value_at(index),
+                Some(NumericScalar::F32(expected))
+            );
+        }
     }
 
     #[test]
