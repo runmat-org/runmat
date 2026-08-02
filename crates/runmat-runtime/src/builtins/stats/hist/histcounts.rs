@@ -2,7 +2,7 @@
 
 use std::cmp::Ordering;
 
-use runmat_accelerate_api::GpuTensorHandle;
+use runmat_accelerate_api::{GpuTensorHandle, IntegerElementType};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -289,6 +289,14 @@ async fn histcounts_gpu(
     handle: GpuTensorHandle,
     options: &HistcountsOptions,
 ) -> BuiltinResult<HistcountsEvaluation> {
+    if matches!(
+        runmat_accelerate_api::handle_integer_type(&handle),
+        Some(IntegerElementType::I64 | IntegerElementType::U64)
+    ) {
+        return Err(builtin_error(
+            "histcounts: 64-bit integer gpuArray inputs are not supported",
+        ));
+    }
     let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     histcounts_from_tensor(tensor, options)
 }
@@ -308,6 +316,9 @@ fn histcounts_from_tensor(
     let mut values = Vec::new();
     let mut min_val: Option<f64> = None;
     let mut max_val: Option<f64> = None;
+    // Numeric histogram edges and normalization are defined in a floating
+    // computation domain. Keep this conversion explicit: automatic binning of
+    // wide integer inputs intentionally has double-precision granularity.
     let samples = tensor::tensor_values_f64_cow(&tensor);
 
     for &sample in samples.iter() {
@@ -1021,15 +1032,16 @@ fn classify_bin_argument(value: &Value) -> BuiltinResult<BinArgument> {
             }
         }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(logical).map_err(builtin_error)?;
-            if tensor.data.len() == 1 {
+            if logical.data.len() == 1 {
                 Ok(BinArgument::NumBins(positive_usize_from_f64(
-                    tensor.data[0],
+                    f64::from(logical.data[0]),
                     "histcounts",
                     "NumBins",
                 )?))
             } else {
-                Ok(BinArgument::Edges(tensor.data))
+                Ok(BinArgument::Edges(
+                    logical.data.iter().copied().map(f64::from).collect(),
+                ))
             }
         }
         Value::GpuTensor(_) => Err(builtin_error(
@@ -1163,26 +1175,20 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Tensor, Type, Value};
+    use runmat_builtins::{
+        IntValue, IntegerStorage, NumericStorage, ResolveContext, Tensor, Type, Value,
+    };
 
     fn values_from_tensor(value: Value) -> Vec<f64> {
         match value {
-            Value::Tensor(t) => t.data,
+            Value::Tensor(t) => t.materialize_f64(),
             Value::Num(n) => vec![n],
             other => panic!("unexpected value {other:?}"),
         }
     }
 
-    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, poison: f64) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.fill(poison);
-        Value::Tensor(tensor)
-    }
-
-    fn cleared_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let mut tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        tensor.data.clear();
-        Value::Tensor(tensor)
+    fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
     }
 
     #[test]
@@ -1254,17 +1260,47 @@ pub(crate) mod tests {
     #[test]
     fn histcounts_data_reads_typed_integer_storage_exactly() {
         let eval = block_on(evaluate(
-            poisoned_int_tensor(
-                IntegerStorage::I16(vec![1, 2, 2, 4, 5, 7]),
-                vec![6, 1],
-                f64::NAN,
-            ),
+            integer_tensor(IntegerStorage::I16(vec![1, 2, 2, 4, 5, 7]), vec![6, 1]),
             &[Value::Int(IntValue::I32(3))],
         ))
         .expect("histcounts");
         let (counts_val, edges_val) = eval.into_pair();
         assert_eq!(values_from_tensor(counts_val), vec![3.0, 1.0, 2.0]);
         assert_eq!(values_from_tensor(edges_val), vec![1.0, 3.0, 5.0, 7.0]);
+    }
+
+    #[test]
+    fn histcounts_accepts_every_host_integer_class_and_returns_double_outputs() {
+        let storages = vec![
+            IntegerStorage::I8(vec![1, 2, 3]),
+            IntegerStorage::I16(vec![1, 2, 3]),
+            IntegerStorage::I32(vec![1, 2, 3]),
+            IntegerStorage::I64(vec![1, 2, 3]),
+            IntegerStorage::U8(vec![1, 2, 3]),
+            IntegerStorage::U16(vec![1, 2, 3]),
+            IntegerStorage::U32(vec![1, 2, 3]),
+            IntegerStorage::U64(vec![1, 2, 3]),
+        ];
+        for storage in storages {
+            let eval = block_on(evaluate(
+                integer_tensor(storage, vec![3, 1]),
+                &[Value::Tensor(
+                    Tensor::new(vec![0.0, 2.0, 4.0], vec![1, 3]).expect("edges"),
+                )],
+            ))
+            .expect("histcounts");
+            let (counts, edges) = eval.into_pair();
+            for (value, expected) in [(counts, vec![1.0, 2.0]), (edges, vec![0.0, 2.0, 4.0])] {
+                let Value::Tensor(tensor) = value else {
+                    panic!("expected double tensor");
+                };
+                assert_eq!(tensor.materialize_f64(), expected);
+                assert!(matches!(
+                    tensor.into_numeric_storage().unwrap(),
+                    NumericStorage::F64(_)
+                ));
+            }
+        }
     }
 
     #[test]
@@ -1275,7 +1311,7 @@ pub(crate) mod tests {
         );
         assert_eq!(
             positive_usize(
-                &cleared_int_tensor(IntegerStorage::U16(vec![4]), vec![1, 1]),
+                &integer_tensor(IntegerStorage::U16(vec![4]), vec![1, 1]),
                 "histcounts",
                 "NumBins",
             )
@@ -1284,7 +1320,7 @@ pub(crate) mod tests {
         );
         assert_eq!(
             positive_usize(
-                &poisoned_int_tensor(IntegerStorage::U16(vec![9]), vec![1, 1], 0.0),
+                &integer_tensor(IntegerStorage::U16(vec![9]), vec![1, 1]),
                 "histcounts",
                 "NumBins",
             )
@@ -1293,12 +1329,8 @@ pub(crate) mod tests {
         );
         for value in [
             Value::Int(IntValue::I8(-1)),
-            poisoned_int_tensor(IntegerStorage::I16(vec![-1]), vec![1, 1], 5.0),
-            poisoned_int_tensor(
-                IntegerStorage::U64(vec![usize::MAX as u64]),
-                vec![1, 1],
-                5.0,
-            ),
+            integer_tensor(IntegerStorage::I16(vec![-1]), vec![1, 1]),
+            integer_tensor(IntegerStorage::U64(vec![usize::MAX as u64]), vec![1, 1]),
             Value::Num(1.5),
             Value::Num(usize::MAX as f64 + 1.0),
         ] {
@@ -1310,14 +1342,14 @@ pub(crate) mod tests {
     fn histcounts_numeric_vectors_read_typed_integer_storage_exactly() {
         assert_eq!(
             numeric_vector(
-                &cleared_int_tensor(IntegerStorage::I16(vec![1, 3, 5]), vec![1, 3]),
+                &integer_tensor(IntegerStorage::I16(vec![1, 3, 5]), vec![1, 3]),
                 "histcounts",
                 "BinEdges",
             )
             .unwrap(),
             vec![1.0, 3.0, 5.0]
         );
-        match classify_bin_argument(&cleared_int_tensor(
+        match classify_bin_argument(&integer_tensor(
             IntegerStorage::U16(vec![2, 4, 6]),
             vec![1, 3],
         ))
@@ -1328,7 +1360,7 @@ pub(crate) mod tests {
         }
         assert_eq!(
             scalar_value(
-                &cleared_int_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]),
+                &integer_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]),
                 "histcounts",
                 "BinWidth",
             )
@@ -1498,11 +1530,7 @@ pub(crate) mod tests {
     fn histcounts_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.5, 1.5, 2.5], vec![3, 1]).unwrap();
-            let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let eval = block_on(evaluate(
                 Value::GpuTensor(handle),
                 &[Value::Tensor(
@@ -1516,6 +1544,52 @@ pub(crate) mod tests {
         });
     }
 
+    #[test]
+    fn histcounts_rejects_64_bit_integer_gpu_inputs_before_gather() {
+        test_support::with_test_provider(|provider| {
+            for storage in [
+                IntegerStorage::I64(vec![1, 2, 3]),
+                IntegerStorage::U64(vec![1, 2, 3]),
+            ] {
+                let tensor = Tensor::new_integer(storage, vec![3, 1]).expect("integer tensor");
+                let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
+                let error = block_on(evaluate(Value::GpuTensor(handle), &[]))
+                    .err()
+                    .expect("64-bit integer gpuArray should be rejected");
+                assert!(error
+                    .message()
+                    .contains("64-bit integer gpuArray inputs are not supported"));
+            }
+        });
+    }
+
+    #[test]
+    fn histcounts_accepts_supported_integer_gpu_classes() {
+        test_support::with_test_provider(|provider| {
+            for storage in [
+                IntegerStorage::I8(vec![1, 2, 3]),
+                IntegerStorage::I16(vec![1, 2, 3]),
+                IntegerStorage::I32(vec![1, 2, 3]),
+                IntegerStorage::U8(vec![1, 2, 3]),
+                IntegerStorage::U16(vec![1, 2, 3]),
+                IntegerStorage::U32(vec![1, 2, 3]),
+            ] {
+                let tensor = Tensor::new_integer(storage, vec![3, 1]).expect("integer tensor");
+                let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
+                let eval = block_on(evaluate(
+                    Value::GpuTensor(handle),
+                    &[Value::Tensor(
+                        Tensor::new(vec![0.0, 2.0, 4.0], vec![1, 3]).expect("edges"),
+                    )],
+                ))
+                .expect("supported integer gpuArray");
+                let (counts, edges) = eval.into_pair();
+                assert_eq!(values_from_tensor(counts), vec![1.0, 2.0]);
+                assert_eq!(values_from_tensor(edges), vec![0.0, 2.0, 4.0]);
+            }
+        });
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
@@ -1525,11 +1599,7 @@ pub(crate) mod tests {
         );
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let tensor = Tensor::new(vec![0.5, 1.5, 2.5], vec![3, 1]).unwrap();
-        let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
-            shape: &tensor.shape,
-        };
-        let handle = provider.upload(&view).expect("upload");
+        let handle = gpu_helpers::upload_tensor(provider.as_ref(), &tensor).expect("upload");
         let eval = block_on(evaluate(
             Value::GpuTensor(handle),
             &[Value::Tensor(
