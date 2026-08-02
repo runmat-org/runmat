@@ -15,10 +15,12 @@ fs2 = "0.4"
 futures = "0.3"
 git2 = { version = "0.20", default-features = false, features = ["https", "ssh", "vendored-libgit2", "vendored-openssl"] }
 hkdf = "0.12"
+keyring = "2.3"
 p256 = { version = "0.13", features = ["ecdh"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
 runmat-package = { workspace = true }
 runmat-package-cache = { workspace = true }
+runmat-server-client = { workspace = true }
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }

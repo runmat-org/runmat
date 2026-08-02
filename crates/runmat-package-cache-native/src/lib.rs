@@ -7,6 +7,7 @@ pub mod error;
 pub mod filesystem;
 pub mod gc;
 pub mod git;
+pub mod http;
 pub mod materialize;
 pub mod project;
 mod provider;

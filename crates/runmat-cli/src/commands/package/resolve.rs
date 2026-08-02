@@ -1,6 +1,5 @@
-use super::private_keys::KeyringPrivateArtifactDecryptor;
-use super::registry_transport::RunMatRegistryTransport;
-use super::server_transport::RunMatServerSnapshotTransport;
+use super::credentials::CliAccessTokenProvider;
+use super::server_transport::default_server_origin;
 use crate::cli::{Cli, PackageProjectArgs};
 use anyhow::{Context, Result};
 use runmat_package::{
@@ -49,13 +48,20 @@ async fn resolve_with_groups(
         backend.clone(),
         layout,
     );
-    let server_transport = Arc::new(RunMatServerSnapshotTransport);
-    let default_server_origin = server_transport.default_origin();
+    let credentials = Arc::new(CliAccessTokenProvider);
+    let server_transport = Arc::new(
+        runmat_package_cache_native::http::HttpServerSnapshotTransport::new(credentials.clone()),
+    );
+    let default_server_origin = default_server_origin();
     let default_registry_index = default_server_origin.clone();
     let provider = provider
         .with_server_transport(server_transport)
-        .with_registry_transport(Arc::new(RunMatRegistryTransport))
-        .with_private_artifact_decryptor(Arc::new(KeyringPrivateArtifactDecryptor));
+        .with_registry_transport(Arc::new(
+            runmat_package_cache_native::http::HttpRegistryTransport::new(credentials),
+        ))
+        .with_private_artifact_decryptor(Arc::new(
+            runmat_package_cache_native::registry::OsCredentialPrivateArtifactDecryptor,
+        ));
     resolve_native_project(
         NativeProjectResolveRequest {
             manifest_path: args.manifest_path.clone(),

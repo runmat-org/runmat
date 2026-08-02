@@ -1,4 +1,5 @@
 mod cache;
+mod credentials;
 mod private_keys;
 mod publication;
 mod publication_artifact;

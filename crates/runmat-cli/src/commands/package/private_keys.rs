@@ -2,9 +2,7 @@ use super::registry_transport::registry_client;
 use crate::cli::{PackageKeyCommand, PackageKeyTarget};
 use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use runmat_package_cache_native::registry::{
-    decrypt_private_artifact, PrivateArtifactDecryptor, RecipientKeyPair,
-};
+use runmat_package_cache_native::registry::RecipientKeyPair;
 use runmat_server_client::auth::{resolve_server_url, RemoteConfig};
 use zeroize::Zeroizing;
 
@@ -13,30 +11,6 @@ pub(super) async fn execute(command: PackageKeyCommand) -> Result<()> {
         PackageKeyCommand::Register(target) => register(target).await,
         PackageKeyCommand::List(target) => list(target).await,
         PackageKeyCommand::Revoke { target, key_id } => revoke(target, &key_id).await,
-    }
-}
-
-pub(super) struct KeyringPrivateArtifactDecryptor;
-
-impl PrivateArtifactDecryptor for KeyringPrivateArtifactDecryptor {
-    fn decrypt(
-        &self,
-        source: &runmat_package::RegistrySourceId,
-        ciphertext: &[u8],
-        metadata: &runmat_package::EncryptedArtifactMetadata,
-        envelopes: &[runmat_package::PackageKeyEnvelope],
-    ) -> Result<Zeroizing<Vec<u8>>, String> {
-        for envelope in envelopes {
-            let Some(key) = load_key(source.registry_origin.as_str(), &envelope.recipient_key_id)?
-            else {
-                continue;
-            };
-            return decrypt_private_artifact(source, ciphertext, metadata, envelope, &key);
-        }
-        Err(
-            "no matching private package key is available; run `runmat package keys register <namespace> <name>` before the publisher creates an envelope"
-                .to_string(),
-        )
     }
 }
 
