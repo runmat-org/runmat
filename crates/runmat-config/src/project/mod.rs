@@ -2,6 +2,7 @@ mod dependency;
 mod entrypoint;
 mod manifest;
 mod source_index;
+mod testing;
 pub use dependency::{
     ProjectCapabilities, ProjectDependency, ProjectDependencyLocator, ProjectPublication,
     ProjectRegistry, ProjectSourceReplacement, ProjectTargetDependencies,
@@ -24,4 +25,8 @@ pub use source_index::{
     build_loose_source_index, build_loose_source_index_async, build_project_source_index,
     build_project_source_index_async, project_source_file_from_path, ProjectSourceFile,
     ProjectSourceIndex, ProjectSourceIndexError,
+};
+pub use testing::{
+    ProjectCoverageFormat, ProjectTestArtifacts, ProjectTestCluster, ProjectTestConfig,
+    ProjectTestCoverage, ProjectTestIsolation, ProjectTestReport, ProjectTestShard,
 };

@@ -5751,12 +5751,16 @@ dependencies = [
  "runmat-server-client",
  "runmat-static-analysis",
  "runmat-telemetry",
+ "runmat-test",
+ "runmat-test-runner",
+ "runmat-test-runner-native",
  "runmat-time",
  "runmat-vm",
  "rustyline",
  "serde",
  "serde_json",
  "serde_yaml",
+ "sha2",
  "supports-color",
  "target-lexicon",
  "tempfile",
@@ -6468,6 +6472,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-test-runner"
+version = "0.6.1"
+dependencies = [
+ "futures",
+ "runmat-test",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "wasm-bindgen-test",
+]
+
+[[package]]
+name = "runmat-test-runner-native"
+version = "0.6.1"
+dependencies = [
+ "libc",
+ "log",
+ "runmat-core",
+ "runmat-package",
+ "runmat-test",
+ "runmat-test-runner",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
 name = "runmat-thread-local"
 version = "0.6.1"
 
@@ -6556,6 +6590,7 @@ dependencies = [
  "runmat-runtime",
  "runmat-telemetry",
  "runmat-test",
+ "runmat-test-runner",
  "runmat-thread-local",
  "runmat-vm",
  "serde",

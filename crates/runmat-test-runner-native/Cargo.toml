@@ -1,0 +1,27 @@
+[package]
+name = "runmat-test-runner-native"
+version = "0.6.1"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../../LICENSE.md"
+description = "Native process, filesystem artifact, and telemetry adapters for RunMat tests"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
+
+[dependencies]
+runmat-test = { workspace = true }
+runmat-test-runner = { workspace = true }
+runmat-package = { workspace = true }
+runmat-core = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "process", "rt", "sync", "time"] }
+sha2 = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3.12"

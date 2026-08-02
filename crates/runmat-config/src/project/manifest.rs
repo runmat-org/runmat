@@ -2,6 +2,7 @@ use super::dependency::{
     ProjectCapabilities, ProjectDependency, ProjectDependencyLocator, ProjectPublication,
     ProjectRegistry, ProjectSourceReplacement, ProjectTargetDependencies,
 };
+use super::testing::ProjectTestConfig;
 use serde::de::IgnoredAny;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
@@ -27,6 +28,7 @@ pub struct ProjectManifest {
     pub source_replacements: BTreeMap<String, ProjectSourceReplacement>,
     pub publish: Option<ProjectPublication>,
     pub entrypoints: Vec<ProjectEntrypoint>,
+    pub test: ProjectTestConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,8 +90,8 @@ struct RawProjectManifest {
     entrypoints: BTreeMap<String, RawProjectEntrypoint>,
     #[serde(default, rename = "runtime")]
     _runtime: Option<IgnoredAny>,
-    #[serde(default, rename = "test")]
-    _test: Option<IgnoredAny>,
+    #[serde(default)]
+    test: ProjectTestConfig,
     #[serde(default, rename = "desktop")]
     _desktop: Option<IgnoredAny>,
 }
@@ -130,6 +132,7 @@ impl From<RawProjectManifest> for ProjectManifest {
             source_replacements: value.source_replacements,
             publish: value.publish,
             entrypoints,
+            test: value.test,
         }
     }
 }
@@ -167,6 +170,8 @@ impl Serialize for ProjectManifest {
             #[serde(skip_serializing_if = "Option::is_none")]
             publish: &'a Option<ProjectPublication>,
             entrypoints: BTreeMap<&'a str, CanonicalEntrypoint<'a>>,
+            #[serde(skip_serializing_if = "ProjectTestConfig::is_default")]
+            test: &'a ProjectTestConfig,
         }
 
         #[derive(Serialize)]
@@ -206,6 +211,7 @@ impl Serialize for ProjectManifest {
             source_replacements: &self.source_replacements,
             publish: &self.publish,
             entrypoints,
+            test: &self.test,
         }
         .serialize(serializer)
     }
@@ -316,6 +322,23 @@ impl ProjectManifest {
                         root.display()
                     ),
                 });
+            }
+        }
+        messages.extend(self.test.validation_messages());
+        for (field, paths) in [
+            ("test root", &self.test.roots),
+            ("test support path", &self.test.paths),
+        ] {
+            for path in paths {
+                if is_relative_without_parent(path) {
+                    path_requirements.push(PathRequirement::Directory {
+                        path: project_root.join(path),
+                        missing_message: format!(
+                            "{field} `{}` does not exist as a directory under project root",
+                            path.display()
+                        ),
+                    });
+                }
             }
         }
 

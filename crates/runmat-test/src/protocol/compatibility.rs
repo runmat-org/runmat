@@ -144,13 +144,20 @@ fn validate_request(
     request: &WorkerRequest,
     limits: ProtocolLimits,
 ) -> Result<(), TestDomainError> {
-    if let WorkerRequest::InstallPlan { plan } = request {
+    if let WorkerRequest::InstallPlan { plan, snapshot } = request {
         let count = plan.tests().count();
         if count > limits.max_tests_per_plan as usize {
             return Err(TestDomainError::ProtocolCollectionTooLarge {
                 field: "plan.tests",
                 actual: count,
                 limit: limits.max_tests_per_plan as usize,
+            });
+        }
+        snapshot.validate()?;
+        if snapshot.program_revision != plan.program_revision {
+            return Err(TestDomainError::InvalidField {
+                field: "plan.program_revision",
+                reason: "installed plan and frozen source snapshot revisions differ".into(),
             });
         }
     }
