@@ -116,11 +116,13 @@ fn complex_integer_element_equals_real_value(
 }
 
 fn real_tensor_element_value(tensor: &Tensor, index: usize) -> Value {
-    tensor
-        .integer_storage()
-        .and_then(|storage| storage.value_at(index))
+    let value = tensor
+        .numeric_value_at(index)
+        .expect("real tensor element index");
+    value
+        .into_int_value()
         .map(Value::Int)
-        .unwrap_or(Value::Num(tensor.data[index]))
+        .unwrap_or_else(|| Value::Num(value.materialize_f64()))
 }
 
 fn tensor_element_pair(tensor: &ComplexTensor, index: usize) -> (f64, f64) {
@@ -629,8 +631,8 @@ where
                     "shape mismatch for element-wise comparison",
                 ));
             }
-            let mut out = Vec::with_capacity(ta.data.len());
-            for i in 0..ta.data.len() {
+            let mut out = Vec::with_capacity(ta.len());
+            for i in 0..ta.len() {
                 out.push(if tensor_elements_equal(ta, tb, i) {
                     1.0
                 } else {
@@ -643,11 +645,8 @@ where
             ));
         }
         (Value::Tensor(t), Value::Num(_)) | (Value::Tensor(t), Value::Int(_)) => {
-            let out: Vec<f64> = t
-                .data
-                .iter()
-                .enumerate()
-                .map(|(i, _)| {
+            let out: Vec<f64> = (0..t.len())
+                .map(|i| {
                     if tensor_element_equals_scalar(t, i, &b) {
                         1.0
                     } else {
@@ -661,11 +660,8 @@ where
             ));
         }
         (Value::Num(_), Value::Tensor(t)) | (Value::Int(_), Value::Tensor(t)) => {
-            let out: Vec<f64> = t
-                .data
-                .iter()
-                .enumerate()
-                .map(|(i, _)| {
+            let out: Vec<f64> = (0..t.len())
+                .map(|i| {
                     if tensor_element_equals_scalar(t, i, &a) {
                         1.0
                     } else {
@@ -807,8 +803,8 @@ where
                     "shape mismatch for element-wise comparison",
                 ));
             }
-            let mut out = Vec::with_capacity(ta.data.len());
-            for i in 0..ta.data.len() {
+            let mut out = Vec::with_capacity(ta.len());
+            for i in 0..ta.len() {
                 out.push(if !tensor_elements_equal(ta, tb, i) {
                     1.0
                 } else {
@@ -821,11 +817,8 @@ where
             ));
         }
         (Value::Tensor(t), Value::Num(_)) | (Value::Tensor(t), Value::Int(_)) => {
-            let out: Vec<f64> = t
-                .data
-                .iter()
-                .enumerate()
-                .map(|(i, _)| {
+            let out: Vec<f64> = (0..t.len())
+                .map(|i| {
                     if !tensor_element_equals_scalar(t, i, &b) {
                         1.0
                     } else {
@@ -839,11 +832,8 @@ where
             ));
         }
         (Value::Num(_), Value::Tensor(t)) | (Value::Int(_), Value::Tensor(t)) => {
-            let out: Vec<f64> = t
-                .data
-                .iter()
-                .enumerate()
-                .map(|(i, _)| {
+            let out: Vec<f64> = (0..t.len())
+                .map(|i| {
                     if !tensor_element_equals_scalar(t, i, &a) {
                         1.0
                     } else {
@@ -955,7 +945,7 @@ mod tests {
             panic!("expected tensor result, got {value:?}");
         };
         assert_eq!(tensor.shape, shape);
-        assert_eq!(tensor.data, expected);
+        assert_eq!(tensor.materialize_f64(), expected);
     }
 
     fn complex_uint64(real: Vec<u64>, imag: Vec<u64>, shape: Vec<usize>) -> Value {
@@ -1032,12 +1022,11 @@ mod tests {
 
     #[test]
     fn logical_array_eq_typed_integer_tensor_reads_exact_storage() {
-        let mut integer = Tensor::new_integer(
+        let integer = Tensor::new_integer(
             IntegerStorage::U64(vec![0, 1, (1_u64 << 53) + 1]),
             vec![1, 3],
         )
         .expect("integer tensor");
-        integer.data.fill(f64::NAN);
         let mut stack = vec![logical_array(vec![0, 1, 1]), Value::Tensor(integer)];
 
         block_on(equal(
@@ -1075,9 +1064,8 @@ mod tests {
     #[test]
     fn typed_complex_integer_eq_typed_real_tensor_reads_exact_storage() {
         let large = (1_u64 << 53) + 1;
-        let mut real = Tensor::new_integer(IntegerStorage::U64(vec![large, u64::MAX]), vec![1, 2])
+        let real = Tensor::new_integer(IntegerStorage::U64(vec![large, u64::MAX]), vec![1, 2])
             .expect("integer tensor");
-        real.data.fill(f64::NAN);
         let mut stack = vec![
             complex_uint64(vec![large, u64::MAX], vec![0, 1], vec![1, 2]),
             Value::Tensor(real),

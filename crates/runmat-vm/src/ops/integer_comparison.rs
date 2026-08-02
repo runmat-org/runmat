@@ -18,47 +18,41 @@ pub(crate) fn scalar_order(left: &Value, right: &Value) -> Option<Ordering> {
 }
 
 pub(crate) fn tensor_elements_equal(left: &Tensor, right: &Tensor, index: usize) -> bool {
-    match (left.integer_storage(), right.integer_storage()) {
-        (Some(left), Some(right)) => {
-            integer_order(
-                &left.value_at(index).expect("integer storage index"),
-                &right.value_at(index).expect("integer storage index"),
-            ) == Ordering::Equal
-        }
+    let left = left
+        .numeric_value_at(index)
+        .expect("left tensor storage index");
+    let right = right
+        .numeric_value_at(index)
+        .expect("right tensor storage index");
+    match (left.into_int_value(), right.into_int_value()) {
+        (Some(left), Some(right)) => integer_order(&left, &right) == Ordering::Equal,
         (Some(left), None) => {
-            integer_f64_order(
-                &left.value_at(index).expect("integer storage index"),
-                right.data[index],
-            ) == Some(Ordering::Equal)
+            integer_f64_order(&left, right.materialize_f64()) == Some(Ordering::Equal)
         }
         (None, Some(right)) => {
-            integer_f64_order(
-                &right.value_at(index).expect("integer storage index"),
-                left.data[index],
-            ) == Some(Ordering::Equal)
+            integer_f64_order(&right, left.materialize_f64()).map(Ordering::reverse)
+                == Some(Ordering::Equal)
         }
-        (None, None) => (left.data[index] - right.data[index]).abs() < 1e-12,
+        (None, None) => left.materialize_f64() == right.materialize_f64(),
     }
 }
 
 pub(crate) fn tensor_element_equals_scalar(tensor: &Tensor, index: usize, scalar: &Value) -> bool {
-    match (tensor.integer_storage(), scalar) {
-        (Some(storage), Value::Int(scalar)) => {
-            integer_order(
-                &storage.value_at(index).expect("integer storage index"),
-                scalar,
-            ) == Ordering::Equal
-        }
-        (Some(storage), Value::Num(scalar)) => {
-            integer_f64_order(
-                &storage.value_at(index).expect("integer storage index"),
-                *scalar,
-            ) == Some(Ordering::Equal)
-        }
-        (None, Value::Int(scalar)) => {
-            integer_f64_order(scalar, tensor.data[index]) == Some(Ordering::Equal)
-        }
-        (None, Value::Num(scalar)) => (tensor.data[index] - scalar).abs() < 1e-12,
+    let value = tensor
+        .numeric_value_at(index)
+        .expect("tensor storage index");
+    match (value, scalar) {
+        (value, Value::Int(scalar)) => match value.into_int_value() {
+            Some(value) => integer_order(&value, scalar) == Ordering::Equal,
+            None => {
+                integer_f64_order(scalar, value.materialize_f64()).map(Ordering::reverse)
+                    == Some(Ordering::Equal)
+            }
+        },
+        (value, Value::Num(scalar)) => match value.into_int_value() {
+            Some(value) => integer_f64_order(&value, *scalar) == Some(Ordering::Equal),
+            None => value.materialize_f64() == *scalar,
+        },
         _ => false,
     }
 }
@@ -172,6 +166,27 @@ mod tests {
             &integer,
             1,
             &Value::Int(IntValue::U64(u64::MAX))
+        ));
+    }
+
+    #[test]
+    fn floating_tensor_equality_is_exact_and_native_single_aware() {
+        let left = Tensor::new(vec![1.0, f64::MIN_POSITIVE], vec![1, 2]).expect("left");
+        let right = Tensor::new(
+            vec![1.0 + f64::EPSILON, f64::MIN_POSITIVE + f64::from_bits(1)],
+            vec![1, 2],
+        )
+        .expect("right");
+        assert!(!tensor_elements_equal(&left, &right, 0));
+        assert!(!tensor_elements_equal(&left, &right, 1));
+
+        let single = Tensor::from_f32(vec![0.1], vec![1, 1]).expect("single");
+        let double = Tensor::new(vec![f64::from(0.1_f32)], vec![1, 1]).expect("double");
+        assert!(tensor_elements_equal(&single, &double, 0));
+        assert!(!tensor_element_equals_scalar(
+            &single,
+            0,
+            &Value::Num(0.1_f64)
         ));
     }
 }
