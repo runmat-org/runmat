@@ -39,7 +39,7 @@
     "build:wasm:web": "wasm-pack build ../../crates/runmat-wasm --target web --out-dir ../../bindings/ts/pkg-web --out-name runmat_wasm_web --release -- --features occt-wasm-host",
     "build:lsp": "wasm-pack build ../../crates/runmat-lsp --target web --out-dir ../../bindings/ts/lsp-web --out-name runmat_lsp --release -- --no-default-features --features wasm",
     "build:types": "npm run generate:builtins && npm run generate:fea-contracts && tsc -p tsconfig.json",
-    "build": "npm run clean && npm run build:registry && npm run build:wasm:web && npm run build:lsp && npm run build:types && npm run sync:wasm",
+    "build": "npm run clean && npm run build:registry && npm run build:wasm:bundler && npm run build:wasm:web && npm run build:lsp && npm run build:types && npm run sync:wasm",
     "ci": "npm run build && npm run lint && npm test && cargo check -p runmat-wasm --target wasm32-unknown-unknown --features occt-wasm-host",
     "lint": "tsc --noEmit",
     "test": "vitest run",
