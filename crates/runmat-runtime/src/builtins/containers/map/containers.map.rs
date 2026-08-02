@@ -11,8 +11,8 @@ use std::sync::{
 use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ClassDef, HandleRef, IntValue, LogicalArray, MethodDef, ObjectInstance, PropertyDef,
-    StructValue, Tensor, Value,
+    CharArray, ClassDef, HandleRef, IntValue, LogicalArray, MethodDef, NumericDType,
+    ObjectInstance, PropertyDef, StructValue, Tensor, Value,
 };
 use runmat_gc::{GcHandle, GcRoot, RootId, Trace, Tracer};
 use runmat_macros::runtime_builtin;
@@ -1569,7 +1569,28 @@ fn tensor_elements_to_values(tensor: &Tensor) -> Vec<Value> {
     if let Some(storage) = tensor.integer_storage() {
         return storage.exact_values().into_iter().map(Value::Int).collect();
     }
-    tensor.data.iter().map(|&value| Value::Num(value)).collect()
+    match tensor.numeric_dtype() {
+        NumericDType::F64 => tensor
+            .as_f64_slice()
+            .expect("double tensor has native double storage")
+            .iter()
+            .copied()
+            .map(Value::Num)
+            .collect(),
+        NumericDType::F32 => (0..tensor.len())
+            .map(|index| {
+                let value = match tensor.numeric_value_at(index) {
+                    Some(runmat_builtins::NumericScalar::F32(value)) => value,
+                    _ => unreachable!("single tensor has native single storage"),
+                };
+                Value::Tensor(
+                    Tensor::from_f32(vec![value], vec![1, 1])
+                        .expect("single scalar tensor construction"),
+                )
+            })
+            .collect(),
+        _ => unreachable!("integer tensor returned through exact key/value path"),
+    }
 }
 
 fn canonicalize_key(
@@ -1787,9 +1808,14 @@ fn normalize_logical_value(value: Value, builtin: &'static str) -> BuiltinResult
                     .map(|value| if value.is_zero() { 0 } else { 1 })
                     .collect()
             } else {
-                t.data
-                    .iter()
-                    .map(|&v| if v != 0.0 { 1 } else { 0 })
+                (0..t.len())
+                    .map(|index| {
+                        if tensor::tensor_value_f64(&t, index) != 0.0 {
+                            1
+                        } else {
+                            0
+                        }
+                    })
                     .collect()
             };
             let logical = LogicalArray::new(flags, t.shape.clone())
@@ -2619,6 +2645,36 @@ pub(crate) mod tests {
             bool_from_value(&Value::Tensor(logical_tensor), "key", BUILTIN_CONSTRUCTOR,)
                 .expect("logical key")
         );
+    }
+
+    #[test]
+    fn vector_map_helpers_preserve_native_single_and_logicalize_typed_values() {
+        let single = Tensor::from_f32(vec![1.25, 2.5], vec![1, 2]).expect("single values");
+        let values = tensor_elements_to_values(&single);
+        assert_eq!(values.len(), 2);
+        for (value, expected) in values.into_iter().zip([1.25_f32, 2.5]) {
+            let Value::Tensor(tensor) = value else {
+                panic!("expected native-single scalar tensor");
+            };
+            assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
+            assert_eq!(
+                tensor.numeric_value_at(0),
+                Some(runmat_builtins::NumericScalar::F32(expected))
+            );
+        }
+
+        let logical = normalize_logical_value(
+            Value::Tensor(
+                Tensor::from_f32(vec![0.0, -0.0, 2.0, f32::NAN], vec![2, 2])
+                    .expect("single logical source"),
+            ),
+            BUILTIN_CONSTRUCTOR,
+        )
+        .expect("logical conversion");
+        let Value::LogicalArray(logical) = logical else {
+            panic!("expected logical array");
+        };
+        assert_eq!(logical.data, vec![0, 0, 1, 1]);
     }
 
     #[test]
