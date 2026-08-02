@@ -441,7 +441,7 @@ impl HistWeightsInput {
             HistWeightsInput::Host(tensor) => {
                 let values = numeric_vector(tensor.clone());
                 let total = values.iter().copied().sum::<f64>() as f32;
-                match tensor.dtype {
+                match tensor.numeric_dtype() {
                     NumericDType::F32 => {
                         let data: Vec<f32> = values.iter().map(|v| *v as f32).collect();
                         Ok(HistogramGpuWeights::HostF32 {
@@ -1657,6 +1657,22 @@ pub(crate) mod tests {
             .expect("weights");
 
         assert_eq!(weights.total_weight_hint(3), Some(6.0));
+    }
+
+    #[test]
+    fn hist_gpu_weights_preserve_native_single_class() {
+        let tensor =
+            Tensor::new_with_dtype(vec![1.0, 2.0, 3.0], vec![1, 3], NumericDType::F32).unwrap();
+        let weights =
+            HistWeightsInput::from_value(Value::Tensor(tensor), 3).expect("single weights");
+
+        match weights.to_gpu_weights(3).expect("GPU weights") {
+            HistogramGpuWeights::HostF32 { data, total_weight } => {
+                assert_eq!(data, vec![1.0_f32, 2.0, 3.0]);
+                assert_eq!(total_weight, 6.0);
+            }
+            _ => panic!("expected native single host weights"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

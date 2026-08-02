@@ -545,7 +545,8 @@ fn build_truecolor_image_surface(
     let rows = x_axis.len();
     let cols = y_axis.len();
     let channels = tensor.shape.get(2).copied().unwrap_or(3);
-    let scale = match tensor.dtype {
+    let dtype = tensor.numeric_dtype();
+    let scale = match dtype {
         NumericDType::U8 => 1.0f32 / 255.0,
         NumericDType::U16 => 1.0f32 / 65535.0,
         NumericDType::F32 | NumericDType::F64 => 1.0,
@@ -559,7 +560,7 @@ fn build_truecolor_image_surface(
                 &IMAGE_ERROR_INVALID_ARGUMENT,
                 format!(
                     "truecolor image data does not support {} values",
-                    tensor.dtype.class_name()
+                    dtype.class_name()
                 ),
             ));
         }
