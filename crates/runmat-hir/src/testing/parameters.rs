@@ -1,11 +1,11 @@
 use runmat_test::descriptor::ParameterDescriptor;
 use std::collections::BTreeMap;
 
+use runmat_execution::ProgramRevision;
 use runmat_test::discovery::{
     MaterializationKind, MaterializationLimits, MaterializationRequest, MaterializationResponse,
 };
 use runmat_test::identity::ParameterId;
-use runmat_test::plan::ProgramRevision;
 use serde_json::{Number, Value};
 
 use crate::{ClassProperty, HirExpr, HirExprKind, OperatorKind};

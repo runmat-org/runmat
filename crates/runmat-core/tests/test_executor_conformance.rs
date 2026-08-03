@@ -12,13 +12,16 @@ use runmat_test::discovery::{FrozenTestRunSnapshot, SavedRunSource};
 use runmat_test::event::TestEventPayload;
 use runmat_test::result::TerminalDisposition;
 
+fn digest(value: &str) -> String {
+    runmat_execution::Digest::sha256(value).to_string()
+}
+
 fn conformance_snapshot() -> FrozenTestRunSnapshot {
     FrozenTestRunSnapshot::freeze(
-        "sha256:conformance-graph",
+        digest("conformance-graph"),
         "sha256:conformance-sources",
-        1,
-        1,
-        "sha256:conformance-config",
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
+        digest("conformance-config"),
         vec![SavedRunSource {
             owner_identity: "path:conformance".into(),
             relative_path: "portableTest.m".into(),
@@ -31,11 +34,10 @@ fn conformance_snapshot() -> FrozenTestRunSnapshot {
 
 fn fixture_snapshot() -> FrozenTestRunSnapshot {
     FrozenTestRunSnapshot::freeze(
-        "sha256:fixture-graph",
+        digest("fixture-graph"),
         "sha256:fixture-sources",
-        1,
-        1,
-        "sha256:fixture-config",
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
+        digest("fixture-config"),
         vec![SavedRunSource {
             owner_identity: "path:conformance".into(),
             relative_path: "fixtureTest.m".into(),

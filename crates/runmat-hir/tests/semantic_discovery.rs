@@ -1,18 +1,28 @@
+use runmat_execution::{Digest, DomainContribution, ProgramEnvironment, ProgramRevision};
 use runmat_hir::testing::{
     discover_tests, discover_tests_with_materialization, SemanticDiscoveryInput, SemanticTestSource,
 };
 use runmat_hir::{lower, LoweringContext};
 use runmat_test::discovery::{MaterializationResponse, MaterializedValue};
-use runmat_test::plan::ProgramRevision;
 
 fn revision() -> ProgramRevision {
-    ProgramRevision {
-        graph_digest: "sha256:graph".into(),
-        source_digest: "sha256:sources".into(),
-        semantic_schema: 1,
-        compiler_schema: 1,
-        test_config_digest: "sha256:test-config".into(),
-    }
+    ProgramRevision::new(
+        Digest::sha256(b"graph"),
+        Digest::sha256(b"sources"),
+        ProgramEnvironment::new(
+            1,
+            1,
+            Digest::sha256(b"runtime"),
+            Digest::sha256(b"catalog"),
+            "matlab",
+        )
+        .unwrap(),
+    )
+    .unwrap()
+    .with_domain_contribution(
+        DomainContribution::new("runmat.test.config", Digest::sha256(b"test-config")).unwrap(),
+    )
+    .unwrap()
 }
 
 fn lower_source(source: &str) -> runmat_hir::HirAssembly {

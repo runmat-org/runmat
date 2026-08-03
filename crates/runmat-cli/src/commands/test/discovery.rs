@@ -96,7 +96,7 @@ pub(super) async fn prepare(args: &TestArgs, cli: &Cli) -> Result<PreparedDiscov
         .unwrap_or_else(|| {
             (
                 if manifest_bytes.is_empty() {
-                    "sha256:loose-project".into()
+                    runmat_execution::Digest::sha256(b"loose-project").to_string()
                 } else {
                     format!("sha256:{:x}", Sha256::digest(&manifest_bytes))
                 },

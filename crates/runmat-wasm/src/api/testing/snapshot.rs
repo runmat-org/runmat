@@ -86,8 +86,7 @@ pub fn freeze_test_snapshot(value: JsValue) -> Result<JsValue, JsValue> {
     let snapshot = FrozenTestRunSnapshot::freeze(
         request.graph_digest,
         request.base_source_digest,
-        1,
-        1,
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
         request.test_config_digest,
         request.saved_sources,
         request.unsaved_buffers,

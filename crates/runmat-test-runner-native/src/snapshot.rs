@@ -35,8 +35,7 @@ pub fn freeze_native_snapshot(
     FrozenTestRunSnapshot::freeze(
         input.graph_digest,
         base_source_digest,
-        1,
-        1,
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
         input.test_config_digest,
         sources,
         input.unsaved_buffers,
@@ -143,6 +142,10 @@ mod tests {
 
     use super::*;
 
+    fn digest(value: &str) -> String {
+        runmat_execution::Digest::sha256(value).to_string()
+    }
+
     #[test]
     fn freezes_sorted_matlab_sources_and_ignores_other_files() {
         let root = tempdir().unwrap();
@@ -153,9 +156,9 @@ mod tests {
         let snapshot = freeze_native_snapshot(NativeSnapshotInput {
             project_root: root.path().to_path_buf(),
             catalog_roots: vec![root.path().join("tests")],
-            graph_digest: "sha256:graph".into(),
+            graph_digest: digest("graph"),
             base_source_digest: None,
-            test_config_digest: "sha256:config".into(),
+            test_config_digest: digest("config"),
             unsaved_buffers: Vec::new(),
         })
         .unwrap();
@@ -172,9 +175,9 @@ mod tests {
         let snapshot = freeze_native_snapshot(NativeSnapshotInput {
             project_root: root.path().to_path_buf(),
             catalog_roots: vec![root.path().to_path_buf()],
-            graph_digest: "sha256:graph".into(),
+            graph_digest: digest("graph"),
             base_source_digest: Some("sha256:project-source".into()),
-            test_config_digest: "sha256:config".into(),
+            test_config_digest: digest("config"),
             unsaved_buffers: Vec::new(),
         })
         .unwrap();

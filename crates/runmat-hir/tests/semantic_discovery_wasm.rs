@@ -14,15 +14,29 @@ fn source(path: &str, content: &str) -> SavedRunSource {
     }
 }
 
+fn digest(value: &str) -> String {
+    runmat_execution::Digest::sha256(value).to_string()
+}
+
+fn environment() -> runmat_execution::ProgramEnvironment {
+    runmat_execution::ProgramEnvironment::new(
+        3,
+        4,
+        runmat_execution::Digest::sha256(b"runtime"),
+        runmat_execution::Digest::sha256(b"catalog"),
+        "matlab",
+    )
+    .unwrap()
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn frozen_semantic_discovery_has_a_native_wasm_golden() {
     let snapshot = FrozenTestRunSnapshot::freeze(
-        "sha256:graph",
+        digest("graph"),
         "sha256:base-sources",
-        3,
-        4,
-        "sha256:config",
+        environment(),
+        digest("config"),
         vec![
             source(
                 "tests/BrowserTest.m",
@@ -68,7 +82,7 @@ fn frozen_semantic_discovery_has_a_native_wasm_golden() {
     let digest = format!("sha256:{:x}", Sha256::digest(&encoded));
     assert_eq!(
         digest,
-        "sha256:f08ac3468ee4f8f41ac923ade0100fe1483f28067e067be400a701c234322efd",
+        "sha256:4f819a1450b5b24125dc79b3d570502eb7dbedb0ff1763abd6a2b4427514701e",
         "serialized discovery: {}",
         String::from_utf8(encoded).unwrap()
     );

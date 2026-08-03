@@ -1,3 +1,6 @@
+use runmat_execution::{
+    Digest as ExecutionDigest, DomainContribution, ProgramEnvironment, ProgramRevision,
+};
 use runmat_test::context::{TestCommand, TestExecutionContext};
 use runmat_test::descriptor::{
     FixtureScope, ProcedureDescriptor, ProcedureKind, SourceDescriptor, SourceSpan,
@@ -9,18 +12,27 @@ use runmat_test::lifecycle::{
     ExecutionPhase, FixtureScopeKey, LifecycleCase, LifecycleEngine, LifecycleStep, NeverCancelled,
     QualificationKind,
 };
-use runmat_test::plan::ProgramRevision;
 use runmat_test::result::{Diagnostic, DiagnosticSeverity};
 use sha2::{Digest, Sha256};
 
 fn canonical_fixture() {
-    let revision = ProgramRevision {
-        graph_digest: "sha256:graph".into(),
-        source_digest: "sha256:source".into(),
-        semantic_schema: 1,
-        compiler_schema: 1,
-        test_config_digest: "sha256:test".into(),
-    };
+    let revision = ProgramRevision::new(
+        ExecutionDigest::sha256(b"graph"),
+        ExecutionDigest::sha256(b"source"),
+        ProgramEnvironment::new(
+            1,
+            1,
+            ExecutionDigest::sha256(b"runtime"),
+            ExecutionDigest::sha256(b"catalog"),
+            "matlab",
+        )
+        .unwrap(),
+    )
+    .unwrap()
+    .with_domain_contribution(
+        DomainContribution::new("runmat.test.config", ExecutionDigest::sha256(b"test")).unwrap(),
+    )
+    .unwrap();
     let id = TestId::derive(&TestIdentityInput {
         owner_identity: "registry:acme/tool@1.0.0#sha256:tree",
         relative_source_identity: "tests/test_solver.m",
@@ -31,7 +43,7 @@ fn canonical_fixture() {
     });
     assert_eq!(
         revision.canonical_identity(),
-        "sha256:graph|sha256:source|1|1|sha256:test"
+        "sha256:6ee1fd68a24276129793784b53b506cfa9eff1303ce8b8910d4596ca45657111"
     );
     assert_eq!(
         id.as_str(),
@@ -77,7 +89,7 @@ fn canonical_fixture() {
     let bytes = serde_json::to_vec(&(outcome, events)).unwrap();
     assert_eq!(
         format!("sha256:{:x}", Sha256::digest(bytes)),
-        "sha256:91a4e29b04c5c863773423aa3b0858da77580628e5af9614c5653b469f12ef50"
+        "sha256:ab2e398c22647508a142dc07a87b4773ab0f8e747bd87a8ceda9f8d7f31e4897"
     );
 }
 

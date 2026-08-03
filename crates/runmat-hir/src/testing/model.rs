@@ -1,5 +1,5 @@
 use crate::HirAssembly;
-use runmat_test::plan::ProgramRevision;
+use runmat_execution::ProgramRevision;
 
 pub struct SemanticTestSource<'a> {
     pub owner_identity: &'a str,

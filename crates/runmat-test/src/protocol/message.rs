@@ -13,8 +13,8 @@ use super::ProtocolHandshake;
 pub enum WorkerRequest {
     Handshake(ProtocolHandshake),
     InstallPlan {
-        plan: TestPlan,
-        snapshot: FrozenTestRunSnapshot,
+        plan: Box<TestPlan>,
+        snapshot: Box<FrozenTestRunSnapshot>,
     },
     Execute {
         test_id: TestId,

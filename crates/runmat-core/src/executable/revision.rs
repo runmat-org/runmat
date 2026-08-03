@@ -4,14 +4,14 @@ use super::ExecutableSource;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExecutableRevision {
-    pub program_revision: Option<runmat_test::plan::ProgramRevision>,
+    pub program_revision: Option<runmat_execution::ProgramRevision>,
     pub source_digest: String,
 }
 
 impl ExecutableRevision {
     pub fn derive(
         source: &ExecutableSource,
-        program_revision: Option<runmat_test::plan::ProgramRevision>,
+        program_revision: Option<runmat_execution::ProgramRevision>,
     ) -> Self {
         let mut digest = Sha256::new();
         frame(&mut digest, source.owner_identity.as_bytes());

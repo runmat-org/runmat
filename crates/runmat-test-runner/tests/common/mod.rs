@@ -4,11 +4,12 @@ use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::future::{pending, ready};
 
+use runmat_execution::{Digest, DomainContribution, ProgramEnvironment, ProgramRevision};
 use runmat_test::descriptor::{
     ProcedureDescriptor, ProcedureKind, SourceDescriptor, SourceSpan, TestDescriptor,
 };
 use runmat_test::identity::{FixtureGroupId, SuiteId, TestId, TestIdentityInput};
-use runmat_test::plan::{FixtureGroupPlan, ProgramRevision, SuitePlan, TestPlanBuilder};
+use runmat_test::plan::{FixtureGroupPlan, SuitePlan, TestPlanBuilder};
 use runmat_test::protocol::ProtocolHandshake;
 use runmat_test::result::{AttemptResult, ResultState};
 use runmat_test_runner::host::{
@@ -181,13 +182,23 @@ impl CancellationPort for ImmediateCancellation {
 }
 
 pub fn plan(names: &[&str]) -> RunSubmission {
-    let revision = ProgramRevision {
-        graph_digest: "graph".into(),
-        source_digest: "source".into(),
-        semantic_schema: 1,
-        compiler_schema: 1,
-        test_config_digest: "config".into(),
-    };
+    let revision = ProgramRevision::new(
+        Digest::sha256(b"graph"),
+        Digest::sha256(b"source"),
+        ProgramEnvironment::new(
+            1,
+            1,
+            Digest::sha256(b"runtime"),
+            Digest::sha256(b"catalog"),
+            "matlab",
+        )
+        .unwrap(),
+    )
+    .unwrap()
+    .with_domain_contribution(
+        DomainContribution::new("runmat.test.config", Digest::sha256(b"config")).unwrap(),
+    )
+    .unwrap();
     let suite_id = SuiteId::derive(&revision.canonical_identity(), "suite");
     let group_id = FixtureGroupId::derive(suite_id.as_str(), "group");
     let tests = names
@@ -243,11 +254,13 @@ pub fn plan(names: &[&str]) -> RunSubmission {
         .build()
         .unwrap();
     let snapshot = runmat_test::discovery::FrozenTestRunSnapshot::freeze(
-        revision.graph_digest,
+        revision.graph_digest().to_string(),
         "source",
-        revision.semantic_schema,
-        revision.compiler_schema,
-        revision.test_config_digest,
+        revision.environment(),
+        revision
+            .domain_contribution("runmat.test.config")
+            .unwrap()
+            .to_string(),
         vec![runmat_test::discovery::SavedRunSource {
             owner_identity: "root".into(),
             relative_path: "tests/sample.m".into(),

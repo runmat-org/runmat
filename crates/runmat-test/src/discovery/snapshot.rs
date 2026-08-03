@@ -3,8 +3,10 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::plan::ProgramRevision;
 use crate::TestDomainError;
+use runmat_execution::{
+    Digest as ExecutionDigest, DomainContribution, ProgramEnvironment, ProgramRevision,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SavedRunSource {
@@ -50,8 +52,7 @@ impl FrozenTestRunSnapshot {
     pub fn freeze(
         graph_digest: impl Into<String>,
         base_source_digest: impl Into<String>,
-        semantic_schema: u32,
-        compiler_schema: u32,
+        environment: ProgramEnvironment,
         test_config_digest: impl Into<String>,
         saved_sources: Vec<SavedRunSource>,
         unsaved_buffers: Vec<UnsavedRunBuffer>,
@@ -93,22 +94,29 @@ impl FrozenTestRunSnapshot {
         let sources = sources.into_values().collect::<Vec<_>>();
         let base_source_digest = base_source_digest.into();
         let source_digest = source_digest(&base_source_digest, &sources);
+        let graph_digest = parse_digest("graph_digest", graph_digest.into())?;
+        let test_config_digest = parse_digest("test_config_digest", test_config_digest.into())?;
+        let program_revision = ProgramRevision::new(graph_digest, source_digest, environment)
+            .and_then(|revision| {
+                revision.with_domain_contribution(DomainContribution::new(
+                    "runmat.test.config",
+                    test_config_digest,
+                )?)
+            })
+            .map_err(|error| TestDomainError::InvalidField {
+                field: "program_revision",
+                reason: error.to_string(),
+            })?;
         Ok(Self {
             base_source_digest,
-            program_revision: ProgramRevision {
-                graph_digest: graph_digest.into(),
-                source_digest,
-                semantic_schema,
-                compiler_schema,
-                test_config_digest: test_config_digest.into(),
-            },
+            program_revision,
             sources,
         })
     }
 
     pub fn validate(&self) -> Result<(), TestDomainError> {
         let expected = source_digest(&self.base_source_digest, &self.sources);
-        if expected != self.program_revision.source_digest {
+        if expected != *self.program_revision.source_digest() {
             return Err(TestDomainError::InvalidField {
                 field: "program_revision.source_digest",
                 reason: "frozen run sources no longer match the program revision".into(),
@@ -159,7 +167,7 @@ fn normalize_relative_path(path: &str) -> Result<String, TestDomainError> {
     Ok(normalized)
 }
 
-fn source_digest(base_source_digest: &str, sources: &[FrozenRunSource]) -> String {
+fn source_digest(base_source_digest: &str, sources: &[FrozenRunSource]) -> ExecutionDigest {
     let mut hasher = Sha256::new();
     write_part(&mut hasher, "runmat-test-run-sources-v1");
     write_part(&mut hasher, base_source_digest);
@@ -168,7 +176,16 @@ fn source_digest(base_source_digest: &str, sources: &[FrozenRunSource]) -> Strin
         write_part(&mut hasher, &source.relative_path);
         write_part(&mut hasher, &source.content);
     }
-    format!("sha256:{:x}", hasher.finalize())
+    ExecutionDigest::from_bytes(hasher.finalize().into())
+}
+
+fn parse_digest(field: &'static str, value: String) -> Result<ExecutionDigest, TestDomainError> {
+    value.parse().map_err(
+        |error: runmat_execution::ContractError| TestDomainError::InvalidField {
+            field,
+            reason: error.to_string(),
+        },
+    )
 }
 
 fn write_part(hasher: &mut Sha256, value: &str) {

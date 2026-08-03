@@ -3,7 +3,8 @@ use serde_json::Value;
 
 use crate::descriptor::{FixtureDescriptor, SourceDescriptor, TestDescriptor, TestSelector};
 use crate::identity::{FixtureGroupId, SuiteId};
-use crate::plan::{FixtureGroupPlan, ProgramRevision, SuitePlan, TestPlan, TestPlanBuilder};
+use crate::plan::{FixtureGroupPlan, SuitePlan, TestPlan, TestPlanBuilder};
+use runmat_execution::ProgramRevision;
 
 use super::FrozenTestRunSnapshot;
 

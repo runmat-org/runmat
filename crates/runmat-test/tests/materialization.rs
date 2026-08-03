@@ -1,18 +1,28 @@
+use runmat_execution::{Digest, DomainContribution, ProgramEnvironment, ProgramRevision};
 use runmat_test::descriptor::{SourceDescriptor, SourceSpan};
 use runmat_test::discovery::{
     materialize_metadata, IsolatedMetadataMaterializer, MaterializationKind, MaterializationLimits,
     MaterializationRequest, MaterializationResponse, MaterializationStatus, MaterializedValue,
 };
-use runmat_test::plan::ProgramRevision;
 
 fn revision(source: &str) -> ProgramRevision {
-    ProgramRevision {
-        graph_digest: "sha256:graph".into(),
-        source_digest: source.into(),
-        semantic_schema: 1,
-        compiler_schema: 1,
-        test_config_digest: "sha256:test".into(),
-    }
+    ProgramRevision::new(
+        Digest::sha256(b"graph"),
+        Digest::sha256(source),
+        ProgramEnvironment::new(
+            1,
+            1,
+            Digest::sha256(b"runtime"),
+            Digest::sha256(b"catalog"),
+            "matlab",
+        )
+        .unwrap(),
+    )
+    .unwrap()
+    .with_domain_contribution(
+        DomainContribution::new("runmat.test.config", Digest::sha256(b"test")).unwrap(),
+    )
+    .unwrap()
 }
 
 fn request() -> MaterializationRequest {

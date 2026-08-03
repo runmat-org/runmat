@@ -1,19 +1,30 @@
 mod common;
 
 use common::{procedure, test_id};
+use runmat_execution::{Digest, DomainContribution, ProgramEnvironment, ProgramRevision};
 use runmat_test::descriptor::TestDescriptor;
 use runmat_test::identity::{FixtureGroupId, SuiteId};
-use runmat_test::plan::{shard_for, FixtureGroupPlan, ProgramRevision, SuitePlan, TestPlanBuilder};
+use runmat_test::plan::{shard_for, FixtureGroupPlan, SuitePlan, TestPlanBuilder};
 
 #[test]
 fn plan_is_stable_across_input_order_and_checkout_location() {
-    let revision = ProgramRevision {
-        graph_digest: "sha256:graph".into(),
-        source_digest: "sha256:sources".into(),
-        semantic_schema: 4,
-        compiler_schema: 9,
-        test_config_digest: "sha256:config".into(),
-    };
+    let revision = ProgramRevision::new(
+        Digest::sha256(b"graph"),
+        Digest::sha256(b"sources"),
+        ProgramEnvironment::new(
+            4,
+            9,
+            Digest::sha256(b"runtime"),
+            Digest::sha256(b"catalog"),
+            "matlab",
+        )
+        .unwrap(),
+    )
+    .unwrap()
+    .with_domain_contribution(
+        DomainContribution::new("runmat.test.config", Digest::sha256(b"config")).unwrap(),
+    )
+    .unwrap();
     let suite_id = SuiteId::derive(&revision.canonical_identity(), "suite/example");
     let group_id = FixtureGroupId::derive(suite_id.as_str(), "class-state");
     let tests = ["zeta", "alpha"]

@@ -16,4 +16,5 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+runmat-execution = { workspace = true }
 wasm-bindgen-test = "0.3"

@@ -130,13 +130,16 @@ mod tests {
 
     use crate::RunMatSession;
 
+    fn digest(value: &str) -> String {
+        runmat_execution::Digest::sha256(value).to_string()
+    }
+
     fn snapshot(path: &str, content: &str) -> FrozenTestRunSnapshot {
         FrozenTestRunSnapshot::freeze(
-            "sha256:graph",
+            digest("graph"),
             "sha256:base-sources",
-            1,
-            1,
-            "sha256:config",
+            crate::program_environment(crate::CompatMode::Matlab),
+            digest("config"),
             vec![SavedRunSource {
                 owner_identity: "path:workspace".into(),
                 relative_path: path.into(),

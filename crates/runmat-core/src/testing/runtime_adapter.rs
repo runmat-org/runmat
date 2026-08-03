@@ -39,7 +39,7 @@ async fn run_arguments(
     coverage: Option<MatlabCoverageSelection>,
 ) -> runmat_runtime::BuiltinResult<Value> {
     let (snapshot, selected_names, requested_coverage) =
-        snapshot_from_arguments(project.as_ref(), args).await?;
+        snapshot_from_arguments(compat, project.as_ref(), args).await?;
     let mut session = configured_session(compat, project)?;
     let run = session
         .run_test_snapshot(
@@ -60,7 +60,8 @@ async fn discover_arguments(
     project: Option<runmat_package::FrozenProjectHandoff>,
     args: Vec<Value>,
 ) -> runmat_runtime::BuiltinResult<Value> {
-    let (snapshot, selected_names, _) = snapshot_from_arguments(project.as_ref(), args).await?;
+    let (snapshot, selected_names, _) =
+        snapshot_from_arguments(compat, project.as_ref(), args).await?;
     let session = configured_session(compat, project)?;
     let discovery = session
         .discover_tests(&snapshot)
@@ -92,6 +93,7 @@ async fn discover_arguments(
 }
 
 async fn snapshot_from_arguments(
+    compat: CompatMode,
     project: Option<&runmat_package::FrozenProjectHandoff>,
     args: Vec<Value>,
 ) -> runmat_runtime::BuiltinResult<(FrozenTestRunSnapshot, Vec<String>, bool)> {
@@ -144,13 +146,17 @@ async fn snapshot_from_arguments(
                 revision.source_revision.to_string(),
             )
         })
-        .unwrap_or_else(|| ("runtime-live".into(), "runtime-live".into()));
+        .unwrap_or_else(|| {
+            (
+                runmat_execution::Digest::sha256(b"runtime-live").to_string(),
+                "runtime-live".into(),
+            )
+        });
     let snapshot = FrozenTestRunSnapshot::freeze(
         graph_digest,
         source_digest,
-        1,
-        1,
-        "runtime-default",
+        crate::program_environment(compat),
+        runmat_execution::Digest::sha256(b"runtime-default").to_string(),
         sources.into_values().collect(),
         Vec::new(),
     )

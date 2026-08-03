@@ -1,7 +1,8 @@
 use crate::error::TestDomainError;
 use crate::identity::RunId;
+use runmat_execution::ProgramRevision;
 
-use super::{validate_plan, ProgramRevision, SuitePlan, TestPlan};
+use super::{validate_plan, SuitePlan, TestPlan};
 
 #[derive(Clone, Debug)]
 pub struct TestPlanBuilder {

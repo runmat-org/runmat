@@ -17,7 +17,9 @@ impl RunMatSession {
         runmat_runtime::builtins::wasm_registry::register_all();
         snapshot.validate()?;
         if let Some(installed) = self.project_revision() {
-            if snapshot.program_revision.graph_digest != installed.graph_digest.to_string() {
+            if *snapshot.program_revision.graph_digest()
+                != runmat_execution::Digest::from_bytes(*installed.graph_digest.bytes())
+            {
                 return Err(TestDomainError::InvalidField {
                     field: "program_revision.graph_digest",
                     reason: "test snapshot does not match the installed project graph".into(),
@@ -69,14 +71,17 @@ mod tests {
 
     use crate::RunMatSession;
 
+    fn digest(value: &str) -> String {
+        runmat_execution::Digest::sha256(value).to_string()
+    }
+
     #[test]
     fn core_discovers_from_the_caller_frozen_snapshot() {
         let snapshot = FrozenTestRunSnapshot::freeze(
-            "sha256:graph",
+            digest("graph"),
             "sha256:base-sources",
-            1,
-            1,
-            "sha256:config",
+            crate::program_environment(crate::CompatMode::Matlab),
+            digest("config"),
             vec![SavedRunSource {
                 owner_identity: "path:workspace".into(),
                 relative_path: "tests/core_test.m".into(),
@@ -97,11 +102,10 @@ mod tests {
     #[test]
     fn core_prepares_the_selected_plan_and_preserves_full_discovery() {
         let snapshot = FrozenTestRunSnapshot::freeze(
-            "sha256:graph",
+            digest("graph"),
             "sha256:base-sources",
-            1,
-            1,
-            "sha256:config",
+            crate::program_environment(crate::CompatMode::Matlab),
+            digest("config"),
             vec![SavedRunSource {
                 owner_identity: "path:workspace".into(),
                 relative_path: "tests/core_test.m".into(),

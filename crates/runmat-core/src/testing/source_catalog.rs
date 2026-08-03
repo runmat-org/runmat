@@ -7,7 +7,7 @@ use crate::ExecutableSource;
 
 #[derive(Clone, Debug)]
 pub(super) struct TestSourceCatalog {
-    revision: runmat_test::plan::ProgramRevision,
+    revision: runmat_execution::ProgramRevision,
     sources: BTreeMap<(String, String), String>,
 }
 
@@ -64,7 +64,7 @@ impl TestSourceCatalog {
         ))
     }
 
-    pub fn revision(&self) -> runmat_test::plan::ProgramRevision {
+    pub fn revision(&self) -> runmat_execution::ProgramRevision {
         self.revision.clone()
     }
 }

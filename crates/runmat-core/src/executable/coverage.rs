@@ -252,7 +252,7 @@ fn stable_site_id(revision: &ExecutableRevision, key: &SiteKey) -> (String, u64)
     let revision = revision
         .program_revision
         .as_ref()
-        .map(runmat_test::plan::ProgramRevision::canonical_identity)
+        .map(runmat_execution::ProgramRevision::canonical_identity)
         .unwrap_or_else(|| revision.source_digest.clone());
     frame(&mut digest, revision.as_bytes());
     frame(&mut digest, &[key.kind_rank]);

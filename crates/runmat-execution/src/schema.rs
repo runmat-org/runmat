@@ -1,0 +1,5 @@
+pub const EXECUTION_SCHEMA_V1: u16 = 1;
+pub const PROGRAM_REVISION_SCHEMA_V1: u16 = 1;
+pub const VALUE_PAYLOAD_SCHEMA_V1: u16 = 1;
+pub const PROTOCOL_MAJOR_V1: u16 = 1;
+pub const PROTOCOL_MINOR_V1: u16 = 0;

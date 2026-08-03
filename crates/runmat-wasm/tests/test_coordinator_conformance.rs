@@ -157,11 +157,10 @@ fn to_js(value: &impl Serialize) -> JsValue {
 
 fn fixture() -> (runmat_test::plan::TestPlan, FrozenTestRunSnapshot, TestId) {
     let snapshot = FrozenTestRunSnapshot::freeze(
-        "graph",
+        runmat_execution::Digest::sha256(b"graph").to_string(),
         "source",
-        1,
-        1,
-        "test",
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
+        runmat_execution::Digest::sha256(b"test").to_string(),
         vec![SavedRunSource {
             owner_identity: "root".into(),
             relative_path: "tests/sample.m".into(),

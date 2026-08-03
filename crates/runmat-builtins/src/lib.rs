@@ -1,6 +1,8 @@
 pub use inventory;
+mod catalog_fingerprint;
 mod object_array;
 pub mod symbolic;
+pub use catalog_fingerprint::{builtin_catalog_fingerprint, BUILTIN_CATALOG_SCHEMA};
 pub use object_array::ObjectArray;
 use runmat_gc_api::{GcHandle, Trace, Tracer};
 use runmat_thread_local::runmat_thread_local;

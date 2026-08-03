@@ -4090,6 +4090,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
+name = "minicbor"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c12b4033ffaa92fbf9df03df38d19324f52bad130dd223f811734a8006dd2d69"
+dependencies = [
+ "minicbor-derive",
+]
+
+[[package]]
+name = "minicbor-derive"
+version = "0.19.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "84f5ad8dfe10176465fe33f19ecfcf08783ba66630fdb40b2e4542547c1046f0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
+]
+
+[[package]]
 name = "minicov"
 version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5739,6 +5759,7 @@ dependencies = [
  "runmat-builtins",
  "runmat-config",
  "runmat-core",
+ "runmat-execution",
  "runmat-filesystem",
  "runmat-gc",
  "runmat-hir",
@@ -5869,6 +5890,7 @@ dependencies = [
  "runmat-macros",
  "runmat-thread-local",
  "serde",
+ "sha2",
 ]
 
 [[package]]
@@ -5902,6 +5924,7 @@ dependencies = [
  "runmat-accelerate-api",
  "runmat-builtins",
  "runmat-config",
+ "runmat-execution",
  "runmat-filesystem",
  "runmat-gc",
  "runmat-hir",
@@ -5923,6 +5946,18 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "wasm-bindgen-test",
+]
+
+[[package]]
+name = "runmat-execution"
+version = "0.6.1"
+dependencies = [
+ "minicbor",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 1.0.69",
  "wasm-bindgen-test",
 ]
 
@@ -6025,6 +6060,7 @@ name = "runmat-hir"
 version = "0.6.1"
 dependencies = [
  "runmat-builtins",
+ "runmat-execution",
  "runmat-parser",
  "runmat-test",
  "serde",
@@ -6444,6 +6480,7 @@ name = "runmat-static-analysis"
 version = "0.6.1"
 dependencies = [
  "runmat-builtins",
+ "runmat-execution",
  "runmat-hir",
  "runmat-mir",
  "runmat-package",
@@ -6468,6 +6505,7 @@ name = "runmat-test"
 version = "0.6.1"
 dependencies = [
  "futures",
+ "runmat-execution",
  "serde",
  "serde_json",
  "sha2",
@@ -6480,6 +6518,7 @@ name = "runmat-test-runner"
 version = "0.6.1"
 dependencies = [
  "futures",
+ "runmat-execution",
  "runmat-test",
  "serde",
  "serde_json",
@@ -6494,6 +6533,7 @@ dependencies = [
  "libc",
  "log",
  "runmat-core",
+ "runmat-execution",
  "runmat-package",
  "runmat-test",
  "runmat-test-runner",
@@ -6584,6 +6624,7 @@ dependencies = [
  "runmat-builtins",
  "runmat-config",
  "runmat-core",
+ "runmat-execution",
  "runmat-filesystem",
  "runmat-geometry-core",
  "runmat-geometry-io",

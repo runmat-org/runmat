@@ -34,6 +34,7 @@ members = [
     "crates/runmat-test",
     "crates/runmat-test-runner",
     "crates/runmat-test-runner-native",
+    "crates/runmat-execution",
     "crates/runmat-static-analysis",
     "crates/runmat-geometry/core",
     "crates/runmat-geometry/io",
@@ -62,6 +63,7 @@ proc-macro2 = "1"
 logos = "0.15"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
+minicbor = { version = "2.3", features = ["alloc", "derive", "std"] }
 tokio = { version = "1", default-features = false }
 uuid = { version = "1", features = ["v4"] }
 clap = { version = "4", features = ["derive", "env"] }
@@ -107,6 +109,7 @@ runmat-package-cache-native = { version = "=0.6.1", path = "crates/runmat-packag
 runmat-test = { version = "=0.6.1", path = "crates/runmat-test" }
 runmat-test-runner = { version = "=0.6.1", path = "crates/runmat-test-runner" }
 runmat-test-runner-native = { version = "=0.6.1", path = "crates/runmat-test-runner-native" }
+runmat-execution = { version = "=0.6.1", path = "crates/runmat-execution" }
 runmat-static-analysis = { version = "=0.6.1", path = "crates/runmat-static-analysis" }
 runmat-server-client = { version = "=0.6.1", path = "crates/runmat-server-client" }
 runmat-accelerate = { version = "=0.6.1", path = "crates/runmat-accelerate" }

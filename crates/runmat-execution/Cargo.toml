@@ -1,0 +1,18 @@
+[package]
+name = "runmat-execution"
+version = "0.6.1"
+edition = "2021"
+description = "Portable identities, handles, resource models, value payloads, and protocol contracts for RunMat execution"
+license = "Apache-2.0"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
+
+[dependencies]
+minicbor = { workspace = true }
+serde = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+wasm-bindgen-test = "0.3"

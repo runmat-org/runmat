@@ -1,10 +1,9 @@
+use runmat_execution::ProgramRevision;
 use serde::{Deserialize, Serialize};
 
 use crate::descriptor::{FixtureDescriptor, TestDescriptor};
 use crate::identity::{FixtureGroupId, RunId, SuiteId};
 use crate::version::TEST_PLAN_SCHEMA_VERSION;
-
-use super::ProgramRevision;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TestPlan {

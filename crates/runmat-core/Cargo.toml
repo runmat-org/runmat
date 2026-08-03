@@ -15,6 +15,7 @@ runmat-hir = { workspace = true }
 runmat-mir = { workspace = true }
 runmat-vm = { workspace = true }
 runmat-config = { workspace = true }
+runmat-execution = { workspace = true }
 runmat-package = { workspace = true }
 runmat-static-analysis = { workspace = true }
 runmat-test = { workspace = true }

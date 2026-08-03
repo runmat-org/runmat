@@ -194,8 +194,8 @@ impl WorkerBackend for ProcessBackend {
             }
             let run_id = request.submission.plan.run_id.clone();
             let install = WorkerRequest::InstallPlan {
-                plan: request.submission.plan,
-                snapshot: request.submission.snapshot,
+                plan: Box::new(request.submission.plan),
+                snapshot: Box::new(request.submission.snapshot),
             };
             if let Err(error) = write_request(&mut writer, &install, limits).await {
                 terminate_failed_spawn(&mut child, process_id).await;

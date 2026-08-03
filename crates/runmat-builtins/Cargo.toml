@@ -11,6 +11,7 @@ repository = "https://github.com/runmat-org/runmat"
 [dependencies]
 inventory = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
+sha2 = { workspace = true }
 runmat-accelerate-api = { workspace = true }
 runmat-async = { workspace = true }
 runmat-gc-api = { workspace = true }

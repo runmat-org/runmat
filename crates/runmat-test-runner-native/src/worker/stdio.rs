@@ -95,8 +95,8 @@ pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
                 }
                 let run_id = plan.run_id.clone();
                 installed = Some(InstalledRun {
-                    plan,
-                    snapshot,
+                    plan: *plan,
+                    snapshot: *snapshot,
                     session,
                 });
                 write_response(&mut output, &WorkerResponse::Ready { run_id }, limits).await?;

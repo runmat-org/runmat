@@ -764,12 +764,14 @@ impl RunMatSession {
     pub async fn compile_executable_unit(
         &mut self,
         source: crate::ExecutableSource,
-        program_revision: Option<runmat_test::plan::ProgramRevision>,
+        program_revision: Option<runmat_execution::ProgramRevision>,
     ) -> std::result::Result<crate::ExecutableUnit, RunError> {
         if let (Some(requested), Some(installed)) =
             (program_revision.as_ref(), self.project_revision())
         {
-            if requested.graph_digest != installed.graph_digest.to_string() {
+            if *requested.graph_digest()
+                != runmat_execution::Digest::from_bytes(*installed.graph_digest.bytes())
+            {
                 return Err(RunError::Runtime(
                     build_runtime_error(
                         "executable source revision does not match the installed project",

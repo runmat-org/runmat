@@ -15,7 +15,7 @@ impl RunMatSession {
             .revision()
             .program_revision
             .as_ref()
-            .map(runmat_test::plan::ProgramRevision::canonical_identity)
+            .map(runmat_execution::ProgramRevision::canonical_identity)
             .unwrap_or_else(|| unit.revision().source_digest.clone());
         let fragment = unit
             .coverage_plan()
