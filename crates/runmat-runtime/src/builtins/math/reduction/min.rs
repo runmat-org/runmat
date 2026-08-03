@@ -7,7 +7,8 @@ use runmat_accelerate_api::{GpuTensorHandle, ReduceDimResult};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, NumericDType, NumericStorage, ResolveContext, Tensor, Type, Value,
+    ComplexStorage, ComplexTensor, NumericDType, NumericStorage, ResolveContext, Tensor, Type,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -157,7 +158,7 @@ const MIN_INPUTS_A_B_OPTIONS: [BuiltinParamDescriptor; 4] = [
     MIN_PARAM_OPTION_VALUE,
 ];
 
-const MIN_SIGNATURES: [BuiltinSignatureDescriptor; 22] = [
+const MIN_SIGNATURES: [BuiltinSignatureDescriptor; 19] = [
     BuiltinSignatureDescriptor {
         label: "M = min(A)",
         inputs: &MIN_INPUTS_A,
@@ -172,11 +173,6 @@ const MIN_SIGNATURES: [BuiltinSignatureDescriptor; 22] = [
         label: "M = min(A, B)",
         inputs: &MIN_INPUTS_A_B,
         outputs: &MIN_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, I] = min(A, B)",
-        inputs: &MIN_INPUTS_A_B,
-        outputs: &MIN_OUTPUT_MI,
     },
     BuiltinSignatureDescriptor {
         label: "M = min(A, [], dim)",
@@ -244,11 +240,6 @@ const MIN_SIGNATURES: [BuiltinSignatureDescriptor; 22] = [
         outputs: &MIN_OUTPUT_M,
     },
     BuiltinSignatureDescriptor {
-        label: "[M, I] = min(A, B, \"ComparisonMethod\", method)",
-        inputs: &MIN_INPUTS_A_B_COMPARISON,
-        outputs: &MIN_OUTPUT_MI,
-    },
-    BuiltinSignatureDescriptor {
         label: "M = min(A, [], optionName, optionValue, ...)",
         inputs: &MIN_INPUTS_A_EMPTY_OPTIONS,
         outputs: &MIN_OUTPUT_M,
@@ -262,11 +253,6 @@ const MIN_SIGNATURES: [BuiltinSignatureDescriptor; 22] = [
         label: "M = min(A, B, optionName, optionValue, ...)",
         inputs: &MIN_INPUTS_A_B_OPTIONS,
         outputs: &MIN_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, I] = min(A, B, optionName, optionValue, ...)",
-        inputs: &MIN_INPUTS_A_B_OPTIONS,
-        outputs: &MIN_OUTPUT_MI,
     },
 ];
 
@@ -444,6 +430,15 @@ impl MinEvaluation {
 pub(crate) async fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if let Some(eval) = crate::builtins::table::categorical_min_evaluate(&value, &rest).await {
         return crate::builtins::table::categorical_extrema_to_value(eval?);
+    }
+    if crate::output_count::current_output_count().unwrap_or(1) > 1
+        && rest
+            .first()
+            .is_some_and(|value| !is_empty_placeholder(value))
+    {
+        return Err(min_invalid_argument(
+            "min: pairwise element-wise form has exactly one output",
+        ));
     }
     let eval = evaluate(value, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
@@ -1132,10 +1127,13 @@ fn reduce_complex_tensor(
     args: &ReductionArgs,
 ) -> BuiltinResult<MinEvaluation> {
     let shape = tensor.shape.clone();
-    if tensor.materialize_f64().is_empty() {
+    let dtype = tensor.numeric_dtype();
+    let data = tensor.materialize_f64();
+    if data.is_empty() {
         let output_shape = resolve_output_shape(&shape, &args.selection, &[])?;
-        let values = ComplexTensor::new(Vec::new(), output_shape.clone())
-            .map_err(|e| min_internal_error(format!("min: {e}")))?;
+        let values =
+            ComplexTensor::from_f64_values_with_dtype(Vec::new(), output_shape.clone(), dtype)
+                .map_err(|e| min_internal_error(format!("min: {e}")))?;
         let indices = Tensor::new(Vec::new(), output_shape)
             .map_err(|e| min_internal_error(format!("min: {e}")))?;
         return Ok(MinEvaluation {
@@ -1149,8 +1147,9 @@ fn reduce_complex_tensor(
     let output_len = tensor::element_count(&output_shape);
 
     if output_len == 0 {
-        let values = ComplexTensor::new(Vec::new(), output_shape.clone())
-            .map_err(|e| min_internal_error(format!("min: {e}")))?;
+        let values =
+            ComplexTensor::from_f64_values_with_dtype(Vec::new(), output_shape.clone(), dtype)
+                .map_err(|e| min_internal_error(format!("min: {e}")))?;
         let indices = Tensor::new(Vec::new(), output_shape)
             .map_err(|e| min_internal_error(format!("min: {e}")))?;
         return Ok(MinEvaluation {
@@ -1167,7 +1166,7 @@ fn reduce_complex_tensor(
     let mut best = vec![BestComplex::new(); output_len];
     let mut coords = vec![0usize; shape.len()];
 
-    for &(re, im) in &tensor.materialize_f64() {
+    for &(re, im) in &data {
         let out_idx = map_output_index(&coords, &output_strides, &dims_mask);
         let reduce_idx = map_reduce_index(
             &coords,
@@ -1217,8 +1216,9 @@ fn reduce_complex_tensor(
         };
     }
 
-    let value_tensor = ComplexTensor::new(values, output_shape.clone())
-        .map_err(|e| min_internal_error(format!("min: {e}")))?;
+    let value_tensor =
+        ComplexTensor::from_f64_values_with_dtype(values, output_shape.clone(), dtype)
+            .map_err(|e| min_internal_error(format!("min: {e}")))?;
     let index_tensor =
         Tensor::new(indices, output_shape).map_err(|e| min_internal_error(format!("min: {e}")))?;
     Ok(MinEvaluation {
@@ -2110,26 +2110,50 @@ fn elementwise_complex_min(
 ) -> BuiltinResult<MinEvaluation> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
         .map_err(|err| min_size_mismatch(format!("min: {err}")))?;
-    let mut values = vec![(0.0f64, 0.0f64); plan.len()];
     let mut indices = vec![0.0f64; plan.len()];
+    let lhs_storage = lhs.into_complex_storage();
+    let rhs_storage = rhs.into_complex_storage();
 
-    for (offset, index_a, index_b) in plan.iter() {
-        let a = lhs
-            .materialize_f64()
-            .get(index_a)
-            .copied()
-            .unwrap_or((f64::NAN, f64::NAN));
-        let b = rhs
-            .materialize_f64()
-            .get(index_b)
-            .copied()
-            .unwrap_or((f64::NAN, f64::NAN));
-        let (value, origin) = choose_complex_elementwise(a, b, comparison);
-        values[offset] = value;
-        indices[offset] = origin;
+    macro_rules! select_same_class {
+        ($left:expr, $right:expr, $variant:ident) => {{
+            let mut values = Vec::with_capacity(plan.len());
+            for (offset, index_a, index_b) in plan.iter() {
+                let a = $left[index_a];
+                let b = $right[index_b];
+                let (_, origin) = choose_complex_elementwise(
+                    (f64::from(a.0), f64::from(a.1)),
+                    (f64::from(b.0), f64::from(b.1)),
+                    comparison,
+                );
+                values.push(if origin == 1.0 { a } else { b });
+                indices[offset] = origin;
+            }
+            ComplexStorage::$variant(values)
+        }};
     }
 
-    let value_tensor = ComplexTensor::new(values, plan.output_shape().to_vec())
+    let values = match (lhs_storage, rhs_storage) {
+        (ComplexStorage::F64(left), ComplexStorage::F64(right)) => {
+            select_same_class!(left, right, F64)
+        }
+        (ComplexStorage::F32(left), ComplexStorage::F32(right)) => {
+            select_same_class!(left, right, F32)
+        }
+        (left, right) => {
+            let left = left.materialize_f64();
+            let right = right.materialize_f64();
+            let mut values = Vec::with_capacity(plan.len());
+            for (offset, index_a, index_b) in plan.iter() {
+                let (value, origin) =
+                    choose_complex_elementwise(left[index_a], right[index_b], comparison);
+                values.push(value);
+                indices[offset] = origin;
+            }
+            ComplexStorage::F64(values)
+        }
+    };
+
+    let value_tensor = ComplexTensor::from_complex_storage(values, plan.output_shape().to_vec())
         .map_err(|e| min_internal_error(format!("min: {e}")))?;
     let index_tensor = Tensor::new(indices, plan.output_shape().to_vec())
         .map_err(|e| min_internal_error(format!("min: {e}")))?;
@@ -2142,11 +2166,23 @@ fn elementwise_complex_min(
 
 fn promote_real_tensor_to_complex(tensor: Tensor) -> ComplexTensor {
     let shape = tensor.shape.clone();
-    let data = tensor::tensor_into_values_f64(tensor)
-        .into_iter()
-        .map(|re| (re, 0.0))
-        .collect::<Vec<_>>();
-    ComplexTensor::new(data, shape).expect("real tensor shape remains valid after promotion")
+    let storage = match tensor
+        .into_numeric_storage()
+        .expect("real extrema input has numeric storage")
+    {
+        NumericStorage::F32(values) => {
+            ComplexStorage::F32(values.into_iter().map(|re| (re, 0.0)).collect())
+        }
+        storage => ComplexStorage::F64(
+            storage
+                .materialize_f64()
+                .into_iter()
+                .map(|re| (re, 0.0))
+                .collect(),
+        ),
+    };
+    ComplexTensor::from_complex_storage(storage, shape)
+        .expect("real tensor shape remains valid after promotion")
 }
 
 fn choose_real_elementwise(a: f64, b: f64, comparison: ComparisonMethod) -> (f64, f64) {
@@ -2220,6 +2256,7 @@ pub(crate) mod tests {
         assert!(labels.contains(&"M = min(A)"));
         assert!(labels.contains(&"[M, I] = min(A)"));
         assert!(labels.contains(&"M = min(A, B)"));
+        assert!(!labels.contains(&"[M, I] = min(A, B)"));
         assert!(labels.contains(&"M = min(A, [], dim)"));
         assert!(labels.contains(&"M = min(A, [], \"all\")"));
         assert!(labels.contains(&"M = min(A, [], nanflag)"));
@@ -2485,6 +2522,23 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn min_reduction_preserves_native_complex_single_storage() {
+        let tensor =
+            ComplexTensor::from_f32(vec![(1.0, 2.0), (0.5, 5.0)], vec![2, 1]).expect("tensor");
+        let values = evaluate(Value::ComplexTensor(tensor), &[])
+            .expect("evaluate")
+            .into_value();
+        let Value::ComplexTensor(values) = values else {
+            panic!("expected typed complex scalar tensor");
+        };
+        assert_eq!(
+            values.into_complex_storage(),
+            ComplexStorage::F32(vec![(1.0, 2.0)])
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn min_elementwise_broadcast() {
         let lhs = Tensor::new(vec![1.0, 4.0, 7.0], vec![1, 3]).unwrap();
         let rhs = Tensor::new(vec![2.0, 3.0, 5.0], vec![3, 1]).unwrap();
@@ -2571,6 +2625,32 @@ pub(crate) mod tests {
             indices,
             Value::Tensor(Tensor::new(vec![2.0, 1.0], vec![2, 1]).expect("indices"))
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn min_elementwise_preserves_native_complex_single_storage() {
+        let lhs = ComplexTensor::from_f32(vec![(3.0, 4.0), (1.0, 0.0)], vec![2, 1]).expect("lhs");
+        let rhs = ComplexTensor::from_f32(vec![(4.0, 0.0), (0.0, 2.0)], vec![2, 1]).expect("rhs");
+        let values = evaluate(Value::ComplexTensor(lhs), &[Value::ComplexTensor(rhs)])
+            .expect("evaluate")
+            .into_value();
+        let Value::ComplexTensor(values) = values else {
+            panic!("expected complex tensor values");
+        };
+        assert_eq!(
+            values.into_complex_storage(),
+            ComplexStorage::F32(vec![(4.0, 0.0), (1.0, 0.0)])
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn min_pairwise_public_form_rejects_second_output() {
+        let _guard = crate::output_count::push_output_count(Some(2));
+        let error = min_builtin(Value::Num(1.0), vec![Value::Num(2.0)])
+            .expect_err("pairwise min has one output");
+        assert_eq!(error.identifier(), MIN_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
