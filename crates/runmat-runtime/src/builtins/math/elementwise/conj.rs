@@ -4,7 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, Tensor, Value,
+    CharArray, ComplexStorage, ComplexTensor, IntegerComplexStorage, IntegerStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -170,25 +170,31 @@ fn conj_complex_scalar(re: f64, im: f64) -> BuiltinResult<Value> {
 }
 
 fn conj_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    if let Some(storage) = ct.integer_storage() {
-        let storage = IntegerComplexStorage::new(
-            storage.real.clone(),
-            conjugate_integer_imaginary_storage(storage.imag.clone()),
-        )
+    let shape = ct.shape.clone();
+    let storage = match ct.into_complex_storage() {
+        ComplexStorage::F64(values) => ComplexStorage::F64(
+            values
+                .into_iter()
+                .map(|(real, imag)| (real, -imag))
+                .collect(),
+        ),
+        ComplexStorage::F32(values) => ComplexStorage::F32(
+            values
+                .into_iter()
+                .map(|(real, imag)| (real, -imag))
+                .collect(),
+        ),
+        ComplexStorage::Integer(storage) => ComplexStorage::Integer(
+            IntegerComplexStorage::new(
+                storage.real,
+                conjugate_integer_imaginary_storage(storage.imag),
+            )
+            .map_err(|e| builtin_error_with_detail(&CONJ_ERROR_INTERNAL, e))?,
+        ),
+    };
+    let tensor = ComplexTensor::from_complex_storage(storage, shape)
         .map_err(|e| builtin_error_with_detail(&CONJ_ERROR_INTERNAL, e))?;
-        let tensor = ComplexTensor::new_integer(storage, ct.shape)
-            .map_err(|e| builtin_error_with_detail(&CONJ_ERROR_INTERNAL, e))?;
-        Ok(Value::ComplexTensor(tensor))
-    } else {
-        let data = ct
-            .materialize_f64()
-            .into_iter()
-            .map(|(re, im)| (re, -im))
-            .collect();
-        let tensor = ComplexTensor::new(data, ct.shape)
-            .map_err(|e| builtin_error_with_detail(&CONJ_ERROR_INTERNAL, e))?;
-        Ok(Value::ComplexTensor(tensor))
-    }
+    Ok(Value::ComplexTensor(tensor))
 }
 
 pub(crate) fn conjugate_integer_imaginary_storage(storage: IntegerStorage) -> IntegerStorage {
@@ -370,6 +376,29 @@ pub(crate) mod tests {
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn conj_complex_single_preserves_native_class_shape_and_empty_storage() {
+        let tensor = ComplexTensor::from_f32(vec![(1.25, 2.5), (-3.0, -4.0)], vec![1, 2]).unwrap();
+        let Value::ComplexTensor(output) =
+            conj_builtin(Value::ComplexTensor(tensor)).expect("conj")
+        else {
+            panic!("expected complex single tensor");
+        };
+        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(
+            output.as_f32_slice(),
+            Some(&[(1.25, -2.5), (-3.0, 4.0)][..])
+        );
+
+        let empty = ComplexTensor::from_f32(Vec::new(), vec![0, 2]).unwrap();
+        let Value::ComplexTensor(output) = conj_builtin(Value::ComplexTensor(empty)).expect("conj")
+        else {
+            panic!("expected empty complex single tensor");
+        };
+        assert_eq!(output.shape, vec![0, 2]);
+        assert_eq!(output.as_f32_slice(), Some(&[][..]));
     }
 
     #[test]

@@ -4,7 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
+    CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -166,29 +166,27 @@ fn imag_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn imag_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    if let Some(storage) = tensor.integer_storage() {
-        return Tensor::new_integer(storage.zeros_like(storage.len()), tensor.shape.clone())
-            .map_err(|e| builtin_error_with_detail(&IMAG_ERROR_INTERNAL, e));
-    }
-    Tensor::new(
-        vec![0.0; tensor::tensor_element_len(&tensor)],
-        tensor.shape.clone(),
-    )
-    .map_err(|e| builtin_error_with_detail(&IMAG_ERROR_INTERNAL, e))
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| builtin_error_with_detail(&IMAG_ERROR_INTERNAL, e))?;
+    let zeros = storage.zeros_like(storage.len());
+    Tensor::from_numeric_storage(zeros, shape)
+        .map_err(|e| builtin_error_with_detail(&IMAG_ERROR_INTERNAL, e))
 }
 
 fn imag_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    if let Some(storage) = ct.integer_storage() {
-        let tensor = Tensor::new_integer(storage.imag.clone(), ct.shape)
-            .map_err(|e| builtin_error_with_detail(&IMAG_ERROR_INTERNAL, e))?;
-        return Ok(tensor::tensor_into_value(tensor));
-    }
-    let data = ct
-        .materialize_f64()
-        .iter()
-        .map(|&(_, im)| im)
-        .collect::<Vec<_>>();
-    let tensor = Tensor::new(data, ct.shape.clone())
+    let shape = ct.shape.clone();
+    let storage = match ct.into_complex_storage() {
+        ComplexStorage::F64(values) => {
+            NumericStorage::F64(values.into_iter().map(|(_, imag)| imag).collect())
+        }
+        ComplexStorage::F32(values) => {
+            NumericStorage::F32(values.into_iter().map(|(_, imag)| imag).collect())
+        }
+        ComplexStorage::Integer(storage) => NumericStorage::from_integer_storage(storage.imag),
+    };
+    let tensor = Tensor::from_numeric_storage(storage, shape)
         .map_err(|e| builtin_error_with_detail(&IMAG_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))
 }
@@ -333,6 +331,30 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn imag_real_and_complex_single_preserve_native_class_and_shape() {
+        let real = Tensor::from_f32(vec![1.0, -2.0], vec![1, 2]).unwrap();
+        let Value::Tensor(output) = imag_builtin(Value::Tensor(real)).expect("imag") else {
+            panic!("expected single zero tensor");
+        };
+        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![0.0, 0.0])
+        );
+
+        let complex = ComplexTensor::from_f32(vec![(1.25, 2.5), (-3.0, 4.0)], vec![2, 1]).unwrap();
+        let Value::Tensor(output) = imag_builtin(Value::ComplexTensor(complex)).expect("imag")
+        else {
+            panic!("expected single imaginary tensor");
+        };
+        assert_eq!(output.shape, vec![2, 1]);
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![2.5, 4.0])
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn imag_empty_tensor_zero_length() {
@@ -345,6 +367,20 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn imag_empty_complex_single_preserves_native_class_and_shape() {
+        let complex = ComplexTensor::from_f32(Vec::new(), vec![0, 3]).unwrap();
+        let Value::Tensor(output) = imag_builtin(Value::ComplexTensor(complex)).expect("imag")
+        else {
+            panic!("expected empty single imaginary tensor");
+        };
+        assert_eq!(output.shape, vec![0, 3]);
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(Vec::new())
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

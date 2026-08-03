@@ -3,7 +3,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
+    CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -169,17 +169,17 @@ fn real_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 }
 
 fn real_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    if let Some(storage) = ct.integer_storage() {
-        let tensor = Tensor::new_integer(storage.real.clone(), ct.shape)
-            .map_err(|e| builtin_error_with_detail(&REAL_ERROR_INTERNAL, e))?;
-        return Ok(tensor::tensor_into_value(tensor));
-    }
-    let data = ct
-        .materialize_f64()
-        .iter()
-        .map(|&(re, _)| re)
-        .collect::<Vec<_>>();
-    let tensor = Tensor::new(data, ct.shape.clone())
+    let shape = ct.shape.clone();
+    let storage = match ct.into_complex_storage() {
+        ComplexStorage::F64(values) => {
+            NumericStorage::F64(values.into_iter().map(|(real, _)| real).collect())
+        }
+        ComplexStorage::F32(values) => {
+            NumericStorage::F32(values.into_iter().map(|(real, _)| real).collect())
+        }
+        ComplexStorage::Integer(storage) => NumericStorage::from_integer_storage(storage.real),
+    };
+    let tensor = Tensor::from_numeric_storage(storage, shape)
         .map_err(|e| builtin_error_with_detail(&REAL_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))
 }
@@ -284,6 +284,30 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn real_complex_single_preserves_native_class_shape_and_empty_storage() {
+        let complex = ComplexTensor::from_f32(vec![(1.25, 2.5), (-3.0, 4.0)], vec![2, 1]).unwrap();
+        let Value::Tensor(output) = real_builtin(Value::ComplexTensor(complex)).expect("real")
+        else {
+            panic!("expected single real tensor");
+        };
+        assert_eq!(output.shape, vec![2, 1]);
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![1.25, -3.0])
+        );
+
+        let empty = ComplexTensor::from_f32(Vec::new(), vec![0, 4]).unwrap();
+        let Value::Tensor(output) = real_builtin(Value::ComplexTensor(empty)).expect("real") else {
+            panic!("expected empty single real tensor");
+        };
+        assert_eq!(output.shape, vec![0, 4]);
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(Vec::new())
+        );
     }
 
     #[test]

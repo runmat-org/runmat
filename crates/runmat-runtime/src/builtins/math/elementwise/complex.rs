@@ -9,8 +9,8 @@ use runmat_builtins::shape_rules::element_count_if_known;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericDType, ResolveContext, Tensor,
-    Type, Value,
+    ComplexStorage, ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericStorage,
+    ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -246,8 +246,28 @@ fn unary_complex_host(value: Value) -> BuiltinResult<Value> {
             let storage = tensor
                 .into_numeric_storage()
                 .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?;
-            match storage.into_integer_storage() {
-                Ok(storage) => {
+            match storage {
+                NumericStorage::F64(values) => {
+                    if is_scalar {
+                        return Ok(Value::Complex(values[0], 0.0));
+                    }
+                    let storage =
+                        ComplexStorage::F64(values.into_iter().map(|value| (value, 0.0)).collect());
+                    let complex = ComplexTensor::from_complex_storage(storage, shape)
+                        .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?;
+                    Ok(complex_tensor_into_value(complex))
+                }
+                NumericStorage::F32(values) => {
+                    let storage =
+                        ComplexStorage::F32(values.into_iter().map(|value| (value, 0.0)).collect());
+                    let complex = ComplexTensor::from_complex_storage(storage, shape)
+                        .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?;
+                    Ok(complex_tensor_into_value(complex))
+                }
+                storage => {
+                    let storage = storage
+                        .into_integer_storage()
+                        .expect("non-floating NumericStorage variant");
                     let zeros = storage.zeros_like(storage.len());
                     let complex = ComplexTensor::new_integer(
                         IntegerComplexStorage::new(storage, zeros)
@@ -255,17 +275,6 @@ fn unary_complex_host(value: Value) -> BuiltinResult<Value> {
                         shape,
                     )
                     .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?;
-                    Ok(complex_tensor_into_value(complex))
-                }
-                Err(storage) => {
-                    let dtype = storage.numeric_dtype();
-                    let values = storage.materialize_f64();
-                    if is_scalar && dtype == NumericDType::F64 {
-                        return Ok(Value::Complex(values[0], 0.0));
-                    }
-                    let data = values.into_iter().map(|value| (value, 0.0)).collect();
-                    let complex = ComplexTensor::from_f64_values_with_dtype(data, shape, dtype)
-                        .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?;
                     Ok(complex_tensor_into_value(complex))
                 }
             }
@@ -403,13 +412,7 @@ fn upload_real_tensor(
     provider: &dyn runmat_accelerate_api::AccelProvider,
     tensor: &Tensor,
 ) -> BuiltinResult<runmat_accelerate_api::GpuTensorHandle> {
-    let data = tensor::tensor_values_f64_cow(tensor);
-    let view = runmat_accelerate_api::HostTensorView {
-        data: &data,
-        shape: &tensor.shape,
-    };
-    let handle = provider
-        .upload(&view)
+    let handle = gpu_helpers::upload_tensor(provider, tensor)
         .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?;
     runmat_accelerate_api::set_handle_logical(&handle, false);
     runmat_accelerate_api::set_handle_storage(
@@ -434,39 +437,51 @@ fn compose_complex(real: &RealInput, imag: &RealInput) -> BuiltinResult<Value> {
 }
 
 fn compose_floating_complex(real: &Tensor, imag: &Tensor) -> BuiltinResult<Value> {
-    let output_dtype =
-        if real.numeric_dtype() == NumericDType::F32 && imag.numeric_dtype() == NumericDType::F32 {
-            NumericDType::F32
-        } else {
-            NumericDType::F64
-        };
-    let real_values = tensor::tensor_values_f64_cow(real);
-    let imag_values = tensor::tensor_values_f64_cow(imag);
-    let (shape, data) = if real.shape == imag.shape {
-        let data: Vec<(f64, f64)> = real_values
-            .iter()
-            .zip(imag_values.iter())
-            .map(|(&re, &im)| (re, im))
-            .collect();
-        (real.shape.clone(), data)
-    } else if is_scalar_tensor(real) {
-        let re = real_values[0];
-        let data: Vec<(f64, f64)> = imag_values.iter().map(|&im| (re, im)).collect();
-        (imag.shape.clone(), data)
-    } else if is_scalar_tensor(imag) {
-        let im = imag_values[0];
-        let data: Vec<(f64, f64)> = real_values.iter().map(|&re| (re, im)).collect();
-        (real.shape.clone(), data)
-    } else {
-        return Err(complex_error_with_detail(
-            &COMPLEX_ERROR_SIZE_MISMATCH,
-            "real and imaginary parts must have the same size, unless one input is scalar",
-        ));
+    let shape = compatible_complex_shape(real, imag)?;
+    let real_storage = real
+        .clone()
+        .into_numeric_storage()
+        .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?;
+    let imag_storage = imag
+        .clone()
+        .into_numeric_storage()
+        .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?;
+    let storage = match (real_storage, imag_storage) {
+        (NumericStorage::F64(real), NumericStorage::F64(imag)) => {
+            ComplexStorage::F64(pair_complex_components(&real, &imag))
+        }
+        (NumericStorage::F32(real), NumericStorage::F32(imag)) => {
+            ComplexStorage::F32(pair_complex_components(&real, &imag))
+        }
+        (NumericStorage::F64(real), NumericStorage::F32(imag)) => {
+            let imag: Vec<f64> = imag.into_iter().map(f64::from).collect();
+            ComplexStorage::F64(pair_complex_components(&real, &imag))
+        }
+        (NumericStorage::F32(real), NumericStorage::F64(imag)) => {
+            let real: Vec<f64> = real.into_iter().map(f64::from).collect();
+            ComplexStorage::F64(pair_complex_components(&real, &imag))
+        }
+        _ => {
+            return Err(complex_error_with_detail(
+                &COMPLEX_ERROR_INTERNAL,
+                "integer input bypassed exact complex composition",
+            ))
+        }
     };
-
-    let ct = ComplexTensor::from_f64_values_with_dtype(data, shape, output_dtype)
+    let ct = ComplexTensor::from_complex_storage(storage, shape)
         .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?;
     Ok(complex_tensor_into_value(ct))
+}
+
+fn pair_complex_components<T: Copy>(real: &[T], imag: &[T]) -> Vec<(T, T)> {
+    if real.len() == imag.len() {
+        real.iter().copied().zip(imag.iter().copied()).collect()
+    } else if real.len() == 1 {
+        imag.iter().copied().map(|imag| (real[0], imag)).collect()
+    } else {
+        debug_assert_eq!(imag.len(), 1);
+        real.iter().copied().map(|real| (real, imag[0])).collect()
+    }
 }
 
 fn compose_integer_complex(real: &RealInput, imag: &RealInput) -> BuiltinResult<Value> {
@@ -609,8 +624,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{
-        CharArray, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray,
-        Tensor, Type, Value,
+        CharArray, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, NumericDType,
+        StringArray, Tensor, Type, Value,
     };
 
     fn complex_call(real: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -735,6 +750,60 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn unary_complex_single_preserves_native_class_shape_and_empty_storage() {
+        let real = Tensor::from_f32(vec![0.1, -2.0], vec![2, 1]).unwrap();
+        let result = complex_call(Value::Tensor(real), Vec::new()).expect("complex");
+        let Value::ComplexTensor(output) = result else {
+            panic!("expected complex single tensor");
+        };
+        assert_eq!(output.shape, vec![2, 1]);
+        assert_eq!(
+            output.as_f32_slice(),
+            Some(&[(0.1_f32, 0.0), (-2.0, 0.0)][..])
+        );
+
+        let empty = Tensor::from_f32(Vec::new(), vec![0, 3]).unwrap();
+        let result = complex_call(Value::Tensor(empty), Vec::new()).expect("complex");
+        let Value::ComplexTensor(output) = result else {
+            panic!("expected empty complex single tensor");
+        };
+        assert_eq!(output.shape, vec![0, 3]);
+        assert_eq!(output.as_f32_slice(), Some(&[][..]));
+    }
+
+    #[test]
+    fn complex_floating_composition_preserves_native_or_promoted_storage_without_materialization() {
+        let real = Tensor::from_f32(vec![1.0], vec![1, 1]).unwrap();
+        let imag = Tensor::from_f32(vec![2.0, 3.0], vec![1, 2]).unwrap();
+        let result = complex_call(Value::Tensor(real), vec![Value::Tensor(imag)]).expect("complex");
+        let Value::ComplexTensor(output) = result else {
+            panic!("expected broadcast complex single tensor");
+        };
+        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(output.as_f32_slice(), Some(&[(1.0, 2.0), (1.0, 3.0)][..]));
+
+        let real = Tensor::from_f32(vec![0.1, 2.0], vec![1, 2]).unwrap();
+        let imag = Tensor::new(vec![4.0, 5.0], vec![1, 2]).unwrap();
+        let result = complex_call(Value::Tensor(real), vec![Value::Tensor(imag)]).expect("complex");
+        let Value::ComplexTensor(output) = result else {
+            panic!("expected promoted complex double tensor");
+        };
+        assert_eq!(
+            output.as_f64_slice(),
+            Some(&[(f64::from(0.1_f32), 4.0), (2.0, 5.0)][..])
+        );
+
+        let real = Tensor::from_f32(Vec::new(), vec![0, 2]).unwrap();
+        let imag = Tensor::from_f32(Vec::new(), vec![0, 2]).unwrap();
+        let result = complex_call(Value::Tensor(real), vec![Value::Tensor(imag)]).expect("complex");
+        let Value::ComplexTensor(output) = result else {
+            panic!("expected empty complex single tensor");
+        };
+        assert_eq!(output.shape, vec![0, 2]);
+        assert_eq!(output.as_f32_slice(), Some(&[][..]));
+    }
+
+    #[test]
     fn complex_integer_components_preserve_uint64_storage_and_scalar_double_expansion() {
         let real = Tensor::new_integer(
             IntegerStorage::U64(vec![9_223_372_036_854_775_809, u64::MAX]),
@@ -807,10 +876,13 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn complex_mixed_gpu_path_uploads_typed_integer_storage_exactly() {
+    fn complex_mixed_gpu_path_preserves_integer_class_rule_without_floating_upload() {
         test_support::with_test_provider(|provider| {
-            let real = Tensor::new_integer(IntegerStorage::I32(vec![2, 4]), vec![1, 2])
-                .expect("typed integer tensor");
+            let real = Tensor::new_integer(
+                IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+                vec![1, 2],
+            )
+            .expect("typed integer tensor");
             let imag = Tensor::new(vec![10.0, 20.0], vec![1, 2]).expect("imag tensor");
             let imag_handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
@@ -819,19 +891,9 @@ pub(crate) mod tests {
                 })
                 .expect("upload imag");
 
-            let result = complex_call(Value::Tensor(real), vec![Value::GpuTensor(imag_handle)])
-                .expect("complex");
-
-            let Value::GpuTensor(out) = result else {
-                panic!("expected resident complex gpuArray");
-            };
-            let gathered =
-                block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(out))).expect("gather");
-            let Value::ComplexTensor(ct) = gathered else {
-                panic!("expected gathered complex tensor");
-            };
-            assert_eq!(ct.shape, vec![1, 2]);
-            assert_eq!(ct.materialize_f64(), vec![(2.0, 10.0), (4.0, 20.0)]);
+            let error = complex_call(Value::Tensor(real), vec![Value::GpuTensor(imag_handle)])
+                .expect_err("nonscalar floating peer must not erase integer class");
+            assert_eq!(error.identifier(), COMPLEX_ERROR_INTEGER_CLASS.identifier);
         });
     }
 

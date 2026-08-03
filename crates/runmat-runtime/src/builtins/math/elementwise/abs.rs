@@ -4,7 +4,8 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, IntegerStorage, NumericStorage, Tensor, Value,
+    CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericStorage, Tensor,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -222,12 +223,28 @@ fn abs_integer_storage(storage: &IntegerStorage) -> IntegerStorage {
 }
 
 fn abs_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let data = ct
-        .materialize_f64()
-        .iter()
-        .map(|&(re, im)| complex_magnitude(re, im))
-        .collect::<Vec<_>>();
-    let tensor = Tensor::new(data, ct.shape.clone())
+    let shape = ct.shape.clone();
+    let storage = match ct.into_complex_storage() {
+        ComplexStorage::F64(values) => NumericStorage::F64(
+            values
+                .into_iter()
+                .map(|(real, imag)| complex_magnitude(real, imag))
+                .collect(),
+        ),
+        ComplexStorage::F32(values) => NumericStorage::F32(
+            values
+                .into_iter()
+                .map(|(real, imag)| real.hypot(imag))
+                .collect(),
+        ),
+        ComplexStorage::Integer(_) => {
+            return Err(builtin_error_with_detail(
+                &ABS_ERROR_INVALID_INPUT,
+                "typed complex integer input is not supported",
+            ))
+        }
+    };
+    let tensor = Tensor::from_numeric_storage(storage, shape)
         .map_err(|e| builtin_error_with_detail(&ABS_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))
 }
@@ -345,6 +362,29 @@ pub(crate) mod tests {
         assert!(error
             .message()
             .contains("complex numbers with integer types"));
+    }
+
+    #[test]
+    fn abs_complex_single_preserves_native_class_shape_and_empty_storage() {
+        let complex = ComplexTensor::from_f32(vec![(3.0, 4.0), (5.0, 12.0)], vec![2, 1]).unwrap();
+        let Value::Tensor(output) = abs_builtin(Value::ComplexTensor(complex)).unwrap() else {
+            panic!("expected single magnitude tensor");
+        };
+        assert_eq!(output.shape, vec![2, 1]);
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![5.0, 13.0])
+        );
+
+        let empty = ComplexTensor::from_f32(Vec::new(), vec![0, 3]).unwrap();
+        let Value::Tensor(output) = abs_builtin(Value::ComplexTensor(empty)).unwrap() else {
+            panic!("expected empty single magnitude tensor");
+        };
+        assert_eq!(output.shape, vec![0, 3]);
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(Vec::new())
+        );
     }
 
     #[test]
