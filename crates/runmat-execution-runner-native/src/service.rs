@@ -4,9 +4,10 @@ use std::sync::{Arc, Mutex};
 
 use runmat_builtins::Value;
 use runmat_execution::{
-    CancellationReason, ExecutionScopeId, FutureHandle, FutureId, OutputContract, TaskHandle,
-    TaskId,
+    CancellationReason, Digest, ExecutionScopeId, FutureHandle, FutureId, OutputContract,
+    ProgramEnvironment, ProgramRevision, TaskHandle, TaskId,
 };
+use runmat_execution_artifact::{ExecutableForm, ProgramArtifact, ProgramBuildRecipe};
 use runmat_runtime::execution::{
     AwaitAction, DeferredCall, ExecutionServiceError, RuntimeExecutionServices,
 };
@@ -136,6 +137,32 @@ impl RuntimeExecutionServices for NativeExecutionService {
         let program = call.program.as_deref().ok_or_else(|| {
             ExecutionServiceError::Failed("future is missing its exact program".into())
         })?;
+        let revision = call
+            .program_revision
+            .clone()
+            .unwrap_or_else(|| local_program_revision(program));
+        let recipe = ProgramBuildRecipe {
+            schema_version: 1,
+            program_revision: revision,
+            entrypoint: call.function.to_string(),
+            outputs: future.outputs.clone(),
+            execution_mode: "interpreter".into(),
+            target_profile: format!(
+                "{}-{}-interpreter-bytecode-v1",
+                std::env::consts::ARCH,
+                std::env::consts::OS
+            ),
+            features: Default::default(),
+            compile_options: Default::default(),
+            source_objects: Vec::new(),
+            expected_artifact_id: None,
+        };
+        let artifact = ProgramArtifact::materialize(
+            &recipe,
+            ExecutableForm::InterpreterBytecodeV1,
+            program.to_vec(),
+        )
+        .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
         let inputs = call
             .arguments
             .iter()
@@ -147,7 +174,14 @@ impl RuntimeExecutionServices for NativeExecutionService {
         let id = TaskId::derive(&[self.scope_id.bytes(), &sequence.to_be_bytes()]);
         let completion = self
             .driver
-            .submit(id, call.function, program, inputs, future.outputs.clone())
+            .submit(
+                id,
+                call.function,
+                recipe,
+                artifact,
+                inputs,
+                future.outputs.clone(),
+            )
             .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
         state
             .futures
@@ -276,4 +310,24 @@ impl RuntimeExecutionServices for NativeExecutionService {
             }
         }
     }
+}
+
+fn local_program_revision(program: &[u8]) -> ProgramRevision {
+    let digest = Digest::sha256(program);
+    ProgramRevision::new(
+        digest,
+        digest,
+        ProgramEnvironment::new(
+            1,
+            1,
+            Digest::sha256(format!(
+                "runmat-runtime-abi-v1\0{}",
+                env!("CARGO_PKG_VERSION")
+            )),
+            Digest::sha256(b"runmat-local-captured-catalog-v1"),
+            "matlab",
+        )
+        .expect("native execution compatibility constants are valid"),
+    )
+    .expect("captured local program revision is valid")
 }

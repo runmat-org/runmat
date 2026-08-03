@@ -131,7 +131,9 @@ impl RunMatSession {
             unit.bytecode(),
             &mut variables,
             Some(&unit.source().relative_path),
-            self.execution_context.clone(),
+            self.execution_context
+                .clone()
+                .with_program_revision(unit.revision().program_revision.clone()),
         )
         .await?
         {

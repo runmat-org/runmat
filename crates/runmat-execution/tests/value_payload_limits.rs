@@ -6,11 +6,13 @@ use runmat_execution::value::{
 
 #[test]
 fn nested_payloads_obey_depth_and_node_limits() {
-    let payload = ValuePayload::Inline(Box::new(InlineValue::Cell(vec![ValuePayload::Inline(
-        Box::new(InlineValue::Cell(vec![ValuePayload::Inline(Box::new(
-            InlineValue::Logical(true),
-        ))])),
-    )])));
+    let payload = ValuePayload::Inline(Box::new(InlineValue::Cell {
+        shape: vec![1],
+        values: vec![ValuePayload::Inline(Box::new(InlineValue::Cell {
+            shape: vec![1],
+            values: vec![ValuePayload::Inline(Box::new(InlineValue::Logical(true)))],
+        }))],
+    }));
     assert!(payload
         .validate(ValueLimits {
             max_depth: 1,
@@ -109,4 +111,30 @@ fn resident_values_require_and_bind_a_worker_fence() {
     assert!(ValuePayload::Object(Box::new(reference))
         .validate(ValueLimits::default())
         .is_err());
+}
+
+#[test]
+fn logical_identity_is_independent_of_inline_or_object_placement() {
+    let inline = ValuePayload::Inline(Box::new(InlineValue::String("payload".into())));
+    let logical_digest = inline.logical_digest().unwrap();
+    let reference = ValuePayload::Object(Box::new(ValueRef {
+        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+        id: ValueId::derive(&[b"value"]),
+        logical_digest,
+        encoded_length: 1024,
+        media_type: "application/runmat-value".into(),
+        value_schema: "runmat-value/v1".into(),
+        encryption_context: Digest::sha256(b"context"),
+        kind: ValueRefKind::ResultObject,
+        authorization_scope: "scope".into(),
+        resident_fence: None,
+    }));
+    assert_eq!(reference.logical_digest().unwrap(), logical_digest);
+
+    let nested_inline = ValuePayload::Inline(Box::new(InlineValue::OutputList(vec![inline])));
+    let nested_reference = ValuePayload::Inline(Box::new(InlineValue::OutputList(vec![reference])));
+    assert_eq!(
+        nested_inline.logical_digest().unwrap(),
+        nested_reference.logical_digest().unwrap()
+    );
 }

@@ -7,11 +7,18 @@ pub const PROTOCOL: &str = "runmat-local-execution-v1";
 #[serde(deny_unknown_fields)]
 pub struct WorkerRequest {
     pub protocol: String,
-    pub program_digest: runmat_execution::Digest,
-    pub program: Vec<u8>,
+    pub recipe: runmat_execution_artifact::ProgramBuildRecipe,
+    pub artifact: runmat_execution_artifact::ProgramArtifact,
     pub function: usize,
     pub arguments: Vec<ValuePayload>,
     pub requested_outputs: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StoredProgram {
+    pub recipe: runmat_execution_artifact::ProgramBuildRecipe,
+    pub artifact: runmat_execution_artifact::ProgramArtifact,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

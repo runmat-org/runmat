@@ -1,0 +1,170 @@
+use core::convert::Infallible;
+
+use hpke::rand_core::{TryCryptoRng, TryRng};
+use hpke::{
+    aead::AesGcm128,
+    kdf::HkdfSha256,
+    kem::{Kem as _, X25519HkdfSha256},
+    setup_receiver, setup_sender_with_rng, Deserializable, OpModeR, OpModeS, Serializable,
+};
+
+use super::{EncryptedArtifact, EncryptionContext, ExecutionHpkeSuite, ExecutionRecipientKey};
+use crate::{ArtifactError, ArtifactResult};
+
+const INFO: &[u8] = b"runmat-execution-artifact-hpke-v1";
+
+#[derive(Clone)]
+pub struct PortableExecutionPrivateKey(<X25519HkdfSha256 as hpke::Kem>::PrivateKey);
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PortableExecutionEncryption;
+
+impl PortableExecutionEncryption {
+    /// Derive a recipient key from 32 bytes supplied by the platform CSPRNG.
+    ///
+    /// Browser hosts must source these bytes from `crypto.getRandomValues`.
+    pub fn recipient_from_entropy(
+        &self,
+        entropy: [u8; 32],
+        fingerprint: impl Into<String>,
+        valid_after_unix_millis: u64,
+        valid_before_unix_millis: u64,
+    ) -> ArtifactResult<(ExecutionRecipientKey, PortableExecutionPrivateKey)> {
+        let (private, public) = X25519HkdfSha256::derive_keypair(&entropy);
+        let recipient = ExecutionRecipientKey {
+            suite: ExecutionHpkeSuite::X25519HkdfSha256Aes128GcmV1,
+            public_key: public.to_bytes().to_vec(),
+            fingerprint: fingerprint.into(),
+            valid_after_unix_millis,
+            valid_before_unix_millis,
+            custodian_uri: None,
+        };
+        recipient.validate()?;
+        Ok((recipient, PortableExecutionPrivateKey(private)))
+    }
+
+    /// Seal with 32 fresh bytes supplied by the platform CSPRNG.
+    ///
+    /// Reusing `ephemeral_entropy` for the same or another recipient is forbidden.
+    pub fn seal_with_entropy(
+        &self,
+        ephemeral_entropy: [u8; 32],
+        recipient: &ExecutionRecipientKey,
+        context: EncryptionContext,
+        plaintext: &[u8],
+    ) -> ArtifactResult<EncryptedArtifact> {
+        recipient.validate()?;
+        validate_context(&context, plaintext)?;
+        let public = <X25519HkdfSha256 as hpke::Kem>::PublicKey::from_bytes(&recipient.public_key)
+            .map_err(encryption)?;
+        let mut entropy = ExactEntropy::new(ephemeral_entropy);
+        let (encapsulated, mut sender) = setup_sender_with_rng::<
+            AesGcm128,
+            HkdfSha256,
+            X25519HkdfSha256,
+        >(&OpModeS::Base, &public, INFO, &mut entropy)
+        .map_err(encryption)?;
+        if !entropy.consumed {
+            return Err(ArtifactError::Encryption(
+                "HPKE provider did not consume ephemeral entropy".into(),
+            ));
+        }
+        let ciphertext = sender
+            .seal(plaintext, &context.aad()?)
+            .map_err(encryption)?;
+        Ok(EncryptedArtifact {
+            schema_version: 1,
+            suite: recipient.suite,
+            context,
+            encapsulated_key: encapsulated.to_bytes().to_vec(),
+            ciphertext,
+        })
+    }
+
+    pub fn open(
+        &self,
+        private_key: &PortableExecutionPrivateKey,
+        artifact: &EncryptedArtifact,
+    ) -> ArtifactResult<Vec<u8>> {
+        if artifact.schema_version != 1
+            || artifact.suite != ExecutionHpkeSuite::X25519HkdfSha256Aes128GcmV1
+        {
+            return Err(ArtifactError::Invalid(
+                "unsupported encrypted execution artifact".into(),
+            ));
+        }
+        let encapsulated =
+            <X25519HkdfSha256 as hpke::Kem>::EncappedKey::from_bytes(&artifact.encapsulated_key)
+                .map_err(encryption)?;
+        let mut receiver = setup_receiver::<AesGcm128, HkdfSha256, X25519HkdfSha256>(
+            &OpModeR::Base,
+            &private_key.0,
+            &encapsulated,
+            INFO,
+        )
+        .map_err(encryption)?;
+        let plaintext = receiver
+            .open(&artifact.ciphertext, &artifact.context.aad()?)
+            .map_err(encryption)?;
+        validate_context(&artifact.context, &plaintext)?;
+        Ok(plaintext)
+    }
+}
+
+struct ExactEntropy {
+    bytes: [u8; 32],
+    consumed: bool,
+}
+
+impl ExactEntropy {
+    fn new(bytes: [u8; 32]) -> Self {
+        Self {
+            bytes,
+            consumed: false,
+        }
+    }
+}
+
+impl TryRng for ExactEntropy {
+    type Error = Infallible;
+
+    fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+        let mut bytes = [0_u8; 4];
+        self.try_fill_bytes(&mut bytes)?;
+        Ok(u32::from_le_bytes(bytes))
+    }
+
+    fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+        let mut bytes = [0_u8; 8];
+        self.try_fill_bytes(&mut bytes)?;
+        Ok(u64::from_le_bytes(bytes))
+    }
+
+    fn try_fill_bytes(&mut self, destination: &mut [u8]) -> Result<(), Self::Error> {
+        assert!(
+            !self.consumed && destination.len() == self.bytes.len(),
+            "X25519 HPKE requested an unexpected amount of entropy"
+        );
+        destination.copy_from_slice(&self.bytes);
+        self.consumed = true;
+        Ok(())
+    }
+}
+
+impl TryCryptoRng for ExactEntropy {}
+
+fn validate_context(context: &EncryptionContext, plaintext: &[u8]) -> ArtifactResult<()> {
+    context.validate()?;
+    if context.total_length != plaintext.len() as u64
+        || context.object_digest != runmat_execution::Digest::sha256(plaintext)
+    {
+        return Err(ArtifactError::Identity(
+            "encryption context does not identify the plaintext".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn encryption(error: impl std::fmt::Display) -> ArtifactError {
+    ArtifactError::Encryption(error.to_string())
+}

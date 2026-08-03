@@ -16,6 +16,16 @@ impl RunMatSession {
     > {
         handoff.validate()?;
         let revision = handoff.revision();
+        let program_revision = runmat_execution::ProgramRevision::new(
+            runmat_execution::Digest::from_bytes(*revision.graph_digest.bytes()),
+            runmat_execution::Digest::from_bytes(*revision.source_revision.bytes()),
+            crate::program_environment(self.compat_mode),
+        )
+        .expect("validated project revision and Core environment are valid");
+        self.execution_context = self
+            .execution_context
+            .clone()
+            .with_program_revision(Some(program_revision));
         self.project_handoff = Some(handoff);
         self.pending_companion_source_discovery = None;
         self.dynamic_function_cache
@@ -28,6 +38,7 @@ impl RunMatSession {
     /// Remove the host-frozen snapshot and restore normal project discovery.
     pub fn clear_project_handoff(&mut self) {
         self.project_handoff = None;
+        self.execution_context = self.execution_context.clone().with_program_revision(None);
         self.pending_companion_source_discovery = None;
         self.dynamic_function_cache
             .lock()

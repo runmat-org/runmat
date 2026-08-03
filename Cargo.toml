@@ -35,6 +35,7 @@ members = [
     "crates/runmat-test-runner",
     "crates/runmat-test-runner-native",
     "crates/runmat-execution",
+    "crates/runmat-execution-artifact",
     "crates/runmat-execution-runner",
     "crates/runmat-execution-runner-native",
     "crates/runmat-process-host",
@@ -67,6 +68,11 @@ logos = "0.15"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
 minicbor = { version = "2.3", features = ["alloc", "derive", "std"] }
+hpke = { version = "=0.14.0", default-features = false, features = [
+    "alloc",
+    "x25519",
+    "aes",
+] }
 tokio = { version = "1", default-features = false }
 uuid = { version = "1", features = ["v4"] }
 clap = { version = "4", features = ["derive", "env"] }
@@ -113,6 +119,7 @@ runmat-test = { version = "=0.6.1", path = "crates/runmat-test" }
 runmat-test-runner = { version = "=0.6.1", path = "crates/runmat-test-runner" }
 runmat-test-runner-native = { version = "=0.6.1", path = "crates/runmat-test-runner-native" }
 runmat-execution = { version = "=0.6.1", path = "crates/runmat-execution" }
+runmat-execution-artifact = { version = "=0.6.1", path = "crates/runmat-execution-artifact" }
 runmat-execution-runner = { version = "=0.6.1", path = "crates/runmat-execution-runner" }
 runmat-execution-runner-native = { version = "=0.6.1", path = "crates/runmat-execution-runner-native" }
 runmat-process-host = { version = "=0.6.1", path = "crates/runmat-process-host" }

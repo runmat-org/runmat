@@ -1,4 +1,4 @@
-use minicbor::Encoder;
+use minicbor::{Decoder, Encoder};
 use serde::{Deserialize, Serialize};
 
 use super::Digest;
@@ -302,6 +302,54 @@ impl ProgramRevision {
         Ok(bytes)
     }
 
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, ContractError> {
+        let mut decoder = Decoder::new(bytes);
+        require_len(decoder.map(), 9, "program revision")?;
+        require_key(&mut decoder, 0)?;
+        let schema_version = decoder.u16().map_err(decode_error)?;
+        require_key(&mut decoder, 1)?;
+        let graph_digest = decode_digest(&mut decoder)?;
+        require_key(&mut decoder, 2)?;
+        let source_digest = decode_digest(&mut decoder)?;
+        require_key(&mut decoder, 3)?;
+        let semantic_schema = decoder.u32().map_err(decode_error)?;
+        require_key(&mut decoder, 4)?;
+        let compiler_schema = decoder.u32().map_err(decode_error)?;
+        require_key(&mut decoder, 5)?;
+        let runtime_fingerprint = decode_digest(&mut decoder)?;
+        require_key(&mut decoder, 6)?;
+        let catalog_fingerprint = decode_digest(&mut decoder)?;
+        require_key(&mut decoder, 7)?;
+        let compatibility_mode = decoder.str().map_err(decode_error)?.to_owned();
+        require_key(&mut decoder, 8)?;
+        let contribution_count =
+            require_bounded_len(decoder.array(), MAX_CONTRIBUTIONS, "domain contributions")?;
+        let mut domain_contributions = Vec::with_capacity(contribution_count);
+        for _ in 0..contribution_count {
+            require_len(decoder.array(), 2, "domain contribution")?;
+            let name = decoder.str().map_err(decode_error)?.to_owned();
+            let digest = decode_digest(&mut decoder)?;
+            domain_contributions.push(DomainContribution::new(name, digest)?);
+        }
+        if decoder.position() != bytes.len() {
+            return Err(ContractError::invalid(
+                "program revision",
+                "canonical encoding contains trailing data",
+            ));
+        }
+        ProgramRevision::try_from(ProgramRevisionWire {
+            schema_version,
+            graph_digest,
+            source_digest,
+            semantic_schema,
+            compiler_schema,
+            runtime_fingerprint,
+            catalog_fingerprint,
+            compatibility_mode,
+            domain_contributions,
+        })
+    }
+
     pub fn identity_digest(&self) -> Result<Digest, ContractError> {
         let mut framed = b"runmat-program-revision-v1\0".to_vec();
         framed.extend(self.canonical_bytes()?);
@@ -313,6 +361,65 @@ impl ProgramRevision {
             .expect("validated ProgramRevision has a canonical identity")
             .to_string()
     }
+}
+
+fn require_key(decoder: &mut Decoder<'_>, expected: u8) -> Result<(), ContractError> {
+    let actual = decoder.u8().map_err(decode_error)?;
+    if actual != expected {
+        return Err(ContractError::invalid(
+            "program revision",
+            format!("expected field key {expected}, found {actual}"),
+        ));
+    }
+    Ok(())
+}
+
+fn require_len(
+    length: Result<Option<u64>, minicbor::decode::Error>,
+    expected: u64,
+    field: &'static str,
+) -> Result<(), ContractError> {
+    match length.map_err(decode_error)? {
+        Some(actual) if actual == expected => Ok(()),
+        Some(actual) => Err(ContractError::invalid(
+            field,
+            format!("expected {expected} entries, found {actual}"),
+        )),
+        None => Err(ContractError::invalid(
+            field,
+            "indefinite-length CBOR is not canonical",
+        )),
+    }
+}
+
+fn require_bounded_len(
+    length: Result<Option<u64>, minicbor::decode::Error>,
+    maximum: usize,
+    field: &'static str,
+) -> Result<usize, ContractError> {
+    match length.map_err(decode_error)? {
+        Some(actual) if actual <= maximum as u64 => Ok(actual as usize),
+        Some(_) => Err(ContractError::Limit {
+            field,
+            limit: maximum as u64,
+        }),
+        None => Err(ContractError::invalid(
+            field,
+            "indefinite-length CBOR is not canonical",
+        )),
+    }
+}
+
+fn decode_digest(decoder: &mut Decoder<'_>) -> Result<Digest, ContractError> {
+    let bytes = decoder.bytes().map_err(decode_error)?;
+    let bytes: [u8; 32] = bytes
+        .try_into()
+        .map_err(|_| ContractError::invalid("digest", "expected exactly 32 bytes"))?;
+    Ok(Digest::from_bytes(bytes))
+}
+
+fn decode_error(error: minicbor::decode::Error) -> ContractError {
+    ContractError::invalid("program revision", error.to_string())
 }
 
 #[derive(Deserialize)]

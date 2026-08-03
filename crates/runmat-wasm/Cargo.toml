@@ -31,6 +31,7 @@ runmat-vm = { workspace = true }
 runmat-filesystem = { workspace = true }
 runmat-config = { workspace = true }
 runmat-execution = { workspace = true }
+runmat-execution-artifact = { workspace = true }
 runmat-package = { workspace = true }
 runmat-package-cache = { workspace = true }
 runmat-test = { workspace = true }
@@ -45,7 +46,7 @@ serde-wasm-bindgen = "0.6"
 wasm-bindgen = { version = "0.2", features = ["serde-serialize"] }
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
-web-sys = { version = "0.3", features = ["Window", "Document", "Response", "ReadableStream", "ReadableStreamDefaultReader", "HtmlCanvasElement", "OffscreenCanvas", "CanvasRenderingContext2d", "ImageData", "console"] }
+web-sys = { version = "0.3", features = ["Window", "Crypto", "Document", "Response", "ReadableStream", "ReadableStreamDefaultReader", "HtmlCanvasElement", "OffscreenCanvas", "CanvasRenderingContext2d", "ImageData", "console"] }
 log = { workspace = true }
 miette = { workspace = true }
 console_error_panic_hook = "0.1"

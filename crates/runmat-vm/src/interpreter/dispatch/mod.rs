@@ -348,7 +348,8 @@ fn create_async_future_value(
             function: function.0,
             arguments,
             requested_outputs,
-            program: Some(program),
+            program_revision: context.execution.program_revision().cloned(),
+            program,
         })
         .map(Value::Future)
         .map_err(execution_error)

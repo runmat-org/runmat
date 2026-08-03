@@ -1,0 +1,251 @@
+use std::collections::BTreeSet;
+
+use minicbor::Encoder;
+use runmat_execution::resource::Capability;
+use runmat_execution::Digest;
+
+use super::{BundleManifest, ExecutionBundle};
+use crate::object::{validate_inventory, ObjectInventoryLimits};
+use crate::{ArtifactError, ArtifactResult, ObjectNamespace};
+
+pub(super) fn validate(bundle: &ExecutionBundle) -> ArtifactResult<()> {
+    if bundle.manifest.schema_version != 1 {
+        return Err(ArtifactError::Invalid(
+            "unsupported execution bundle schema".into(),
+        ));
+    }
+    if bundle.manifest.recipes.is_empty() {
+        return Err(ArtifactError::Invalid(
+            "execution bundle must contain at least one build recipe".into(),
+        ));
+    }
+    bundle
+        .manifest
+        .program_revision
+        .validate()
+        .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+    if bundle.manifest.program_revision.graph_digest()
+        != &bundle.manifest.project_revision.graph_digest
+        || bundle.manifest.program_revision.source_digest()
+            != &bundle.manifest.project_revision.source_digest
+        || bundle.manifest.resources.cpu_millicores == 0
+        || bundle.manifest.resources.memory_bytes == 0
+    {
+        return Err(ArtifactError::Identity(
+            "bundle revisions or resources are inconsistent".into(),
+        ));
+    }
+    validate_inventory(&bundle.objects, ObjectInventoryLimits::default())?;
+    let descriptors = bundle
+        .objects
+        .iter()
+        .map(|object| object.descriptor.clone())
+        .collect::<Vec<_>>();
+    if descriptors != bundle.manifest.sources
+        || bundle
+            .manifest
+            .sources
+            .iter()
+            .any(|source| source.namespace != ObjectNamespace::ProgramSource)
+        || bundle
+            .manifest
+            .sources
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+        || bundle
+            .manifest
+            .callables
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+        || bundle
+            .manifest
+            .portable_environment
+            .windows(2)
+            .any(|pair| pair[0].0 >= pair[1].0)
+    {
+        return Err(ArtifactError::Invalid(
+            "bundle inventories are not canonical".into(),
+        ));
+    }
+    let recipes = bundle
+        .manifest
+        .recipes
+        .iter()
+        .map(|recipe| {
+            if recipe.program_revision != bundle.manifest.program_revision
+                || recipe.source_objects != bundle.manifest.sources
+            {
+                return Err(ArtifactError::Identity(
+                    "bundle recipe does not name its exact bundle revision and source closure"
+                        .into(),
+                ));
+            }
+            recipe.id()
+        })
+        .collect::<ArtifactResult<Vec<_>>>()?;
+    if recipes.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(ArtifactError::Invalid(
+            "bundle recipes are not unique and sorted".into(),
+        ));
+    }
+    if bundle
+        .manifest
+        .artifacts
+        .windows(2)
+        .any(|pair| pair[0].id >= pair[1].id)
+    {
+        return Err(ArtifactError::Invalid(
+            "bundle program artifacts are not unique and sorted".into(),
+        ));
+    }
+    let recipe_set = recipes.into_iter().collect::<BTreeSet<_>>();
+    for artifact in &bundle.manifest.artifacts {
+        let recipe = bundle
+            .manifest
+            .recipes
+            .iter()
+            .find(|recipe| recipe.id().ok() == Some(artifact.recipe_id))
+            .ok_or_else(|| {
+                ArtifactError::Invalid("program artifact has no bundle recipe".into())
+            })?;
+        artifact.validate_against(recipe)?;
+        if !recipe_set.contains(&artifact.recipe_id) {
+            return Err(ArtifactError::Invalid(
+                "program artifact recipe is absent".into(),
+            ));
+        }
+    }
+    let source_digests = bundle
+        .manifest
+        .sources
+        .iter()
+        .map(|source| source.digest)
+        .collect::<BTreeSet<_>>();
+    if bundle
+        .manifest
+        .callables
+        .iter()
+        .any(|callable| !source_digests.contains(&callable.source_digest))
+    {
+        return Err(ArtifactError::Identity(
+            "callable inventory references a source outside the bundle".into(),
+        ));
+    }
+    for (name, value) in &bundle.manifest.portable_environment {
+        let upper = name.to_ascii_uppercase();
+        if name.is_empty()
+            || name.len() > 128
+            || value.len() > 4096
+            || !name.is_ascii()
+            || !value.is_ascii()
+            || name.chars().any(char::is_control)
+            || value.chars().any(char::is_control)
+            || ["TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH"]
+                .iter()
+                .any(|marker| upper.contains(marker))
+        {
+            return Err(ArtifactError::Invalid(
+                "portable environment contains an invalid or secret-bearing entry".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn identity(manifest: &BundleManifest) -> ArtifactResult<Digest> {
+    let mut bytes = b"runmat-execution-bundle-v1\0".to_vec();
+    let revision = manifest
+        .program_revision
+        .canonical_bytes()
+        .map_err(|error| ArtifactError::Encoding(error.to_string()))?;
+    let mut encoder = Encoder::new(&mut bytes);
+    encoder
+        .array(11)
+        .and_then(|encoder| encoder.u16(manifest.schema_version))
+        .and_then(|encoder| encoder.bytes(&revision))
+        .and_then(|encoder| encoder.bytes(manifest.project_revision.graph_digest.bytes()))
+        .and_then(|encoder| encoder.bytes(manifest.project_revision.source_digest.bytes()))
+        .and_then(|encoder| encoder.array(manifest.sources.len() as u64))
+        .map_err(encoding)?;
+    for source in &manifest.sources {
+        encoder
+            .array(5)
+            .and_then(|encoder| encoder.u8(source.namespace as u8))
+            .and_then(|encoder| encoder.str(&source.logical_name))
+            .and_then(|encoder| encoder.bytes(source.digest.bytes()))
+            .and_then(|encoder| encoder.u64(source.encoded_length))
+            .and_then(|encoder| encoder.str(&source.media_type))
+            .map_err(encoding)?;
+    }
+    encoder
+        .array(manifest.callables.len() as u64)
+        .map_err(encoding)?;
+    for callable in &manifest.callables {
+        encoder
+            .array(3)
+            .and_then(|encoder| encoder.str(&callable.owner_identity))
+            .and_then(|encoder| encoder.str(&callable.qualified_name))
+            .and_then(|encoder| encoder.bytes(callable.source_digest.bytes()))
+            .map_err(encoding)?;
+    }
+    encoder
+        .array(manifest.recipes.len() as u64)
+        .map_err(encoding)?;
+    for recipe in &manifest.recipes {
+        encoder.bytes(recipe.id()?.0.bytes()).map_err(encoding)?;
+    }
+    encoder
+        .array(manifest.artifacts.len() as u64)
+        .map_err(encoding)?;
+    for artifact in &manifest.artifacts {
+        encoder.bytes(artifact.id.0.bytes()).map_err(encoding)?;
+    }
+    encoder
+        .array(manifest.requested_capabilities.len() as u64)
+        .map_err(encoding)?;
+    for capability in &manifest.requested_capabilities {
+        encode_capability(&mut encoder, capability)?;
+    }
+    encoder
+        .array(3)
+        .and_then(|encoder| encoder.u32(manifest.resources.cpu_millicores))
+        .and_then(|encoder| encoder.u64(manifest.resources.memory_bytes))
+        .and_then(|encoder| encoder.u64(manifest.resources.scratch_bytes))
+        .map_err(encoding)?;
+    encoder
+        .array(manifest.portable_environment.len() as u64)
+        .map_err(encoding)?;
+    for (name, value) in &manifest.portable_environment {
+        encoder
+            .array(2)
+            .and_then(|encoder| encoder.str(name))
+            .and_then(|encoder| encoder.str(value))
+            .map_err(encoding)?;
+    }
+    Ok(Digest::sha256(bytes))
+}
+
+fn encode_capability(
+    encoder: &mut Encoder<&mut Vec<u8>>,
+    capability: &Capability,
+) -> ArtifactResult<()> {
+    match capability {
+        Capability::ProcessIsolation => encoder.array(1).and_then(|encoder| encoder.u8(0)),
+        Capability::BrowserWorker => encoder.array(1).and_then(|encoder| encoder.u8(1)),
+        Capability::NetworkDenied => encoder.array(1).and_then(|encoder| encoder.u8(2)),
+        Capability::Accelerator(value) => encoder
+            .array(2)
+            .and_then(|encoder| encoder.u8(3))
+            .and_then(|encoder| encoder.str(value)),
+        Capability::Custom(value) => encoder
+            .array(2)
+            .and_then(|encoder| encoder.u8(4))
+            .and_then(|encoder| encoder.str(value)),
+    }
+    .map(|_| ())
+    .map_err(encoding)
+}
+
+fn encoding(error: minicbor::encode::Error<std::convert::Infallible>) -> ArtifactError {
+    ArtifactError::Encoding(error.to_string())
+}

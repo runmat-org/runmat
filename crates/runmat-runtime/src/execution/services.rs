@@ -17,6 +17,7 @@ pub struct DeferredCall {
     pub function: usize,
     pub arguments: Vec<Value>,
     pub requested_outputs: usize,
+    pub program_revision: Option<runmat_execution::ProgramRevision>,
     /// Exact, runtime-opaque program description supplied by the VM.
     ///
     /// The serial service does not inspect this payload. Execution adapters may
@@ -292,6 +293,7 @@ mod tests {
                 function: 1,
                 arguments: vec![],
                 requested_outputs: 1,
+                program_revision: None,
                 program: None,
             })
             .unwrap();
@@ -309,6 +311,7 @@ mod tests {
                 function: 7,
                 arguments: vec![Value::Num(3.0)],
                 requested_outputs: 1,
+                program_revision: None,
                 program: None,
             })
             .unwrap();
@@ -356,6 +359,7 @@ mod tests {
                 function: 1,
                 arguments: vec![],
                 requested_outputs: 1,
+                program_revision: None,
                 program: None,
             })
             .unwrap();

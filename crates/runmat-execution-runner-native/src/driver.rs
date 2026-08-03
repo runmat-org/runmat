@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
-use runmat_execution::identity::WorkerId;
+use runmat_execution::identity::{ArtifactId, WorkerId};
 use runmat_execution::resource::{Capability, ResourceInventory, ResourceRequest};
 use runmat_execution::state::{PoolState, TaskState};
 use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
@@ -11,6 +11,7 @@ use runmat_execution::value::ValuePayload;
 use runmat_execution::{
     CancellationReason, Digest, ExecutionScopeId, OutputContract, PoolId, TaskId,
 };
+use runmat_execution_artifact::{ProgramArtifact, ProgramBuildRecipe};
 use runmat_execution_runner::port::BackendReport;
 use runmat_execution_runner::{
     AttemptFailureKind, AttemptReport, AttemptRequest, AttemptSuccess, Driver, DriverAction,
@@ -22,7 +23,7 @@ use runmat_process_host::HostCommand;
 use tokio::io::BufReader;
 
 use crate::local_store::{ArtifactStore, CheckpointStore};
-use crate::protocol::{WorkerRequest, WorkerResponse, PROTOCOL};
+use crate::protocol::{StoredProgram, WorkerRequest, WorkerResponse, PROTOCOL};
 use crate::{NativeExecutionConfig, NativeExecutionError, NativeExecutionResult};
 
 pub(crate) type TransferResult = Result<ValuePayload, String>;
@@ -143,11 +144,20 @@ impl LocalDriver {
         self: &Arc<Self>,
         task_id: TaskId,
         function: usize,
-        program: &[u8],
+        recipe: ProgramBuildRecipe,
+        artifact: ProgramArtifact,
         inputs: Vec<ValuePayload>,
         outputs: OutputContract,
     ) -> NativeExecutionResult<Arc<TaskCompletion>> {
-        let artifact_id = self.artifacts.put(program)?;
+        artifact.validate_against(&recipe).map_err(|error| {
+            NativeExecutionError::Protocol(format!(
+                "local program artifact failed validation: {error}"
+            ))
+        })?;
+        let artifact_id = ArtifactId::derive(&[artifact.id.0.bytes()]);
+        let stored = serde_json::to_vec(&StoredProgram { recipe, artifact })
+            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+        self.artifacts.put(artifact_id, &stored)?;
         let completion = Arc::new(TaskCompletion::new());
         self.completions
             .lock()
@@ -312,7 +322,7 @@ fn execute_attempt(
     request: &AttemptRequest,
     completion: &TaskCompletion,
 ) -> TransferResult {
-    let program = driver
+    let stored = driver
         .artifacts
         .get(request.task.program_artifact_id)
         .map_err(|error| error.to_string())?;
@@ -322,10 +332,12 @@ fn execute_attempt(
         .qualified_name
         .parse::<usize>()
         .map_err(|error| format!("invalid callable identity: {error}"))?;
+    let stored: StoredProgram =
+        serde_json::from_slice(&stored).map_err(|error| error.to_string())?;
     let worker_request = WorkerRequest {
         protocol: PROTOCOL.into(),
-        program_digest: Digest::sha256(&program),
-        program,
+        recipe: stored.recipe,
+        artifact: stored.artifact,
         function,
         arguments: request.task.inputs.clone(),
         requested_outputs: usize::from(request.task.outputs.requested_outputs),

@@ -16,14 +16,17 @@ impl ArtifactStore {
         Ok(Self { root })
     }
 
-    pub(crate) fn put(&self, bytes: &[u8]) -> NativeExecutionResult<ArtifactId> {
-        let digest = Digest::sha256(bytes);
-        let id = ArtifactId::derive(&[digest.bytes()]);
+    pub(crate) fn put(&self, id: ArtifactId, bytes: &[u8]) -> NativeExecutionResult<()> {
         let path = self.root.join(id.to_string());
         if !path.exists() {
             fs::write(&path, bytes).map_err(io_error)?;
         }
-        Ok(id)
+        if Digest::sha256(&fs::read(&path).map_err(io_error)?) != Digest::sha256(bytes) {
+            return Err(NativeExecutionError::Protocol(
+                "local artifact store identity collision".into(),
+            ));
+        }
+        Ok(())
     }
 
     pub(crate) fn get(&self, id: ArtifactId) -> NativeExecutionResult<Vec<u8>> {

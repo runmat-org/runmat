@@ -9,6 +9,7 @@ use super::RuntimeExecutionServices;
 #[derive(Clone)]
 pub struct InvocationExecutionContext {
     services: Rc<dyn RuntimeExecutionServices>,
+    program_revision: Option<runmat_execution::ProgramRevision>,
 }
 
 impl std::fmt::Debug for InvocationExecutionContext {
@@ -22,10 +23,25 @@ impl std::fmt::Debug for InvocationExecutionContext {
 
 impl InvocationExecutionContext {
     pub fn new(services: Rc<dyn RuntimeExecutionServices>) -> Self {
-        Self { services }
+        Self {
+            services,
+            program_revision: None,
+        }
     }
 
     pub fn services(&self) -> &Rc<dyn RuntimeExecutionServices> {
         &self.services
+    }
+
+    pub fn program_revision(&self) -> Option<&runmat_execution::ProgramRevision> {
+        self.program_revision.as_ref()
+    }
+
+    pub fn with_program_revision(
+        mut self,
+        revision: Option<runmat_execution::ProgramRevision>,
+    ) -> Self {
+        self.program_revision = revision;
+        self
     }
 }

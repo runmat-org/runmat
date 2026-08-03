@@ -19,21 +19,20 @@ pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
 }
 
 async fn execute(request: WorkerRequest) -> WorkerResponse {
-    if request.protocol != PROTOCOL
-        || runmat_execution::Digest::sha256(&request.program) != request.program_digest
-    {
+    if request.protocol != PROTOCOL || request.artifact.validate_against(&request.recipe).is_err() {
         return WorkerResponse::Failure {
             message: "worker rejected a protocol or program identity mismatch".into(),
         };
     }
-    let registry: runmat_vm::FunctionRegistry = match serde_json::from_slice(&request.program) {
-        Ok(registry) => registry,
-        Err(error) => {
-            return WorkerResponse::Failure {
-                message: format!("worker rejected an invalid program: {error}"),
+    let registry: runmat_vm::FunctionRegistry =
+        match serde_json::from_slice(&request.artifact.executable_bytes) {
+            Ok(registry) => registry,
+            Err(error) => {
+                return WorkerResponse::Failure {
+                    message: format!("worker rejected an invalid program: {error}"),
+                }
             }
-        }
-    };
+        };
     let arguments = match request
         .arguments
         .iter()
@@ -64,5 +63,63 @@ async fn execute(request: WorkerRequest) -> WorkerResponse {
         Err(error) => WorkerResponse::Failure {
             message: error.to_string(),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use runmat_execution::{Digest, OutputContract, ProgramEnvironment, ProgramRevision};
+    use runmat_execution_artifact::{ExecutableForm, ProgramArtifact, ProgramBuildRecipe};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn worker_rejects_a_tampered_materialized_program_before_decoding() {
+        let revision = ProgramRevision::new(
+            Digest::sha256(b"graph"),
+            Digest::sha256(b"source"),
+            ProgramEnvironment::new(
+                1,
+                1,
+                Digest::sha256(b"runtime"),
+                Digest::sha256(b"catalog"),
+                "matlab",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let recipe = ProgramBuildRecipe {
+            schema_version: 1,
+            program_revision: revision,
+            entrypoint: "0".into(),
+            outputs: OutputContract {
+                requested_outputs: 1,
+            },
+            execution_mode: "interpreter".into(),
+            target_profile: "test-interpreter-bytecode-v1".into(),
+            features: Default::default(),
+            compile_options: Default::default(),
+            source_objects: Vec::new(),
+            expected_artifact_id: None,
+        };
+        let mut artifact = ProgramArtifact::materialize(
+            &recipe,
+            ExecutableForm::InterpreterBytecodeV1,
+            b"not reached".to_vec(),
+        )
+        .unwrap();
+        artifact.executable_bytes.push(0);
+        let response = execute(WorkerRequest {
+            protocol: PROTOCOL.into(),
+            recipe,
+            artifact,
+            function: 0,
+            arguments: Vec::new(),
+            requested_outputs: 1,
+        })
+        .await;
+        assert!(
+            matches!(response, WorkerResponse::Failure { message } if message.contains("identity mismatch"))
+        );
     }
 }

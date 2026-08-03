@@ -1,5 +1,6 @@
 // The stable wasm-bindgen boundary exposed to JavaScript.
 pub(crate) mod config;
+pub(crate) mod execution_artifact;
 pub(crate) mod init;
 pub(crate) mod package;
 pub(crate) mod plot;

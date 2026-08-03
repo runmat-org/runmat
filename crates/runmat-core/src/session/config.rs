@@ -7,8 +7,10 @@ impl RunMatSession {
         &mut self,
         services: std::rc::Rc<dyn runmat_runtime::execution::RuntimeExecutionServices>,
     ) {
+        let revision = self.execution_context.program_revision().cloned();
         self.execution_context =
-            runmat_runtime::execution::InvocationExecutionContext::new(services);
+            runmat_runtime::execution::InvocationExecutionContext::new(services)
+                .with_program_revision(revision);
     }
 
     /// Install an async stdin handler (Phase 2). This is the preferred input path for

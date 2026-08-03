@@ -11,6 +11,7 @@ repository = "https://github.com/runmat-org/runmat"
 [dependencies]
 runmat-builtins = { workspace = true }
 runmat-execution = { workspace = true }
+runmat-execution-artifact = { workspace = true }
 runmat-execution-runner = { workspace = true }
 runmat-process-host = { workspace = true }
 runmat-runtime = { workspace = true }
