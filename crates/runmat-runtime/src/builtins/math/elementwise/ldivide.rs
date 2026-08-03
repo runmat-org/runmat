@@ -1,12 +1,13 @@
 //! MATLAB-compatible `ldivide` builtin with GPU-aware semantics for RunMat.
 
 use async_recursion::async_recursion;
-use num_complex::Complex64;
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use num_complex::{Complex32, Complex64};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
+    CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericStorage, Tensor,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -339,13 +340,7 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
         Value::Tensor(tensor) => {
-            let data = tensor::tensor_values_f64_cow(&tensor);
-            let view = HostTensorView {
-                data: &data,
-                shape: &tensor.shape,
-            };
-            let handle = provider
-                .upload(&view)
+            let handle = gpu_helpers::upload_tensor(provider, &tensor)
                 .map_err(|e| builtin_error(format!("ldivide: failed to upload GPU result: {e}")))?;
             Ok(Value::GpuTensor(handle))
         }
@@ -354,7 +349,11 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
                 .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
             convert_to_gpu(Value::Tensor(tensor))
         }
-        Value::Int(i) => convert_to_gpu(Value::Num(i.to_f64())),
+        Value::Int(i) => {
+            let tensor = Tensor::new_integer(IntegerStorage::from_scalar(i), vec![1, 1])
+                .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
+            convert_to_gpu(Value::Tensor(tensor))
+        }
         Value::Bool(b) => convert_to_gpu(Value::Num(if b { 1.0 } else { 0.0 })),
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)
@@ -449,11 +448,20 @@ async fn real_to_complex(value: Value) -> BuiltinResult<Value> {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(t) => {
-            let data: Vec<(f64, f64)> = tensor::tensor_values_f64_cow(&t)
-                .iter()
-                .map(|&v| (v, 0.0))
-                .collect();
-            let tensor = ComplexTensor::new(data, t.shape.clone())
+            let shape = t.shape.clone();
+            let storage = t
+                .into_numeric_storage()
+                .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
+            let storage = match storage {
+                NumericStorage::F64(values) => {
+                    ComplexStorage::F64(values.into_iter().map(|value| (value, 0.0)).collect())
+                }
+                NumericStorage::F32(values) => {
+                    ComplexStorage::F32(values.into_iter().map(|value| (value, 0.0)).collect())
+                }
+                storage => promote_integer_real_storage_to_complex(storage),
+            };
+            let tensor = ComplexTensor::from_complex_storage(storage, shape)
                 .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
             Ok(complex_tensor_into_value(tensor))
         }
@@ -477,6 +485,16 @@ async fn real_to_complex(value: Value) -> BuiltinResult<Value> {
             format!("cannot convert value {other:?} to complex output"),
         )),
     }
+}
+
+fn promote_integer_real_storage_to_complex(storage: NumericStorage) -> ComplexStorage {
+    ComplexStorage::F64(
+        storage
+            .materialize_f64()
+            .into_iter()
+            .map(|value| (value, 0.0))
+            .collect(),
+    )
 }
 
 async fn ldivide_gpu_pair(
@@ -633,9 +651,7 @@ async fn ldivide_gpu_host_right(
 fn scalar_real_value(value: &Value) -> Option<f64> {
     match value {
         Value::Num(n) => Some(*n),
-        Value::Int(i) => Some(i.to_f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Some(tensor::tensor_value_f64(t, 0)),
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
         Value::CharArray(ca) if ca.rows * ca.cols == 1 => {
             Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
@@ -647,15 +663,16 @@ fn scalar_real_value(value: &Value) -> Option<f64> {
 fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
     match value {
         Value::Complex(re, im) => Some((*re, *im)),
-        Value::ComplexTensor(ct) if tensor::is_scalar_complex_tensor(ct) => {
-            let value = tensor::complex_tensor_value_complex64(ct, 0);
-            Some((value.re, value.im))
-        }
         _ => None,
     }
 }
 
 fn scalar_ldivide_value(divisor: &Value, numerator: &Value) -> Option<Value> {
+    if matches!(divisor, Value::Tensor(_) | Value::ComplexTensor(_))
+        || matches!(numerator, Value::Tensor(_) | Value::ComplexTensor(_))
+    {
+        return None;
+    }
     let num = scalar_complex_value(numerator)
         .or_else(|| scalar_real_value(numerator).map(|v| (v, 0.0)))?;
     let div =
@@ -699,18 +716,52 @@ fn ldivide_host(divisor: Value, numerator: Value) -> BuiltinResult<Value> {
 fn ldivide_real_real(divisor: &Tensor, numerator: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&numerator.shape, &divisor.shape)
         .map_err(|err| ldivide_error_with_detail(&LDIVIDE_ERROR_SIZE_MISMATCH, &err))?;
-    if plan.is_empty() {
-        let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
-        return Ok(tensor::tensor_into_value(tensor));
-    }
-    let numerator_values = tensor::tensor_values_f64_cow(numerator);
-    let divisor_values = tensor::tensor_values_f64_cow(divisor);
-    let mut out = vec![0.0f64; plan.len()];
-    for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
-        out[out_idx] = numerator_values[idx_lhs] / divisor_values[idx_rhs];
-    }
-    let tensor = Tensor::new(out, plan.output_shape().to_vec())
+    let numerator = numerator
+        .clone()
+        .into_numeric_storage()
+        .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
+    let divisor = divisor
+        .clone()
+        .into_numeric_storage()
+        .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
+    let output = match (numerator, divisor) {
+        (NumericStorage::F32(numerator), NumericStorage::F32(divisor)) => {
+            let mut output = vec![0.0f32; plan.len()];
+            for (output_index, numerator_index, divisor_index) in plan.iter() {
+                output[output_index] = numerator[numerator_index] / divisor[divisor_index];
+            }
+            NumericStorage::F32(output)
+        }
+        (NumericStorage::F64(numerator), NumericStorage::F64(divisor)) => {
+            let mut output = vec![0.0f64; plan.len()];
+            for (output_index, numerator_index, divisor_index) in plan.iter() {
+                output[output_index] = numerator[numerator_index] / divisor[divisor_index];
+            }
+            NumericStorage::F64(output)
+        }
+        (NumericStorage::F32(numerator), NumericStorage::F64(divisor)) => {
+            let mut output = vec![0.0f32; plan.len()];
+            for (output_index, numerator_index, divisor_index) in plan.iter() {
+                output[output_index] =
+                    (f64::from(numerator[numerator_index]) / divisor[divisor_index]) as f32;
+            }
+            NumericStorage::F32(output)
+        }
+        (NumericStorage::F64(numerator), NumericStorage::F32(divisor)) => {
+            let mut output = vec![0.0f32; plan.len()];
+            for (output_index, numerator_index, divisor_index) in plan.iter() {
+                output[output_index] =
+                    (numerator[numerator_index] / f64::from(divisor[divisor_index])) as f32;
+            }
+            NumericStorage::F32(output)
+        }
+        _ => {
+            return Err(builtin_error(
+                "ldivide: integer operands did not use the exact integer arithmetic path",
+            ))
+        }
+    };
+    let tensor = Tensor::from_numeric_storage(output, plan.output_shape().to_vec())
         .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
     Ok(tensor::tensor_into_value(tensor))
 }
@@ -721,21 +772,54 @@ fn ldivide_complex_complex(
 ) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&numerator.shape, &divisor.shape)
         .map_err(|err| ldivide_error_with_detail(&LDIVIDE_ERROR_SIZE_MISMATCH, &err))?;
-    if plan.is_empty() {
-        let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
-        return Ok(complex_tensor_into_value(tensor));
-    }
-    let numerator_values = tensor::complex_tensor_values_complex64(numerator);
-    let divisor_values = tensor::complex_tensor_values_complex64(divisor);
-    let mut out = vec![(0.0f64, 0.0f64); plan.len()];
-    for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
-        let numerator = numerator_values[idx_lhs];
-        let divisor = divisor_values[idx_rhs];
-        let quotient = numerator / divisor;
-        out[out_idx] = (quotient.re, quotient.im);
-    }
-    let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
+    let output = match (numerator.complex_storage(), divisor.complex_storage()) {
+        (ComplexStorage::F64(numerator), ComplexStorage::F64(divisor)) => {
+            let mut output = vec![(0.0f64, 0.0f64); plan.len()];
+            for (output_index, numerator_index, divisor_index) in plan.iter() {
+                output[output_index] =
+                    divide_complex_f64(numerator[numerator_index], divisor[divisor_index]);
+            }
+            ComplexStorage::F64(output)
+        }
+        (ComplexStorage::F32(numerator), ComplexStorage::F32(divisor)) => {
+            let mut output = vec![(0.0f32, 0.0f32); plan.len()];
+            for (output_index, numerator_index, divisor_index) in plan.iter() {
+                output[output_index] =
+                    divide_complex_f32(numerator[numerator_index], divisor[divisor_index]);
+            }
+            ComplexStorage::F32(output)
+        }
+        (ComplexStorage::F32(numerator), ComplexStorage::F64(divisor)) => {
+            let mut output = vec![(0.0f32, 0.0f32); plan.len()];
+            for (output_index, numerator_index, divisor_index) in plan.iter() {
+                let numerator = (
+                    f64::from(numerator[numerator_index].0),
+                    f64::from(numerator[numerator_index].1),
+                );
+                let value = divide_complex_f64(numerator, divisor[divisor_index]);
+                output[output_index] = (value.0 as f32, value.1 as f32);
+            }
+            ComplexStorage::F32(output)
+        }
+        (ComplexStorage::F64(numerator), ComplexStorage::F32(divisor)) => {
+            let mut output = vec![(0.0f32, 0.0f32); plan.len()];
+            for (output_index, numerator_index, divisor_index) in plan.iter() {
+                let divisor = (
+                    f64::from(divisor[divisor_index].0),
+                    f64::from(divisor[divisor_index].1),
+                );
+                let value = divide_complex_f64(numerator[numerator_index], divisor);
+                output[output_index] = (value.0 as f32, value.1 as f32);
+            }
+            ComplexStorage::F32(output)
+        }
+        _ => {
+            return Err(builtin_error(
+                "ldivide: complex integer arithmetic is not supported",
+            ))
+        }
+    };
+    let tensor = ComplexTensor::from_complex_storage(output, plan.output_shape().to_vec())
         .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
@@ -743,20 +827,12 @@ fn ldivide_complex_complex(
 fn ldivide_complex_real(divisor: &ComplexTensor, numerator: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&numerator.shape, &divisor.shape)
         .map_err(|err| ldivide_error_with_detail(&LDIVIDE_ERROR_SIZE_MISMATCH, &err))?;
-    if plan.is_empty() {
-        let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
-        return Ok(complex_tensor_into_value(tensor));
-    }
-    let numerator_values = tensor::tensor_values_f64_cow(numerator);
-    let divisor_values = tensor::complex_tensor_values_complex64(divisor);
-    let mut out = vec![(0.0f64, 0.0f64); plan.len()];
-    for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
-        let scalar = numerator_values[idx_lhs];
-        let quotient = Complex64::new(scalar, 0.0) / divisor_values[idx_rhs];
-        out[out_idx] = (quotient.re, quotient.im);
-    }
-    let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
+    let numerator = numerator
+        .clone()
+        .into_numeric_storage()
+        .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
+    let output = divide_real_by_complex_storage(&numerator, divisor.complex_storage(), &plan)?;
+    let tensor = ComplexTensor::from_complex_storage(output, plan.output_shape().to_vec())
         .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
@@ -764,23 +840,128 @@ fn ldivide_complex_real(divisor: &ComplexTensor, numerator: &Tensor) -> BuiltinR
 fn ldivide_real_complex(divisor: &Tensor, numerator: &ComplexTensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&numerator.shape, &divisor.shape)
         .map_err(|err| ldivide_error_with_detail(&LDIVIDE_ERROR_SIZE_MISMATCH, &err))?;
-    if plan.is_empty() {
-        let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
-        return Ok(complex_tensor_into_value(tensor));
-    }
-    let numerator_values = tensor::complex_tensor_values_complex64(numerator);
-    let divisor_values = tensor::tensor_values_f64_cow(divisor);
-    let mut out = vec![(0.0f64, 0.0f64); plan.len()];
-    for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
-        let numerator = numerator_values[idx_lhs];
-        let scalar = divisor_values[idx_rhs];
-        let quotient = numerator / Complex64::new(scalar, 0.0);
-        out[out_idx] = (quotient.re, quotient.im);
-    }
-    let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
+    let divisor = divisor
+        .clone()
+        .into_numeric_storage()
+        .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
+    let output = divide_complex_by_real_storage(numerator.complex_storage(), &divisor, &plan)?;
+    let tensor = ComplexTensor::from_complex_storage(output, plan.output_shape().to_vec())
         .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
+}
+
+fn divide_complex_by_real_storage(
+    complex: &ComplexStorage,
+    real: &NumericStorage,
+    plan: &BroadcastPlan,
+) -> BuiltinResult<ComplexStorage> {
+    Ok(match (complex, real) {
+        (ComplexStorage::F64(complex), NumericStorage::F64(real)) => {
+            let mut output = vec![(0.0f64, 0.0f64); plan.len()];
+            for (output_index, complex_index, real_index) in plan.iter() {
+                let value = complex[complex_index];
+                let scalar = real[real_index];
+                output[output_index] = (value.0 / scalar, value.1 / scalar);
+            }
+            ComplexStorage::F64(output)
+        }
+        (ComplexStorage::F32(complex), NumericStorage::F32(real)) => {
+            let mut output = vec![(0.0f32, 0.0f32); plan.len()];
+            for (output_index, complex_index, real_index) in plan.iter() {
+                let value = complex[complex_index];
+                let scalar = real[real_index];
+                output[output_index] = (value.0 / scalar, value.1 / scalar);
+            }
+            ComplexStorage::F32(output)
+        }
+        (ComplexStorage::F32(complex), NumericStorage::F64(real)) => {
+            let mut output = vec![(0.0f32, 0.0f32); plan.len()];
+            for (output_index, complex_index, real_index) in plan.iter() {
+                let value = complex[complex_index];
+                let scalar = real[real_index];
+                output[output_index] = (
+                    (f64::from(value.0) / scalar) as f32,
+                    (f64::from(value.1) / scalar) as f32,
+                );
+            }
+            ComplexStorage::F32(output)
+        }
+        (ComplexStorage::F64(complex), NumericStorage::F32(real)) => {
+            let mut output = vec![(0.0f32, 0.0f32); plan.len()];
+            for (output_index, complex_index, real_index) in plan.iter() {
+                let value = complex[complex_index];
+                let scalar = f64::from(real[real_index]);
+                output[output_index] = ((value.0 / scalar) as f32, (value.1 / scalar) as f32);
+            }
+            ComplexStorage::F32(output)
+        }
+        _ => {
+            return Err(builtin_error(
+                "ldivide: integer operands did not use the exact integer arithmetic path",
+            ))
+        }
+    })
+}
+
+fn divide_real_by_complex_storage(
+    real: &NumericStorage,
+    complex: &ComplexStorage,
+    plan: &BroadcastPlan,
+) -> BuiltinResult<ComplexStorage> {
+    Ok(match (real, complex) {
+        (NumericStorage::F64(real), ComplexStorage::F64(complex)) => {
+            let mut output = vec![(0.0f64, 0.0f64); plan.len()];
+            for (output_index, real_index, complex_index) in plan.iter() {
+                output[output_index] =
+                    divide_complex_f64((real[real_index], 0.0), complex[complex_index]);
+            }
+            ComplexStorage::F64(output)
+        }
+        (NumericStorage::F32(real), ComplexStorage::F32(complex)) => {
+            let mut output = vec![(0.0f32, 0.0f32); plan.len()];
+            for (output_index, real_index, complex_index) in plan.iter() {
+                output[output_index] =
+                    divide_complex_f32((real[real_index], 0.0), complex[complex_index]);
+            }
+            ComplexStorage::F32(output)
+        }
+        (NumericStorage::F32(real), ComplexStorage::F64(complex)) => {
+            let mut output = vec![(0.0f32, 0.0f32); plan.len()];
+            for (output_index, real_index, complex_index) in plan.iter() {
+                let value =
+                    divide_complex_f64((f64::from(real[real_index]), 0.0), complex[complex_index]);
+                output[output_index] = (value.0 as f32, value.1 as f32);
+            }
+            ComplexStorage::F32(output)
+        }
+        (NumericStorage::F64(real), ComplexStorage::F32(complex)) => {
+            let mut output = vec![(0.0f32, 0.0f32); plan.len()];
+            for (output_index, real_index, complex_index) in plan.iter() {
+                let complex = (
+                    f64::from(complex[complex_index].0),
+                    f64::from(complex[complex_index].1),
+                );
+                let value = divide_complex_f64((real[real_index], 0.0), complex);
+                output[output_index] = (value.0 as f32, value.1 as f32);
+            }
+            ComplexStorage::F32(output)
+        }
+        _ => {
+            return Err(builtin_error(
+                "ldivide: integer operands did not use the exact integer arithmetic path",
+            ))
+        }
+    })
+}
+
+fn divide_complex_f64(lhs: (f64, f64), rhs: (f64, f64)) -> (f64, f64) {
+    let quotient = Complex64::new(lhs.0, lhs.1) / Complex64::new(rhs.0, rhs.1);
+    (quotient.re, quotient.im)
+}
+
+fn divide_complex_f32(lhs: (f32, f32), rhs: (f32, f32)) -> (f32, f32) {
+    let quotient = Complex32::new(lhs.0, lhs.1) / Complex32::new(rhs.0, rhs.1);
+    (quotient.re, quotient.im)
 }
 
 enum LdivideOperand {
@@ -793,10 +974,6 @@ fn classify_operand(value: Value) -> BuiltinResult<LdivideOperand> {
         Value::Tensor(t) => Ok(LdivideOperand::Real(t)),
         Value::Num(n) => Ok(LdivideOperand::Real(
             Tensor::new(vec![n], vec![1, 1]).map_err(|e| builtin_error(format!("ldivide: {e}")))?,
-        )),
-        Value::Int(i) => Ok(LdivideOperand::Real(
-            Tensor::new(vec![i.to_f64()], vec![1, 1])
-                .map_err(|e| builtin_error(format!("ldivide: {e}")))?,
         )),
         Value::Bool(b) => Ok(LdivideOperand::Real(
             Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
@@ -832,7 +1009,7 @@ fn char_array_to_tensor(chars: &CharArray) -> BuiltinResult<Tensor> {
 fn extract_scalar_f64(value: &Value) -> BuiltinResult<Option<f64>> {
     match value {
         Value::Num(n) => Ok(Some(*n)),
-        Value::Int(i) => Ok(Some(i.to_f64())),
+        Value::Int(i) => Ok(Some(provider_scalar_from_integer(i))),
         Value::Bool(b) => Ok(Some(if *b { 1.0 } else { 0.0 })),
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(Some(tensor::tensor_value_f64(t, 0))),
         Value::LogicalArray(l) if l.data.len() == 1 => {
@@ -843,6 +1020,10 @@ fn extract_scalar_f64(value: &Value) -> BuiltinResult<Option<f64>> {
         )),
         _ => Ok(None),
     }
+}
+
+fn provider_scalar_from_integer(value: &IntValue) -> f64 {
+    value.to_f64()
 }
 
 async fn gpu_scalar_value(handle: &GpuTensorHandle) -> BuiltinResult<Option<f64>> {
@@ -866,8 +1047,8 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
-        CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
-        ResolveContext, SymbolicExpr, Tensor, Type,
+        CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, ResolveContext,
+        SymbolicExpr, Tensor, Type,
     };
 
     const EPS: f64 = 1e-12;
@@ -878,16 +1059,12 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn scalar_extractors_read_typed_integer_tensor_storage_exactly() {
+    fn provider_scalar_extractor_reads_typed_integer_tensor_storage() {
         let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
                 .expect("integer tensor");
         let value = Value::Tensor(tensor);
 
-        assert_eq!(
-            scalar_real_value(&value),
-            Some(9_007_199_254_740_993_u64 as f64)
-        );
         assert_eq!(
             extract_scalar_f64(&value).expect("scalar"),
             Some(9_007_199_254_740_993_u64 as f64)
@@ -969,21 +1146,19 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn ldivide_mixed_arrays_ignore_poisoned_integer_mirrors_and_return_double() {
-        let divisor = Tensor::new_integer(
-            IntegerStorage::U64(vec![9_007_199_254_740_993, 4]),
-            vec![1, 2],
-        )
-        .expect("integer divisor");
-        let numerator =
-            Tensor::new(vec![18_014_398_509_481_986.0, 20.0], vec![1, 2]).expect("numerator");
+    fn ldivide_mixed_floating_arrays_return_single() {
+        let divisor = Tensor::from_f32(vec![2.0, 4.0], vec![1, 2]).unwrap();
+        let numerator = Tensor::new(vec![10.0, 20.0], vec![1, 2]).unwrap();
 
-        let result = ldivide_real_real(&divisor, &numerator).expect("ldivide helper");
+        let result =
+            ldivide_builtin(Value::Tensor(divisor), Value::Tensor(numerator), Vec::new()).unwrap();
         let Value::Tensor(result) = result else {
-            panic!("expected double tensor");
+            panic!("expected single tensor");
         };
-        assert_eq!(result.materialize_f64(), vec![2.0, 5.0]);
-        assert!(result.integer_storage().is_none());
+        assert_eq!(
+            result.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![5.0, 5.0])
+        );
     }
 
     #[test]
@@ -1003,16 +1178,16 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn ldivide_scalar_complex_value_reads_typed_integer_complex_storage_without_mirror() {
-        let storage =
-            IntegerComplexStorage::new(IntegerStorage::I16(vec![6]), IntegerStorage::I16(vec![-2]))
-                .expect("complex integer storage");
-        let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
+    fn ldivide_like_complex_conversion_preserves_single_storage() {
+        let tensor = Tensor::from_f32(vec![4.0, 5.0], vec![1, 2]).unwrap();
 
-        assert_eq!(
-            scalar_complex_value(&Value::ComplexTensor(tensor)),
-            Some((6.0, -2.0))
-        );
+        let result =
+            block_on(super::real_to_complex(Value::Tensor(tensor))).expect("complex conversion");
+
+        let Value::ComplexTensor(result) = result else {
+            panic!("expected complex single tensor");
+        };
+        assert_eq!(result.as_f32_slice(), Some(&[(4.0, 0.0), (5.0, 0.0)][..]));
     }
 
     #[test]
@@ -1095,6 +1270,95 @@ pub(crate) mod tests {
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn ldivide_preserves_native_complex_single_storage() {
+        let divisor = ComplexTensor::from_f32(vec![(1.0, 2.0), (3.0, -4.0)], vec![1, 2]).unwrap();
+        let numerator =
+            ComplexTensor::from_f32(vec![(2.0, -1.0), (-1.0, 1.0)], vec![1, 2]).unwrap();
+        let result = ldivide_builtin(
+            Value::ComplexTensor(divisor),
+            Value::ComplexTensor(numerator),
+            Vec::new(),
+        )
+        .expect("complex ldivide");
+        let Value::ComplexTensor(result) = result else {
+            panic!("expected complex single tensor");
+        };
+        assert_eq!(
+            result.as_f32_slice(),
+            Some(&[(0.0, -1.0), (-0.28, -0.04)][..])
+        );
+    }
+
+    #[test]
+    fn ldivide_mixed_complex_floating_inputs_return_single_without_scalar_collapse() {
+        let single = ComplexTensor::from_f32(vec![(1.0, 2.0)], vec![1, 1]).unwrap();
+        let double = ComplexTensor::new(vec![(2.0, -1.0)], vec![1, 1]).unwrap();
+        for (divisor, numerator, expected) in [
+            (single.clone(), double.clone(), (0.0, -1.0)),
+            (double.clone(), single.clone(), (0.0, 1.0)),
+        ] {
+            let result = ldivide_builtin(
+                Value::ComplexTensor(divisor),
+                Value::ComplexTensor(numerator),
+                Vec::new(),
+            )
+            .expect("complex ldivide");
+            let Value::ComplexTensor(result) = result else {
+                panic!("expected one-element complex single tensor");
+            };
+            assert_eq!(result.as_f32_slice(), Some(&[expected][..]));
+        }
+    }
+
+    #[test]
+    fn ldivide_mixed_real_complex_single_paths_preserve_single() {
+        let complex = ComplexTensor::from_f32(vec![(1.0, 2.0), (-3.0, 1.0)], vec![1, 2]).unwrap();
+        let real = Tensor::new(vec![2.0, 0.5], vec![1, 2]).unwrap();
+
+        let result = ldivide_builtin(
+            Value::ComplexTensor(complex.clone()),
+            Value::Tensor(real.clone()),
+            Vec::new(),
+        )
+        .expect("complex divisor ldivide");
+        let Value::ComplexTensor(result) = result else {
+            panic!("expected complex single tensor");
+        };
+        assert_eq!(
+            result.as_f32_slice(),
+            Some(&[(0.4, -0.8), (-0.15, -0.05)][..])
+        );
+
+        let result = ldivide_builtin(
+            Value::Tensor(real),
+            Value::ComplexTensor(complex),
+            Vec::new(),
+        )
+        .expect("complex numerator ldivide");
+        let Value::ComplexTensor(result) = result else {
+            panic!("expected complex single tensor");
+        };
+        assert_eq!(result.as_f32_slice(), Some(&[(0.5, 1.0), (-6.0, 2.0)][..]));
+    }
+
+    #[test]
+    fn ldivide_preserves_empty_complex_single_class() {
+        let divisor = ComplexTensor::from_f32(Vec::new(), vec![0, 2]).unwrap();
+        let numerator = ComplexTensor::new(Vec::new(), vec![0, 2]).unwrap();
+        let result = ldivide_builtin(
+            Value::ComplexTensor(divisor),
+            Value::ComplexTensor(numerator),
+            Vec::new(),
+        )
+        .expect("complex ldivide");
+        let Value::ComplexTensor(result) = result else {
+            panic!("expected complex single tensor");
+        };
+        assert_eq!(result.shape, vec![0, 2]);
+        assert_eq!(result.as_f32_slice(), Some(&[][..]));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
