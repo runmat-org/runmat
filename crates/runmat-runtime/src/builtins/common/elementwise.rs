@@ -6,7 +6,7 @@
 use crate::builtins::common::matrix::matrix_power;
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::math::elementwise::integer_arithmetic::{try_integer_binary, IntegerBinaryOp};
-use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
+use runmat_builtins::{IntValue, IntegerStorage, NumericStorage, Tensor, Value};
 
 fn complex_pow_scalar(base_re: f64, base_im: f64, exp_re: f64, exp_im: f64) -> (f64, f64) {
     if base_re == 0.0 && base_im == 0.0 && exp_re == 0.0 && exp_im == 0.0 {
@@ -133,13 +133,22 @@ pub fn elementwise_neg(a: &Value) -> Result<Value, String> {
         Value::Int(value) => Ok(Value::Int(negate_integer_scalar(value.clone()))),
         Value::Bool(b) => Ok(Value::Bool(!b)), // Boolean negation
         Value::Tensor(m) => {
-            if let Some(storage) = m.integer_storage() {
-                return Tensor::new_integer(negate_integer_storage(storage), m.shape.clone())
-                    .map(Value::Tensor);
-            }
-            let values = tensor_utils::tensor_values_f64_cow(m);
-            let data: Vec<f64> = values.iter().map(|x| -x).collect();
-            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
+            let shape = m.shape.clone();
+            let storage = m.clone().into_numeric_storage()?;
+            let negated = match storage {
+                NumericStorage::F64(values) => {
+                    NumericStorage::F64(values.into_iter().map(|value| -value).collect())
+                }
+                NumericStorage::F32(values) => {
+                    NumericStorage::F32(values.into_iter().map(|value| -value).collect())
+                }
+                storage => NumericStorage::from_integer_storage(negate_integer_storage(
+                    &storage
+                        .into_integer_storage()
+                        .expect("non-floating numeric storage is integer"),
+                )),
+            };
+            Tensor::from_numeric_storage(negated, shape).map(Value::Tensor)
         }
         _ => Err(format!("Negation not supported for type: -{a:?}")),
     }
@@ -1084,6 +1093,21 @@ mod tests {
         assert_eq!(
             elementwise_neg(&Value::Int(IntValue::U64(u64::MAX))).expect("neg"),
             Value::Int(IntValue::U64(0))
+        );
+    }
+
+    #[test]
+    fn elementwise_neg_preserves_native_single_storage_and_shape() {
+        let shape = vec![1, 2, 2];
+        let tensor =
+            Tensor::from_f32(vec![1.25, -2.5, f32::INFINITY, -0.0], shape.clone()).unwrap();
+        let Value::Tensor(result) = elementwise_neg(&Value::Tensor(tensor)).expect("neg") else {
+            panic!("expected tensor");
+        };
+        assert_eq!(result.shape, shape);
+        assert_eq!(
+            result.into_numeric_storage().expect("storage"),
+            NumericStorage::F32(vec![-1.25, 2.5, f32::NEG_INFINITY, 0.0])
         );
     }
 
