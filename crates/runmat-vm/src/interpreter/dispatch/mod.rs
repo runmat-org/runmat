@@ -362,36 +362,59 @@ async fn await_execution_value(
 ) -> Result<Value, RuntimeError> {
     use runmat_runtime::execution::AwaitAction;
 
-    match context
-        .execution
-        .services()
-        .begin_await(value)
-        .map_err(execution_error)?
-    {
-        AwaitAction::Passthrough(value) | AwaitAction::Completed(value) => Ok(value),
-        AwaitAction::ExecuteFuture { handle, call } => {
-            let descriptor = crate::call::descriptor::CallableDescriptor::resolved(
-                runmat_hir::CallableIdentity::BoundFunction(runmat_hir::FunctionId(call.function)),
-                call.arguments,
-                call.requested_outputs,
-                runmat_hir::CallableFallbackPolicy::None,
-                crate::call::descriptor::CallableCallKind::Direct,
-            );
-            let result = crate::call::descriptor::execute_callable_descriptor(descriptor)
-                .await
-                .map(|value| calls::normalize_requested_outputs(value, call.requested_outputs));
-            let stored = result.as_ref().map(Clone::clone).map_err(|error| {
-                runmat_runtime::execution::ExecutionServiceError::Failed(error.to_string())
-            });
-            context
-                .execution
-                .services()
-                .complete_future(&handle, stored)
-                .map_err(execution_error)?;
-            let _ = function_registry;
-            result
+    let mut value = value;
+    loop {
+        match context
+            .execution
+            .services()
+            .begin_await(value)
+            .map_err(execution_error)?
+        {
+            AwaitAction::Passthrough(value) | AwaitAction::Completed(value) => return Ok(value),
+            AwaitAction::Pending(pending) => {
+                yield_once().await;
+                value = pending;
+            }
+            AwaitAction::ExecuteFuture { handle, call } => {
+                let descriptor = crate::call::descriptor::CallableDescriptor::resolved(
+                    runmat_hir::CallableIdentity::BoundFunction(runmat_hir::FunctionId(
+                        call.function,
+                    )),
+                    call.arguments,
+                    call.requested_outputs,
+                    runmat_hir::CallableFallbackPolicy::None,
+                    crate::call::descriptor::CallableCallKind::Direct,
+                );
+                let result = crate::call::descriptor::execute_callable_descriptor(descriptor)
+                    .await
+                    .map(|value| calls::normalize_requested_outputs(value, call.requested_outputs));
+                let stored = result.as_ref().map(Clone::clone).map_err(|error| {
+                    runmat_runtime::execution::ExecutionServiceError::Failed(error.to_string())
+                });
+                context
+                    .execution
+                    .services()
+                    .complete_future(&handle, stored)
+                    .map_err(execution_error)?;
+                let _ = function_registry;
+                return result;
+            }
         }
     }
+}
+
+async fn yield_once() {
+    let mut yielded = false;
+    futures::future::poll_fn(|context| {
+        if yielded {
+            std::task::Poll::Ready(())
+        } else {
+            yielded = true;
+            context.waker().wake_by_ref();
+            std::task::Poll::Pending
+        }
+    })
+    .await;
 }
 
 #[cfg(feature = "native-accel")]

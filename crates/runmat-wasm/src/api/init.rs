@@ -11,6 +11,7 @@ use runmat_runtime::builtins::wasm_registry;
 use crate::api::plot::ensure_figure_event_bridge;
 use crate::api::session::RunMatWasm;
 use crate::runtime::config::{apply_plotting_overrides, InitOptions, SessionConfig};
+use crate::runtime::execution::{execution_host_from_options, BrowserExecutionService};
 use crate::runtime::filesystem::install_js_fs_provider;
 use crate::runtime::gpu::{
     capture_gpu_adapter_info, initialize_gpu_provider, install_cpu_provider,
@@ -92,6 +93,21 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     session.set_compat_mode(config.language_compat);
     session.set_callstack_limit(config.callstack_limit);
     session.set_error_namespace(config.error_namespace.clone());
+    let execution_service =
+        BrowserExecutionService::new(execution_host_from_options(&options).map_err(|error| {
+            init_error_with_details(
+                InitErrorCode::InvalidOptions,
+                "Failed to initialize browser execution host",
+                Some(error),
+            )
+        })?)
+        .map_err(|error| {
+            init_error(
+                InitErrorCode::SessionCreation,
+                format!("Failed to initialize browser execution: {error}"),
+            )
+        })?;
+    session.install_execution_services(execution_service.clone());
 
     let mut gpu_status = GpuStatus {
         requested: config.enable_gpu,
@@ -178,6 +194,7 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
         gpu_status,
         telemetry_sink,
         package_cache,
+        execution_service,
     ))
 }
 
@@ -243,7 +260,7 @@ fn ensure_getrandom_js() {
     }
 }
 
-fn ensure_internal_builtins() {
+pub(crate) fn ensure_internal_builtins() {
     if runmat_builtins::builtin_function_by_name("make_anon").is_none() {
         register_make_anon_fallback();
     }

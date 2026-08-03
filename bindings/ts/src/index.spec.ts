@@ -2,6 +2,7 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import * as defaultFs from "./fs/default.js";
 import {
   __internals,
+  executeProgramArtifact,
   initRunMat,
   renderFigureImage,
   exportFigureScene,
@@ -339,6 +340,43 @@ describe("initRunMat wiring", () => {
 
     expect(captured).toHaveLength(1);
     expect(captured[0].telemetryConsent).toBe(false);
+  });
+
+  it("passes the browser execution host through without interpreting it", async () => {
+    const captured: any[] = [];
+    const executionHost = {
+      capabilities: { topology: "serial" as const, maxWorkers: 1 },
+      launch: vi.fn(async () => ({ outcome: "success" })),
+      cancel: vi.fn()
+    };
+    __internals.setNativeModuleOverride({
+      default: async () => {},
+      initRunMat: async (options: any) => {
+        captured.push(options);
+        return createMockNativeSession();
+      }
+    } as NativeModule);
+
+    await initRunMat({ executionHost, enableGpu: false });
+
+    expect(captured[0].executionHost).toBe(executionHost);
+  });
+
+  it("delegates exact program execution to the portable wasm export", async () => {
+    const execute = vi.fn(async (request) => ({
+      outcome: "success",
+      request
+    }));
+    __internals.setNativeModuleOverride({
+      default: async () => {},
+      initRunMat: async () => createMockNativeSession(),
+      executeProgramArtifact: execute
+    } as NativeModule);
+
+    await expect(executeProgramArtifact({ schemaVersion: 1 })).resolves.toEqual({
+      outcome: "success",
+      request: { schemaVersion: 1 }
+    });
   });
 
   it("passes telemetry id and exposes telemetryClientId()", async () => {

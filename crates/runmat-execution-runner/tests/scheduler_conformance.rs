@@ -2,6 +2,7 @@ mod common;
 
 use std::collections::BTreeSet;
 
+use runmat_execution::resource::Capability;
 use runmat_execution::state::{PoolState, TaskState};
 use runmat_execution::task::RetryPolicy;
 use runmat_execution::TaskId;
@@ -103,6 +104,26 @@ fn task_graph_rejects_unknown_dependencies() {
         fixture.driver.snapshot().pools[&fixture.pool].state,
         PoolState::Ready
     );
+}
+
+#[test]
+fn pool_rejects_unsupported_isolation_instead_of_queueing_forever() {
+    let mut fixture = common::fixture(1, 1);
+    let mut task = common::task(
+        "process-isolation",
+        fixture.scope,
+        fixture.pool,
+        RetryPolicy::Never,
+    );
+    task.request
+        .resources
+        .required_capabilities
+        .insert(Capability::ProcessIsolation);
+    let error = fixture
+        .driver
+        .handle(DriverCommand::Submit(Box::new(task)))
+        .unwrap_err();
+    assert!(error.to_string().contains("cannot be satisfied"));
 }
 
 #[test]

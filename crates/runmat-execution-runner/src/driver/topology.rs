@@ -89,12 +89,19 @@ impl Driver {
                 "cannot submit into a cancelled execution scope".into(),
             ));
         }
-        if !self
+        let pool = self
             .snapshot
             .pools
-            .contains_key(&submission.request.pool_id)
-        {
-            return Err(RunnerError::UnknownPool(submission.request.pool_id));
+            .get(&submission.request.pool_id)
+            .ok_or(RunnerError::UnknownPool(submission.request.pool_id))?;
+        if !crate::scheduler::fits(
+            &pool.spec.resource_limit,
+            &Default::default(),
+            &submission.request.resources,
+        ) {
+            return Err(RunnerError::Invalid(
+                "task resource request cannot be satisfied by the target pool".into(),
+            ));
         }
         if self.snapshot.tasks.contains_key(&submission.request.id) {
             return Err(RunnerError::Invalid(format!(

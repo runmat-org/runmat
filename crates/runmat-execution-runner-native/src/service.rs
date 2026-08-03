@@ -4,10 +4,9 @@ use std::sync::{Arc, Mutex};
 
 use runmat_builtins::Value;
 use runmat_execution::{
-    value::ValuePayload, CancellationReason, Digest, ExecutionScopeId, FutureHandle, FutureId,
-    JobHandle, OutputContract, ProgramEnvironment, ProgramRevision, TaskHandle, TaskId,
+    CancellationReason, ExecutionScopeId, FutureHandle, FutureId, JobHandle, OutputContract,
+    TaskHandle, TaskId,
 };
-use runmat_execution_artifact::{ExecutableForm, ProgramArtifact, ProgramBuildRecipe};
 use runmat_runtime::execution::{
     AwaitAction, DeferredCall, DurableJobOptions, ExecutionServiceError, RuntimeExecutionServices,
 };
@@ -314,61 +313,21 @@ impl RuntimeExecutionServices for NativeExecutionService {
 fn materialize_call(
     call: &DeferredCall,
     outputs: OutputContract,
-) -> Result<(ProgramBuildRecipe, ProgramArtifact, Vec<ValuePayload>), ExecutionServiceError> {
-    let program = call.program.as_deref().ok_or_else(|| {
-        ExecutionServiceError::Failed("execution is missing its exact program".into())
-    })?;
-    let revision = call
-        .program_revision
-        .clone()
-        .unwrap_or_else(|| local_program_revision(program));
-    let recipe = ProgramBuildRecipe {
-        schema_version: 1,
-        program_revision: revision,
-        entrypoint: call.function.to_string(),
+) -> Result<
+    (
+        runmat_execution_artifact::ProgramBuildRecipe,
+        runmat_execution_artifact::ProgramArtifact,
+        Vec<runmat_execution::value::ValuePayload>,
+    ),
+    ExecutionServiceError,
+> {
+    runmat_vm::materialize_deferred_call(
+        call,
         outputs,
-        execution_mode: "interpreter".into(),
-        target_profile: format!(
+        format!(
             "{}-{}-interpreter-bytecode-v1",
             std::env::consts::ARCH,
             std::env::consts::OS
         ),
-        features: Default::default(),
-        compile_options: Default::default(),
-        source_objects: Vec::new(),
-        expected_artifact_id: None,
-    };
-    let artifact = ProgramArtifact::materialize(
-        &recipe,
-        ExecutableForm::InterpreterBytecodeV1,
-        program.to_vec(),
     )
-    .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
-    let inputs = call
-        .arguments
-        .iter()
-        .map(runmat_runtime::execution::value_codec::encode_inline_value)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
-    Ok((recipe, artifact, inputs))
-}
-
-fn local_program_revision(program: &[u8]) -> ProgramRevision {
-    let digest = Digest::sha256(program);
-    ProgramRevision::new(
-        digest,
-        digest,
-        ProgramEnvironment::new(
-            1,
-            1,
-            Digest::sha256(format!(
-                "runmat-runtime-abi-v1\0{}",
-                env!("CARGO_PKG_VERSION")
-            )),
-            Digest::sha256(b"runmat-local-captured-catalog-v1"),
-            "matlab",
-        )
-        .expect("native execution compatibility constants are valid"),
-    )
-    .expect("captured local program revision is valid")
 }

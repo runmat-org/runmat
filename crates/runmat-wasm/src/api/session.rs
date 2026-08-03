@@ -49,6 +49,7 @@ use crate::api::streams::js_input_request;
 use crate::runtime::config::{
     parse_language_compat_from_str, parse_workspace_export_mode, SessionConfig,
 };
+use crate::runtime::execution::BrowserExecutionService;
 use crate::runtime::gpu::{capture_memory_usage, GpuStatus};
 use crate::runtime::logging::init_logging_once;
 use crate::runtime::state::{
@@ -77,6 +78,7 @@ pub struct RunMatWasm {
     pub(crate) active_interrupt: RefCell<Option<Arc<AtomicBool>>>,
     telemetry_sink: Option<Arc<dyn TelemetrySink>>,
     package_cache: Option<Arc<dyn runmat_package_cache::CacheBackend>>,
+    execution_service: std::rc::Rc<BrowserExecutionService>,
 }
 
 pub(crate) struct WasmInterruptGuard<'a> {
@@ -132,6 +134,7 @@ impl RunMatWasm {
         gpu_status: GpuStatus,
         telemetry_sink: Option<Arc<dyn TelemetrySink>>,
         package_cache: Option<Arc<dyn runmat_package_cache::CacheBackend>>,
+        execution_service: std::rc::Rc<BrowserExecutionService>,
     ) -> Self {
         Self {
             session: RefCell::new(session),
@@ -141,6 +144,7 @@ impl RunMatWasm {
             active_interrupt: RefCell::new(None),
             telemetry_sink,
             package_cache,
+            execution_service,
         }
     }
 
@@ -1219,6 +1223,7 @@ impl RunMatWasm {
         session.set_compat_mode(config.language_compat);
         session.set_callstack_limit(config.callstack_limit);
         session.set_error_namespace(config.error_namespace.clone());
+        session.install_execution_services(self.execution_service.clone());
         if let Some(handoff) = installed_handoff {
             session
                 .install_project_handoff(handoff)

@@ -7,6 +7,7 @@ mod wire;
 
 pub use api::config::{migrate_legacy_runmat_config, patch_runmat_config, resolve_runmat_config};
 pub use api::execution_artifact::{build_execution_bundle, BrowserExecutionRecipient};
+pub use api::execution_program::execute_program_artifact;
 pub use api::init::init_runmat;
 pub use api::package::{
     build_git_snapshot, package_cache_acquire_lease, package_cache_gc, package_cache_release_lease,

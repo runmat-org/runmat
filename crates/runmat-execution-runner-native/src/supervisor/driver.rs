@@ -2,7 +2,7 @@ use std::path::Path;
 
 use super::model::{BatchDriverInvocation, DriverCompletion, ProgramBatchSubmission};
 use super::store::{load_driver_invocation, write_completion, write_driver_marker};
-use crate::protocol::{WorkerRequest, WorkerResponse, PROTOCOL};
+use crate::protocol::{WorkerRequest, WorkerResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1};
 use crate::{NativeExecutionError, NativeExecutionResult};
 
 pub fn prepare_batch_driver() -> NativeExecutionResult<BatchDriverInvocation> {
@@ -48,12 +48,12 @@ pub fn complete_batch_driver_with_value(
 
 pub async fn execute_program_batch(submission: ProgramBatchSubmission) -> WorkerResponse {
     crate::worker::execute(WorkerRequest {
-        protocol: PROTOCOL.into(),
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
         recipe: submission.recipe,
         artifact: submission.artifact,
         function: submission.function,
         arguments: submission.arguments,
-        requested_outputs: usize::from(submission.requested_outputs),
+        requested_outputs: submission.requested_outputs,
     })
     .await
 }

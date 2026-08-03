@@ -34,6 +34,12 @@ pub struct DurableJobOptions {
 #[derive(Clone, Debug, PartialEq)]
 pub enum AwaitAction {
     Passthrough(Value),
+    /// The host has started the operation but cannot complete it synchronously.
+    ///
+    /// The VM yields once and polls `begin_await` again with this value. This
+    /// keeps browser workers non-blocking while native adapters may continue
+    /// to use an efficient blocking completion primitive.
+    Pending(Value),
     ExecuteFuture {
         handle: FutureHandle,
         call: DeferredCall,

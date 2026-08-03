@@ -23,7 +23,9 @@ use runmat_process_host::HostCommand;
 use tokio::io::BufReader;
 
 use crate::local_store::{ArtifactStore, CheckpointStore};
-use crate::protocol::{StoredProgram, WorkerRequest, WorkerResponse, PROTOCOL};
+use crate::protocol::{
+    StoredProgram, WorkerRequest, WorkerResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+};
 use crate::{NativeExecutionConfig, NativeExecutionError, NativeExecutionResult};
 
 pub(crate) type TransferResult = Result<ValuePayload, String>;
@@ -335,12 +337,12 @@ fn execute_attempt(
     let stored: StoredProgram =
         serde_json::from_slice(&stored).map_err(|error| error.to_string())?;
     let worker_request = WorkerRequest {
-        protocol: PROTOCOL.into(),
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
         recipe: stored.recipe,
         artifact: stored.artifact,
         function,
         arguments: request.task.inputs.clone(),
-        requested_outputs: usize::from(request.task.outputs.requested_outputs),
+        requested_outputs: request.task.outputs.requested_outputs,
     };
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()

@@ -11,6 +11,9 @@ impl RunMatWasm {
     /// Execute one exact planned test in this session. Browser worker adapters
     /// use this narrow endpoint; scheduling remains in the portable Rust
     /// coordinator.
+    // A RunMatWasm session is intentionally single-owner and non-reentrant.
+    // The mutable borrow is the execution lease for the complete async attempt.
+    #[allow(clippy::await_holding_refcell_ref)]
     #[wasm_bindgen(js_name = executeTestAttempt)]
     pub async fn execute_test_attempt_js(&self, input: JsValue) -> Result<JsValue, JsValue> {
         self.ensure_not_disposed()?;

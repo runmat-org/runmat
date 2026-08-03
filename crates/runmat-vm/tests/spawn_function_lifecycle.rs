@@ -130,8 +130,12 @@ mod tests {
         fusion_residency::mark(&handle);
 
         let source = r#"
+            async function y = pass(v)
+                y = v;
+            end
+
             function y = spawn_drop_unaliased(x)
-                task = spawn(x);
+                task = spawn(pass(x));
                 x = 0;
                 task = 0;
                 y = 0;
@@ -168,9 +172,13 @@ mod tests {
         fusion_residency::mark(&handle);
 
         let source = r#"
+            async function y = pass(v)
+                y = v;
+            end
+
             function y = spawn_drop_with_alias(x)
                 alias = x;
-                task = spawn(x);
+                task = spawn(pass(x));
                 x = 0;
                 task = 0;
                 y = alias;
@@ -256,9 +264,13 @@ mod tests {
         fusion_residency::mark(&handle);
 
         let source = r#"
+            async function y = pass(v)
+                y = v;
+            end
+
             async function y = spawn_await_drop_with_alias(x)
                 alias = x;
-                task = spawn(x);
+                task = spawn(pass(x));
                 tmp = await(task);
                 task = 0;
                 x = 0;

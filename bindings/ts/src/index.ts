@@ -301,6 +301,7 @@ export interface RunMatInitOptions {
   packageCache?: IndexedDbPackageCacheOptions & {
     provider?: RunMatPackageCacheProvider;
   };
+  executionHost?: RunMatExecutionHost;
   plotCanvas?: HTMLCanvasElement;
   scatterTargetPoints?: number;
   surfaceVertexBudget?: number;
@@ -310,6 +311,25 @@ export interface RunMatInitOptions {
   language?: {
     compat?: LanguageCompatMode;
   };
+}
+
+export type BrowserExecutionTopology = "coordinator" | "flat" | "serial";
+
+export interface BrowserExecutionHostCapabilities {
+  topology: BrowserExecutionTopology;
+  maxWorkers: number;
+}
+
+export interface BrowserProgramLaunchRequest {
+  taskId: string;
+  workerId: string;
+  program: Record<string, unknown>;
+}
+
+export interface RunMatExecutionHost {
+  capabilities: BrowserExecutionHostCapabilities;
+  launch(request: BrowserProgramLaunchRequest): Promise<Record<string, unknown>>;
+  cancel(taskId: string): void;
 }
 
 export type FigureEventKind = "created" | "updated" | "cleared" | "closed";
@@ -1056,6 +1076,7 @@ interface NativeInitOptions {
   languageCompat?: LanguageCompatMode;
   fsProvider?: RunMatFilesystemProvider;
   packageCacheProvider?: RunMatPackageCacheProvider;
+  executionHost?: RunMatExecutionHost;
 }
 
 interface RunMatNativeSession {
@@ -1244,6 +1265,9 @@ interface RunMatNativeModule {
       | Promise<WasmInitInput>
   ) => Promise<unknown>;
   initRunMat(options: NativeInitOptions): Promise<RunMatNativeSession>;
+  executeProgramArtifact?: (
+    request: Record<string, unknown>
+  ) => Promise<Record<string, unknown>>;
   buildGitSnapshot?: (
     repository: string,
     subdir: string,
@@ -1443,9 +1467,21 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
     errorNamespace: options.errorNamespace,
     languageCompat: options.language?.compat,
     fsProvider,
-    packageCacheProvider: packageCache.provider
+    packageCacheProvider: packageCache.provider,
+    executionHost: options.executionHost
   });
   return new WebRunMatSession(session, packageCache.close);
+}
+
+export async function executeProgramArtifact(
+  request: Record<string, unknown>,
+  wasmModule?: WasmInitInput
+): Promise<Record<string, unknown>> {
+  const native = await loadNativeModule(wasmModule);
+  if (typeof native.executeProgramArtifact !== "function") {
+    throw new Error("The loaded RunMat module does not support portable program execution.");
+  }
+  return native.executeProgramArtifact(request);
 }
 
 export async function fetchGitSnapshot(

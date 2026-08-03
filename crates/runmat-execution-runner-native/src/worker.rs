@@ -1,6 +1,6 @@
 use runmat_process_host::ipc::{read_payload, write_payload, FrameLimits};
 
-use crate::protocol::{WorkerRequest, WorkerResponse, PROTOCOL};
+use crate::protocol::{WorkerRequest, WorkerResponse};
 use crate::{NativeExecutionError, NativeExecutionResult};
 
 pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
@@ -19,51 +19,7 @@ pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
 }
 
 pub(crate) async fn execute(request: WorkerRequest) -> WorkerResponse {
-    if request.protocol != PROTOCOL || request.artifact.validate_against(&request.recipe).is_err() {
-        return WorkerResponse::Failure {
-            message: "worker rejected a protocol or program identity mismatch".into(),
-        };
-    }
-    let registry: runmat_vm::FunctionRegistry =
-        match serde_json::from_slice(&request.artifact.executable_bytes) {
-            Ok(registry) => registry,
-            Err(error) => {
-                return WorkerResponse::Failure {
-                    message: format!("worker rejected an invalid program: {error}"),
-                }
-            }
-        };
-    let arguments = match request
-        .arguments
-        .iter()
-        .map(runmat_runtime::execution::value_codec::decode_inline_value)
-        .collect::<Result<Vec<_>, _>>()
-    {
-        Ok(arguments) => arguments,
-        Err(error) => {
-            return WorkerResponse::Failure {
-                message: format!("worker rejected an invalid argument: {error}"),
-            }
-        }
-    };
-    match runmat_vm::invoke_semantic_function_value(
-        request.function,
-        &arguments,
-        request.requested_outputs,
-        &registry,
-    )
-    .await
-    {
-        Ok(value) => match runmat_runtime::execution::value_codec::encode_inline_value(&value) {
-            Ok(value) => WorkerResponse::Success { value },
-            Err(error) => WorkerResponse::Failure {
-                message: format!("worker could not transfer its result: {error}"),
-            },
-        },
-        Err(error) => WorkerResponse::Failure {
-            message: error.to_string(),
-        },
-    }
+    runmat_vm::execute_program_request(request).await
 }
 
 #[cfg(test)]
@@ -110,7 +66,7 @@ mod tests {
         .unwrap();
         artifact.executable_bytes.push(0);
         let response = execute(WorkerRequest {
-            protocol: PROTOCOL.into(),
+            schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
             recipe,
             artifact,
             function: 0,
