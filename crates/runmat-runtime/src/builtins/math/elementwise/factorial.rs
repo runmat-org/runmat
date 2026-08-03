@@ -9,7 +9,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -249,6 +249,29 @@ fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
 }
 
 async fn factorial_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    if let Some(integer_type) = runmat_accelerate_api::handle_integer_type(&handle) {
+        if matches!(
+            integer_type,
+            runmat_accelerate_api::IntegerElementType::I64
+                | runmat_accelerate_api::IntegerElementType::U64
+        ) {
+            return Err(factorial_error_with_detail(
+                &FACTORIAL_ERROR_INVALID_INPUT,
+                "64-bit integer GPU inputs are not supported",
+            ));
+        }
+        let provider = runmat_accelerate_api::provider_for_handle(&handle);
+        let tensor = gpu_helpers::gather_tensor_async(&handle)
+            .await
+            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+        let output = factorial_tensor(tensor)?;
+        if let Some(provider) = provider {
+            if let Ok(handle) = gpu_helpers::upload_tensor(provider, &output) {
+                return Ok(gpu_helpers::resident_gpu_value(handle));
+            }
+        }
+        return Ok(tensor::tensor_into_value(output));
+    }
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_factorial(&handle).await {
             return Ok(Value::GpuTensor(out));
@@ -261,57 +284,153 @@ async fn factorial_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 }
 
 fn factorial_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let values = tensor::tensor_values_f64_cow(&tensor);
-    let mut data = Vec::with_capacity(values.len());
-    for &value in values.iter() {
-        data.push(factorial_scalar(value));
-    }
-    Tensor::new(data, tensor.shape.clone())
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| factorial_error_with_detail(&FACTORIAL_ERROR_INTERNAL, e))?;
+    let storage = match storage {
+        NumericStorage::F64(values) => NumericStorage::F64(
+            values
+                .into_iter()
+                .map(factorial_scalar)
+                .collect::<BuiltinResult<Vec<_>>>()?,
+        ),
+        NumericStorage::F32(values) => NumericStorage::F32(
+            values
+                .into_iter()
+                .map(factorial_scalar_f32)
+                .collect::<BuiltinResult<Vec<_>>>()?,
+        ),
+        NumericStorage::I8(values) => NumericStorage::I8(factorial_signed_values(values)?),
+        NumericStorage::I16(values) => NumericStorage::I16(factorial_signed_values(values)?),
+        NumericStorage::I32(values) => NumericStorage::I32(factorial_signed_values(values)?),
+        NumericStorage::I64(values) => NumericStorage::I64(factorial_signed_values(values)?),
+        NumericStorage::U8(values) => NumericStorage::U8(factorial_unsigned_values(values)),
+        NumericStorage::U16(values) => NumericStorage::U16(factorial_unsigned_values(values)),
+        NumericStorage::U32(values) => NumericStorage::U32(factorial_unsigned_values(values)),
+        NumericStorage::U64(values) => NumericStorage::U64(factorial_unsigned_values(values)),
+    };
+    Tensor::from_numeric_storage(storage, shape)
         .map_err(|e| factorial_error_with_detail(&FACTORIAL_ERROR_INTERNAL, e))
 }
 
-fn factorial_scalar(value: f64) -> f64 {
-    if value.is_nan() {
-        return f64::NAN;
-    }
-    if value == 0.0 {
-        return 1.0;
-    }
-    if value.is_infinite() {
-        return if value.is_sign_positive() {
-            f64::INFINITY
-        } else {
-            f64::NAN
-        };
-    }
-    if value < 0.0 {
-        return f64::NAN;
-    }
-    let Some(n) = classify_nonnegative_integer(value) else {
-        return f64::NAN;
-    };
+fn factorial_scalar(value: f64) -> BuiltinResult<f64> {
+    let n = validate_factorial_f64(value)?;
     if n > MAX_FACTORIAL_N {
-        return f64::INFINITY;
+        return Ok(f64::INFINITY);
     }
-    FACT_TABLE[n]
+    Ok(FACT_TABLE[n])
 }
 
-fn classify_nonnegative_integer(value: f64) -> Option<usize> {
-    if !value.is_finite() {
-        return None;
+fn factorial_scalar_f32(value: f32) -> BuiltinResult<f32> {
+    let n = validate_factorial_f32(value)?;
+    if n >= 35 {
+        return Ok(f32::INFINITY);
     }
-    if value < 0.0 {
-        return None;
+    Ok(FACT_TABLE[n] as f32)
+}
+
+fn validate_factorial_f64(value: f64) -> BuiltinResult<usize> {
+    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 {
+        return Err(factorial_error_with_detail(
+            &FACTORIAL_ERROR_INVALID_INPUT,
+            "input values must be real, finite, nonnegative integers",
+        ));
     }
-    let rounded = value.round();
-    let tol = f64::EPSILON * value.abs().max(1.0);
-    if (value - rounded).abs() > tol {
-        return None;
+    if value > MAX_FACTORIAL_N as f64 {
+        return Ok(MAX_FACTORIAL_N + 1);
     }
-    if rounded < 0.0 {
-        return None;
+    Ok(value as usize)
+}
+
+fn validate_factorial_f32(value: f32) -> BuiltinResult<usize> {
+    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 {
+        return Err(factorial_error_with_detail(
+            &FACTORIAL_ERROR_INVALID_INPUT,
+            "input values must be real, finite, nonnegative integers",
+        ));
     }
-    Some(rounded as usize)
+    if value >= 35.0 {
+        return Ok(35);
+    }
+    Ok(value as usize)
+}
+
+trait FactorialUnsigned: Copy {
+    const MAX_U128: u128;
+    fn into_u128(self) -> u128;
+    fn from_u128(value: u128) -> Self;
+}
+
+trait FactorialSigned: Copy {
+    const MAX_U128: u128;
+    fn is_negative(self) -> bool;
+    fn into_u128(self) -> u128;
+    fn from_u128(value: u128) -> Self;
+}
+
+macro_rules! impl_factorial_unsigned {
+    ($($ty:ty),+ $(,)?) => {
+        $(
+            impl FactorialUnsigned for $ty {
+                const MAX_U128: u128 = <$ty>::MAX as u128;
+                fn into_u128(self) -> u128 { self as u128 }
+                fn from_u128(value: u128) -> Self { value as $ty }
+            }
+        )+
+    };
+}
+
+macro_rules! impl_factorial_signed {
+    ($($ty:ty),+ $(,)?) => {
+        $(
+            impl FactorialSigned for $ty {
+                const MAX_U128: u128 = <$ty>::MAX as u128;
+                fn is_negative(self) -> bool { self < 0 }
+                fn into_u128(self) -> u128 { self as u128 }
+                fn from_u128(value: u128) -> Self { value as $ty }
+            }
+        )+
+    };
+}
+
+impl_factorial_unsigned!(u8, u16, u32, u64);
+impl_factorial_signed!(i8, i16, i32, i64);
+
+fn factorial_unsigned_values<T: FactorialUnsigned>(values: Vec<T>) -> Vec<T> {
+    values
+        .into_iter()
+        .map(|value| T::from_u128(factorial_integer_saturating(value.into_u128(), T::MAX_U128)))
+        .collect()
+}
+
+fn factorial_signed_values<T: FactorialSigned>(values: Vec<T>) -> BuiltinResult<Vec<T>> {
+    if values.iter().any(|value| value.is_negative()) {
+        return Err(factorial_error_with_detail(
+            &FACTORIAL_ERROR_INVALID_INPUT,
+            "input values must be real, finite, nonnegative integers",
+        ));
+    }
+    Ok(values
+        .into_iter()
+        .map(|value| T::from_u128(factorial_integer_saturating(value.into_u128(), T::MAX_U128)))
+        .collect())
+}
+
+fn factorial_integer_saturating(n: u128, maximum: u128) -> u128 {
+    let mut value = 1_u128;
+    let mut factor = 2_u128;
+    while factor <= n {
+        let Some(next) = value.checked_mul(factor) else {
+            return maximum;
+        };
+        if next > maximum {
+            return maximum;
+        }
+        value = next;
+        factor += 1;
+    }
+    value
 }
 
 async fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
@@ -392,7 +511,11 @@ fn convert_to_gpu_like(value: Value) -> BuiltinResult<Value> {
                 .map_err(|e| factorial_error_with_detail(&FACTORIAL_ERROR_INTERNAL, e))?;
             upload_tensor(provider, tensor)
         }
-        Value::Int(i) => convert_to_gpu_like(Value::Num(i.to_f64())),
+        Value::Int(i) => {
+            let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, Value::Int(i))
+                .map_err(|e| factorial_error_with_detail(&FACTORIAL_ERROR_INTERNAL, e))?;
+            upload_tensor(provider, tensor)
+        }
         Value::Bool(b) => convert_to_gpu_like(Value::Num(if b { 1.0 } else { 0.0 })),
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)
@@ -499,7 +622,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn factorial_reads_typed_integer_tensor_storage_exactly() {
+    fn factorial_preserves_uint64_storage_and_saturates() {
         let tensor = Tensor::new_integer(IntegerStorage::U64(vec![3, 5, 171]), vec![3, 1])
             .expect("integer tensor");
 
@@ -507,47 +630,143 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 1]);
-                assert_eq!(out.materialize_f64()[0], 6.0);
-                assert_eq!(out.materialize_f64()[1], 120.0);
-                assert!(out.materialize_f64()[2].is_infinite());
-                assert!(out.integer_storage().is_none());
+                assert_eq!(
+                    out.into_numeric_storage().unwrap(),
+                    NumericStorage::U64(vec![6, 120, u64::MAX])
+                );
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn factorial_non_integer_produces_nan() {
-        let result = factorial_builtin(Value::Num(2.5), Vec::new()).expect("factorial");
-        match result {
-            Value::Num(v) => assert!(v.is_nan()),
-            other => panic!("expected scalar NaN, got {other:?}"),
+    fn factorial_preserves_all_native_classes_and_documented_saturation_thresholds() {
+        let cases = [
+            (
+                IntegerStorage::I8(vec![5, 6]),
+                IntegerStorage::I8(vec![120, i8::MAX]),
+            ),
+            (
+                IntegerStorage::I16(vec![7, 8]),
+                IntegerStorage::I16(vec![5_040, i16::MAX]),
+            ),
+            (
+                IntegerStorage::I32(vec![12, 13]),
+                IntegerStorage::I32(vec![479_001_600, i32::MAX]),
+            ),
+            (
+                IntegerStorage::I64(vec![20, 21]),
+                IntegerStorage::I64(vec![2_432_902_008_176_640_000, i64::MAX]),
+            ),
+            (
+                IntegerStorage::U8(vec![5, 6]),
+                IntegerStorage::U8(vec![120, u8::MAX]),
+            ),
+            (
+                IntegerStorage::U16(vec![8, 9]),
+                IntegerStorage::U16(vec![40_320, u16::MAX]),
+            ),
+            (
+                IntegerStorage::U32(vec![12, 13]),
+                IntegerStorage::U32(vec![479_001_600, u32::MAX]),
+            ),
+            (
+                IntegerStorage::U64(vec![20, 21]),
+                IntegerStorage::U64(vec![2_432_902_008_176_640_000, u64::MAX]),
+            ),
+        ];
+        for (input, expected) in cases {
+            let tensor = Tensor::new_integer(input, vec![1, 2]).unwrap();
+            let Value::Tensor(output) =
+                factorial_builtin(Value::Tensor(tensor), Vec::new()).expect("factorial")
+            else {
+                panic!("expected typed tensor");
+            };
+            assert_eq!(output.integer_storage(), Some(&expected));
         }
+
+        let single = Tensor::from_f32(vec![5.0, 34.0, 35.0], vec![1, 3]).unwrap();
+        let Value::Tensor(output) =
+            factorial_builtin(Value::Tensor(single), Vec::new()).expect("single factorial")
+        else {
+            panic!("expected single tensor");
+        };
+        let NumericStorage::F32(values) = output.into_numeric_storage().unwrap() else {
+            panic!("expected native single storage");
+        };
+        assert_eq!(values[0], 120.0);
+        assert!(values[1].is_finite());
+        assert!(values[2].is_infinite());
+
+        let empty = Tensor::from_f32(Vec::new(), vec![0, 3]).unwrap();
+        let Value::Tensor(output) =
+            factorial_builtin(Value::Tensor(empty), Vec::new()).expect("empty factorial")
+        else {
+            panic!("expected empty single tensor");
+        };
+        assert_eq!(output.shape, vec![0, 3]);
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(Vec::new())
+        );
+    }
+
+    #[test]
+    fn factorial_rejects_negative_signed_integer_and_64_bit_integer_gpu_inputs() {
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![-1, 3]), vec![1, 2]).unwrap();
+        let err = factorial_builtin(Value::Tensor(tensor), Vec::new())
+            .expect_err("negative integer must reject");
+        assert_eq!(err.identifier(), FACTORIAL_ERROR_INVALID_INPUT.identifier);
+
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new_integer(IntegerStorage::U64(vec![5, 20]), vec![1, 2]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
+            let err = factorial_builtin(Value::GpuTensor(handle), Vec::new())
+                .expect_err("uint64 GPU factorial must reject");
+            assert_eq!(err.identifier(), FACTORIAL_ERROR_INVALID_INPUT.identifier);
+            assert!(err.message().contains("64-bit integer GPU"));
+        });
+    }
+
+    #[test]
+    fn factorial_integer_gpu_preserves_class_and_residency_without_floating_hook() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new_integer(IntegerStorage::U32(vec![5, 13]), vec![1, 2]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
+            let result =
+                factorial_builtin(Value::GpuTensor(handle), Vec::new()).expect("factorial");
+            assert!(matches!(result, Value::GpuTensor(_)));
+            let output = test_support::gather(result).expect("gather");
+            assert_eq!(
+                output.integer_storage(),
+                Some(&IntegerStorage::U32(vec![120, u32::MAX]))
+            );
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn factorial_negative_produces_nan() {
+    fn factorial_non_integer_errors() {
+        let err =
+            factorial_builtin(Value::Num(2.5), Vec::new()).expect_err("factorial must reject");
+        assert_eq!(err.identifier(), FACTORIAL_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn factorial_negative_errors() {
         let tensor = Tensor::new(vec![-1.0, 3.0], vec![2, 1]).unwrap();
-        let result = factorial_builtin(Value::Tensor(tensor), Vec::new()).expect("factorial");
-        match result {
-            Value::Tensor(out) => {
-                assert!(out.materialize_f64()[0].is_nan());
-                assert_eq!(out.materialize_f64()[1], 6.0);
-            }
-            other => panic!("expected tensor result, got {other:?}"),
-        }
+        let err = factorial_builtin(Value::Tensor(tensor), Vec::new())
+            .expect_err("factorial must reject");
+        assert_eq!(err.identifier(), FACTORIAL_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn factorial_small_positive_non_integer_nan() {
-        let result = factorial_builtin(Value::Num(1e-12), Vec::new()).expect("factorial");
-        match result {
-            Value::Num(v) => assert!(v.is_nan()),
-            other => panic!("expected scalar NaN, got {other:?}"),
-        }
+    fn factorial_small_positive_non_integer_errors() {
+        let err =
+            factorial_builtin(Value::Num(1e-12), Vec::new()).expect_err("factorial must reject");
+        assert_eq!(err.identifier(), FACTORIAL_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -591,6 +810,28 @@ pub(crate) mod tests {
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
             }
+        });
+    }
+
+    #[test]
+    fn factorial_like_gpu_prototype_preserves_integer_scalar_class() {
+        test_support::with_test_provider(|provider| {
+            let prototype = provider
+                .upload(&HostTensorView {
+                    data: &[0.0],
+                    shape: &[1, 1],
+                })
+                .expect("upload prototype");
+            let result = factorial_builtin(
+                Value::Int(IntValue::U16(5)),
+                vec![Value::from("like"), Value::GpuTensor(prototype)],
+            )
+            .expect("factorial like");
+            let output = test_support::gather(result).expect("gather");
+            assert_eq!(
+                output.integer_storage(),
+                Some(&IntegerStorage::U16(vec![120]))
+            );
         });
     }
 
@@ -648,20 +889,18 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn factorial_int_input_promotes_to_double() {
+    fn factorial_int_input_preserves_class() {
         let value = Value::Int(IntValue::U16(5));
         let result = factorial_builtin(value, Vec::new()).expect("factorial");
-        assert_eq!(result, Value::Num(120.0));
+        assert_eq!(result, Value::Int(IntValue::U16(120)));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn factorial_nan_propagates() {
-        let result = factorial_builtin(Value::Num(f64::NAN), Vec::new()).expect("factorial");
-        match result {
-            Value::Num(v) => assert!(v.is_nan()),
-            other => panic!("expected scalar NaN, got {other:?}"),
-        }
+    fn factorial_nan_errors() {
+        let err =
+            factorial_builtin(Value::Num(f64::NAN), Vec::new()).expect_err("factorial must reject");
+        assert_eq!(err.identifier(), FACTORIAL_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
