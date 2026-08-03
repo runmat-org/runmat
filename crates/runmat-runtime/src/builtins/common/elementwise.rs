@@ -579,53 +579,10 @@ pub async fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
                     m1.rows, m1.cols, m2.rows, m2.cols
                 ));
             }
-            let lhs = complex_tensor_values(m1);
-            let rhs = complex_tensor_values(m2);
-            let data: Vec<(f64, f64)> = (0..lhs.len())
-                .map(|index| {
-                    let (ar, ai) = lhs.value_at(index);
-                    let (br, bi) = rhs.value_at(index);
-                    let denom = br * br + bi * bi;
-                    if denom == 0.0 {
-                        (f64::NAN, f64::NAN)
-                    } else {
-                        ((ar * br + ai * bi) / denom, (ai * br - ar * bi) / denom)
-                    }
-                })
-                .collect();
-            Ok(Value::ComplexTensor(
-                runmat_builtins::ComplexTensor::new_2d(data, m1.rows, m1.cols)?,
-            ))
+            divide_complex_tensors(m1, m2)
         }
-        (Value::ComplexTensor(m), Value::Num(s)) => {
-            let values = complex_tensor_values(m);
-            let data: Vec<(f64, f64)> = (0..values.len())
-                .map(|index| {
-                    let (re, im) = values.value_at(index);
-                    (re / s, im / s)
-                })
-                .collect();
-            Ok(Value::ComplexTensor(
-                runmat_builtins::ComplexTensor::new_2d(data, m.rows, m.cols)?,
-            ))
-        }
-        (Value::Num(s), Value::ComplexTensor(m)) => {
-            let values = complex_tensor_values(m);
-            let data: Vec<(f64, f64)> = (0..values.len())
-                .map(|index| {
-                    let (br, bi) = values.value_at(index);
-                    let denom = br * br + bi * bi;
-                    if denom == 0.0 {
-                        (f64::NAN, f64::NAN)
-                    } else {
-                        ((s * br) / denom, (-s * bi) / denom)
-                    }
-                })
-                .collect();
-            Ok(Value::ComplexTensor(
-                runmat_builtins::ComplexTensor::new_2d(data, m.rows, m.cols)?,
-            ))
-        }
+        (Value::ComplexTensor(m), Value::Num(s)) => divide_complex_tensor_scalar(m, *s),
+        (Value::Num(s), Value::ComplexTensor(m)) => divide_scalar_complex_tensor(*s, m),
 
         _ => Err(format!(
             "Element-wise division not supported for types: {a:?} ./ {b:?}"
@@ -728,6 +685,155 @@ fn divide_real_value_f32(numerator: f32, denominator: f32) -> f32 {
         f32::INFINITY * numerator.signum()
     } else {
         numerator / denominator
+    }
+}
+
+fn divide_complex_tensors(lhs: &ComplexTensor, rhs: &ComplexTensor) -> Result<Value, String> {
+    let shape = lhs.shape.clone();
+    let output = match (lhs.complex_storage(), rhs.complex_storage()) {
+        (ComplexStorage::F64(lhs), ComplexStorage::F64(rhs)) => ComplexStorage::F64(
+            lhs.iter()
+                .zip(rhs)
+                .map(|(&left, &right)| divide_complex_value_f64(left, right))
+                .collect(),
+        ),
+        (ComplexStorage::F32(lhs), ComplexStorage::F32(rhs)) => ComplexStorage::F32(
+            lhs.iter()
+                .zip(rhs)
+                .map(|(&left, &right)| divide_complex_value_f32(left, right))
+                .collect(),
+        ),
+        (ComplexStorage::F32(lhs), ComplexStorage::F64(rhs)) => ComplexStorage::F32(
+            lhs.iter()
+                .zip(rhs)
+                .map(|(&(ar, ai), &right)| {
+                    let (real, imag) =
+                        divide_complex_value_f64((f64::from(ar), f64::from(ai)), right);
+                    (real as f32, imag as f32)
+                })
+                .collect(),
+        ),
+        (ComplexStorage::F64(lhs), ComplexStorage::F32(rhs)) => ComplexStorage::F32(
+            lhs.iter()
+                .zip(rhs)
+                .map(|(&left, &(br, bi))| {
+                    let (real, imag) =
+                        divide_complex_value_f64(left, (f64::from(br), f64::from(bi)));
+                    (real as f32, imag as f32)
+                })
+                .collect(),
+        ),
+        _ => return divide_promoted_complex_tensors(lhs, rhs),
+    };
+    ComplexTensor::from_complex_storage(output, shape).map(Value::ComplexTensor)
+}
+
+fn divide_promoted_complex_tensors(
+    lhs: &ComplexTensor,
+    rhs: &ComplexTensor,
+) -> Result<Value, String> {
+    let lhs_values = complex_tensor_values(lhs);
+    let rhs_values = complex_tensor_values(rhs);
+    let output = (0..lhs_values.len())
+        .map(|index| {
+            divide_complex_value_f64(lhs_values.value_at(index), rhs_values.value_at(index))
+        })
+        .collect();
+    ComplexTensor::new(output, lhs.shape.clone()).map(Value::ComplexTensor)
+}
+
+fn divide_complex_tensor_scalar(tensor: &ComplexTensor, scalar: f64) -> Result<Value, String> {
+    let shape = tensor.shape.clone();
+    let output = match tensor.complex_storage() {
+        ComplexStorage::F64(values) => ComplexStorage::F64(
+            values
+                .iter()
+                .map(|&(real, imag)| (real / scalar, imag / scalar))
+                .collect(),
+        ),
+        ComplexStorage::F32(values) => {
+            let scalar = scalar as f32;
+            ComplexStorage::F32(
+                values
+                    .iter()
+                    .map(|&(real, imag)| (real / scalar, imag / scalar))
+                    .collect(),
+            )
+        }
+        ComplexStorage::Integer(_) => return divide_promoted_complex_tensor_scalar(tensor, scalar),
+    };
+    ComplexTensor::from_complex_storage(output, shape).map(Value::ComplexTensor)
+}
+
+fn divide_promoted_complex_tensor_scalar(
+    tensor: &ComplexTensor,
+    scalar: f64,
+) -> Result<Value, String> {
+    let values = complex_tensor_values(tensor);
+    let output = (0..values.len())
+        .map(|index| {
+            let (real, imag) = values.value_at(index);
+            (real / scalar, imag / scalar)
+        })
+        .collect();
+    ComplexTensor::new(output, tensor.shape.clone()).map(Value::ComplexTensor)
+}
+
+fn divide_scalar_complex_tensor(scalar: f64, tensor: &ComplexTensor) -> Result<Value, String> {
+    let shape = tensor.shape.clone();
+    let output = match tensor.complex_storage() {
+        ComplexStorage::F64(values) => ComplexStorage::F64(
+            values
+                .iter()
+                .map(|&denominator| divide_complex_value_f64((scalar, 0.0), denominator))
+                .collect(),
+        ),
+        ComplexStorage::F32(values) => {
+            let scalar = scalar as f32;
+            ComplexStorage::F32(
+                values
+                    .iter()
+                    .map(|&denominator| divide_complex_value_f32((scalar, 0.0), denominator))
+                    .collect(),
+            )
+        }
+        ComplexStorage::Integer(_) => return divide_scalar_promoted_complex_tensor(scalar, tensor),
+    };
+    ComplexTensor::from_complex_storage(output, shape).map(Value::ComplexTensor)
+}
+
+fn divide_scalar_promoted_complex_tensor(
+    scalar: f64,
+    tensor: &ComplexTensor,
+) -> Result<Value, String> {
+    let values = complex_tensor_values(tensor);
+    let output = (0..values.len())
+        .map(|index| divide_complex_value_f64((scalar, 0.0), values.value_at(index)))
+        .collect();
+    ComplexTensor::new(output, tensor.shape.clone()).map(Value::ComplexTensor)
+}
+
+fn divide_complex_value_f64(numerator: (f64, f64), denominator: (f64, f64)) -> (f64, f64) {
+    let divisor = denominator.0 * denominator.0 + denominator.1 * denominator.1;
+    if divisor == 0.0 {
+        (f64::NAN, f64::NAN)
+    } else {
+        (
+            (numerator.0 * denominator.0 + numerator.1 * denominator.1) / divisor,
+            (numerator.1 * denominator.0 - numerator.0 * denominator.1) / divisor,
+        )
+    }
+}
+
+fn divide_complex_value_f32(numerator: (f32, f32), denominator: (f32, f32)) -> (f32, f32) {
+    let divisor = denominator.0 * denominator.0 + denominator.1 * denominator.1;
+    if divisor == 0.0 {
+        (f32::NAN, f32::NAN)
+    } else {
+        (
+            (numerator.0 * denominator.0 + numerator.1 * denominator.1) / divisor,
+            (numerator.1 * denominator.0 - numerator.0 * denominator.1) / divisor,
+        )
     }
 }
 
@@ -1147,6 +1253,58 @@ mod tests {
         };
         assert_eq!(result.shape, vec![1, 2]);
         assert_eq!(result.materialize_f64(), vec![(1.5, 2.0), (-1.0, 2.5)]);
+    }
+
+    #[test]
+    fn elementwise_div_preserves_native_complex_single_and_nd_shape() {
+        let shape = vec![1, 2, 1];
+        let lhs = ComplexTensor::from_f32(vec![(5.0, 5.0), (-10.0, 0.0)], shape.clone()).unwrap();
+        let rhs = ComplexTensor::from_f32(vec![(3.0, -1.0), (4.0, 2.0)], shape.clone()).unwrap();
+        let Value::ComplexTensor(result) = block_on(elementwise_div(
+            &Value::ComplexTensor(lhs),
+            &Value::ComplexTensor(rhs),
+        ))
+        .expect("div") else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(result.shape, shape);
+        assert_eq!(result.as_f32_slice(), Some(&[(1.0, 2.0), (-2.0, 1.0)][..]));
+    }
+
+    #[test]
+    fn elementwise_div_mixed_complex_floating_returns_single() {
+        let single = ComplexTensor::from_f32(vec![(5.0, 5.0)], vec![1, 1]).unwrap();
+        let double = ComplexTensor::new(vec![(3.0, -1.0)], vec![1, 1]).unwrap();
+        let Value::ComplexTensor(result) = block_on(elementwise_div(
+            &Value::ComplexTensor(single),
+            &Value::ComplexTensor(double),
+        ))
+        .expect("div") else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(result.as_f32_slice(), Some(&[(1.0, 2.0)][..]));
+    }
+
+    #[test]
+    fn elementwise_div_complex_single_scalar_paths_preserve_single() {
+        let tensor = ComplexTensor::from_f32(vec![(2.0, 4.0)], vec![1, 1]).unwrap();
+        let Value::ComplexTensor(by_scalar) = block_on(elementwise_div(
+            &Value::ComplexTensor(tensor.clone()),
+            &Value::Num(2.0),
+        ))
+        .expect("div") else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(by_scalar.as_f32_slice(), Some(&[(1.0, 2.0)][..]));
+
+        let Value::ComplexTensor(scalar_by) = block_on(elementwise_div(
+            &Value::Num(10.0),
+            &Value::ComplexTensor(tensor),
+        ))
+        .expect("div") else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(scalar_by.as_f32_slice(), Some(&[(1.0, -2.0)][..]));
     }
 
     #[test]
