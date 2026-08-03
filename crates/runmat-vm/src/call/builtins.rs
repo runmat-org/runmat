@@ -81,7 +81,7 @@ impl Default for DynamicEvalOptions {
     fn default() -> Self {
         Self {
             compat_mode: CompatMode::Matlab,
-            runmat_extensions_enabled: true,
+            runmat_extensions_enabled: false,
             top_level_await_enabled: true,
             dynamic_eval_enabled: true,
         }
@@ -99,6 +99,7 @@ pub fn set_dynamic_eval_options(
     top_level_await_enabled: bool,
     dynamic_eval_enabled: bool,
 ) {
+    runmat_runtime::compatibility::set_runmat_extensions_enabled(runmat_extensions_enabled);
     DYNAMIC_EVAL_OPTIONS.with(|slot| {
         *slot.borrow_mut() = DynamicEvalOptions {
             compat_mode,
@@ -117,9 +118,12 @@ pub struct DynamicEvalOptionsGuard {
 impl Drop for DynamicEvalOptionsGuard {
     fn drop(&mut self) {
         let previous = self.previous;
-        DYNAMIC_EVAL_OPTIONS.with(|slot| {
-            *slot.borrow_mut() = previous;
-        });
+        set_dynamic_eval_options(
+            previous.compat_mode,
+            previous.runmat_extensions_enabled,
+            previous.top_level_await_enabled,
+            previous.dynamic_eval_enabled,
+        );
     }
 }
 
@@ -1489,10 +1493,30 @@ pub fn rethrow_without_explicit_exception(
 #[cfg(test)]
 mod tests {
     use super::{
-        imported_builtin_qualified_name, parse_finite_arity_bound,
-        rethrow_without_explicit_exception,
+        current_dynamic_eval_options, imported_builtin_qualified_name, parse_finite_arity_bound,
+        push_dynamic_eval_options, rethrow_without_explicit_exception,
     };
     use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
+    use runmat_parser::CompatMode;
+
+    #[test]
+    fn dynamic_eval_guard_restores_runtime_extension_policy() {
+        let original = current_dynamic_eval_options();
+        let original_runtime = runmat_runtime::compatibility::runmat_extensions_enabled();
+        {
+            let _guard = push_dynamic_eval_options(CompatMode::RunMat, true, false, false);
+            assert!(current_dynamic_eval_options().runmat_extensions_enabled);
+            assert!(runmat_runtime::compatibility::runmat_extensions_enabled());
+        }
+        assert_eq!(
+            current_dynamic_eval_options().runmat_extensions_enabled,
+            original.runmat_extensions_enabled
+        );
+        assert_eq!(
+            runmat_runtime::compatibility::runmat_extensions_enabled(),
+            original_runtime
+        );
+    }
 
     #[test]
     fn imported_builtin_qualified_name_uses_typed_segments() {

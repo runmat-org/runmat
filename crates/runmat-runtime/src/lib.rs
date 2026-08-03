@@ -22,6 +22,7 @@ pub mod geometry;
 pub mod operations;
 
 pub mod callsite;
+pub mod compatibility;
 pub mod console;
 pub mod data;
 pub mod interaction;

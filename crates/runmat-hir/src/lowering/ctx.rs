@@ -2348,7 +2348,7 @@ impl LoweringCtx {
                 if name == AWAIT_EXTENSION_NAME && args.len() == 1 {
                     if !self.runmat_extensions_enabled {
                         return Err(HirError::new(
-                            "await is a RunMat extension and is not available in MATLAB strict mode",
+                            "await is a RunMat extension and is available only in RunMat compatibility mode",
                         )
                         .with_span(span)
                         .with_identifier(IDENT_AWAIT_EXTENSION_DISABLED));
@@ -2364,7 +2364,7 @@ impl LoweringCtx {
                 } else if name == SPAWN_EXTENSION_NAME && args.len() == 1 {
                     if !self.runmat_extensions_enabled {
                         return Err(HirError::new(
-                            "spawn is a RunMat extension and is not available in MATLAB strict mode",
+                            "spawn is a RunMat extension and is available only in RunMat compatibility mode",
                         )
                         .with_span(span)
                         .with_identifier(IDENT_SPAWN_EXTENSION_DISABLED));

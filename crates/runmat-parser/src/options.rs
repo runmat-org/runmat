@@ -34,6 +34,18 @@ impl ParserOptions {
 impl CompatMode {
     /// Whether semantic lowering should allow RunMat-only extension syntax.
     pub fn allows_runmat_extensions(self) -> bool {
-        !matches!(self, Self::Strict)
+        matches!(self, Self::RunMat)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CompatMode;
+
+    #[test]
+    fn only_runmat_mode_enables_runmat_extensions() {
+        assert!(CompatMode::RunMat.allows_runmat_extensions());
+        assert!(!CompatMode::Matlab.allows_runmat_extensions());
+        assert!(!CompatMode::Strict.allows_runmat_extensions());
     }
 }

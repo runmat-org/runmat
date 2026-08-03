@@ -195,7 +195,7 @@ const RANDI_SIG_CLASS_INPUTS: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
         default: Some("\"double\""),
-        description: "Class override ('double'|'logical').",
+        description: "Output class override; int64 and uint64 are RunMat-mode extensions.",
     },
 ];
 
@@ -392,6 +392,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn randi_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let parsed = ParsedRandi::parse(args).await?;
+    reject_disabled_wide_integer_extension(&parsed.template)?;
     build_output(parsed).await
 }
 
@@ -408,6 +409,45 @@ enum OutputTemplate {
     Logical,
     Integer(IntegerTarget),
     Like(Value),
+}
+
+fn reject_disabled_wide_integer_extension(template: &OutputTemplate) -> crate::BuiltinResult<()> {
+    if output_template_uses_wide_integer(template)
+        && !crate::compatibility::runmat_extensions_enabled()
+    {
+        return Err(builtin_error(
+            "randi: int64 and uint64 output classes are RunMat extensions; enable runmat compatibility mode to use them",
+        ));
+    }
+    Ok(())
+}
+
+fn output_template_uses_wide_integer(template: &OutputTemplate) -> bool {
+    match template {
+        OutputTemplate::Integer(IntegerTarget::I64 | IntegerTarget::U64) => true,
+        OutputTemplate::Like(value) => value_uses_wide_integer_class(value),
+        _ => false,
+    }
+}
+
+fn value_uses_wide_integer_class(value: &Value) -> bool {
+    match value {
+        Value::Int(IntValue::I64(_) | IntValue::U64(_)) => true,
+        Value::Tensor(tensor) => {
+            matches!(
+                tensor.numeric_dtype(),
+                NumericDType::I64 | NumericDType::U64
+            )
+        }
+        Value::GpuTensor(handle) => matches!(
+            runmat_accelerate_api::handle_integer_type(handle),
+            Some(
+                runmat_accelerate_api::IntegerElementType::I64
+                    | runmat_accelerate_api::IntegerElementType::U64
+            )
+        ),
+        _ => false,
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -1237,6 +1277,7 @@ pub(crate) mod tests {
     #[test]
     fn randi_preserves_every_explicit_integer_class_and_integer_like_prototype() {
         let _guard = random::test_lock().lock().unwrap();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let cases = [
             ("int8", IntegerTarget::I8),
             ("int16", IntegerTarget::I16),
@@ -1302,6 +1343,7 @@ pub(crate) mod tests {
     #[test]
     fn randi_preserves_exact_high_uint64_bounds_and_saturates_out_of_class_bounds() {
         let _guard = random::test_lock().lock().unwrap();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         reset_rng_clean();
         let lower = u64::MAX - 4;
         let bounds = Tensor::new_integer(IntegerStorage::U64(vec![lower, u64::MAX]), vec![1, 2])
@@ -1339,6 +1381,102 @@ pub(crate) mod tests {
                 tensor.integer_storage(),
                 Some(&IntegerStorage::U8(vec![expected; 4]))
             );
+        }
+    }
+
+    #[test]
+    fn randi_matlab_mode_accepts_only_documented_integer_output_classes() {
+        let _guard = random::test_lock().lock().unwrap();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let documented = [
+            ("int8", IntegerStorage::I8(vec![0])),
+            ("int16", IntegerStorage::I16(vec![0])),
+            ("int32", IntegerStorage::I32(vec![0])),
+            ("uint8", IntegerStorage::U8(vec![0])),
+            ("uint16", IntegerStorage::U16(vec![0])),
+            ("uint32", IntegerStorage::U32(vec![0])),
+        ];
+        for (class, prototype_storage) in documented {
+            let explicit = block_on(randi_builtin(vec![
+                Value::Num(5.0),
+                Value::Num(2.0),
+                Value::from(class),
+            ]))
+            .expect("documented explicit integer class");
+            let Value::Tensor(explicit) = explicit else {
+                panic!("expected explicit integer tensor");
+            };
+            assert_eq!(
+                explicit.numeric_dtype(),
+                prototype_storage.numeric_dtype(),
+                "{class}"
+            );
+
+            let prototype =
+                Tensor::new_integer(prototype_storage, vec![1, 1]).expect("integer prototype");
+            let like = block_on(randi_builtin(vec![
+                Value::Num(5.0),
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::Tensor(prototype),
+            ]))
+            .expect("documented integer like class");
+            let Value::Tensor(like) = like else {
+                panic!("expected like integer tensor");
+            };
+            assert_eq!(like.numeric_dtype(), explicit.numeric_dtype(), "{class}");
+        }
+    }
+
+    #[test]
+    fn randi_matlab_mode_rejects_wide_integer_output_extensions_before_dispatch() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        for class in ["int64", "uint64"] {
+            let error = block_on(randi_builtin(vec![Value::Num(5.0), Value::from(class)]))
+                .expect_err("wide explicit class must be gated");
+            assert!(error.to_string().contains("RunMat extensions"), "{error}");
+        }
+
+        let host_prototypes = [
+            Value::Int(IntValue::I64(0)),
+            Value::Int(IntValue::U64(0)),
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::I64(vec![0]), vec![1, 1])
+                    .expect("int64 prototype"),
+            ),
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![0]), vec![1, 1])
+                    .expect("uint64 prototype"),
+            ),
+        ];
+        for prototype in host_prototypes {
+            let error = block_on(randi_builtin(vec![
+                Value::Num(5.0),
+                Value::from("like"),
+                prototype,
+            ]))
+            .expect_err("wide host prototype must be gated");
+            assert!(error.to_string().contains("RunMat extensions"), "{error}");
+        }
+
+        for (offset, element_type) in [
+            (0, runmat_accelerate_api::IntegerElementType::I64),
+            (1, runmat_accelerate_api::IntegerElementType::U64),
+        ] {
+            let handle = GpuTensorHandle {
+                shape: vec![1, 1],
+                device_id: u32::MAX,
+                buffer_id: u64::MAX - 10 - offset,
+            };
+            runmat_accelerate_api::set_handle_integer_type(&handle, element_type);
+            let error = block_on(randi_builtin(vec![
+                Value::Num(5.0),
+                Value::from("like"),
+                Value::GpuTensor(handle.clone()),
+            ]))
+            .expect_err("wide resident prototype must be gated before provider dispatch");
+            assert!(error.to_string().contains("RunMat extensions"), "{error}");
+            runmat_accelerate_api::clear_handle_integer_type(&handle);
         }
     }
 
@@ -1623,6 +1761,7 @@ pub(crate) mod tests {
     #[test]
     fn randi_gpu_like_preserves_native_uint64_storage() {
         let _guard = random::test_lock().lock().unwrap();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         random::reset_rng();
         test_support::with_test_provider(|provider| {
             let prototype_values = [1_u64 << 53, u64::MAX];

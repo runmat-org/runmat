@@ -2473,16 +2473,21 @@ fn min_max_builtin_multi_assign_execute() {
 }
 
 #[test]
-fn cummin_cummax_builtin_multi_assign_execute() {
-    let bytecode = compile_source(
-        "[mx,mi] = cummax([2 1 3]); [mn,ni] = cummin([2 1 3]); z = sum(mx) + sum(mi) + sum(mn) + sum(ni);",
-    )
-    .unwrap();
-    let vars = interpret(&bytecode).expect("semantic cummin/cummax multi-assign should execute");
-
-    assert!(vars
-        .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 21.0).abs() < 1e-9)));
+fn cummin_cummax_builtin_reject_undocumented_second_output() {
+    for (builtin, source) in [
+        ("cummax", "[values,indices] = cummax([2 1 3]);"),
+        ("cummin", "[values,indices] = cummin([2 1 3]);"),
+    ] {
+        let error = execute_source_result(source).expect_err("second output must be rejected");
+        assert_eq!(
+            error.identifier(),
+            Some(if builtin == "cummax" {
+                "RunMat:cummax:InvalidArgument"
+            } else {
+                "RunMat:cummin:InvalidArgument"
+            })
+        );
+    }
 }
 
 #[test]
@@ -4185,6 +4190,7 @@ fn primes_script_surface_preserves_signed_and_unsigned_integer_classes() {
 
 #[test]
 fn randi_script_surface_preserves_explicit_and_like_integer_classes() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let vars = execute_source(
         "signed = randi(5, 2, 2, 'int64'); prototype = uint64(zeros(2, 2)); unsigned = randi(5, 'like', prototype); signed_class = class(signed); unsigned_class = class(unsigned);",
     );
@@ -4204,6 +4210,21 @@ fn randi_script_surface_preserves_explicit_and_like_integer_classes() {
                 |value| matches!(value, runmat_builtins::Value::String(class) if class == expected)
             ),
             "expected class {expected:?}; vars={vars:?}"
+        );
+    }
+}
+
+#[test]
+fn randi_script_surface_gates_wide_integer_classes_by_compatibility_policy() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
+    for source in [
+        "out = randi(5, 2, 2, 'int64');",
+        "prototype = uint64(zeros(2, 2)); out = randi(5, 'like', prototype);",
+    ] {
+        let error = execute_source_result(source).expect_err("wide randi output must be gated");
+        assert!(
+            error.to_string().contains("RunMat extensions"),
+            "unexpected error: {error}"
         );
     }
 }

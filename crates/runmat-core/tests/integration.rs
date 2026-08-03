@@ -205,6 +205,58 @@ fn test_strict_mode_rejects_runmat_extensions() {
 }
 
 #[test]
+fn test_matlab_mode_rejects_runmat_syntax_extensions() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+        for (source, identifier) in [
+            ("t = spawn(1);", "RunMat:SpawnExtensionDisabled"),
+            ("y = await(1);", "RunMat:AwaitExtensionDisabled"),
+        ] {
+            let error = runmat_core::execute_text_request_for_testing(&mut engine, source)
+                .expect_err("matlab mode should reject RunMat syntax extensions");
+            let RunError::Semantic(error) = error else {
+                panic!("expected semantic extension error");
+            };
+            assert_eq!(error.identifier.as_deref(), Some(identifier));
+        }
+    });
+}
+
+#[test]
+fn test_randi_wide_integer_outputs_follow_session_compatibility_mode() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+        let matlab = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = randi(5, 2, 2, 'int64');",
+        )
+        .expect("runtime failure should be returned in the execution outcome");
+        assert!(
+            matlab
+                .error
+                .as_ref()
+                .is_some_and(|error| error.to_string().contains("RunMat extensions")),
+            "matlab mode must reject the wide randi extension: {:?}",
+            matlab.error
+        );
+
+        engine.set_compat_mode(CompatMode::RunMat);
+        let runmat = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = randi(5, 2, 2, 'int64'); class(out)",
+        )
+        .expect("runmat mode should enable wide randi outputs");
+        assert!(runmat.error.is_none(), "{:?}", runmat.error);
+        assert_eq!(
+            runmat.value,
+            Some(runmat_builtins::Value::String("int64".to_string()))
+        );
+    });
+}
+
+#[test]
 fn test_request_host_policy_disables_top_level_await() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
@@ -213,7 +265,7 @@ fn test_request_host_policy_disables_top_level_await() {
                 name: "request-await-policy.m".to_string(),
                 text: "y = await(1);".to_string(),
             },
-            compatibility: CompatMode::Matlab,
+            compatibility: CompatMode::RunMat,
             host_policy: abi::HostExecutionPolicy {
                 top_level_await: false,
                 dynamic_eval: true,
@@ -237,6 +289,7 @@ fn test_request_host_policy_disables_top_level_await() {
 fn test_await_passes_through_non_spawn_operand_at_runtime() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::RunMat);
         let result = runmat_core::execute_text_request_for_testing(&mut engine, "y = await(1);")
             .expect("execution should complete successfully");
         assert!(
@@ -253,6 +306,7 @@ fn test_await_passes_through_non_spawn_operand_at_runtime() {
 fn test_spawn_handle_is_consumed_after_await() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::RunMat);
         let first_await = runmat_core::execute_text_request_for_testing(
             &mut engine,
             "t = spawn(41 + 1); first = await(t);",

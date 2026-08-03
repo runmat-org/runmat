@@ -2683,7 +2683,7 @@ fn execute_request_honors_top_level_await_host_policy() {
             name: "request-await-policy.m".to_string(),
             text: "y = await(1);".to_string(),
         },
-        compatibility: CompatMode::Matlab,
+        compatibility: CompatMode::RunMat,
         host_policy: abi::HostExecutionPolicy {
             top_level_await: false,
             dynamic_eval: true,
