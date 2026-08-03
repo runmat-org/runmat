@@ -199,6 +199,63 @@ fn registered_complex_integer_ordering_uses_exact_real_components_for_every_clas
 }
 
 #[test]
+fn registered_integer_scalar_mtimes_preserves_every_class_and_saturates() {
+    let cases = [
+        (
+            IntegerStorage::I8(vec![i8::MAX, 2]),
+            IntValue::I8(2),
+            IntegerStorage::I8(vec![i8::MAX, 4]),
+        ),
+        (
+            IntegerStorage::I16(vec![i16::MAX, 2]),
+            IntValue::I16(2),
+            IntegerStorage::I16(vec![i16::MAX, 4]),
+        ),
+        (
+            IntegerStorage::I32(vec![i32::MAX, 2]),
+            IntValue::I32(2),
+            IntegerStorage::I32(vec![i32::MAX, 4]),
+        ),
+        (
+            IntegerStorage::I64(vec![i64::MAX, 2]),
+            IntValue::I64(2),
+            IntegerStorage::I64(vec![i64::MAX, 4]),
+        ),
+        (
+            IntegerStorage::U8(vec![u8::MAX, 2]),
+            IntValue::U8(2),
+            IntegerStorage::U8(vec![u8::MAX, 4]),
+        ),
+        (
+            IntegerStorage::U16(vec![u16::MAX, 2]),
+            IntValue::U16(2),
+            IntegerStorage::U16(vec![u16::MAX, 4]),
+        ),
+        (
+            IntegerStorage::U32(vec![u32::MAX, 2]),
+            IntValue::U32(2),
+            IntegerStorage::U32(vec![u32::MAX, 4]),
+        ),
+        (
+            IntegerStorage::U64(vec![u64::MAX, (1_u64 << 53) + 1]),
+            IntValue::U64(2),
+            IntegerStorage::U64(vec![u64::MAX, (1_u64 << 54) + 2]),
+        ),
+    ];
+    for (array, scalar, expected) in cases {
+        let array = integer_tensor(array, vec![1, 2]);
+        for operands in [
+            [array.clone(), Value::Int(scalar.clone())],
+            [Value::Int(scalar.clone()), array.clone()],
+        ] {
+            let result =
+                runmat_runtime::call_builtin("mtimes", &operands).expect("integer scalar mtimes");
+            expect_integer(result, &[1, 2], expected.clone());
+        }
+    }
+}
+
+#[test]
 fn registered_integer_arithmetic_rejects_logicals_before_provider_dispatch() {
     use runmat_accelerate_api::{GpuTensorHandle, IntegerElementType};
 

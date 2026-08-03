@@ -149,3 +149,46 @@ fn vm_complex_ordering_compares_real_components_and_preserves_wide_integers() {
     assert!(masks.iter().any(|mask| mask.data == vec![1, 1]));
     assert!(masks.iter().filter(|mask| mask.data == vec![1, 0]).count() >= 3);
 }
+
+#[test]
+fn vm_integer_scalar_mtimes_is_exact_and_rejects_matrix_forms() {
+    let vars = execute_source(
+        r#"
+        wide = uint64(9007199254740992) + uint64([1 0]);
+        scale = uint64(2);
+        a = wide * scale;
+        b = mtimes(scale, wide);
+        signed = int8([127 -128 2]) * int8(2);
+        "#,
+    )
+    .expect("compiled integer scalar mtimes");
+    assert!(
+        vars.iter()
+            .filter(|value| matches!(
+                value,
+                Value::Tensor(tensor)
+                    if tensor.integer_storage()
+                        == Some(&runmat_builtins::IntegerStorage::U64(vec![
+                            18_014_398_509_481_986,
+                            18_014_398_509_481_984,
+                        ]))
+            ))
+            .count()
+            >= 2
+    );
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::Tensor(tensor)
+            if tensor.integer_storage()
+                == Some(&runmat_builtins::IntegerStorage::I8(vec![127, -128, 4]))
+    )));
+
+    for source in [
+        "out = int16([1 2]) * int16([3; 4]);",
+        "out = int16([1 2]) * uint16(2);",
+        "out = int16(2) * [1 2];",
+    ] {
+        let error = execute_source(source).expect_err("invalid compiled integer mtimes");
+        assert_eq!(error.identifier(), Some("RunMat:mtimes:InvalidInput"));
+    }
+}
