@@ -4,7 +4,8 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, NumericDType, Tensor, Type, Value,
+    ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericScalar,
+    NumericStorage, Tensor, Type, Value,
 };
 const NAME: &str = "mean";
 
@@ -82,7 +83,7 @@ const MEAN_INPUTS_A_ALL: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
-const MEAN_INPUTS_A_NANFLAG: [BuiltinParamDescriptor; 2] = [
+const MEAN_INPUTS_A_MISSINGFLAG: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "A",
         ty: BuiltinParamType::Any,
@@ -91,11 +92,11 @@ const MEAN_INPUTS_A_NANFLAG: [BuiltinParamDescriptor; 2] = [
         description: "Input array.",
     },
     BuiltinParamDescriptor {
-        name: "nanflag",
+        name: "missingflag",
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
-        default: Some("\"includenan\""),
-        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+        default: Some("\"includemissing\""),
+        description: "Missing-data handling mode: \"includemissing\" or \"omitmissing\".",
     },
 ];
 
@@ -111,12 +112,12 @@ const MEAN_INPUTS_A_OUTTYPE: [BuiltinParamDescriptor; 2] = [
         name: "outtype",
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
-        default: Some("\"double\""),
+        default: Some("\"default\""),
         description: "Output class specifier: \"double\", \"default\", \"native\", or \"like\".",
     },
 ];
 
-const MEAN_INPUTS_A_DIM_NANFLAG: [BuiltinParamDescriptor; 3] = [
+const MEAN_INPUTS_A_DIM_MISSINGFLAG: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "A",
         ty: BuiltinParamType::Any,
@@ -132,15 +133,15 @@ const MEAN_INPUTS_A_DIM_NANFLAG: [BuiltinParamDescriptor; 3] = [
         description: "Dimension selector or vector of dimensions.",
     },
     BuiltinParamDescriptor {
-        name: "nanflag",
+        name: "missingflag",
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
-        default: Some("\"includenan\""),
-        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+        default: Some("\"includemissing\""),
+        description: "Missing-data handling mode: \"includemissing\" or \"omitmissing\".",
     },
 ];
 
-const MEAN_INPUTS_A_NANFLAG_DIM: [BuiltinParamDescriptor; 3] = [
+const MEAN_INPUTS_A_MISSINGFLAG_DIM: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "A",
         ty: BuiltinParamType::Any,
@@ -149,11 +150,11 @@ const MEAN_INPUTS_A_NANFLAG_DIM: [BuiltinParamDescriptor; 3] = [
         description: "Input array.",
     },
     BuiltinParamDescriptor {
-        name: "nanflag",
+        name: "missingflag",
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
-        default: Some("\"includenan\""),
-        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+        default: Some("\"includemissing\""),
+        description: "Missing-data handling mode: \"includemissing\" or \"omitmissing\".",
     },
     BuiltinParamDescriptor {
         name: "dim",
@@ -188,7 +189,31 @@ const MEAN_INPUTS_A_LIKE: [BuiltinParamDescriptor; 3] = [
     },
 ];
 
-const MEAN_SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
+const MEAN_INPUTS_A_WEIGHTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "Weights",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"Weights\""),
+        description: "Weighting-scheme name.",
+    },
+    BuiltinParamDescriptor {
+        name: "W",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Nonnegative single- or double-precision weighting scheme.",
+    },
+];
+
+const MEAN_SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
     BuiltinSignatureDescriptor {
         label: "M = mean(A)",
         inputs: &MEAN_INPUTS_A,
@@ -205,8 +230,8 @@ const MEAN_SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
         outputs: &MEAN_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "M = mean(A, nanflag)",
-        inputs: &MEAN_INPUTS_A_NANFLAG,
+        label: "M = mean(A, missingflag)",
+        inputs: &MEAN_INPUTS_A_MISSINGFLAG,
         outputs: &MEAN_OUTPUT,
     },
     BuiltinSignatureDescriptor {
@@ -215,13 +240,13 @@ const MEAN_SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
         outputs: &MEAN_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "M = mean(A, dim, nanflag)",
-        inputs: &MEAN_INPUTS_A_DIM_NANFLAG,
+        label: "M = mean(A, dim, missingflag)",
+        inputs: &MEAN_INPUTS_A_DIM_MISSINGFLAG,
         outputs: &MEAN_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "M = mean(A, nanflag, dim)",
-        inputs: &MEAN_INPUTS_A_NANFLAG_DIM,
+        label: "M = mean(A, missingflag, dim)",
+        inputs: &MEAN_INPUTS_A_MISSINGFLAG_DIM,
         outputs: &MEAN_OUTPUT,
     },
     BuiltinSignatureDescriptor {
@@ -234,12 +259,17 @@ const MEAN_SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
         inputs: &MEAN_INPUTS_A_DIM,
         outputs: &MEAN_OUTPUT,
     },
+    BuiltinSignatureDescriptor {
+        label: "M = mean(___, Weights=W)",
+        inputs: &MEAN_INPUTS_A_WEIGHTS,
+        outputs: &MEAN_OUTPUT,
+    },
 ];
 
 const MEAN_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.MEAN.INVALID_ARGUMENT",
     identifier: Some("RunMat:mean:InvalidArgument"),
-    when: "Dimension, nanflag, or output class argument grammar is invalid.",
+    when: "Dimension, missing-data, weights, or output class argument grammar is invalid.",
     message: "mean: invalid argument",
 };
 
@@ -340,13 +370,50 @@ struct ParsedArguments {
     axes: MeanAxes,
     nan_mode: ReductionNaN,
     output: OutputTemplate,
+    weights: Option<MeanWeights>,
 }
 
 #[derive(Clone)]
 enum OutputTemplate {
+    Default,
     Double,
     Native,
     Like(Value),
+}
+
+#[derive(Clone)]
+struct MeanWeights {
+    storage: MeanWeightStorage,
+    shape: Vec<usize>,
+}
+
+#[derive(Clone)]
+enum MeanWeightStorage {
+    F64(Vec<f64>),
+    F32(Vec<f32>),
+}
+
+impl MeanWeights {
+    fn len(&self) -> usize {
+        match &self.storage {
+            MeanWeightStorage::F64(values) => values.len(),
+            MeanWeightStorage::F32(values) => values.len(),
+        }
+    }
+
+    fn f64_at(&self, index: usize) -> f64 {
+        match &self.storage {
+            MeanWeightStorage::F64(values) => values[index],
+            MeanWeightStorage::F32(values) => f64::from(values[index]),
+        }
+    }
+
+    fn f32_at(&self, index: usize) -> f32 {
+        match &self.storage {
+            MeanWeightStorage::F64(values) => values[index] as f32,
+            MeanWeightStorage::F32(values) => values[index],
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -389,6 +456,26 @@ impl InputMeta {
             Value::LogicalArray(_) => InputClass::Logical,
             Value::Bool(_) => InputClass::Bool,
             Value::Int(i) => InputClass::Integer(IntClass::from_int_value(i)),
+            Value::Tensor(tensor) => tensor
+                .integer_storage()
+                .map_or(InputClass::Double, |storage| {
+                    InputClass::Integer(IntClass::from_integer_storage(storage))
+                }),
+            Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle) => {
+                InputClass::Logical
+            }
+            Value::GpuTensor(handle) => {
+                if let Some(element_type) = runmat_accelerate_api::handle_integer_type(handle) {
+                    InputClass::Integer(IntClass::from_element_type(element_type))
+                } else if matches!(
+                    runmat_accelerate_api::handle_storage(handle),
+                    runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+                ) {
+                    InputClass::Complex
+                } else {
+                    InputClass::Double
+                }
+            }
             _ => InputClass::Double,
         };
         let device = match value {
@@ -407,7 +494,15 @@ impl InputMeta {
 fn numeric_dtype_from_value(value: &Value) -> Option<NumericDType> {
     match value {
         Value::Tensor(t) => Some(t.numeric_dtype()),
+        Value::ComplexTensor(t) => Some(t.numeric_dtype()),
+        Value::Complex(_, _) => Some(NumericDType::F64),
         Value::GpuTensor(handle) => {
+            if runmat_accelerate_api::handle_is_logical(handle) {
+                return Some(NumericDType::F64);
+            }
+            if let Some(element_type) = runmat_accelerate_api::handle_integer_type(handle) {
+                return Some(IntClass::from_element_type(element_type).numeric_dtype());
+            }
             let precision = runmat_accelerate_api::handle_precision(handle).or_else(|| {
                 runmat_accelerate_api::provider_for_handle(handle)
                     .map(|provider| provider.precision())
@@ -428,6 +523,19 @@ fn precision_to_dtype(precision: ProviderPrecision) -> NumericDType {
 }
 
 impl IntClass {
+    fn from_integer_storage(storage: &IntegerStorage) -> Self {
+        match storage {
+            IntegerStorage::I8(_) => IntClass::I8,
+            IntegerStorage::I16(_) => IntClass::I16,
+            IntegerStorage::I32(_) => IntClass::I32,
+            IntegerStorage::I64(_) => IntClass::I64,
+            IntegerStorage::U8(_) => IntClass::U8,
+            IntegerStorage::U16(_) => IntClass::U16,
+            IntegerStorage::U32(_) => IntClass::U32,
+            IntegerStorage::U64(_) => IntClass::U64,
+        }
+    }
+
     fn from_int_value(value: &IntValue) -> Self {
         match value {
             IntValue::I8(_) => IntClass::I8,
@@ -441,28 +549,30 @@ impl IntClass {
         }
     }
 
-    fn to_value(self, scalar: f64) -> BuiltinResult<Value> {
-        if scalar.is_nan() {
-            return Err(mean_internal_error(
-                "mean: cannot represent NaN as an integer output",
-            ));
+    fn from_element_type(value: runmat_accelerate_api::IntegerElementType) -> Self {
+        match value {
+            runmat_accelerate_api::IntegerElementType::I8 => IntClass::I8,
+            runmat_accelerate_api::IntegerElementType::I16 => IntClass::I16,
+            runmat_accelerate_api::IntegerElementType::I32 => IntClass::I32,
+            runmat_accelerate_api::IntegerElementType::I64 => IntClass::I64,
+            runmat_accelerate_api::IntegerElementType::U8 => IntClass::U8,
+            runmat_accelerate_api::IntegerElementType::U16 => IntClass::U16,
+            runmat_accelerate_api::IntegerElementType::U32 => IntClass::U32,
+            runmat_accelerate_api::IntegerElementType::U64 => IntClass::U64,
         }
-        let rounded = scalar.round();
-        if !rounded.is_finite() {
-            return Err(mean_internal_error(
-                "mean: integer output overflowed the target type",
-            ));
+    }
+
+    fn numeric_dtype(self) -> NumericDType {
+        match self {
+            IntClass::I8 => NumericDType::I8,
+            IntClass::I16 => NumericDType::I16,
+            IntClass::I32 => NumericDType::I32,
+            IntClass::I64 => NumericDType::I64,
+            IntClass::U8 => NumericDType::U8,
+            IntClass::U16 => NumericDType::U16,
+            IntClass::U32 => NumericDType::U32,
+            IntClass::U64 => NumericDType::U64,
         }
-        Ok(match self {
-            IntClass::I8 => Value::Int(IntValue::I8(rounded as i8)),
-            IntClass::I16 => Value::Int(IntValue::I16(rounded as i16)),
-            IntClass::I32 => Value::Int(IntValue::I32(rounded as i32)),
-            IntClass::I64 => Value::Int(IntValue::I64(rounded as i64)),
-            IntClass::U8 => Value::Int(IntValue::U8(rounded as u8)),
-            IntClass::U16 => Value::Int(IntValue::U16(rounded as u16)),
-            IntClass::U32 => Value::Int(IntValue::U32(rounded as u32)),
-            IntClass::U64 => Value::Int(IntValue::U64(rounded as u64)),
-        })
     }
 }
 
@@ -532,6 +642,19 @@ fn mean_native_integer(value: &Value, parsed: &ParsedArguments) -> BuiltinResult
         }
         _ => return Ok(None),
     };
+    if let Some(weights) = parsed.weights.as_ref() {
+        let dim = match &parsed.axes {
+            MeanAxes::Default => default_dimension_from_shape(&shape),
+            MeanAxes::Dim(dim) => *dim,
+            MeanAxes::Vec(_) | MeanAxes::All => {
+                return Err(mean_invalid_argument(
+                    "mean: Weights cannot be combined with vecdim or 'all'",
+                ));
+            }
+        };
+        let result = weighted_integer_mean(&storage, &shape, dim, weights)?;
+        return Ok(Some(tensor::tensor_into_value(result)));
+    }
     let dims = resolve_native_dims(&shape, &parsed.axes)?;
     crate::builtins::math::reduction::integer_native::mean(&storage, &shape, &dims)
         .map(Some)
@@ -542,6 +665,32 @@ async fn mean_native_integer_gpu(
     handle: GpuTensorHandle,
     parsed: &ParsedArguments,
 ) -> BuiltinResult<Value> {
+    if let Some(weights) = parsed.weights.as_ref() {
+        let provider = runmat_accelerate_api::provider_for_handle(&handle).ok_or_else(|| {
+            mean_internal_error("mean: native integer gpuArray requires an acceleration provider")
+        })?;
+        let gathered = gpu_helpers::gather_tensor_async(&handle).await?;
+        let storage = gathered
+            .integer_storage()
+            .cloned()
+            .ok_or_else(|| mean_internal_error("mean: expected gathered integer storage"))?;
+        let dim = match &parsed.axes {
+            MeanAxes::Default => default_dimension_from_shape(&gathered.shape),
+            MeanAxes::Dim(dim) => *dim,
+            MeanAxes::Vec(_) | MeanAxes::All => {
+                return Err(mean_invalid_argument(
+                    "mean: Weights cannot be combined with vecdim or 'all'",
+                ));
+            }
+        };
+        let result = weighted_integer_mean(&storage, &gathered.shape, dim, weights)?;
+        let uploaded = gpu_helpers::upload_tensor(provider, &result).map_err(|error| {
+            mean_internal_error(format!(
+                "mean: failed to upload weighted native result: {error}"
+            ))
+        })?;
+        return Ok(Value::GpuTensor(uploaded));
+    }
     let dims = resolve_native_dims(&handle.shape, &parsed.axes)?;
     if dims.is_empty() {
         return Ok(Value::GpuTensor(handle));
@@ -612,8 +761,9 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     let mut axes = MeanAxes::Default;
     let mut axes_set = false;
     let mut nan_mode = ReductionNaN::Include;
-    let mut output = OutputTemplate::Double;
+    let mut output = OutputTemplate::Default;
     let mut output_set = false;
+    let mut weights = None;
     let tokens = tokens_from_values(args);
 
     let mut idx = 0;
@@ -621,12 +771,25 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
         let arg = &args[idx];
         if let Some(crate::builtins::common::arg_tokens::ArgToken::String(text)) = tokens.get(idx) {
             match text.as_str() {
-                "omitnan" => {
+                "weights" => {
+                    if weights.is_some() {
+                        return Err(mean_invalid_argument(
+                            "mean: Weights may be specified only once",
+                        ));
+                    }
+                    let value = args
+                        .get(idx + 1)
+                        .ok_or_else(|| mean_invalid_argument("mean: Weights requires a value"))?;
+                    weights = Some(parse_weights(value).await?);
+                    idx += 2;
+                    continue;
+                }
+                "omitnan" | "omitmissing" => {
                     nan_mode = ReductionNaN::Omit;
                     idx += 1;
                     continue;
                 }
-                "includenan" => {
+                "includenan" | "includemissing" => {
                     nan_mode = ReductionNaN::Include;
                     idx += 1;
                     continue;
@@ -647,12 +810,25 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
         }
         if let Some(keyword) = keyword_of(arg) {
             match keyword.as_str() {
-                "omitnan" => {
+                "weights" => {
+                    if weights.is_some() {
+                        return Err(mean_invalid_argument(
+                            "mean: Weights may be specified only once",
+                        ));
+                    }
+                    let value = args
+                        .get(idx + 1)
+                        .ok_or_else(|| mean_invalid_argument("mean: Weights requires a value"))?;
+                    weights = Some(parse_weights(value).await?);
+                    idx += 2;
+                    continue;
+                }
+                "omitnan" | "omitmissing" => {
                     nan_mode = ReductionNaN::Omit;
                     idx += 1;
                     continue;
                 }
-                "includenan" => {
+                "includenan" | "includemissing" => {
                     nan_mode = ReductionNaN::Include;
                     idx += 1;
                     continue;
@@ -668,7 +844,18 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                     idx += 1;
                     continue;
                 }
-                "double" | "default" => {
+                "default" => {
+                    if output_set {
+                        return Err(mean_invalid_argument(
+                            "mean: multiple output class specifications provided",
+                        ));
+                    }
+                    output = OutputTemplate::Default;
+                    output_set = true;
+                    idx += 1;
+                    continue;
+                }
+                "double" => {
                     if output_set {
                         return Err(mean_invalid_argument(
                             "mean: multiple output class specifications provided",
@@ -749,11 +936,62 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
         )));
     }
 
+    if weights.is_some() && matches!(axes, MeanAxes::Vec(_) | MeanAxes::All) {
+        return Err(mean_invalid_argument(
+            "mean: Weights cannot be combined with vecdim or 'all'",
+        ));
+    }
+
     Ok(ParsedArguments {
         axes,
         nan_mode,
         output,
+        weights,
     })
+}
+
+async fn parse_weights(value: &Value) -> BuiltinResult<MeanWeights> {
+    let tensor = match value {
+        Value::Num(value) => Tensor::new(vec![*value], vec![1, 1])
+            .map_err(|error| mean_internal_error(format!("mean: {error}")))?,
+        Value::Tensor(tensor) => tensor.clone(),
+        Value::GpuTensor(handle) => {
+            if runmat_accelerate_api::handle_integer_type(handle).is_some()
+                || runmat_accelerate_api::handle_is_logical(handle)
+            {
+                return Err(mean_invalid_argument(
+                    "mean: Weights must be single or double",
+                ));
+            }
+            gpu_helpers::gather_tensor_async(handle).await?
+        }
+        _ => {
+            return Err(mean_invalid_argument(
+                "mean: Weights must be a single- or double-precision numeric array",
+            ));
+        }
+    };
+    let shape = tensor.shape.clone();
+    let storage = match tensor.into_numeric_storage().map_err(mean_internal_error)? {
+        NumericStorage::F64(values) => MeanWeightStorage::F64(values),
+        NumericStorage::F32(values) => MeanWeightStorage::F32(values),
+        _ => {
+            return Err(mean_invalid_argument(
+                "mean: Weights must be single or double",
+            ));
+        }
+    };
+    let weights = MeanWeights { storage, shape };
+    for index in 0..weights.len() {
+        let weight = weights.f64_at(index);
+        if weight.is_nan() || weight < 0.0 {
+            return Err(mean_invalid_argument(format!(
+                "mean: Weights must contain nonnegative values (index {})",
+                index + 1
+            )));
+        }
+    }
+    Ok(weights)
 }
 
 async fn parse_axes(value: &Value) -> BuiltinResult<Option<MeanAxes>> {
@@ -761,7 +999,8 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<MeanAxes>> {
         let lowered = text.trim().to_ascii_lowercase();
         return match lowered.as_str() {
             "all" => Ok(Some(MeanAxes::All)),
-            "omitnan" | "includenan" | "double" | "native" | "default" | "like" => Ok(None),
+            "omitnan" | "includenan" | "omitmissing" | "includemissing" | "double" | "native"
+            | "default" | "like" | "weights" => Ok(None),
             "" => Err(mean_invalid_argument(
                 "mean: dimension string must not be empty",
             )),
@@ -846,9 +1085,666 @@ fn map_dims_error(message: String, scalar: bool) -> RuntimeError {
     mean_invalid_argument("mean: dimension entries must be finite integers")
 }
 
+#[derive(Clone, Copy)]
+enum WeightLayout {
+    Vector,
+    Full,
+}
+
+fn weighted_dimension(shape: &[usize], axes: &MeanAxes) -> BuiltinResult<usize> {
+    match axes {
+        MeanAxes::Default => Ok(default_dimension_from_shape(shape)),
+        MeanAxes::Dim(dim) => Ok(*dim),
+        MeanAxes::Vec(_) | MeanAxes::All => Err(mean_invalid_argument(
+            "mean: Weights cannot be combined with vecdim or 'all'",
+        )),
+    }
+}
+
+fn weighted_computation_dtype(input: NumericDType, output: &OutputTemplate) -> NumericDType {
+    match output {
+        OutputTemplate::Double | OutputTemplate::Like(_) => NumericDType::F64,
+        OutputTemplate::Default => {
+            if input == NumericDType::F32 {
+                NumericDType::F32
+            } else {
+                NumericDType::F64
+            }
+        }
+        OutputTemplate::Native => input,
+    }
+}
+
+fn validate_weight_shape(
+    weights: &MeanWeights,
+    input_shape: &[usize],
+    reduce_len: usize,
+) -> BuiltinResult<WeightLayout> {
+    if is_vector_shape(&weights.shape) {
+        if weights.len() != reduce_len {
+            return Err(mean_invalid_argument(format!(
+                "mean: vector Weights length {} must match operating dimension length {reduce_len}",
+                weights.len()
+            )));
+        }
+        return Ok(WeightLayout::Vector);
+    }
+    if !matlab_shape_equal(&weights.shape, input_shape) {
+        return Err(mean_invalid_argument(format!(
+            "mean: nonvector Weights shape {:?} must match input shape {:?}",
+            weights.shape, input_shape
+        )));
+    }
+    Ok(WeightLayout::Full)
+}
+
+fn is_vector_shape(shape: &[usize]) -> bool {
+    match shape {
+        [] | [_] => true,
+        [rows, cols] => *rows == 1 || *cols == 1,
+        _ => false,
+    }
+}
+
+fn matlab_shape_equal(left: &[usize], right: &[usize]) -> bool {
+    let rank = left.len().max(right.len());
+    (0..rank).all(|index| {
+        left.get(index).copied().unwrap_or(1) == right.get(index).copied().unwrap_or(1)
+    })
+}
+
+fn normalized_weight_f64(weight: f64, scale: f64) -> f64 {
+    if scale.is_infinite() {
+        if weight.is_infinite() {
+            1.0
+        } else {
+            0.0
+        }
+    } else {
+        weight / scale
+    }
+}
+
+fn normalized_weight_f32(weight: f32, scale: f32) -> f32 {
+    if scale.is_infinite() {
+        if weight.is_infinite() {
+            1.0
+        } else {
+            0.0
+        }
+    } else {
+        weight / scale
+    }
+}
+
+fn weighted_real_mean(
+    tensor: &Tensor,
+    dim: usize,
+    nan_mode: ReductionNaN,
+    weights: &MeanWeights,
+    dtype: NumericDType,
+) -> BuiltinResult<Tensor> {
+    if dim == 0 {
+        return Err(mean_invalid_argument("mean: dimension must be >= 1"));
+    }
+    let reduce_len = if dim <= tensor.shape.len() {
+        tensor.shape[dim - 1]
+    } else {
+        1
+    };
+    let layout = validate_weight_shape(weights, &tensor.shape, reduce_len)?;
+    if dim > tensor.shape.len() {
+        return Ok(tensor::coerce_tensor_dtype(tensor.clone(), dtype));
+    }
+    let output_shape = reduction_shape(&tensor.shape, dim).unwrap_or_else(|| tensor.shape.clone());
+    if reduce_len == 0 || tensor.is_empty() {
+        return match dtype {
+            NumericDType::F32 => Tensor::from_f32(
+                vec![f32::NAN; tensor::element_count(&output_shape)],
+                output_shape,
+            ),
+            _ => Tensor::new(
+                vec![f64::NAN; tensor::element_count(&output_shape)],
+                output_shape,
+            ),
+        }
+        .map_err(|error| mean_internal_error(format!("mean: {error}")));
+    }
+
+    match dtype {
+        NumericDType::F32 => {
+            weighted_real_mean_f32(tensor, dim, nan_mode, weights, layout, output_shape)
+        }
+        _ => weighted_real_mean_f64(tensor, dim, nan_mode, weights, layout, output_shape),
+    }
+}
+
+fn weighted_real_mean_f64(
+    tensor: &Tensor,
+    dim: usize,
+    nan_mode: ReductionNaN,
+    weights: &MeanWeights,
+    layout: WeightLayout,
+    output_shape: Vec<usize>,
+) -> BuiltinResult<Tensor> {
+    let dim_index = dim - 1;
+    let reduce_len = tensor.shape[dim_index];
+    let stride_before = dim_product(&tensor.shape[..dim_index]);
+    let stride_after = dim_product(&tensor.shape[dim..]);
+    let mut output = Vec::with_capacity(tensor::element_count(&output_shape));
+
+    for after in 0..stride_after {
+        for before in 0..stride_before {
+            let mut candidates = Vec::with_capacity(reduce_len);
+            let mut saw_missing = false;
+            for k in 0..reduce_len {
+                let index = before + k * stride_before + after * stride_before * reduce_len;
+                let value = tensor
+                    .numeric_value_at(index)
+                    .expect("weighted mean index is in bounds");
+                if numeric_scalar_is_nan(value) {
+                    saw_missing = true;
+                    if nan_mode == ReductionNaN::Include {
+                        break;
+                    }
+                    continue;
+                }
+                let weight_index = match layout {
+                    WeightLayout::Vector => k,
+                    WeightLayout::Full => index,
+                };
+                candidates.push((value, weights.f64_at(weight_index)));
+            }
+            if saw_missing && nan_mode == ReductionNaN::Include {
+                output.push(f64::NAN);
+                continue;
+            }
+            let scale = candidates
+                .iter()
+                .map(|(_, weight)| *weight)
+                .fold(0.0_f64, f64::max);
+            if candidates.is_empty() || scale == 0.0 {
+                output.push(f64::NAN);
+                continue;
+            }
+            let anchor = candidates[0].0;
+            let mut total = 0.0;
+            let mut delta = 0.0;
+            for (value, weight) in candidates {
+                let weight = normalized_weight_f64(weight, scale);
+                total += weight;
+                delta += weight * numeric_scalar_difference_f64(value, anchor);
+            }
+            output.push(numeric_scalar_to_f64(anchor) + delta / total);
+        }
+    }
+    Tensor::new(output, output_shape).map_err(|error| mean_internal_error(format!("mean: {error}")))
+}
+
+fn weighted_real_mean_f32(
+    tensor: &Tensor,
+    dim: usize,
+    nan_mode: ReductionNaN,
+    weights: &MeanWeights,
+    layout: WeightLayout,
+    output_shape: Vec<usize>,
+) -> BuiltinResult<Tensor> {
+    let dim_index = dim - 1;
+    let reduce_len = tensor.shape[dim_index];
+    let stride_before = dim_product(&tensor.shape[..dim_index]);
+    let stride_after = dim_product(&tensor.shape[dim..]);
+    let mut output = Vec::with_capacity(tensor::element_count(&output_shape));
+
+    for after in 0..stride_after {
+        for before in 0..stride_before {
+            let mut candidates = Vec::with_capacity(reduce_len);
+            let mut saw_missing = false;
+            for k in 0..reduce_len {
+                let index = before + k * stride_before + after * stride_before * reduce_len;
+                let value = tensor
+                    .numeric_value_at(index)
+                    .expect("weighted mean index is in bounds");
+                let value = numeric_scalar_to_f32(value);
+                if value.is_nan() {
+                    saw_missing = true;
+                    if nan_mode == ReductionNaN::Include {
+                        break;
+                    }
+                    continue;
+                }
+                let weight_index = match layout {
+                    WeightLayout::Vector => k,
+                    WeightLayout::Full => index,
+                };
+                candidates.push((value, weights.f32_at(weight_index)));
+            }
+            if saw_missing && nan_mode == ReductionNaN::Include {
+                output.push(f32::NAN);
+                continue;
+            }
+            let scale = candidates
+                .iter()
+                .map(|(_, weight)| *weight)
+                .fold(0.0_f32, f32::max);
+            if candidates.is_empty() || scale == 0.0 {
+                output.push(f32::NAN);
+                continue;
+            }
+            let anchor = candidates[0].0;
+            let mut total = 0.0_f32;
+            let mut delta = 0.0_f32;
+            for (value, weight) in candidates {
+                let weight = normalized_weight_f32(weight, scale);
+                total += weight;
+                delta += weight * (value - anchor);
+            }
+            output.push(anchor + delta / total);
+        }
+    }
+    Tensor::from_f32(output, output_shape)
+        .map_err(|error| mean_internal_error(format!("mean: {error}")))
+}
+
+fn numeric_scalar_is_nan(value: NumericScalar) -> bool {
+    match value {
+        NumericScalar::F64(value) => value.is_nan(),
+        NumericScalar::F32(value) => value.is_nan(),
+        NumericScalar::I8(_)
+        | NumericScalar::I16(_)
+        | NumericScalar::I32(_)
+        | NumericScalar::I64(_)
+        | NumericScalar::U8(_)
+        | NumericScalar::U16(_)
+        | NumericScalar::U32(_)
+        | NumericScalar::U64(_) => false,
+    }
+}
+
+fn numeric_scalar_to_f64(value: NumericScalar) -> f64 {
+    match value {
+        NumericScalar::F64(value) => value,
+        NumericScalar::F32(value) => f64::from(value),
+        value => value
+            .into_int_value()
+            .expect("nonfloating numeric scalar is integer")
+            .to_f64(),
+    }
+}
+
+fn numeric_scalar_to_f32(value: NumericScalar) -> f32 {
+    match value {
+        NumericScalar::F64(value) => value as f32,
+        NumericScalar::F32(value) => value,
+        value => value
+            .into_int_value()
+            .expect("nonfloating numeric scalar is integer")
+            .to_f64() as f32,
+    }
+}
+
+fn numeric_scalar_difference_f64(value: NumericScalar, anchor: NumericScalar) -> f64 {
+    match (value, anchor) {
+        (NumericScalar::I8(value), NumericScalar::I8(anchor)) => {
+            f64::from(value as i16 - anchor as i16)
+        }
+        (NumericScalar::I16(value), NumericScalar::I16(anchor)) => {
+            f64::from(value as i32 - anchor as i32)
+        }
+        (NumericScalar::I32(value), NumericScalar::I32(anchor)) => {
+            (value as i64 - anchor as i64) as f64
+        }
+        (NumericScalar::I64(value), NumericScalar::I64(anchor)) => {
+            (value as i128 - anchor as i128) as f64
+        }
+        (NumericScalar::U8(value), NumericScalar::U8(anchor)) => {
+            f64::from(value as i16 - anchor as i16)
+        }
+        (NumericScalar::U16(value), NumericScalar::U16(anchor)) => {
+            f64::from(value as i32 - anchor as i32)
+        }
+        (NumericScalar::U32(value), NumericScalar::U32(anchor)) => {
+            (value as i64 - anchor as i64) as f64
+        }
+        (NumericScalar::U64(value), NumericScalar::U64(anchor)) => {
+            (value as i128 - anchor as i128) as f64
+        }
+        _ => numeric_scalar_to_f64(value) - numeric_scalar_to_f64(anchor),
+    }
+}
+
+fn weighted_integer_mean(
+    storage: &IntegerStorage,
+    shape: &[usize],
+    dim: usize,
+    weights: &MeanWeights,
+) -> BuiltinResult<Tensor> {
+    if dim == 0 {
+        return Err(mean_invalid_argument("mean: dimension must be >= 1"));
+    }
+    let reduce_len = if dim <= shape.len() {
+        shape[dim - 1]
+    } else {
+        1
+    };
+    let layout = validate_weight_shape(weights, shape, reduce_len)?;
+    if dim > shape.len() || reduce_len == 1 {
+        return Tensor::new_integer(storage.clone(), shape.to_vec())
+            .map_err(|error| mean_internal_error(format!("mean: {error}")));
+    }
+    let output_shape = reduction_shape(shape, dim).unwrap_or_else(|| shape.to_vec());
+    if reduce_len == 0 || storage.is_empty() {
+        return Tensor::new_integer(
+            storage.zeros_like(tensor::element_count(&output_shape)),
+            output_shape,
+        )
+        .map_err(|error| mean_internal_error(format!("mean: {error}")));
+    }
+
+    let dim_index = dim - 1;
+    let stride_before = dim_product(&shape[..dim_index]);
+    let stride_after = dim_product(&shape[dim..]);
+    let exact = storage.exact_values();
+    let mut output = Vec::with_capacity(tensor::element_count(&output_shape));
+    for after in 0..stride_after {
+        for before in 0..stride_before {
+            let mut candidates = Vec::with_capacity(reduce_len);
+            for k in 0..reduce_len {
+                let index = before + k * stride_before + after * stride_before * reduce_len;
+                let weight_index = match layout {
+                    WeightLayout::Vector => k,
+                    WeightLayout::Full => index,
+                };
+                candidates.push((
+                    int_value_to_i128(&exact[index]),
+                    weights.f64_at(weight_index),
+                ));
+            }
+            output.push(weighted_integer_value(
+                &candidates,
+                exact.first().expect("nonempty integer storage"),
+            ));
+        }
+    }
+    let output = storage
+        .from_same_class_values(output)
+        .map_err(mean_internal_error)?;
+    Tensor::new_integer(output, output_shape)
+        .map_err(|error| mean_internal_error(format!("mean: {error}")))
+}
+
+fn weighted_integer_value(candidates: &[(i128, f64)], prototype: &IntValue) -> IntValue {
+    let scale = candidates
+        .iter()
+        .map(|(_, weight)| *weight)
+        .fold(0.0_f64, f64::max);
+    if scale == 0.0 {
+        return integer_value_from_i128_like(prototype, 0);
+    }
+    let anchor = candidates[0].0;
+    let mut total = 0.0;
+    let mut delta = 0.0;
+    for &(value, weight) in candidates {
+        let weight = normalized_weight_f64(weight, scale);
+        total += weight;
+        delta += weight * (value - anchor) as f64;
+    }
+    let delta = delta / total;
+    let final_is_nonnegative = anchor as f64 + delta >= 0.0;
+    let rounded_offset = if final_is_nonnegative {
+        (delta + 0.5).floor()
+    } else {
+        (delta - 0.5).ceil()
+    };
+    let rounded = anchor.saturating_add(rounded_offset as i128);
+    integer_value_from_i128_like(prototype, rounded)
+}
+
+fn int_value_to_i128(value: &IntValue) -> i128 {
+    match value {
+        IntValue::I8(value) => i128::from(*value),
+        IntValue::I16(value) => i128::from(*value),
+        IntValue::I32(value) => i128::from(*value),
+        IntValue::I64(value) => i128::from(*value),
+        IntValue::U8(value) => i128::from(*value),
+        IntValue::U16(value) => i128::from(*value),
+        IntValue::U32(value) => i128::from(*value),
+        IntValue::U64(value) => i128::from(*value),
+    }
+}
+
+fn integer_value_from_i128_like(prototype: &IntValue, value: i128) -> IntValue {
+    match prototype {
+        IntValue::I8(_) => IntValue::I8(value.clamp(i8::MIN as i128, i8::MAX as i128) as i8),
+        IntValue::I16(_) => IntValue::I16(value.clamp(i16::MIN as i128, i16::MAX as i128) as i16),
+        IntValue::I32(_) => IntValue::I32(value.clamp(i32::MIN as i128, i32::MAX as i128) as i32),
+        IntValue::I64(_) => IntValue::I64(value.clamp(i64::MIN as i128, i64::MAX as i128) as i64),
+        IntValue::U8(_) => IntValue::U8(value.clamp(0, u8::MAX as i128) as u8),
+        IntValue::U16(_) => IntValue::U16(value.clamp(0, u16::MAX as i128) as u16),
+        IntValue::U32(_) => IntValue::U32(value.clamp(0, u32::MAX as i128) as u32),
+        IntValue::U64(_) => IntValue::U64(value.clamp(0, u64::MAX as i128) as u64),
+    }
+}
+
+fn weighted_complex_mean(
+    tensor: &ComplexTensor,
+    dim: usize,
+    nan_mode: ReductionNaN,
+    weights: &MeanWeights,
+    dtype: NumericDType,
+) -> BuiltinResult<ComplexTensor> {
+    if dim == 0 {
+        return Err(mean_invalid_argument("mean: dimension must be >= 1"));
+    }
+    let reduce_len = if dim <= tensor.shape.len() {
+        tensor.shape[dim - 1]
+    } else {
+        1
+    };
+    let layout = validate_weight_shape(weights, &tensor.shape, reduce_len)?;
+    if dim > tensor.shape.len() {
+        return coerce_complex_tensor_dtype(tensor.clone(), dtype);
+    }
+    let output_shape = reduction_shape(&tensor.shape, dim).unwrap_or_else(|| tensor.shape.clone());
+    if reduce_len == 0 || tensor.is_empty() {
+        return match dtype {
+            NumericDType::F32 => ComplexTensor::from_f32(
+                vec![(f32::NAN, f32::NAN); tensor::element_count(&output_shape)],
+                output_shape,
+            ),
+            _ => ComplexTensor::new(
+                vec![(f64::NAN, f64::NAN); tensor::element_count(&output_shape)],
+                output_shape,
+            ),
+        }
+        .map_err(|error| mean_internal_error(format!("mean: {error}")));
+    }
+    match dtype {
+        NumericDType::F32 => {
+            weighted_complex_mean_f32(tensor, dim, nan_mode, weights, layout, output_shape)
+        }
+        _ => weighted_complex_mean_f64(tensor, dim, nan_mode, weights, layout, output_shape),
+    }
+}
+
+fn weighted_complex_mean_f64(
+    tensor: &ComplexTensor,
+    dim: usize,
+    nan_mode: ReductionNaN,
+    weights: &MeanWeights,
+    layout: WeightLayout,
+    output_shape: Vec<usize>,
+) -> BuiltinResult<ComplexTensor> {
+    let dim_index = dim - 1;
+    let reduce_len = tensor.shape[dim_index];
+    let stride_before = dim_product(&tensor.shape[..dim_index]);
+    let stride_after = dim_product(&tensor.shape[dim..]);
+    let mut output = Vec::with_capacity(tensor::element_count(&output_shape));
+    for after in 0..stride_after {
+        for before in 0..stride_before {
+            let mut candidates = Vec::with_capacity(reduce_len);
+            let mut saw_missing = false;
+            for k in 0..reduce_len {
+                let index = before + k * stride_before + after * stride_before * reduce_len;
+                let (real, imag) = tensor
+                    .numeric_value_at(index)
+                    .expect("weighted complex mean index is in bounds");
+                let real = numeric_scalar_to_f64(real);
+                let imag = numeric_scalar_to_f64(imag);
+                if real.is_nan() || imag.is_nan() {
+                    saw_missing = true;
+                    if nan_mode == ReductionNaN::Include {
+                        break;
+                    }
+                    continue;
+                }
+                let weight_index = match layout {
+                    WeightLayout::Vector => k,
+                    WeightLayout::Full => index,
+                };
+                candidates.push(((real, imag), weights.f64_at(weight_index)));
+            }
+            if saw_missing && nan_mode == ReductionNaN::Include {
+                output.push((f64::NAN, f64::NAN));
+                continue;
+            }
+            let scale = candidates
+                .iter()
+                .map(|(_, weight)| *weight)
+                .fold(0.0_f64, f64::max);
+            if candidates.is_empty() || scale == 0.0 {
+                output.push((f64::NAN, f64::NAN));
+                continue;
+            }
+            let anchor = candidates[0].0;
+            let mut total = 0.0;
+            let mut delta_real = 0.0;
+            let mut delta_imag = 0.0;
+            for ((real, imag), weight) in candidates {
+                let weight = normalized_weight_f64(weight, scale);
+                total += weight;
+                delta_real += weight * (real - anchor.0);
+                delta_imag += weight * (imag - anchor.1);
+            }
+            output.push((anchor.0 + delta_real / total, anchor.1 + delta_imag / total));
+        }
+    }
+    ComplexTensor::new(output, output_shape)
+        .map_err(|error| mean_internal_error(format!("mean: {error}")))
+}
+
+fn weighted_complex_mean_f32(
+    tensor: &ComplexTensor,
+    dim: usize,
+    nan_mode: ReductionNaN,
+    weights: &MeanWeights,
+    layout: WeightLayout,
+    output_shape: Vec<usize>,
+) -> BuiltinResult<ComplexTensor> {
+    let dim_index = dim - 1;
+    let reduce_len = tensor.shape[dim_index];
+    let stride_before = dim_product(&tensor.shape[..dim_index]);
+    let stride_after = dim_product(&tensor.shape[dim..]);
+    let mut output = Vec::with_capacity(tensor::element_count(&output_shape));
+    for after in 0..stride_after {
+        for before in 0..stride_before {
+            let mut candidates = Vec::with_capacity(reduce_len);
+            let mut saw_missing = false;
+            for k in 0..reduce_len {
+                let index = before + k * stride_before + after * stride_before * reduce_len;
+                let (real, imag) = tensor
+                    .numeric_value_at(index)
+                    .expect("weighted complex mean index is in bounds");
+                let real = numeric_scalar_to_f32(real);
+                let imag = numeric_scalar_to_f32(imag);
+                if real.is_nan() || imag.is_nan() {
+                    saw_missing = true;
+                    if nan_mode == ReductionNaN::Include {
+                        break;
+                    }
+                    continue;
+                }
+                let weight_index = match layout {
+                    WeightLayout::Vector => k,
+                    WeightLayout::Full => index,
+                };
+                candidates.push(((real, imag), weights.f32_at(weight_index)));
+            }
+            if saw_missing && nan_mode == ReductionNaN::Include {
+                output.push((f32::NAN, f32::NAN));
+                continue;
+            }
+            let scale = candidates
+                .iter()
+                .map(|(_, weight)| *weight)
+                .fold(0.0_f32, f32::max);
+            if candidates.is_empty() || scale == 0.0 {
+                output.push((f32::NAN, f32::NAN));
+                continue;
+            }
+            let anchor = candidates[0].0;
+            let mut total = 0.0_f32;
+            let mut delta_real = 0.0_f32;
+            let mut delta_imag = 0.0_f32;
+            for ((real, imag), weight) in candidates {
+                let weight = normalized_weight_f32(weight, scale);
+                total += weight;
+                delta_real += weight * (real - anchor.0);
+                delta_imag += weight * (imag - anchor.1);
+            }
+            output.push((anchor.0 + delta_real / total, anchor.1 + delta_imag / total));
+        }
+    }
+    ComplexTensor::from_f32(output, output_shape)
+        .map_err(|error| mean_internal_error(format!("mean: {error}")))
+}
+
+fn coerce_complex_tensor_dtype(
+    tensor: ComplexTensor,
+    dtype: NumericDType,
+) -> BuiltinResult<ComplexTensor> {
+    let shape = tensor.shape.clone();
+    match (tensor.into_complex_storage(), dtype) {
+        (ComplexStorage::F64(values), NumericDType::F64) => {
+            ComplexTensor::new(values, shape).map_err(mean_internal_error)
+        }
+        (ComplexStorage::F32(values), NumericDType::F32) => {
+            ComplexTensor::from_f32(values, shape).map_err(mean_internal_error)
+        }
+        (ComplexStorage::F32(values), NumericDType::F64) => ComplexTensor::new(
+            values
+                .into_iter()
+                .map(|(real, imag)| (f64::from(real), f64::from(imag)))
+                .collect(),
+            shape,
+        )
+        .map_err(mean_internal_error),
+        (ComplexStorage::F64(values), NumericDType::F32) => ComplexTensor::from_f32(
+            values
+                .into_iter()
+                .map(|(real, imag)| (real as f32, imag as f32))
+                .collect(),
+            shape,
+        )
+        .map_err(mean_internal_error),
+        (ComplexStorage::Integer(_), _) => Err(mean_invalid_input(
+            "mean: complex integer input is not supported",
+        )),
+        (_, dtype) => Err(mean_invalid_argument(format!(
+            "mean: complex output cannot use {}",
+            dtype.class_name()
+        ))),
+    }
+}
+
 fn mean_host(value: Value, args: &ParsedArguments) -> BuiltinResult<Value> {
     let tensor = tensor::value_into_tensor_for("mean", value).map_err(mean_invalid_input)?;
-    let reduced = mean_tensor(tensor, args.axes.clone(), args.nan_mode)?;
+    let reduced = if let Some(weights) = args.weights.as_ref() {
+        let dim = weighted_dimension(&tensor.shape, &args.axes)?;
+        let dtype = weighted_computation_dtype(tensor.numeric_dtype(), &args.output);
+        weighted_real_mean(&tensor, dim, args.nan_mode, weights, dtype)?
+    } else {
+        mean_tensor(tensor, args.axes.clone(), args.nan_mode)?
+    };
     Ok(tensor::tensor_into_value(reduced))
 }
 
@@ -859,7 +1755,13 @@ fn mean_host_complex_scalar(re: f64, im: f64, args: &ParsedArguments) -> Builtin
 }
 
 fn mean_host_complex_tensor(tensor: ComplexTensor, args: &ParsedArguments) -> BuiltinResult<Value> {
-    let reduced = mean_complex_tensor(tensor, args.axes.clone(), args.nan_mode)?;
+    let reduced = if let Some(weights) = args.weights.as_ref() {
+        let dim = weighted_dimension(&tensor.shape, &args.axes)?;
+        let dtype = weighted_computation_dtype(tensor.numeric_dtype(), &args.output);
+        weighted_complex_mean(&tensor, dim, args.nan_mode, weights, dtype)?
+    } else {
+        mean_complex_tensor(tensor, args.axes.clone(), args.nan_mode)?
+    };
     Ok(complex_tensor_into_value(reduced))
 }
 
@@ -871,6 +1773,47 @@ async fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinRes
                 runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
             );
         }
+    }
+    if let Some(weights) = args.weights.as_ref() {
+        let provider = runmat_accelerate_api::provider_for_handle(&handle)
+            .or_else(runmat_accelerate_api::provider)
+            .ok_or_else(|| mean_internal_error("mean: GPU input has no owning provider"))?;
+        if runmat_accelerate_api::handle_storage(&handle)
+            == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            let gathered = dispatcher::gather_if_needed_async(&Value::GpuTensor(handle.clone()))
+                .await
+                .map_err(|error| mean_internal_error(format!("mean: {error}")))?;
+            let Value::ComplexTensor(gathered) = gathered else {
+                return Err(mean_internal_error(
+                    "mean: expected gathered complex GPU storage",
+                ));
+            };
+            let dim = weighted_dimension(&gathered.shape, &args.axes)?;
+            let input_dtype = numeric_dtype_from_value(&Value::GpuTensor(handle))
+                .unwrap_or_else(|| gathered.numeric_dtype());
+            let dtype = weighted_computation_dtype(input_dtype, &args.output);
+            let reduced = weighted_complex_mean(&gathered, dim, args.nan_mode, weights, dtype)?;
+            let uploaded =
+                gpu_helpers::upload_complex_tensor(provider, &reduced).map_err(|error| {
+                    mean_internal_error(format!(
+                        "mean: failed to upload weighted complex GPU result: {error}"
+                    ))
+                })?;
+            return Ok(Value::GpuTensor(uploaded));
+        }
+        let gathered = gpu_helpers::gather_tensor_async(&handle).await?;
+        let dim = weighted_dimension(&gathered.shape, &args.axes)?;
+        let input_dtype = numeric_dtype_from_value(&Value::GpuTensor(handle.clone()))
+            .unwrap_or_else(|| gathered.numeric_dtype());
+        let dtype = weighted_computation_dtype(input_dtype, &args.output);
+        let reduced = weighted_real_mean(&gathered, dim, args.nan_mode, weights, dtype)?;
+        let uploaded = gpu_helpers::upload_tensor(provider, &reduced).map_err(|error| {
+            mean_internal_error(format!(
+                "mean: failed to upload weighted GPU result: {error}"
+            ))
+        })?;
+        return Ok(Value::GpuTensor(uploaded));
     }
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         // Include-NaN: use provider reduce_mean_* hooks
@@ -1503,7 +2446,18 @@ async fn apply_output_template(
     meta: &InputMeta,
 ) -> BuiltinResult<Value> {
     match template {
-        OutputTemplate::Double => Ok(value),
+        OutputTemplate::Default => {
+            let value = if meta.numeric_dtype == Some(NumericDType::F32) {
+                coerce_value_to_dtype(value, NumericDType::F32).await?
+            } else {
+                value
+            };
+            ensure_device(value, meta.device).await
+        }
+        OutputTemplate::Double => {
+            let value = coerce_value_to_dtype(value, NumericDType::F64).await?;
+            ensure_device(value, meta.device).await
+        }
         OutputTemplate::Native => {
             let value = apply_native_template(value, meta).await?;
             ensure_device(value, meta.device).await
@@ -1514,13 +2468,7 @@ async fn apply_output_template(
 
 async fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<Value> {
     match meta.class {
-        InputClass::Integer(class) => match value {
-            Value::Num(n) => class.to_value(n),
-            Value::Tensor(t) if tensor::is_scalar_tensor(&t) => {
-                class.to_value(tensor::tensor_value_f64(&t, 0))
-            }
-            other => Ok(other),
-        },
+        InputClass::Integer(class) => coerce_value_to_dtype(value, class.numeric_dtype()).await,
         _ => {
             if let Some(dtype) = meta.numeric_dtype {
                 coerce_value_to_dtype(value, dtype).await
@@ -1532,40 +2480,62 @@ async fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<
 }
 
 async fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResult<Value> {
-    match dtype {
-        NumericDType::F64 => Ok(value),
-        NumericDType::F32
-        | NumericDType::I8
-        | NumericDType::I16
-        | NumericDType::I32
-        | NumericDType::I64
-        | NumericDType::U8
-        | NumericDType::U16
-        | NumericDType::U32
-        | NumericDType::U64 => match value {
-            Value::Tensor(tensor) => {
-                let tensor = tensor::coerce_tensor_dtype(tensor, dtype);
-                Ok(Value::Tensor(tensor))
+    match value {
+        Value::GpuTensor(handle) => {
+            if numeric_dtype_from_value(&Value::GpuTensor(handle.clone())) == Some(dtype) {
+                return Ok(Value::GpuTensor(handle));
             }
-            Value::Num(n) => {
-                let tensor = Tensor::new(vec![n], vec![1, 1])
-                    .map_err(|e| mean_internal_error(format!("{NAME}: {e}")))?;
-                let tensor = tensor::coerce_tensor_dtype(tensor, dtype);
-                Ok(Value::Tensor(tensor))
+            let gathered = dispatcher::gather_if_needed_async(&Value::GpuTensor(handle))
+                .await
+                .map_err(|error| mean_internal_error(format!("mean: {error}")))?;
+            coerce_host_value_to_dtype(gathered, dtype)
+        }
+        other => coerce_host_value_to_dtype(other, dtype),
+    }
+}
+
+fn coerce_host_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResult<Value> {
+    match value {
+        Value::Tensor(tensor) => {
+            let tensor = tensor::coerce_tensor_dtype(tensor, dtype);
+            Ok(tensor::tensor_into_value(tensor))
+        }
+        Value::Num(value) => {
+            let tensor = Tensor::new(vec![value], vec![1, 1])
+                .map_err(|error| mean_internal_error(format!("mean: {error}")))?;
+            let tensor = tensor::coerce_tensor_dtype(tensor, dtype);
+            Ok(tensor::tensor_into_value(tensor))
+        }
+        Value::Int(value) => {
+            let tensor = Tensor::new_integer(IntegerStorage::from_scalar(value), vec![1, 1])
+                .map_err(|error| mean_internal_error(format!("mean: {error}")))?;
+            let tensor = tensor::coerce_tensor_dtype(tensor, dtype);
+            Ok(tensor::tensor_into_value(tensor))
+        }
+        Value::LogicalArray(logical) => {
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|error| mean_internal_error(format!("mean: {error}")))?;
+            let tensor = tensor::coerce_tensor_dtype(tensor, dtype);
+            Ok(tensor::tensor_into_value(tensor))
+        }
+        Value::Bool(value) => {
+            coerce_host_value_to_dtype(Value::Num(if value { 1.0 } else { 0.0 }), dtype)
+        }
+        Value::ComplexTensor(tensor) => {
+            coerce_complex_tensor_dtype(tensor, dtype).map(complex_tensor_into_value)
+        }
+        Value::Complex(real, imag) => match dtype {
+            NumericDType::F64 => Ok(Value::Complex(real, imag)),
+            NumericDType::F32 => {
+                ComplexTensor::from_f32(vec![(real as f32, imag as f32)], canonical_scalar_shape())
+                    .map(complex_tensor_into_value)
+                    .map_err(mean_internal_error)
             }
-            Value::LogicalArray(logical) => {
-                let tensor = tensor::logical_to_tensor(&logical)
-                    .map_err(|e| mean_internal_error(format!("{NAME}: {e}")))?;
-                let tensor = tensor::coerce_tensor_dtype(tensor, dtype);
-                Ok(Value::Tensor(tensor))
-            }
-            Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-                let tensor = tensor::coerce_tensor_dtype(tensor, dtype);
-                Ok(Value::Tensor(tensor))
-            }
-            other => Ok(other),
+            _ => Err(mean_invalid_argument(
+                "mean: complex output must be single or double",
+            )),
         },
+        other => Ok(other),
     }
 }
 
@@ -1573,8 +2543,9 @@ async fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<
     match device {
         DevicePreference::Host => match value {
             Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-                Ok(tensor::tensor_into_value(tensor))
+                dispatcher::gather_if_needed_async(&Value::GpuTensor(handle))
+                    .await
+                    .map_err(|error| mean_internal_error(format!("mean: {error}")))
             }
             _ => Ok(value),
         },
@@ -1589,6 +2560,12 @@ async fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<
             Value::LogicalArray(logical) => {
                 let tensor = tensor::logical_to_tensor(&logical).map_err(mean_invalid_input)?;
                 upload_tensor(tensor)
+            }
+            Value::ComplexTensor(tensor) => upload_complex_tensor(tensor),
+            Value::Complex(real, imag) => {
+                let tensor = ComplexTensor::new(vec![(real, imag)], canonical_scalar_shape())
+                    .map_err(mean_internal_error)?;
+                upload_complex_tensor(tensor)
             }
             other => Err(mean_invalid_input(format!(
                 "mean: cannot place value {other:?} on the GPU"
@@ -1605,6 +2582,20 @@ fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     };
     let handle = gpu_helpers::upload_tensor(provider, &tensor)
         .map_err(|e| mean_internal_error(format!("mean: failed to upload GPU result: {e}")))?;
+    Ok(Value::GpuTensor(handle))
+}
+
+fn upload_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
+    let Some(provider) = runmat_accelerate_api::provider() else {
+        return Err(mean_internal_error(
+            "mean: no acceleration provider available to honour complex GPU output",
+        ));
+    };
+    let handle = gpu_helpers::upload_complex_tensor(provider, &tensor).map_err(|error| {
+        mean_internal_error(format!(
+            "mean: failed to upload complex GPU result: {error}"
+        ))
+    })?;
     Ok(Value::GpuTensor(handle))
 }
 
@@ -1725,12 +2716,18 @@ pub(crate) mod tests {
         assert!(labels.contains(&"M = mean(A)"));
         assert!(labels.contains(&"M = mean(A, dim)"));
         assert!(labels.contains(&"M = mean(A, \"all\")"));
-        assert!(labels.contains(&"M = mean(A, nanflag)"));
+        assert!(labels.contains(&"M = mean(A, missingflag)"));
         assert!(labels.contains(&"M = mean(A, outtype)"));
-        assert!(labels.contains(&"M = mean(A, dim, nanflag)"));
-        assert!(labels.contains(&"M = mean(A, nanflag, dim)"));
+        assert!(labels.contains(&"M = mean(A, dim, missingflag)"));
+        assert!(labels.contains(&"M = mean(A, missingflag, dim)"));
         assert!(labels.contains(&"M = mean(A, \"like\", prototype)"));
         assert!(labels.contains(&"M = mean(A, vecdim)"));
+        assert!(labels.contains(&"M = mean(___, Weights=W)"));
+        assert_eq!(MEAN_INPUTS_A_OUTTYPE[1].default, Some("\"default\""));
+        assert_eq!(
+            MEAN_INPUTS_A_MISSINGFLAG[1].default,
+            Some("\"includemissing\"")
+        );
     }
 
     #[test]
@@ -1767,6 +2764,249 @@ pub(crate) mod tests {
                 assert_eq!(values(&out), vec![2.5, 3.5, 4.5]);
             }
             other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mean_weights_vector_and_full_size_follow_operating_dimension() {
+        let input = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
+        let vector_weights = Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap();
+        let vector = mean_builtin(
+            Value::Tensor(input.clone()),
+            vec![
+                Value::Int(IntValue::I32(1)),
+                Value::from("Weights"),
+                Value::Tensor(vector_weights),
+            ],
+        )
+        .expect("weighted vector mean");
+        let Value::Tensor(vector) = vector else {
+            panic!("expected tensor weighted vector result");
+        };
+        assert_eq!(vector.shape, vec![1, 2]);
+        assert_eq!(values(&vector), vec![2.5, 3.5]);
+
+        let full_weights = Tensor::new(vec![1.0, 3.0, 2.0, 1.0], vec![2, 2]).unwrap();
+        let full = mean_builtin(
+            Value::Tensor(input),
+            vec![
+                Value::Int(IntValue::I32(1)),
+                Value::from("Weights"),
+                Value::Tensor(full_weights),
+            ],
+        )
+        .expect("weighted full-size mean");
+        let Value::Tensor(full) = full else {
+            panic!("expected tensor weighted full-size result");
+        };
+        assert_eq!(full.shape, vec![1, 2]);
+        assert!((values(&full)[0] - 2.5).abs() < 1e-12);
+        assert!((values(&full)[1] - (8.0 / 3.0)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn mean_weights_support_generic_missing_flags() {
+        let input = Tensor::new(vec![1.0, f64::NAN, 3.0], vec![3, 1]).unwrap();
+        let weights = Tensor::new(vec![1.0, 100.0, 3.0], vec![3, 1]).unwrap();
+        let included = mean_builtin(
+            Value::Tensor(input.clone()),
+            vec![
+                Value::from("Weights"),
+                Value::Tensor(weights.clone()),
+                Value::from("includemissing"),
+            ],
+        )
+        .expect("included weighted mean");
+        assert!(matches!(included, Value::Num(value) if value.is_nan()));
+
+        let omitted = mean_builtin(
+            Value::Tensor(input),
+            vec![
+                Value::from("omitmissing"),
+                Value::from("Weights"),
+                Value::Tensor(weights),
+            ],
+        )
+        .expect("omitted weighted mean");
+        assert!(matches!(omitted, Value::Num(value) if (value - 2.5).abs() < 1e-12));
+    }
+
+    #[test]
+    fn mean_weights_preserve_single_default_and_honor_explicit_double() {
+        let input = Tensor::from_f32(vec![1.0, 3.0], vec![2, 1]).unwrap();
+        let weights = Tensor::from_f32(vec![1.0, 3.0], vec![2, 1]).unwrap();
+        let default = mean_builtin(
+            Value::Tensor(input.clone()),
+            vec![Value::from("Weights"), Value::Tensor(weights.clone())],
+        )
+        .expect("single weighted mean");
+        let Value::Tensor(default) = default else {
+            panic!("expected typed single scalar tensor");
+        };
+        assert_eq!(default.numeric_dtype(), NumericDType::F32);
+        assert_eq!(values(&default), vec![2.5]);
+
+        let double = mean_builtin(
+            Value::Tensor(input),
+            vec![
+                Value::from("Weights"),
+                Value::Tensor(weights),
+                Value::from("double"),
+            ],
+        )
+        .expect("double weighted mean");
+        assert!(matches!(double, Value::Num(value) if (value - 2.5).abs() < 1e-12));
+    }
+
+    #[test]
+    fn mean_weights_default_integer_output_is_double() {
+        let input = Tensor::new_integer(IntegerStorage::I16(vec![1, 3]), vec![2, 1]).unwrap();
+        let weights = Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap();
+        let result = mean_builtin(
+            Value::Tensor(input),
+            vec![Value::from("Weights"), Value::Tensor(weights)],
+        )
+        .expect("weighted integer mean");
+        assert!(matches!(result, Value::Num(value) if (value - 2.5).abs() < 1e-12));
+    }
+
+    #[test]
+    fn mean_weights_logical_default_and_native_are_double() {
+        let input =
+            runmat_builtins::LogicalArray::new(vec![0, 1], vec![2, 1]).expect("logical input");
+        let weights = Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap();
+        for suffix in [Vec::new(), vec![Value::from("native")]] {
+            let mut args = vec![Value::from("Weights"), Value::Tensor(weights.clone())];
+            args.extend(suffix);
+            let result = mean_builtin(Value::LogicalArray(input.clone()), args)
+                .expect("weighted logical mean");
+            assert!(matches!(result, Value::Num(value) if (value - 0.75).abs() < 1e-12));
+        }
+    }
+
+    #[test]
+    fn mean_weights_native_preserves_every_integer_class() {
+        let cases = [
+            (IntegerStorage::I8(vec![1, 3]), IntegerStorage::I8(vec![3])),
+            (
+                IntegerStorage::I16(vec![1, 3]),
+                IntegerStorage::I16(vec![3]),
+            ),
+            (
+                IntegerStorage::I32(vec![1, 3]),
+                IntegerStorage::I32(vec![3]),
+            ),
+            (
+                IntegerStorage::I64(vec![1, 3]),
+                IntegerStorage::I64(vec![3]),
+            ),
+            (IntegerStorage::U8(vec![1, 3]), IntegerStorage::U8(vec![3])),
+            (
+                IntegerStorage::U16(vec![1, 3]),
+                IntegerStorage::U16(vec![3]),
+            ),
+            (
+                IntegerStorage::U32(vec![1, 3]),
+                IntegerStorage::U32(vec![3]),
+            ),
+            (
+                IntegerStorage::U64(vec![1, 3]),
+                IntegerStorage::U64(vec![3]),
+            ),
+        ];
+        for (input, expected) in cases {
+            let input = Tensor::new_integer(input, vec![2, 1]).unwrap();
+            let weights = Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap();
+            let result = mean_builtin(
+                Value::Tensor(input),
+                vec![
+                    Value::from("Weights"),
+                    Value::Tensor(weights),
+                    Value::from("native"),
+                ],
+            )
+            .expect("native weighted integer mean");
+            assert_eq!(
+                result,
+                Value::Int(expected.value_at(0).expect("expected scalar storage"))
+            );
+        }
+    }
+
+    #[test]
+    fn mean_weights_native_uint64_is_exact_above_flintmax() {
+        let wide = 1_u64 << 63;
+        let input =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide + 1, wide + 3]), vec![2, 1]).unwrap();
+        let weights = Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap();
+        let result = mean_builtin(
+            Value::Tensor(input),
+            vec![
+                Value::from("Weights"),
+                Value::Tensor(weights),
+                Value::from("native"),
+            ],
+        )
+        .expect("wide native weighted mean");
+        assert_eq!(result, Value::Int(IntValue::U64(wide + 3)));
+    }
+
+    #[test]
+    fn mean_weights_complex_single_preserves_precision() {
+        let input = ComplexTensor::from_f32(vec![(1.0, 2.0), (3.0, 6.0)], vec![2, 1]).unwrap();
+        let weights = Tensor::from_f32(vec![1.0, 3.0], vec![2, 1]).unwrap();
+        let result = mean_builtin(
+            Value::ComplexTensor(input),
+            vec![Value::from("Weights"), Value::Tensor(weights)],
+        )
+        .expect("complex single weighted mean");
+        let Value::ComplexTensor(result) = result else {
+            panic!("expected complex single tensor");
+        };
+        assert_eq!(result.numeric_dtype(), NumericDType::F32);
+        assert_eq!(result.materialize_f64(), vec![(2.5, 5.0)]);
+    }
+
+    #[test]
+    fn mean_weights_reject_invalid_grammar_values_and_shapes() {
+        let input = Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap());
+        let valid = Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap());
+        let invalid_cases = [
+            vec![Value::from("Weights")],
+            vec![
+                Value::from("Weights"),
+                Value::Tensor(
+                    Tensor::new_integer(IntegerStorage::U8(vec![1, 3]), vec![2, 1]).unwrap(),
+                ),
+            ],
+            vec![
+                Value::from("Weights"),
+                Value::Tensor(Tensor::new(vec![1.0, -1.0], vec![2, 1]).unwrap()),
+            ],
+            vec![
+                Value::from("Weights"),
+                Value::Tensor(Tensor::new(vec![1.0, f64::NAN], vec![2, 1]).unwrap()),
+            ],
+            vec![
+                Value::from("Weights"),
+                Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap()),
+            ],
+            vec![Value::from("all"), Value::from("Weights"), valid.clone()],
+            vec![
+                Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+                Value::from("Weights"),
+                valid.clone(),
+            ],
+            vec![
+                Value::from("Weights"),
+                valid.clone(),
+                Value::from("Weights"),
+                valid,
+            ],
+        ];
+        for args in invalid_cases {
+            let error = mean_builtin(input.clone(), args).expect_err("invalid weighted mean");
+            assert_eq!(error.identifier(), MEAN_ERROR_INVALID_ARGUMENT.identifier);
         }
     }
 
@@ -2201,6 +3441,126 @@ pub(crate) mod tests {
         });
     }
 
+    #[test]
+    fn mean_weights_gpu_input_preserves_residency() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
+            let input = gpu_helpers::upload_tensor(provider, &input).expect("upload input");
+            let weights = Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap();
+            let result = mean_builtin(
+                Value::GpuTensor(input),
+                vec![Value::from("Weights"), Value::Tensor(weights)],
+            )
+            .expect("weighted GPU mean");
+            let Value::GpuTensor(handle) = result else {
+                panic!("expected resident weighted mean");
+            };
+            let gathered =
+                test_support::gather(Value::GpuTensor(handle)).expect("gather weighted mean");
+            assert_eq!(gathered.shape, vec![1, 2]);
+            assert_eq!(values(&gathered), vec![2.5, 3.5]);
+        });
+    }
+
+    #[test]
+    fn mean_weights_logical_gpu_result_is_numeric_and_resident() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
+            let input = gpu_helpers::upload_tensor(provider, &input).expect("upload logical input");
+            let input = gpu_helpers::logical_gpu_value(input);
+            let weights = Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap();
+            let result = mean_builtin(input, vec![Value::from("Weights"), Value::Tensor(weights)])
+                .expect("weighted logical GPU mean");
+            let Value::GpuTensor(result) = result else {
+                panic!("expected resident numeric result");
+            };
+            assert!(!runmat_accelerate_api::handle_is_logical(&result));
+            let gathered =
+                test_support::gather(Value::GpuTensor(result)).expect("gather logical mean");
+            assert_eq!(values(&gathered), vec![0.75]);
+        });
+    }
+
+    #[test]
+    fn mean_weights_complex_gpu_input_preserves_class_and_residency() {
+        test_support::with_test_provider(|provider| {
+            let input = ComplexTensor::new(vec![(1.0, 2.0), (3.0, 6.0)], vec![2, 1]).unwrap();
+            let input = gpu_helpers::upload_complex_tensor(provider, &input).expect("upload input");
+            let weights = Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap();
+            let result = mean_builtin(
+                Value::GpuTensor(input),
+                vec![Value::from("Weights"), Value::Tensor(weights)],
+            )
+            .expect("weighted complex GPU mean");
+            let Value::GpuTensor(result) = result else {
+                panic!("expected resident weighted complex mean");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&result),
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            );
+            let gathered = block_on(dispatcher::gather_if_needed_async(&Value::GpuTensor(
+                result,
+            )))
+            .expect("gather weighted complex mean");
+            let Value::ComplexTensor(gathered) = gathered else {
+                panic!("expected gathered complex tensor");
+            };
+            assert_eq!(gathered.materialize_f64(), vec![(2.5, 5.0)]);
+        });
+    }
+
+    #[test]
+    fn mean_weights_accept_resident_gpu_weights() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap();
+            let weights = Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap();
+            let weights = gpu_helpers::upload_tensor(provider, &weights).expect("upload weights");
+            let result = mean_builtin(
+                Value::Tensor(input),
+                vec![Value::from("Weights"), Value::GpuTensor(weights)],
+            )
+            .expect("mean with resident weights");
+            assert!(matches!(result, Value::Num(value) if (value - 2.5).abs() < 1e-12));
+        });
+    }
+
+    #[test]
+    fn mean_weights_native_integer_gpu_is_exact_and_resident() {
+        test_support::with_test_provider(|provider| {
+            let wide = 1_u64 << 63;
+            let input = provider
+                .upload_integer(&runmat_accelerate_api::HostIntegerTensorView {
+                    data: runmat_accelerate_api::HostIntegerDataView::U64(&[wide + 1, wide + 3]),
+                    shape: &[2, 1],
+                })
+                .expect("upload native integer");
+            let weights = Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap();
+            let result = mean_builtin(
+                Value::GpuTensor(input),
+                vec![
+                    Value::from("Weights"),
+                    Value::Tensor(weights),
+                    Value::from("native"),
+                ],
+            )
+            .expect("native weighted GPU mean");
+            let Value::GpuTensor(result) = result else {
+                panic!("expected resident native weighted mean");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&result),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            assert_eq!(
+                block_on(provider.download_integer(&result))
+                    .expect("download native weighted mean")
+                    .data,
+                runmat_accelerate_api::HostIntegerDataOwned::U64(vec![wide + 3])
+            );
+        });
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn mean_gpu_omit_nan_falls_back_to_host() {
@@ -2379,6 +3739,7 @@ pub(crate) mod tests {
             axes: MeanAxes::Dim(1),
             nan_mode: ReductionNaN::Include,
             output: OutputTemplate::Double,
+            weights: None,
         };
         let cpu = mean_host(Value::Tensor(t.clone()), &args).unwrap();
         let provider = runmat_accelerate_api::provider().unwrap();
