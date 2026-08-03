@@ -88,11 +88,11 @@ const MODE_INPUTS_X_DIM_OR_ALL: [BuiltinParamDescriptor; 2] = [
         description: "Input data array.",
     },
     BuiltinParamDescriptor {
-        name: "dim_or_all",
+        name: "dim_or_vecdim_or_all",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Reduction axis (positive integer) or 'all'.",
+        description: "Reduction axis, vector of axes, or 'all'.",
     },
 ];
 
@@ -103,7 +103,7 @@ const MODE_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
         outputs: &MODE_OUTPUT_M,
     },
     BuiltinSignatureDescriptor {
-        label: "M = mode(X, dim_or_all)",
+        label: "M = mode(X, dim_or_vecdim_or_all)",
         inputs: &MODE_INPUTS_X_DIM_OR_ALL,
         outputs: &MODE_OUTPUT_M,
     },
@@ -113,7 +113,7 @@ const MODE_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
         outputs: &MODE_OUTPUT_MF,
     },
     BuiltinSignatureDescriptor {
-        label: "[M, F] = mode(X, dim_or_all)",
+        label: "[M, F] = mode(X, dim_or_vecdim_or_all)",
         inputs: &MODE_INPUTS_X_DIM_OR_ALL,
         outputs: &MODE_OUTPUT_MF,
     },
@@ -123,7 +123,7 @@ const MODE_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
         outputs: &MODE_OUTPUT_MFC,
     },
     BuiltinSignatureDescriptor {
-        label: "[M, F, C] = mode(X, dim_or_all)",
+        label: "[M, F, C] = mode(X, dim_or_vecdim_or_all)",
         inputs: &MODE_INPUTS_X_DIM_OR_ALL,
         outputs: &MODE_OUTPUT_MFC,
     },
@@ -296,6 +296,7 @@ fn upload_mode_value(
 enum ModeAxes {
     Default,
     Dim(usize),
+    Vec(Vec<usize>),
     All,
 }
 
@@ -348,32 +349,70 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<ModeAxes>> {
         };
     }
 
-    let dim = match value {
-        Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
-            tensor::dimension_from_value_async(value, NAME, false)
-                .await
-                .map_err(|e| mode_error_with(&MODE_ERROR_INVALID_DIMENSION, e))?
-        }
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
-            tensor::dimension_from_value_async(value, NAME, false)
-                .await
-                .map_err(|e| mode_error_with(&MODE_ERROR_INVALID_DIMENSION, e))?
-        }
-        Value::LogicalArray(la) if la.data.len() == 1 => {
-            tensor::dimension_from_value_async(value, NAME, false)
-                .await
-                .map_err(|e| mode_error_with(&MODE_ERROR_INVALID_DIMENSION, e))?
+    let (scalar_hint, is_empty) = match value {
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) => (true, false),
+        Value::Tensor(tensor) => (tensor::is_scalar_tensor(tensor), tensor.is_empty()),
+        Value::LogicalArray(logical) => (logical.data.len() == 1, logical.data.is_empty()),
+        Value::GpuTensor(handle) => {
+            let len = tensor::element_count(&handle.shape);
+            (len == 1, len == 0)
         }
         _ => return Ok(None),
     };
-
-    let Some(dim) = dim else {
+    if is_empty {
+        return Ok(Some(ModeAxes::Default));
+    }
+    let dims = tensor::dims_from_value_async(value)
+        .await
+        .map_err(|message| mode_dimension_error(message, scalar_hint))?;
+    let Some(dims) = dims else {
         return Ok(None);
     };
-    if dim < 1 {
-        return Err(mode_error(&MODE_ERROR_INVALID_DIMENSION));
+    if dims.is_empty() {
+        return Ok(Some(ModeAxes::Default));
     }
-    Ok(Some(ModeAxes::Dim(dim)))
+    for &dim in &dims {
+        if dim < 1 {
+            return Err(mode_error_with(
+                &MODE_ERROR_INVALID_DIMENSION,
+                if scalar_hint {
+                    "mode: dimension must be >= 1"
+                } else {
+                    "mode: dimension entries must be >= 1"
+                },
+            ));
+        }
+    }
+    if dims.len() == 1 {
+        Ok(Some(ModeAxes::Dim(dims[0])))
+    } else {
+        Ok(Some(ModeAxes::Vec(dims)))
+    }
+}
+
+fn mode_dimension_error(message: String, scalar: bool) -> RuntimeError {
+    let detail = if message.contains("finite") {
+        if scalar {
+            "mode: dimension must be finite"
+        } else {
+            "mode: dimension entries must be finite integers"
+        }
+    } else if message.contains("integer") {
+        if scalar {
+            "mode: dimension must be an integer"
+        } else {
+            "mode: dimension entries must be integers"
+        }
+    } else if message.contains("non-negative") {
+        if scalar {
+            "mode: dimension must be >= 1"
+        } else {
+            "mode: dimension entries must be >= 1"
+        }
+    } else {
+        return mode_error_with(&MODE_ERROR_INVALID_DIMENSION, message);
+    };
+    mode_error_with(&MODE_ERROR_INVALID_DIMENSION, detail)
 }
 
 fn value_as_str(value: &Value) -> Option<String> {
@@ -507,6 +546,7 @@ fn mode_evaluate(
                 reduce_integer_along_dim(tensor, storage, dim)
             }
             ModeAxes::Dim(dim) => reduce_integer_along_dim(tensor, storage, dim),
+            ModeAxes::Vec(dims) => reduce_integer_along_dims(tensor, storage, dims),
             ModeAxes::All => reduce_integer_all(tensor, storage),
         };
     }
@@ -516,6 +556,7 @@ fn mode_evaluate(
             reduce_along_dim(tensor, dim, output_class)
         }
         ModeAxes::Dim(dim) => reduce_along_dim(tensor, dim, output_class),
+        ModeAxes::Vec(dims) => reduce_along_dims(tensor, dims, output_class),
         ModeAxes::All => reduce_all(tensor, output_class),
     }
 }
@@ -675,6 +716,48 @@ fn reduce_along_dim(
     })
 }
 
+fn reduce_along_dims(
+    tensor: Tensor,
+    dims: Vec<usize>,
+    output_class: OutputClass,
+) -> BuiltinResult<ModeEvaluation> {
+    let shape = tensor.shape.clone();
+    let (output_shape, reduce_mask) = vecdim_plan(&shape, dims)?;
+    if !reduce_mask.iter().any(|reduced| *reduced) {
+        return reduce_along_dim(tensor, shape.len() + 1, output_class);
+    }
+    let data = tensor::tensor_into_values_f64(tensor);
+    if data.is_empty() {
+        return ModeEvaluation::empty(output_shape, output_class);
+    }
+    let output_len = tensor::element_count(&output_shape);
+    let mut slices = vec![Vec::new(); output_len];
+    for (linear, value) in data.into_iter().enumerate() {
+        let output_index = vecdim_output_index(linear, &shape, &reduce_mask);
+        slices[output_index].push(value);
+    }
+    let mut values = Vec::with_capacity(output_len);
+    let mut freq = Vec::with_capacity(output_len);
+    let mut ties = Vec::with_capacity(output_len);
+    for slice in slices {
+        let scalar = scalar_mode(&slice);
+        values.push(scalar.value);
+        freq.push(scalar.frequency);
+        ties.push(scalar.ties);
+    }
+    let values = Tensor::new(values, output_shape.clone())
+        .map_err(|error| mode_internal_error(format!("mode: {error}")))?;
+    let freq = Tensor::new(freq, output_shape.clone())
+        .map_err(|error| mode_internal_error(format!("mode: {error}")))?;
+    Ok(ModeEvaluation {
+        values,
+        freq,
+        ties: ModeTies::Floating(ties),
+        output_shape,
+        output_class,
+    })
+}
+
 fn reduce_integer_all(_tensor: Tensor, storage: IntegerStorage) -> BuiltinResult<ModeEvaluation> {
     let output_shape = vec![1usize, 1];
     if storage.is_empty() {
@@ -748,6 +831,90 @@ fn reduce_integer_along_dim(
         output_shape,
         output_class: OutputClass::Double,
     })
+}
+
+fn reduce_integer_along_dims(
+    tensor: Tensor,
+    storage: IntegerStorage,
+    dims: Vec<usize>,
+) -> BuiltinResult<ModeEvaluation> {
+    let (output_shape, reduce_mask) = vecdim_plan(&tensor.shape, dims)?;
+    if !reduce_mask.iter().any(|reduced| *reduced) {
+        return integer_identity_mode(tensor, storage);
+    }
+    if storage.is_empty() {
+        return ModeEvaluation::empty(output_shape, OutputClass::Double);
+    }
+    let output_len = tensor::element_count(&output_shape);
+    let mut slices = vec![Vec::new(); output_len];
+    for (linear, value) in storage.exact_values().into_iter().enumerate() {
+        let output_index = vecdim_output_index(linear, &tensor.shape, &reduce_mask);
+        slices[output_index].push(value);
+    }
+    let mut values = Vec::with_capacity(output_len);
+    let mut freq = Vec::with_capacity(output_len);
+    let mut ties = Vec::with_capacity(output_len);
+    for slice in slices {
+        let scalar = integer_scalar_mode(&slice);
+        values.push(scalar.value);
+        freq.push(scalar.frequency);
+        ties.push(
+            storage
+                .from_same_class_values(scalar.ties)
+                .map_err(mode_internal_error)?,
+        );
+    }
+    let values = Tensor::new_integer(
+        storage
+            .from_same_class_values(values)
+            .map_err(mode_internal_error)?,
+        output_shape.clone(),
+    )
+    .map_err(|error| mode_internal_error(format!("mode: {error}")))?;
+    let freq = Tensor::new(freq, output_shape.clone())
+        .map_err(|error| mode_internal_error(format!("mode: {error}")))?;
+    Ok(ModeEvaluation {
+        values,
+        freq,
+        ties: ModeTies::Integer(ties),
+        output_shape,
+        output_class: OutputClass::Double,
+    })
+}
+
+fn vecdim_plan(shape: &[usize], mut dims: Vec<usize>) -> BuiltinResult<(Vec<usize>, Vec<bool>)> {
+    dims.sort_unstable();
+    dims.dedup();
+    if dims.iter().any(|dim| *dim == 0) {
+        return Err(mode_error(&MODE_ERROR_INVALID_DIMENSION));
+    }
+    let mut output_shape = shape.to_vec();
+    let mut reduce_mask = vec![false; shape.len()];
+    for dim in dims {
+        let index = dim - 1;
+        if index < shape.len() {
+            output_shape[index] = 1;
+            reduce_mask[index] = true;
+        }
+    }
+    Ok((output_shape, reduce_mask))
+}
+
+fn vecdim_output_index(linear: usize, shape: &[usize], reduce_mask: &[bool]) -> usize {
+    let mut remainder = linear;
+    let mut output_index = 0usize;
+    let mut output_stride = 1usize;
+    for (dimension, &extent) in shape.iter().enumerate() {
+        let coordinate = if extent == 0 { 0 } else { remainder % extent };
+        if extent != 0 {
+            remainder /= extent;
+        }
+        if !reduce_mask[dimension] {
+            output_index += coordinate * output_stride;
+            output_stride *= extent;
+        }
+    }
+    output_index
 }
 
 fn integer_identity_mode(tensor: Tensor, storage: IntegerStorage) -> BuiltinResult<ModeEvaluation> {
@@ -1327,6 +1494,19 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn mode_descriptor_advertises_vecdim_forms() {
+        assert!(MODE_DESCRIPTOR
+            .signatures
+            .iter()
+            .any(|signature| signature.label == "M = mode(X, dim_or_vecdim_or_all)"));
+        assert!(MODE_DESCRIPTOR
+            .signatures
+            .iter()
+            .flat_map(|signature| signature.inputs)
+            .any(|input| input.name == "dim_or_vecdim_or_all"));
+    }
+
+    #[test]
     fn mode_scalar_returns_self() {
         let result = mode_call(Value::Num(7.0), Vec::new()).expect("mode");
         assert_eq!(result, Value::Num(7.0));
@@ -1457,6 +1637,70 @@ pub(crate) mod tests {
             }
             other => panic!("expected cell array, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn mode_vecdim_reduces_combined_slices_with_ties_and_frequencies() {
+        let input = Tensor::new(vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 3.0, 4.0], vec![2, 2, 2])
+            .expect("input");
+        let dims = Tensor::new_integer(IntegerStorage::U8(vec![1, 2]), vec![1, 2])
+            .expect("dimension vector");
+        let outputs =
+            mode_outputs(Value::Tensor(input), vec![Value::Tensor(dims)], 3).expect("mode");
+        let values = expect_tensor(&outputs[0]);
+        assert_eq!(values.shape, vec![1, 1, 2]);
+        assert_eq!(values.materialize_f64(), vec![1.0, 3.0]);
+        let frequency = expect_tensor(&outputs[1]);
+        assert_eq!(frequency.shape, vec![1, 1, 2]);
+        assert_eq!(frequency.materialize_f64(), vec![2.0, 3.0]);
+        let Value::Cell(ties) = &outputs[2] else {
+            panic!("expected tied-value cell");
+        };
+        assert_eq!(ties.shape, vec![1, 1, 2]);
+        assert_eq!(
+            expect_tensor(&ties.data[0]).materialize_f64(),
+            vec![1.0, 2.0]
+        );
+        assert_eq!(expect_tensor(&ties.data[1]).materialize_f64(), vec![3.0]);
+    }
+
+    #[test]
+    fn mode_vecdim_preserves_exact_wide_integer_values_and_ties() {
+        let wide = u64::MAX - 1;
+        let input = Tensor::new_integer(
+            IntegerStorage::U64(vec![
+                wide,
+                wide,
+                wide - 1,
+                wide - 1,
+                wide,
+                wide,
+                wide,
+                wide - 1,
+            ]),
+            vec![2, 2, 2],
+        )
+        .expect("input");
+        let dims = Tensor::new_integer(IntegerStorage::U8(vec![2, 1, 2]), vec![1, 3])
+            .expect("dimension vector");
+        let outputs =
+            mode_outputs(Value::Tensor(input), vec![Value::Tensor(dims)], 3).expect("mode");
+        assert_eq!(
+            expect_tensor(&outputs[0]).integer_storage(),
+            Some(&IntegerStorage::U64(vec![wide - 1, wide]))
+        );
+        assert_eq!(expect_tensor(&outputs[1]).materialize_f64(), vec![2.0, 3.0]);
+        let Value::Cell(ties) = &outputs[2] else {
+            panic!("expected tied-value cell");
+        };
+        assert_eq!(
+            expect_tensor(&ties.data[0]).integer_storage(),
+            Some(&IntegerStorage::U64(vec![wide - 1, wide]))
+        );
+        assert_eq!(
+            expect_tensor(&ties.data[1]).integer_storage(),
+            Some(&IntegerStorage::U64(vec![wide]))
+        );
     }
 
     #[test]
