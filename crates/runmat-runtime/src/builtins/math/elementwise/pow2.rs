@@ -4,10 +4,11 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
+    CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
@@ -231,6 +232,19 @@ async fn pow2_binary(mantissa: Value, exponent: Value) -> BuiltinResult<Value> {
 }
 
 async fn pow2_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
+        let provider = runmat_accelerate_api::provider_for_handle(&handle);
+        let tensor = gpu_helpers::gather_tensor_async(&handle)
+            .await
+            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+        let output = pow2_tensor(tensor)?;
+        if let Some(provider) = provider {
+            if let Ok(handle) = gpu_helpers::upload_tensor(provider, &output) {
+                return Ok(gpu_helpers::resident_gpu_value(handle));
+            }
+        }
+        return Ok(tensor::tensor_into_value(output));
+    }
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_pow2(&handle).await {
             return Ok(gpu_helpers::resident_gpu_value(out));
@@ -246,7 +260,9 @@ async fn pow2_gpu_scale(
     mantissa: GpuTensorHandle,
     exponent: GpuTensorHandle,
 ) -> BuiltinResult<Value> {
-    if mantissa.device_id == exponent.device_id {
+    let has_integer_input = runmat_accelerate_api::handle_integer_type(&mantissa).is_some()
+        || runmat_accelerate_api::handle_integer_type(&exponent).is_some();
+    if !has_integer_input && mantissa.device_id == exponent.device_id {
         if let Some(provider) = runmat_accelerate_api::provider_for_handle(&mantissa) {
             if mantissa.shape == exponent.shape {
                 if let Ok(out) = provider.pow2_scale(&mantissa, &exponent) {
@@ -271,23 +287,60 @@ fn pow2_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn pow2_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let data: Vec<f64> = tensor::tensor_values_f64(&tensor)
-        .into_iter()
-        .map(|v| v.exp2())
-        .collect();
-    Tensor::new(data, tensor.shape.clone())
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| pow2_error_with_detail(&POW2_ERROR_INTERNAL, e))?;
+    let storage = match storage {
+        NumericStorage::F64(values) => {
+            NumericStorage::F64(values.into_iter().map(f64::exp2).collect())
+        }
+        NumericStorage::F32(values) => {
+            NumericStorage::F32(values.into_iter().map(f32::exp2).collect())
+        }
+        storage => NumericStorage::F64(
+            promote_integer_storage_to_pow2_double_domain(storage)
+                .into_iter()
+                .map(f64::exp2)
+                .collect(),
+        ),
+    };
+    Tensor::from_numeric_storage(storage, shape)
         .map_err(|e| pow2_error_with_detail(&POW2_ERROR_INTERNAL, e))
 }
 
 fn pow2_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let mapped = ct
-        .materialize_f64()
-        .iter()
-        .map(|&(re, im)| pow2_complex(re, im))
-        .collect::<Vec<_>>();
-    let tensor = ComplexTensor::new(mapped, ct.shape.clone())
+    let shape = ct.shape.clone();
+    let storage = match ct.into_complex_storage() {
+        ComplexStorage::F64(values) => ComplexStorage::F64(
+            values
+                .into_iter()
+                .map(|(real, imag)| pow2_complex(real, imag))
+                .collect(),
+        ),
+        ComplexStorage::F32(values) => ComplexStorage::F32(
+            values
+                .into_iter()
+                .map(|(real, imag)| pow2_complex_f32(real, imag))
+                .collect(),
+        ),
+        ComplexStorage::Integer(_) => {
+            return Err(pow2_error_with_detail(
+                &POW2_ERROR_INVALID_INPUT,
+                "typed complex integer input is not supported",
+            ))
+        }
+    };
+    let tensor = ComplexTensor::from_complex_storage(storage, shape)
         .map_err(|e| pow2_error_with_detail(&POW2_ERROR_INTERNAL, e))?;
     Ok(complex_tensor_into_value(tensor))
+}
+
+fn promote_integer_storage_to_pow2_double_domain(storage: NumericStorage) -> Vec<f64> {
+    storage
+        .into_integer_storage()
+        .expect("pow2 integer-promotion boundary received floating storage")
+        .to_f64_vec()
 }
 
 fn pow2_char_array(ca: CharArray) -> BuiltinResult<Value> {
@@ -309,73 +362,109 @@ fn pow2_host_scale(mantissa: Value, exponent: Value) -> BuiltinResult<Value> {
     let exponent_array = value_into_numeric_array(exponent, "pow2")?;
     let plan = BroadcastPlan::new(mantissa_array.shape(), exponent_array.shape())
         .map_err(|e| pow2_error_with_detail(&POW2_ERROR_SIZE_MISMATCH, e))?;
-    if plan.is_empty() {
-        if mantissa_array.is_complex() || exponent_array.is_complex() {
-            let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
-                .map_err(|e| pow2_error_with_detail(&POW2_ERROR_INTERNAL, e))?;
-            return Ok(Value::ComplexTensor(tensor));
+    let output_shape = plan.output_shape().to_vec();
+    let output_is_complex = mantissa_array.is_complex() || exponent_array.is_complex();
+    let use_single = mantissa_array.uses_single() || exponent_array.uses_single();
+    if use_single {
+        let mantissa = pow2_array_into_f32_components(mantissa_array)?;
+        let exponent = pow2_array_into_f32_components(exponent_array)?;
+        let output = plan
+            .iter()
+            .map(|(_, idx_m, idx_e)| {
+                let (mr, mi) = mantissa[idx_m];
+                let (er, ei) = exponent[idx_e];
+                let power = pow2_complex_f32(er, ei);
+                complex_mul_f32(mr, mi, power.0, power.1)
+            })
+            .collect::<Vec<_>>();
+        if output_is_complex {
+            let tensor =
+                ComplexTensor::from_complex_storage(ComplexStorage::F32(output), output_shape)
+                    .map_err(|e| pow2_error_with_detail(&POW2_ERROR_INTERNAL, e))?;
+            Ok(complex_tensor_into_value(tensor))
         } else {
-            let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
-                .map_err(|e| pow2_error_with_detail(&POW2_ERROR_INTERNAL, e))?;
-            return Ok(tensor::tensor_into_value(tensor));
-        }
-    }
-    match (mantissa_array, exponent_array) {
-        (NumericArray::Real(m), NumericArray::Real(e)) => {
-            let mantissa_values = tensor::tensor_values_f64_cow(&m);
-            let exponent_values = tensor::tensor_values_f64_cow(&e);
-            let mut out = vec![0.0f64; plan.len()];
-            for (idx_out, idx_m, idx_e) in plan.iter() {
-                let scale = exponent_values[idx_e].exp2();
-                out[idx_out] = mantissa_values[idx_m] * scale;
-            }
-            let tensor = Tensor::new(out, plan.output_shape().to_vec())
+            let values = output.into_iter().map(|(real, _)| real).collect();
+            let tensor = Tensor::from_numeric_storage(NumericStorage::F32(values), output_shape)
                 .map_err(|e| pow2_error_with_detail(&POW2_ERROR_INTERNAL, e))?;
             Ok(tensor::tensor_into_value(tensor))
         }
-        (NumericArray::Real(m), NumericArray::Complex(e)) => {
-            let mantissa_values = tensor::tensor_values_f64_cow(&m);
-            let exponent_values = tensor::complex_tensor_values_complex64(&e);
-            let mut out = vec![(0.0f64, 0.0f64); plan.len()];
-            for (idx_out, idx_m, idx_e) in plan.iter() {
-                let exponent = exponent_values[idx_e];
-                let (re_pow, im_pow) = pow2_complex(exponent.re, exponent.im);
-                let scale = mantissa_values[idx_m];
-                out[idx_out] = (scale * re_pow, scale * im_pow);
-            }
-            let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
-                .map_err(|e| pow2_error_with_detail(&POW2_ERROR_INTERNAL, e))?;
+    } else {
+        let mantissa = pow2_array_into_f64_components(mantissa_array)?;
+        let exponent = pow2_array_into_f64_components(exponent_array)?;
+        let output = plan
+            .iter()
+            .map(|(_, idx_m, idx_e)| {
+                let (mr, mi) = mantissa[idx_m];
+                let (er, ei) = exponent[idx_e];
+                let power = pow2_complex(er, ei);
+                complex_mul(mr, mi, power.0, power.1)
+            })
+            .collect::<Vec<_>>();
+        if output_is_complex {
+            let tensor =
+                ComplexTensor::from_complex_storage(ComplexStorage::F64(output), output_shape)
+                    .map_err(|e| pow2_error_with_detail(&POW2_ERROR_INTERNAL, e))?;
             Ok(complex_tensor_into_value(tensor))
-        }
-        (NumericArray::Complex(m), NumericArray::Real(e)) => {
-            let mantissa_values = tensor::complex_tensor_values_complex64(&m);
-            let exponent_values = tensor::tensor_values_f64_cow(&e);
-            let mut out = vec![(0.0f64, 0.0f64); plan.len()];
-            for (idx_out, idx_m, idx_e) in plan.iter() {
-                let scale = exponent_values[idx_e].exp2();
-                let mantissa = mantissa_values[idx_m];
-                let (re_m, im_m) = (mantissa.re, mantissa.im);
-                out[idx_out] = (re_m * scale, im_m * scale);
-            }
-            let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
+        } else {
+            let values = output.into_iter().map(|(real, _)| real).collect();
+            let tensor = Tensor::from_numeric_storage(NumericStorage::F64(values), output_shape)
                 .map_err(|e| pow2_error_with_detail(&POW2_ERROR_INTERNAL, e))?;
-            Ok(complex_tensor_into_value(tensor))
+            Ok(tensor::tensor_into_value(tensor))
         }
-        (NumericArray::Complex(m), NumericArray::Complex(e)) => {
-            let mantissa_values = tensor::complex_tensor_values_complex64(&m);
-            let exponent_values = tensor::complex_tensor_values_complex64(&e);
-            let mut out = vec![(0.0f64, 0.0f64); plan.len()];
-            for (idx_out, idx_m, idx_e) in plan.iter() {
-                let exponent = exponent_values[idx_e];
-                let (re_pow, im_pow) = pow2_complex(exponent.re, exponent.im);
-                let mantissa = mantissa_values[idx_m];
-                let (re_m, im_m) = (mantissa.re, mantissa.im);
-                out[idx_out] = complex_mul(re_m, im_m, re_pow, im_pow);
-            }
-            let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
+    }
+}
+
+fn pow2_array_into_f32_components(array: NumericArray) -> BuiltinResult<Vec<(f32, f32)>> {
+    match array {
+        NumericArray::Real(tensor) => {
+            let storage = tensor
+                .into_numeric_storage()
                 .map_err(|e| pow2_error_with_detail(&POW2_ERROR_INTERNAL, e))?;
-            Ok(complex_tensor_into_value(tensor))
+            Ok(storage
+                .materialize_f32()
+                .into_iter()
+                .map(|value| (value, 0.0))
+                .collect())
         }
+        NumericArray::Complex(tensor) => match tensor.into_complex_storage() {
+            ComplexStorage::F32(values) => Ok(values),
+            ComplexStorage::F64(values) => Ok(values
+                .into_iter()
+                .map(|(real, imag)| (real as f32, imag as f32))
+                .collect()),
+            ComplexStorage::Integer(_) => Err(pow2_error_with_detail(
+                &POW2_ERROR_INVALID_INPUT,
+                "typed complex integer input is not supported",
+            )),
+        },
+    }
+}
+
+fn pow2_array_into_f64_components(array: NumericArray) -> BuiltinResult<Vec<(f64, f64)>> {
+    match array {
+        NumericArray::Real(tensor) => {
+            let storage = tensor
+                .into_numeric_storage()
+                .map_err(|e| pow2_error_with_detail(&POW2_ERROR_INTERNAL, e))?;
+            let values = match storage {
+                NumericStorage::F64(values) => values,
+                NumericStorage::F32(_) => {
+                    unreachable!("single storage selects the native-single pow2 domain")
+                }
+                storage => promote_integer_storage_to_pow2_double_domain(storage),
+            };
+            Ok(values.into_iter().map(|value| (value, 0.0)).collect())
+        }
+        NumericArray::Complex(tensor) => match tensor.into_complex_storage() {
+            ComplexStorage::F64(values) => Ok(values),
+            ComplexStorage::F32(_) => {
+                unreachable!("complex single selects the native-single pow2 domain")
+            }
+            ComplexStorage::Integer(_) => Err(pow2_error_with_detail(
+                &POW2_ERROR_INVALID_INPUT,
+                "typed complex integer input is not supported",
+            )),
+        },
     }
 }
 
@@ -384,12 +473,6 @@ fn scalar_real_value(value: &Value) -> Option<f64> {
         Value::Num(n) => Some(*n),
         Value::Int(i) => Some(i.to_f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Some(
-            tensor::tensor_values_f64(t)
-                .into_iter()
-                .next()
-                .unwrap_or(0.0),
-        ),
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
         Value::CharArray(ca) if ca.rows * ca.cols == 1 => {
             Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
@@ -401,10 +484,6 @@ fn scalar_real_value(value: &Value) -> Option<f64> {
 fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
     match value {
         Value::Complex(re, im) => Some((*re, *im)),
-        Value::ComplexTensor(ct) if tensor::is_scalar_complex_tensor(ct) => {
-            let value = tensor::complex_tensor_value_complex64(ct, 0);
-            Some((value.re, value.im))
-        }
         _ => None,
     }
 }
@@ -426,8 +505,20 @@ fn scalar_pow2_value(mantissa: &Value, exponent: &Value) -> Option<Value> {
 }
 
 fn pow2_complex(re: f64, im: f64) -> (f64, f64) {
+    if im == 0.0 {
+        return (re.exp2(), 0.0);
+    }
     let scale = (re * LN_2).exp();
     let angle = im * LN_2;
+    (scale * angle.cos(), scale * angle.sin())
+}
+
+fn pow2_complex_f32(re: f32, im: f32) -> (f32, f32) {
+    if im == 0.0 {
+        return (re.exp2(), 0.0);
+    }
+    let scale = (re * std::f32::consts::LN_2).exp();
+    let angle = im * std::f32::consts::LN_2;
     (scale * angle.cos(), scale * angle.sin())
 }
 
@@ -435,13 +526,8 @@ fn complex_mul(ar: f64, ai: f64, br: f64, bi: f64) -> (f64, f64) {
     (ar * br - ai * bi, ar * bi + ai * br)
 }
 
-fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor::is_scalar_complex_tensor(&tensor) && tensor.integer_storage().is_none() {
-        let value = tensor::complex_tensor_value_complex64(&tensor, 0);
-        Value::Complex(value.re, value.im)
-    } else {
-        Value::ComplexTensor(tensor)
-    }
+fn complex_mul_f32(ar: f32, ai: f32, br: f32, bi: f32) -> (f32, f32) {
+    (ar * br - ai * bi, ar * bi + ai * br)
 }
 
 fn value_into_numeric_array(value: Value, name: &str) -> BuiltinResult<NumericArray> {
@@ -492,6 +578,17 @@ impl NumericArray {
 
     fn is_complex(&self) -> bool {
         matches!(self, NumericArray::Complex(_))
+    }
+
+    fn uses_single(&self) -> bool {
+        match self {
+            NumericArray::Real(tensor) => {
+                tensor.numeric_dtype() == runmat_builtins::NumericDType::F32
+            }
+            NumericArray::Complex(tensor) => {
+                tensor.numeric_dtype() == runmat_builtins::NumericDType::F32
+            }
+        }
     }
 }
 
@@ -597,6 +694,124 @@ pub(crate) mod tests {
             vec![18_014_398_509_481_986.0, 48.0]
         );
         assert!(result.integer_storage().is_none());
+    }
+
+    #[test]
+    fn pow2_unary_preserves_native_single_real_complex_scalar_and_empty_storage() {
+        let tensor = Tensor::from_f32(vec![0.0, 3.0], vec![1, 2]).unwrap();
+        let Value::Tensor(output) = pow2_builtin(Value::Tensor(tensor), vec![]).expect("pow2")
+        else {
+            panic!("expected single tensor");
+        };
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![1.0, 8.0])
+        );
+
+        let scalar = Tensor::from_f32(vec![2.0], vec![1, 1]).unwrap();
+        let Value::Tensor(output) = pow2_builtin(Value::Tensor(scalar), vec![]).expect("pow2")
+        else {
+            panic!("single scalar must retain tensor class");
+        };
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![4.0])
+        );
+
+        let complex = ComplexTensor::from_f32(vec![(1.0, 0.5)], vec![1, 1]).unwrap();
+        let Value::ComplexTensor(output) =
+            pow2_builtin(Value::ComplexTensor(complex), vec![]).expect("complex pow2")
+        else {
+            panic!("complex single scalar must retain tensor class");
+        };
+        assert_eq!(
+            output.as_f32_slice(),
+            Some(&[pow2_complex_f32(1.0, 0.5)][..])
+        );
+
+        let empty = ComplexTensor::from_f32(Vec::new(), vec![0, 3]).unwrap();
+        let Value::ComplexTensor(output) =
+            pow2_builtin(Value::ComplexTensor(empty), vec![]).expect("empty pow2")
+        else {
+            panic!("expected empty complex single tensor");
+        };
+        assert_eq!(output.shape, vec![0, 3]);
+        assert_eq!(output.as_f32_slice(), Some(&[][..]));
+    }
+
+    #[test]
+    fn pow2_binary_preserves_mixed_and_complex_single_storage() {
+        let mantissa = Tensor::new(vec![0.5, 1.5], vec![1, 2]).unwrap();
+        let exponent = Tensor::from_f32(vec![3.0, 4.0], vec![1, 2]).unwrap();
+        let Value::Tensor(output) =
+            pow2_builtin(Value::Tensor(mantissa), vec![Value::Tensor(exponent)])
+                .expect("mixed pow2")
+        else {
+            panic!("expected mixed result to retain single");
+        };
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![4.0, 24.0])
+        );
+
+        let mantissa = ComplexTensor::from_f32(vec![(1.0, 1.0)], vec![1, 1]).unwrap();
+        let exponent = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
+        let Value::ComplexTensor(output) = pow2_builtin(
+            Value::ComplexTensor(mantissa),
+            vec![Value::Tensor(exponent)],
+        )
+        .expect("complex mixed pow2") else {
+            panic!("complex single scalar must retain tensor class");
+        };
+        assert_eq!(output.as_f32_slice(), Some(&[(4.0, 4.0)][..]));
+
+        let mantissa = ComplexTensor::from_f32(Vec::new(), vec![0, 2]).unwrap();
+        let exponent = Tensor::new(Vec::new(), vec![0, 2]).unwrap();
+        let Value::ComplexTensor(output) = pow2_builtin(
+            Value::ComplexTensor(mantissa),
+            vec![Value::Tensor(exponent)],
+        )
+        .expect("empty mixed pow2") else {
+            panic!("expected empty complex single tensor");
+        };
+        assert_eq!(output.shape, vec![0, 2]);
+        assert_eq!(output.as_f32_slice(), Some(&[][..]));
+    }
+
+    #[test]
+    fn pow2_integer_gpu_paths_bypass_floating_provider_hooks() {
+        test_support::with_test_provider(|provider| {
+            let unary = Tensor::new_integer(IntegerStorage::U64(vec![0, 64]), vec![1, 2]).unwrap();
+            let unary = gpu_helpers::upload_tensor(provider, &unary).expect("upload unary");
+            let result =
+                pow2_builtin(Value::GpuTensor(unary), vec![]).expect("integer gpu unary pow2");
+            assert!(matches!(result, Value::GpuTensor(_)));
+            let gathered = test_support::gather(result).expect("gather unary result");
+            assert_eq!(
+                gathered.into_numeric_storage().unwrap(),
+                NumericStorage::F64(vec![1.0, 2.0_f64.powi(64)])
+            );
+
+            let wide = 9_007_199_254_740_993_u64;
+            let mantissa =
+                Tensor::new_integer(IntegerStorage::U64(vec![wide, 3]), vec![1, 2]).unwrap();
+            let exponent =
+                Tensor::new_integer(IntegerStorage::U64(vec![1, 4]), vec![1, 2]).unwrap();
+            let mantissa =
+                gpu_helpers::upload_tensor(provider, &mantissa).expect("upload mantissa");
+            let exponent =
+                gpu_helpers::upload_tensor(provider, &exponent).expect("upload exponent");
+            let Value::Tensor(output) =
+                pow2_builtin(Value::GpuTensor(mantissa), vec![Value::GpuTensor(exponent)])
+                    .expect("integer gpu binary pow2")
+            else {
+                panic!("binary integer fallback must return host double tensor");
+            };
+            assert_eq!(
+                output.into_numeric_storage().unwrap(),
+                NumericStorage::F64(vec![(wide as f64) * 2.0, 48.0])
+            );
+        });
     }
 
     #[test]
