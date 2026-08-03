@@ -408,10 +408,9 @@ fn evaluate_elements(
     opts: IsMemberTolOptions,
     loc_request: LocRequest,
 ) -> BuiltinResult<IsMemberTolEvaluation> {
-    // Tolerance and DataScale arithmetic are defined in the floating-point
-    // comparison domain. Integer tensors enter that domain explicitly here.
-    let a_values = tensor::tensor_values_f64_cow(&a);
-    let b_values = tensor::tensor_values_f64_cow(&b);
+    let a_shape = a.shape.clone();
+    let a_values = materialize_tolerance_values(a)?;
+    let b_values = materialize_tolerance_values(b)?;
     let tol = opts.tol.expect("defaulted tolerance");
     let scale = opts
         .data_scale
@@ -464,17 +463,16 @@ fn evaluate_elements(
         }
     }
 
-    let mask = LogicalArray::new(mask_data, a.shape.clone())
+    let mask = LogicalArray::new(mask_data, a_shape.clone())
         .map_err(|e| error_with(&ERROR_INTERNAL, format!("{NAME}: {e}")))?;
     let loc = match loc_request {
         LocRequest::None => None,
         LocRequest::First => Some(LocOutput::First(
-            Tensor::new(loc_data, a.shape.clone())
+            Tensor::new(loc_data, a_shape.clone())
                 .map_err(|e| error_with(&ERROR_INTERNAL, format!("{NAME}: {e}")))?,
         )),
         LocRequest::All => Some(LocOutput::All(cell_array_from_linear_matches(
-            all_cells,
-            a.shape.clone(),
+            all_cells, a_shape,
         )?)),
     };
     Ok(IsMemberTolEvaluation { mask, loc })
@@ -491,10 +489,8 @@ fn evaluate_rows(
     if cols_a != cols_b {
         return Err(error(&ERROR_ROWS_COLUMN_MISMATCH));
     }
-    // Keep native tensor storage authoritative; only the tolerance engine sees
-    // the explicitly materialized floating-point comparison values.
-    let a_values = tensor::tensor_values_f64_cow(&a);
-    let b_values = tensor::tensor_values_f64_cow(&b);
+    let a_values = materialize_tolerance_values(a)?;
+    let b_values = materialize_tolerance_values(b)?;
     let tol = opts.tol.expect("defaulted tolerance");
     let scales = row_scales(
         &a_values,
@@ -578,6 +574,14 @@ fn evaluate_rows(
         )?)),
     };
     Ok(IsMemberTolEvaluation { mask, loc })
+}
+
+fn materialize_tolerance_values(tensor: Tensor) -> BuiltinResult<Vec<f64>> {
+    // Tolerance and DataScale arithmetic have one intentional f64 computation domain. Native single and exact integer storage remain authoritative until this boundary.
+    tensor
+        .into_numeric_storage()
+        .map(|storage| storage.materialize_f64())
+        .map_err(|e| error_with(&ERROR_INTERNAL, format!("{NAME}: {e}")))
 }
 
 fn first_element_match(value: f64, candidates: &[f64], threshold: f64) -> Option<usize> {
@@ -939,6 +943,19 @@ mod tests {
         let b = Tensor::new(vec![0.1 + 1.0e-14, 1.0e10 + 5.0e-3], vec![1, 2]).unwrap();
         let result = eval(Value::Tensor(a), Value::Tensor(b), &[]).unwrap();
         assert_eq!(result.mask.data, vec![1, 1]);
+    }
+
+    #[test]
+    fn default_tolerance_uses_native_single_class_before_materialization() {
+        let single_a = Tensor::from_f32(vec![1.0], vec![1, 1]).unwrap();
+        let single_b = Tensor::from_f32(vec![1.0 + 5.0e-7], vec![1, 1]).unwrap();
+        let single = eval(Value::Tensor(single_a), Value::Tensor(single_b), &[]).unwrap();
+        assert_eq!(single.mask_value(), Value::Bool(true));
+
+        let double_a = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let double_b = Tensor::new(vec![1.0 + 5.0e-7], vec![1, 1]).unwrap();
+        let double = eval(Value::Tensor(double_a), Value::Tensor(double_b), &[]).unwrap();
+        assert_eq!(double.mask_value(), Value::Bool(false));
     }
 
     #[test]
