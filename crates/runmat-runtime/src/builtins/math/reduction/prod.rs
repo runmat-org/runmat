@@ -446,6 +446,13 @@ impl InputMeta {
             Value::LogicalArray(_) => InputClass::Logical,
             Value::Bool(_) => InputClass::Bool,
             Value::Int(i) => InputClass::Integer(IntClass::from_int_value(i)),
+            Value::Tensor(tensor) => IntClass::from_numeric_dtype(tensor.numeric_dtype())
+                .map(InputClass::Integer)
+                .unwrap_or(InputClass::Double),
+            Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle)
+                .map(IntClass::from_integer_element_type)
+                .map(InputClass::Integer)
+                .unwrap_or(InputClass::Double),
             _ => InputClass::Double,
         };
         let device = match value {
@@ -485,6 +492,33 @@ fn precision_to_dtype(precision: ProviderPrecision) -> NumericDType {
 }
 
 impl IntClass {
+    fn from_numeric_dtype(dtype: NumericDType) -> Option<Self> {
+        match dtype {
+            NumericDType::I8 => Some(Self::I8),
+            NumericDType::I16 => Some(Self::I16),
+            NumericDType::I32 => Some(Self::I32),
+            NumericDType::I64 => Some(Self::I64),
+            NumericDType::U8 => Some(Self::U8),
+            NumericDType::U16 => Some(Self::U16),
+            NumericDType::U32 => Some(Self::U32),
+            NumericDType::U64 => Some(Self::U64),
+            NumericDType::F32 | NumericDType::F64 => None,
+        }
+    }
+
+    fn from_integer_element_type(dtype: runmat_accelerate_api::IntegerElementType) -> Self {
+        match dtype {
+            runmat_accelerate_api::IntegerElementType::I8 => Self::I8,
+            runmat_accelerate_api::IntegerElementType::I16 => Self::I16,
+            runmat_accelerate_api::IntegerElementType::I32 => Self::I32,
+            runmat_accelerate_api::IntegerElementType::I64 => Self::I64,
+            runmat_accelerate_api::IntegerElementType::U8 => Self::U8,
+            runmat_accelerate_api::IntegerElementType::U16 => Self::U16,
+            runmat_accelerate_api::IntegerElementType::U32 => Self::U32,
+            runmat_accelerate_api::IntegerElementType::U64 => Self::U64,
+        }
+    }
+
     fn from_int_value(value: &IntValue) -> Self {
         match value {
             IntValue::I8(_) => IntClass::I8,
@@ -975,11 +1009,31 @@ async fn apply_output_template(
     meta: &InputMeta,
 ) -> BuiltinResult<Value> {
     match template {
-        OutputTemplate::Double => Ok(value),
+        OutputTemplate::Double => apply_double_template(value, meta).await,
         OutputTemplate::Native => {
             let value = apply_native_template(value, meta).await?;
             ensure_device(value, meta.device).await
         }
+    }
+}
+
+async fn apply_double_template(value: Value, meta: &InputMeta) -> BuiltinResult<Value> {
+    if !matches!(meta.class, InputClass::Integer(_)) {
+        return Ok(value);
+    }
+    match value {
+        Value::Int(value) => Ok(Value::Num(value.to_f64())),
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => Ok(Value::Tensor(
+            tensor::coerce_tensor_dtype(tensor, NumericDType::F64),
+        )),
+        Value::GpuTensor(handle)
+            if runmat_accelerate_api::handle_integer_type(&handle).is_some() =>
+        {
+            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+            let tensor = tensor::coerce_tensor_dtype(tensor, NumericDType::F64);
+            ensure_device(Value::Tensor(tensor), meta.device).await
+        }
+        other => Ok(other),
     }
 }
 
@@ -1292,6 +1346,55 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn prod_integer_dimension_beyond_rank_still_honors_output_class() {
+        let storages = vec![
+            IntegerStorage::I8(vec![2, 3]),
+            IntegerStorage::I16(vec![2, 3]),
+            IntegerStorage::I32(vec![2, 3]),
+            IntegerStorage::I64(vec![2, 3]),
+            IntegerStorage::U8(vec![2, 3]),
+            IntegerStorage::U16(vec![2, 3]),
+            IntegerStorage::U32(vec![2, 3]),
+            IntegerStorage::U64(vec![2, 3]),
+        ];
+        for storage in storages {
+            let tensor = Tensor::new_integer(storage.clone(), vec![1, 2]).expect("integer tensor");
+            let default = prod_builtin(
+                Value::Tensor(tensor.clone()),
+                vec![Value::Int(IntValue::I32(4))],
+            )
+            .expect("default prod");
+            let explicit_double = prod_builtin(
+                Value::Tensor(tensor.clone()),
+                vec![Value::Int(IntValue::I32(4)), Value::from("double")],
+            )
+            .expect("double prod");
+            let explicit_default = prod_builtin(
+                Value::Tensor(tensor.clone()),
+                vec![Value::Int(IntValue::I32(4)), Value::from("default")],
+            )
+            .expect("explicit default prod");
+            for result in [default, explicit_default, explicit_double] {
+                let Value::Tensor(output) = result else {
+                    panic!("expected tensor output");
+                };
+                assert_eq!(output.shape, vec![1, 2]);
+                assert_eq!(output.numeric_dtype(), NumericDType::F64);
+                assert_eq!(values(&output), vec![2.0, 3.0]);
+            }
+            let native = prod_builtin(
+                Value::Tensor(tensor),
+                vec![Value::Int(IntValue::I32(4)), Value::from("native")],
+            )
+            .expect("native prod");
+            let Value::Tensor(output) = native else {
+                panic!("expected native tensor output");
+            };
+            assert_eq!(output.integer_storage(), Some(&storage));
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_native_integer_scalar() {
@@ -1442,6 +1545,28 @@ pub(crate) mod tests {
                 .expect("prod");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered, Tensor::new(vec![36.0], vec![1, 1]).unwrap());
+        });
+    }
+
+    #[test]
+    fn prod_integer_gpu_dimension_beyond_rank_returns_resident_double() {
+        test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&[9_007_199_254_740_992, 5]),
+                    shape: &[1, 2],
+                })
+                .expect("upload integer gpuArray");
+            let result = prod_builtin(Value::GpuTensor(handle), vec![Value::Int(IntValue::I32(4))])
+                .expect("prod");
+            let Value::GpuTensor(output) = &result else {
+                panic!("expected resident gpuArray output");
+            };
+            assert_eq!(output.shape, vec![1, 2]);
+            assert_eq!(runmat_accelerate_api::handle_integer_type(output), None);
+            let gathered = test_support::gather(result).expect("gather");
+            assert_eq!(gathered.numeric_dtype(), NumericDType::F64);
+            assert_eq!(values(&gathered), vec![9_007_199_254_740_992.0, 5.0]);
         });
     }
 
