@@ -7,6 +7,7 @@ pub(super) trait SetFloat: Copy + Default + PartialOrd + std::fmt::Debug {
     fn compare(self, other: Self) -> Ordering;
     fn is_nan(self) -> bool;
     fn hypot(self, other: Self) -> Self;
+    fn atan2(self, other: Self) -> Self;
     fn numeric_storage(values: Vec<Self>) -> NumericStorage;
     fn complex_storage(values: Vec<(Self, Self)>) -> ComplexStorage;
 }
@@ -32,6 +33,10 @@ impl SetFloat for f64 {
 
     fn hypot(self, other: Self) -> Self {
         f64::hypot(self, other)
+    }
+
+    fn atan2(self, other: Self) -> Self {
+        f64::atan2(self, other)
     }
 
     fn numeric_storage(values: Vec<Self>) -> NumericStorage {
@@ -64,6 +69,10 @@ impl SetFloat for f32 {
 
     fn hypot(self, other: Self) -> Self {
         f32::hypot(self, other)
+    }
+
+    fn atan2(self, other: Self) -> Self {
+        f32::atan2(self, other)
     }
 
     fn numeric_storage(values: Vec<Self>) -> NumericStorage {
