@@ -1,7 +1,7 @@
 use runmat_package::FrozenProjectHandoff;
 use runmat_test::protocol::ProtocolLimits;
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::{NativeRunnerError, NativeRunnerResult};
 
@@ -35,11 +35,9 @@ pub async fn write_bootstrap(
             "native worker bootstrap exceeds the negotiated message bound".into(),
         ));
     }
-    let length = u32::try_from(payload.len())
-        .map_err(|_| NativeRunnerError::Protocol("bootstrap length exceeds u32".into()))?;
-    writer.write_all(&length.to_be_bytes()).await?;
-    writer.write_all(&payload).await?;
-    writer.flush().await?;
+    runmat_process_host::ipc::write_payload(writer, &payload, super::framing::host_limits(limits))
+        .await
+        .map_err(map_host_error)?;
     Ok(())
 }
 
@@ -47,11 +45,10 @@ pub async fn read_bootstrap(
     reader: &mut (impl AsyncRead + Unpin),
     limits: ProtocolLimits,
 ) -> NativeRunnerResult<NativeWorkerBootstrap> {
-    let mut header = [0_u8; 4];
-    reader.read_exact(&mut header).await?;
-    let length = super::framing::frame_length(header, limits)?;
-    let mut payload = vec![0; length];
-    reader.read_exact(&mut payload).await?;
+    let payload =
+        runmat_process_host::ipc::read_payload(reader, super::framing::host_limits(limits))
+            .await
+            .map_err(map_host_error)?;
     let bootstrap: NativeWorkerBootstrap = serde_json::from_slice(&payload)
         .map_err(|error| NativeRunnerError::Protocol(error.to_string()))?;
     if bootstrap.schema_version != NATIVE_BOOTSTRAP_SCHEMA_VERSION {
@@ -66,4 +63,11 @@ pub async fn read_bootstrap(
             .map_err(|error| NativeRunnerError::Protocol(error.to_string()))?;
     }
     Ok(bootstrap)
+}
+
+fn map_host_error(error: runmat_process_host::ProcessHostError) -> NativeRunnerError {
+    match error {
+        runmat_process_host::ProcessHostError::Io(error) => NativeRunnerError::Io(error),
+        error => NativeRunnerError::Protocol(error.to_string()),
+    }
 }

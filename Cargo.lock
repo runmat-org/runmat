@@ -5769,6 +5769,7 @@ dependencies = [
  "runmat-package-cache-native",
  "runmat-parser",
  "runmat-plot",
+ "runmat-process-host",
  "runmat-runtime",
  "runmat-server-client",
  "runmat-static-analysis",
@@ -6355,6 +6356,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-process-host"
+version = "0.6.1"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
 name = "runmat-runtime"
 version = "0.6.1"
 dependencies = [
@@ -6532,11 +6545,11 @@ dependencies = [
 name = "runmat-test-runner-native"
 version = "0.6.1"
 dependencies = [
- "libc",
  "log",
  "runmat-core",
  "runmat-execution",
  "runmat-package",
+ "runmat-process-host",
  "runmat-test",
  "runmat-test-runner",
  "serde",

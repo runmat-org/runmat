@@ -1,16 +1,9 @@
 use runmat_test::protocol::{ProtocolLimits, WorkerRequest, WorkerResponse};
 
-use crate::{NativeRunnerError, NativeRunnerResult};
-
-pub(super) fn frame_length(header: [u8; 4], limits: ProtocolLimits) -> NativeRunnerResult<usize> {
-    let length = u32::from_be_bytes(header) as usize;
-    if length > limits.max_message_bytes as usize {
-        return Err(NativeRunnerError::Protocol(format!(
-            "worker frame is {length} bytes; negotiated maximum is {}",
-            limits.max_message_bytes
-        )));
+pub(super) fn host_limits(limits: ProtocolLimits) -> runmat_process_host::ipc::FrameLimits {
+    runmat_process_host::ipc::FrameLimits {
+        max_message_bytes: limits.max_message_bytes,
     }
-    Ok(length)
 }
 
 pub(super) fn decode_response_frame(

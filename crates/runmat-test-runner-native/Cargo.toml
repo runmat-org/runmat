@@ -10,6 +10,7 @@ repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 runmat-execution = { workspace = true }
+runmat-process-host = { workspace = true }
 runmat-test = { workspace = true }
 runmat-test-runner = { workspace = true }
 runmat-package = { workspace = true }
@@ -20,9 +21,6 @@ log = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3.12"

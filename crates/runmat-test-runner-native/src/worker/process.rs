@@ -1,8 +1,9 @@
 use std::fmt;
-use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+use runmat_process_host::environment::EnvironmentPolicy;
+use runmat_process_host::{ChildProcess, HostCommand, ProcessHostError};
 use runmat_test::event::TestEvent;
 use runmat_test::protocol::{
     ProtocolHandshake, ProtocolLimits, WorkerCapability, WorkerRequest, WorkerResponse,
@@ -13,14 +14,13 @@ use runmat_test_runner::worker::{
     CancelRequest, ExecutionRequest, SpawnRequest, WorkerBackend, WorkerExecution, WorkerSessionId,
 };
 use tokio::io::BufReader;
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::process::{ChildStdin, ChildStdout};
 use tokio::sync::Mutex;
 
 use crate::transport::{read_response, write_bootstrap, write_request, NativeWorkerBootstrap};
 use crate::NativeRunnerError;
 
 use super::command::ProcessBackendConfig;
-use super::pipes::CapturedStderr;
 
 pub struct ProcessBackend {
     config: ProcessBackendConfig,
@@ -64,11 +64,11 @@ pub struct ProcessSession {
 }
 
 struct ProcessState {
-    child: Mutex<Child>,
+    child: Mutex<ChildProcess>,
     process_id: Option<u32>,
     writer: Mutex<ChildStdin>,
     reader: Mutex<BufReader<ChildStdout>>,
-    stderr: CapturedStderr,
+    stderr: runmat_process_host::child::CapturedStderr,
     limits: ProtocolLimits,
 }
 
@@ -118,40 +118,21 @@ impl WorkerBackend for ProcessBackend {
                     ),
                 ));
             }
-            let mut command = Command::new(&self.config.executable);
-            command
-                .args(&self.config.worker_arguments)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .kill_on_drop(true);
-            if !self.config.inherit_environment {
-                command.env_clear();
-            }
-            command.envs(&self.config.environment);
-            super::process_tree::configure(&mut command);
-            let mut child = command.spawn().map_err(spawn_error)?;
+            let mut command = HostCommand::new(&self.config.executable);
+            command.arguments = self.config.worker_arguments.clone();
+            command.environment = self.config.environment.clone();
+            command.environment_policy = if self.config.inherit_environment {
+                EnvironmentPolicy::Inherit
+            } else {
+                EnvironmentPolicy::Clear
+            };
+            command.max_stderr_bytes = self.config.max_stderr_bytes;
+            let mut child = command.spawn().await.map_err(spawn_error)?;
             let process_id = child.id();
-            let mut writer = child.stdin.take().ok_or_else(|| {
-                BackendError::new(
-                    BackendErrorKind::Unavailable,
-                    "worker stdin was unavailable",
-                )
-            })?;
-            let stdout = child.stdout.take().ok_or_else(|| {
-                BackendError::new(
-                    BackendErrorKind::Unavailable,
-                    "worker stdout was unavailable",
-                )
-            })?;
-            let stderr_reader = child.stderr.take().ok_or_else(|| {
-                BackendError::new(
-                    BackendErrorKind::Unavailable,
-                    "worker stderr was unavailable",
-                )
-            })?;
-            let stderr = CapturedStderr::new(self.config.max_stderr_bytes);
-            stderr.drain(stderr_reader);
+            let stdio = child.take_stdio().map_err(spawn_error)?;
+            let mut writer = stdio.stdin;
+            let stdout = stdio.stdout;
+            let stderr = child.captured_stderr();
             let mut reader = BufReader::new(stdout);
             let local = &self.capabilities.handshake;
             let initial_limits = local.limits;
@@ -162,20 +143,20 @@ impl WorkerBackend for ProcessBackend {
             )
             .await
             {
-                terminate_failed_spawn(&mut child, process_id).await;
+                terminate_failed_spawn(&mut child).await;
                 return Err(native_backend_error(error));
             }
             let remote = match read_response(&mut reader, initial_limits).await {
                 Ok(WorkerResponse::Handshake(remote)) => remote,
                 Ok(response) => {
-                    terminate_failed_spawn(&mut child, process_id).await;
+                    terminate_failed_spawn(&mut child).await;
                     return Err(BackendError::new(
                         BackendErrorKind::MalformedProtocol,
                         format!("worker returned {response:?} before handshake"),
                     ));
                 }
                 Err(error) => {
-                    terminate_failed_spawn(&mut child, process_id).await;
+                    terminate_failed_spawn(&mut child).await;
                     return Err(native_backend_error(error));
                 }
             };
@@ -189,7 +170,7 @@ impl WorkerBackend for ProcessBackend {
             )
             .await
             {
-                terminate_failed_spawn(&mut child, process_id).await;
+                terminate_failed_spawn(&mut child).await;
                 return Err(native_backend_error(error));
             }
             let run_id = request.submission.plan.run_id.clone();
@@ -198,27 +179,27 @@ impl WorkerBackend for ProcessBackend {
                 snapshot: Box::new(request.submission.snapshot),
             };
             if let Err(error) = write_request(&mut writer, &install, limits).await {
-                terminate_failed_spawn(&mut child, process_id).await;
+                terminate_failed_spawn(&mut child).await;
                 return Err(native_backend_error(error));
             }
             match read_response(&mut reader, limits).await {
                 Ok(WorkerResponse::Ready { run_id: ready }) if ready == run_id => {}
                 Ok(WorkerResponse::Rejected { code, message }) => {
-                    terminate_failed_spawn(&mut child, process_id).await;
+                    terminate_failed_spawn(&mut child).await;
                     return Err(BackendError::new(
                         BackendErrorKind::Rejected,
                         format!("{code}: {message}"),
                     ));
                 }
                 Ok(response) => {
-                    terminate_failed_spawn(&mut child, process_id).await;
+                    terminate_failed_spawn(&mut child).await;
                     return Err(BackendError::new(
                         BackendErrorKind::MalformedProtocol,
                         format!("worker returned invalid plan response {response:?}"),
                     ));
                 }
                 Err(error) => {
-                    terminate_failed_spawn(&mut child, process_id).await;
+                    terminate_failed_spawn(&mut child).await;
                     return Err(native_backend_error(error));
                 }
             }
@@ -302,9 +283,7 @@ impl WorkerBackend for ProcessBackend {
     fn terminate<'a>(&'a self, session: &'a Self::Session) -> BackendFuture<'a, ()> {
         Box::pin(async move {
             let mut child = session.state.child.lock().await;
-            super::signals::hard_terminate(&mut child, session.state.process_id)
-                .await
-                .map_err(transport_error)
+            child.terminate_tree().await.map_err(transport_error)
         })
     }
 
@@ -319,9 +298,7 @@ impl WorkerBackend for ProcessBackend {
                 WorkerResponse::ShutdownComplete => {
                     drop(reader);
                     let mut child = session.state.child.lock().await;
-                    super::cleanup::reap(&mut child)
-                        .await
-                        .map_err(transport_error)
+                    child.wait().await.map(|_| ()).map_err(transport_error)
                 }
                 response => Err(BackendError::new(
                     BackendErrorKind::MalformedProtocol,
@@ -389,15 +366,15 @@ async fn read_execution(
     }
 }
 
-async fn terminate_failed_spawn(child: &mut Child, process_id: Option<u32>) {
-    let _ = super::signals::hard_terminate(child, process_id).await;
+async fn terminate_failed_spawn(child: &mut ChildProcess) {
+    let _ = child.terminate_tree().await;
 }
 
-fn spawn_error(error: std::io::Error) -> BackendError {
+fn spawn_error(error: ProcessHostError) -> BackendError {
     BackendError::new(BackendErrorKind::Unavailable, error.to_string())
 }
 
-fn transport_error(error: std::io::Error) -> BackendError {
+fn transport_error(error: ProcessHostError) -> BackendError {
     BackendError::new(BackendErrorKind::Transport, error.to_string())
 }
 

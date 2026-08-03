@@ -1,11 +1,7 @@
-mod cleanup;
 mod command;
 mod local;
-mod pipes;
 mod pool;
 mod process;
-mod process_tree;
-mod signals;
 mod stdio;
 
 pub use command::ProcessBackendConfig;

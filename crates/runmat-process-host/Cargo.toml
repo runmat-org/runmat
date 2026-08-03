@@ -1,0 +1,22 @@
+[package]
+name = "runmat-process-host"
+version = "0.6.1"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../../LICENSE.md"
+description = "Native child-process lifecycle and local IPC primitives for RunMat"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["io-std", "io-util", "process", "rt", "sync"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tempfile = "3.12"
+tokio = { workspace = true, features = ["io-util", "macros", "process", "rt-multi-thread", "time"] }

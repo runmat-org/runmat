@@ -5,14 +5,28 @@ use std::process::ExitCode;
 #[tokio::main]
 async fn main() -> ExitCode {
     let args = std::env::args_os().collect::<Vec<_>>();
-    if args.len() == 2 && args[1] == "--__runmat-test-worker" {
-        return match runmat::commands::test::worker::run_stdio().await {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => {
-                eprintln!("runmat test worker failed: {error:#}");
-                ExitCode::from(2)
-            }
-        };
+    match runmat_process_host::HiddenModeRegistry::standard().detect(args.clone()) {
+        Ok(Some(runmat_process_host::HiddenMode::TestWorker)) => {
+            return match runmat::commands::test::worker::run_stdio().await {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("runmat test worker failed: {error:#}");
+                    ExitCode::from(2)
+                }
+            };
+        }
+        Ok(Some(mode)) => {
+            eprintln!(
+                "RunMat host mode '{}' is not available in this build",
+                mode.marker()
+            );
+            return ExitCode::from(2);
+        }
+        Ok(None) => {}
+        Err(error) => {
+            eprintln!("invalid RunMat host mode: {error}");
+            return ExitCode::from(2);
+        }
     }
     let requested_color = runmat::presentation::requested_color_mode(&args).unwrap_or_default();
     let matches = runmat::Cli::command()

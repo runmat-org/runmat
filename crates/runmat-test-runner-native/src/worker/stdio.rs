@@ -7,7 +7,6 @@ use runmat_test::plan::TestPlan;
 use runmat_test::protocol::{
     negotiate, ProtocolHandshake, ProtocolLimits, WorkerCapability, WorkerRequest, WorkerResponse,
 };
-use tokio::io::{stdin, stdout, BufReader, BufWriter};
 
 use crate::transport::{read_bootstrap, read_request, write_response};
 use crate::{NativeRunnerError, NativeRunnerResult};
@@ -25,8 +24,7 @@ struct InstalledRun {
 /// remains transport-agnostic, while CLI and Desktop reuse this exact Core
 /// execution adapter instead of implementing independent child loops.
 pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
-    let mut input = BufReader::new(stdin());
-    let mut output = BufWriter::new(stdout());
+    let (mut input, mut output) = runmat_process_host::ipc::stdio::endpoint();
     let local = ProtocolHandshake::current(
         "runmat-native-worker",
         vec![

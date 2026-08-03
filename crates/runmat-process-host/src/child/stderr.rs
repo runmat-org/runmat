@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 #[derive(Clone, Debug)]
-pub(super) struct CapturedStderr {
+pub struct CapturedStderr {
     bytes: Arc<Mutex<Vec<u8>>>,
     limit: usize,
 }
@@ -29,13 +29,20 @@ impl CapturedStderr {
         });
     }
 
+    pub fn bytes(&self) -> Vec<u8> {
+        self.bytes
+            .lock()
+            .expect("child stderr lock poisoned")
+            .clone()
+    }
+
     pub fn text(&self) -> String {
-        String::from_utf8_lossy(&self.bytes.lock().expect("worker stderr lock poisoned"))
+        String::from_utf8_lossy(&self.bytes.lock().expect("child stderr lock poisoned"))
             .into_owned()
     }
 
     fn push(&self, bytes: &[u8]) {
-        let mut capture = self.bytes.lock().expect("worker stderr lock poisoned");
+        let mut capture = self.bytes.lock().expect("child stderr lock poisoned");
         let remaining = self.limit.saturating_sub(capture.len());
         capture.extend_from_slice(&bytes[..bytes.len().min(remaining)]);
     }
