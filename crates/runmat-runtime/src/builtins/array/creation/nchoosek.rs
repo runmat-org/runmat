@@ -3,13 +3,12 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, IntegerComplexStorage, LogicalArray, NumericDType,
-    NumericStorage, ResolveContext, Tensor, Type, Value,
+    CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerComplexStorage, LogicalArray,
+    NumericDType, NumericStorage, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::{
-    gpu_helpers,
     spec::{
         BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
         ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -34,7 +33,8 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Combination materialisation runs on the host; gpuArray inputs are gathered before constructing the output.",
+    notes:
+        "MATLAB does not expose interactive gpuArray support for nchoosek; GPU inputs are rejected.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::nchoosek")]
@@ -112,7 +112,7 @@ const ERROR_TOO_LARGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.NCHOOSEK.INTERNAL",
     identifier: Some("RunMat:nchoosek:Internal"),
-    when: "Output allocation, GPU gather, or container construction failed.",
+    when: "Output allocation or container construction failed.",
     message: "nchoosek: internal error",
 };
 
@@ -140,18 +140,13 @@ async fn nchoosek_builtin(first: Value, k: Value) -> BuiltinResult<Value> {
 }
 
 pub async fn evaluate(first: Value, k: Value) -> BuiltinResult<Value> {
-    let first = gather_if_gpu(first).await?;
-    let k = gather_if_gpu(k).await?;
-    evaluate_host(first, k)
-}
-
-async fn gather_if_gpu(value: Value) -> BuiltinResult<Value> {
-    match value {
-        Value::GpuTensor(handle) => gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
-            .await
-            .map_err(|e| nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {e}"))),
-        other => Ok(other),
+    if matches!(first, Value::GpuTensor(_)) || matches!(k, Value::GpuTensor(_)) {
+        return Err(nchoosek_error_with(
+            &ERROR_INVALID_INPUT,
+            "nchoosek: gpuArray inputs are not supported",
+        ));
     }
+    evaluate_host(first, k)
 }
 
 fn evaluate_host(first: Value, k: Value) -> BuiltinResult<Value> {
@@ -206,20 +201,16 @@ fn scalar_coefficient_mode(value: &Value) -> Option<CoefficientMode> {
             class: int_class(int),
         }),
         Value::Tensor(tensor) if tensor_element_len(tensor) == 1 => {
-            if let Some(value) = tensor
-                .integer_storage()
-                .and_then(|storage| storage.value_at(0))
-            {
+            let scalar = tensor.numeric_value_at(0)?;
+            if let Some(value) = scalar.into_int_value() {
                 return parse_nonnegative_integer_int(&value).map(|n| CoefficientMode {
                     n,
                     class: int_class(&value),
                 });
             }
-            parse_nonnegative_integer_f64(tensor::tensor_value_f64(tensor, 0)).map(|n| {
-                CoefficientMode {
-                    n,
-                    class: tensor_class(tensor.numeric_dtype()),
-                }
+            parse_nonnegative_integer_numeric(scalar).map(|n| CoefficientMode {
+                n,
+                class: tensor_class(tensor.numeric_dtype()),
             })
         }
         _ => None,
@@ -397,22 +388,30 @@ fn combination_storage(
 fn combinations_complex_tensor(tensor: ComplexTensor, k: usize) -> BuiltinResult<Value> {
     let n = vector_len(&tensor.shape)?;
     let rows = checked_rows(n, k)?;
-    if let Some(storage) = tensor.integer_storage() {
-        let real = storage
-            .real
-            .from_exact_values_like(combination_columns(&storage.real.exact_values(), rows, k)?)
-            .map_err(|error| nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {error}")))?;
-        let imag = storage
-            .imag
-            .from_exact_values_like(combination_columns(&storage.imag.exact_values(), rows, k)?)
-            .map_err(|error| nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {error}")))?;
-        let storage = IntegerComplexStorage::new(real, imag)
-            .map_err(|error| nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {error}")))?;
-        return ComplexTensor::new_integer(storage, vec![rows, k])
-            .map(Value::ComplexTensor)
-            .map_err(|error| nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {error}")));
-    }
-    combinations_complex(tensor.materialize_f64(), tensor.shape, k)
+    let storage = match tensor.into_complex_storage() {
+        ComplexStorage::F64(values) => ComplexStorage::F64(combination_columns(&values, rows, k)?),
+        ComplexStorage::F32(values) => ComplexStorage::F32(combination_columns(&values, rows, k)?),
+        ComplexStorage::Integer(storage) => {
+            let real = storage
+                .real
+                .from_exact_values_like(combination_columns(&storage.real.exact_values(), rows, k)?)
+                .map_err(|error| {
+                    nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {error}"))
+                })?;
+            let imag = storage
+                .imag
+                .from_exact_values_like(combination_columns(&storage.imag.exact_values(), rows, k)?)
+                .map_err(|error| {
+                    nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {error}"))
+                })?;
+            ComplexStorage::Integer(IntegerComplexStorage::new(real, imag).map_err(|error| {
+                nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {error}"))
+            })?)
+        }
+    };
+    ComplexTensor::from_complex_storage(storage, vec![rows, k])
+        .map(Value::ComplexTensor)
+        .map_err(|error| nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {error}")))
 }
 
 fn combinations_complex(
@@ -547,16 +546,14 @@ fn parse_k(value: &Value) -> BuiltinResult<ParsedK> {
             })
             .ok_or_else(invalid_k),
         Value::Tensor(tensor) if tensor_element_len(tensor) == 1 => {
-            if let Some(value) = tensor
-                .integer_storage()
-                .and_then(|storage| storage.value_at(0))
-            {
+            let scalar = tensor.numeric_value_at(0).ok_or_else(invalid_k)?;
+            if let Some(value) = scalar.into_int_value() {
                 let class = int_class(&value);
                 return parse_nonnegative_integer_int(&value)
                     .map(|value| ParsedK { value, class })
                     .ok_or_else(invalid_k);
             }
-            parse_nonnegative_integer_f64(tensor::tensor_value_f64(tensor, 0))
+            parse_nonnegative_integer_numeric(scalar)
                 .map(|value| ParsedK {
                     value,
                     class: tensor_class(tensor.numeric_dtype()),
@@ -564,6 +561,16 @@ fn parse_k(value: &Value) -> BuiltinResult<ParsedK> {
                 .ok_or_else(invalid_k)
         }
         _ => Err(invalid_k()),
+    }
+}
+
+fn parse_nonnegative_integer_numeric(value: runmat_builtins::NumericScalar) -> Option<usize> {
+    match value {
+        runmat_builtins::NumericScalar::F64(value) => parse_nonnegative_integer_f64(value),
+        runmat_builtins::NumericScalar::F32(value) => {
+            parse_nonnegative_integer_f64(f64::from(value))
+        }
+        value => parse_nonnegative_integer_int(&value.into_int_value()?),
     }
 }
 
@@ -1019,7 +1026,7 @@ mod tests {
     }
 
     #[test]
-    fn gpu_inputs_are_gathered_before_combining() {
+    fn gpu_inputs_are_rejected() {
         test_support::with_test_provider(|provider| {
             let vector = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
             let handle = provider
@@ -1028,12 +1035,24 @@ mod tests {
                     shape: &vector.shape,
                 })
                 .expect("upload");
-            let Value::Tensor(out) = call(Value::GpuTensor(handle), Value::Num(2.0)).unwrap()
-            else {
-                panic!("expected tensor");
-            };
-            assert_eq!(out.shape, vec![3, 2]);
-            assert_eq!(out.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
+            let error = call(Value::GpuTensor(handle), Value::Num(2.0)).unwrap_err();
+            assert_eq!(
+                error.identifier.as_deref(),
+                Some("RunMat:nchoosek:InvalidInput")
+            );
         });
+    }
+
+    #[test]
+    fn complex_single_vector_preserves_native_storage() {
+        let input =
+            ComplexTensor::from_f32(vec![(1.0, 0.5), (2.0, -0.5), (3.0, 1.0)], vec![1, 3]).unwrap();
+        let Value::ComplexTensor(output) =
+            call(Value::ComplexTensor(input), Value::Num(2.0)).unwrap()
+        else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(output.shape, vec![3, 2]);
+        assert!(matches!(output.complex_storage(), ComplexStorage::F32(_)));
     }
 }

@@ -2,11 +2,12 @@
 
 use std::path::{Path, PathBuf};
 
+#[cfg(not(target_arch = "wasm32"))]
+use runmat_builtins::NumericStorage;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, IntegerStorage, LogicalArray, NumericScalar, NumericStorage, StringArray, Tensor,
-    Type, Value,
+    IntValue, IntegerStorage, LogicalArray, NumericScalar, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
