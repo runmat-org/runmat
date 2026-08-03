@@ -546,55 +546,15 @@ pub async fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
         }
 
         // Matrix-scalar cases (broadcasting)
-        (Value::Tensor(m), Value::Num(s)) => {
-            let values = tensor_utils::tensor_values_f64_cow(m);
-            if *s == 0.0 {
-                let data: Vec<f64> = values.iter().map(|x| f64::INFINITY * x.signum()).collect();
-                Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
-            } else {
-                let data: Vec<f64> = values.iter().map(|x| x / s).collect();
-                Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
-            }
-        }
+        (Value::Tensor(m), Value::Num(s)) => divide_real_tensor_scalar(m, *s),
         (Value::Tensor(m), Value::Int(s)) => {
             let scalar = s.to_f64();
-            let values = tensor_utils::tensor_values_f64_cow(m);
-            if scalar == 0.0 {
-                let data: Vec<f64> = values.iter().map(|x| f64::INFINITY * x.signum()).collect();
-                Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
-            } else {
-                let data: Vec<f64> = values.iter().map(|x| x / scalar).collect();
-                Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
-            }
+            divide_real_tensor_scalar(m, scalar)
         }
-        (Value::Num(s), Value::Tensor(m)) => {
-            let values = tensor_utils::tensor_values_f64_cow(m);
-            let data: Vec<f64> = values
-                .iter()
-                .map(|x| {
-                    if *x == 0.0 {
-                        f64::INFINITY * s.signum()
-                    } else {
-                        s / x
-                    }
-                })
-                .collect();
-            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
-        }
+        (Value::Num(s), Value::Tensor(m)) => divide_scalar_real_tensor(*s, m),
         (Value::Int(s), Value::Tensor(m)) => {
             let scalar = s.to_f64();
-            let values = tensor_utils::tensor_values_f64_cow(m);
-            let data: Vec<f64> = values
-                .iter()
-                .map(|x| {
-                    if *x == 0.0 {
-                        f64::INFINITY * scalar.signum()
-                    } else {
-                        scalar / x
-                    }
-                })
-                .collect();
-            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
+            divide_scalar_real_tensor(scalar, m)
         }
 
         // Matrix-matrix case
@@ -608,20 +568,7 @@ pub async fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
                     m2.cols()
                 ));
             }
-            let lhs = tensor_utils::tensor_values_f64_cow(m1);
-            let rhs = tensor_utils::tensor_values_f64_cow(m2);
-            let data: Vec<f64> = lhs
-                .iter()
-                .zip(rhs.iter())
-                .map(|(x, y)| {
-                    if *y == 0.0 {
-                        f64::INFINITY * x.signum()
-                    } else {
-                        x / y
-                    }
-                })
-                .collect();
-            Ok(Value::Tensor(Tensor::new_2d(data, m1.rows(), m1.cols())?))
+            divide_real_tensors(m1, m2)
         }
 
         // Complex tensors
@@ -683,6 +630,104 @@ pub async fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
         _ => Err(format!(
             "Element-wise division not supported for types: {a:?} ./ {b:?}"
         )),
+    }
+}
+
+fn divide_real_tensor_scalar(tensor: &Tensor, scalar: f64) -> Result<Value, String> {
+    let shape = tensor.shape.clone();
+    let storage = tensor.clone().into_numeric_storage()?;
+    let output = match storage {
+        NumericStorage::F64(values) => NumericStorage::F64(
+            values
+                .into_iter()
+                .map(|value| divide_real_value_f64(value, scalar))
+                .collect(),
+        ),
+        NumericStorage::F32(values) => {
+            let scalar = scalar as f32;
+            NumericStorage::F32(
+                values
+                    .into_iter()
+                    .map(|value| divide_real_value_f32(value, scalar))
+                    .collect(),
+            )
+        }
+        _ => return Err("element-wise integer division did not use the exact integer path".into()),
+    };
+    Tensor::from_numeric_storage(output, shape).map(Value::Tensor)
+}
+
+fn divide_scalar_real_tensor(scalar: f64, tensor: &Tensor) -> Result<Value, String> {
+    let shape = tensor.shape.clone();
+    let storage = tensor.clone().into_numeric_storage()?;
+    let output = match storage {
+        NumericStorage::F64(values) => NumericStorage::F64(
+            values
+                .into_iter()
+                .map(|value| divide_real_value_f64(scalar, value))
+                .collect(),
+        ),
+        NumericStorage::F32(values) => {
+            let scalar = scalar as f32;
+            NumericStorage::F32(
+                values
+                    .into_iter()
+                    .map(|value| divide_real_value_f32(scalar, value))
+                    .collect(),
+            )
+        }
+        _ => return Err("element-wise integer division did not use the exact integer path".into()),
+    };
+    Tensor::from_numeric_storage(output, shape).map(Value::Tensor)
+}
+
+fn divide_real_tensors(lhs: &Tensor, rhs: &Tensor) -> Result<Value, String> {
+    let shape = lhs.shape.clone();
+    let lhs = lhs.clone().into_numeric_storage()?;
+    let rhs = rhs.clone().into_numeric_storage()?;
+    let output = match (lhs, rhs) {
+        (NumericStorage::F64(lhs), NumericStorage::F64(rhs)) => NumericStorage::F64(
+            lhs.into_iter()
+                .zip(rhs)
+                .map(|(left, right)| divide_real_value_f64(left, right))
+                .collect(),
+        ),
+        (NumericStorage::F32(lhs), NumericStorage::F32(rhs)) => NumericStorage::F32(
+            lhs.into_iter()
+                .zip(rhs)
+                .map(|(left, right)| divide_real_value_f32(left, right))
+                .collect(),
+        ),
+        (NumericStorage::F32(lhs), NumericStorage::F64(rhs)) => NumericStorage::F32(
+            lhs.into_iter()
+                .zip(rhs)
+                .map(|(left, right)| divide_real_value_f64(f64::from(left), right) as f32)
+                .collect(),
+        ),
+        (NumericStorage::F64(lhs), NumericStorage::F32(rhs)) => NumericStorage::F32(
+            lhs.into_iter()
+                .zip(rhs)
+                .map(|(left, right)| divide_real_value_f64(left, f64::from(right)) as f32)
+                .collect(),
+        ),
+        _ => return Err("element-wise integer division did not use the exact integer path".into()),
+    };
+    Tensor::from_numeric_storage(output, shape).map(Value::Tensor)
+}
+
+fn divide_real_value_f64(numerator: f64, denominator: f64) -> f64 {
+    if denominator == 0.0 {
+        f64::INFINITY * numerator.signum()
+    } else {
+        numerator / denominator
+    }
+}
+
+fn divide_real_value_f32(numerator: f32, denominator: f32) -> f32 {
+    if denominator == 0.0 {
+        f32::INFINITY * numerator.signum()
+    } else {
+        numerator / denominator
     }
 }
 
@@ -1211,6 +1256,68 @@ mod tests {
         } else {
             panic!("Expected numeric result");
         }
+    }
+
+    #[test]
+    fn elementwise_div_preserves_native_single_and_nd_shape() {
+        let shape = vec![1, 2, 2];
+        let tensor = Tensor::from_f32(vec![1.0, -2.0, 0.0, 4.0], shape.clone()).unwrap();
+        let Value::Tensor(result) =
+            block_on(elementwise_div(&Value::Tensor(tensor), &Value::Num(2.0))).expect("div")
+        else {
+            panic!("expected tensor");
+        };
+        assert_eq!(result.shape, shape);
+        assert_eq!(
+            result.into_numeric_storage().expect("storage"),
+            NumericStorage::F32(vec![0.5, -1.0, 0.0, 2.0])
+        );
+    }
+
+    #[test]
+    fn elementwise_div_mixed_floating_tensors_returns_single() {
+        let single = Tensor::from_f32(vec![2.0, -8.0], vec![1, 2]).unwrap();
+        let double = Tensor::new(vec![4.0, 2.0], vec![1, 2]).unwrap();
+
+        let Value::Tensor(left_single) = block_on(elementwise_div(
+            &Value::Tensor(single.clone()),
+            &Value::Tensor(double.clone()),
+        ))
+        .expect("div") else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            left_single.into_numeric_storage().expect("storage"),
+            NumericStorage::F32(vec![0.5, -4.0])
+        );
+
+        let Value::Tensor(right_single) = block_on(elementwise_div(
+            &Value::Tensor(double),
+            &Value::Tensor(single),
+        ))
+        .expect("div") else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            right_single.into_numeric_storage().expect("storage"),
+            NumericStorage::F32(vec![2.0, -0.25])
+        );
+    }
+
+    #[test]
+    fn elementwise_div_native_single_preserves_zero_policy() {
+        let tensor = Tensor::from_f32(vec![2.0, -2.0, 0.0], vec![1, 3]).unwrap();
+        let Value::Tensor(result) =
+            block_on(elementwise_div(&Value::Tensor(tensor), &Value::Num(0.0))).expect("div")
+        else {
+            panic!("expected tensor");
+        };
+        let NumericStorage::F32(values) = result.into_numeric_storage().expect("storage") else {
+            panic!("expected single storage");
+        };
+        assert!(values[0].is_infinite() && values[0].is_sign_positive());
+        assert!(values[1].is_infinite() && values[1].is_sign_negative());
+        assert!(values[2].is_infinite() && values[2].is_sign_positive());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
