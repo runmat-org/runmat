@@ -49,10 +49,12 @@ pub async fn spawn(spec: HostCommand) -> ProcessHostResult<ChildProcess> {
     };
     apply_environment(&mut command, &spec.environment_policy, &spec.environment);
     super::process_tree::configure(&mut command);
+    super::limits::configure(&mut command, spec.resource_limits);
     let child = command.spawn()?;
     let process_id = child.id();
+    let containment = super::process_tree::contain(&child, spec.resource_limits)?;
     let stderr = CapturedStderr::new(spec.max_stderr_bytes);
-    let mut process = ChildProcess::new(child, process_id, stderr);
+    let mut process = ChildProcess::new(child, process_id, stderr, containment);
     if piped {
         let stdin = process.child_stdin().ok_or_else(|| {
             ProcessHostError::Protocol("child stdin was unavailable after piped spawn".into())

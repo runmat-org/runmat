@@ -4518,6 +4518,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ntapi"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3b335231dfd352ffb0f8017f3b6027a4917f7df785ea2143d8af2adc66980ae"
+dependencies = [
+ "winapi",
+]
+
+[[package]]
 name = "nu-ansi-term"
 version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6228,6 +6237,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-execution-transport-native"
+version = "0.6.1"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "minicbor",
+ "serde",
+ "sha2 0.10.9",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
 name = "runmat-filesystem"
 version = "0.6.1"
 dependencies = [
@@ -6516,6 +6538,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-node-agent"
+version = "0.6.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "clap",
+ "dirs 5.0.1",
+ "rand 0.8.6",
+ "runmat-execution-transport-native",
+ "runmat-process-host",
+ "runmat-server-client",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "sysinfo",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
 name = "runmat-package"
 version = "0.6.1"
 dependencies = [
@@ -6629,6 +6673,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7751,6 +7796,21 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.118",
+]
+
+[[package]]
+name = "sysinfo"
+version = "0.30.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0a5b4ddaee55fb2bea2bf0e5000747e5f5c0de765e5a5ff87f4cd106439f4bb3"
+dependencies = [
+ "cfg-if",
+ "core-foundation-sys",
+ "libc",
+ "ntapi",
+ "once_cell",
+ "rayon",
+ "windows 0.52.0",
 ]
 
 [[package]]

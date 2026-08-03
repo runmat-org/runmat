@@ -16,6 +16,14 @@ tokio = { workspace = true, features = ["io-std", "io-util", "process", "rt", "s
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
 [dev-dependencies]
 serde_json = { workspace = true }
 tempfile = "3.12"

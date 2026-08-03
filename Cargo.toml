@@ -38,6 +38,8 @@ members = [
     "crates/runmat-execution-artifact",
     "crates/runmat-execution-runner",
     "crates/runmat-execution-runner-native",
+    "crates/runmat-execution-transport-native",
+    "crates/runmat-node-agent",
     "crates/runmat-process-host",
     "crates/runmat-static-analysis",
     "crates/runmat-geometry/core",
@@ -122,6 +124,7 @@ runmat-execution = { version = "=0.6.1", path = "crates/runmat-execution" }
 runmat-execution-artifact = { version = "=0.6.1", path = "crates/runmat-execution-artifact" }
 runmat-execution-runner = { version = "=0.6.1", path = "crates/runmat-execution-runner" }
 runmat-execution-runner-native = { version = "=0.6.1", path = "crates/runmat-execution-runner-native" }
+runmat-execution-transport-native = { version = "=0.6.1", path = "crates/runmat-execution-transport-native" }
 runmat-process-host = { version = "=0.6.1", path = "crates/runmat-process-host" }
 runmat-static-analysis = { version = "=0.6.1", path = "crates/runmat-static-analysis" }
 runmat-server-client = { version = "=0.6.1", path = "crates/runmat-server-client" }

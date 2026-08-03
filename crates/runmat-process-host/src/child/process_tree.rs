@@ -1,5 +1,15 @@
 use tokio::process::{Child, Command};
 
+use super::ResourceLimits;
+
+#[cfg(not(windows))]
+pub(super) struct ProcessContainment;
+
+#[cfg(windows)]
+pub(super) struct ProcessContainment {
+    _job: std::os::windows::io::OwnedHandle,
+}
+
 #[cfg(unix)]
 pub(super) fn configure(command: &mut Command) {
     command.process_group(0);
@@ -13,6 +23,79 @@ pub(super) fn configure(command: &mut Command) {
 
 #[cfg(not(any(unix, windows)))]
 pub(super) fn configure(_command: &mut Command) {}
+
+#[cfg(not(windows))]
+pub(super) fn contain(_: &Child, _: ResourceLimits) -> std::io::Result<Option<ProcessContainment>> {
+    Ok(None)
+}
+
+#[cfg(windows)]
+pub(super) fn contain(
+    child: &Child,
+    limits: ResourceLimits,
+) -> std::io::Result<Option<ProcessContainment>> {
+    use std::mem::size_of;
+    use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _};
+    use std::ptr;
+
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_ACTIVE_PROCESS, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        JOB_OBJECT_LIMIT_PROCESS_MEMORY, JOB_OBJECT_LIMIT_PROCESS_TIME,
+    };
+
+    let raw_job = unsafe { CreateJobObjectW(ptr::null(), ptr::null()) };
+    if raw_job.is_null() {
+        return Err(std::io::Error::last_os_error());
+    }
+    let job = unsafe {
+        std::os::windows::io::OwnedHandle::from_raw_handle(
+            raw_job as std::os::windows::io::RawHandle,
+        )
+    };
+    let mut information: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
+    information.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if let Some(memory_bytes) = limits.memory_bytes {
+        information.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_PROCESS_MEMORY;
+        information.ProcessMemoryLimit =
+            usize::try_from(memory_bytes).map_err(|_| std::io::Error::other("memory limit"))?;
+    }
+    if let Some(cpu_seconds) = limits.cpu_seconds {
+        information.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_PROCESS_TIME;
+        information.BasicLimitInformation.PerProcessUserTimeLimit = i64::try_from(
+            cpu_seconds
+                .checked_mul(10_000_000)
+                .ok_or_else(|| std::io::Error::other("CPU limit"))?,
+        )
+        .map_err(|_| std::io::Error::other("CPU limit"))?;
+    }
+    if let Some(process_count) = limits.process_count {
+        information.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
+        information.BasicLimitInformation.ActiveProcessLimit =
+            u32::try_from(process_count).map_err(|_| std::io::Error::other("process limit"))?;
+    }
+    let configured = unsafe {
+        SetInformationJobObject(
+            job.as_raw_handle() as _,
+            JobObjectExtendedLimitInformation,
+            &information as *const _ as *const _,
+            u32::try_from(size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>())
+                .map_err(|_| std::io::Error::other("job information size"))?,
+        )
+    };
+    if configured == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let child_handle = child
+        .raw_handle()
+        .ok_or_else(|| std::io::Error::other("child process handle is unavailable"))?;
+    let assigned = unsafe { AssignProcessToJobObject(job.as_raw_handle() as _, child_handle as _) };
+    if assigned == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(Some(ProcessContainment { _job: job }))
+}
 
 pub(super) async fn terminate(child: &mut Child, process_id: Option<u32>) -> std::io::Result<()> {
     #[cfg(unix)]

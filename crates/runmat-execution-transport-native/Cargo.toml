@@ -1,0 +1,17 @@
+[package]
+name = "runmat-execution-transport-native"
+version = "0.6.1"
+edition = "2021"
+license-file = "../../LICENSE.md"
+
+[dependencies]
+async-trait = "0.1"
+chrono = { workspace = true }
+minicbor = { workspace = true }
+serde = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

@@ -287,6 +287,304 @@ paths:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
       security: []
+  /v1/execution/nodes/{nodeId}/allocations:
+    get:
+      tags:
+      - Execution
+      operationId: list_allocations
+      parameters:
+      - name: orgId
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: credentialEpoch
+        in: query
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: X-RunMat-Node-Credential
+        in: header
+        description: Current node credential
+        required: true
+        schema:
+          type: string
+      - name: nodeId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AllocationLeaseListResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security: []
+  /v1/execution/nodes/{nodeId}/allocations/{leaseId}/accept:
+    post:
+      tags:
+      - Execution
+      operationId: accept_allocation
+      parameters:
+      - name: X-RunMat-Node-Credential
+        in: header
+        description: Current node credential
+        required: true
+        schema:
+          type: string
+      - name: nodeId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: leaseId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransitionAllocationRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AllocationLeaseResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security: []
+  /v1/execution/nodes/{nodeId}/allocations/{leaseId}/release:
+    post:
+      tags:
+      - Execution
+      operationId: release_allocation
+      parameters:
+      - name: X-RunMat-Node-Credential
+        in: header
+        description: Current node credential
+        required: true
+        schema:
+          type: string
+      - name: nodeId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: leaseId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransitionAllocationRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AllocationLeaseResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security: []
+  /v1/execution/nodes/{nodeId}/credentials/rotate:
+    post:
+      tags:
+      - Execution
+      operationId: rotate_credential
+      parameters:
+      - name: X-RunMat-Node-Credential
+        in: header
+        description: Current node credential
+        required: true
+        schema:
+          type: string
+      - name: nodeId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RotateNodeCredentialRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeCredentialResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security: []
+  /v1/execution/nodes/{nodeId}/drain/complete:
+    post:
+      tags:
+      - Execution
+      operationId: complete_drain
+      parameters:
+      - name: X-RunMat-Node-Credential
+        in: header
+        description: Current node credential
+        required: true
+        schema:
+          type: string
+      - name: nodeId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RotateNodeCredentialRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security: []
+  /v1/execution/nodes/{nodeId}/heartbeat:
+    post:
+      tags:
+      - Execution
+      operationId: heartbeat
+      parameters:
+      - name: X-RunMat-Node-Credential
+        in: header
+        description: Current node credential
+        required: true
+        schema:
+          type: string
+      - name: nodeId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NodeHeartbeatRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security: []
   /v1/lifecycle/intake:
     post:
       tags:
@@ -4713,6 +5011,46 @@ components:
       - moderate
       - high
       - critical
+    AllocationLeaseListResponse:
+      type: object
+      required:
+      - allocations
+      properties:
+        allocations:
+          type: array
+          items:
+            $ref: '#/components/schemas/AllocationLeaseResponse'
+    AllocationLeaseResponse:
+      type: object
+      required:
+      - id
+      - runId
+      - projectId
+      - queue
+      - resources
+      - state
+      - fencingToken
+      - expiresAt
+      properties:
+        expiresAt:
+          type: string
+          format: date-time
+        fencingToken:
+          type: integer
+          format: int64
+          minimum: 0
+        id:
+          type: string
+        projectId:
+          type: string
+        queue:
+          type: string
+        resources:
+          $ref: '#/components/schemas/ResourceRequestBody'
+        runId:
+          type: string
+        state:
+          type: string
     AnalyticsProjectionFailure:
       type: object
       required:
@@ -6684,17 +7022,35 @@ components:
           minimum: 0
         skippedOnceKey:
           type: boolean
+    NodeCredentialResponse:
+      type: object
+      required:
+      - nodeId
+      - credential
+      - credentialEpoch
+      properties:
+        credential:
+          type: string
+        credentialEpoch:
+          type: integer
+          format: int64
+          minimum: 0
+        nodeId:
+          type: string
     NodeEnrollmentResponse:
       type: object
       required:
       - nodeId
       - clusterId
       - orgId
+      - credential
       - credentialEpoch
       - leaseEpoch
       - heartbeatExpiresAt
       properties:
         clusterId:
+          type: string
+        credential:
           type: string
         credentialEpoch:
           type: integer
@@ -6711,6 +7067,28 @@ components:
           type: string
         orgId:
           type: string
+    NodeHeartbeatRequest:
+      type: object
+      required:
+      - orgId
+      - credentialEpoch
+      - inventory
+      - heartbeatTtlSeconds
+      properties:
+        credentialEpoch:
+          type: integer
+          format: int64
+          minimum: 0
+        heartbeatTtlSeconds:
+          type: integer
+          format: int64
+          maximum: 300
+          minimum: 10
+        inventory:
+          $ref: '#/components/schemas/ResourceInventoryBody'
+        orgId:
+          type: string
+      additionalProperties: false
     NodeListResponse:
       type: object
       required:
@@ -8471,6 +8849,19 @@ components:
           format: date-time
           nullable: true
       additionalProperties: false
+    RotateNodeCredentialRequest:
+      type: object
+      required:
+      - orgId
+      - credentialEpoch
+      properties:
+        credentialEpoch:
+          type: integer
+          format: int64
+          minimum: 0
+        orgId:
+          type: string
+      additionalProperties: false
     RunEventListResponse:
       type: object
       required:
@@ -9130,6 +9521,24 @@ components:
           type: string
         url:
           type: string
+    TransitionAllocationRequest:
+      type: object
+      required:
+      - orgId
+      - credentialEpoch
+      - fencingToken
+      properties:
+        credentialEpoch:
+          type: integer
+          format: int64
+          minimum: 0
+        fencingToken:
+          type: integer
+          format: int64
+          minimum: 0
+        orgId:
+          type: string
+      additionalProperties: false
     TrustTierBody:
       type: string
       enum:

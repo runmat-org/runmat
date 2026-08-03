@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use crate::child::{self, ChildProcess};
+use crate::child::{self, ChildProcess, ResourceLimits};
 use crate::environment::EnvironmentPolicy;
 use crate::{ProcessHostError, ProcessHostResult};
 
@@ -29,6 +29,7 @@ pub struct HostCommand {
     pub lifetime: ChildLifetime,
     pub stdio: StdioPolicy,
     pub max_stderr_bytes: usize,
+    pub resource_limits: ResourceLimits,
 }
 
 impl HostCommand {
@@ -42,6 +43,7 @@ impl HostCommand {
             lifetime: ChildLifetime::Owned,
             stdio: StdioPolicy::Piped,
             max_stderr_bytes: 1024 * 1024,
+            resource_limits: ResourceLimits::default(),
         }
     }
 
@@ -65,6 +67,7 @@ impl HostCommand {
                 "child stderr bound must be greater than zero".into(),
             ));
         }
+        self.resource_limits.validate()?;
         if self.lifetime == ChildLifetime::Detached
             && matches!(self.stdio, StdioPolicy::Piped | StdioPolicy::Inherit)
         {

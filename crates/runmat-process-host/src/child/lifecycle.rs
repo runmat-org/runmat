@@ -19,15 +19,22 @@ pub struct ChildProcess {
     process_id: Option<u32>,
     stderr: CapturedStderr,
     stdio: Option<ChildStdio>,
+    _containment: Option<super::process_tree::ProcessContainment>,
 }
 
 impl ChildProcess {
-    pub(super) fn new(child: Child, process_id: Option<u32>, stderr: CapturedStderr) -> Self {
+    pub(super) fn new(
+        child: Child,
+        process_id: Option<u32>,
+        stderr: CapturedStderr,
+        containment: Option<super::process_tree::ProcessContainment>,
+    ) -> Self {
         Self {
             child,
             process_id,
             stderr,
             stdio: None,
+            _containment: containment,
         }
     }
 
@@ -67,6 +74,13 @@ impl ChildProcess {
             code: status.code(),
             success: status.success(),
         })
+    }
+
+    pub fn try_wait(&mut self) -> ProcessHostResult<Option<ProcessExit>> {
+        Ok(self.child.try_wait()?.map(|status| ProcessExit {
+            code: status.code(),
+            success: status.success(),
+        }))
     }
 
     pub async fn terminate_tree(&mut self) -> ProcessHostResult<()> {
