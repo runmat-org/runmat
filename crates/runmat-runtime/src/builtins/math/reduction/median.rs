@@ -6,7 +6,8 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, IntegerStorage, Tensor, Type, Value,
+    IntValue, IntegerStorage, LogicalArray, NumericDType, NumericScalar, NumericStorage, Tensor,
+    Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -118,7 +119,31 @@ const MEDIAN_INPUTS_A_NANFLAG_AXES: [BuiltinParamDescriptor; 3] = [
     },
 ];
 
-const MEDIAN_SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
+const MEDIAN_INPUTS_A_WEIGHTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "Weights",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"Weights\""),
+        description: "Weighting-scheme name.",
+    },
+    BuiltinParamDescriptor {
+        name: "W",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Nonnegative single- or double-precision weighting scheme.",
+    },
+];
+
+const MEDIAN_SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
     BuiltinSignatureDescriptor {
         label: "M = median(A)",
         inputs: &MEDIAN_INPUTS_A,
@@ -162,6 +187,11 @@ const MEDIAN_SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
     BuiltinSignatureDescriptor {
         label: "M = median(A, missingflag, \"all\")",
         inputs: &MEDIAN_INPUTS_A_NANFLAG_AXES,
+        outputs: &MEDIAN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = median(___, Weights=W)",
+        inputs: &MEDIAN_INPUTS_A_WEIGHTS,
         outputs: &MEDIAN_OUTPUT,
     },
 ];
@@ -286,6 +316,12 @@ enum MedianAxes {
 struct ParsedArguments {
     axes: MedianAxes,
     nan_mode: ReductionNaN,
+    weights: Option<MedianWeights>,
+}
+
+struct MedianWeights {
+    values: Vec<f64>,
+    shape: Vec<usize>,
 }
 
 #[runtime_builtin(
@@ -310,6 +346,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     let mut axes = MedianAxes::Default;
     let mut axes_set = false;
     let mut nan_mode = ReductionNaN::Include;
+    let mut weights = None;
     let tokens = tokens_from_values(args);
 
     let mut idx = 0;
@@ -318,6 +355,19 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
 
         if let Some(crate::builtins::common::arg_tokens::ArgToken::String(text)) = tokens.get(idx) {
             match text.as_str() {
+                "weights" => {
+                    if weights.is_some() {
+                        return Err(median_invalid_argument(
+                            "median: Weights may be specified only once",
+                        ));
+                    }
+                    let value = args.get(idx + 1).ok_or_else(|| {
+                        median_invalid_argument("median: Weights requires a value")
+                    })?;
+                    weights = Some(parse_weights(value).await?);
+                    idx += 2;
+                    continue;
+                }
                 "omitnan" | "omitmissing" => {
                     nan_mode = ReductionNaN::Omit;
                     idx += 1;
@@ -345,6 +395,19 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
 
         if let Some(keyword) = keyword_of(arg) {
             match keyword.as_str() {
+                "weights" => {
+                    if weights.is_some() {
+                        return Err(median_invalid_argument(
+                            "median: Weights may be specified only once",
+                        ));
+                    }
+                    let value = args.get(idx + 1).ok_or_else(|| {
+                        median_invalid_argument("median: Weights requires a value")
+                    })?;
+                    weights = Some(parse_weights(value).await?);
+                    idx += 2;
+                    continue;
+                }
                 "omitnan" | "omitmissing" => {
                     nan_mode = ReductionNaN::Omit;
                     idx += 1;
@@ -412,18 +475,153 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
         )));
     }
 
-    Ok(ParsedArguments { axes, nan_mode })
+    if weights.is_some() && matches!(axes, MedianAxes::Vec(_) | MedianAxes::All) {
+        return Err(median_invalid_argument(
+            "median: Weights cannot be combined with vecdim or 'all'",
+        ));
+    }
+
+    Ok(ParsedArguments {
+        axes,
+        nan_mode,
+        weights,
+    })
+}
+
+async fn parse_weights(value: &Value) -> BuiltinResult<MedianWeights> {
+    let tensor = match value {
+        Value::Num(value) => Tensor::new(vec![*value], vec![1, 1])
+            .map_err(|error| median_internal_error(format!("median: {error}")))?,
+        Value::Tensor(tensor) => tensor.clone(),
+        Value::GpuTensor(handle) => {
+            if runmat_accelerate_api::handle_integer_type(handle).is_some()
+                || runmat_accelerate_api::handle_is_logical(handle)
+            {
+                return Err(median_invalid_argument(
+                    "median: Weights must be single or double",
+                ));
+            }
+            gpu_helpers::gather_tensor_async(handle).await?
+        }
+        _ => {
+            return Err(median_invalid_argument(
+                "median: Weights must be a single- or double-precision numeric array",
+            ));
+        }
+    };
+
+    if !matches!(
+        tensor.numeric_dtype(),
+        NumericDType::F32 | NumericDType::F64
+    ) {
+        return Err(median_invalid_argument(
+            "median: Weights must be single or double",
+        ));
+    }
+
+    let shape = tensor.shape.clone();
+    let values = tensor.materialize_f64();
+    for (index, &weight) in values.iter().enumerate() {
+        if weight.is_nan() || weight < 0.0 {
+            return Err(median_invalid_argument(format!(
+                "median: Weights must contain nonnegative values (index {})",
+                index + 1
+            )));
+        }
+    }
+    Ok(MedianWeights { values, shape })
 }
 
 fn median_host(value: Value, args: &ParsedArguments) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for("median", value).map_err(median_invalid_input)?;
-    let reduced = median_tensor(tensor, args.axes.clone(), args.nan_mode)?;
-    Ok(tensor::tensor_into_value(reduced))
+    match value {
+        Value::LogicalArray(logical) => median_logical_host(logical, args),
+        Value::Bool(value) => median_logical_host(
+            LogicalArray::new(vec![u8::from(value)], vec![1, 1]).map_err(median_internal_error)?,
+            args,
+        ),
+        other => {
+            let tensor =
+                tensor::value_into_tensor_for("median", other).map_err(median_invalid_input)?;
+            let reduced = median_tensor(
+                tensor,
+                args.axes.clone(),
+                args.nan_mode,
+                args.weights.as_ref(),
+            )?;
+            Ok(tensor::tensor_into_value(reduced))
+        }
+    }
+}
+
+fn median_logical_host(logical: LogicalArray, args: &ParsedArguments) -> BuiltinResult<Value> {
+    let tensor = Tensor::new_integer(IntegerStorage::U8(logical.data), logical.shape.clone())
+        .map_err(|error| median_internal_error(format!("median: {error}")))?;
+    let reduced = median_tensor(
+        tensor,
+        args.axes.clone(),
+        args.nan_mode,
+        args.weights.as_ref(),
+    )?;
+    logical_value_from_reduction(reduced)
+}
+
+fn logical_value_from_reduction(tensor: Tensor) -> BuiltinResult<Value> {
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(median_internal_error)?;
+    let NumericStorage::U8(values) = storage else {
+        return Err(median_internal_error(
+            "median: logical reduction did not preserve its logical payload",
+        ));
+    };
+    if values.len() == 1 {
+        Ok(Value::Bool(values[0] != 0))
+    } else {
+        LogicalArray::new(values, shape)
+            .map(Value::LogicalArray)
+            .map_err(median_internal_error)
+    }
+}
+
+fn logical_tensor_from_gathered(tensor: Tensor) -> BuiltinResult<Tensor> {
+    let shape = tensor.shape.clone();
+    let values = tensor
+        .materialize_f64()
+        .into_iter()
+        .map(|value| u8::from(value != 0.0))
+        .collect();
+    Tensor::new_integer(IntegerStorage::U8(values), shape)
+        .map_err(|error| median_internal_error(format!("median: {error}")))
+}
+
+fn floating_tensor_from_logical_reduction(tensor: &Tensor) -> BuiltinResult<Tensor> {
+    let values = tensor
+        .integer_storage()
+        .and_then(|storage| match storage {
+            IntegerStorage::U8(values) => Some(
+                values
+                    .iter()
+                    .map(|&value| if value != 0 { 1.0 } else { 0.0 })
+                    .collect(),
+            ),
+            _ => None,
+        })
+        .ok_or_else(|| {
+            median_internal_error("median: logical GPU reduction did not preserve logical values")
+        })?;
+    Tensor::new(values, tensor.shape.clone())
+        .map_err(|error| median_internal_error(format!("median: {error}")))
 }
 
 async fn median_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Value> {
+    let is_logical = runmat_accelerate_api::handle_is_logical(&handle);
     let is_integer = runmat_accelerate_api::handle_integer_type(&handle).is_some();
-    if !is_integer && args.nan_mode == ReductionNaN::Include {
+    if !is_integer
+        && !is_logical
+        && args.weights.is_none()
+        && args.nan_mode == ReductionNaN::Include
+    {
         if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle)
             .or_else(runmat_accelerate_api::provider)
         {
@@ -434,13 +632,32 @@ async fn median_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinR
     }
 
     let gathered = gpu_helpers::gather_tensor_async(&handle).await?;
-    let reduced = median_tensor(gathered, args.axes.clone(), args.nan_mode)?;
+    let gathered = if is_logical {
+        logical_tensor_from_gathered(gathered)?
+    } else {
+        gathered
+    };
+    let reduced = median_tensor(
+        gathered,
+        args.axes.clone(),
+        args.nan_mode,
+        args.weights.as_ref(),
+    )?;
     let provider = runmat_accelerate_api::provider_for_handle(&handle)
         .or_else(runmat_accelerate_api::provider)
         .ok_or_else(|| median_internal_error("median: GPU result has no owning provider"))?;
-    let uploaded = gpu_helpers::upload_tensor(provider, &reduced)
+    let upload_tensor = if is_logical {
+        floating_tensor_from_logical_reduction(&reduced)?
+    } else {
+        reduced
+    };
+    let uploaded = gpu_helpers::upload_tensor(provider, &upload_tensor)
         .map_err(|error| median_internal_error(format!("median: GPU upload failed: {error}")))?;
-    Ok(Value::GpuTensor(uploaded))
+    if is_logical {
+        Ok(gpu_helpers::logical_gpu_value(uploaded))
+    } else {
+        Ok(Value::GpuTensor(uploaded))
+    }
 }
 
 async fn median_gpu_try(
@@ -513,7 +730,23 @@ fn median_tensor(
     tensor: Tensor,
     axes: MedianAxes,
     nan_mode: ReductionNaN,
+    weights: Option<&MedianWeights>,
 ) -> BuiltinResult<Tensor> {
+    if let Some(weights) = weights {
+        return match axes {
+            MedianAxes::Default => {
+                let dim = default_dimension(&tensor);
+                reduce_tensor_weighted_median_dim(tensor, dim, nan_mode, weights)
+            }
+            MedianAxes::Dim(dim) => {
+                reduce_tensor_weighted_median_dim(tensor, dim, nan_mode, weights)
+            }
+            MedianAxes::Vec(_) | MedianAxes::All => Err(median_invalid_argument(
+                "median: Weights cannot be combined with vecdim or 'all'",
+            )),
+        };
+    }
+
     match axes {
         MedianAxes::Default => {
             let dim = default_dimension(&tensor);
@@ -650,6 +883,226 @@ fn value_as_str(value: &Value) -> Option<String> {
         Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
         Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
         _ => None,
+    }
+}
+
+#[derive(Clone, Copy)]
+enum WeightLayout {
+    Vector,
+    Full,
+}
+
+fn reduce_tensor_weighted_median_dim(
+    tensor: Tensor,
+    dim: usize,
+    nan_mode: ReductionNaN,
+    weights: &MedianWeights,
+) -> BuiltinResult<Tensor> {
+    if dim == 0 {
+        return Err(median_invalid_argument("median: dimension must be >= 1"));
+    }
+
+    let input_shape = tensor.shape.clone();
+    let reduce_len = if input_shape.is_empty() {
+        1
+    } else if dim <= input_shape.len() {
+        input_shape[dim - 1]
+    } else {
+        1
+    };
+    let weight_layout = validate_weight_shape(weights, &input_shape, reduce_len)?;
+
+    if input_shape.is_empty() {
+        return tensor
+            .reshape(vec![1, 1])
+            .map_err(|error| median_internal_error(format!("median: {error}")));
+    }
+    if dim > input_shape.len() {
+        return Ok(tensor);
+    }
+
+    let output_shape = reduction_shape(&input_shape, dim).expect("in-range reduction dimension");
+    if reduce_len == 0 || tensor.is_empty() {
+        return reduce_tensor_median_dim(tensor, dim, nan_mode);
+    }
+
+    let dim_index = dim - 1;
+    let stride_before = dim_product(&input_shape[..dim_index]);
+    let stride_after = dim_product(&input_shape[dim..]);
+    let mut selected = Vec::with_capacity(tensor::element_count(&output_shape));
+
+    for after in 0..stride_after {
+        for before in 0..stride_before {
+            let mut candidates = Vec::with_capacity(reduce_len);
+            let mut first_missing = None;
+
+            for k in 0..reduce_len {
+                let index = before + k * stride_before + after * stride_before * reduce_len;
+                let value = tensor
+                    .numeric_value_at(index)
+                    .expect("weighted median index is in bounds");
+                if numeric_scalar_is_nan(value) {
+                    first_missing.get_or_insert(index);
+                    if nan_mode == ReductionNaN::Include {
+                        candidates.clear();
+                        break;
+                    }
+                    continue;
+                }
+                let weight = match weight_layout {
+                    WeightLayout::Vector => weights.values[k],
+                    WeightLayout::Full => weights.values[index],
+                };
+                candidates.push((index, weight));
+            }
+
+            if nan_mode == ReductionNaN::Include {
+                if let Some(index) = first_missing {
+                    selected.push(index);
+                    continue;
+                }
+            }
+            if candidates.is_empty() {
+                if let Some(index) = first_missing {
+                    selected.push(index);
+                    continue;
+                }
+                return Err(median_invalid_argument(
+                    "median: each weighted slice must contain a positive total weight",
+                ));
+            }
+
+            candidates.sort_by(|(left, _), (right, _)| {
+                compare_same_class_numeric_scalars(
+                    tensor
+                        .numeric_value_at(*left)
+                        .expect("weighted median left index is in bounds"),
+                    tensor
+                        .numeric_value_at(*right)
+                        .expect("weighted median right index is in bounds"),
+                )
+            });
+
+            let scale = candidates
+                .iter()
+                .map(|(_, weight)| *weight)
+                .fold(0.0_f64, f64::max);
+            if scale == 0.0 {
+                return Err(median_invalid_argument(
+                    "median: each weighted slice must contain a positive total weight",
+                ));
+            }
+            let normalized_weight = |weight: f64| {
+                if scale.is_infinite() {
+                    if weight.is_infinite() {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                } else {
+                    weight / scale
+                }
+            };
+            let total: f64 = candidates
+                .iter()
+                .map(|(_, weight)| normalized_weight(*weight))
+                .sum();
+            let threshold = total / 2.0;
+            let mut cumulative = 0.0;
+            let mut chosen = candidates
+                .last()
+                .map(|(index, _)| *index)
+                .expect("nonempty weighted median candidates");
+            for (index, weight) in candidates {
+                cumulative += normalized_weight(weight);
+                if cumulative >= threshold {
+                    chosen = index;
+                    break;
+                }
+            }
+            selected.push(chosen);
+        }
+    }
+
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(median_internal_error)?
+        .gather(&selected)
+        .map_err(median_internal_error)?;
+    Tensor::from_numeric_storage(storage, output_shape)
+        .map_err(|error| median_internal_error(format!("median: {error}")))
+}
+
+fn validate_weight_shape(
+    weights: &MedianWeights,
+    input_shape: &[usize],
+    reduce_len: usize,
+) -> BuiltinResult<WeightLayout> {
+    if is_vector_shape(&weights.shape) {
+        if weights.values.len() != reduce_len {
+            return Err(median_invalid_argument(format!(
+                "median: vector Weights length {} must match operating dimension length {reduce_len}",
+                weights.values.len()
+            )));
+        }
+        return Ok(WeightLayout::Vector);
+    }
+    if !matlab_shape_equal(&weights.shape, input_shape) {
+        return Err(median_invalid_argument(format!(
+            "median: nonvector Weights shape {:?} must match input shape {:?}",
+            weights.shape, input_shape
+        )));
+    }
+    Ok(WeightLayout::Full)
+}
+
+fn is_vector_shape(shape: &[usize]) -> bool {
+    match shape {
+        [] | [_] => true,
+        [rows, cols] => *rows == 1 || *cols == 1,
+        _ => false,
+    }
+}
+
+fn matlab_shape_equal(left: &[usize], right: &[usize]) -> bool {
+    let rank = left.len().max(right.len());
+    (0..rank).all(|index| {
+        left.get(index).copied().unwrap_or(1) == right.get(index).copied().unwrap_or(1)
+    })
+}
+
+fn numeric_scalar_is_nan(value: NumericScalar) -> bool {
+    match value {
+        NumericScalar::F64(value) => value.is_nan(),
+        NumericScalar::F32(value) => value.is_nan(),
+        NumericScalar::I8(_)
+        | NumericScalar::I16(_)
+        | NumericScalar::I32(_)
+        | NumericScalar::I64(_)
+        | NumericScalar::U8(_)
+        | NumericScalar::U16(_)
+        | NumericScalar::U32(_)
+        | NumericScalar::U64(_) => false,
+    }
+}
+
+fn compare_same_class_numeric_scalars(left: NumericScalar, right: NumericScalar) -> Ordering {
+    match (left, right) {
+        (NumericScalar::F64(left), NumericScalar::F64(right)) => {
+            left.partial_cmp(&right).unwrap_or(Ordering::Equal)
+        }
+        (NumericScalar::F32(left), NumericScalar::F32(right)) => {
+            left.partial_cmp(&right).unwrap_or(Ordering::Equal)
+        }
+        (NumericScalar::I8(left), NumericScalar::I8(right)) => left.cmp(&right),
+        (NumericScalar::I16(left), NumericScalar::I16(right)) => left.cmp(&right),
+        (NumericScalar::I32(left), NumericScalar::I32(right)) => left.cmp(&right),
+        (NumericScalar::I64(left), NumericScalar::I64(right)) => left.cmp(&right),
+        (NumericScalar::U8(left), NumericScalar::U8(right)) => left.cmp(&right),
+        (NumericScalar::U16(left), NumericScalar::U16(right)) => left.cmp(&right),
+        (NumericScalar::U32(left), NumericScalar::U32(right)) => left.cmp(&right),
+        (NumericScalar::U64(left), NumericScalar::U64(right)) => left.cmp(&right),
+        _ => unreachable!("numeric tensor storage is homogeneous"),
     }
 }
 
@@ -986,6 +1439,7 @@ pub(crate) mod tests {
         assert!(labels.contains(&"M = median(A, missingflag)"));
         assert!(labels.contains(&"M = median(A, axes, missingflag)"));
         assert!(labels.contains(&"M = median(A, missingflag, axes)"));
+        assert!(labels.contains(&"M = median(___, Weights=W)"));
         assert_eq!(
             MEDIAN_INPUTS_A_NANFLAG[1].default,
             Some("\"includemissing\"")
@@ -1125,6 +1579,206 @@ pub(crate) mod tests {
             result.integer_storage(),
             Some(&IntegerStorage::U64(vec![large, u64::MAX]))
         );
+    }
+
+    #[test]
+    fn weighted_median_matches_documented_column_example() {
+        let input = Tensor::new(
+            vec![1.0, 7.0, 1.0, 1.0, 6.0, 1.0, 9.0, 9.0, 9.0, 2.0],
+            vec![5, 2],
+        )
+        .expect("input");
+        let weights = Tensor::new(vec![1.0, 2.0, 1.0, 2.0, 3.0], vec![5, 1]).expect("weights");
+        let result = median_builtin(
+            Value::Tensor(input),
+            vec![Value::from("Weights"), Value::Tensor(weights)],
+        )
+        .expect("weighted median");
+        let Value::Tensor(result) = result else {
+            panic!("expected weighted matrix result");
+        };
+        assert_eq!(result.materialize_f64(), vec![6.0, 9.0]);
+    }
+
+    #[test]
+    fn weighted_median_selects_threshold_value_and_preserves_native_single() {
+        let input = Tensor::from_f32(vec![1.0, 9.0, 20.0], vec![3, 1]).expect("single input");
+        let weights = Tensor::from_f32(vec![1.0, 1.0, 2.0], vec![3, 1]).expect("single weights");
+        let result = median_builtin(
+            Value::Tensor(input),
+            vec![Value::from("Weights"), Value::Tensor(weights)],
+        )
+        .expect("weighted median");
+        let Value::Tensor(result) = result else {
+            panic!("expected native single scalar tensor");
+        };
+        assert_eq!(
+            result.into_numeric_storage().expect("storage"),
+            NumericStorage::F32(vec![9.0])
+        );
+    }
+
+    #[test]
+    fn weighted_median_preserves_exact_u64_values_above_flintmax() {
+        let wide = 9_007_199_254_740_993_u64;
+        let input = Tensor::new_integer(
+            IntegerStorage::U64(vec![wide, wide + 2, u64::MAX]),
+            vec![3, 1],
+        )
+        .expect("integer input");
+        let weights = Tensor::new(vec![1.0, 1.0, 10.0], vec![3, 1]).expect("weights");
+        let result = median_builtin(
+            Value::Tensor(input),
+            vec![Value::from("Weights"), Value::Tensor(weights)],
+        )
+        .expect("weighted median");
+        assert_eq!(result, Value::Int(IntValue::U64(u64::MAX)));
+    }
+
+    #[test]
+    fn weighted_median_preserves_every_integer_class() {
+        let cases = [
+            (IntegerStorage::I8(vec![9, -4, 2]), IntValue::I8(-4)),
+            (
+                IntegerStorage::I16(vec![900, -400, 200]),
+                IntValue::I16(-400),
+            ),
+            (
+                IntegerStorage::I32(vec![90_000, -40_000, 20_000]),
+                IntValue::I32(-40_000),
+            ),
+            (
+                IntegerStorage::I64(vec![i64::MAX, i64::MIN, 0]),
+                IntValue::I64(i64::MIN),
+            ),
+            (IntegerStorage::U8(vec![9, 4, 2]), IntValue::U8(4)),
+            (IntegerStorage::U16(vec![900, 400, 200]), IntValue::U16(400)),
+            (
+                IntegerStorage::U32(vec![90_000, 40_000, 20_000]),
+                IntValue::U32(40_000),
+            ),
+            (
+                IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993, 0]),
+                IntValue::U64(9_007_199_254_740_993),
+            ),
+        ];
+        for (storage, expected) in cases {
+            let input = Tensor::new_integer(storage, vec![3, 1]).expect("integer input");
+            let weights = Tensor::new(vec![1.0, 10.0, 1.0], vec![3, 1]).expect("weights");
+            let result = median_builtin(
+                Value::Tensor(input),
+                vec![Value::from("Weights"), Value::Tensor(weights)],
+            )
+            .expect("weighted median");
+            assert_eq!(result, Value::Int(expected));
+        }
+    }
+
+    #[test]
+    fn weighted_median_supports_full_size_weights_and_explicit_dimension() {
+        let input = Tensor::new(vec![1.0, 4.0, 10.0, 2.0, 8.0, 20.0], vec![3, 2]).expect("input");
+        let weights = Tensor::new(vec![1.0, 1.0, 8.0, 8.0, 1.0, 1.0], vec![3, 2]).expect("weights");
+        let result = median_builtin(
+            Value::Tensor(input),
+            vec![
+                Value::Int(IntValue::I32(1)),
+                Value::from("Weights"),
+                Value::Tensor(weights),
+            ],
+        )
+        .expect("weighted median");
+        let Value::Tensor(result) = result else {
+            panic!("expected matrix result");
+        };
+        assert_eq!(result.shape, vec![1, 2]);
+        assert_eq!(result.materialize_f64(), vec![10.0, 2.0]);
+    }
+
+    #[test]
+    fn weighted_median_applies_missing_policy_before_weight_threshold() {
+        let input = Tensor::new(vec![1.0, f64::NAN, 10.0], vec![3, 1]).expect("input");
+        let weights = Tensor::new(vec![1.0, 100.0, 1.0], vec![3, 1]).expect("weights");
+        let included = median_builtin(
+            Value::Tensor(input.clone()),
+            vec![
+                Value::from("Weights"),
+                Value::Tensor(weights.clone()),
+                Value::from("includemissing"),
+            ],
+        )
+        .expect("included median");
+        let Value::Num(included) = included else {
+            panic!("expected double scalar");
+        };
+        assert!(included.is_nan());
+
+        let omitted = median_builtin(
+            Value::Tensor(input),
+            vec![
+                Value::from("omitmissing"),
+                Value::from("Weights"),
+                Value::Tensor(weights),
+            ],
+        )
+        .expect("omitted median");
+        assert_eq!(omitted, Value::Num(1.0));
+    }
+
+    #[test]
+    fn weighted_median_preserves_logical_class() {
+        let input = LogicalArray::new(vec![0, 1, 1, 0, 0, 1], vec![3, 2]).expect("logical");
+        let weights = Tensor::new(vec![1.0, 5.0, 1.0], vec![3, 1]).expect("weights");
+        let result = median_builtin(
+            Value::LogicalArray(input),
+            vec![Value::from("Weights"), Value::Tensor(weights)],
+        )
+        .expect("weighted logical median");
+        assert_eq!(
+            result,
+            Value::LogicalArray(LogicalArray::new(vec![1, 0], vec![1, 2]).expect("logical result"))
+        );
+    }
+
+    #[test]
+    fn weighted_median_validates_documented_weight_contract() {
+        let input = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).expect("input");
+        let integer_weights = Tensor::new_integer(IntegerStorage::U8(vec![1, 1, 1]), vec![3, 1])
+            .expect("integer weights");
+        let error = median_builtin(
+            Value::Tensor(input.clone()),
+            vec![Value::from("Weights"), Value::Tensor(integer_weights)],
+        )
+        .expect_err("integer weights must fail");
+        assert!(error.message().contains("single or double"));
+
+        let negative = Tensor::new(vec![1.0, -1.0, 1.0], vec![3, 1]).expect("weights");
+        let error = median_builtin(
+            Value::Tensor(input.clone()),
+            vec![Value::from("Weights"), Value::Tensor(negative)],
+        )
+        .expect_err("negative weights must fail");
+        assert!(error.message().contains("nonnegative"));
+
+        let wrong_length = Tensor::new(vec![1.0, 1.0], vec![2, 1]).expect("weights");
+        let error = median_builtin(
+            Value::Tensor(input.clone()),
+            vec![Value::from("Weights"), Value::Tensor(wrong_length)],
+        )
+        .expect_err("wrong weight length must fail");
+        assert!(error.message().contains("operating dimension length"));
+
+        let vecdim = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("vecdim");
+        let weights = Tensor::new(vec![1.0, 1.0, 1.0], vec![3, 1]).expect("weights");
+        let error = median_builtin(
+            Value::Tensor(input),
+            vec![
+                Value::Tensor(vecdim),
+                Value::from("Weights"),
+                Value::Tensor(weights),
+            ],
+        )
+        .expect_err("vecdim with weights must fail");
+        assert!(error.message().contains("vecdim"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1332,6 +1986,77 @@ pub(crate) mod tests {
         });
     }
 
+    #[test]
+    fn weighted_median_gpu_fallback_preserves_exact_class_and_residency() {
+        test_support::with_test_provider(|provider| {
+            let wide = 9_007_199_254_740_993_u64;
+            let input = Tensor::new_integer(
+                IntegerStorage::U64(vec![wide, wide + 2, u64::MAX]),
+                vec![3, 1],
+            )
+            .expect("integer input");
+            let handle = gpu_helpers::upload_tensor(provider, &input).expect("input upload");
+            let weights = Tensor::from_f32(vec![1.0, 1.0, 10.0], vec![3, 1]).expect("weights");
+            let result = median_builtin(
+                Value::GpuTensor(handle),
+                vec![Value::from("Weights"), Value::Tensor(weights)],
+            )
+            .expect("weighted median");
+            let Value::GpuTensor(result_handle) = &result else {
+                panic!("expected resident result");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(result_handle),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            let gathered = test_support::gather(result).expect("gather result");
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![u64::MAX]))
+            );
+        });
+    }
+
+    #[test]
+    fn weighted_median_accepts_resident_weights_and_preserves_logical_metadata() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new(vec![0.0, 1.0, 0.0], vec![3, 1]).expect("input");
+            let input_handle = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &input.materialize_f64(),
+                    shape: &input.shape,
+                })
+                .expect("input upload");
+            let input = gpu_helpers::logical_gpu_value(input_handle);
+            let Value::GpuTensor(input_handle) = input else {
+                unreachable!()
+            };
+
+            let weights = Tensor::new(vec![1.0, 5.0, 1.0], vec![3, 1]).expect("weights");
+            let weights_handle = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &weights.materialize_f64(),
+                    shape: &weights.shape,
+                })
+                .expect("weights upload");
+            let result = median_builtin(
+                Value::GpuTensor(input_handle),
+                vec![Value::from("Weights"), Value::GpuTensor(weights_handle)],
+            )
+            .expect("weighted median");
+            let Value::GpuTensor(result_handle) = &result else {
+                panic!("expected resident logical result");
+            };
+            assert!(runmat_accelerate_api::handle_is_logical(result_handle));
+            let gathered = block_on(crate::dispatcher::gather_if_needed_async(&result))
+                .expect("gather logical result");
+            assert_eq!(
+                gathered,
+                Value::LogicalArray(LogicalArray::new(vec![1], vec![1, 1]).unwrap())
+            );
+        });
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
@@ -1350,6 +2075,7 @@ pub(crate) mod tests {
         let args_dim1 = ParsedArguments {
             axes: MedianAxes::Dim(1),
             nan_mode: ReductionNaN::Include,
+            weights: None,
         };
         let cpu = median_host(Value::Tensor(tensor.clone()), &args_dim1).expect("cpu median");
         let view = runmat_accelerate_api::HostTensorView {
@@ -1377,6 +2103,7 @@ pub(crate) mod tests {
         let args_all = ParsedArguments {
             axes: MedianAxes::All,
             nan_mode: ReductionNaN::Include,
+            weights: None,
         };
         let cpu_all =
             median_host(Value::Tensor(tensor.clone()), &args_all).expect("cpu median all");
