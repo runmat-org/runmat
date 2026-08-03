@@ -1,11 +1,12 @@
 //! MATLAB-compatible `times` builtin with GPU-aware semantics for RunMat.
 
 use async_recursion::async_recursion;
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value,
+    CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericStorage, Tensor,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -371,13 +372,7 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => Ok(gpu_helpers::resident_gpu_value(handle)),
         Value::Tensor(tensor) => {
-            let data = tensor::tensor_values_f64_cow(&tensor);
-            let view = HostTensorView {
-                data: &data,
-                shape: &tensor.shape,
-            };
-            let handle = provider
-                .upload(&view)
+            let handle = gpu_helpers::upload_tensor(provider, &tensor)
                 .map_err(|e| builtin_error(format!("times: failed to upload GPU result: {e}")))?;
             Ok(gpu_helpers::resident_gpu_value(handle))
         }
@@ -386,7 +381,11 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
                 .map_err(|e| builtin_error(format!("times: {e}")))?;
             convert_to_gpu(Value::Tensor(tensor))
         }
-        Value::Int(i) => convert_to_gpu(Value::Num(i.to_f64())),
+        Value::Int(i) => {
+            let tensor = Tensor::new_integer(integer_storage_from_scalar(i), vec![1, 1])
+                .map_err(|e| builtin_error(format!("times: {e}")))?;
+            convert_to_gpu(Value::Tensor(tensor))
+        }
         Value::Bool(b) => convert_to_gpu(Value::Num(if b { 1.0 } else { 0.0 })),
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)
@@ -657,7 +656,6 @@ async fn times_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> BuiltinResult
 fn scalar_real_value(value: &Value) -> Option<f64> {
     match value {
         Value::Num(n) => Some(*n),
-        Value::Int(i) => Some(i.to_f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => Some(tensor::tensor_value_f64(t, 0)),
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
@@ -930,10 +928,6 @@ fn classify_operand(value: Value) -> BuiltinResult<TimesOperand> {
         Value::Num(n) => Ok(TimesOperand::Real(
             Tensor::new(vec![n], vec![1, 1]).map_err(|e| builtin_error(format!("times: {e}")))?,
         )),
-        Value::Int(i) => Ok(TimesOperand::Real(
-            Tensor::new(vec![i.to_f64()], vec![1, 1])
-                .map_err(|e| builtin_error(format!("times: {e}")))?,
-        )),
         Value::Bool(b) => Ok(TimesOperand::Real(
             Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
                 .map_err(|e| builtin_error(format!("times: {e}")))?,
@@ -968,7 +962,7 @@ fn char_array_to_tensor(chars: &CharArray) -> BuiltinResult<Tensor> {
 fn extract_scalar_f64(value: &Value) -> BuiltinResult<Option<f64>> {
     match value {
         Value::Num(n) => Ok(Some(*n)),
-        Value::Int(i) => Ok(Some(i.to_f64())),
+        Value::Int(i) => Ok(Some(provider_scalar_from_integer(i))),
         Value::Bool(b) => Ok(Some(if *b { 1.0 } else { 0.0 })),
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(Some(tensor::tensor_value_f64(t, 0))),
         Value::LogicalArray(l) if l.data.len() == 1 => {
@@ -978,6 +972,23 @@ fn extract_scalar_f64(value: &Value) -> BuiltinResult<Option<f64>> {
             ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0),
         )),
         _ => Ok(None),
+    }
+}
+
+fn provider_scalar_from_integer(value: &IntValue) -> f64 {
+    value.to_f64()
+}
+
+fn integer_storage_from_scalar(value: IntValue) -> IntegerStorage {
+    match value {
+        IntValue::I8(value) => IntegerStorage::I8(vec![value]),
+        IntValue::I16(value) => IntegerStorage::I16(vec![value]),
+        IntValue::I32(value) => IntegerStorage::I32(vec![value]),
+        IntValue::I64(value) => IntegerStorage::I64(vec![value]),
+        IntValue::U8(value) => IntegerStorage::U8(vec![value]),
+        IntValue::U16(value) => IntegerStorage::U16(vec![value]),
+        IntValue::U32(value) => IntegerStorage::U32(vec![value]),
+        IntValue::U64(value) => IntegerStorage::U64(vec![value]),
     }
 }
 
