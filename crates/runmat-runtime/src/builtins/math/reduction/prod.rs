@@ -83,7 +83,7 @@ const PROD_INPUTS_ALL: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
-const PROD_INPUTS_NANFLAG: [BuiltinParamDescriptor; 2] = [
+const PROD_INPUTS_MISSINGFLAG: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "A",
         ty: BuiltinParamType::Any,
@@ -92,11 +92,11 @@ const PROD_INPUTS_NANFLAG: [BuiltinParamDescriptor; 2] = [
         description: "Input array.",
     },
     BuiltinParamDescriptor {
-        name: "nanflag",
+        name: "missingflag",
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
-        default: Some("\"includenan\""),
-        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+        default: Some("\"includemissing\""),
+        description: "Missing-data handling mode: \"includemissing\" or \"omitmissing\".",
     },
 ];
 
@@ -117,7 +117,7 @@ const PROD_INPUTS_OUTTYPE: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
-const PROD_INPUTS_DIM_NANFLAG: [BuiltinParamDescriptor; 3] = [
+const PROD_INPUTS_DIM_MISSINGFLAG: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "A",
         ty: BuiltinParamType::Any,
@@ -133,15 +133,15 @@ const PROD_INPUTS_DIM_NANFLAG: [BuiltinParamDescriptor; 3] = [
         description: "Dimension selector or vector of dimensions.",
     },
     BuiltinParamDescriptor {
-        name: "nanflag",
+        name: "missingflag",
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
-        default: Some("\"includenan\""),
-        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+        default: Some("\"includemissing\""),
+        description: "Missing-data handling mode: \"includemissing\" or \"omitmissing\".",
     },
 ];
 
-const PROD_INPUTS_NANFLAG_DIM: [BuiltinParamDescriptor; 3] = [
+const PROD_INPUTS_MISSINGFLAG_DIM: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "A",
         ty: BuiltinParamType::Any,
@@ -150,11 +150,11 @@ const PROD_INPUTS_NANFLAG_DIM: [BuiltinParamDescriptor; 3] = [
         description: "Input array.",
     },
     BuiltinParamDescriptor {
-        name: "nanflag",
+        name: "missingflag",
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
-        default: Some("\"includenan\""),
-        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+        default: Some("\"includemissing\""),
+        description: "Missing-data handling mode: \"includemissing\" or \"omitmissing\".",
     },
     BuiltinParamDescriptor {
         name: "dim",
@@ -182,8 +182,8 @@ const PROD_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
         outputs: &PROD_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "B = prod(A, nanflag)",
-        inputs: &PROD_INPUTS_NANFLAG,
+        label: "B = prod(A, missingflag)",
+        inputs: &PROD_INPUTS_MISSINGFLAG,
         outputs: &PROD_OUTPUT,
     },
     BuiltinSignatureDescriptor {
@@ -192,13 +192,13 @@ const PROD_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
         outputs: &PROD_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "B = prod(A, dim, nanflag)",
-        inputs: &PROD_INPUTS_DIM_NANFLAG,
+        label: "B = prod(A, dim, missingflag)",
+        inputs: &PROD_INPUTS_DIM_MISSINGFLAG,
         outputs: &PROD_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "B = prod(A, nanflag, dim)",
-        inputs: &PROD_INPUTS_NANFLAG_DIM,
+        label: "B = prod(A, missingflag, dim)",
+        inputs: &PROD_INPUTS_MISSINGFLAG_DIM,
         outputs: &PROD_OUTPUT,
     },
 ];
@@ -206,7 +206,7 @@ const PROD_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
 const PROD_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.PROD.INVALID_ARGUMENT",
     identifier: Some("RunMat:prod:InvalidArgument"),
-    when: "Dimension, nanflag, or output class argument grammar is invalid.",
+    when: "Dimension, missing-data flag, or output class argument grammar is invalid.",
     message: "prod: invalid argument",
 };
 
@@ -320,7 +320,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name = "prod",
     category = "math/reduction",
     summary = "Multiply elements across array dimensions.",
-    keywords = "prod,product,reduction,gpu,omitnan",
+    keywords = "prod,product,reduction,gpu,omitmissing,omitnan",
     accel = "reduction",
     type_resolver(prod_type),
     descriptor(crate::builtins::math::reduction::prod::PROD_DESCRIPTOR),
@@ -538,12 +538,12 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
         let arg = &args[idx];
         if let Some(crate::builtins::common::arg_tokens::ArgToken::String(text)) = tokens.get(idx) {
             match text.as_str() {
-                "omitnan" => {
+                "omitmissing" | "omitnan" => {
                     nan_mode = ReductionNaN::Omit;
                     idx += 1;
                     continue;
                 }
-                "includenan" => {
+                "includemissing" | "includenan" => {
                     nan_mode = ReductionNaN::Include;
                     idx += 1;
                     continue;
@@ -565,12 +565,12 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
         }
         if let Some(keyword) = keyword_of(arg) {
             match keyword.as_str() {
-                "omitnan" => {
+                "omitmissing" | "omitnan" => {
                     nan_mode = ReductionNaN::Omit;
                     idx += 1;
                     continue;
                 }
-                "includenan" => {
+                "includemissing" | "includenan" => {
                     nan_mode = ReductionNaN::Include;
                     idx += 1;
                     continue;
@@ -1137,11 +1137,20 @@ pub(crate) mod tests {
         assert!(labels.contains(&"B = prod(A)"));
         assert!(labels.contains(&"B = prod(A, dim)"));
         assert!(labels.contains(&"B = prod(A, \"all\")"));
-        assert!(labels.contains(&"B = prod(A, nanflag)"));
+        assert!(labels.contains(&"B = prod(A, missingflag)"));
         assert!(labels.contains(&"B = prod(A, outtype)"));
-        assert!(labels.contains(&"B = prod(A, dim, nanflag)"));
-        assert!(labels.contains(&"B = prod(A, nanflag, dim)"));
+        assert!(labels.contains(&"B = prod(A, dim, missingflag)"));
+        assert!(labels.contains(&"B = prod(A, missingflag, dim)"));
+        assert!(!labels.iter().any(|label| label.contains("nanflag")));
         assert!(!labels.iter().any(|label| label.contains("like")));
+        let missingflag = PROD_DESCRIPTOR
+            .signatures
+            .iter()
+            .flat_map(|signature| signature.inputs)
+            .find(|input| input.name == "missingflag")
+            .expect("missingflag descriptor");
+        assert_eq!(missingflag.default, Some("\"includemissing\""));
+        assert!(missingflag.description.contains("\"omitmissing\""));
         assert!(PROD_DESCRIPTOR
             .errors
             .iter()
@@ -1242,6 +1251,21 @@ pub(crate) mod tests {
         let result =
             prod_builtin(Value::Tensor(tensor), vec![Value::from("omitnan")]).expect("prod");
         assert_eq!(result, Value::Num(8.0));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn prod_generic_missing_flags_match_legacy_aliases() {
+        let tensor = || Tensor::new(vec![2.0, f64::NAN, 4.0], vec![3, 1]).unwrap();
+        let omitted = prod_builtin(Value::Tensor(tensor()), vec![Value::from("omitmissing")])
+            .expect("prod omitmissing");
+        assert_eq!(omitted, Value::Num(8.0));
+        let included = prod_builtin(Value::Tensor(tensor()), vec![Value::from("includemissing")])
+            .expect("prod includemissing");
+        match included {
+            Value::Num(value) => assert!(value.is_nan()),
+            other => panic!("expected scalar NaN, got {other:?}"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

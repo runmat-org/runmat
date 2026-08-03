@@ -82,7 +82,7 @@ const SUM_INPUTS_A_ALL: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
-const SUM_INPUTS_A_NANFLAG: [BuiltinParamDescriptor; 2] = [
+const SUM_INPUTS_A_MISSINGFLAG: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "A",
         ty: BuiltinParamType::Any,
@@ -91,11 +91,11 @@ const SUM_INPUTS_A_NANFLAG: [BuiltinParamDescriptor; 2] = [
         description: "Input array.",
     },
     BuiltinParamDescriptor {
-        name: "nanflag",
+        name: "missingflag",
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
-        default: Some("\"includenan\""),
-        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+        default: Some("\"includemissing\""),
+        description: "Missing-data handling mode: \"includemissing\" or \"omitmissing\".",
     },
 ];
 
@@ -116,7 +116,7 @@ const SUM_INPUTS_A_OUTTYPE: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
-const SUM_INPUTS_A_DIM_NANFLAG: [BuiltinParamDescriptor; 3] = [
+const SUM_INPUTS_A_DIM_MISSINGFLAG: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "A",
         ty: BuiltinParamType::Any,
@@ -132,15 +132,15 @@ const SUM_INPUTS_A_DIM_NANFLAG: [BuiltinParamDescriptor; 3] = [
         description: "Dimension selector or vector of dimensions.",
     },
     BuiltinParamDescriptor {
-        name: "nanflag",
+        name: "missingflag",
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
-        default: Some("\"includenan\""),
-        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+        default: Some("\"includemissing\""),
+        description: "Missing-data handling mode: \"includemissing\" or \"omitmissing\".",
     },
 ];
 
-const SUM_INPUTS_A_NANFLAG_DIM: [BuiltinParamDescriptor; 3] = [
+const SUM_INPUTS_A_MISSINGFLAG_DIM: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "A",
         ty: BuiltinParamType::Any,
@@ -149,11 +149,11 @@ const SUM_INPUTS_A_NANFLAG_DIM: [BuiltinParamDescriptor; 3] = [
         description: "Input array.",
     },
     BuiltinParamDescriptor {
-        name: "nanflag",
+        name: "missingflag",
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
-        default: Some("\"includenan\""),
-        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+        default: Some("\"includemissing\""),
+        description: "Missing-data handling mode: \"includemissing\" or \"omitmissing\".",
     },
     BuiltinParamDescriptor {
         name: "dim",
@@ -181,8 +181,8 @@ const SUM_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
         outputs: &SUM_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "S = sum(A, nanflag)",
-        inputs: &SUM_INPUTS_A_NANFLAG,
+        label: "S = sum(A, missingflag)",
+        inputs: &SUM_INPUTS_A_MISSINGFLAG,
         outputs: &SUM_OUTPUT,
     },
     BuiltinSignatureDescriptor {
@@ -191,13 +191,13 @@ const SUM_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
         outputs: &SUM_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "S = sum(A, dim, nanflag)",
-        inputs: &SUM_INPUTS_A_DIM_NANFLAG,
+        label: "S = sum(A, dim, missingflag)",
+        inputs: &SUM_INPUTS_A_DIM_MISSINGFLAG,
         outputs: &SUM_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "S = sum(A, nanflag, dim)",
-        inputs: &SUM_INPUTS_A_NANFLAG_DIM,
+        label: "S = sum(A, missingflag, dim)",
+        inputs: &SUM_INPUTS_A_MISSINGFLAG_DIM,
         outputs: &SUM_OUTPUT,
     },
     BuiltinSignatureDescriptor {
@@ -210,7 +210,7 @@ const SUM_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
 const SUM_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.SUM.INVALID_ARGUMENT",
     identifier: Some("RunMat:sum:InvalidArgument"),
-    when: "Dimension, nanflag, or output class argument grammar is invalid.",
+    when: "Dimension, missing-data flag, or output class argument grammar is invalid.",
     message: "sum: invalid argument",
 };
 
@@ -315,7 +315,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name = "sum",
     category = "math/reduction",
     summary = "Sum array elements along dimensions with MATLAB-compatible options.",
-    keywords = "sum,reduction,gpu,omitnan,all",
+    keywords = "sum,reduction,gpu,omitmissing,omitnan,all",
     accel = "reduction",
     type_resolver(sum_type),
     descriptor(crate::builtins::math::reduction::sum::SUM_DESCRIPTOR),
@@ -522,12 +522,12 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
         let arg = &args[idx];
         if let Some(crate::builtins::common::arg_tokens::ArgToken::String(text)) = tokens.get(idx) {
             match text.as_str() {
-                "omitnan" => {
+                "omitmissing" | "omitnan" => {
                     nan_mode = ReductionNaN::Omit;
                     idx += 1;
                     continue;
                 }
-                "includenan" => {
+                "includemissing" | "includenan" => {
                     nan_mode = ReductionNaN::Include;
                     idx += 1;
                     continue;
@@ -548,12 +548,12 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
         }
         if let Some(keyword) = keyword_of(arg) {
             match keyword.as_str() {
-                "omitnan" => {
+                "omitmissing" | "omitnan" => {
                     nan_mode = ReductionNaN::Omit;
                     idx += 1;
                     continue;
                 }
-                "includenan" => {
+                "includemissing" | "includenan" => {
                     nan_mode = ReductionNaN::Include;
                     idx += 1;
                     continue;
@@ -1345,12 +1345,21 @@ pub(crate) mod tests {
         assert!(labels.contains(&"S = sum(A)"));
         assert!(labels.contains(&"S = sum(A, dim)"));
         assert!(labels.contains(&"S = sum(A, \"all\")"));
-        assert!(labels.contains(&"S = sum(A, nanflag)"));
+        assert!(labels.contains(&"S = sum(A, missingflag)"));
         assert!(labels.contains(&"S = sum(A, outtype)"));
-        assert!(labels.contains(&"S = sum(A, dim, nanflag)"));
-        assert!(labels.contains(&"S = sum(A, nanflag, dim)"));
+        assert!(labels.contains(&"S = sum(A, dim, missingflag)"));
+        assert!(labels.contains(&"S = sum(A, missingflag, dim)"));
+        assert!(!labels.iter().any(|label| label.contains("nanflag")));
         assert!(!labels.iter().any(|label| label.contains("like")));
         assert!(labels.contains(&"S = sum(A, vecdim)"));
+        let missingflag = SUM_DESCRIPTOR
+            .signatures
+            .iter()
+            .flat_map(|signature| signature.inputs)
+            .find(|input| input.name == "missingflag")
+            .expect("missingflag descriptor");
+        assert_eq!(missingflag.default, Some("\"includemissing\""));
+        assert!(missingflag.description.contains("\"omitmissing\""));
     }
 
     #[test]
@@ -1454,6 +1463,21 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, f64::NAN, 3.0], vec![3, 1]).unwrap();
         let result = sum_builtin(Value::Tensor(tensor), vec![Value::from("omitnan")]).expect("sum");
         assert_eq!(result, Value::Num(4.0));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn sum_generic_missing_flags_match_legacy_aliases() {
+        let tensor = || Tensor::new(vec![1.0, f64::NAN, 3.0], vec![3, 1]).unwrap();
+        let omitted = sum_builtin(Value::Tensor(tensor()), vec![Value::from("omitmissing")])
+            .expect("sum omitmissing");
+        assert_eq!(omitted, Value::Num(4.0));
+        let included = sum_builtin(Value::Tensor(tensor()), vec![Value::from("includemissing")])
+            .expect("sum includemissing");
+        match included {
+            Value::Num(value) => assert!(value.is_nan()),
+            other => panic!("expected scalar NaN, got {other:?}"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
