@@ -1,6 +1,6 @@
 use crate::indexing::plan::total_len_from_shape;
 use crate::interpreter::errors::mex;
-use runmat_builtins::{IntValue, NumericScalar, Tensor, Value};
+use runmat_builtins::{IntValue, LogicalArray, NumericScalar, Tensor, Value};
 use runmat_runtime::{
     builtins::common::{shape::is_scalar_shape, tensor},
     dispatcher::gather_if_needed_async,
@@ -168,6 +168,26 @@ pub async fn materialize_index_value(value: &Value) -> VmResult<Value> {
     Ok(value.clone())
 }
 
+pub(crate) fn logical_indices_linear(
+    array: &LogicalArray,
+    total_len: usize,
+) -> VmResult<Vec<usize>> {
+    let mut indices = Vec::new();
+    for (index, &selected) in array.data.iter().enumerate() {
+        if selected == 0 {
+            continue;
+        }
+        if index >= total_len {
+            return Err(mex(
+                "IndexOutOfBounds",
+                "Logical index exceeds array bounds",
+            ));
+        }
+        indices.push(index + 1);
+    }
+    Ok(indices)
+}
+
 pub async fn indices_from_value_linear(value: &Value, total_len: usize) -> VmResult<Vec<usize>> {
     if let Value::Bool(b) = value {
         return Ok(if *b { vec![1] } else { Vec::new() });
@@ -189,21 +209,7 @@ pub async fn indices_from_value_linear(value: &Value, total_len: usize) -> VmRes
     };
     match value {
         Value::Tensor(idx_t) => numeric_tensor_indices(idx_t, Some(total_len)),
-        Value::LogicalArray(la) => {
-            if la.data.len() != total_len {
-                return Err(mex(
-                    "IndexShape",
-                    "Logical mask length mismatch for linear indexing",
-                ));
-            }
-            let mut indices = Vec::new();
-            for (i, &b) in la.data.iter().enumerate() {
-                if b != 0 {
-                    indices.push(i + 1);
-                }
-            }
-            Ok(indices)
-        }
+        Value::LogicalArray(la) => logical_indices_linear(la, total_len),
         _ => Err(mex(
             "UnsupportedIndexType",
             "Unsupported index type for linear indexing",
@@ -405,7 +411,7 @@ mod tests {
         build_cell_scalar_selectors, build_slice_selectors, indices_from_value_linear,
         selector_from_value_dim, SliceSelector,
     };
-    use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
+    use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, Tensor, Value};
 
     #[test]
     fn selector_from_value_dim_rejects_fractional_numeric_indices() {
@@ -421,6 +427,42 @@ mod tests {
         );
         let err = futures::executor::block_on(indices_from_value_linear(&value, 8)).unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
+    }
+
+    #[test]
+    fn linear_logical_indices_accept_prefix_masks_and_false_overhang() {
+        let shorter = Value::LogicalArray(
+            LogicalArray::new(vec![0, 1, 1], vec![1, 3]).expect("short logical mask"),
+        );
+        let indices = futures::executor::block_on(indices_from_value_linear(&shorter, 5))
+            .expect("short linear logical mask");
+        assert_eq!(indices, vec![2, 3]);
+
+        let false_overhang = Value::LogicalArray(
+            LogicalArray::new(vec![1, 0, 0, 0, 0, 0], vec![1, 6]).expect("long logical mask"),
+        );
+        let indices = futures::executor::block_on(indices_from_value_linear(&false_overhang, 5))
+            .expect("false logical overhang");
+        assert_eq!(indices, vec![1]);
+    }
+
+    #[test]
+    fn linear_logical_indices_reject_true_positions_beyond_target() {
+        let value = Value::LogicalArray(
+            LogicalArray::new(vec![0, 0, 0, 1], vec![1, 4]).expect("logical mask"),
+        );
+        let error = futures::executor::block_on(indices_from_value_linear(&value, 3))
+            .expect_err("true logical overhang must reject");
+        assert_eq!(error.identifier(), Some("RunMat:IndexOutOfBounds"));
+    }
+
+    #[test]
+    fn per_dimension_logical_indices_still_require_exact_length() {
+        let value =
+            Value::LogicalArray(LogicalArray::new(vec![1, 0], vec![1, 2]).expect("logical mask"));
+        let error = futures::executor::block_on(selector_from_value_dim(&value, 3))
+            .expect_err("short per-dimension logical mask must reject");
+        assert_eq!(error.identifier(), Some("RunMat:IndexShape"));
     }
 
     #[test]

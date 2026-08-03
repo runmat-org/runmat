@@ -1,7 +1,7 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use runmat_builtins::Value;
+use runmat_builtins::{IntValue, IntegerStorage, Value};
 use test_helpers::execute_source;
 
 #[test]
@@ -66,6 +66,58 @@ fn logical_mask_linear_indexing_all_false_returns_empty_column() {
     } else {
         panic!("v");
     }
+}
+
+#[test]
+fn short_linear_logical_masks_read_assign_and_delete_integer_arrays() {
+    let vars = execute_source(
+        "A = uint64([10 20 30 40]); \
+         mask = logical([0 1]); \
+         picked = A(mask); \
+         A(mask) = uint64(99); \
+         assigned = A; \
+         A(mask) = []; \
+         deleted = A;",
+    )
+    .expect("short logical read, assignment, and deletion");
+
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::Tensor(tensor)
+            if tensor.shape == vec![1, 4]
+                && tensor.integer_storage()
+                    == Some(&IntegerStorage::U64(vec![10, 99, 30, 40]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::Tensor(tensor)
+            if tensor.shape == vec![1, 3]
+                && tensor.integer_storage() == Some(&IntegerStorage::U64(vec![10, 30, 40]))
+    )));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Int(IntValue::U64(20)))));
+}
+
+#[test]
+fn linear_logical_false_overhang_is_ignored_but_true_overhang_rejects() {
+    let vars = execute_source(
+        "A = uint8([10 20 30]); \
+         mask = logical([0 1 0 0 0]); \
+         picked = A(mask);",
+    )
+    .expect("false logical overhang");
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Int(IntValue::U8(20)))));
+
+    let error = execute_source(
+        "A = uint8([10 20 30]); \
+         mask = logical([0 0 0 1]); \
+         picked = A(mask);",
+    )
+    .expect_err("true logical overhang must reject");
+    assert_eq!(error.identifier(), Some("RunMat:IndexOutOfBounds"));
 }
 
 #[test]

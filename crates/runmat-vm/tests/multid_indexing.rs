@@ -190,3 +190,31 @@ fn gpu_range_end_assignment() {
 
     assert_eq!(b_tensor.materialize_f64(), vec![9.0, 9.0, 9.0, 4.0]);
 }
+
+#[test]
+fn gpu_integer_short_linear_logical_mask_preserves_residency_and_class() {
+    runmat_accelerate::simple_provider::register_inprocess_provider();
+    let vars = execute_source(
+        "A = gpuArray(uint64([10 20 30 40])); \
+         mask = logical([1 0 1]); \
+         B = gather(A(mask)); \
+         A(mask) = uint64([7 9]); \
+         C = gather(A);",
+    )
+    .expect("gpu short logical read and assignment");
+
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_builtins::Value::Tensor(tensor)
+            if tensor.shape == vec![2, 1]
+                && tensor.integer_storage()
+                    == Some(&runmat_builtins::IntegerStorage::U64(vec![10, 30]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_builtins::Value::Tensor(tensor)
+            if tensor.shape == vec![1, 4]
+                && tensor.integer_storage()
+                    == Some(&runmat_builtins::IntegerStorage::U64(vec![7, 20, 9, 40]))
+    )));
+}

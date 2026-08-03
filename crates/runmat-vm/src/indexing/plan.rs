@@ -1,6 +1,7 @@
 use crate::bytecode::EndExpr;
 use crate::indexing::selectors::{
-    index_scalar_from_value, materialize_index_value, numeric_tensor_indices, SliceSelector,
+    index_scalar_from_value, logical_indices_linear, materialize_index_value,
+    numeric_tensor_indices, SliceSelector,
 };
 use crate::interpreter::errors::mex;
 use runmat_builtins::Value;
@@ -536,23 +537,28 @@ where
                             });
                         } else {
                             let dim_len = *full_shape.get(d).unwrap_or(&1);
-                            if la.data.len() != dim_len {
-                                return Err(mex(
-                                    "IndexShape",
-                                    "Logical mask length mismatch for dimension",
-                                ));
-                            }
-                            let mut vv = Vec::new();
-                            for (i, &bit) in la.data.iter().enumerate() {
-                                if bit != 0 {
-                                    vv.push(i + 1);
-                                }
-                            }
                             if spec.dims == 1 {
+                                let vv = logical_indices_linear(la, dim_len)?;
                                 // MATLAB-style linear logical indexing returns a column vector.
                                 linear_output_shape = Some(vec![vv.len(), 1]);
+                                selectors.push(ExprSel::Indices(vv));
+                            } else {
+                                if la.data.len() != dim_len {
+                                    return Err(mex(
+                                        "IndexShape",
+                                        "Logical mask length mismatch for dimension",
+                                    ));
+                                }
+                                let vv = la
+                                    .data
+                                    .iter()
+                                    .enumerate()
+                                    .filter_map(|(index, &selected)| {
+                                        (selected != 0).then_some(index + 1)
+                                    })
+                                    .collect();
+                                selectors.push(ExprSel::Indices(vv));
                             }
-                            selectors.push(ExprSel::Indices(vv));
                         }
                     }
                     Value::Tensor(idx_t) => {
@@ -1281,6 +1287,42 @@ mod tests {
             .await
             .unwrap();
             assert_eq!(plain.indices, expr.indices);
+            assert_eq!(plain.output_shape, expr.output_shape);
+            assert_eq!(plain.selection_lengths, expr.selection_lengths);
+        })
+    }
+
+    #[test]
+    fn expr_plan_short_linear_logical_mask_matches_plain_column_shape() {
+        futures::executor::block_on(async {
+            let shape = vec![2, 3];
+            let numeric = vec![Value::LogicalArray(
+                LogicalArray::new(vec![0, 1, 1], vec![1, 3]).expect("logical selector"),
+            )];
+            let plain_selectors = build_slice_selectors(1, 0, 0, &numeric, &shape)
+                .await
+                .unwrap();
+            let plain = build_index_plan(&plain_selectors, 1, &shape).unwrap();
+            let expr = build_expr_index_plan(
+                ExprPlanSpec {
+                    dims: 1,
+                    colon_mask: 0,
+                    end_mask: 0,
+                    range_dims: &[],
+                    range_params: &[],
+                    range_start_exprs: &[],
+                    range_step_exprs: &[],
+                    range_end_exprs: &[],
+                    numeric: &numeric,
+                    shape: &shape,
+                },
+                |_dim_len, _expr| async move { unreachable!() },
+            )
+            .await
+            .unwrap();
+            assert_eq!(plain.indices, vec![1, 2]);
+            assert_eq!(plain.indices, expr.indices);
+            assert_eq!(plain.output_shape, vec![2, 1]);
             assert_eq!(plain.output_shape, expr.output_shape);
             assert_eq!(plain.selection_lengths, expr.selection_lengths);
         })
