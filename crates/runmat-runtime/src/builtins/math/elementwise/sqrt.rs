@@ -9,10 +9,11 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
+    CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
@@ -154,6 +155,12 @@ async fn sqrt_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn sqrt_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
+        let tensor = gpu_helpers::gather_tensor_async(&handle)
+            .await
+            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+        return sqrt_tensor_real(tensor);
+    }
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         match detect_gpu_requires_complex(provider, &handle).await {
             Ok(false) => {
@@ -207,28 +214,31 @@ fn sqrt_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn sqrt_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
-    let values = tensor::tensor_values_f64_cow(&tensor);
-    let len = values.len();
-    let mut requires_complex = false;
-    for &v in values.iter() {
-        if v < 0.0 {
-            requires_complex = true;
-            break;
-        }
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| builtin_error(format!("sqrt: {e}")))?;
+    match storage {
+        NumericStorage::F64(values) => sqrt_real_f64_values(values, shape),
+        NumericStorage::F32(values) => sqrt_real_f32_values(values, shape),
+        storage => sqrt_real_f64_values(promote_integer_storage_to_sqrt_domain(storage), shape),
     }
+}
 
+fn sqrt_real_f64_values(values: Vec<f64>, shape: Vec<usize>) -> BuiltinResult<Value> {
+    let len = values.len();
+    let requires_complex = values.iter().any(|&value| value < 0.0);
     if !requires_complex {
-        let mut data = Vec::with_capacity(len);
-        for &v in values.iter() {
-            let root = zero_small(v.sqrt());
-            data.push(root);
-        }
-        let tensor = Tensor::new(data, tensor.shape.clone())
+        let values = values
+            .into_iter()
+            .map(|value| zero_small(value.sqrt()))
+            .collect();
+        let tensor = Tensor::from_numeric_storage(NumericStorage::F64(values), shape)
             .map_err(|e| builtin_error(format!("sqrt: {e}")))?;
         Ok(tensor::tensor_into_value(tensor))
     } else {
         let mut data = Vec::with_capacity(len);
-        for &v in values.iter() {
+        for v in values {
             if v < 0.0 {
                 let imag = zero_small((-v).sqrt());
                 data.push((0.0, imag));
@@ -237,18 +247,36 @@ fn sqrt_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
                 data.push((real, 0.0));
             }
         }
-        if len == 1 {
-            let (re, im) = data[0];
-            if im == 0.0 {
-                Ok(Value::Num(re))
-            } else {
-                Ok(Value::Complex(re, im))
-            }
-        } else {
-            let tensor = ComplexTensor::new(data, tensor.shape.clone())
-                .map_err(|e| builtin_error(format!("sqrt: {e}")))?;
-            Ok(Value::ComplexTensor(tensor))
-        }
+        let tensor = ComplexTensor::from_complex_storage(ComplexStorage::F64(data), shape)
+            .map_err(|e| builtin_error(format!("sqrt: {e}")))?;
+        Ok(complex_tensor_into_value(tensor))
+    }
+}
+
+fn sqrt_real_f32_values(values: Vec<f32>, shape: Vec<usize>) -> BuiltinResult<Value> {
+    let requires_complex = values.iter().any(|&value| value < 0.0);
+    if !requires_complex {
+        let values = values
+            .into_iter()
+            .map(|value| zero_small_f32(value.sqrt()))
+            .collect();
+        let tensor = Tensor::from_numeric_storage(NumericStorage::F32(values), shape)
+            .map_err(|e| builtin_error(format!("sqrt: {e}")))?;
+        Ok(tensor::tensor_into_value(tensor))
+    } else {
+        let values = values
+            .into_iter()
+            .map(|value| {
+                if value < 0.0 {
+                    (0.0, zero_small_f32((-value).sqrt()))
+                } else {
+                    (zero_small_f32(value.sqrt()), 0.0)
+                }
+            })
+            .collect();
+        let tensor = ComplexTensor::from_complex_storage(ComplexStorage::F32(values), shape)
+            .map_err(|e| builtin_error(format!("sqrt: {e}")))?;
+        Ok(complex_tensor_into_value(tensor))
     }
 }
 
@@ -260,21 +288,43 @@ fn sqrt_complex_value(re: f64, im: f64) -> Value {
 }
 
 fn sqrt_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let mut data = Vec::with_capacity(ct.materialize_f64().len());
-    for &(re, im) in &ct.materialize_f64() {
-        let (mut real_part, mut imag_part) = sqrt_complex_parts(re, im);
-        real_part = zero_small(real_part);
-        imag_part = zero_small(imag_part);
-        data.push((real_part, imag_part));
-    }
-    if data.len() == 1 {
-        let (re, im) = data[0];
-        Ok(Value::Complex(re, im))
-    } else {
-        let tensor = ComplexTensor::new(data, ct.shape.clone())
-            .map_err(|e| builtin_error(format!("sqrt: {e}")))?;
-        Ok(Value::ComplexTensor(tensor))
-    }
+    let shape = ct.shape.clone();
+    let storage = match ct.into_complex_storage() {
+        ComplexStorage::F64(values) => ComplexStorage::F64(
+            values
+                .into_iter()
+                .map(|(real, imag)| {
+                    let (real, imag) = sqrt_complex_parts(real, imag);
+                    (zero_small(real), zero_small(imag))
+                })
+                .collect(),
+        ),
+        ComplexStorage::F32(values) => ComplexStorage::F32(
+            values
+                .into_iter()
+                .map(|(real, imag)| {
+                    let (real, imag) = sqrt_complex_parts_f32(real, imag);
+                    (zero_small_f32(real), zero_small_f32(imag))
+                })
+                .collect(),
+        ),
+        ComplexStorage::Integer(_) => {
+            return Err(sqrt_error_with_detail(
+                &SQRT_ERROR_INVALID_INPUT,
+                "typed complex integer input is not supported",
+            ))
+        }
+    };
+    let tensor = ComplexTensor::from_complex_storage(storage, shape)
+        .map_err(|e| builtin_error(format!("sqrt: {e}")))?;
+    Ok(complex_tensor_into_value(tensor))
+}
+
+fn promote_integer_storage_to_sqrt_domain(storage: NumericStorage) -> Vec<f64> {
+    storage
+        .into_integer_storage()
+        .expect("sqrt integer-promotion boundary received floating storage")
+        .to_f64_vec()
 }
 
 fn sqrt_char_array(ca: CharArray) -> BuiltinResult<Value> {
@@ -312,8 +362,40 @@ fn sqrt_complex_parts(re: f64, im: f64) -> (f64, f64) {
     }
 }
 
+fn sqrt_complex_parts_f32(re: f32, im: f32) -> (f32, f32) {
+    if im == 0.0 {
+        if re < 0.0 {
+            (0.0, (-re).sqrt())
+        } else {
+            (re.sqrt(), 0.0)
+        }
+    } else {
+        let magnitude = re.hypot(im);
+        if magnitude == 0.0 {
+            (0.0, 0.0)
+        } else {
+            let real_part = ((magnitude + re) / 2.0).sqrt();
+            let imag_part_raw = ((magnitude - re) / 2.0).sqrt();
+            let imag_part = if im >= 0.0 {
+                imag_part_raw
+            } else {
+                -imag_part_raw
+            };
+            (real_part, imag_part)
+        }
+    }
+}
+
 fn zero_small(value: f64) -> f64 {
     if value.abs() < ZERO_EPS {
+        0.0
+    } else {
+        value
+    }
+}
+
+fn zero_small_f32(value: f32) -> f32 {
+    if value.abs() < ZERO_EPS as f32 {
         0.0
     } else {
         value
@@ -521,6 +603,62 @@ pub(crate) mod tests {
             }
             other => panic!("expected complex tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn sqrt_preserves_native_single_real_complex_negative_and_empty_storage() {
+        let tensor = Tensor::from_f32(vec![0.0, 4.0], vec![2, 1]).unwrap();
+        let Value::Tensor(output) = sqrt_builtin(Value::Tensor(tensor)).expect("sqrt") else {
+            panic!("expected single real tensor");
+        };
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![0.0, 2.0])
+        );
+
+        let tensor = Tensor::from_f32(vec![-4.0, 9.0], vec![1, 2]).unwrap();
+        let Value::ComplexTensor(output) = sqrt_builtin(Value::Tensor(tensor)).expect("sqrt")
+        else {
+            panic!("expected complex single tensor");
+        };
+        assert_eq!(output.as_f32_slice(), Some(&[(0.0, 2.0), (3.0, 0.0)][..]));
+
+        let complex = ComplexTensor::from_f32(vec![(3.0, 4.0)], vec![1, 1]).unwrap();
+        let Value::ComplexTensor(output) =
+            sqrt_builtin(Value::ComplexTensor(complex)).expect("sqrt")
+        else {
+            panic!("one-element complex single must retain class");
+        };
+        assert_eq!(
+            output.as_f32_slice(),
+            Some(&[sqrt_complex_parts_f32(3.0, 4.0)][..])
+        );
+
+        let empty = ComplexTensor::from_f32(Vec::new(), vec![0, 2]).unwrap();
+        let Value::ComplexTensor(output) = sqrt_builtin(Value::ComplexTensor(empty)).expect("sqrt")
+        else {
+            panic!("expected empty complex single tensor");
+        };
+        assert_eq!(output.shape, vec![0, 2]);
+        assert_eq!(output.as_f32_slice(), Some(&[][..]));
+    }
+
+    #[test]
+    fn sqrt_integer_gpu_gathers_exact_storage_before_floating_domain() {
+        test_support::with_test_provider(|provider| {
+            let wide = 9_007_199_254_740_993_u64;
+            let tensor =
+                Tensor::new_integer(IntegerStorage::U64(vec![0, wide]), vec![1, 2]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
+            let Value::Tensor(output) = sqrt_builtin(Value::GpuTensor(handle)).expect("sqrt")
+            else {
+                panic!("expected host double tensor");
+            };
+            assert_eq!(
+                output.into_numeric_storage().unwrap(),
+                NumericStorage::F64(vec![0.0, (wide as f64).sqrt()])
+            );
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
