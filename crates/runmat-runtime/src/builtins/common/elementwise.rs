@@ -51,7 +51,7 @@ fn complex_pow_scalar_f32(base_re: f32, base_im: f32, exp_re: f32, exp_im: f32) 
 fn scalar_real_value(value: &Value) -> Option<f64> {
     match value {
         Value::Num(n) => Some(*n),
-        Value::Int(i) => Some(i.to_f64()),
+        Value::Int(i) => Some(power_domain_scalar_from_integer(i)),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         Value::Tensor(t) if tensor_utils::is_scalar_tensor(t) => {
             Some(tensor_utils::tensor_value_f64(t, 0))
@@ -71,12 +71,12 @@ fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
     }
 }
 
-enum ComplexTensorValues<'a> {
+enum PromotedComplexTensorValues<'a> {
     Raw(&'a [(f64, f64)]),
     Exact(Vec<num_complex::Complex64>),
 }
 
-impl ComplexTensorValues<'_> {
+impl PromotedComplexTensorValues<'_> {
     fn len(&self) -> usize {
         match self {
             Self::Raw(values) => values.len(),
@@ -95,12 +95,22 @@ impl ComplexTensorValues<'_> {
     }
 }
 
-fn complex_tensor_values(tensor: &runmat_builtins::ComplexTensor) -> ComplexTensorValues<'_> {
+fn promoted_complex_tensor_values(
+    tensor: &runmat_builtins::ComplexTensor,
+) -> PromotedComplexTensorValues<'_> {
     if let Some(values) = tensor.as_f64_slice() {
-        ComplexTensorValues::Raw(values)
+        PromotedComplexTensorValues::Raw(values)
     } else {
-        ComplexTensorValues::Exact(tensor_utils::complex_tensor_values_complex64(tensor))
+        PromotedComplexTensorValues::Exact(tensor_utils::complex_tensor_values_complex64(tensor))
     }
+}
+
+fn provider_scalar_from_integer(value: &IntValue) -> f64 {
+    value.to_f64()
+}
+
+fn power_domain_scalar_from_integer(value: &IntValue) -> f64 {
+    value.to_f64()
 }
 
 fn scalar_power_value(base: &Value, exponent: &Value) -> Option<Value> {
@@ -227,12 +237,12 @@ pub async fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
                 }
             }
             (Value::GpuTensor(ga), Value::Int(i)) => {
-                if let Ok(hc) = p.scalar_mul(ga, i.to_f64()) {
+                if let Ok(hc) = p.scalar_mul(ga, provider_scalar_from_integer(i)) {
                     return Ok(Value::GpuTensor(hc));
                 }
             }
             (Value::Int(i), Value::GpuTensor(gb)) => {
-                if let Ok(hc) = p.scalar_mul(gb, i.to_f64()) {
+                if let Ok(hc) = p.scalar_mul(gb, provider_scalar_from_integer(i)) {
                     return Ok(Value::GpuTensor(hc));
                 }
             }
@@ -264,21 +274,10 @@ pub async fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
         (Value::Num(s), Value::Complex(br, bi)) => Ok(Value::Complex(s * br, s * bi)),
         // Scalar-scalar case
         (Value::Num(x), Value::Num(y)) => Ok(Value::Num(x * y)),
-        (Value::Int(x), Value::Num(y)) => Ok(Value::Num(x.to_f64() * y)),
-        (Value::Num(x), Value::Int(y)) => Ok(Value::Num(x * y.to_f64())),
-        (Value::Int(x), Value::Int(y)) => Ok(Value::Num(x.to_f64() * y.to_f64())),
 
         // Matrix-scalar cases (broadcasting)
         (Value::Tensor(m), Value::Num(s)) => multiply_real_tensor_scalar(m, *s),
-        (Value::Tensor(m), Value::Int(s)) => {
-            let scalar = s.to_f64();
-            multiply_real_tensor_scalar(m, scalar)
-        }
         (Value::Num(s), Value::Tensor(m)) => multiply_real_tensor_scalar(m, *s),
-        (Value::Int(s), Value::Tensor(m)) => {
-            let scalar = s.to_f64();
-            multiply_real_tensor_scalar(m, scalar)
-        }
 
         // Matrix-matrix case
         (Value::Tensor(m1), Value::Tensor(m2)) => {
@@ -415,8 +414,8 @@ fn multiply_promoted_complex_tensors(
     lhs: &ComplexTensor,
     rhs: &ComplexTensor,
 ) -> Result<Value, String> {
-    let lhs_values = complex_tensor_values(lhs);
-    let rhs_values = complex_tensor_values(rhs);
+    let lhs_values = promoted_complex_tensor_values(lhs);
+    let rhs_values = promoted_complex_tensor_values(rhs);
     let mut output = Vec::with_capacity(lhs_values.len());
     for index in 0..lhs_values.len() {
         let (ar, ai) = lhs_values.value_at(index);
@@ -455,7 +454,7 @@ fn multiply_promoted_complex_tensor_scalar(
     tensor: &ComplexTensor,
     scalar: f64,
 ) -> Result<Value, String> {
-    let values = complex_tensor_values(tensor);
+    let values = promoted_complex_tensor_values(tensor);
     let output = (0..values.len())
         .map(|index| {
             let (real, imag) = values.value_at(index);
@@ -482,7 +481,7 @@ pub async fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
                 }
             }
             (Value::GpuTensor(ga), Value::Int(i)) => {
-                if let Ok(hc) = p.scalar_div(ga, i.to_f64()) {
+                if let Ok(hc) = p.scalar_div(ga, provider_scalar_from_integer(i)) {
                     return Ok(Value::GpuTensor(hc));
                 }
             }
@@ -492,7 +491,7 @@ pub async fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
                 }
             }
             (Value::Int(i), Value::GpuTensor(gb)) => {
-                if let Ok(hc) = p.scalar_rdiv(gb, i.to_f64()) {
+                if let Ok(hc) = p.scalar_rdiv(gb, provider_scalar_from_integer(i)) {
                     return Ok(Value::GpuTensor(hc));
                 }
             }
@@ -542,39 +541,9 @@ pub async fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
                 Ok(Value::Num(x / y))
             }
         }
-        (Value::Int(x), Value::Num(y)) => {
-            if *y == 0.0 {
-                Ok(Value::Num(f64::INFINITY * x.to_f64().signum()))
-            } else {
-                Ok(Value::Num(x.to_f64() / y))
-            }
-        }
-        (Value::Num(x), Value::Int(y)) => {
-            if y.is_zero() {
-                Ok(Value::Num(f64::INFINITY * x.signum()))
-            } else {
-                Ok(Value::Num(x / y.to_f64()))
-            }
-        }
-        (Value::Int(x), Value::Int(y)) => {
-            if y.is_zero() {
-                Ok(Value::Num(f64::INFINITY * x.to_f64().signum()))
-            } else {
-                Ok(Value::Num(x.to_f64() / y.to_f64()))
-            }
-        }
-
         // Matrix-scalar cases (broadcasting)
         (Value::Tensor(m), Value::Num(s)) => divide_real_tensor_scalar(m, *s),
-        (Value::Tensor(m), Value::Int(s)) => {
-            let scalar = s.to_f64();
-            divide_real_tensor_scalar(m, scalar)
-        }
         (Value::Num(s), Value::Tensor(m)) => divide_scalar_real_tensor(*s, m),
-        (Value::Int(s), Value::Tensor(m)) => {
-            let scalar = s.to_f64();
-            divide_scalar_real_tensor(scalar, m)
-        }
 
         // Matrix-matrix case
         (Value::Tensor(m1), Value::Tensor(m2)) => {
@@ -751,8 +720,8 @@ fn divide_promoted_complex_tensors(
     lhs: &ComplexTensor,
     rhs: &ComplexTensor,
 ) -> Result<Value, String> {
-    let lhs_values = complex_tensor_values(lhs);
-    let rhs_values = complex_tensor_values(rhs);
+    let lhs_values = promoted_complex_tensor_values(lhs);
+    let rhs_values = promoted_complex_tensor_values(rhs);
     let output = (0..lhs_values.len())
         .map(|index| {
             divide_complex_value_f64(lhs_values.value_at(index), rhs_values.value_at(index))
@@ -788,7 +757,7 @@ fn divide_promoted_complex_tensor_scalar(
     tensor: &ComplexTensor,
     scalar: f64,
 ) -> Result<Value, String> {
-    let values = complex_tensor_values(tensor);
+    let values = promoted_complex_tensor_values(tensor);
     let output = (0..values.len())
         .map(|index| {
             let (real, imag) = values.value_at(index);
@@ -825,7 +794,7 @@ fn divide_scalar_promoted_complex_tensor(
     scalar: f64,
     tensor: &ComplexTensor,
 ) -> Result<Value, String> {
-    let values = complex_tensor_values(tensor);
+    let values = promoted_complex_tensor_values(tensor);
     let output = (0..values.len())
         .map(|index| divide_complex_value_f64((scalar, 0.0), values.value_at(index)))
         .collect();
@@ -882,22 +851,8 @@ pub fn power(a: &Value, b: &Value) -> Result<Value, String> {
             let (r, i) = complex_pow_scalar(*x, 0.0, *br, *bi);
             Ok(Value::Complex(r, i))
         }
-        (Value::Complex(ar, ai), Value::Int(y)) => {
-            let yv = y.to_f64();
-            let (r, i) = complex_pow_scalar(*ar, *ai, yv, 0.0);
-            Ok(Value::Complex(r, i))
-        }
-        (Value::Int(x), Value::Complex(br, bi)) => {
-            let xv = x.to_f64();
-            let (r, i) = complex_pow_scalar(xv, 0.0, *br, *bi);
-            Ok(Value::Complex(r, i))
-        }
-
         // Scalar cases - real only
         (Value::Num(x), Value::Num(y)) => Ok(Value::Num(x.powf(*y))),
-        (Value::Int(x), Value::Num(y)) => Ok(Value::Num(x.to_f64().powf(*y))),
-        (Value::Num(x), Value::Int(y)) => Ok(Value::Num(x.powf(y.to_f64()))),
-        (Value::Int(x), Value::Int(y)) => Ok(Value::Num(x.to_f64().powf(y.to_f64()))),
 
         // Matrix^scalar case - matrix exponentiation
         (Value::Tensor(m), Value::Num(s)) => {
@@ -977,33 +932,12 @@ pub fn elementwise_pow(a: &Value, b: &Value) -> Result<Value, String> {
             let (r, i) = complex_pow_scalar(*x, 0.0, *br, *bi);
             Ok(Value::Complex(r, i))
         }
-        (Value::Complex(ar, ai), Value::Int(y)) => {
-            let yv = y.to_f64();
-            let (r, i) = complex_pow_scalar(*ar, *ai, yv, 0.0);
-            Ok(Value::Complex(r, i))
-        }
-        (Value::Int(x), Value::Complex(br, bi)) => {
-            let xv = x.to_f64();
-            let (r, i) = complex_pow_scalar(xv, 0.0, *br, *bi);
-            Ok(Value::Complex(r, i))
-        }
         // Scalar-scalar case
         (Value::Num(x), Value::Num(y)) => Ok(Value::Num(x.powf(*y))),
-        (Value::Int(x), Value::Num(y)) => Ok(Value::Num(x.to_f64().powf(*y))),
-        (Value::Num(x), Value::Int(y)) => Ok(Value::Num(x.powf(y.to_f64()))),
-        (Value::Int(x), Value::Int(y)) => Ok(Value::Num(x.to_f64().powf(y.to_f64()))),
 
         // Matrix-scalar cases (broadcasting)
         (Value::Tensor(m), Value::Num(s)) => power_real_tensor_scalar(m, *s),
-        (Value::Tensor(m), Value::Int(s)) => {
-            let scalar = s.to_f64();
-            power_real_tensor_scalar(m, scalar)
-        }
         (Value::Num(s), Value::Tensor(m)) => power_scalar_real_tensor(*s, m),
-        (Value::Int(s), Value::Tensor(m)) => {
-            let scalar = s.to_f64();
-            power_scalar_real_tensor(scalar, m)
-        }
 
         // Matrix-matrix case
         (Value::Tensor(m1), Value::Tensor(m2)) => {
@@ -1030,18 +964,10 @@ pub fn elementwise_pow(a: &Value, b: &Value) -> Result<Value, String> {
             power_complex_tensors(m1, m2)
         }
         (Value::ComplexTensor(m), Value::Num(s)) => power_complex_tensor_scalar(m, (*s, 0.0)),
-        (Value::ComplexTensor(m), Value::Int(s)) => {
-            let sv = s.to_f64();
-            power_complex_tensor_scalar(m, (sv, 0.0))
-        }
         (Value::ComplexTensor(m), Value::Complex(br, bi)) => {
             power_complex_tensor_scalar(m, (*br, *bi))
         }
         (Value::Num(s), Value::ComplexTensor(m)) => power_scalar_complex_tensor((*s, 0.0), m),
-        (Value::Int(s), Value::ComplexTensor(m)) => {
-            let sv = s.to_f64();
-            power_scalar_complex_tensor((sv, 0.0), m)
-        }
         (Value::Complex(br, bi), Value::ComplexTensor(m)) => {
             power_scalar_complex_tensor((*br, *bi), m)
         }
@@ -1168,8 +1094,8 @@ fn power_promoted_complex_tensors(
     base: &ComplexTensor,
     exponent: &ComplexTensor,
 ) -> Result<Value, String> {
-    let base_values = complex_tensor_values(base);
-    let exponent_values = complex_tensor_values(exponent);
+    let base_values = promoted_complex_tensor_values(base);
+    let exponent_values = promoted_complex_tensor_values(exponent);
     let output = (0..base_values.len())
         .map(|index| {
             let (br, bi) = base_values.value_at(index);
@@ -1210,7 +1136,7 @@ fn power_promoted_complex_tensor_scalar(
     base: &ComplexTensor,
     exponent: (f64, f64),
 ) -> Result<Value, String> {
-    let values = complex_tensor_values(base);
+    let values = promoted_complex_tensor_values(base);
     let output = (0..values.len())
         .map(|index| {
             let (br, bi) = values.value_at(index);
@@ -1250,7 +1176,7 @@ fn power_scalar_promoted_complex_tensor(
     base: (f64, f64),
     exponent: &ComplexTensor,
 ) -> Result<Value, String> {
-    let values = complex_tensor_values(exponent);
+    let values = promoted_complex_tensor_values(exponent);
     let output = (0..values.len())
         .map(|index| {
             let (er, ei) = values.value_at(index);
