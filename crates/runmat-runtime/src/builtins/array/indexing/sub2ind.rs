@@ -277,6 +277,11 @@ fn try_gpu_sub2ind(dims: &[usize], subs: &[Value]) -> crate::BuiltinResult<Optio
         {
             return Ok(None);
         }
+        if subs.iter().any(
+            |value| matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some()),
+        ) {
+            return Ok(None);
+        }
         if dims.is_empty() {
             return Ok(None);
         }
@@ -636,6 +641,48 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn sub2ind_accepts_every_integer_class_and_returns_double() {
+        for prototype in [
+            IntegerStorage::I8(Vec::new()),
+            IntegerStorage::I16(Vec::new()),
+            IntegerStorage::I32(Vec::new()),
+            IntegerStorage::I64(Vec::new()),
+            IntegerStorage::U8(Vec::new()),
+            IntegerStorage::U16(Vec::new()),
+            IntegerStorage::U32(Vec::new()),
+            IntegerStorage::U64(Vec::new()),
+        ] {
+            let typed = |values: &[i8], shape| {
+                let values = values
+                    .iter()
+                    .map(|value| prototype.cast_exact_assignment(&IntValue::I8(*value)))
+                    .collect();
+                Tensor::new_integer(
+                    prototype
+                        .from_same_class_values(values)
+                        .expect("same-class values"),
+                    shape,
+                )
+                .expect("typed tensor")
+            };
+            let result = sub2ind_builtin(
+                Value::Tensor(typed(&[2, 3], vec![1, 2])),
+                vec![
+                    Value::Tensor(typed(&[1, 2], vec![1, 2])),
+                    Value::Tensor(typed(&[3], vec![1, 1])),
+                ],
+            )
+            .expect("sub2ind");
+            let Value::Tensor(result) = result else {
+                panic!("expected double tensor output");
+            };
+            assert_eq!(result.shape, vec![1, 2]);
+            assert_eq!(result.materialize_f64(), vec![5.0, 6.0]);
+            assert!(result.integer_storage().is_none());
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_shape_mismatch() {
@@ -741,6 +788,39 @@ pub(crate) mod tests {
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
             }
+        });
+    }
+
+    #[test]
+    fn sub2ind_integer_gpu_inputs_fall_back_exactly_to_resident_double() {
+        test_support::with_test_provider(|provider| {
+            let dims =
+                Tensor::new_integer(IntegerStorage::U64(vec![2, 3]), vec![1, 2]).expect("dims");
+            let rows = provider
+                .upload_integer(&runmat_accelerate_api::HostIntegerTensorView {
+                    data: runmat_accelerate_api::HostIntegerDataView::U64(&[1, 2]),
+                    shape: &[1, 2],
+                })
+                .expect("rows");
+            let cols = provider
+                .upload_integer(&runmat_accelerate_api::HostIntegerTensorView {
+                    data: runmat_accelerate_api::HostIntegerDataView::U64(&[3]),
+                    shape: &[1, 1],
+                })
+                .expect("cols");
+            let result = sub2ind_builtin(
+                Value::Tensor(dims),
+                vec![Value::GpuTensor(rows), Value::GpuTensor(cols)],
+            )
+            .expect("sub2ind");
+            let Value::GpuTensor(handle) = &result else {
+                panic!("expected resident double output");
+            };
+            assert_eq!(runmat_accelerate_api::handle_integer_type(handle), None);
+            let result = test_support::gather(result).expect("gather result");
+            assert_eq!(result.shape, vec![1, 2]);
+            assert_eq!(result.materialize_f64(), vec![5.0, 6.0]);
+            assert!(result.integer_storage().is_none());
         });
     }
 
