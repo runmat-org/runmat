@@ -1395,6 +1395,88 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn prod_empty_integer_identities_preserve_shape_and_output_class() {
+        let storages = vec![
+            IntegerStorage::I8(Vec::new()),
+            IntegerStorage::I16(Vec::new()),
+            IntegerStorage::I32(Vec::new()),
+            IntegerStorage::I64(Vec::new()),
+            IntegerStorage::U8(Vec::new()),
+            IntegerStorage::U16(Vec::new()),
+            IntegerStorage::U32(Vec::new()),
+            IntegerStorage::U64(Vec::new()),
+        ];
+        for storage in storages {
+            let tensor =
+                Tensor::new_integer(storage.clone(), vec![0, 3]).expect("empty integer tensor");
+            let default = prod_builtin(Value::Tensor(tensor.clone()), Vec::new())
+                .expect("default empty prod");
+            let Value::Tensor(default) = default else {
+                panic!("expected default tensor output");
+            };
+            assert_eq!(default.shape, vec![1, 3]);
+            assert_eq!(default.numeric_dtype(), NumericDType::F64);
+            assert_eq!(values(&default), vec![1.0; 3]);
+
+            let native = prod_builtin(Value::Tensor(tensor.clone()), vec![Value::from("native")])
+                .expect("native empty prod");
+            let Value::Tensor(native) = native else {
+                panic!("expected native tensor output");
+            };
+            assert_eq!(native.shape, vec![1, 3]);
+            assert_eq!(native.integer_storage(), Some(&storage.ones_like(3)));
+
+            let default_dim_two = prod_builtin(
+                Value::Tensor(tensor.clone()),
+                vec![Value::Int(IntValue::I32(2))],
+            )
+            .expect("default empty prod along dimension two");
+            let Value::Tensor(default_dim_two) = default_dim_two else {
+                panic!("expected default empty tensor output");
+            };
+            assert_eq!(default_dim_two.shape, vec![0, 1]);
+            assert_eq!(default_dim_two.numeric_dtype(), NumericDType::F64);
+            assert!(default_dim_two.is_empty());
+
+            let native_dim_two = prod_builtin(
+                Value::Tensor(tensor.clone()),
+                vec![Value::Int(IntValue::I32(2)), Value::from("native")],
+            )
+            .expect("native empty prod along dimension two");
+            let Value::Tensor(native_dim_two) = native_dim_two else {
+                panic!("expected native empty tensor output");
+            };
+            assert_eq!(native_dim_two.shape, vec![0, 1]);
+            assert_eq!(native_dim_two.integer_storage(), Some(&storage));
+
+            let default_all = prod_builtin(Value::Tensor(tensor.clone()), vec![Value::from("all")])
+                .expect("default empty prod across all dimensions");
+            assert_eq!(default_all, Value::Num(1.0));
+
+            let native_all = prod_builtin(
+                Value::Tensor(tensor),
+                vec![Value::from("all"), Value::from("native")],
+            )
+            .expect("native empty prod across all dimensions");
+            assert_eq!(
+                native_all,
+                Value::Int(storage.ones_like(1).value_at(0).unwrap())
+            );
+
+            let zero_by_zero =
+                Tensor::new_integer(storage.clone(), vec![0, 0]).expect("zero-by-zero tensor");
+            let zero_by_zero =
+                prod_builtin(Value::Tensor(zero_by_zero), vec![Value::from("native")])
+                    .expect("zero-by-zero prod");
+            let Value::Tensor(zero_by_zero) = zero_by_zero else {
+                panic!("expected zero-by-zero tensor output");
+            };
+            assert_eq!(zero_by_zero.shape, vec![1, 0]);
+            assert_eq!(zero_by_zero.integer_storage(), Some(&storage));
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_native_integer_scalar() {
@@ -1567,6 +1649,50 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.numeric_dtype(), NumericDType::F64);
             assert_eq!(values(&gathered), vec![9_007_199_254_740_992.0, 5.0]);
+        });
+    }
+
+    #[test]
+    fn prod_empty_integer_gpu_identities_preserve_class_shape_and_residency() {
+        test_support::with_test_provider(|provider| {
+            let upload = || {
+                provider
+                    .upload_integer(&HostIntegerTensorView {
+                        data: HostIntegerDataView::U16(&[]),
+                        shape: &[0, 3],
+                    })
+                    .expect("upload empty integer gpuArray")
+            };
+            let default =
+                prod_builtin(Value::GpuTensor(upload()), Vec::new()).expect("default prod");
+            let Value::GpuTensor(default_handle) = &default else {
+                panic!("expected resident default output");
+            };
+            assert_eq!(default_handle.shape, vec![1, 3]);
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(default_handle),
+                None
+            );
+            let default = test_support::gather(default).expect("gather default prod");
+            assert_eq!(default.numeric_dtype(), NumericDType::F64);
+            assert_eq!(values(&default), vec![1.0; 3]);
+
+            let native = prod_builtin(Value::GpuTensor(upload()), vec![Value::from("native")])
+                .expect("native prod");
+            let Value::GpuTensor(native) = native else {
+                panic!("expected resident native output");
+            };
+            assert_eq!(native.shape, vec![1, 3]);
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&native),
+                Some(IntegerElementType::U16)
+            );
+            assert_eq!(
+                block_on(provider.download_integer(&native))
+                    .expect("download native prod")
+                    .data,
+                HostIntegerDataOwned::U16(vec![1; 3])
+            );
         });
     }
 
