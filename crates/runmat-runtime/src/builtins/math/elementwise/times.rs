@@ -5,7 +5,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, NumericStorage, Tensor, Value,
+    CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -480,11 +480,20 @@ async fn real_to_complex(value: Value) -> BuiltinResult<Value> {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(t) => {
-            let data: Vec<(f64, f64)> = tensor::tensor_values_f64_cow(&t)
-                .iter()
-                .map(|&v| (v, 0.0))
-                .collect();
-            let tensor = ComplexTensor::new(data, t.shape.clone())
+            let shape = t.shape.clone();
+            let storage = t
+                .into_numeric_storage()
+                .map_err(|e| builtin_error(format!("times: {e}")))?;
+            let storage = match storage {
+                NumericStorage::F64(values) => {
+                    ComplexStorage::F64(values.into_iter().map(|value| (value, 0.0)).collect())
+                }
+                NumericStorage::F32(values) => {
+                    ComplexStorage::F32(values.into_iter().map(|value| (value, 0.0)).collect())
+                }
+                storage => promote_integer_real_storage_to_complex(storage),
+            };
+            let tensor = ComplexTensor::from_complex_storage(storage, shape)
                 .map_err(|e| builtin_error(format!("times: {e}")))?;
             Ok(complex_tensor_into_value(tensor))
         }
@@ -508,6 +517,16 @@ async fn real_to_complex(value: Value) -> BuiltinResult<Value> {
             format!("cannot convert value {other:?} to complex output"),
         )),
     }
+}
+
+fn promote_integer_real_storage_to_complex(storage: NumericStorage) -> ComplexStorage {
+    ComplexStorage::F64(
+        storage
+            .materialize_f64()
+            .into_iter()
+            .map(|value| (value, 0.0))
+            .collect(),
+    )
 }
 
 async fn times_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> BuiltinResult<Value> {
@@ -661,6 +680,11 @@ fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
 }
 
 fn scalar_times_value(lhs: &Value, rhs: &Value) -> Option<Value> {
+    if matches!(lhs, Value::Tensor(_) | Value::ComplexTensor(_))
+        || matches!(rhs, Value::Tensor(_) | Value::ComplexTensor(_))
+    {
+        return None;
+    }
     let left = scalar_complex_value(lhs).or_else(|| scalar_real_value(lhs).map(|v| (v, 0.0)))?;
     let right = scalar_complex_value(rhs).or_else(|| scalar_real_value(rhs).map(|v| (v, 0.0)))?;
     let (ar, ai) = left;
@@ -752,20 +776,46 @@ fn times_real_real(lhs: Tensor, rhs: Tensor) -> BuiltinResult<Value> {
 fn times_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
         .map_err(|err| times_error_with_detail(&TIMES_ERROR_SIZE_MISMATCH, &err))?;
-    if plan.is_empty() {
-        let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| builtin_error(format!("times: {e}")))?;
-        return Ok(complex_tensor_into_value(tensor));
-    }
-    let mut out = vec![(0.0f64, 0.0f64); plan.len()];
-    for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
-        let (ar, ai) = lhs.materialize_f64()[idx_lhs];
-        let (br, bi) = rhs.materialize_f64()[idx_rhs];
-        let re = ar * br - ai * bi;
-        let im = ar * bi + ai * br;
-        out[out_idx] = (re, im);
-    }
-    let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
+    let output = match (lhs.complex_storage(), rhs.complex_storage()) {
+        (ComplexStorage::F64(lhs), ComplexStorage::F64(rhs)) => {
+            let mut output = vec![(0.0f64, 0.0f64); plan.len()];
+            for (output_index, lhs_index, rhs_index) in plan.iter() {
+                output[output_index] = multiply_complex_f64(lhs[lhs_index], rhs[rhs_index]);
+            }
+            ComplexStorage::F64(output)
+        }
+        (ComplexStorage::F32(lhs), ComplexStorage::F32(rhs)) => {
+            let mut output = vec![(0.0f32, 0.0f32); plan.len()];
+            for (output_index, lhs_index, rhs_index) in plan.iter() {
+                output[output_index] = multiply_complex_f32(lhs[lhs_index], rhs[rhs_index]);
+            }
+            ComplexStorage::F32(output)
+        }
+        (ComplexStorage::F32(lhs), ComplexStorage::F64(rhs)) => {
+            let mut output = vec![(0.0f32, 0.0f32); plan.len()];
+            for (output_index, lhs_index, rhs_index) in plan.iter() {
+                let lhs = (f64::from(lhs[lhs_index].0), f64::from(lhs[lhs_index].1));
+                let value = multiply_complex_f64(lhs, rhs[rhs_index]);
+                output[output_index] = (value.0 as f32, value.1 as f32);
+            }
+            ComplexStorage::F32(output)
+        }
+        (ComplexStorage::F64(lhs), ComplexStorage::F32(rhs)) => {
+            let mut output = vec![(0.0f32, 0.0f32); plan.len()];
+            for (output_index, lhs_index, rhs_index) in plan.iter() {
+                let rhs = (f64::from(rhs[rhs_index].0), f64::from(rhs[rhs_index].1));
+                let value = multiply_complex_f64(lhs[lhs_index], rhs);
+                output[output_index] = (value.0 as f32, value.1 as f32);
+            }
+            ComplexStorage::F32(output)
+        }
+        _ => {
+            return Err(builtin_error(
+                "times: complex integer arithmetic is not supported",
+            ))
+        }
+    };
+    let tensor = ComplexTensor::from_complex_storage(output, plan.output_shape().to_vec())
         .map_err(|e| builtin_error(format!("times: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
@@ -773,21 +823,12 @@ fn times_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinRes
 fn times_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
         .map_err(|err| times_error_with_detail(&TIMES_ERROR_SIZE_MISMATCH, &err))?;
-    if plan.is_empty() {
-        let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| builtin_error(format!("times: {e}")))?;
-        return Ok(complex_tensor_into_value(tensor));
-    }
-    // Complex storage is currently double precision, so real operands enter
-    // this explicitly floating complex-arithmetic boundary as f64 values.
-    let rhs_values = tensor::tensor_values_f64_cow(rhs);
-    let mut out = vec![(0.0f64, 0.0f64); plan.len()];
-    for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
-        let (ar, ai) = lhs.materialize_f64()[idx_lhs];
-        let scalar = rhs_values[idx_rhs];
-        out[out_idx] = (ar * scalar, ai * scalar);
-    }
-    let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
+    let rhs = rhs
+        .clone()
+        .into_numeric_storage()
+        .map_err(|e| builtin_error(format!("times: {e}")))?;
+    let output = multiply_complex_real_storage(lhs.complex_storage(), &rhs, &plan, true)?;
+    let tensor = ComplexTensor::from_complex_storage(output, plan.output_shape().to_vec())
         .map_err(|e| builtin_error(format!("times: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
 }
@@ -795,23 +836,87 @@ fn times_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value>
 fn times_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
         .map_err(|err| times_error_with_detail(&TIMES_ERROR_SIZE_MISMATCH, &err))?;
-    if plan.is_empty() {
-        let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| builtin_error(format!("times: {e}")))?;
-        return Ok(complex_tensor_into_value(tensor));
-    }
-    // Complex storage is currently double precision, so real operands enter
-    // this explicitly floating complex-arithmetic boundary as f64 values.
-    let lhs_values = tensor::tensor_values_f64_cow(lhs);
-    let mut out = vec![(0.0f64, 0.0f64); plan.len()];
-    for (out_idx, idx_lhs, idx_rhs) in plan.iter() {
-        let scalar = lhs_values[idx_lhs];
-        let (br, bi) = rhs.materialize_f64()[idx_rhs];
-        out[out_idx] = (scalar * br, scalar * bi);
-    }
-    let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
+    let lhs = lhs
+        .clone()
+        .into_numeric_storage()
+        .map_err(|e| builtin_error(format!("times: {e}")))?;
+    let output = multiply_complex_real_storage(rhs.complex_storage(), &lhs, &plan, false)?;
+    let tensor = ComplexTensor::from_complex_storage(output, plan.output_shape().to_vec())
         .map_err(|e| builtin_error(format!("times: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
+}
+
+fn multiply_complex_real_storage(
+    complex: &ComplexStorage,
+    real: &NumericStorage,
+    plan: &BroadcastPlan,
+    complex_is_left: bool,
+) -> BuiltinResult<ComplexStorage> {
+    let indices = |lhs_index: usize, rhs_index: usize| {
+        if complex_is_left {
+            (lhs_index, rhs_index)
+        } else {
+            (rhs_index, lhs_index)
+        }
+    };
+    Ok(match (complex, real) {
+        (ComplexStorage::F64(complex), NumericStorage::F64(real)) => {
+            let mut output = vec![(0.0f64, 0.0f64); plan.len()];
+            for (output_index, lhs_index, rhs_index) in plan.iter() {
+                let (complex_index, real_index) = indices(lhs_index, rhs_index);
+                let value = complex[complex_index];
+                let scalar = real[real_index];
+                output[output_index] = (value.0 * scalar, value.1 * scalar);
+            }
+            ComplexStorage::F64(output)
+        }
+        (ComplexStorage::F32(complex), NumericStorage::F32(real)) => {
+            let mut output = vec![(0.0f32, 0.0f32); plan.len()];
+            for (output_index, lhs_index, rhs_index) in plan.iter() {
+                let (complex_index, real_index) = indices(lhs_index, rhs_index);
+                let value = complex[complex_index];
+                let scalar = real[real_index];
+                output[output_index] = (value.0 * scalar, value.1 * scalar);
+            }
+            ComplexStorage::F32(output)
+        }
+        (ComplexStorage::F32(complex), NumericStorage::F64(real)) => {
+            let mut output = vec![(0.0f32, 0.0f32); plan.len()];
+            for (output_index, lhs_index, rhs_index) in plan.iter() {
+                let (complex_index, real_index) = indices(lhs_index, rhs_index);
+                let value = complex[complex_index];
+                let scalar = real[real_index];
+                output[output_index] = (
+                    (f64::from(value.0) * scalar) as f32,
+                    (f64::from(value.1) * scalar) as f32,
+                );
+            }
+            ComplexStorage::F32(output)
+        }
+        (ComplexStorage::F64(complex), NumericStorage::F32(real)) => {
+            let mut output = vec![(0.0f32, 0.0f32); plan.len()];
+            for (output_index, lhs_index, rhs_index) in plan.iter() {
+                let (complex_index, real_index) = indices(lhs_index, rhs_index);
+                let value = complex[complex_index];
+                let scalar = f64::from(real[real_index]);
+                output[output_index] = ((value.0 * scalar) as f32, (value.1 * scalar) as f32);
+            }
+            ComplexStorage::F32(output)
+        }
+        _ => {
+            return Err(builtin_error(
+                "times: integer operands did not use the exact integer arithmetic path",
+            ))
+        }
+    })
+}
+
+fn multiply_complex_f64(lhs: (f64, f64), rhs: (f64, f64)) -> (f64, f64) {
+    (lhs.0 * rhs.0 - lhs.1 * rhs.1, lhs.0 * rhs.1 + lhs.1 * rhs.0)
+}
+
+fn multiply_complex_f32(lhs: (f32, f32), rhs: (f32, f32)) -> (f32, f32) {
+    (lhs.0 * rhs.0 - lhs.1 * rhs.1, lhs.0 * rhs.1 + lhs.1 * rhs.0)
 }
 
 enum TimesOperand {
@@ -1154,6 +1259,82 @@ pub(crate) mod tests {
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn times_preserves_native_complex_single_storage() {
+        let lhs = ComplexTensor::from_f32(vec![(1.0, 2.0), (3.0, -4.0)], vec![1, 2]).unwrap();
+        let rhs = ComplexTensor::from_f32(vec![(2.0, -1.0), (-1.0, 1.0)], vec![1, 2]).unwrap();
+        let result = times_builtin(
+            Value::ComplexTensor(lhs),
+            Value::ComplexTensor(rhs),
+            Vec::new(),
+        )
+        .expect("complex times");
+        let Value::ComplexTensor(result) = result else {
+            panic!("expected complex single tensor");
+        };
+        assert_eq!(result.as_f32_slice(), Some(&[(4.0, 3.0), (1.0, 7.0)][..]));
+    }
+
+    #[test]
+    fn times_mixed_complex_floating_inputs_return_single() {
+        let single = ComplexTensor::from_f32(vec![(1.0, 2.0)], vec![1, 1]).unwrap();
+        let double = ComplexTensor::new(vec![(2.0, -1.0)], vec![1, 1]).unwrap();
+        for (lhs, rhs) in [
+            (single.clone(), double.clone()),
+            (double.clone(), single.clone()),
+        ] {
+            let result = times_builtin(
+                Value::ComplexTensor(lhs),
+                Value::ComplexTensor(rhs),
+                Vec::new(),
+            )
+            .expect("complex times");
+            let Value::ComplexTensor(result) = result else {
+                panic!("expected complex single tensor");
+            };
+            assert_eq!(result.as_f32_slice(), Some(&[(4.0, 3.0)][..]));
+        }
+    }
+
+    #[test]
+    fn times_mixed_real_complex_single_paths_preserve_single() {
+        let complex = ComplexTensor::from_f32(vec![(1.0, 2.0), (-3.0, 1.0)], vec![1, 2]).unwrap();
+        let real = Tensor::new(vec![2.0, 0.5], vec![1, 2]).unwrap();
+        for (lhs, rhs) in [
+            (
+                Value::ComplexTensor(complex.clone()),
+                Value::Tensor(real.clone()),
+            ),
+            (
+                Value::Tensor(real.clone()),
+                Value::ComplexTensor(complex.clone()),
+            ),
+        ] {
+            let result = times_builtin(lhs, rhs, Vec::new()).expect("complex-real times");
+            let Value::ComplexTensor(result) = result else {
+                panic!("expected complex single tensor");
+            };
+            assert_eq!(result.as_f32_slice(), Some(&[(2.0, 4.0), (-1.5, 0.5)][..]));
+        }
+    }
+
+    #[test]
+    fn times_preserves_empty_complex_single_class() {
+        let lhs = ComplexTensor::from_f32(Vec::new(), vec![0, 2]).unwrap();
+        let rhs = ComplexTensor::new(Vec::new(), vec![0, 2]).unwrap();
+        let result = times_builtin(
+            Value::ComplexTensor(lhs),
+            Value::ComplexTensor(rhs),
+            Vec::new(),
+        )
+        .expect("complex times");
+        let Value::ComplexTensor(result) = result else {
+            panic!("expected complex single tensor");
+        };
+        assert_eq!(result.shape, vec![0, 2]);
+        assert_eq!(result.as_f32_slice(), Some(&[][..]));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
