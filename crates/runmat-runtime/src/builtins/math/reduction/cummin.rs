@@ -1,7 +1,5 @@
 //! MATLAB-compatible `cummin` builtin with GPU-aware semantics for RunMat.
 
-use std::cmp::Ordering;
-
 use runmat_accelerate_api::{
     GpuTensorHandle, ProviderCumminResult, ProviderNanMode, ProviderScanDirection,
 };
@@ -12,6 +10,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use super::complex_cumulative_extrema;
 use super::floating_cumulative_extrema::{
     self, CumulativeDirection, CumulativeExtrema, CumulativeNanMode,
 };
@@ -30,23 +29,6 @@ const CUMMIN_OUTPUT_M: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "Cumulative minimum values.",
 }];
-
-const CUMMIN_OUTPUT_MI: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "M",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Cumulative minimum values.",
-    },
-    BuiltinParamDescriptor {
-        name: "I",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "One-based running minimum indices along the reduction dimension.",
-    },
-];
 
 const CUMMIN_PARAM_A: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "A",
@@ -135,7 +117,7 @@ const CUMMIN_INPUTS_NANFLAG_DIRECTION_DIM: [BuiltinParamDescriptor; 4] = [
     CUMMIN_PARAM_DIM,
 ];
 
-const CUMMIN_SIGNATURES: [BuiltinSignatureDescriptor; 32] = [
+const CUMMIN_SIGNATURES: [BuiltinSignatureDescriptor; 16] = [
     BuiltinSignatureDescriptor {
         label: "M = cummin(A)",
         inputs: &CUMMIN_INPUTS_CORE,
@@ -216,86 +198,6 @@ const CUMMIN_SIGNATURES: [BuiltinSignatureDescriptor; 32] = [
         inputs: &CUMMIN_INPUTS_NANFLAG_DIRECTION_DIM,
         outputs: &CUMMIN_OUTPUT_M,
     },
-    BuiltinSignatureDescriptor {
-        label: "[M, I] = cummin(A)",
-        inputs: &CUMMIN_INPUTS_CORE,
-        outputs: &CUMMIN_OUTPUT_MI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, I] = cummin(A, dim)",
-        inputs: &CUMMIN_INPUTS_DIM,
-        outputs: &CUMMIN_OUTPUT_MI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, I] = cummin(A, direction)",
-        inputs: &CUMMIN_INPUTS_DIRECTION,
-        outputs: &CUMMIN_OUTPUT_MI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, I] = cummin(A, nanflag)",
-        inputs: &CUMMIN_INPUTS_NANFLAG,
-        outputs: &CUMMIN_OUTPUT_MI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, I] = cummin(A, dim, direction)",
-        inputs: &CUMMIN_INPUTS_DIM_DIRECTION,
-        outputs: &CUMMIN_OUTPUT_MI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, I] = cummin(A, direction, dim)",
-        inputs: &CUMMIN_INPUTS_DIRECTION_DIM,
-        outputs: &CUMMIN_OUTPUT_MI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, I] = cummin(A, dim, nanflag)",
-        inputs: &CUMMIN_INPUTS_DIM_NANFLAG,
-        outputs: &CUMMIN_OUTPUT_MI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, I] = cummin(A, nanflag, dim)",
-        inputs: &CUMMIN_INPUTS_NANFLAG_DIM,
-        outputs: &CUMMIN_OUTPUT_MI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, I] = cummin(A, direction, nanflag)",
-        inputs: &CUMMIN_INPUTS_DIRECTION_NANFLAG,
-        outputs: &CUMMIN_OUTPUT_MI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, I] = cummin(A, nanflag, direction)",
-        inputs: &CUMMIN_INPUTS_NANFLAG_DIRECTION,
-        outputs: &CUMMIN_OUTPUT_MI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, I] = cummin(A, dim, direction, nanflag)",
-        inputs: &CUMMIN_INPUTS_DIM_DIRECTION_NANFLAG,
-        outputs: &CUMMIN_OUTPUT_MI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, I] = cummin(A, dim, nanflag, direction)",
-        inputs: &CUMMIN_INPUTS_DIM_NANFLAG_DIRECTION,
-        outputs: &CUMMIN_OUTPUT_MI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, I] = cummin(A, direction, dim, nanflag)",
-        inputs: &CUMMIN_INPUTS_DIRECTION_DIM_NANFLAG,
-        outputs: &CUMMIN_OUTPUT_MI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, I] = cummin(A, direction, nanflag, dim)",
-        inputs: &CUMMIN_INPUTS_DIRECTION_NANFLAG_DIM,
-        outputs: &CUMMIN_OUTPUT_MI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, I] = cummin(A, nanflag, dim, direction)",
-        inputs: &CUMMIN_INPUTS_NANFLAG_DIM_DIRECTION,
-        outputs: &CUMMIN_OUTPUT_MI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, I] = cummin(A, nanflag, direction, dim)",
-        inputs: &CUMMIN_INPUTS_NANFLAG_DIRECTION_DIM,
-        outputs: &CUMMIN_OUTPUT_MI,
-    },
 ];
 
 const CUMMIN_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -327,7 +229,7 @@ const CUMMIN_ERRORS: [BuiltinErrorDescriptor; 3] = [
 
 pub const CUMMIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &CUMMIN_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &CUMMIN_ERRORS,
 };
@@ -353,7 +255,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     workgroup_size: None,
     accepts_nan_mode: true,
     notes:
-        "Providers may expose prefix-min kernels that return running values and indices; the runtime gathers to host when hooks or options are unsupported.",
+        "Providers may compute internal running-selection indices, but the public builtin exposes only cumulative values; the runtime gathers to host when hooks or options are unsupported.",
 };
 
 fn cummin_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
@@ -432,8 +334,8 @@ impl CumminEvaluation {
 #[runtime_builtin(
     name = "cummin",
     category = "math/reduction",
-    summary = "Compute cumulative minima (with optional indices).",
-    keywords = "cummin,cumulative minimum,running minimum,reverse,omitnan,indices,gpu",
+    summary = "Compute cumulative minima.",
+    keywords = "cummin,cumulative minimum,running minimum,reverse,omitnan,gpu",
     accel = "reduction",
     type_resolver(cummin_type),
     descriptor(crate::builtins::math::reduction::cummin::CUMMIN_DESCRIPTOR),
@@ -445,14 +347,13 @@ async fn cummin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
         if out_count == 0 {
             return Ok(Value::OutputList(Vec::new()));
         }
-        if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.into_value()]));
+        if out_count > 1 {
+            return Err(cummin_error_with_detail(
+                &CUMMIN_ERROR_INVALID_ARGUMENT,
+                "cummin returns exactly one output",
+            ));
         }
-        let (values, indices) = eval.into_pair();
-        return Ok(crate::output_count::output_list_with_padding(
-            out_count,
-            vec![values, indices],
-        ));
+        return Ok(Value::OutputList(vec![eval.into_value()]));
     }
     Ok(eval.into_value())
 }
@@ -797,201 +698,26 @@ fn cummin_complex_tensor(
     direction: CumminDirection,
     nan_mode: CumminNanMode,
 ) -> BuiltinResult<(ComplexTensor, Tensor)> {
-    if dim == 0 {
-        return Err(cummin_error_with_detail(
-            &CUMMIN_ERROR_INVALID_ARGUMENT,
-            "dimension must be >= 1",
-        ));
-    }
-    if tensor.materialize_f64().is_empty() {
-        let indices =
-            Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| cummin_internal_error(&e))?;
-        return Ok((tensor.clone(), indices));
-    }
-    if dim > tensor.shape.len() {
-        let indices = ones_indices(&tensor.shape)?;
-        return Ok((tensor.clone(), indices));
-    }
-
-    let dim_index = dim - 1;
-    let segment_len = tensor.shape[dim_index];
-    if segment_len == 0 {
-        let indices =
-            Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| cummin_internal_error(&e))?;
-        return Ok((tensor.clone(), indices));
-    }
-
-    let stride_before = dim_product(&tensor.shape[..dim_index]);
-    let stride_after = dim_product(&tensor.shape[dim..]);
-    let block = stride_before * segment_len;
-    let mut values_out = vec![(0.0f64, 0.0f64); tensor.materialize_f64().len()];
-    let mut indices_out = vec![0.0f64; tensor.materialize_f64().len()];
-
-    for after in 0..stride_after {
-        let base = after * block;
-        for before in 0..stride_before {
-            match direction {
-                CumminDirection::Forward => {
-                    let mut current = (0.0f64, 0.0f64);
-                    let mut current_index = 0usize;
-                    let mut has_value = false;
-                    let mut nan_fixed = false;
-                    let mut nan_index = 0usize;
-                    for k in 0..segment_len {
-                        let idx = base + before + k * stride_before;
-                        let value = tensor.materialize_f64()[idx];
-                        let position = k + 1;
-                        let value_is_nan = complex_is_nan(value);
-                        match nan_mode {
-                            CumminNanMode::Include => {
-                                if nan_fixed {
-                                    values_out[idx] = complex_nan();
-                                    indices_out[idx] = nan_index as f64;
-                                    continue;
-                                }
-                                if value_is_nan {
-                                    nan_fixed = true;
-                                    nan_index = position;
-                                    values_out[idx] = complex_nan();
-                                    indices_out[idx] = position as f64;
-                                    continue;
-                                }
-                                if !has_value || complex_less(value, current) {
-                                    has_value = true;
-                                    current = value;
-                                    current_index = position;
-                                }
-                                values_out[idx] = current;
-                                indices_out[idx] = current_index as f64;
-                            }
-                            CumminNanMode::Omit => {
-                                if value_is_nan {
-                                    if has_value {
-                                        values_out[idx] = current;
-                                        indices_out[idx] = current_index as f64;
-                                    } else {
-                                        values_out[idx] = complex_nan();
-                                        indices_out[idx] = f64::NAN;
-                                    }
-                                    continue;
-                                }
-                                if !has_value || complex_less(value, current) {
-                                    has_value = true;
-                                    current = value;
-                                    current_index = position;
-                                }
-                                values_out[idx] = current;
-                                indices_out[idx] = current_index as f64;
-                            }
-                        }
-                    }
-                }
-                CumminDirection::Reverse => {
-                    let mut current = (0.0f64, 0.0f64);
-                    let mut current_index = 0usize;
-                    let mut has_value = false;
-                    let mut nan_fixed = false;
-                    let mut nan_index = 0usize;
-                    for offset in (0..segment_len).rev() {
-                        let idx = base + before + offset * stride_before;
-                        let value = tensor.materialize_f64()[idx];
-                        let position = offset + 1;
-                        let value_is_nan = complex_is_nan(value);
-                        match nan_mode {
-                            CumminNanMode::Include => {
-                                if nan_fixed {
-                                    values_out[idx] = complex_nan();
-                                    indices_out[idx] = nan_index as f64;
-                                    continue;
-                                }
-                                if value_is_nan {
-                                    nan_fixed = true;
-                                    nan_index = position;
-                                    values_out[idx] = complex_nan();
-                                    indices_out[idx] = position as f64;
-                                    continue;
-                                }
-                                if !has_value || complex_less(value, current) {
-                                    has_value = true;
-                                    current = value;
-                                    current_index = position;
-                                }
-                                values_out[idx] = current;
-                                indices_out[idx] = current_index as f64;
-                            }
-                            CumminNanMode::Omit => {
-                                if value_is_nan {
-                                    if has_value {
-                                        values_out[idx] = current;
-                                        indices_out[idx] = current_index as f64;
-                                    } else {
-                                        values_out[idx] = complex_nan();
-                                        indices_out[idx] = f64::NAN;
-                                    }
-                                    continue;
-                                }
-                                if !has_value || complex_less(value, current) {
-                                    has_value = true;
-                                    current = value;
-                                    current_index = position;
-                                }
-                                values_out[idx] = current;
-                                indices_out[idx] = current_index as f64;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    let values_tensor = ComplexTensor::new(values_out, tensor.shape.clone())
-        .map_err(|e| cummin_internal_error(&e))?;
-    let indices_tensor =
-        Tensor::new(indices_out, tensor.shape.clone()).map_err(|e| cummin_internal_error(&e))?;
-    Ok((values_tensor, indices_tensor))
-}
-
-fn complex_less(candidate: (f64, f64), current: (f64, f64)) -> bool {
-    compare_complex_auto(candidate, current) == Ordering::Less
-}
-
-fn complex_is_nan(value: (f64, f64)) -> bool {
-    value.0.is_nan() || value.1.is_nan()
-}
-
-fn complex_nan() -> (f64, f64) {
-    (f64::NAN, f64::NAN)
-}
-
-fn compare_complex_auto(a: (f64, f64), b: (f64, f64)) -> Ordering {
-    let a_mag = magnitude_squared(a);
-    let b_mag = magnitude_squared(b);
-    if a_mag < b_mag {
-        return Ordering::Less;
-    }
-    if a_mag > b_mag {
-        return Ordering::Greater;
-    }
-    let a_angle = a.1.atan2(a.0);
-    let b_angle = b.1.atan2(b.0);
-    if a_angle < b_angle {
-        Ordering::Less
-    } else if a_angle > b_angle {
-        Ordering::Greater
-    } else {
-        Ordering::Equal
-    }
-}
-
-fn magnitude_squared(z: (f64, f64)) -> f64 {
-    z.0.mul_add(z.0, z.1 * z.1)
+    complex_cumulative_extrema::cumulative_extrema(
+        tensor.clone().into_complex_storage(),
+        tensor.shape.clone(),
+        dim,
+        match direction {
+            CumminDirection::Forward => complex_cumulative_extrema::Direction::Forward,
+            CumminDirection::Reverse => complex_cumulative_extrema::Direction::Reverse,
+        },
+        match nan_mode {
+            CumminNanMode::Include => complex_cumulative_extrema::NanMode::Include,
+            CumminNanMode::Omit => complex_cumulative_extrema::NanMode::Omit,
+        },
+        complex_cumulative_extrema::Extrema::Min,
+    )
+    .map_err(|error| cummin_error_with_detail(&CUMMIN_ERROR_INVALID_ARGUMENT, error))
 }
 
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor::is_scalar_complex_tensor(&tensor) && tensor.integer_storage().is_none() {
-        let value = tensor::complex_tensor_value_complex64(&tensor, 0);
-        Value::Complex(value.re, value.im)
+    if let Some([value]) = tensor.as_f64_slice() {
+        Value::Complex(value.0, value.1)
     } else {
         Value::ComplexTensor(tensor)
     }
@@ -1020,12 +746,6 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
         .position(|&extent| extent != 1)
         .map(|idx| idx + 1)
         .unwrap_or(1)
-}
-
-fn dim_product(dims: &[usize]) -> usize {
-    dims.iter()
-        .copied()
-        .fold(1usize, |acc, value| acc.saturating_mul(value))
 }
 
 #[cfg(test)]
@@ -1071,11 +791,9 @@ pub(crate) mod tests {
         assert!(labels.contains(&"M = cummin(A, direction)"));
         assert!(labels.contains(&"M = cummin(A, nanflag)"));
         assert!(labels.contains(&"M = cummin(A, dim, direction, nanflag)"));
-        assert!(labels.contains(&"[M, I] = cummin(A)"));
-        assert!(labels.contains(&"[M, I] = cummin(A, dim)"));
-        assert!(labels.contains(&"[M, I] = cummin(A, direction)"));
-        assert!(labels.contains(&"[M, I] = cummin(A, nanflag)"));
-        assert!(labels.contains(&"[M, I] = cummin(A, dim, direction, nanflag)"));
+        assert_eq!(labels.len(), 16);
+        assert!(labels.iter().all(|label| !label.contains("[M, I]")));
+        assert_eq!(CUMMIN_DESCRIPTOR.output_mode, BuiltinOutputMode::Fixed);
         assert!(CUMMIN_DESCRIPTOR
             .errors
             .iter()
@@ -1088,6 +806,32 @@ pub(crate) mod tests {
             .errors
             .iter()
             .any(|err| err.code == CUMMIN_ERROR_INTERNAL.code));
+    }
+
+    #[test]
+    fn cummin_rejects_a_second_public_output() {
+        let _guard = crate::output_count::push_output_count(Some(2));
+        let error = block_on(super::cummin_builtin(Value::Num(7.0), Vec::new())).unwrap_err();
+        assert_eq!(
+            error.identifier.as_deref(),
+            Some("RunMat:cummin:InvalidArgument")
+        );
+    }
+
+    #[test]
+    fn cummin_complex_single_preserves_native_storage() {
+        let input =
+            ComplexTensor::from_f32(vec![(1.0, 0.0), (3.0, 0.0), (0.0, 2.0)], vec![3, 1]).unwrap();
+        let values = evaluate(Value::ComplexTensor(input), &[])
+            .expect("cummin")
+            .into_value();
+        let Value::ComplexTensor(values) = values else {
+            panic!("expected native complex tensor");
+        };
+        assert_eq!(
+            values.complex_storage(),
+            &runmat_builtins::ComplexStorage::F32(vec![(1.0, 0.0), (1.0, 0.0), (1.0, 0.0)])
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

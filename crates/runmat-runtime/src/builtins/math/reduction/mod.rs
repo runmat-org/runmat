@@ -2,6 +2,7 @@
 pub(crate) mod all;
 pub(crate) mod any;
 pub(crate) mod bounds;
+pub(crate) mod complex_cumulative_extrema;
 pub(crate) mod cummax;
 pub(crate) mod cummin;
 pub(crate) mod cumprod;
