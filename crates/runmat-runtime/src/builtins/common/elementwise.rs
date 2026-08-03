@@ -975,27 +975,15 @@ pub fn elementwise_pow(a: &Value, b: &Value) -> Result<Value, String> {
         (Value::Int(x), Value::Int(y)) => Ok(Value::Num(x.to_f64().powf(y.to_f64()))),
 
         // Matrix-scalar cases (broadcasting)
-        (Value::Tensor(m), Value::Num(s)) => {
-            let values = tensor_utils::tensor_values_f64_cow(m);
-            let data: Vec<f64> = values.iter().map(|x| x.powf(*s)).collect();
-            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
-        }
+        (Value::Tensor(m), Value::Num(s)) => power_real_tensor_scalar(m, *s),
         (Value::Tensor(m), Value::Int(s)) => {
             let scalar = s.to_f64();
-            let values = tensor_utils::tensor_values_f64_cow(m);
-            let data: Vec<f64> = values.iter().map(|x| x.powf(scalar)).collect();
-            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
+            power_real_tensor_scalar(m, scalar)
         }
-        (Value::Num(s), Value::Tensor(m)) => {
-            let values = tensor_utils::tensor_values_f64_cow(m);
-            let data: Vec<f64> = values.iter().map(|x| s.powf(*x)).collect();
-            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
-        }
+        (Value::Num(s), Value::Tensor(m)) => power_scalar_real_tensor(*s, m),
         (Value::Int(s), Value::Tensor(m)) => {
             let scalar = s.to_f64();
-            let values = tensor_utils::tensor_values_f64_cow(m);
-            let data: Vec<f64> = values.iter().map(|x| scalar.powf(*x)).collect();
-            Ok(Value::Tensor(Tensor::new_2d(data, m.rows(), m.cols())?))
+            power_scalar_real_tensor(scalar, m)
         }
 
         // Matrix-matrix case
@@ -1009,14 +997,7 @@ pub fn elementwise_pow(a: &Value, b: &Value) -> Result<Value, String> {
                     m2.cols()
                 ));
             }
-            let lhs = tensor_utils::tensor_values_f64_cow(m1);
-            let rhs = tensor_utils::tensor_values_f64_cow(m2);
-            let data: Vec<f64> = lhs
-                .iter()
-                .zip(rhs.iter())
-                .map(|(x, y)| x.powf(*y))
-                .collect();
-            Ok(Value::Tensor(Tensor::new_2d(data, m1.rows(), m1.cols())?))
+            power_real_tensors(m1, m2)
         }
 
         // Complex tensor element-wise power
@@ -1118,6 +1099,80 @@ pub fn elementwise_pow(a: &Value, b: &Value) -> Result<Value, String> {
             "Element-wise power not supported for types: {a:?} .^ {b:?}"
         )),
     }
+}
+
+fn power_real_tensor_scalar(tensor: &Tensor, exponent: f64) -> Result<Value, String> {
+    let shape = tensor.shape.clone();
+    let storage = tensor.clone().into_numeric_storage()?;
+    let output = match storage {
+        NumericStorage::F64(values) => NumericStorage::F64(
+            values
+                .into_iter()
+                .map(|value| value.powf(exponent))
+                .collect(),
+        ),
+        NumericStorage::F32(values) => {
+            let exponent = exponent as f32;
+            NumericStorage::F32(
+                values
+                    .into_iter()
+                    .map(|value| value.powf(exponent))
+                    .collect(),
+            )
+        }
+        _ => return Err("element-wise integer power did not use the exact integer path".into()),
+    };
+    Tensor::from_numeric_storage(output, shape).map(Value::Tensor)
+}
+
+fn power_scalar_real_tensor(base: f64, tensor: &Tensor) -> Result<Value, String> {
+    let shape = tensor.shape.clone();
+    let storage = tensor.clone().into_numeric_storage()?;
+    let output = match storage {
+        NumericStorage::F64(values) => {
+            NumericStorage::F64(values.into_iter().map(|value| base.powf(value)).collect())
+        }
+        NumericStorage::F32(values) => {
+            let base = base as f32;
+            NumericStorage::F32(values.into_iter().map(|value| base.powf(value)).collect())
+        }
+        _ => return Err("element-wise integer power did not use the exact integer path".into()),
+    };
+    Tensor::from_numeric_storage(output, shape).map(Value::Tensor)
+}
+
+fn power_real_tensors(base: &Tensor, exponent: &Tensor) -> Result<Value, String> {
+    let shape = base.shape.clone();
+    let base = base.clone().into_numeric_storage()?;
+    let exponent = exponent.clone().into_numeric_storage()?;
+    let output = match (base, exponent) {
+        (NumericStorage::F64(base), NumericStorage::F64(exponent)) => NumericStorage::F64(
+            base.into_iter()
+                .zip(exponent)
+                .map(|(base, exponent)| base.powf(exponent))
+                .collect(),
+        ),
+        (NumericStorage::F32(base), NumericStorage::F32(exponent)) => NumericStorage::F32(
+            base.into_iter()
+                .zip(exponent)
+                .map(|(base, exponent)| base.powf(exponent))
+                .collect(),
+        ),
+        (NumericStorage::F32(base), NumericStorage::F64(exponent)) => NumericStorage::F32(
+            base.into_iter()
+                .zip(exponent)
+                .map(|(base, exponent)| f64::from(base).powf(exponent) as f32)
+                .collect(),
+        ),
+        (NumericStorage::F64(base), NumericStorage::F32(exponent)) => NumericStorage::F32(
+            base.into_iter()
+                .zip(exponent)
+                .map(|(base, exponent)| base.powf(f64::from(exponent)) as f32)
+                .collect(),
+        ),
+        _ => return Err("element-wise integer power did not use the exact integer path".into()),
+    };
+    Tensor::from_numeric_storage(output, shape).map(Value::Tensor)
 }
 
 // Element-wise operations are not directly exposed as runtime builtins because they need
@@ -1489,6 +1544,64 @@ mod tests {
         } else {
             panic!("Expected matrix result");
         }
+    }
+
+    #[test]
+    fn elementwise_pow_preserves_native_single_and_nd_shape() {
+        let shape = vec![1, 2, 2];
+        let tensor = Tensor::from_f32(vec![2.0, 3.0, 4.0, 5.0], shape.clone()).unwrap();
+        let Value::Tensor(result) =
+            elementwise_pow(&Value::Tensor(tensor), &Value::Num(2.0)).expect("power")
+        else {
+            panic!("expected tensor");
+        };
+        assert_eq!(result.shape, shape);
+        assert_eq!(
+            result.into_numeric_storage().expect("storage"),
+            NumericStorage::F32(vec![4.0, 9.0, 16.0, 25.0])
+        );
+    }
+
+    #[test]
+    fn elementwise_pow_mixed_floating_tensors_returns_single() {
+        let single = Tensor::from_f32(vec![2.0, 4.0], vec![1, 2]).unwrap();
+        let double = Tensor::new(vec![3.0, 0.5], vec![1, 2]).unwrap();
+
+        let Value::Tensor(single_base) = elementwise_pow(
+            &Value::Tensor(single.clone()),
+            &Value::Tensor(double.clone()),
+        )
+        .expect("power") else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            single_base.into_numeric_storage().expect("storage"),
+            NumericStorage::F32(vec![8.0, 2.0])
+        );
+
+        let Value::Tensor(single_exponent) =
+            elementwise_pow(&Value::Tensor(double), &Value::Tensor(single)).expect("power")
+        else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            single_exponent.into_numeric_storage().expect("storage"),
+            NumericStorage::F32(vec![9.0, 0.0625])
+        );
+    }
+
+    #[test]
+    fn elementwise_pow_double_scalar_base_with_single_exponent_returns_single() {
+        let exponent = Tensor::from_f32(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
+        let Value::Tensor(result) =
+            elementwise_pow(&Value::Num(2.0), &Value::Tensor(exponent)).expect("power")
+        else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            result.into_numeric_storage().expect("storage"),
+            NumericStorage::F32(vec![2.0, 4.0, 8.0])
+        );
     }
 
     #[test]
