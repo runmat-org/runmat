@@ -8,7 +8,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
+    CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -153,6 +153,19 @@ async fn expm1_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn expm1_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
+        let provider = runmat_accelerate_api::provider_for_handle(&handle);
+        let tensor = gpu_helpers::gather_tensor_async(&handle)
+            .await
+            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+        let output = expm1_tensor(tensor)?;
+        if let Some(provider) = provider {
+            if let Ok(handle) = gpu_helpers::upload_tensor(provider, &output) {
+                return Ok(gpu_helpers::resident_gpu_value(handle));
+            }
+        }
+        return Ok(tensor::tensor_into_value(output));
+    }
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_expm1(&handle).await {
             return Ok(Value::GpuTensor(out));
@@ -171,22 +184,59 @@ fn expm1_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn expm1_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let data = tensor::tensor_values_f64_cow(&tensor)
-        .iter()
-        .map(|&v| v.exp_m1())
-        .collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone()).map_err(|e| builtin_error(format!("expm1: {e}")))
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| builtin_error(format!("expm1: {e}")))?;
+    let output = match storage {
+        NumericStorage::F64(values) => {
+            NumericStorage::F64(values.into_iter().map(f64::exp_m1).collect())
+        }
+        NumericStorage::F32(values) => {
+            NumericStorage::F32(values.into_iter().map(f32::exp_m1).collect())
+        }
+        storage => NumericStorage::F64(
+            promote_integer_storage_to_expm1_domain(storage)
+                .into_iter()
+                .map(f64::exp_m1)
+                .collect(),
+        ),
+    };
+    Tensor::from_numeric_storage(output, shape).map_err(|e| builtin_error(format!("expm1: {e}")))
 }
 
 fn expm1_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let mapped = ct
-        .materialize_f64()
-        .iter()
-        .map(|&(re, im)| expm1_complex_parts(re, im))
-        .collect::<Vec<_>>();
-    let tensor = ComplexTensor::new(mapped, ct.shape.clone())
+    let shape = ct.shape.clone();
+    let storage = match ct.into_complex_storage() {
+        ComplexStorage::F64(values) => ComplexStorage::F64(
+            values
+                .into_iter()
+                .map(|(real, imag)| expm1_complex_parts(real, imag))
+                .collect(),
+        ),
+        ComplexStorage::F32(values) => ComplexStorage::F32(
+            values
+                .into_iter()
+                .map(|(real, imag)| expm1_complex_parts_f32(real, imag))
+                .collect(),
+        ),
+        ComplexStorage::Integer(_) => {
+            return Err(expm1_error_with_detail(
+                &EXPM1_ERROR_INVALID_INPUT,
+                "typed complex integer input is not supported",
+            ))
+        }
+    };
+    let tensor = ComplexTensor::from_complex_storage(storage, shape)
         .map_err(|e| builtin_error(format!("expm1: {e}")))?;
     Ok(Value::ComplexTensor(tensor))
+}
+
+fn promote_integer_storage_to_expm1_domain(storage: NumericStorage) -> Vec<f64> {
+    storage
+        .into_integer_storage()
+        .expect("expm1 integer-promotion boundary received floating storage")
+        .to_f64_vec()
 }
 
 fn expm1_char_array(ca: CharArray) -> BuiltinResult<Value> {
@@ -201,6 +251,19 @@ fn expm1_char_array(ca: CharArray) -> BuiltinResult<Value> {
 }
 
 fn expm1_complex_parts(re: f64, im: f64) -> (f64, f64) {
+    let half = 0.5 * im;
+    let sin_half = half.sin();
+    let cos_half = half.cos();
+    let cos_b_minus_one = -2.0 * sin_half * sin_half;
+    let sin_b = 2.0 * sin_half * cos_half;
+    let expm1_a = re.exp_m1();
+    let exp_a = expm1_a + 1.0;
+    let real = expm1_a + exp_a * cos_b_minus_one;
+    let imag = exp_a * sin_b;
+    (real, imag)
+}
+
+fn expm1_complex_parts_f32(re: f32, im: f32) -> (f32, f32) {
     let half = 0.5 * im;
     let sin_half = half.sin();
     let cos_half = half.cos();
@@ -309,6 +372,63 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn expm1_preserves_native_single_real_complex_and_empty_storage() {
+        let tensor = Tensor::from_f32(vec![0.0, 1.0], vec![2, 1]).unwrap();
+        let Value::Tensor(output) = expm1_builtin(Value::Tensor(tensor)).expect("expm1") else {
+            panic!("expected single tensor");
+        };
+        assert_eq!(output.shape, vec![2, 1]);
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![0.0, 1.0_f32.exp_m1()])
+        );
+
+        let complex = ComplexTensor::from_f32(vec![(0.0, 0.0), (1.0, 0.5)], vec![1, 2]).unwrap();
+        let Value::ComplexTensor(output) =
+            expm1_builtin(Value::ComplexTensor(complex)).expect("expm1")
+        else {
+            panic!("expected complex single tensor");
+        };
+        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(
+            output.as_f32_slice(),
+            Some(
+                &[
+                    expm1_complex_parts_f32(0.0, 0.0),
+                    expm1_complex_parts_f32(1.0, 0.5),
+                ][..]
+            )
+        );
+
+        let empty = ComplexTensor::from_f32(Vec::new(), vec![0, 3]).unwrap();
+        let Value::ComplexTensor(output) =
+            expm1_builtin(Value::ComplexTensor(empty)).expect("expm1")
+        else {
+            panic!("expected empty complex single tensor");
+        };
+        assert_eq!(output.shape, vec![0, 3]);
+        assert_eq!(output.as_f32_slice(), Some(&[][..]));
+    }
+
+    #[test]
+    fn expm1_integer_gpu_promotes_after_exact_gather_and_returns_floating_storage() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new_integer(
+                IntegerStorage::U64(vec![0, 9_007_199_254_740_993]),
+                vec![1, 2],
+            )
+            .unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
+            let result = expm1_builtin(Value::GpuTensor(handle)).expect("expm1");
+            let gathered = test_support::gather(result).expect("gather");
+            assert_eq!(
+                gathered.into_numeric_storage().unwrap(),
+                NumericStorage::F64(vec![0.0, f64::INFINITY])
+            );
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
