@@ -15,6 +15,15 @@ async fn main() -> ExitCode {
                 }
             };
         }
+        Ok(Some(runmat_process_host::HiddenMode::ExecutionWorker)) => {
+            return match runmat_execution_runner_native::run_worker_stdio().await {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("runmat execution worker failed: {error}");
+                    ExitCode::from(2)
+                }
+            };
+        }
         Ok(Some(mode)) => {
             eprintln!(
                 "RunMat host mode '{}' is not available in this build",

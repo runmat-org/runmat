@@ -325,8 +325,22 @@ fn create_async_future_value(
     function: runmat_hir::FunctionId,
     requested_outputs: usize,
     arguments: Vec<Value>,
+    function_registry: &crate::bytecode::FunctionRegistry,
 ) -> Result<Value, RuntimeError> {
     enforce_spawn_value_concurrency_policy(&Value::OutputList(arguments.clone()))?;
+    let program = context
+        .execution
+        .services()
+        .requires_program_capture()
+        .then(|| {
+            serde_json::to_vec(function_registry).map_err(|error| {
+                crate::interpreter::errors::mex(
+                    "ExecutionProgram",
+                    &format!("failed to capture the exact async program: {error}"),
+                )
+            })
+        })
+        .transpose()?;
     context
         .execution
         .services()
@@ -334,6 +348,7 @@ fn create_async_future_value(
             function: function.0,
             arguments,
             requested_outputs,
+            program: Some(program),
         })
         .map(Value::Future)
         .map_err(execution_error)
@@ -1144,7 +1159,11 @@ pub async fn dispatch_instruction(
         Instr::CreateSemanticFuture(function, arg_count, out_count) => {
             let args = crate::call::builtins::collect_call_args(stack, *arg_count)?;
             stack.push(create_async_future_value(
-                context, *function, *out_count, args,
+                context,
+                *function,
+                *out_count,
+                args,
+                function_registry,
             )?);
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
@@ -1153,7 +1172,11 @@ pub async fn dispatch_instruction(
         Instr::CreateSemanticFutureExpandMultiOutput(function, specs, out_count) => {
             let args = build_user_function_expand_multi_args(stack, specs).await?;
             stack.push(create_async_future_value(
-                context, *function, *out_count, args,
+                context,
+                *function,
+                *out_count,
+                args,
+                function_registry,
             )?);
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,

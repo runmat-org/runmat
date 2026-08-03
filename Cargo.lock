@@ -5760,6 +5760,7 @@ dependencies = [
  "runmat-config",
  "runmat-core",
  "runmat-execution",
+ "runmat-execution-runner-native",
  "runmat-filesystem",
  "runmat-gc",
  "runmat-hir",
@@ -5972,6 +5973,23 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "runmat-execution-runner-native"
+version = "0.6.1"
+dependencies = [
+ "runmat-builtins",
+ "runmat-execution",
+ "runmat-execution-runner",
+ "runmat-process-host",
+ "runmat-runtime",
+ "runmat-vm",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
 ]
 
 [[package]]
@@ -6629,6 +6647,7 @@ dependencies = [
  "runmat-thread-local",
  "runmat-time",
  "serde",
+ "serde_json",
  "stacker",
  "tracing",
 ]

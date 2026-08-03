@@ -1,6 +1,16 @@
 use super::*;
 
 impl RunMatSession {
+    /// Replace the root execution service used by this session and every
+    /// nested invocation compiled from it.
+    pub fn install_execution_services(
+        &mut self,
+        services: std::rc::Rc<dyn runmat_runtime::execution::RuntimeExecutionServices>,
+    ) {
+        self.execution_context =
+            runmat_runtime::execution::InvocationExecutionContext::new(services);
+    }
+
     /// Install an async stdin handler (Phase 2). This is the preferred input path for
     /// poll-driven execution (`ExecuteFuture`).
     ///

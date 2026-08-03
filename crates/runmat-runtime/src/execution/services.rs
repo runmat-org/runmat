@@ -17,6 +17,11 @@ pub struct DeferredCall {
     pub function: usize,
     pub arguments: Vec<Value>,
     pub requested_outputs: usize,
+    /// Exact, runtime-opaque program description supplied by the VM.
+    ///
+    /// The serial service does not inspect this payload. Execution adapters may
+    /// require it to reproduce the callable in an isolated worker.
+    pub program: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -31,6 +36,9 @@ pub enum AwaitAction {
 
 pub trait RuntimeExecutionServices {
     fn scope_id(&self) -> ExecutionScopeId;
+    fn requires_program_capture(&self) -> bool {
+        false
+    }
     fn create_future(&self, call: DeferredCall) -> Result<FutureHandle, ExecutionServiceError>;
     fn spawn(&self, future: &FutureHandle) -> Result<TaskHandle, ExecutionServiceError>;
     fn begin_await(&self, value: Value) -> Result<AwaitAction, ExecutionServiceError>;
@@ -284,6 +292,7 @@ mod tests {
                 function: 1,
                 arguments: vec![],
                 requested_outputs: 1,
+                program: None,
             })
             .unwrap();
         assert_eq!(
@@ -300,6 +309,7 @@ mod tests {
                 function: 7,
                 arguments: vec![Value::Num(3.0)],
                 requested_outputs: 1,
+                program: None,
             })
             .unwrap();
         let task = service.spawn(&future).unwrap();
@@ -346,6 +356,7 @@ mod tests {
                 function: 1,
                 arguments: vec![],
                 requested_outputs: 1,
+                program: None,
             })
             .unwrap();
         service.drain_scope(CancellationReason::Shutdown);
