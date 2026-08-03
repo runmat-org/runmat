@@ -6,6 +6,7 @@ pub(super) trait SetFloat: Copy + Default + PartialOrd + std::fmt::Debug {
     fn canonical_key(self) -> u64;
     fn compare(self, other: Self) -> Ordering;
     fn is_nan(self) -> bool;
+    fn abs(self) -> Self;
     fn hypot(self, other: Self) -> Self;
     fn atan2(self, other: Self) -> Self;
     fn numeric_storage(values: Vec<Self>) -> NumericStorage;
@@ -29,6 +30,10 @@ impl SetFloat for f64 {
 
     fn is_nan(self) -> bool {
         f64::is_nan(self)
+    }
+
+    fn abs(self) -> Self {
+        f64::abs(self)
     }
 
     fn hypot(self, other: Self) -> Self {
@@ -65,6 +70,10 @@ impl SetFloat for f32 {
 
     fn is_nan(self) -> bool {
         f32::is_nan(self)
+    }
+
+    fn abs(self) -> Self {
+        f32::abs(self)
     }
 
     fn hypot(self, other: Self) -> Self {

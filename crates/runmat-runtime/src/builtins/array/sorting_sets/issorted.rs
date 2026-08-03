@@ -9,7 +9,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
-use super::{integer_order, type_resolvers::bool_output_type};
+use super::{float_order::SetFloat, integer_order, type_resolvers::bool_output_type};
 use crate::build_runtime_error;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
@@ -592,13 +592,26 @@ fn issorted_real(tensor: &Tensor, args: &IssortedArgs) -> crate::BuiltinResult<b
     if let Some(storage) = tensor.integer_storage() {
         return issorted_integer(&storage.exact_values(), &tensor.shape, args);
     }
-    let values = tensor.materialize_f64();
+    if let Some(values) = tensor.as_f32_slice() {
+        return issorted_floating(values, &tensor.shape, args);
+    }
+    let values = tensor
+        .as_f64_slice()
+        .expect("non-integer real tensor stores native single or double");
+    issorted_floating(values, &tensor.shape, args)
+}
+
+fn issorted_floating<T: SetFloat>(
+    values: &[T],
+    shape: &[usize],
+    args: &IssortedArgs,
+) -> crate::BuiltinResult<bool> {
     if values.is_empty() {
         return Ok(true);
     }
     match args.mode {
-        CheckMode::Dimension(dim) => Ok(check_real_dimension(&values, &tensor.shape, dim, args)),
-        CheckMode::Rows => check_real_rows(&values, tensor, args),
+        CheckMode::Dimension(dim) => Ok(check_real_dimension(values, shape, dim, args)),
+        CheckMode::Rows => check_real_rows(values, shape, args),
     }
 }
 
@@ -720,12 +733,34 @@ fn check_integer_slice(
 }
 
 fn issorted_complex(tensor: &ComplexTensor, args: &IssortedArgs) -> crate::BuiltinResult<bool> {
-    if tensor.materialize_f64().is_empty() {
+    if let Some(values) = tensor.as_f32_slice() {
+        return issorted_floating_complex(values, &tensor.shape, args);
+    }
+    if let Some(values) = tensor.as_f64_slice() {
+        return issorted_floating_complex(values, &tensor.shape, args);
+    }
+    issorted_promoted_complex_f64(tensor, args)
+}
+
+fn issorted_promoted_complex_f64(
+    tensor: &ComplexTensor,
+    args: &IssortedArgs,
+) -> crate::BuiltinResult<bool> {
+    let values = tensor.materialize_f64();
+    issorted_floating_complex(&values, &tensor.shape, args)
+}
+
+fn issorted_floating_complex<T: SetFloat>(
+    values: &[(T, T)],
+    shape: &[usize],
+    args: &IssortedArgs,
+) -> crate::BuiltinResult<bool> {
+    if values.is_empty() {
         return Ok(true);
     }
     match args.mode {
-        CheckMode::Dimension(dim) => Ok(check_complex_dimension(tensor, dim, args)),
-        CheckMode::Rows => check_complex_rows(tensor, args),
+        CheckMode::Dimension(dim) => Ok(check_complex_dimension(values, shape, dim, args)),
+        CheckMode::Rows => check_complex_rows(values, shape, args),
     }
 }
 
@@ -745,7 +780,12 @@ fn issorted_string(array: &StringArray, args: &IssortedArgs) -> crate::BuiltinRe
     }
 }
 
-fn check_real_dimension(values: &[f64], shape: &[usize], dim: usize, args: &IssortedArgs) -> bool {
+fn check_real_dimension<T: SetFloat>(
+    values: &[T],
+    shape: &[usize],
+    dim: usize,
+    args: &IssortedArgs,
+) -> bool {
     let dim_index = dim.saturating_sub(1);
     if dim_index >= shape.len() {
         return true;
@@ -777,17 +817,22 @@ fn check_real_dimension(values: &[f64], shape: &[usize], dim: usize, args: &Isso
     true
 }
 
-fn check_complex_dimension(tensor: &ComplexTensor, dim: usize, args: &IssortedArgs) -> bool {
+fn check_complex_dimension<T: SetFloat>(
+    values: &[(T, T)],
+    shape: &[usize],
+    dim: usize,
+    args: &IssortedArgs,
+) -> bool {
     let dim_index = dim.saturating_sub(1);
-    if dim_index >= tensor.shape.len() {
+    if dim_index >= shape.len() {
         return true;
     }
-    let len_dim = tensor.shape[dim_index];
+    let len_dim = shape[dim_index];
     if len_dim <= 1 {
         return true;
     }
-    let before = product(&tensor.shape[..dim_index]);
-    let after = product(&tensor.shape[dim_index + 1..]);
+    let before = product(&shape[..dim_index]);
+    let after = product(&shape[dim_index + 1..]);
     let effective_comp = match args.comparison {
         ComparisonMethod::Auto => ComparisonMethod::Abs,
         other => other,
@@ -798,7 +843,7 @@ fn check_complex_dimension(tensor: &ComplexTensor, dim: usize, args: &IssortedAr
             slice.clear();
             for k in 0..len_dim {
                 let idx = before_idx + k * before + after_idx * before * len_dim;
-                slice.push(tensor.materialize_f64()[idx]);
+                slice.push(values[idx]);
             }
             if !check_complex_slice(&slice, args.direction, effective_comp, args.missing) {
                 return false;
@@ -835,19 +880,19 @@ fn check_string_dimension(array: &StringArray, dim: usize, args: &IssortedArgs) 
     true
 }
 
-fn check_real_rows(
-    values: &[f64],
-    tensor: &Tensor,
+fn check_real_rows<T: SetFloat>(
+    values: &[T],
+    shape: &[usize],
     args: &IssortedArgs,
 ) -> crate::BuiltinResult<bool> {
-    if tensor.shape.len() > 2 {
+    if shape.len() > 2 {
         return Err(issorted_error(
             &ISSORTED_ERROR_ROWS_REQUIRES_2D,
             ISSORTED_ERROR_ROWS_REQUIRES_2D.message,
         ));
     }
-    let rows = tensor.rows();
-    let cols = tensor.cols();
+    let rows = shape.first().copied().unwrap_or(1);
+    let cols = shape.get(1).copied().unwrap_or(1);
     if rows <= 1 || cols == 0 {
         return Ok(true);
     }
@@ -864,15 +909,19 @@ fn check_real_rows(
     Ok(false)
 }
 
-fn check_complex_rows(tensor: &ComplexTensor, args: &IssortedArgs) -> crate::BuiltinResult<bool> {
-    if tensor.shape.len() > 2 {
+fn check_complex_rows<T: SetFloat>(
+    values: &[(T, T)],
+    shape: &[usize],
+    args: &IssortedArgs,
+) -> crate::BuiltinResult<bool> {
+    if shape.len() > 2 {
         return Err(issorted_error(
             &ISSORTED_ERROR_ROWS_REQUIRES_2D,
             ISSORTED_ERROR_ROWS_REQUIRES_2D.message,
         ));
     }
-    let rows = tensor.rows;
-    let cols = tensor.cols;
+    let rows = shape.first().copied().unwrap_or(1);
+    let cols = shape.get(1).copied().unwrap_or(1);
     if rows <= 1 || cols == 0 {
         return Ok(true);
     }
@@ -882,7 +931,7 @@ fn check_complex_rows(tensor: &ComplexTensor, args: &IssortedArgs) -> crate::Bui
     };
     let orders = direction_orders(args.direction);
     for &order in orders {
-        if complex_rows_in_order(tensor, rows, cols, order, effective_comp, args.missing) {
+        if complex_rows_in_order(values, rows, cols, order, effective_comp, args.missing) {
             return Ok(true);
         }
     }
@@ -910,8 +959,8 @@ fn check_string_rows(array: &StringArray, args: &IssortedArgs) -> crate::Builtin
     Ok(false)
 }
 
-fn real_rows_in_order(
-    values: &[f64],
+fn real_rows_in_order<T: SetFloat>(
+    values: &[T],
     rows: usize,
     cols: usize,
     order: OrderSpec,
@@ -940,21 +989,21 @@ fn real_rows_in_order(
     true
 }
 
-fn complex_rows_in_order(
-    tensor: &ComplexTensor,
+fn complex_rows_in_order<T: SetFloat>(
+    values: &[(T, T)],
     rows: usize,
     cols: usize,
     order: OrderSpec,
     comparison: ComparisonMethod,
     missing: MissingPlacement,
 ) -> bool {
-    if order.strict && tensor.materialize_f64().iter().any(|v| complex_is_nan(*v)) {
+    if order.strict && values.iter().any(|v| complex_is_nan(*v)) {
         return false;
     }
     let missing_resolved = missing.resolve(order.direction);
     for row in 0..rows - 1 {
         let ord = compare_complex_row_pair(
-            tensor,
+            values,
             rows,
             cols,
             row,
@@ -999,8 +1048,8 @@ fn string_rows_in_order(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn compare_real_row_pair(
-    values: &[f64],
+fn compare_real_row_pair<T: SetFloat>(
+    values: &[T],
     rows: usize,
     cols: usize,
     a: usize,
@@ -1022,8 +1071,8 @@ fn compare_real_row_pair(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn compare_complex_row_pair(
-    tensor: &ComplexTensor,
+fn compare_complex_row_pair<T: SetFloat>(
+    values: &[(T, T)],
     rows: usize,
     cols: usize,
     a: usize,
@@ -1035,13 +1084,8 @@ fn compare_complex_row_pair(
     for col in 0..cols {
         let idx_a = a + col * rows;
         let idx_b = b + col * rows;
-        let ord = compare_complex_scalars(
-            tensor.materialize_f64()[idx_a],
-            tensor.materialize_f64()[idx_b],
-            direction,
-            comparison,
-            missing,
-        );
+        let ord =
+            compare_complex_scalars(values[idx_a], values[idx_b], direction, comparison, missing);
         if ord != Ordering::Equal {
             return ord;
         }
@@ -1089,8 +1133,8 @@ fn order_satisfied(ord: Ordering, order: OrderSpec) -> bool {
     }
 }
 
-fn check_real_slice(
-    slice: &[f64],
+fn check_real_slice<T: SetFloat>(
+    slice: &[T],
     direction: Direction,
     comparison: ComparisonMethod,
     missing: MissingPlacement,
@@ -1111,8 +1155,8 @@ fn check_real_slice(
     false
 }
 
-fn check_complex_slice(
-    slice: &[(f64, f64)],
+fn check_complex_slice<T: SetFloat>(
+    slice: &[(T, T)],
     direction: Direction,
     comparison: ComparisonMethod,
     missing: MissingPlacement,
@@ -1150,8 +1194,8 @@ fn check_string_slice(slice: &[&str], direction: Direction, missing: MissingPlac
     false
 }
 
-fn real_slice_in_order(
-    slice: &[f64],
+fn real_slice_in_order<T: SetFloat>(
+    slice: &[T],
     order: OrderSpec,
     comparison: ComparisonMethod,
     missing: MissingPlacementResolved,
@@ -1165,8 +1209,8 @@ fn real_slice_in_order(
     true
 }
 
-fn complex_slice_in_order(
-    slice: &[(f64, f64)],
+fn complex_slice_in_order<T: SetFloat>(
+    slice: &[(T, T)],
     order: OrderSpec,
     comparison: ComparisonMethod,
     missing: MissingPlacementResolved,
@@ -1194,9 +1238,9 @@ fn string_slice_in_order(
     true
 }
 
-fn compare_real_scalars(
-    a: f64,
-    b: f64,
+fn compare_real_scalars<T: SetFloat>(
+    a: T,
+    b: T,
     direction: SortDirection,
     comparison: ComparisonMethod,
     missing: MissingPlacementResolved,
@@ -1215,14 +1259,14 @@ fn compare_real_scalars(
     }
 }
 
-fn compare_real_finite_scalars(
-    a: f64,
-    b: f64,
+fn compare_real_finite_scalars<T: SetFloat>(
+    a: T,
+    b: T,
     direction: SortDirection,
     comparison: ComparisonMethod,
 ) -> Ordering {
     if matches!(comparison, ComparisonMethod::Abs) {
-        let abs_cmp = a.abs().partial_cmp(&b.abs()).unwrap_or(Ordering::Equal);
+        let abs_cmp = a.abs().compare(b.abs());
         if abs_cmp != Ordering::Equal {
             return match direction {
                 SortDirection::Ascend => abs_cmp,
@@ -1231,14 +1275,14 @@ fn compare_real_finite_scalars(
         }
     }
     match direction {
-        SortDirection::Ascend => a.partial_cmp(&b).unwrap_or(Ordering::Equal),
-        SortDirection::Descend => b.partial_cmp(&a).unwrap_or(Ordering::Equal),
+        SortDirection::Ascend => a.compare(b),
+        SortDirection::Descend => b.compare(a),
     }
 }
 
-fn compare_complex_scalars(
-    a: (f64, f64),
-    b: (f64, f64),
+fn compare_complex_scalars<T: SetFloat>(
+    a: (T, T),
+    b: (T, T),
     direction: SortDirection,
     comparison: ComparisonMethod,
     missing: MissingPlacementResolved,
@@ -1257,18 +1301,16 @@ fn compare_complex_scalars(
     }
 }
 
-fn compare_complex_finite_scalars(
-    a: (f64, f64),
-    b: (f64, f64),
+fn compare_complex_finite_scalars<T: SetFloat>(
+    a: (T, T),
+    b: (T, T),
     direction: SortDirection,
     comparison: ComparisonMethod,
 ) -> Ordering {
     match comparison {
         ComparisonMethod::Real => compare_complex_real_first(a, b, direction),
         ComparisonMethod::Abs | ComparisonMethod::Auto => {
-            let abs_cmp = complex_abs(a)
-                .partial_cmp(&complex_abs(b))
-                .unwrap_or(Ordering::Equal);
+            let abs_cmp = complex_abs(a).compare(complex_abs(b));
             if abs_cmp != Ordering::Equal {
                 return match direction {
                     SortDirection::Ascend => abs_cmp,
@@ -1280,18 +1322,21 @@ fn compare_complex_finite_scalars(
     }
 }
 
-fn compare_complex_real_first(a: (f64, f64), b: (f64, f64), direction: SortDirection) -> Ordering {
+fn compare_complex_real_first<T: SetFloat>(
+    a: (T, T),
+    b: (T, T),
+    direction: SortDirection,
+) -> Ordering {
     let real_cmp = match direction {
-        SortDirection::Ascend => a.0.partial_cmp(&b.0),
-        SortDirection::Descend => b.0.partial_cmp(&a.0),
-    }
-    .unwrap_or(Ordering::Equal);
+        SortDirection::Ascend => a.0.compare(b.0),
+        SortDirection::Descend => b.0.compare(a.0),
+    };
     if real_cmp != Ordering::Equal {
         return real_cmp;
     }
     match direction {
-        SortDirection::Ascend => a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal),
-        SortDirection::Descend => b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal),
+        SortDirection::Ascend => a.1.compare(b.1),
+        SortDirection::Descend => b.1.compare(a.1),
     }
 }
 
@@ -1320,11 +1365,11 @@ fn compare_string_scalars(
     }
 }
 
-fn complex_is_nan(value: (f64, f64)) -> bool {
+fn complex_is_nan<T: SetFloat>(value: (T, T)) -> bool {
     value.0.is_nan() || value.1.is_nan()
 }
 
-fn complex_abs(value: (f64, f64)) -> f64 {
+fn complex_abs<T: SetFloat>(value: (T, T)) -> T {
     value.0.hypot(value.1)
 }
 
@@ -1459,6 +1504,54 @@ pub(crate) mod tests {
         assert_eq!(
             issorted_builtin(Value::Tensor(descending), Vec::new()).expect("issorted"),
             Value::Bool(false)
+        );
+
+        let rows = Tensor::from_f32(vec![1.0, 2.0, 1.0, 3.0], vec![2, 2]).expect("rows");
+        assert_eq!(
+            issorted_builtin(Value::Tensor(rows), vec![Value::from("rows")]).expect("issorted"),
+            Value::Bool(true)
+        );
+
+        let absolute = Tensor::from_f32(vec![-1.0, 1.5, -2.0], vec![3, 1]).expect("absolute");
+        assert_eq!(
+            issorted_builtin(
+                Value::Tensor(absolute),
+                vec![Value::from("ComparisonMethod"), Value::from("abs")],
+            )
+            .expect("issorted"),
+            Value::Bool(true)
+        );
+    }
+
+    #[test]
+    fn issorted_reads_native_complex_single_storage() {
+        let values = ComplexTensor::from_f32(vec![(1.0, 1.0), (2.0, 0.0), (2.0, 3.0)], vec![3, 1])
+            .expect("input");
+        assert_eq!(
+            issorted_builtin(
+                Value::ComplexTensor(values),
+                vec![Value::from("ComparisonMethod"), Value::from("abs")],
+            )
+            .expect("issorted"),
+            Value::Bool(true)
+        );
+
+        let rows = ComplexTensor::from_f32(
+            vec![(1.0, 0.0), (2.0, 0.0), (1.0, 1.0), (3.0, 1.0)],
+            vec![2, 2],
+        )
+        .expect("rows");
+        assert_eq!(
+            issorted_builtin(
+                Value::ComplexTensor(rows),
+                vec![
+                    Value::from("rows"),
+                    Value::from("ComparisonMethod"),
+                    Value::from("real")
+                ],
+            )
+            .expect("issorted"),
+            Value::Bool(true)
         );
     }
 

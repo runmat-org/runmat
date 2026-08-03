@@ -2452,6 +2452,14 @@ impl Tensor {
         }
     }
 
+    /// Borrows native single storage when this tensor's authoritative class is single.
+    pub fn as_f32_slice(&self) -> Option<&[f32]> {
+        match &self.storage {
+            TensorStorage::F32(values) => Some(values),
+            TensorStorage::F64(_) | TensorStorage::Integer(_) => None,
+        }
+    }
+
     /// Explicitly materializes this tensor in the `f64` computation domain.
     ///
     /// Integer values outside the exact binary64 range may lose precision.
