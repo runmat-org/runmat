@@ -1163,4 +1163,129 @@ mod tests {
             )
         );
     }
+
+    #[test]
+    fn cumulative_arithmetic_saturates_forward_and_reverse_for_every_integer_class() {
+        macro_rules! assert_scan {
+            ($variant:ident, $input:expr, $expected:expr, $direction:expr, $operation:expr) => {{
+                let result = cumulative(
+                    &IntegerStorage::$variant($input),
+                    &[3, 1],
+                    1,
+                    $direction,
+                    $operation,
+                )
+                .expect("cumulative scan");
+                assert_eq!(
+                    result,
+                    Value::Tensor(
+                        Tensor::new_integer(IntegerStorage::$variant($expected), vec![3, 1])
+                            .expect("expected cumulative scan")
+                    )
+                );
+            }};
+        }
+        macro_rules! assert_signed_class {
+            ($variant:ident, $ty:ty) => {{
+                let max = <$ty>::MAX;
+                assert_scan!(
+                    $variant,
+                    vec![max, 1, -1],
+                    vec![max, max, max - 1],
+                    CumulativeDirection::Forward,
+                    CumulativeOperation::Sum
+                );
+                assert_scan!(
+                    $variant,
+                    vec![max, 1, -1],
+                    vec![max, 0, -1],
+                    CumulativeDirection::Reverse,
+                    CumulativeOperation::Sum
+                );
+                assert_scan!(
+                    $variant,
+                    vec![max, 2, -1],
+                    vec![max, max, -max],
+                    CumulativeDirection::Forward,
+                    CumulativeOperation::Product
+                );
+                assert_scan!(
+                    $variant,
+                    vec![max, 2, -1],
+                    vec![<$ty>::MIN, -2, -1],
+                    CumulativeDirection::Reverse,
+                    CumulativeOperation::Product
+                );
+            }};
+        }
+        macro_rules! assert_unsigned_class {
+            ($variant:ident, $ty:ty) => {{
+                let max = <$ty>::MAX;
+                assert_scan!(
+                    $variant,
+                    vec![max, 2, 0],
+                    vec![max, max, max],
+                    CumulativeDirection::Forward,
+                    CumulativeOperation::Sum
+                );
+                assert_scan!(
+                    $variant,
+                    vec![max, 2, 0],
+                    vec![max, 2, 0],
+                    CumulativeDirection::Reverse,
+                    CumulativeOperation::Sum
+                );
+                assert_scan!(
+                    $variant,
+                    vec![max, 2, 1],
+                    vec![max, max, max],
+                    CumulativeDirection::Forward,
+                    CumulativeOperation::Product
+                );
+                assert_scan!(
+                    $variant,
+                    vec![max, 2, 1],
+                    vec![max, 2, 1],
+                    CumulativeDirection::Reverse,
+                    CumulativeOperation::Product
+                );
+            }};
+        }
+
+        assert_signed_class!(I8, i8);
+        assert_signed_class!(I16, i16);
+        assert_signed_class!(I32, i32);
+        assert_signed_class!(I64, i64);
+        assert_unsigned_class!(U8, u8);
+        assert_unsigned_class!(U16, u16);
+        assert_unsigned_class!(U32, u32);
+        assert_unsigned_class!(U64, u64);
+    }
+
+    #[test]
+    fn cumulative_arithmetic_preserves_all_integer_empty_shapes() {
+        for storage in [
+            IntegerStorage::I8(Vec::new()),
+            IntegerStorage::I16(Vec::new()),
+            IntegerStorage::I32(Vec::new()),
+            IntegerStorage::I64(Vec::new()),
+            IntegerStorage::U8(Vec::new()),
+            IntegerStorage::U16(Vec::new()),
+            IntegerStorage::U32(Vec::new()),
+            IntegerStorage::U64(Vec::new()),
+        ] {
+            for direction in [CumulativeDirection::Forward, CumulativeDirection::Reverse] {
+                for operation in [CumulativeOperation::Sum, CumulativeOperation::Product] {
+                    assert_eq!(
+                        cumulative(&storage, &[0, 3], 1, direction, operation)
+                            .expect("empty cumulative scan"),
+                        Value::Tensor(
+                            Tensor::new_integer(storage.clone(), vec![0, 3])
+                                .expect("expected empty cumulative scan")
+                        )
+                    );
+                }
+            }
+        }
+    }
 }
