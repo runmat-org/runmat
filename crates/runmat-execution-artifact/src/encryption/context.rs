@@ -6,6 +6,7 @@ use crate::{ArtifactError, ArtifactResult};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[repr(u8)]
 pub enum EncryptionPurpose {
     Bundle,
     Input,
@@ -14,6 +15,7 @@ pub enum EncryptionPurpose {
     Log,
     Checkpoint,
     TransferFrame,
+    RunKeyEnvelope,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

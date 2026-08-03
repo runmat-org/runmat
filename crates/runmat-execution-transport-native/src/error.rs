@@ -12,6 +12,8 @@ pub enum TransportError {
     Overflow,
     #[error("object transfer does not match its admitted identity")]
     Integrity,
+    #[error("application frame encryption failed: {0}")]
+    Encryption(String),
     #[error("control-plane transport is unavailable: {0}")]
     Unavailable(String),
     #[error("credential or lease is stale")]

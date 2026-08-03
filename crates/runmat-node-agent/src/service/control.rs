@@ -34,6 +34,7 @@ impl NodeControlPlane for HttpNodeControlPlane {
             .consume_node_enrollment(&types::ConsumeEnrollmentRequest {
                 token: request.token,
                 identity_fingerprint: request.identity_fingerprint,
+                identity_public_key: encode_bytes(&request.identity_public_key),
                 inventory: inventory_to_api(request.inventory)?,
                 heartbeat_ttl_seconds: to_i64(request.heartbeat_ttl_seconds, "heartbeat TTL")?,
             })
@@ -130,6 +131,28 @@ impl NodeControlPlane for HttpNodeControlPlane {
         Ok(())
     }
 
+    async fn publish_endpoint_identity(
+        &self,
+        heartbeat: &NodeHeartbeat,
+        allocation: &NodeAllocation,
+        evidence: runmat_execution::security::EndpointIdentityEvidence,
+    ) -> TransportResult<()> {
+        self.client
+            .publish_endpoint_identity(
+                &heartbeat.node_id,
+                &allocation.id,
+                &heartbeat.credential,
+                &types::PublishEndpointIdentityRequest {
+                    org_id: heartbeat.org_id.clone(),
+                    credential_epoch: to_i64(heartbeat.credential_epoch, "credential epoch")?,
+                    evidence: evidence_to_api(evidence)?,
+                },
+            )
+            .await
+            .map_err(map_error)?;
+        Ok(())
+    }
+
     async fn release(
         &self,
         heartbeat: &NodeHeartbeat,
@@ -219,6 +242,68 @@ fn allocation_from_api(value: types::AllocationLeaseResponse) -> TransportResult
         fencing_token: to_u64(value.fencing_token, "fencing token")?,
         expires_at_millis: value.expires_at.timestamp_millis(),
     })
+}
+
+fn evidence_to_api(
+    value: runmat_execution::security::EndpointIdentityEvidence,
+) -> TransportResult<types::EndpointIdentityEvidenceBody> {
+    Ok(types::EndpointIdentityEvidenceBody {
+        schema_version: i32::from(value.schema_version),
+        org_id: value.org_id,
+        cluster_id: value.cluster_id,
+        node_id: value.node_id,
+        allocation_lease_id: value.allocation_lease_id,
+        fencing_token: to_i64(value.fencing_token, "fencing token")?,
+        run_identity: value.run_identity,
+        identity_public_key: encode_bytes(&value.identity_public_key),
+        identity_fingerprint: value.identity_fingerprint,
+        recipient: types::EndpointRecipientKeyBody {
+            suite: value.recipient.suite,
+            public_key: encode_bytes(&value.recipient.public_key),
+            fingerprint: value.recipient.fingerprint,
+            valid_after_unix_millis: to_i64(
+                value.recipient.valid_after_unix_millis,
+                "recipient validity",
+            )?,
+            valid_before_unix_millis: to_i64(
+                value.recipient.valid_before_unix_millis,
+                "recipient validity",
+            )?,
+        },
+        direct_quic_endpoints: value
+            .direct_quic_endpoints
+            .into_iter()
+            .map(|endpoint| types::DirectQuicEndpointBody {
+                authority: endpoint.authority,
+                server_name: endpoint.server_name,
+                certificate_der: encode_bytes(&endpoint.certificate_der),
+                certificate_sha256: endpoint.certificate_sha256,
+            })
+            .collect(),
+        trust_tier: match value.trust_tier {
+            runmat_execution::security::ExecutionTrustTier::CustomerTrusted => {
+                types::ExecutionTrustTierBody::CustomerTrusted
+            }
+            runmat_execution::security::ExecutionTrustTier::HostedOrdinary => {
+                types::ExecutionTrustTierBody::HostedOrdinary
+            }
+            runmat_execution::security::ExecutionTrustTier::AttestedConfidential => {
+                types::ExecutionTrustTierBody::AttestedConfidential
+            }
+        },
+        attestation_class: value.attestation_class,
+        attestation_evidence: value
+            .attestation_evidence
+            .map(|evidence| encode_bytes(&evidence)),
+        issued_at_unix_millis: to_i64(value.issued_at_unix_millis, "evidence issue time")?,
+        expires_at_unix_millis: to_i64(value.expires_at_unix_millis, "evidence expiry")?,
+        signature: encode_bytes(&value.signature),
+    })
+}
+
+fn encode_bytes(value: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(value)
 }
 
 fn to_i64(value: u64, field: &str) -> TransportResult<i64> {

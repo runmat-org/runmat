@@ -19,6 +19,7 @@ pub struct NodeInventory {
 pub struct EnrollmentRequest {
     pub token: String,
     pub identity_fingerprint: String,
+    pub identity_public_key: Vec<u8>,
     pub inventory: NodeInventory,
     pub heartbeat_ttl_seconds: u64,
 }
@@ -94,6 +95,17 @@ pub trait NodeControlPlane: Send + Sync {
         heartbeat: &NodeHeartbeat,
         allocation: &NodeAllocation,
     ) -> TransportResult<()>;
+    async fn publish_endpoint_identity(
+        &self,
+        heartbeat: &NodeHeartbeat,
+        allocation: &NodeAllocation,
+        evidence: runmat_execution::security::EndpointIdentityEvidence,
+    ) -> TransportResult<()> {
+        let _ = (heartbeat, allocation, evidence);
+        Err(crate::TransportError::Unavailable(
+            "endpoint identity publication is not implemented".into(),
+        ))
+    }
     async fn release(
         &self,
         heartbeat: &NodeHeartbeat,

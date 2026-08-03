@@ -7,11 +7,19 @@ license-file = "../../LICENSE.md"
 [dependencies]
 async-trait = "0.1"
 chrono = { workspace = true }
+futures-util = "0.3"
 minicbor = { workspace = true }
 serde = { workspace = true }
+runmat-execution = { workspace = true }
+runmat-execution-artifact = { workspace = true }
+rand = "0.8"
+quinn = "0.11"
+rustls = "0.23"
 sha2 = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["sync", "time"] }
+tokio = { workspace = true, features = ["io-util", "net", "sync", "time"] }
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt"] }
+rcgen = "0.14"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

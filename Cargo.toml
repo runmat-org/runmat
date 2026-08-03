@@ -75,6 +75,10 @@ hpke = { version = "=0.14.0", default-features = false, features = [
     "x25519",
     "aes",
 ] }
+aes-gcm = "0.10"
+hkdf = "0.12"
+zeroize = "1"
+ed25519-dalek = "2"
 tokio = { version = "1", default-features = false }
 uuid = { version = "1", features = ["v4"] }
 clap = { version = "4", features = ["derive", "env"] }

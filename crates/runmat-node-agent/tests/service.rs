@@ -75,6 +75,17 @@ impl NodeControlPlane for Control {
         Ok(())
     }
 
+    async fn publish_endpoint_identity(
+        &self,
+        _: &NodeHeartbeat,
+        allocation: &NodeAllocation,
+        evidence: runmat_execution::security::EndpointIdentityEvidence,
+    ) -> TransportResult<()> {
+        assert_eq!(evidence.allocation_lease_id, allocation.id);
+        assert_eq!(evidence.run_identity, allocation.run_id);
+        Ok(())
+    }
+
     async fn release(&self, _: &NodeHeartbeat, _: &NodeAllocation) -> TransportResult<()> {
         let mut state = self.state.lock().unwrap();
         state.lease_state = "released".into();
@@ -91,13 +102,20 @@ impl NodeControlPlane for Control {
 #[tokio::test]
 async fn service_reaps_fixed_mode_process_releases_lease_and_completes_drain() {
     let directory = tempfile::tempdir().unwrap();
+    let identity_secret = [19; 32];
+    let signer =
+        runmat_execution::security::EndpointIdentitySigner::from_secret(identity_secret).unwrap();
     CredentialStore::new(directory.path())
         .store(&NodeCredential {
             node_id: "node-1".into(),
             cluster_id: "cluster-1".into(),
             org_id: "org-1".into(),
-            identity_secret: "i".repeat(43),
-            identity_fingerprint: "f".repeat(64),
+            identity_secret: base64::Engine::encode(
+                &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+                identity_secret,
+            ),
+            identity_public_key: signer.public_key().to_vec(),
+            identity_fingerprint: signer.fingerprint(),
             credential: "c".repeat(43),
             credential_epoch: 1,
             lease_epoch: 1,
@@ -119,6 +137,7 @@ async fn service_reaps_fixed_mode_process_releases_lease_and_completes_drain() {
             heartbeat_ttl: Duration::from_secs(10),
             drain_timeout: Duration::from_millis(10),
             maximum_allocations: 1,
+            trust_tier: runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
         },
         control.clone(),
     )

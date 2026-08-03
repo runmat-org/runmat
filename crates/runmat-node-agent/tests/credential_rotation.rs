@@ -47,12 +47,19 @@ impl NodeControlPlane for RotationControl {
 async fn rotation_replaces_the_secret_and_epoch_in_one_atomic_store_write() {
     let directory = tempfile::tempdir().unwrap();
     let store = CredentialStore::new(directory.path());
+    let identity_secret = [17; 32];
+    let signer =
+        runmat_execution::security::EndpointIdentitySigner::from_secret(identity_secret).unwrap();
     let mut credential = NodeCredential {
         node_id: "node".into(),
         cluster_id: "cluster".into(),
         org_id: "org".into(),
-        identity_secret: "i".repeat(43),
-        identity_fingerprint: "f".repeat(64),
+        identity_secret: base64::Engine::encode(
+            &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+            identity_secret,
+        ),
+        identity_public_key: signer.public_key().to_vec(),
+        identity_fingerprint: signer.fingerprint(),
         credential: "a".repeat(43),
         credential_epoch: 1,
         lease_epoch: 1,

@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
 use rand::RngCore as _;
-use sha2::{Digest as _, Sha256};
-
 use runmat_execution_transport_native::control::{
     EnrollmentRequest, NodeControlPlane, NodeInventory,
 };
@@ -19,12 +17,16 @@ pub async fn enroll(
 ) -> AgentResult<NodeCredential> {
     let mut identity = [0_u8; 32];
     rand::rngs::OsRng.fill_bytes(&mut identity);
+    let signer = runmat_execution::security::EndpointIdentitySigner::from_secret(identity)
+        .map_err(|error| crate::AgentError::UnsafeCredential(error.to_string()))?;
     let identity_secret = base64_url(&identity);
-    let identity_fingerprint = format!("{:x}", Sha256::digest(identity));
+    let identity_public_key = signer.public_key().to_vec();
+    let identity_fingerprint = signer.fingerprint();
     let enrolled = control
         .enroll(EnrollmentRequest {
             token,
             identity_fingerprint: identity_fingerprint.clone(),
+            identity_public_key: identity_public_key.clone(),
             inventory,
             heartbeat_ttl_seconds,
         })
@@ -34,6 +36,7 @@ pub async fn enroll(
         cluster_id: enrolled.cluster_id,
         org_id: enrolled.org_id,
         identity_secret,
+        identity_public_key,
         identity_fingerprint,
         credential: enrolled.credential,
         credential_epoch: enrolled.credential_epoch,

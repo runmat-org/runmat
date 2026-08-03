@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = { workspace = true }
 async-trait = "0.1"
+base64 = "0.22"
 chrono = { workspace = true }
 clap = { workspace = true }
 dirs = "5"
@@ -23,6 +24,8 @@ sysinfo = "0.30"
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs", "macros", "process", "rt-multi-thread", "signal", "sync", "time"] }
 runmat-execution-transport-native = { workspace = true }
+runmat-execution = { workspace = true }
+runmat-execution-artifact = { workspace = true }
 runmat-process-host = { workspace = true }
 runmat-server-client = { workspace = true }
 

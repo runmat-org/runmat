@@ -7,8 +7,15 @@ use hpke::{
     kem::{Kem as _, X25519HkdfSha256},
     setup_receiver, setup_sender_with_rng, Deserializable, OpModeR, OpModeS, Serializable,
 };
+use runmat_execution::security::recipient_fingerprint;
 
-use super::{EncryptedArtifact, EncryptionContext, ExecutionHpkeSuite, ExecutionRecipientKey};
+use super::{
+    run_key::{
+        envelope, material_from_plaintext, run_key_context, validate_envelope, RunKeyEnvelope,
+        RunKeyMaterial,
+    },
+    EncryptedArtifact, EncryptionContext, ExecutionHpkeSuite, ExecutionRecipientKey,
+};
 use crate::{ArtifactError, ArtifactResult};
 
 const INFO: &[u8] = b"runmat-execution-artifact-hpke-v1";
@@ -20,6 +27,26 @@ pub struct PortableExecutionPrivateKey(<X25519HkdfSha256 as hpke::Kem>::PrivateK
 pub struct PortableExecutionEncryption;
 
 impl PortableExecutionEncryption {
+    pub fn recipient_from_entropy_with_derived_fingerprint(
+        &self,
+        entropy: [u8; 32],
+        valid_after_unix_millis: u64,
+        valid_before_unix_millis: u64,
+    ) -> ArtifactResult<(ExecutionRecipientKey, PortableExecutionPrivateKey)> {
+        let (private, public) = X25519HkdfSha256::derive_keypair(&entropy);
+        let public_key = public.to_bytes().to_vec();
+        let recipient = ExecutionRecipientKey {
+            suite: ExecutionHpkeSuite::X25519HkdfSha256Aes128GcmV1,
+            fingerprint: recipient_fingerprint(&public_key),
+            public_key,
+            valid_after_unix_millis,
+            valid_before_unix_millis,
+            custodian_uri: None,
+        };
+        recipient.validate()?;
+        Ok((recipient, PortableExecutionPrivateKey(private)))
+    }
+
     /// Derive a recipient key from 32 bytes supplied by the platform CSPRNG.
     ///
     /// Browser hosts must source these bytes from `crypto.getRandomValues`.
@@ -108,6 +135,41 @@ impl PortableExecutionEncryption {
             .map_err(encryption)?;
         validate_context(&artifact.context, &plaintext)?;
         Ok(plaintext)
+    }
+
+    pub fn seal_run_key_with_entropy(
+        &self,
+        ephemeral_entropy: [u8; 32],
+        recipient: &ExecutionRecipientKey,
+        run_key: &RunKeyMaterial,
+        run_identity: impl Into<String>,
+        key_epoch: u32,
+    ) -> ArtifactResult<RunKeyEnvelope> {
+        let plaintext = run_key.expose_for_recipient_envelope();
+        let encrypted = self.seal_with_entropy(
+            ephemeral_entropy,
+            recipient,
+            run_key_context(run_identity.into(), plaintext, key_epoch),
+            plaintext,
+        )?;
+        Ok(envelope(recipient, encrypted))
+    }
+
+    pub fn open_run_key(
+        &self,
+        private_key: &PortableExecutionPrivateKey,
+        envelope: &RunKeyEnvelope,
+        expected_recipient_fingerprint: &str,
+        expected_run_identity: &str,
+        expected_key_epoch: u32,
+    ) -> ArtifactResult<RunKeyMaterial> {
+        validate_envelope(
+            envelope,
+            expected_recipient_fingerprint,
+            expected_run_identity,
+            expected_key_epoch,
+        )?;
+        material_from_plaintext(self.open(private_key, &envelope.encrypted_key)?)
     }
 }
 

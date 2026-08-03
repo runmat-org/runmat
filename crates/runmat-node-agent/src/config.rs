@@ -12,6 +12,7 @@ pub struct AgentConfig {
     pub heartbeat_ttl: Duration,
     pub drain_timeout: Duration,
     pub maximum_allocations: usize,
+    pub trust_tier: runmat_execution::security::ExecutionTrustTier,
 }
 
 impl AgentConfig {

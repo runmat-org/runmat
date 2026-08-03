@@ -6,7 +6,9 @@ use runmat_execution_transport_native::control::{
     NodeControlPlane, NodeHeartbeat, ReconnectBackoff,
 };
 
-use crate::allocation::{prepare, validate_offer, AllocationProcesses, DrainState};
+use crate::allocation::{
+    prepare, prepare_endpoint_identity, validate_offer, AllocationProcesses, DrainState,
+};
 use crate::enrollment::{CredentialStore, NodeCredential};
 use crate::{inventory, AgentConfig, AgentError, AgentResult};
 
@@ -132,6 +134,18 @@ impl NodeAgentService {
             }
             validate_offer(&allocation, &inventory, now_millis)?;
             let sandbox = prepare(&self.config.state_directory, &allocation, &inventory)?;
+            let evidence = prepare_endpoint_identity(
+                &self.credential,
+                &allocation,
+                &sandbox,
+                self.config.trust_tier,
+                u64::try_from(now_millis).map_err(|_| {
+                    AgentError::AllocationRejected("system clock predates Unix epoch".into())
+                })?,
+            )?;
+            self.control
+                .publish_endpoint_identity(&heartbeat, &allocation, evidence)
+                .await?;
             self.control.accept(&heartbeat, &allocation).await?;
             if let Err(error) = self
                 .processes

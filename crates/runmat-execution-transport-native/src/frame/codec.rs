@@ -1,4 +1,6 @@
-use minicbor::{Decoder, Encoder};
+use runmat_execution_artifact::encryption::{
+    decode_transfer_wire_frame, encode_transfer_wire_frame, TransferWireFrame,
+};
 
 use crate::{TransportError, TransportResult};
 
@@ -59,81 +61,36 @@ impl WireFrame {
         if self.payload.len() > limits.maximum_payload_bytes {
             return Err(TransportError::FrameTooLarge);
         }
-        let mut bytes = Vec::with_capacity(self.payload.len() + 64);
-        let mut encoder = Encoder::new(&mut bytes);
-        encoder
-            .map(5)
-            .and_then(|encoder| encoder.u8(0))
-            .and_then(|encoder| encoder.u16(Self::SCHEMA_VERSION))
-            .and_then(|encoder| encoder.u8(1))
-            .and_then(|encoder| encoder.bytes(&self.session_id))
-            .and_then(|encoder| encoder.u8(2))
-            .and_then(|encoder| encoder.u64(self.sequence))
-            .and_then(|encoder| encoder.u8(3))
-            .and_then(|encoder| encoder.u8(self.kind as u8))
-            .and_then(|encoder| encoder.u8(4))
-            .and_then(|encoder| encoder.bytes(&self.payload))
-            .map_err(|error| TransportError::MalformedFrame(error.to_string()))?;
-        if bytes.len() > limits.maximum_frame_bytes {
-            return Err(TransportError::FrameTooLarge);
-        }
-        Ok(bytes)
+        encode_transfer_wire_frame(
+            &TransferWireFrame {
+                session_id: self.session_id,
+                sequence: self.sequence,
+                frame_kind: self.kind as u8,
+                encrypted_payload: self.payload.clone(),
+            },
+            limits.maximum_frame_bytes,
+        )
+        .map_err(map_artifact)
     }
 
     pub fn decode(bytes: &[u8], limits: FrameLimits) -> TransportResult<Self> {
         if bytes.len() > limits.maximum_frame_bytes {
             return Err(TransportError::FrameTooLarge);
         }
-        let mut decoder = Decoder::new(bytes);
-        if decoder
-            .map()
-            .map_err(malformed)?
-            .ok_or_else(|| TransportError::MalformedFrame("indefinite map".to_string()))?
-            != 5
-        {
-            return Err(TransportError::MalformedFrame(
-                "frame field count".to_string(),
-            ));
-        }
-        expect_key(&mut decoder, 0)?;
-        if decoder.u16().map_err(malformed)? != Self::SCHEMA_VERSION {
-            return Err(TransportError::MalformedFrame(
-                "unsupported frame schema".to_string(),
-            ));
-        }
-        expect_key(&mut decoder, 1)?;
-        let session = decoder.bytes().map_err(malformed)?;
-        let session_id: [u8; 16] = session
-            .try_into()
-            .map_err(|_| TransportError::MalformedFrame("session id length".to_string()))?;
-        expect_key(&mut decoder, 2)?;
-        let sequence = decoder.u64().map_err(malformed)?;
-        expect_key(&mut decoder, 3)?;
-        let kind = FrameKind::try_from(decoder.u8().map_err(malformed)?)?;
-        expect_key(&mut decoder, 4)?;
-        let payload = decoder.bytes().map_err(malformed)?.to_vec();
-        if payload.len() > limits.maximum_payload_bytes || decoder.position() != bytes.len() {
+        let frame =
+            decode_transfer_wire_frame(bytes, limits.maximum_frame_bytes).map_err(map_artifact)?;
+        if frame.encrypted_payload.len() > limits.maximum_payload_bytes {
             return Err(TransportError::FrameTooLarge);
         }
         Ok(Self {
-            session_id,
-            sequence,
-            kind,
-            payload,
+            session_id: frame.session_id,
+            sequence: frame.sequence,
+            kind: FrameKind::try_from(frame.frame_kind)?,
+            payload: frame.encrypted_payload,
         })
     }
 }
 
-fn expect_key(decoder: &mut Decoder<'_>, expected: u8) -> TransportResult<()> {
-    let actual = decoder.u8().map_err(malformed)?;
-    if actual != expected {
-        return Err(TransportError::MalformedFrame(
-            "non-canonical frame key order".to_string(),
-        ));
-    }
-    Ok(())
-}
-
-fn malformed(error: minicbor::decode::Error) -> TransportError {
+fn map_artifact(error: impl std::fmt::Display) -> TransportError {
     TransportError::MalformedFrame(error.to_string())
 }

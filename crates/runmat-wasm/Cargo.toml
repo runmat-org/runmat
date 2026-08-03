@@ -52,6 +52,7 @@ log = { workspace = true }
 miette = { workspace = true }
 console_error_panic_hook = "0.1"
 async-trait = "0.1"
+base64 = "0.22"
 getrandom = { version = "0.2", features = ["js"] }
 uuid = { version = "1", features = ["v4", "js"], default-features = false }
 zeroize = "1"

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use clap::Parser as _;
-use runmat_node_agent::cli::{Cli, Command};
+use runmat_node_agent::cli::{Cli, Command, TrustTier};
 use runmat_node_agent::enrollment::CredentialStore;
 use runmat_node_agent::service::{HttpNodeControlPlane, NodeAgentService, Shutdown};
 use runmat_node_agent::AgentConfig;
@@ -76,5 +76,13 @@ fn config(cli: &Cli) -> anyhow::Result<AgentConfig> {
         heartbeat_ttl: AgentConfig::DEFAULT_HEARTBEAT_TTL,
         drain_timeout: AgentConfig::DEFAULT_DRAIN_TIMEOUT,
         maximum_allocations: AgentConfig::DEFAULT_MAXIMUM_ALLOCATIONS,
+        trust_tier: match cli.trust_tier {
+            TrustTier::CustomerTrusted => {
+                runmat_execution::security::ExecutionTrustTier::CustomerTrusted
+            }
+            TrustTier::HostedOrdinary => {
+                runmat_execution::security::ExecutionTrustTier::HostedOrdinary
+            }
+        },
     })
 }

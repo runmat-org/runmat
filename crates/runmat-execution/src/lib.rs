@@ -6,6 +6,7 @@ pub mod identity;
 pub mod protocol;
 pub mod resource;
 pub mod schema;
+pub mod security;
 pub mod state;
 pub mod task;
 pub mod value;

@@ -14,6 +14,25 @@ pub struct ExecutionRecipientKey {
 }
 
 impl ExecutionRecipientKey {
+    pub fn from_verified_endpoint(
+        evidence: &runmat_execution::security::EndpointIdentityEvidence,
+        policy: &runmat_execution::security::EndpointTrustPolicy,
+    ) -> Result<Self, crate::ArtifactError> {
+        policy
+            .verify(evidence)
+            .map_err(|error| crate::ArtifactError::Identity(error.to_string()))?;
+        let recipient = Self {
+            suite: ExecutionHpkeSuite::X25519HkdfSha256Aes128GcmV1,
+            public_key: evidence.recipient.public_key.clone(),
+            fingerprint: evidence.recipient.fingerprint.clone(),
+            valid_after_unix_millis: evidence.recipient.valid_after_unix_millis,
+            valid_before_unix_millis: evidence.recipient.valid_before_unix_millis,
+            custodian_uri: None,
+        };
+        recipient.validate()?;
+        Ok(recipient)
+    }
+
     pub fn validate(&self) -> Result<(), crate::ArtifactError> {
         if self.suite != ExecutionHpkeSuite::X25519HkdfSha256Aes128GcmV1
             || self.public_key.len() != 32

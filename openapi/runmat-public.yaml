@@ -390,6 +390,66 @@ paths:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
       security: []
+  /v1/execution/nodes/{nodeId}/allocations/{leaseId}/identity:
+    post:
+      tags:
+      - Execution
+      operationId: publish_endpoint_identity
+      parameters:
+      - name: X-RunMat-Node-Credential
+        in: header
+        description: Current node credential
+        required: true
+        schema:
+          type: string
+      - name: nodeId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: leaseId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublishEndpointIdentityRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AllocationEndpointIdentityResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security: []
   /v1/execution/nodes/{nodeId}/allocations/{leaseId}/release:
     post:
       tags:
@@ -3419,6 +3479,100 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/execution/runs/{runId}/admission:
+    get:
+      tags:
+      - Execution
+      operationId: get_run_admission
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: runId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunAdmissionResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/execution/runs/{runId}/admission/confirm:
+    post:
+      tags:
+      - Execution
+      operationId: confirm_run_admission
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: runId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmEndpointIdentityRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
   /v1/projects/{projectId}/execution/runs/{runId}/cancel:
     post:
       tags:
@@ -3442,6 +3596,59 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RunResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/execution/runs/{runId}/content:
+    post:
+      tags:
+      - Execution
+      operationId: commit_run_content
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: runId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommitRunContentRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
         '403':
           description: ''
           content:
@@ -3504,6 +3711,94 @@ paths:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
         '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/execution/transfers/{transferId}:
+    get:
+      tags:
+      - Execution
+      operationId: get_artifact_transfer_status
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: transferId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferStatusResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/execution/transfers/{transferId}/chunks:
+    post:
+      tags:
+      - Execution
+      operationId: prepare_artifact_transfer_chunks
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: transferId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PrepareTransferChunksRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrepareTransferChunksResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
           description: ''
           content:
             application/json:
@@ -5011,6 +5306,23 @@ components:
       - moderate
       - high
       - critical
+    AllocationEndpointIdentityResponse:
+      type: object
+      required:
+      - leaseId
+      - nodeId
+      - evidence
+      - createdAt
+      properties:
+        createdAt:
+          type: string
+          format: date-time
+        evidence:
+          $ref: '#/components/schemas/EndpointIdentityEvidenceBody'
+        leaseId:
+          type: string
+        nodeId:
+          type: string
     AllocationLeaseListResponse:
       type: object
       required:
@@ -5211,6 +5523,13 @@ components:
           type: integer
           format: int64
           minimum: 0
+    ArtifactSizeClassRequest:
+      type: string
+      enum:
+      - small
+      - medium
+      - large
+      - extra-large
     AttachAttestationRequest:
       type: object
       required:
@@ -5573,6 +5892,31 @@ components:
       - active
       - draining
       - disabled
+    CommitRunContentRequest:
+      type: object
+      required:
+      - bundleArtifactId
+      - programArtifactId
+      - endpointFingerprint
+      - runKeyEnvelopes
+      properties:
+        bundleArtifactId:
+          type: string
+        endpointFingerprint:
+          type: string
+        inputArtifactId:
+          type: string
+          nullable: true
+        programArtifactId:
+          type: string
+        runKeyEnvelopes:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunKeyEnvelopeBody'
+          description: |-
+            Bounded HPKE ciphertext envelopes for the verified driver and,
+            optionally, the organization's recovery recipient.
+      additionalProperties: false
     CompleteTransferRequest:
       type: object
       required:
@@ -5583,11 +5927,23 @@ components:
           format: int64
           minimum: 0
       additionalProperties: false
+    ConfirmEndpointIdentityRequest:
+      type: object
+      required:
+      - endpointFingerprint
+      - evidenceDigest
+      properties:
+        endpointFingerprint:
+          type: string
+        evidenceDigest:
+          type: string
+      additionalProperties: false
     ConsumeEnrollmentRequest:
       type: object
       required:
       - token
       - identityFingerprint
+      - identityPublicKey
       - inventory
       - heartbeatTtlSeconds
       properties:
@@ -5598,6 +5954,9 @@ components:
           minimum: 10
         identityFingerprint:
           type: string
+        identityPublicKey:
+          type: string
+          description: Base64url without padding.
         inventory:
           $ref: '#/components/schemas/ResourceInventoryBody'
         token:
@@ -5814,6 +6173,117 @@ components:
           minimum: 0
         updated_at:
           type: string
+    DirectQuicEndpointBody:
+      type: object
+      required:
+      - authority
+      - serverName
+      - certificateDer
+      - certificateSha256
+      properties:
+        authority:
+          type: string
+        certificateDer:
+          type: string
+          description: Base64url without padding.
+        certificateSha256:
+          type: string
+        serverName:
+          type: string
+      additionalProperties: false
+    EndpointIdentityEvidenceBody:
+      type: object
+      required:
+      - schemaVersion
+      - orgId
+      - clusterId
+      - nodeId
+      - allocationLeaseId
+      - fencingToken
+      - runIdentity
+      - identityPublicKey
+      - identityFingerprint
+      - recipient
+      - trustTier
+      - issuedAtUnixMillis
+      - expiresAtUnixMillis
+      - signature
+      properties:
+        allocationLeaseId:
+          type: string
+        attestationClass:
+          type: string
+          nullable: true
+        attestationEvidence:
+          type: string
+          description: Base64url without padding.
+          nullable: true
+        clusterId:
+          type: string
+        directQuicEndpoints:
+          type: array
+          items:
+            $ref: '#/components/schemas/DirectQuicEndpointBody'
+        expiresAtUnixMillis:
+          type: integer
+          format: int64
+          minimum: 0
+        fencingToken:
+          type: integer
+          format: int64
+          minimum: 0
+        identityFingerprint:
+          type: string
+        identityPublicKey:
+          type: string
+          description: Base64url without padding.
+        issuedAtUnixMillis:
+          type: integer
+          format: int64
+          minimum: 0
+        nodeId:
+          type: string
+        orgId:
+          type: string
+        recipient:
+          $ref: '#/components/schemas/EndpointRecipientKeyBody'
+        runIdentity:
+          type: string
+        schemaVersion:
+          type: integer
+          format: int32
+          minimum: 0
+        signature:
+          type: string
+          description: Base64url without padding.
+        trustTier:
+          $ref: '#/components/schemas/ExecutionTrustTierBody'
+      additionalProperties: false
+    EndpointRecipientKeyBody:
+      type: object
+      required:
+      - suite
+      - publicKey
+      - fingerprint
+      - validAfterUnixMillis
+      - validBeforeUnixMillis
+      properties:
+        fingerprint:
+          type: string
+        publicKey:
+          type: string
+          description: Base64url without padding.
+        suite:
+          type: string
+        validAfterUnixMillis:
+          type: integer
+          format: int64
+          minimum: 0
+        validBeforeUnixMillis:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
     EnrollmentResponse:
       type: object
       required:
@@ -5849,6 +6319,12 @@ components:
         traceId:
           type: string
           nullable: true
+    ExecutionTrustTierBody:
+      type: string
+      enum:
+      - customer-trusted
+      - hosted-ordinary
+      - attested-confidential
     FinalizePublicationResponse:
       type: object
       required:
@@ -7504,6 +7980,25 @@ components:
         updatedAt:
           type: string
           format: date-time
+    PrepareTransferChunksRequest:
+      type: object
+      required:
+      - chunks
+      properties:
+        chunks:
+          type: array
+          items:
+            $ref: '#/components/schemas/UploadChunkRequestBody'
+      additionalProperties: false
+    PrepareTransferChunksResponse:
+      type: object
+      required:
+      - targets
+      properties:
+        targets:
+          type: array
+          items:
+            $ref: '#/components/schemas/UploadChunkTargetResponse'
     ProjectCreateRequest:
       type: object
       required:
@@ -7947,6 +8442,22 @@ components:
           nullable: true
         version:
           type: string
+    PublishEndpointIdentityRequest:
+      type: object
+      required:
+      - orgId
+      - credentialEpoch
+      - evidence
+      properties:
+        credentialEpoch:
+          type: integer
+          format: int64
+          minimum: 0
+        evidence:
+          $ref: '#/components/schemas/EndpointIdentityEvidenceBody'
+        orgId:
+          type: string
+      additionalProperties: false
     RecipientKeyListResponse:
       type: object
       required:
@@ -8862,6 +9373,44 @@ components:
         orgId:
           type: string
       additionalProperties: false
+    RunAdmissionResponse:
+      type: object
+      required:
+      - runId
+      - state
+      - allocationLeaseId
+      - fencingToken
+      - relayPath
+      - relayTicket
+      - relayProtocol
+      properties:
+        allocationLeaseId:
+          type: string
+        endpointIdentity:
+          allOf:
+          - $ref: '#/components/schemas/AllocationEndpointIdentityResponse'
+          nullable: true
+        evidenceDigest:
+          type: string
+          nullable: true
+        fencingToken:
+          type: integer
+          format: int64
+          minimum: 0
+        relayPath:
+          type: string
+          description: Authenticated WebSocket fallback carrying opaque application frames.
+        relayProtocol:
+          type: string
+        relayTicket:
+          type: string
+          description: |-
+            Single-use, short-lived capability supplied as the
+            `runmat-ticket.<value>` WebSocket subprotocol.
+        runId:
+          type: string
+        state:
+          type: string
     RunEventListResponse:
       type: object
       required:
@@ -8890,6 +9439,23 @@ components:
         kind:
           type: string
         payload: {}
+    RunKeyEnvelopeBody:
+      type: object
+      required:
+      - recipientRole
+      - envelope
+      properties:
+        envelope:
+          type: string
+          description: Base64url-encoded serialized `RunKeyEnvelope`.
+        recipientRole:
+          $ref: '#/components/schemas/RunKeyRecipientRoleBody'
+      additionalProperties: false
+    RunKeyRecipientRoleBody:
+      type: string
+      enum:
+      - driver
+      - recovery
     RunListResponse:
       type: object
       required:
@@ -8911,8 +9477,8 @@ components:
       - clusterId
       - queue
       - projectRevision
-      - bundleArtifactId
-      - programArtifactId
+      - bundleCiphertextSizeClass
+      - compatibilityFingerprints
       - resources
       - state
       - version
@@ -8924,12 +9490,19 @@ components:
           nullable: true
         bundleArtifactId:
           type: string
+          nullable: true
+        bundleCiphertextSizeClass:
+          type: string
         cancellationRequestedAt:
           type: string
           format: date-time
           nullable: true
         clusterId:
           type: string
+        compatibilityFingerprints:
+          type: object
+          additionalProperties:
+            type: string
         createdAt:
           type: string
           format: date-time
@@ -8942,6 +9515,7 @@ components:
           type: string
         programArtifactId:
           type: string
+          nullable: true
         projectId:
           type: string
         projectRevision:
@@ -8962,6 +9536,9 @@ components:
         updatedAt:
           type: string
           format: date-time
+        verifiedEndpointFingerprint:
+          type: string
+          nullable: true
         version:
           type: integer
           format: int64
@@ -9382,19 +9959,17 @@ components:
       - queue
       - requestDigest
       - projectRevision
-      - bundleArtifactId
-      - programArtifactId
+      - bundleCiphertextSizeClass
       - resources
       properties:
-        bundleArtifactId:
-          type: string
+        bundleCiphertextSizeClass:
+          $ref: '#/components/schemas/ArtifactSizeClassRequest'
         clusterId:
           type: string
-        inputArtifactId:
-          type: string
-          nullable: true
-        programArtifactId:
-          type: string
+        compatibilityFingerprints:
+          type: object
+          additionalProperties:
+            type: string
         projectRevision:
           type: string
         queue:
@@ -9496,6 +10071,39 @@ components:
         updatedAt:
           type: string
           format: date-time
+    TransferStatusResponse:
+      type: object
+      required:
+      - transferId
+      - artifactId
+      - state
+      - receivedSizeBytes
+      - receivedChunkCount
+      - receivedChunkIndices
+      - expiresAt
+      properties:
+        artifactId:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        receivedChunkCount:
+          type: integer
+          minimum: 0
+        receivedChunkIndices:
+          type: array
+          items:
+            type: integer
+            format: int32
+            minimum: 0
+        receivedSizeBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        state:
+          type: string
+        transferId:
+          type: string
     TransferTargetResponse:
       type: object
       required:
@@ -9681,6 +10289,50 @@ components:
           type: integer
           minimum: 0
         status:
+          type: string
+    UploadChunkRequestBody:
+      type: object
+      required:
+      - chunkIndex
+      - offsetBytes
+      - sizeBytes
+      - ciphertextSha256
+      properties:
+        chunkIndex:
+          type: integer
+          format: int32
+          minimum: 0
+        ciphertextSha256:
+          type: string
+          description: Lowercase SHA-256 digest of the ciphertext chunk, without a prefix.
+        offsetBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        sizeBytes:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+    UploadChunkTargetResponse:
+      type: object
+      required:
+      - chunkIndex
+      - method
+      - url
+      - headers
+      properties:
+        chunkIndex:
+          type: integer
+          format: int32
+          minimum: 0
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        method:
+          type: string
+        url:
           type: string
     UsageNoticeCtaResponse:
       type: object
