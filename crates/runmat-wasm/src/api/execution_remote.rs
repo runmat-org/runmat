@@ -210,6 +210,25 @@ impl BrowserRemoteSubmission {
         encode_encrypted_run_object(&object).map_err(js_error)
     }
 
+    #[wasm_bindgen(js_name = decryptObject)]
+    pub fn decrypt_object(&self, purpose: String, ciphertext: Vec<u8>) -> Result<Vec<u8>, JsValue> {
+        let object = runmat_execution_artifact::encryption::decode_encrypted_run_object(
+            &ciphertext,
+            64 * 1024 * 1024,
+        )
+        .map_err(js_error)?;
+        if object.context.run_identity != self.run_identity
+            || object.context.purpose != parse_purpose(&purpose)?
+        {
+            return Err(JsValue::from_str(
+                "remote artifact scope or encryption purpose is invalid",
+            ));
+        }
+        RunObjectEncryption
+            .open(&self.run_key, &object)
+            .map_err(js_error)
+    }
+
     #[wasm_bindgen(js_name = createFrameSession)]
     pub fn create_frame_session(
         &self,
@@ -227,6 +246,7 @@ impl BrowserRemoteSubmission {
 fn parse_purpose(value: &str) -> Result<EncryptionPurpose, JsValue> {
     match value {
         "bundle" => Ok(EncryptionPurpose::Bundle),
+        "program" => Ok(EncryptionPurpose::Program),
         "input" => Ok(EncryptionPurpose::Input),
         "result" => Ok(EncryptionPurpose::Result),
         "detailed-event" => Ok(EncryptionPurpose::DetailedEvent),

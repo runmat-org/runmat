@@ -6,6 +6,7 @@ pub mod check;
 pub mod config;
 pub mod fea;
 pub mod gc;
+pub mod job;
 pub mod package;
 pub mod repl;
 pub mod script;

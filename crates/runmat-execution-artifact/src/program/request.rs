@@ -1,11 +1,61 @@
 use runmat_execution::value::{ValueLimits, ValuePayload};
 use serde::{Deserialize, Serialize};
 
-use super::{ProgramArtifact, ProgramBuildRecipe};
+use super::{ExecutableForm, ProgramArtifact, ProgramBuildRecipe};
 use crate::{ArtifactError, ArtifactResult};
 
 pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V1: u16 = 1;
 pub const MAX_PROGRAM_EXECUTION_ARGUMENTS: usize = 4096;
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProgramExecutionDescriptor {
+    pub schema_version: u16,
+    pub recipe: ProgramBuildRecipe,
+    pub artifact: ProgramArtifact,
+    pub function: usize,
+    pub requested_outputs: u16,
+}
+
+impl ProgramExecutionDescriptor {
+    pub fn validate(&self) -> ArtifactResult<()> {
+        self.artifact.validate_against(&self.recipe)?;
+        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V1
+            || !entrypoint_matches(self.artifact.form, self.function, &self.recipe.entrypoint)
+            || self.requested_outputs != self.recipe.outputs.requested_outputs
+        {
+            return Err(ArtifactError::Invalid(
+                "program descriptor has an inconsistent callable or output contract".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProgramExecutionInputs {
+    pub schema_version: u16,
+    pub arguments: Vec<ValuePayload>,
+}
+
+impl ProgramExecutionInputs {
+    pub fn validate(&self) -> ArtifactResult<()> {
+        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V1
+            || self.arguments.len() > MAX_PROGRAM_EXECUTION_ARGUMENTS
+        {
+            return Err(ArtifactError::Invalid(
+                "program inputs use an unsupported schema or exceed their bound".into(),
+            ));
+        }
+        for argument in &self.arguments {
+            argument
+                .validate(ValueLimits::default())
+                .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+        }
+        Ok(())
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -19,6 +69,24 @@ pub struct ProgramExecutionRequest {
 }
 
 impl ProgramExecutionRequest {
+    pub fn from_parts(
+        descriptor: ProgramExecutionDescriptor,
+        inputs: ProgramExecutionInputs,
+    ) -> ArtifactResult<Self> {
+        descriptor.validate()?;
+        inputs.validate()?;
+        let request = Self {
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+            recipe: descriptor.recipe,
+            artifact: descriptor.artifact,
+            function: descriptor.function,
+            arguments: inputs.arguments,
+            requested_outputs: descriptor.requested_outputs,
+        };
+        request.validate()?;
+        Ok(request)
+    }
+
     pub fn validate(&self) -> ArtifactResult<()> {
         if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V1 {
             return Err(ArtifactError::Invalid(
@@ -26,9 +94,11 @@ impl ProgramExecutionRequest {
             ));
         }
         self.artifact.validate_against(&self.recipe)?;
-        if self.function.to_string() != self.recipe.entrypoint
+        if !entrypoint_matches(self.artifact.form, self.function, &self.recipe.entrypoint)
             || self.requested_outputs != self.recipe.outputs.requested_outputs
             || self.arguments.len() > MAX_PROGRAM_EXECUTION_ARGUMENTS
+            || (self.artifact.form == ExecutableForm::InterpreterScriptV1
+                && !self.arguments.is_empty())
         {
             return Err(ArtifactError::Invalid(
                 "program execution request has an inconsistent callable, output contract, or argument count".into(),
@@ -40,6 +110,13 @@ impl ProgramExecutionRequest {
                 .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
         }
         Ok(())
+    }
+}
+
+fn entrypoint_matches(form: ExecutableForm, function: usize, entrypoint: &str) -> bool {
+    match form {
+        ExecutableForm::InterpreterBytecodeV1 => function.to_string() == entrypoint,
+        ExecutableForm::InterpreterScriptV1 => function == 0 && entrypoint == "script",
     }
 }
 
@@ -120,5 +197,25 @@ mod tests {
         let mut outputs = request();
         outputs.requested_outputs = 2;
         assert!(outputs.validate().is_err());
+    }
+
+    #[test]
+    fn script_form_has_an_explicit_argument_free_entrypoint() {
+        let mut script = request();
+        script.recipe.entrypoint = "script".into();
+        script.function = 0;
+        script.artifact = ProgramArtifact::materialize(
+            &script.recipe,
+            ExecutableForm::InterpreterScriptV1,
+            b"script-bytecode".to_vec(),
+        )
+        .unwrap();
+        script.validate().unwrap();
+        script
+            .arguments
+            .push(runmat_execution::value::ValuePayload::Inline(Box::new(
+                runmat_execution::value::InlineValue::String("unexpected".into()),
+            )));
+        assert!(script.validate().is_err());
     }
 }

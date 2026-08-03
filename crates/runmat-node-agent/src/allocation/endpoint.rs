@@ -1,25 +1,17 @@
 use std::path::Path;
 
-use base64::Engine as _;
 use rand::RngCore as _;
-use serde::{Deserialize, Serialize};
 
 use runmat_execution::security::{
     EndpointIdentityEvidence, EndpointIdentitySigner, EndpointRecipientKey, ExecutionTrustTier,
 };
 use runmat_execution_artifact::encryption::PortableExecutionEncryption;
 use runmat_execution_transport_native::control::NodeAllocation;
+use runmat_execution_transport_native::identity::EndpointIdentityMaterial;
 
 use super::Sandbox;
 use crate::enrollment::{decode_secret, NodeCredential};
 use crate::{AgentError, AgentResult};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct StoredEndpointIdentity {
-    recipient_secret: String,
-    evidence: EndpointIdentityEvidence,
-}
 
 pub fn prepare_endpoint_identity(
     credential: &NodeCredential,
@@ -30,7 +22,7 @@ pub fn prepare_endpoint_identity(
 ) -> AgentResult<EndpointIdentityEvidence> {
     let path = sandbox.root.join("endpoint-identity.json");
     if path.exists() {
-        let stored: StoredEndpointIdentity = serde_json::from_slice(&std::fs::read(&path)?)?;
+        let stored: EndpointIdentityMaterial = serde_json::from_slice(&std::fs::read(&path)?)?;
         validate_stored(credential, allocation, &stored, now_unix_millis)?;
         return Ok(stored.evidence);
     }
@@ -82,11 +74,7 @@ pub fn prepare_endpoint_identity(
     signer
         .sign(&mut evidence)
         .map_err(|error| AgentError::AllocationRejected(error.to_string()))?;
-    let stored = StoredEndpointIdentity {
-        recipient_secret: base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .encode(recipient_entropy),
-        evidence: evidence.clone(),
-    };
+    let stored = EndpointIdentityMaterial::new(recipient_entropy, evidence.clone());
     write_private(&path, &serde_json::to_vec(&stored)?)?;
     Ok(evidence)
 }
@@ -94,14 +82,13 @@ pub fn prepare_endpoint_identity(
 fn validate_stored(
     credential: &NodeCredential,
     allocation: &NodeAllocation,
-    stored: &StoredEndpointIdentity,
+    stored: &EndpointIdentityMaterial,
     now_unix_millis: u64,
 ) -> AgentResult<()> {
-    let secret = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(&stored.recipient_secret)
+    stored
+        .recipient_private_key()
         .map_err(|_| AgentError::AllocationRejected("stored recipient key is malformed".into()))?;
-    if secret.len() != 32
-        || stored.evidence.node_id != credential.node_id
+    if stored.evidence.node_id != credential.node_id
         || stored.evidence.allocation_lease_id != allocation.id
         || stored.evidence.run_identity != allocation.run_id
         || stored.evidence.fencing_token != allocation.fencing_token

@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use runmat_execution_transport_native::control::DriverBootstrapCredential;
 use runmat_execution_transport_native::control::NodeAllocation;
 use runmat_process_host::{
     ChildLifetime, ChildProcess, HiddenMode, HostCommand, ResourceLimits, StdioPolicy,
@@ -30,6 +31,8 @@ impl AllocationProcesses {
         runmat_executable: &Path,
         allocation: &NodeAllocation,
         sandbox: &Sandbox,
+        server_url: &str,
+        bootstrap: &DriverBootstrapCredential,
     ) -> AgentResult<u32> {
         if self.children.contains_key(&allocation.id) {
             return Err(AgentError::AllocationRejected(
@@ -46,8 +49,40 @@ impl AllocationProcesses {
             allocation.id.clone(),
         );
         command.environment.insert(
-            "RUNMAT_EXECUTION_FENCING_TOKEN".to_string(),
-            allocation.fencing_token.to_string(),
+            "RUNMAT_EXECUTION_SERVER_URL".to_string(),
+            server_url.to_string(),
+        );
+        command.environment.insert(
+            "RUNMAT_EXECUTION_RUN_ID".to_string(),
+            bootstrap.run_id.clone(),
+        );
+        command.environment.insert(
+            "RUNMAT_EXECUTION_ORG_ID".to_string(),
+            bootstrap.org_id.clone(),
+        );
+        command.environment.insert(
+            "RUNMAT_EXECUTION_PROJECT_ID".to_string(),
+            bootstrap.project_id.clone(),
+        );
+        command.environment.insert(
+            "RUNMAT_EXECUTION_DRIVER_LEASE_ID".to_string(),
+            bootstrap.driver_lease_id.clone(),
+        );
+        command.environment.insert(
+            "RUNMAT_EXECUTION_DRIVER_FENCING_TOKEN".to_string(),
+            bootstrap.fencing_token.to_string(),
+        );
+        command.environment.insert(
+            "RUNMAT_EXECUTION_DRIVER_CREDENTIAL".to_string(),
+            bootstrap.credential.clone(),
+        );
+        command.environment.insert(
+            "RUNMAT_EXECUTION_ENDPOINT_IDENTITY_FILE".to_string(),
+            sandbox
+                .root
+                .join("endpoint-identity.json")
+                .to_string_lossy()
+                .into_owned(),
         );
         command.working_directory = Some(sandbox.root.clone());
         command.lifetime = ChildLifetime::Owned;
@@ -162,5 +197,9 @@ impl AllocationProcesses {
 
     pub fn active_count(&self) -> usize {
         self.children.len()
+    }
+
+    pub fn contains(&self, allocation_id: &str) -> bool {
+        self.children.contains_key(allocation_id)
     }
 }

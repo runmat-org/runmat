@@ -13,12 +13,16 @@ runmat-builtins = { workspace = true }
 runmat-execution = { workspace = true }
 runmat-execution-artifact = { workspace = true }
 runmat-execution-runner = { workspace = true }
+runmat-execution-transport-native = { workspace = true }
 runmat-process-host = { workspace = true }
 runmat-runtime = { workspace = true }
 runmat-vm = { workspace = true }
 dirs = "5.0"
+base64 = "0.22"
+rand = "0.8"
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "rt", "sync", "time"] }
 uuid = { workspace = true }
@@ -27,5 +31,6 @@ uuid = { workspace = true }
 windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
+async-trait = "0.1"
 tempfile = "3.12"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

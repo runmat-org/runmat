@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 
 use runmat_execution_transport_native::control::{
-    EnrolledNode, EnrollmentRequest, NodeAllocation, NodeControlPlane, NodeHeartbeat,
-    NodeInventory, NodeStatus, ResourceRequest, RotatedCredential,
+    DriverBootstrapCredential, EnrolledNode, EnrollmentRequest, NodeAllocation, NodeControlPlane,
+    NodeHeartbeat, NodeInventory, NodeStatus, ResourceRequest, RotatedCredential,
 };
 use runmat_execution_transport_native::{TransportError, TransportResult};
 use runmat_server_client::public_api::{self, types};
@@ -151,6 +151,34 @@ impl NodeControlPlane for HttpNodeControlPlane {
             .await
             .map_err(map_error)?;
         Ok(())
+    }
+
+    async fn driver_bootstrap(
+        &self,
+        heartbeat: &NodeHeartbeat,
+        allocation: &NodeAllocation,
+    ) -> TransportResult<DriverBootstrapCredential> {
+        let response = self
+            .client
+            .create_driver_bootstrap(
+                &heartbeat.node_id,
+                &allocation.id,
+                &heartbeat.credential,
+                &transition_body(heartbeat, allocation)?,
+            )
+            .await
+            .map_err(map_bootstrap_error)?
+            .into_inner();
+        Ok(DriverBootstrapCredential {
+            run_id: response.run_id,
+            org_id: response.org_id,
+            project_id: response.project_id,
+            allocation_lease_id: response.allocation_lease_id,
+            driver_lease_id: response.driver_lease_id,
+            fencing_token: to_u64(response.fencing_token, "driver fencing token")?,
+            credential: response.credential,
+            expires_at_millis: response.expires_at.timestamp_millis(),
+        })
     }
 
     async fn release(
@@ -323,5 +351,13 @@ fn map_error<E: std::fmt::Debug>(error: public_api::Error<E>) -> TransportError 
         TransportError::StaleAuthority
     } else {
         TransportError::Unavailable(error.to_string())
+    }
+}
+
+fn map_bootstrap_error<E: std::fmt::Debug>(error: public_api::Error<E>) -> TransportError {
+    if error.status().is_some_and(|status| status.as_u16() == 409) {
+        TransportError::NotReady
+    } else {
+        map_error(error)
     }
 }

@@ -7,7 +7,8 @@ use runmat_execution_transport_native::control::{
 };
 
 use crate::allocation::{
-    prepare, prepare_endpoint_identity, validate_offer, AllocationProcesses, DrainState,
+    prepare, prepare_endpoint_identity, validate_active, validate_offer, AllocationProcesses,
+    DrainState,
 };
 use crate::enrollment::{CredentialStore, NodeCredential};
 use crate::{inventory, AgentConfig, AgentError, AgentResult};
@@ -104,6 +105,7 @@ impl NodeAgentService {
         let allocations = self.control.allocations(&heartbeat).await?;
         let now_millis = Utc::now().timestamp_millis();
         self.processes.fence_stale(&allocations, now_millis).await?;
+        let mut released_this_pass = BTreeSet::new();
         let pending = self.pending_release.iter().cloned().collect::<Vec<_>>();
         for allocation_id in pending {
             if let Some(allocation) = allocations
@@ -111,6 +113,7 @@ impl NodeAgentService {
                 .find(|allocation| allocation.id == allocation_id)
             {
                 self.control.release(&heartbeat, allocation).await?;
+                released_this_pass.insert(allocation_id.clone());
             }
             self.pending_release.remove(&allocation_id);
         }
@@ -120,16 +123,50 @@ impl NodeAgentService {
                 .find(|allocation| allocation.id == allocation_id)
             {
                 self.control.release(&heartbeat, allocation).await?;
+                released_this_pass.insert(allocation_id);
             }
         }
         if self.drain != DrainState::Accepting {
             return self.finish_drain(&heartbeat).await;
         }
+        for allocation in &allocations {
+            if self.processes.active_count() >= self.config.maximum_allocations {
+                break;
+            }
+            if allocation.state != "active"
+                || self.processes.contains(&allocation.id)
+                || released_this_pass.contains(&allocation.id)
+            {
+                continue;
+            }
+            validate_active(allocation, &inventory, now_millis)?;
+            let sandbox = prepare(&self.config.state_directory, allocation, &inventory)?;
+            let bootstrap = match self.control.driver_bootstrap(&heartbeat, allocation).await {
+                Ok(bootstrap) => bootstrap,
+                Err(runmat_execution_transport_native::TransportError::NotReady) => continue,
+                Err(error) => return Err(error.into()),
+            };
+            validate_driver_bootstrap(&self.credential, allocation, &bootstrap, now_millis)?;
+            if let Err(error) = self
+                .processes
+                .launch_driver(
+                    &self.config.runmat_executable,
+                    allocation,
+                    &sandbox,
+                    &self.config.server_url,
+                    &bootstrap,
+                )
+                .await
+            {
+                let _ = self.control.release(&heartbeat, allocation).await;
+                return Err(error);
+            }
+        }
         for allocation in allocations {
             if self.processes.active_count() >= self.config.maximum_allocations {
                 break;
             }
-            if allocation.state != "offered" {
+            if allocation.state != "offered" || released_this_pass.contains(&allocation.id) {
                 continue;
             }
             validate_offer(&allocation, &inventory, now_millis)?;
@@ -147,14 +184,6 @@ impl NodeAgentService {
                 .publish_endpoint_identity(&heartbeat, &allocation, evidence)
                 .await?;
             self.control.accept(&heartbeat, &allocation).await?;
-            if let Err(error) = self
-                .processes
-                .launch_driver(&self.config.runmat_executable, &allocation, &sandbox)
-                .await
-            {
-                let _ = self.control.release(&heartbeat, &allocation).await;
-                return Err(error);
-            }
         }
         Ok(())
     }
@@ -197,4 +226,26 @@ impl NodeAgentService {
         self.drain.begin();
         Ok(())
     }
+}
+
+fn validate_driver_bootstrap(
+    credential: &NodeCredential,
+    allocation: &runmat_execution_transport_native::control::NodeAllocation,
+    bootstrap: &runmat_execution_transport_native::control::DriverBootstrapCredential,
+    now_millis: i64,
+) -> AgentResult<()> {
+    if bootstrap.org_id != credential.org_id
+        || bootstrap.run_id != allocation.run_id
+        || bootstrap.project_id != allocation.project_id
+        || bootstrap.allocation_lease_id != allocation.id
+        || bootstrap.fencing_token == 0
+        || bootstrap.credential.is_empty()
+        || bootstrap.credential.len() > 256
+        || bootstrap.expires_at_millis <= now_millis
+    {
+        return Err(AgentError::AllocationRejected(
+            "driver bootstrap authority does not match its allocation".into(),
+        ));
+    }
+    Ok(())
 }

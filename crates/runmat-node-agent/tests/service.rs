@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use runmat_execution_transport_native::control::{
-    EnrolledNode, EnrollmentRequest, NodeAllocation, NodeControlPlane, NodeHeartbeat, NodeStatus,
-    ResourceRequest, RotatedCredential,
+    DriverBootstrapCredential, EnrolledNode, EnrollmentRequest, NodeAllocation, NodeControlPlane,
+    NodeHeartbeat, NodeStatus, ResourceRequest, RotatedCredential,
 };
 use runmat_execution_transport_native::TransportResult;
 use runmat_node_agent::enrollment::{CredentialStore, NodeCredential};
@@ -86,6 +86,23 @@ impl NodeControlPlane for Control {
         Ok(())
     }
 
+    async fn driver_bootstrap(
+        &self,
+        heartbeat: &NodeHeartbeat,
+        allocation: &NodeAllocation,
+    ) -> TransportResult<DriverBootstrapCredential> {
+        Ok(DriverBootstrapCredential {
+            run_id: allocation.run_id.clone(),
+            org_id: heartbeat.org_id.clone(),
+            project_id: allocation.project_id.clone(),
+            allocation_lease_id: allocation.id.clone(),
+            driver_lease_id: "driver-lease-1".into(),
+            fencing_token: 1,
+            credential: "driver-credential".into(),
+            expires_at_millis: allocation.expires_at_millis,
+        })
+    }
+
     async fn release(&self, _: &NodeHeartbeat, _: &NodeAllocation) -> TransportResult<()> {
         let mut state = self.state.lock().unwrap();
         state.lease_state = "released".into();
@@ -143,6 +160,7 @@ async fn service_reaps_fixed_mode_process_releases_lease_and_completes_drain() {
     )
     .unwrap();
 
+    service.reconcile_once().await.unwrap();
     service.reconcile_once().await.unwrap();
     tokio::time::sleep(Duration::from_millis(50)).await;
     service.reconcile_once().await.unwrap();

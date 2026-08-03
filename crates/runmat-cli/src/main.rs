@@ -25,6 +25,15 @@ async fn main() -> ExitCode {
             };
         }
         Ok(Some(runmat_process_host::HiddenMode::ExecutionDriver)) => {
+            if std::env::var_os("RUNMAT_EXECUTION_DRIVER_LEASE_ID").is_some() {
+                return match runmat_execution_runner_native::run_remote_driver_from_env().await {
+                    Ok(()) => ExitCode::SUCCESS,
+                    Err(error) => {
+                        eprintln!("runmat remote execution driver failed: {error}");
+                        ExitCode::from(2)
+                    }
+                };
+            }
             return runmat::commands::batch::run_driver().await;
         }
         Ok(Some(runmat_process_host::HiddenMode::LocalSupervisor)) => {

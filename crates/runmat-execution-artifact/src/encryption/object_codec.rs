@@ -67,6 +67,7 @@ pub fn decode_encrypted_run_object(
         5 => EncryptionPurpose::Checkpoint,
         6 => EncryptionPurpose::TransferFrame,
         7 => EncryptionPurpose::RunKeyEnvelope,
+        8 => EncryptionPurpose::Program,
         _ => return Err(ArtifactError::Invalid("unknown encryption purpose".into())),
     };
     let object_digest = Digest::from_bytes(

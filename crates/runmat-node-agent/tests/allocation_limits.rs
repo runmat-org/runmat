@@ -2,7 +2,9 @@
 
 use std::os::unix::fs::PermissionsExt as _;
 
-use runmat_execution_transport_native::control::{NodeAllocation, ResourceRequest};
+use runmat_execution_transport_native::control::{
+    DriverBootstrapCredential, NodeAllocation, ResourceRequest,
+};
 use runmat_node_agent::allocation::{AllocationProcesses, Sandbox};
 
 #[tokio::test]
@@ -35,8 +37,24 @@ async fn local_wall_limit_kills_the_owned_process_tree() {
         expires_at_millis: 4_000_000_000_000,
     };
     let mut processes = AllocationProcesses::default();
+    let bootstrap = DriverBootstrapCredential {
+        run_id: allocation.run_id.clone(),
+        org_id: "org".into(),
+        project_id: allocation.project_id.clone(),
+        allocation_lease_id: allocation.id.clone(),
+        driver_lease_id: "driver-lease".into(),
+        fencing_token: 1,
+        credential: "credential".into(),
+        expires_at_millis: allocation.expires_at_millis,
+    };
     processes
-        .launch_driver(&executable, &allocation, &sandbox)
+        .launch_driver(
+            &executable,
+            &allocation,
+            &sandbox,
+            "https://server.test",
+            &bootstrap,
+        )
         .await
         .unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(20)).await;

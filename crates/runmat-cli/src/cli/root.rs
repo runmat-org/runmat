@@ -10,7 +10,7 @@ use crate::cli::remote::{FsCommand, OrgCommand, ProjectCommand, RemoteCommand};
 use crate::cli::value_types::{CaptureFiguresMode, FigureSize, GcPreset, LogLevel, OptLevel};
 use crate::cli::ColorMode;
 use crate::cli::TestArgs;
-use crate::cli::{BatchCommand, ClusterCommand, PackageCommand};
+use crate::cli::{BatchCommand, ClusterCommand, JobCommand, PackageCommand};
 
 #[derive(Parser, Clone)]
 #[command(
@@ -361,6 +361,11 @@ pub enum Commands {
     Cluster {
         #[command(subcommand)]
         cluster_command: ClusterCommand,
+    },
+    /// Submit and manage durable encrypted remote jobs
+    Job {
+        #[command(subcommand)]
+        job_command: JobCommand,
     },
 }
 

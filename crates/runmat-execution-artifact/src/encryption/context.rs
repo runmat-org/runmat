@@ -16,6 +16,7 @@ pub enum EncryptionPurpose {
     Checkpoint,
     TransferFrame,
     RunKeyEnvelope,
+    Program,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

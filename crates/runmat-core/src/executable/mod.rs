@@ -13,4 +13,4 @@ pub use revision::ExecutableRevision;
 pub use runmat_test::coverage::{CoverageFragment, CoverageMetric, CoverageSite};
 pub use source::ExecutableSource;
 pub use source_map::{ExecutableSourceMap, SourceMapEntry};
-pub use unit::ExecutableUnit;
+pub use unit::{ExecutableUnit, PortableExecutable, PortableExecutableKind};

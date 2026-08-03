@@ -29,6 +29,7 @@ env_logger = { workspace = true }
 log = { workspace = true }
 anyhow = { workspace = true }
 base64 = "0.22"
+rand = "0.8"
 keyring = "2.3"
 miette = { workspace = true }
 uuid = { workspace = true, features = ["serde"] }
@@ -51,6 +52,7 @@ openssl-sys = { version = "0.9.109", optional = true }
 # RunMat crates
 runmat-core = { version = "=0.6.1", path = "../runmat-core" }
 runmat-execution = { workspace = true }
+runmat-execution-artifact = { workspace = true }
 runmat-execution-runner-native = { workspace = true }
 runmat-process-host = { workspace = true }
 runmat-parser = { version = "=0.6.1", path = "../runmat-parser" }

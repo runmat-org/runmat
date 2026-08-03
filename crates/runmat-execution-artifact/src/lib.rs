@@ -16,6 +16,7 @@ pub use error::{ArtifactError, ArtifactResult};
 pub use object::{LogicalObject, ObjectDescriptor, ObjectNamespace};
 pub use program::{
     ExecutableForm, ProgramArtifact, ProgramArtifactId, ProgramBuildRecipe,
-    ProgramExecutionRequest, ProgramExecutionResponse, ProgramRecipeId,
-    MAX_PROGRAM_EXECUTION_ARGUMENTS, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionRequest,
+    ProgramExecutionResponse, ProgramRecipeId, MAX_PROGRAM_EXECUTION_ARGUMENTS,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
 };

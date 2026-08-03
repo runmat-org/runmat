@@ -3,7 +3,7 @@ use runmat_config::runtime::RunMatRuntimeConfig;
 
 use crate::cli::{Cli, Commands};
 use crate::commands::{
-    accel, batch, benchmark, check, config, gc, package, repl, script, test, version,
+    accel, batch, benchmark, check, config, gc, job, package, repl, script, test, version,
 };
 use crate::remote;
 
@@ -106,6 +106,7 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
         Commands::Cluster { cluster_command } => {
             remote::execute_cluster_command(cluster_command).await
         }
+        Commands::Job { job_command } => job::execute(job_command, cli, config).await,
         Commands::Remote { remote_command } => {
             remote::execute_remote_command(remote_command, cli, config).await
         }

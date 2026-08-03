@@ -15,6 +15,26 @@ pub fn validate_offer(
             "lease is stale, expired, or not offered".to_string(),
         ));
     }
+    validate_resources(allocation, inventory)
+}
+
+pub fn validate_active(
+    allocation: &NodeAllocation,
+    inventory: &NodeInventory,
+    now_millis: i64,
+) -> AgentResult<()> {
+    if allocation.state != "active"
+        || allocation.fencing_token == 0
+        || allocation.expires_at_millis <= now_millis
+    {
+        return Err(AgentError::AllocationRejected(
+            "lease is stale, expired, or not active".to_string(),
+        ));
+    }
+    validate_resources(allocation, inventory)
+}
+
+fn validate_resources(allocation: &NodeAllocation, inventory: &NodeInventory) -> AgentResult<()> {
     let request = &allocation.resources;
     if request.cpu_millicores > inventory.cpu_millicores
         || request.memory_bytes > inventory.memory_bytes

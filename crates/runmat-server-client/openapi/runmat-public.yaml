@@ -256,6 +256,236 @@ paths:
                 $ref: '#/components/schemas/PublicPricingResponse'
       security:
       - {}
+  /v1/execution/drivers/{driverLeaseId}/artifacts:
+    post:
+      tags:
+      - Execution
+      operationId: store_artifact
+      parameters:
+      - name: fencingToken
+        in: query
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: X-RunMat-Driver-Credential
+        in: header
+        description: Scoped driver credential
+        required: true
+        schema:
+          type: string
+      - name: driverLeaseId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StoreDriverArtifactRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StoreDriverArtifactResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security: []
+  /v1/execution/drivers/{driverLeaseId}/bootstrap:
+    get:
+      tags:
+      - Execution
+      operationId: driver_bootstrap
+      parameters:
+      - name: fencingToken
+        in: query
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: X-RunMat-Driver-Credential
+        in: header
+        description: Scoped driver credential
+        required: true
+        schema:
+          type: string
+      - name: driverLeaseId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriverRunBootstrapResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security: []
+  /v1/execution/drivers/{driverLeaseId}/heartbeat:
+    post:
+      tags:
+      - Execution
+      operationId: driver_heartbeat
+      parameters:
+      - name: fencingToken
+        in: query
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: X-RunMat-Driver-Credential
+        in: header
+        description: Scoped driver credential
+        required: true
+        schema:
+          type: string
+      - name: driverLeaseId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DriverHeartbeatRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriverHeartbeatResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security: []
+  /v1/execution/drivers/{driverLeaseId}/transition:
+    post:
+      tags:
+      - Execution
+      operationId: driver_transition
+      parameters:
+      - name: fencingToken
+        in: query
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: X-RunMat-Driver-Credential
+        in: header
+        description: Scoped driver credential
+        required: true
+        schema:
+          type: string
+      - name: driverLeaseId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DriverTransitionRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security: []
   /v1/execution/node-enrollments/consume:
     post:
       tags:
@@ -371,6 +601,60 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AllocationLeaseResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security: []
+  /v1/execution/nodes/{nodeId}/allocations/{leaseId}/driver-bootstrap:
+    post:
+      tags:
+      - Execution
+      operationId: create_driver_bootstrap
+      parameters:
+      - name: X-RunMat-Node-Credential
+        in: header
+        description: Current node credential
+        required: true
+        schema:
+          type: string
+      - name: nodeId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: leaseId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransitionAllocationRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriverBootstrapCredentialResponse'
         '401':
           description: ''
           content:
@@ -5837,6 +6121,11 @@ components:
         endpointFingerprint:
           type: string
       additionalProperties: false
+    CheckpointRecoveryDispositionRequest:
+      type: string
+      enum:
+      - resume-safe
+      - indeterminate
     ClusterListResponse:
       type: object
       required:
@@ -6191,6 +6480,183 @@ components:
         serverName:
           type: string
       additionalProperties: false
+    DriverArtifactDownloadResponse:
+      type: object
+      required:
+      - artifactId
+      - kind
+      - ciphertextDigest
+      - ciphertextSizeBytes
+      - mediaType
+      - method
+      - url
+      - headers
+      - expiresAt
+      properties:
+        artifactId:
+          type: string
+        ciphertextDigest:
+          type: string
+        ciphertextSizeBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        expiresAt:
+          type: string
+          format: date-time
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        kind:
+          type: string
+        mediaType:
+          type: string
+        method:
+          type: string
+        url:
+          type: string
+    DriverArtifactKindRequest:
+      type: string
+      enum:
+      - result
+      - checkpoint
+      - diagnostic
+    DriverBootstrapCredentialResponse:
+      type: object
+      required:
+      - runId
+      - orgId
+      - projectId
+      - allocationLeaseId
+      - driverLeaseId
+      - fencingToken
+      - credential
+      - expiresAt
+      properties:
+        allocationLeaseId:
+          type: string
+        credential:
+          type: string
+          description: |-
+            Returned exactly once to the authenticated node agent and passed only
+            to the allocation-owned driver process.
+        driverLeaseId:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        fencingToken:
+          type: integer
+          format: int64
+          minimum: 0
+        orgId:
+          type: string
+        projectId:
+          type: string
+        runId:
+          type: string
+    DriverHeartbeatRequest:
+      type: object
+      required:
+      - ttlSeconds
+      properties:
+        ttlSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+    DriverHeartbeatResponse:
+      type: object
+      required:
+      - expiresAt
+      - runState
+      - cancellationRequested
+      properties:
+        cancellationRequested:
+          type: boolean
+        expiresAt:
+          type: string
+          format: date-time
+        runState:
+          type: string
+    DriverRunBootstrapResponse:
+      type: object
+      required:
+      - runId
+      - orgId
+      - projectId
+      - allocationLeaseId
+      - driverLeaseId
+      - fencingToken
+      - projectRevision
+      - endpointFingerprint
+      - runKeyEnvelope
+      - artifacts
+      - cancellationRequested
+      - relayPath
+      - relayProtocol
+      properties:
+        allocationLeaseId:
+          type: string
+        artifacts:
+          type: array
+          items:
+            $ref: '#/components/schemas/DriverArtifactDownloadResponse'
+        cancellationRequested:
+          type: boolean
+        checkpoint:
+          allOf:
+          - $ref: '#/components/schemas/DriverArtifactDownloadResponse'
+          nullable: true
+        driverLeaseId:
+          type: string
+        endpointFingerprint:
+          type: string
+        fencingToken:
+          type: integer
+          format: int64
+          minimum: 0
+        orgId:
+          type: string
+        projectId:
+          type: string
+        projectRevision:
+          type: string
+        relayPath:
+          type: string
+        relayProtocol:
+          type: string
+        runId:
+          type: string
+        runKeyEnvelope:
+          type: string
+          description: Base64url-encoded canonical run-key envelope for this driver.
+    DriverTransitionRequest:
+      type: object
+      required:
+      - target
+      properties:
+        diagnosticArtifactId:
+          type: string
+          nullable: true
+        reasonCode:
+          type: string
+          nullable: true
+        resultArtifactId:
+          type: string
+          nullable: true
+        target:
+          $ref: '#/components/schemas/DriverTransitionTargetRequest'
+      additionalProperties: false
+    DriverTransitionTargetRequest:
+      type: string
+      enum:
+      - running
+      - succeeded
+      - failed
+      - cancelled
+      - indeterminate
     EndpointIdentityEvidenceBody:
       type: object
       required:
@@ -9506,6 +9972,9 @@ components:
         createdAt:
           type: string
           format: date-time
+        diagnosticArtifactId:
+          type: string
+          nullable: true
         id:
           type: string
         inputArtifactId:
@@ -9527,6 +9996,9 @@ components:
           nullable: true
         resources:
           $ref: '#/components/schemas/ResourceRequestBody'
+        resultArtifactId:
+          type: string
+          nullable: true
         state:
           type: string
         terminalAt:
@@ -9952,6 +10424,59 @@ components:
           uploadUrl:
             type: string
             nullable: true
+    StoreDriverArtifactRequest:
+      type: object
+      required:
+      - kind
+      - ciphertext
+      - ciphertextDigest
+      - mediaType
+      - retainForSeconds
+      properties:
+        checkpointSequence:
+          type: integer
+          format: int64
+          description: Required only for checkpoint artifacts.
+          nullable: true
+          minimum: 0
+        ciphertext:
+          type: string
+          description: Base64url-encoded application ciphertext.
+        ciphertextDigest:
+          type: string
+        kind:
+          $ref: '#/components/schemas/DriverArtifactKindRequest'
+        mediaType:
+          type: string
+        recoveryDisposition:
+          allOf:
+          - $ref: '#/components/schemas/CheckpointRecoveryDispositionRequest'
+          nullable: true
+        retainForSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+    StoreDriverArtifactResponse:
+      type: object
+      required:
+      - artifactId
+      - kind
+      - ciphertextSizeBytes
+      properties:
+        artifactId:
+          type: string
+        checkpointSequence:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        ciphertextSizeBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        kind:
+          type: string
     SubmitRunRequest:
       type: object
       required:

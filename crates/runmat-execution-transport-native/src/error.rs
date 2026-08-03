@@ -16,6 +16,8 @@ pub enum TransportError {
     Encryption(String),
     #[error("control-plane transport is unavailable: {0}")]
     Unavailable(String),
+    #[error("control-plane resource is not ready")]
+    NotReady,
     #[error("credential or lease is stale")]
     StaleAuthority,
 }

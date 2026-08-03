@@ -9,6 +9,7 @@ use crate::{ArtifactError, ArtifactResult};
 #[serde(rename_all = "snake_case")]
 pub enum ExecutableForm {
     InterpreterBytecodeV1,
+    InterpreterScriptV1,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

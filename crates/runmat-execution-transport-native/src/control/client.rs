@@ -81,6 +81,18 @@ pub struct RotatedCredential {
     pub credential_epoch: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DriverBootstrapCredential {
+    pub run_id: String,
+    pub org_id: String,
+    pub project_id: String,
+    pub allocation_lease_id: String,
+    pub driver_lease_id: String,
+    pub fencing_token: u64,
+    pub credential: String,
+    pub expires_at_millis: i64,
+}
+
 #[async_trait]
 pub trait NodeControlPlane: Send + Sync {
     async fn enroll(&self, request: EnrollmentRequest) -> TransportResult<EnrolledNode>;
@@ -95,6 +107,16 @@ pub trait NodeControlPlane: Send + Sync {
         heartbeat: &NodeHeartbeat,
         allocation: &NodeAllocation,
     ) -> TransportResult<()>;
+    async fn driver_bootstrap(
+        &self,
+        heartbeat: &NodeHeartbeat,
+        allocation: &NodeAllocation,
+    ) -> TransportResult<DriverBootstrapCredential> {
+        let _ = (heartbeat, allocation);
+        Err(crate::TransportError::Unavailable(
+            "driver bootstrap is not implemented".into(),
+        ))
+    }
     async fn publish_endpoint_identity(
         &self,
         heartbeat: &NodeHeartbeat,
