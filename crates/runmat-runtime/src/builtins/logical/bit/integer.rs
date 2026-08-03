@@ -456,7 +456,7 @@ const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 const ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.BITWISE.SIZE_MISMATCH",
     identifier: Some("RunMat:bitwise:SizeMismatch"),
-    when: "Input shapes are not compatible for implicit expansion.",
+    when: "Input shapes violate the operation's expansion rule: binary bitwise functions use compatible-size expansion, while bit positions/counts require scalar expansion or exactly matching nonscalar sizes.",
     message: "bitwise operation: array sizes are not compatible",
 };
 
@@ -621,7 +621,7 @@ async fn bitget_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     }
     let input = bit_buffer_from(BITGET_NAME, value, assumed).await?;
     let positions = shift_buffer_from(bit).await?;
-    let plan = BroadcastPlan::new(&input.shape, &positions.shape)
+    let plan = scalar_or_exact_size_plan(&input.shape, &positions.shape)
         .map_err(|err| error_with_detail(BITGET_NAME, &ERROR_SIZE_MISMATCH, err))?;
     let width = input.compute_class.map_or(64, IntegerClass::bit_width);
     let mut data = Vec::with_capacity(plan.len());
@@ -661,7 +661,7 @@ async fn sparse_bitget(
     let class = assumed;
     let width = class.map_or(64, IntegerClass::bit_width);
     let sparse_shape = sparse.shape();
-    let plan = BroadcastPlan::new(&sparse_shape, &positions.shape)
+    let plan = scalar_or_exact_size_plan(&sparse_shape, &positions.shape)
         .map_err(|err| error_with_detail(BITGET_NAME, &ERROR_SIZE_MISMATCH, err))?;
     let output_shape = plan.output_shape().to_vec();
     checked_sparse_result_len(&output_shape, BITGET_NAME)?;
@@ -717,13 +717,13 @@ async fn bitset_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             shape: vec![1, 1],
         },
     };
-    let input_positions = BroadcastPlan::new(&input.shape, &positions.shape)
+    let input_positions = scalar_or_exact_size_plan(&input.shape, &positions.shape)
         .map_err(|err| error_with_detail(BITSET_NAME, &ERROR_SIZE_MISMATCH, err))?;
     let input_position_indices = input_positions
         .iter()
         .map(|(_, input_index, position_index)| (input_index, position_index))
         .collect::<Vec<_>>();
-    let plan = BroadcastPlan::new(input_positions.output_shape(), &values.shape)
+    let plan = scalar_or_exact_size_plan(input_positions.output_shape(), &values.shape)
         .map_err(|err| error_with_detail(BITSET_NAME, &ERROR_SIZE_MISMATCH, err))?;
     let width = input.compute_class.map_or(64, IntegerClass::bit_width);
     let mut data = Vec::with_capacity(plan.len());
@@ -778,14 +778,14 @@ async fn sparse_bitset(
     let class = assumed;
     let width = class.map_or(64, IntegerClass::bit_width);
     let sparse_shape = sparse.shape();
-    let input_positions = BroadcastPlan::new(&sparse_shape, &positions.shape)
+    let input_positions = scalar_or_exact_size_plan(&sparse_shape, &positions.shape)
         .map_err(|err| error_with_detail(BITSET_NAME, &ERROR_SIZE_MISMATCH, err))?;
     checked_sparse_result_len(input_positions.output_shape(), BITSET_NAME)?;
     let input_position_indices = input_positions
         .iter()
         .map(|(_, sparse_index, position_index)| (sparse_index, position_index))
         .collect::<Vec<_>>();
-    let plan = BroadcastPlan::new(input_positions.output_shape(), &values.shape)
+    let plan = scalar_or_exact_size_plan(input_positions.output_shape(), &values.shape)
         .map_err(|err| error_with_detail(BITSET_NAME, &ERROR_SIZE_MISMATCH, err))?;
     let output_shape = plan.output_shape().to_vec();
     checked_sparse_result_len(&output_shape, BITSET_NAME)?;
@@ -869,7 +869,7 @@ async fn bitshift_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     }
     let left = bit_buffer_from(BITSHIFT_NAME, value, assumed).await?;
     let shifts = shift_buffer_from(shift).await?;
-    let plan = BroadcastPlan::new(&left.shape, &shifts.shape)
+    let plan = scalar_or_exact_size_plan(&left.shape, &shifts.shape)
         .map_err(|err| error_with_detail(BITSHIFT_NAME, &ERROR_SIZE_MISMATCH, err))?;
     let mut data = Vec::with_capacity(plan.len());
     for (_, idx_a, idx_b) in plan.iter() {
@@ -903,7 +903,7 @@ async fn sparse_bitshift(
     let shifts = shift_buffer_from(shift).await?;
     let class = assumed;
     let sparse_shape = sparse.shape();
-    let plan = BroadcastPlan::new(&sparse_shape, &shifts.shape)
+    let plan = scalar_or_exact_size_plan(&sparse_shape, &shifts.shape)
         .map_err(|err| error_with_detail(BITSHIFT_NAME, &ERROR_SIZE_MISMATCH, err))?;
     let output_shape = plan.output_shape().to_vec();
     checked_sparse_result_len(&output_shape, BITSHIFT_NAME)?;
@@ -1327,6 +1327,34 @@ struct ShiftBuffer {
 struct BitValueBuffer {
     data: Vec<bool>,
     shape: Vec<usize>,
+}
+
+fn scalar_or_exact_size_plan(
+    lhs_shape: &[usize],
+    rhs_shape: &[usize],
+) -> Result<BroadcastPlan, String> {
+    let scalar = |shape: &[usize]| {
+        shape
+            .iter()
+            .try_fold(1usize, |length, dimension| length.checked_mul(*dimension))
+            == Some(1)
+    };
+    let same_size = || {
+        let rank = lhs_shape.len().max(rhs_shape.len()).max(2);
+        (0..rank).all(|dimension| {
+            lhs_shape.get(dimension).copied().unwrap_or(1)
+                == rhs_shape.get(dimension).copied().unwrap_or(1)
+        })
+    };
+    if !scalar(lhs_shape) && !scalar(rhs_shape) && !same_size() {
+        return Err("inputs must be scalar or have exactly the same size".to_string());
+    }
+    let rank = lhs_shape.len().max(rhs_shape.len());
+    let mut lhs_canonical = lhs_shape.to_vec();
+    lhs_canonical.resize(rank, 1);
+    let mut rhs_canonical = rhs_shape.to_vec();
+    rhs_canonical.resize(rank, 1);
+    BroadcastPlan::new(&lhs_canonical, &rhs_canonical)
 }
 
 async fn bit_buffer_from(

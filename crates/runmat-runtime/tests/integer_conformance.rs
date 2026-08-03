@@ -310,6 +310,44 @@ fn registered_integer_scalar_right_mrdivide_preserves_every_class() {
 }
 
 #[test]
+fn registered_bit_position_operations_use_scalar_or_exact_size_expansion() {
+    let input = integer_tensor(IntegerStorage::U64(vec![1, 1_u64 << 63]), vec![2, 1]);
+    let shifts = Value::Tensor(Tensor::new(vec![1.0, -63.0], vec![2, 1]).expect("shifts"));
+    expect_integer(
+        runmat_runtime::call_builtin("bitshift", &[input.clone(), shifts])
+            .expect("same-size bitshift"),
+        &[2, 1],
+        IntegerStorage::U64(vec![2, 1]),
+    );
+    let positions = Value::Tensor(Tensor::new(vec![1.0, 64.0], vec![2, 1]).expect("positions"));
+    expect_integer(
+        runmat_runtime::call_builtin("bitget", &[input.clone(), positions])
+            .expect("same-size bitget"),
+        &[2, 1],
+        IntegerStorage::U64(vec![1, 1]),
+    );
+    let zeros = integer_tensor(IntegerStorage::U64(vec![0, 0]), vec![2, 1]);
+    let positions = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("positions"));
+    expect_integer(
+        runmat_runtime::call_builtin("bitset", &[zeros, positions, Value::Bool(true)])
+            .expect("scalar-expanded bitset value"),
+        &[2, 1],
+        IntegerStorage::U64(vec![1, 2]),
+    );
+
+    let row = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("row"));
+    for (builtin, args) in [
+        ("bitshift", vec![input.clone(), row.clone()]),
+        ("bitget", vec![input.clone(), row.clone()]),
+        ("bitset", vec![input.clone(), Value::Num(1.0), row.clone()]),
+    ] {
+        let error =
+            runmat_runtime::call_builtin(builtin, &args).expect_err("singleton expansion rejects");
+        assert_eq!(error.identifier(), Some("RunMat:bitwise:SizeMismatch"));
+    }
+}
+
+#[test]
 fn registered_integer_arithmetic_rejects_logicals_before_provider_dispatch() {
     use runmat_accelerate_api::{GpuTensorHandle, IntegerElementType};
 

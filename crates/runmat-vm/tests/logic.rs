@@ -1880,3 +1880,38 @@ fn sparse_arithmetic_handles_sparse_scalar_and_complex_interop() {
     ));
     assert!(logical_truth(&vars[5]));
 }
+
+#[test]
+fn bit_position_and_count_functions_require_scalar_or_exact_sizes_when_compiled() {
+    let vars = execute_source(
+        "a = uint16([1; 2]); \
+         shifted = bitshift(a, [1; -1]); \
+         got = bitget(a, [1; 2]); \
+         set = bitset(a, [2; 1], [1; 0]);",
+    )
+    .expect("compiled bit position operations");
+    for expected in [
+        IntegerStorage::U16(vec![2, 1]),
+        IntegerStorage::U16(vec![1, 1]),
+        IntegerStorage::U16(vec![3, 2]),
+    ] {
+        assert!(vars.iter().any(|value| matches!(
+            value,
+            Value::Tensor(tensor) if tensor.integer_storage() == Some(&expected)
+        )));
+    }
+
+    for source in [
+        "out = bitshift(uint16([1; 2]), [1 2]);",
+        "out = bitget(uint16([1; 2]), [1 2]);",
+        "out = bitset(uint16([1; 2]), 1, [1 0]);",
+        "out = bitset(uint16(1), [1; 2], [1 0]);",
+    ] {
+        let error = execute_source(source).expect_err("singleton expansion must reject");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:bitwise:SizeMismatch"),
+            "{source}: unexpected error: {error}"
+        );
+    }
+}

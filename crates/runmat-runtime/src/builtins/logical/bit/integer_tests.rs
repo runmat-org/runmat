@@ -1,4 +1,5 @@
 use super::*;
+use crate::builtins::common::test_support;
 use futures::executor::block_on;
 
 #[test]
@@ -395,17 +396,17 @@ fn bitget_sparse_double_scalar_position_preserves_sparse_storage() {
 }
 
 #[test]
-fn sparse_bitwise_position_and_value_arrays_broadcast_with_zero_aware_storage() {
+fn sparse_bitwise_position_and_value_arrays_require_matching_sizes() {
     let sparse =
         runmat_builtins::SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![3.0, 5.0])
             .expect("sparse");
 
     let Value::SparseTensor(shifted) = block_on(bitshift_builtin(vec![
         Value::SparseTensor(sparse.clone()),
-        Value::Tensor(Tensor::new(vec![1.0, -1.0], vec![2, 1]).expect("shifts")),
+        Value::Tensor(Tensor::new(vec![1.0, -1.0, 1.0, -1.0], vec![2, 2]).expect("shifts")),
         Value::String("uint8".to_string()),
     ]))
-    .expect("broadcast sparse bitshift") else {
+    .expect("same-size sparse bitshift") else {
         panic!("bitshift leaves implicit zeros sparse for every shift");
     };
     assert_eq!(shifted.get(0, 0), Some(6.0));
@@ -413,10 +414,10 @@ fn sparse_bitwise_position_and_value_arrays_broadcast_with_zero_aware_storage() 
 
     let Value::SparseTensor(got) = block_on(bitget_builtin(vec![
         Value::SparseTensor(sparse.clone()),
-        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("positions")),
+        Value::Tensor(Tensor::new(vec![1.0, 2.0, 1.0, 2.0], vec![2, 2]).expect("positions")),
         Value::String("uint8".to_string()),
     ]))
-    .expect("broadcast sparse bitget") else {
+    .expect("same-size sparse bitget") else {
         panic!("bitget leaves implicit zeros sparse for every position");
     };
     assert_eq!(got.get(0, 0), Some(1.0));
@@ -424,11 +425,11 @@ fn sparse_bitwise_position_and_value_arrays_broadcast_with_zero_aware_storage() 
 
     let Value::SparseTensor(cleared) = block_on(bitset_builtin(vec![
         Value::SparseTensor(sparse.clone()),
-        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("positions")),
-        Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![1, 2]).expect("clear values")),
+        Value::Tensor(Tensor::new(vec![1.0, 2.0, 1.0, 2.0], vec![2, 2]).expect("positions")),
+        Value::Tensor(Tensor::new(vec![0.0; 4], vec![2, 2]).expect("clear values")),
         Value::String("uint8".to_string()),
     ]))
-    .expect("broadcast sparse bitset clear") else {
+    .expect("same-size sparse bitset clear") else {
         panic!("clearing broadcast positions preserves implicit zeros");
     };
     assert_eq!(cleared.get(0, 0), Some(2.0));
@@ -436,16 +437,16 @@ fn sparse_bitwise_position_and_value_arrays_broadcast_with_zero_aware_storage() 
 
     let Value::Tensor(set) = block_on(bitset_builtin(vec![
         Value::SparseTensor(sparse),
-        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("positions")),
-        Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).expect("set values")),
+        Value::Tensor(Tensor::new(vec![1.0, 2.0, 1.0, 2.0], vec![2, 2]).expect("positions")),
+        Value::Tensor(Tensor::new(vec![0.0, 0.0, 1.0, 1.0], vec![2, 2]).expect("set values")),
         Value::String("uint8".to_string()),
     ]))
-    .expect("broadcast sparse bitset set") else {
+    .expect("same-size sparse bitset set") else {
         panic!("setting an implicit position materializes the result");
     };
     assert_eq!(
         set.as_f64_slice().expect("double bitset output"),
-        &[2.0, 0.0, 2.0, 7.0]
+        &[2.0, 0.0, 1.0, 7.0]
     );
 }
 
@@ -545,9 +546,9 @@ fn bitset_sparse_scalar_forms_preserve_or_materialize_from_zero_semantics() {
 }
 
 #[test]
-fn bitset_broadcasts_input_positions_and_values() {
+fn bitset_accepts_same_size_inputs_and_scalar_values() {
     let input = Tensor::new_integer(IntegerStorage::U16(vec![0, 0]), vec![1, 2]).expect("input");
-    let positions = Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("positions");
+    let positions = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("positions");
     let values = Tensor::new(vec![1.0, 0.0], vec![1, 2]).expect("values");
     let Value::Tensor(output) = block_on(bitset_builtin(vec![
         Value::Tensor(input),
@@ -557,10 +558,163 @@ fn bitset_broadcasts_input_positions_and_values() {
     .expect("bitset") else {
         panic!("expected tensor result");
     };
-    assert_eq!(output.shape, vec![2, 2]);
+    assert_eq!(output.shape, vec![1, 2]);
     assert_eq!(
         output.integer_storage(),
-        Some(&IntegerStorage::U16(vec![1, 2, 0, 0]))
+        Some(&IntegerStorage::U16(vec![1, 0]))
+    );
+
+    let input = Tensor::new_integer(IntegerStorage::U16(vec![0, 0]), vec![1, 2]).expect("input");
+    let Value::Tensor(output) = block_on(bitset_builtin(vec![
+        Value::Tensor(input),
+        Value::Num(2.0),
+        Value::Bool(true),
+    ]))
+    .expect("scalar-expanded bitset") else {
+        panic!("expected tensor result");
+    };
+    assert_eq!(
+        output.integer_storage(),
+        Some(&IntegerStorage::U16(vec![2, 2]))
+    );
+}
+
+#[test]
+fn bit_position_and_count_operations_reject_general_singleton_expansion() {
+    let input = Tensor::new_integer(IntegerStorage::U8(vec![1, 2]), vec![2, 1]).expect("input");
+    let row = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("row operand");
+    for error in [
+        block_on(bitshift_builtin(vec![
+            Value::Tensor(input.clone()),
+            Value::Tensor(row.clone()),
+        ]))
+        .expect_err("bitshift row/column expansion must reject"),
+        block_on(bitget_builtin(vec![
+            Value::Tensor(input.clone()),
+            Value::Tensor(row.clone()),
+        ]))
+        .expect_err("bitget row/column expansion must reject"),
+        block_on(bitset_builtin(vec![
+            Value::Tensor(input.clone()),
+            Value::Tensor(row.clone()),
+            Value::Bool(true),
+        ]))
+        .expect_err("bitset position expansion must reject"),
+        block_on(bitset_builtin(vec![
+            Value::Tensor(input),
+            Value::Num(1.0),
+            Value::Tensor(row),
+        ]))
+        .expect_err("bitset value expansion must reject"),
+    ] {
+        assert_eq!(error.identifier(), ERROR_SIZE_MISMATCH.identifier);
+        assert!(error.message().contains("exactly the same size"));
+    }
+}
+
+#[test]
+fn scalar_or_exact_size_plan_ignores_only_trailing_singletons() {
+    let plan = scalar_or_exact_size_plan(&[2, 1], &[2, 1, 1]).expect("same MATLAB size");
+    assert_eq!(plan.output_shape(), &[2, 1, 1]);
+    assert!(scalar_or_exact_size_plan(&[2, 1], &[2, 1, 2]).is_err());
+    assert!(scalar_or_exact_size_plan(&[0, 2], &[0, 2]).is_ok());
+    assert!(scalar_or_exact_size_plan(&[0, 2], &[1, 2]).is_err());
+}
+
+#[test]
+fn sparse_bit_position_and_count_operations_reject_general_singleton_expansion() {
+    let sparse =
+        runmat_builtins::SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![3.0, 5.0])
+            .expect("sparse");
+    let column = Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("column operand");
+    for error in [
+        block_on(bitshift_builtin(vec![
+            Value::SparseTensor(sparse.clone()),
+            Value::Tensor(column.clone()),
+            Value::String("uint8".to_string()),
+        ]))
+        .expect_err("sparse bitshift singleton expansion must reject"),
+        block_on(bitget_builtin(vec![
+            Value::SparseTensor(sparse.clone()),
+            Value::Tensor(column.clone()),
+            Value::String("uint8".to_string()),
+        ]))
+        .expect_err("sparse bitget singleton expansion must reject"),
+        block_on(bitset_builtin(vec![
+            Value::SparseTensor(sparse),
+            Value::Num(1.0),
+            Value::Tensor(column),
+            Value::String("uint8".to_string()),
+        ]))
+        .expect_err("sparse bitset value expansion must reject"),
+    ] {
+        assert_eq!(error.identifier(), ERROR_SIZE_MISMATCH.identifier);
+        assert!(error.message().contains("exactly the same size"));
+    }
+}
+
+#[test]
+fn gathered_gpu_bit_position_shapes_use_scalar_or_exact_size_rules() {
+    test_support::with_test_provider(|provider| {
+        let input = Tensor::new_integer(IntegerStorage::U8(vec![1, 2]), vec![2, 1]).expect("input");
+        let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload");
+        let row = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("row operand");
+        let error = block_on(bitget_builtin(vec![
+            Value::GpuTensor(handle),
+            Value::Tensor(row),
+        ]))
+        .expect_err("gathered GPU singleton expansion must reject");
+        assert_eq!(error.identifier(), ERROR_SIZE_MISMATCH.identifier);
+
+        let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload");
+        let shifts = Tensor::new(vec![1.0, -1.0], vec![2, 1]).expect("same-size shifts");
+        let Value::Tensor(output) = block_on(bitshift_builtin(vec![
+            Value::GpuTensor(handle),
+            Value::Tensor(shifts),
+        ]))
+        .expect("gathered GPU same-size bitshift") else {
+            panic!("expected typed tensor result");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U8(vec![2, 1]))
+        );
+    });
+}
+
+#[test]
+#[cfg(feature = "wgpu")]
+fn wgpu_gathered_bit_position_shapes_use_scalar_or_exact_size_rules() {
+    if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+    )
+    .is_err()
+    {
+        return;
+    }
+    let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+    let input = Tensor::new_integer(IntegerStorage::U8(vec![1, 2]), vec![2, 1]).expect("input");
+    let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload");
+    let row = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("row operand");
+    let error = block_on(bitget_builtin(vec![
+        Value::GpuTensor(handle),
+        Value::Tensor(row),
+    ]))
+    .expect_err("wgpu singleton expansion must reject");
+    assert_eq!(error.identifier(), ERROR_SIZE_MISMATCH.identifier);
+
+    let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload");
+    let positions = Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("same-size positions");
+    let Value::Tensor(output) = block_on(bitget_builtin(vec![
+        Value::GpuTensor(handle),
+        Value::Tensor(positions),
+    ]))
+    .expect("wgpu same-size bitget") else {
+        panic!("expected typed tensor result");
+    };
+    assert_eq!(
+        output.integer_storage(),
+        Some(&IntegerStorage::U8(vec![1, 1]))
     );
 }
 
