@@ -8,11 +8,11 @@ use runmat_accelerate_api::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, IntegerStorage, NumericStorage, Tensor, Value,
+    ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
-use super::{integer_order, type_resolvers::tensor_output_type};
+use super::{float_order::SetFloat, integer_order, type_resolvers::tensor_output_type};
 use crate::build_runtime_error;
 use crate::builtins::common::arg_tokens::{tokens_from_values, ArgToken};
 use crate::builtins::common::gpu_helpers;
@@ -455,7 +455,7 @@ fn sort_floating_tensor<T>(
     wrap: fn(Vec<T>) -> NumericStorage,
 ) -> crate::BuiltinResult<SortEvaluation>
 where
-    T: Copy + Into<f64>,
+    T: SetFloat,
 {
     let dim_len = dimension_length(&shape, dim);
     if values.is_empty() || dim_len <= 1 {
@@ -484,7 +484,7 @@ where
                 let value = sorted[idx];
                 buffer.push((k, value));
             }
-            buffer.sort_by(|a, b| compare_real_values(a.1.into(), b.1.into(), args));
+            buffer.sort_by(|a, b| compare_real_values(a.1, b.1, args));
             for (pos, (original_index, value)) in buffer.iter().enumerate() {
                 let target = before + pos * stride_before + after * stride_before * dim_len;
                 sorted[target] = *value;
@@ -557,9 +557,8 @@ fn sort_complex_tensor(
     tensor: ComplexTensor,
     args: &SortArgs,
 ) -> crate::BuiltinResult<SortEvaluation> {
-    let dim = args
-        .dimension
-        .unwrap_or_else(|| default_dimension(&tensor.shape));
+    let shape = tensor.shape.clone();
+    let dim = args.dimension.unwrap_or_else(|| default_dimension(&shape));
     if dim == 0 {
         return Err(sort_error(
             &SORT_ERROR_INVALID_DIMENSION,
@@ -567,44 +566,34 @@ fn sort_complex_tensor(
         ));
     }
 
-    let dim_len = dimension_length(&tensor.shape, dim);
-    if tensor.materialize_f64().is_empty() || dim_len <= 1 {
-        let indices = vec![1.0; tensor.materialize_f64().len()];
-        let index_tensor = Tensor::new(indices, tensor.shape.clone())
+    let dim_len = dimension_length(&shape, dim);
+    let storage = tensor.into_complex_storage();
+    if storage.is_empty() || dim_len <= 1 {
+        let indices = vec![1.0; storage.len()];
+        let index_tensor =
+            Tensor::new(indices, shape.clone()).map_err(|e| sort_internal(format!("sort: {e}")))?;
+        let sorted_tensor = ComplexTensor::from_complex_storage(storage, shape)
             .map_err(|e| sort_internal(format!("sort: {e}")))?;
         return Ok(SortEvaluation {
-            sorted: complex_tensor_into_value(tensor),
+            sorted: complex_tensor_into_value(sorted_tensor),
             indices: index_tensor,
         });
     }
 
-    let stride_before = stride_before(&tensor.shape, dim);
-    let stride_after = stride_after(&tensor.shape, dim);
-    let mut sorted = tensor.materialize_f64().clone();
-    let mut indices = vec![0.0f64; tensor.materialize_f64().len()];
-    let mut buffer: Vec<(usize, (f64, f64))> = Vec::with_capacity(dim_len);
-
-    for after in 0..stride_after {
-        for before in 0..stride_before {
-            buffer.clear();
-            for k in 0..dim_len {
-                let idx = before + k * stride_before + after * stride_before * dim_len;
-                let value = tensor.materialize_f64()[idx];
-                buffer.push((k, value));
-            }
-            buffer.sort_by(|a, b| compare_complex_values(a.1, b.1, args));
-            for (pos, (original_index, value)) in buffer.iter().enumerate() {
-                let target = before + pos * stride_before + after * stride_before * dim_len;
-                sorted[target] = *value;
-                indices[target] = (*original_index + 1) as f64;
-            }
+    let (source_indices, indices) = match &storage {
+        ComplexStorage::F64(values) => complex_sort_permutation(values, &shape, dim, args),
+        ComplexStorage::F32(values) => complex_sort_permutation(values, &shape, dim, args),
+        ComplexStorage::Integer(_) => {
+            sort_promoted_complex_integer_permutation(&storage, &shape, dim, args)
         }
-    }
-
-    let sorted_tensor = ComplexTensor::new(sorted, tensor.shape.clone())
+    };
+    let sorted_storage = storage
+        .gather(&source_indices)
         .map_err(|e| sort_internal(format!("sort: {e}")))?;
-    let index_tensor = Tensor::new(indices, tensor.shape.clone())
+    let sorted_tensor = ComplexTensor::from_complex_storage(sorted_storage, shape.clone())
         .map_err(|e| sort_internal(format!("sort: {e}")))?;
+    let index_tensor =
+        Tensor::new(indices, shape).map_err(|e| sort_internal(format!("sort: {e}")))?;
 
     Ok(SortEvaluation {
         sorted: complex_tensor_into_value(sorted_tensor),
@@ -612,16 +601,57 @@ fn sort_complex_tensor(
     })
 }
 
+fn sort_promoted_complex_integer_permutation(
+    storage: &ComplexStorage,
+    shape: &[usize],
+    dim: usize,
+    args: &SortArgs,
+) -> (Vec<usize>, Vec<f64>) {
+    let values = storage.materialize_f64();
+    complex_sort_permutation(&values, shape, dim, args)
+}
+
+fn complex_sort_permutation<T: SetFloat>(
+    values: &[(T, T)],
+    shape: &[usize],
+    dim: usize,
+    args: &SortArgs,
+) -> (Vec<usize>, Vec<f64>) {
+    let stride_before = stride_before(shape, dim);
+    let stride_after = stride_after(shape, dim);
+    let dim_len = dimension_length(shape, dim);
+    let mut source_indices = vec![0usize; values.len()];
+    let mut indices = vec![0.0f64; values.len()];
+    let mut buffer: Vec<(usize, usize, (T, T))> = Vec::with_capacity(dim_len);
+
+    for after in 0..stride_after {
+        for before in 0..stride_before {
+            buffer.clear();
+            for k in 0..dim_len {
+                let source = before + k * stride_before + after * stride_before * dim_len;
+                buffer.push((k, source, values[source]));
+            }
+            buffer.sort_by(|a, b| compare_complex_values(a.2, b.2, args));
+            for (position, (original_index, source, _)) in buffer.iter().enumerate() {
+                let target = before + position * stride_before + after * stride_before * dim_len;
+                source_indices[target] = *source;
+                indices[target] = (*original_index + 1) as f64;
+            }
+        }
+    }
+
+    (source_indices, indices)
+}
+
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor.materialize_f64().len() == 1 {
-        let (re, im) = tensor.materialize_f64()[0];
-        Value::Complex(re, im)
+    if let Some([value]) = tensor.as_f64_slice() {
+        Value::Complex(value.0, value.1)
     } else {
         Value::ComplexTensor(tensor)
     }
 }
 
-fn compare_real_values(a: f64, b: f64, args: &SortArgs) -> Ordering {
+fn compare_real_values<T: SetFloat>(a: T, b: T, args: &SortArgs) -> Ordering {
     match (a.is_nan(), b.is_nan()) {
         (true, true) => Ordering::Equal,
         (true, false) => match args.direction {
@@ -636,10 +666,10 @@ fn compare_real_values(a: f64, b: f64, args: &SortArgs) -> Ordering {
     }
 }
 
-fn compare_real_finite(a: f64, b: f64, args: &SortArgs) -> Ordering {
+fn compare_real_finite<T: SetFloat>(a: T, b: T, args: &SortArgs) -> Ordering {
     let primary = match args.comparison {
         ComparisonMethod::Abs => {
-            let abs_cmp = a.abs().partial_cmp(&b.abs()).unwrap_or(Ordering::Equal);
+            let abs_cmp = a.abs().compare(b.abs());
             if abs_cmp != Ordering::Equal {
                 return match args.direction {
                     SortDirection::Ascend => abs_cmp,
@@ -654,12 +684,12 @@ fn compare_real_finite(a: f64, b: f64, args: &SortArgs) -> Ordering {
         return primary;
     }
     match args.direction {
-        SortDirection::Ascend => a.partial_cmp(&b).unwrap_or(Ordering::Equal),
-        SortDirection::Descend => b.partial_cmp(&a).unwrap_or(Ordering::Equal),
+        SortDirection::Ascend => a.compare(b),
+        SortDirection::Descend => b.compare(a),
     }
 }
 
-fn compare_complex_values(a: (f64, f64), b: (f64, f64), args: &SortArgs) -> Ordering {
+fn compare_complex_values<T: SetFloat>(a: (T, T), b: (T, T), args: &SortArgs) -> Ordering {
     match (complex_is_nan(a), complex_is_nan(b)) {
         (true, true) => Ordering::Equal,
         (true, false) => match args.direction {
@@ -674,13 +704,11 @@ fn compare_complex_values(a: (f64, f64), b: (f64, f64), args: &SortArgs) -> Orde
     }
 }
 
-fn compare_complex_finite(a: (f64, f64), b: (f64, f64), args: &SortArgs) -> Ordering {
+fn compare_complex_finite<T: SetFloat>(a: (T, T), b: (T, T), args: &SortArgs) -> Ordering {
     match args.comparison {
         ComparisonMethod::Real => compare_complex_real_imag(a, b, args.direction),
         ComparisonMethod::Abs | ComparisonMethod::Auto => {
-            let abs_cmp = complex_abs(a)
-                .partial_cmp(&complex_abs(b))
-                .unwrap_or(Ordering::Equal);
+            let abs_cmp = complex_abs(a).compare(complex_abs(b));
             if abs_cmp != Ordering::Equal {
                 return match args.direction {
                     SortDirection::Ascend => abs_cmp,
@@ -692,26 +720,29 @@ fn compare_complex_finite(a: (f64, f64), b: (f64, f64), args: &SortArgs) -> Orde
     }
 }
 
-fn compare_complex_real_imag(a: (f64, f64), b: (f64, f64), direction: SortDirection) -> Ordering {
+fn compare_complex_real_imag<T: SetFloat>(
+    a: (T, T),
+    b: (T, T),
+    direction: SortDirection,
+) -> Ordering {
     let real_cmp = match direction {
-        SortDirection::Ascend => a.0.partial_cmp(&b.0),
-        SortDirection::Descend => b.0.partial_cmp(&a.0),
-    }
-    .unwrap_or(Ordering::Equal);
+        SortDirection::Ascend => a.0.compare(b.0),
+        SortDirection::Descend => b.0.compare(a.0),
+    };
     if real_cmp != Ordering::Equal {
         return real_cmp;
     }
     match direction {
-        SortDirection::Ascend => a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal),
-        SortDirection::Descend => b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal),
+        SortDirection::Ascend => a.1.compare(b.1),
+        SortDirection::Descend => b.1.compare(a.1),
     }
 }
 
-fn complex_is_nan(value: (f64, f64)) -> bool {
+fn complex_is_nan<T: SetFloat>(value: (T, T)) -> bool {
     value.0.is_nan() || value.1.is_nan()
 }
 
-fn complex_abs(value: (f64, f64)) -> f64 {
+fn complex_abs<T: SetFloat>(value: (T, T)) -> T {
     value.0.hypot(value.1)
 }
 
@@ -970,8 +1001,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{
-        ComplexTensor, IntValue, IntegerStorage, NumericStorage, ResolveContext, Tensor, Type,
-        Value,
+        ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericStorage,
+        ResolveContext, Tensor, Type, Value,
     };
 
     fn sort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -1387,6 +1418,55 @@ pub(crate) mod tests {
             Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![3.0, 1.0, 2.0]),
             other => panic!("expected tensor indices, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn sort_preserves_native_complex_single_storage_and_indices() {
+        let tensor =
+            ComplexTensor::from_f32(vec![(3.0, 4.0), (1.0, 0.0), (0.0, 2.0)], vec![3, 1]).unwrap();
+        let (sorted, indices) = evaluate(Value::ComplexTensor(tensor), &[])
+            .expect("sort")
+            .into_values();
+        let Value::ComplexTensor(sorted) = sorted else {
+            panic!("expected complex single tensor");
+        };
+        assert_eq!(
+            sorted.as_f32_slice(),
+            Some(&[(1.0, 0.0), (0.0, 2.0), (3.0, 4.0)][..])
+        );
+        let Value::Tensor(indices) = indices else {
+            panic!("expected index tensor");
+        };
+        assert_eq!(indices.as_f64_slice(), Some(&[2.0, 3.0, 1.0][..]));
+    }
+
+    #[test]
+    fn sort_preserves_one_element_complex_single_tensor() {
+        let tensor = ComplexTensor::from_f32(vec![(1.25, -2.5)], vec![1, 1]).unwrap();
+        let sorted = evaluate(Value::ComplexTensor(tensor), &[])
+            .expect("sort")
+            .into_sorted_value();
+        let Value::ComplexTensor(sorted) = sorted else {
+            panic!("expected complex single tensor");
+        };
+        assert_eq!(sorted.as_f32_slice(), Some(&[(1.25, -2.5)][..]));
+    }
+
+    #[test]
+    fn sort_rejects_typed_complex_integer_storage() {
+        let input = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993]),
+            IntegerStorage::U64(vec![0, 0, 0]),
+        )
+        .unwrap();
+        let tensor = ComplexTensor::new_integer(input, vec![3, 1]).unwrap();
+        let error = match evaluate(Value::ComplexTensor(tensor), &[]) {
+            Ok(_) => panic!("expected typed complex integer rejection"),
+            Err(error) => error,
+        };
+        assert!(error
+            .to_string()
+            .contains("operations involving complex numbers with integer types are not supported"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
