@@ -47,7 +47,17 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Find drives control flow and currently bypasses fusion; metadata is present for completeness only.",
 };
 
-fn find_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
+fn find_type(args: &[Type], _ctx: &ResolveContext) -> Type {
+    if matches!(
+        args.first(),
+        Some(Type::Tensor {
+            shape: Some(shape)
+        }) if shape.len() == 2 && shape.first() == Some(&Some(1))
+    ) {
+        return Type::Tensor {
+            shape: Some(vec![Some(1), None]),
+        };
+    }
     column_vector_type()
 }
 
@@ -366,6 +376,9 @@ fn try_provider_find(
     handle: &runmat_accelerate_api::GpuTensorHandle,
     options: &FindOptions,
 ) -> Option<ProviderFindResult> {
+    if matches!(options.direction, FindDirection::Last) {
+        return None;
+    }
     #[cfg(all(test, feature = "wgpu"))]
     {
         if handle.device_id != 0 {
@@ -380,7 +393,11 @@ fn try_provider_find(
         FindDirection::Last => runmat_accelerate_api::FindDirection::Last,
     };
     let limit = options.effective_limit();
-    provider.find(handle, limit, direction).ok()
+    let mut result = provider.find(handle, limit, direction).ok()?;
+    if is_row_vector_shape(&handle.shape) {
+        result.linear.shape = vec![1, result.linear.shape.first().copied().unwrap_or(0)];
+    }
+    Some(result)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -677,6 +694,9 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
                 }
             }
 
+            if matches!(options.direction, FindDirection::Last) {
+                indices.reverse();
+            }
             let values = find_values_for_tensor(tensor, &indices);
             FindResult::new(shape, indices, values)
         }
@@ -744,6 +764,10 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
                 }
             }
 
+            if matches!(options.direction, FindDirection::Last) {
+                indices.reverse();
+                values.reverse();
+            }
             let values = find_values_for_complex_tensor(tensor, &indices, values);
             FindResult::new(shape, indices, values)
         }
@@ -825,6 +849,9 @@ fn compute_find_sparse(
                             values.push(floating_values.expect("double sparse storage")[idx]);
                         }
                         if limit.is_some_and(|k| indices.len() >= k) {
+                            indices.reverse();
+                            values.reverse();
+                            integer_value_indices.reverse();
                             let values =
                                 sparse_find_values(integer_storage, values, &integer_value_indices);
                             return FindResult::new(shape, indices, values);
@@ -835,8 +862,17 @@ fn compute_find_sparse(
         }
     }
 
+    if matches!(options.direction, FindDirection::Last) {
+        indices.reverse();
+        values.reverse();
+        integer_value_indices.reverse();
+    }
     let values = sparse_find_values(integer_storage, values, &integer_value_indices);
     FindResult::new(shape, indices, values)
+}
+
+fn is_row_vector_shape(shape: &[usize]) -> bool {
+    shape.len() == 2 && shape.first() == Some(&1)
 }
 
 impl FindResult {
@@ -850,8 +886,12 @@ impl FindResult {
 
     fn linear_tensor(&self) -> crate::BuiltinResult<Tensor> {
         let data: Vec<f64> = self.indices.iter().map(|&idx| idx as f64).collect();
-        let rows = data.len();
-        Tensor::new(data, vec![rows, 1])
+        let shape = if is_row_vector_shape(&self.shape) {
+            vec![1, data.len()]
+        } else {
+            vec![data.len(), 1]
+        };
+        Tensor::new(data, shape)
             .map_err(|e| find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL))
     }
 
@@ -887,7 +927,7 @@ impl FindResult {
                 })?;
                 Ok(tensor_to_value(tensor, prefer_gpu))
             }
-            FindValues::Integer(values) => integer_values_to_value(values.clone()),
+            FindValues::Integer(values) => integer_values_to_value(values.clone(), prefer_gpu),
             FindValues::Complex(values) => {
                 let tensor =
                     ComplexTensor::new(values.clone(), vec![values.len(), 1]).map_err(|e| {
@@ -953,14 +993,17 @@ fn select_integer_values(storage: &IntegerStorage, indices: &[usize]) -> Integer
     }
 }
 
-fn integer_values_to_value(storage: IntegerStorage) -> crate::BuiltinResult<Value> {
-    if storage.len() == 1 {
+fn integer_values_to_value(
+    storage: IntegerStorage,
+    prefer_gpu: bool,
+) -> crate::BuiltinResult<Value> {
+    if storage.len() == 1 && !prefer_gpu {
         return Ok(Value::Int(integer_storage_value(&storage, 0)));
     }
     let shape = vec![storage.len(), 1];
     let tensor = Tensor::new_integer(storage, shape)
         .map_err(|e| find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL))?;
-    Ok(Value::Tensor(tensor))
+    Ok(tensor_to_value(tensor, prefer_gpu))
 }
 
 fn integer_storage_value(storage: &IntegerStorage, index: usize) -> IntValue {
@@ -1031,7 +1074,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn find_type_is_column_vector() {
+    fn find_type_tracks_known_row_vector_orientation() {
         assert_eq!(
             find_type(
                 &[Type::Tensor { shape: None }],
@@ -1039,6 +1082,17 @@ pub(crate) mod tests {
             ),
             Type::Tensor {
                 shape: Some(vec![None, Some(1)])
+            }
+        );
+        assert_eq!(
+            find_type(
+                &[Type::Tensor {
+                    shape: Some(vec![Some(1), Some(5)])
+                }],
+                &ResolveContext::new(Vec::new()),
+            ),
+            Type::Tensor {
+                shape: Some(vec![Some(1), None])
             }
         );
     }
@@ -1080,6 +1134,7 @@ pub(crate) mod tests {
             find_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(2))]).expect("find");
         match result {
             Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![1, 2]);
                 assert_eq!(t.materialize_f64(), vec![2.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1134,6 +1189,24 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 1]);
             assert_eq!(gathered.materialize_f64(), vec![2.0, 4.0]);
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn find_gpu_row_vector_preserves_linear_index_orientation() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![0.0, 4.0, 5.0, 7.0], vec![1, 4]).unwrap();
+            let view = HostTensorView {
+                data: &tensor.materialize_f64(),
+                shape: &tensor.shape,
+            };
+            let handle = provider.upload(&view).expect("upload");
+            let result = find_builtin(Value::GpuTensor(handle), Vec::new()).expect("find");
+            assert!(matches!(result, Value::GpuTensor(_)));
+            let gathered = test_support::gather(result).expect("gather");
+            assert_eq!(gathered.shape, vec![1, 3]);
+            assert_eq!(gathered.materialize_f64(), vec![2.0, 3.0, 4.0]);
         });
     }
 
@@ -1285,7 +1358,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             last_values.integer_storage(),
-            Some(&IntegerStorage::U64(vec![7, 1_u64 << 63]))
+            Some(&IntegerStorage::U64(vec![1_u64 << 63, 7]))
         );
     }
 
@@ -1354,7 +1427,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn find_last_order_descending() {
+    fn find_last_returns_selected_indices_in_ascending_order() {
         let tensor = Tensor::new(vec![1.0, 0.0, 2.0, 3.0, 0.0], vec![1, 5]).unwrap();
         let result = find_builtin(
             Value::Tensor(tensor),
@@ -1363,8 +1436,8 @@ pub(crate) mod tests {
         .expect("find");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 1]);
-                assert_eq!(t.materialize_f64(), vec![4.0, 3.0]);
+                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.materialize_f64(), vec![3.0, 4.0]);
             }
             Value::Num(_) => panic!("expected column vector"),
             other => panic!("unexpected result {other:?}"),
@@ -1383,6 +1456,70 @@ pub(crate) mod tests {
             }
             other => panic!("expected empty tensor, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn find_empty_orientation_follows_input_vector_shape() {
+        for (shape, expected_shape) in [
+            (vec![1, 0], vec![1, 0]),
+            (vec![0, 1], vec![0, 1]),
+            (vec![0, 3], vec![0, 1]),
+        ] {
+            let input =
+                Tensor::new_integer(IntegerStorage::U32(Vec::new()), shape).expect("empty input");
+            let Value::Tensor(indices) =
+                find_builtin(Value::Tensor(input), Vec::new()).expect("find")
+            else {
+                panic!("expected empty tensor");
+            };
+            assert_eq!(indices.shape, expected_shape);
+            assert!(indices.materialize_f64().is_empty());
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn find_integer_gpu_last_preserves_order_orientation_class_and_residency() {
+        test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload_integer(&runmat_accelerate_api::HostIntegerTensorView {
+                    data: runmat_accelerate_api::HostIntegerDataView::U64(&[
+                        0,
+                        1_u64 << 63,
+                        7,
+                        u64::MAX,
+                    ]),
+                    shape: &[1, 4],
+                })
+                .expect("upload integer row vector");
+            let eval = evaluate(
+                Value::GpuTensor(handle),
+                &[Value::Int(IntValue::I32(2)), Value::from("last")],
+            )
+            .expect("find last");
+
+            let linear = eval.linear_value().expect("linear indices");
+            assert!(matches!(linear, Value::GpuTensor(_)));
+            let linear = test_support::gather(linear).expect("gather linear indices");
+            assert_eq!(linear.shape, vec![1, 2]);
+            assert_eq!(linear.materialize_f64(), vec![3.0, 4.0]);
+
+            let values = eval.values_value().expect("selected values");
+            let Value::GpuTensor(values_handle) = &values else {
+                panic!("expected resident selected values, got {values:?}");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(values_handle),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            let values = test_support::gather(values).expect("gather selected values");
+            assert_eq!(values.shape, vec![2, 1]);
+            assert_eq!(
+                values.integer_storage(),
+                Some(&IntegerStorage::U64(vec![7, u64::MAX]))
+            );
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
