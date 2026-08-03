@@ -6,7 +6,9 @@
 use crate::builtins::common::matrix::matrix_power;
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::math::elementwise::integer_arithmetic::{try_integer_binary, IntegerBinaryOp};
-use runmat_builtins::{IntValue, IntegerStorage, NumericStorage, Tensor, Value};
+use runmat_builtins::{
+    ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericStorage, Tensor, Value,
+};
 
 fn complex_pow_scalar(base_re: f64, base_im: f64, exp_re: f64, exp_im: f64) -> (f64, f64) {
     if base_re == 0.0 && base_im == 0.0 && exp_re == 0.0 && exp_im == 0.0 {
@@ -281,43 +283,10 @@ pub async fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
                     m1.rows, m1.cols, m2.rows, m2.cols
                 ));
             }
-            let lhs = complex_tensor_values(m1);
-            let rhs = complex_tensor_values(m2);
-            let mut out: Vec<(f64, f64)> = Vec::with_capacity(lhs.len());
-            for i in 0..lhs.len() {
-                let (ar, ai) = lhs.value_at(i);
-                let (br, bi) = rhs.value_at(i);
-                out.push((ar * br - ai * bi, ar * bi + ai * br));
-            }
-            Ok(Value::ComplexTensor(
-                runmat_builtins::ComplexTensor::new(out, m1.shape.clone())
-                    .map_err(|e| format!(".*: {e}"))?,
-            ))
+            multiply_complex_tensors(m1, m2)
         }
-        (Value::ComplexTensor(m), Value::Num(s)) => {
-            let values = complex_tensor_values(m);
-            let data: Vec<(f64, f64)> = (0..values.len())
-                .map(|index| {
-                    let (re, im) = values.value_at(index);
-                    (re * s, im * s)
-                })
-                .collect();
-            Ok(Value::ComplexTensor(
-                runmat_builtins::ComplexTensor::new_2d(data, m.rows, m.cols)?,
-            ))
-        }
-        (Value::Num(s), Value::ComplexTensor(m)) => {
-            let values = complex_tensor_values(m);
-            let data: Vec<(f64, f64)> = (0..values.len())
-                .map(|index| {
-                    let (re, im) = values.value_at(index);
-                    (s * re, s * im)
-                })
-                .collect();
-            Ok(Value::ComplexTensor(
-                runmat_builtins::ComplexTensor::new_2d(data, m.rows, m.cols)?,
-            ))
-        }
+        (Value::ComplexTensor(m), Value::Num(s)) => multiply_complex_tensor_scalar(m, *s),
+        (Value::Num(s), Value::ComplexTensor(m)) => multiply_complex_tensor_scalar(m, *s),
 
         _ => Err(format!(
             "Element-wise multiplication not supported for types: {a:?} .* {b:?}"
@@ -381,6 +350,100 @@ fn multiply_real_tensors(lhs: &Tensor, rhs: &Tensor) -> Result<Value, String> {
         }
     };
     Tensor::from_numeric_storage(output, shape).map(Value::Tensor)
+}
+
+fn multiply_complex_tensors(lhs: &ComplexTensor, rhs: &ComplexTensor) -> Result<Value, String> {
+    let shape = lhs.shape.clone();
+    let output = match (lhs.complex_storage(), rhs.complex_storage()) {
+        (ComplexStorage::F64(lhs), ComplexStorage::F64(rhs)) => ComplexStorage::F64(
+            lhs.iter()
+                .zip(rhs)
+                .map(|(&(ar, ai), &(br, bi))| (ar * br - ai * bi, ar * bi + ai * br))
+                .collect(),
+        ),
+        (ComplexStorage::F32(lhs), ComplexStorage::F32(rhs)) => ComplexStorage::F32(
+            lhs.iter()
+                .zip(rhs)
+                .map(|(&(ar, ai), &(br, bi))| (ar * br - ai * bi, ar * bi + ai * br))
+                .collect(),
+        ),
+        (ComplexStorage::F32(lhs), ComplexStorage::F64(rhs)) => ComplexStorage::F32(
+            lhs.iter()
+                .zip(rhs)
+                .map(|(&(ar, ai), &(br, bi))| {
+                    let ar = f64::from(ar);
+                    let ai = f64::from(ai);
+                    ((ar * br - ai * bi) as f32, (ar * bi + ai * br) as f32)
+                })
+                .collect(),
+        ),
+        (ComplexStorage::F64(lhs), ComplexStorage::F32(rhs)) => ComplexStorage::F32(
+            lhs.iter()
+                .zip(rhs)
+                .map(|(&(ar, ai), &(br, bi))| {
+                    let br = f64::from(br);
+                    let bi = f64::from(bi);
+                    ((ar * br - ai * bi) as f32, (ar * bi + ai * br) as f32)
+                })
+                .collect(),
+        ),
+        _ => return multiply_promoted_complex_tensors(lhs, rhs),
+    };
+    ComplexTensor::from_complex_storage(output, shape).map(Value::ComplexTensor)
+}
+
+fn multiply_promoted_complex_tensors(
+    lhs: &ComplexTensor,
+    rhs: &ComplexTensor,
+) -> Result<Value, String> {
+    let lhs_values = complex_tensor_values(lhs);
+    let rhs_values = complex_tensor_values(rhs);
+    let mut output = Vec::with_capacity(lhs_values.len());
+    for index in 0..lhs_values.len() {
+        let (ar, ai) = lhs_values.value_at(index);
+        let (br, bi) = rhs_values.value_at(index);
+        output.push((ar * br - ai * bi, ar * bi + ai * br));
+    }
+    ComplexTensor::new(output, lhs.shape.clone()).map(Value::ComplexTensor)
+}
+
+fn multiply_complex_tensor_scalar(tensor: &ComplexTensor, scalar: f64) -> Result<Value, String> {
+    let shape = tensor.shape.clone();
+    let output = match tensor.complex_storage() {
+        ComplexStorage::F64(values) => ComplexStorage::F64(
+            values
+                .iter()
+                .map(|&(real, imag)| (real * scalar, imag * scalar))
+                .collect(),
+        ),
+        ComplexStorage::F32(values) => {
+            let scalar = scalar as f32;
+            ComplexStorage::F32(
+                values
+                    .iter()
+                    .map(|&(real, imag)| (real * scalar, imag * scalar))
+                    .collect(),
+            )
+        }
+        ComplexStorage::Integer(_) => {
+            return multiply_promoted_complex_tensor_scalar(tensor, scalar)
+        }
+    };
+    ComplexTensor::from_complex_storage(output, shape).map(Value::ComplexTensor)
+}
+
+fn multiply_promoted_complex_tensor_scalar(
+    tensor: &ComplexTensor,
+    scalar: f64,
+) -> Result<Value, String> {
+    let values = complex_tensor_values(tensor);
+    let output = (0..values.len())
+        .map(|index| {
+            let (real, imag) = values.value_at(index);
+            (real * scalar, imag * scalar)
+        })
+        .collect();
+    ComplexTensor::new(output, tensor.shape.clone()).map(Value::ComplexTensor)
 }
 
 // elementwise_add has been retired in favor of the `plus` builtin
@@ -976,6 +1039,54 @@ mod tests {
         };
         assert_eq!(result.shape, vec![1, 2]);
         assert_eq!(result.materialize_f64(), vec![(11.0, -2.0), (-17.0, 28.0)]);
+    }
+
+    #[test]
+    fn elementwise_mul_preserves_native_complex_single_and_nd_shape() {
+        let shape = vec![1, 2, 1];
+        let lhs = ComplexTensor::from_f32(vec![(1.0, 2.0), (-2.0, 1.0)], shape.clone()).unwrap();
+        let rhs = ComplexTensor::from_f32(vec![(3.0, -1.0), (4.0, 2.0)], shape.clone()).unwrap();
+        let Value::ComplexTensor(result) = block_on(elementwise_mul(
+            &Value::ComplexTensor(lhs),
+            &Value::ComplexTensor(rhs),
+        ))
+        .expect("mul") else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(result.shape, shape);
+        assert_eq!(result.as_f32_slice(), Some(&[(5.0, 5.0), (-10.0, 0.0)][..]));
+    }
+
+    #[test]
+    fn elementwise_mul_mixed_complex_floating_returns_single() {
+        let single = ComplexTensor::from_f32(vec![(1.0, 2.0)], vec![1, 1]).unwrap();
+        let double = ComplexTensor::new(vec![(3.0, -1.0)], vec![1, 1]).unwrap();
+        for (lhs, rhs) in [
+            (single.clone(), double.clone()),
+            (double.clone(), single.clone()),
+        ] {
+            let Value::ComplexTensor(result) = block_on(elementwise_mul(
+                &Value::ComplexTensor(lhs),
+                &Value::ComplexTensor(rhs),
+            ))
+            .expect("mul") else {
+                panic!("expected complex tensor");
+            };
+            assert_eq!(result.as_f32_slice(), Some(&[(5.0, 5.0)][..]));
+        }
+    }
+
+    #[test]
+    fn elementwise_mul_complex_single_by_double_scalar_returns_single() {
+        let tensor = ComplexTensor::from_f32(vec![(1.0, 2.0), (-2.0, 1.0)], vec![1, 2]).unwrap();
+        let Value::ComplexTensor(result) = block_on(elementwise_mul(
+            &Value::ComplexTensor(tensor),
+            &Value::Num(0.5),
+        ))
+        .expect("mul") else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(result.as_f32_slice(), Some(&[(0.5, 1.0), (-1.0, 0.5)][..]));
     }
 
     #[test]
