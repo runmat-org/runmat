@@ -3046,19 +3046,59 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn mean_native_integer_empty_reduction_returns_typed_zeros() {
-        let input = Tensor::new_integer(runmat_builtins::IntegerStorage::I8(vec![]), vec![0, 3])
-            .expect("integer tensor");
-        let result =
-            mean_builtin(Value::Tensor(input), vec![Value::from("native")]).expect("native mean");
-        let Value::Tensor(output) = result else {
-            panic!("expected typed tensor result");
-        };
-        assert_eq!(output.shape, vec![1, 3]);
-        assert_eq!(
-            output.integer_storage(),
-            Some(&runmat_builtins::IntegerStorage::I8(vec![0, 0, 0]))
-        );
+    fn mean_native_integer_empty_reduction_covers_every_class_and_shape() {
+        for storage in [
+            IntegerStorage::I8(Vec::new()),
+            IntegerStorage::I16(Vec::new()),
+            IntegerStorage::I32(Vec::new()),
+            IntegerStorage::I64(Vec::new()),
+            IntegerStorage::U8(Vec::new()),
+            IntegerStorage::U16(Vec::new()),
+            IntegerStorage::U32(Vec::new()),
+            IntegerStorage::U64(Vec::new()),
+        ] {
+            let default = mean_builtin(
+                Value::Tensor(
+                    Tensor::new_integer(storage.clone(), vec![0, 3]).expect("integer tensor"),
+                ),
+                vec![Value::from("native")],
+            )
+            .expect("default native mean");
+            assert_eq!(
+                default,
+                Value::Tensor(
+                    Tensor::new_integer(storage.zeros_like(3), vec![1, 3])
+                        .expect("default expected output")
+                )
+            );
+
+            let second_dimension = mean_builtin(
+                Value::Tensor(
+                    Tensor::new_integer(storage.clone(), vec![0, 3]).expect("integer tensor"),
+                ),
+                vec![Value::Num(2.0), Value::from("native")],
+            )
+            .expect("dimension-two native mean");
+            assert_eq!(
+                second_dimension,
+                Value::Tensor(
+                    Tensor::new_integer(storage.clone(), vec![0, 1])
+                        .expect("dimension-two expected output")
+                )
+            );
+
+            let all = mean_builtin(
+                Value::Tensor(
+                    Tensor::new_integer(storage.clone(), vec![0, 3]).expect("integer tensor"),
+                ),
+                vec![Value::from("all"), Value::from("native")],
+            )
+            .expect("all native mean");
+            assert_eq!(
+                all,
+                Value::Int(storage.cast_exact_assignment(&IntValue::I8(0)))
+            );
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -3508,6 +3548,35 @@ pub(crate) mod tests {
                     .expect("download native integer mean")
                     .data,
                 runmat_accelerate_api::HostIntegerDataOwned::U64(vec![large + 2, 8])
+            );
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn mean_native_empty_integer_gpu_returns_resident_typed_zeros() {
+        test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload_integer(&runmat_accelerate_api::HostIntegerTensorView {
+                    data: runmat_accelerate_api::HostIntegerDataView::U16(&[]),
+                    shape: &[0, 3],
+                })
+                .expect("upload empty native integer");
+            let result = mean_builtin(Value::GpuTensor(handle), vec![Value::from("native")])
+                .expect("native empty mean");
+            let Value::GpuTensor(out) = result else {
+                panic!("expected resident GPU tensor");
+            };
+            assert_eq!(out.shape, vec![1, 3]);
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&out),
+                Some(runmat_accelerate_api::IntegerElementType::U16)
+            );
+            assert_eq!(
+                block_on(provider.download_integer(&out))
+                    .expect("download native integer mean")
+                    .data,
+                runmat_accelerate_api::HostIntegerDataOwned::U16(vec![0, 0, 0])
             );
         });
     }
