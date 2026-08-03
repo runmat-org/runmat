@@ -29,6 +29,25 @@ fn complex_pow_scalar(base_re: f64, base_im: f64, exp_re: f64, exp_im: f64) -> (
     (mag * b.cos(), mag * b.sin())
 }
 
+fn complex_pow_scalar_f32(base_re: f32, base_im: f32, exp_re: f32, exp_im: f32) -> (f32, f32) {
+    if base_re == 0.0 && base_im == 0.0 && exp_re == 0.0 && exp_im == 0.0 {
+        return (1.0, 0.0);
+    }
+    if base_re == 0.0 && base_im == 0.0 && exp_im == 0.0 && exp_re > 0.0 {
+        return (0.0, 0.0);
+    }
+    let radius = base_re.hypot(base_im).max(0.0);
+    if radius == 0.0 {
+        return (0.0, 0.0);
+    }
+    let theta = base_im.atan2(base_re);
+    let log_radius = radius.ln();
+    let real = exp_re * log_radius - exp_im * theta;
+    let imag = exp_re * theta + exp_im * log_radius;
+    let magnitude = real.exp();
+    (magnitude * imag.cos(), magnitude * imag.sin())
+}
+
 fn scalar_real_value(value: &Value) -> Option<f64> {
     match value {
         Value::Num(n) => Some(*n),
@@ -1008,91 +1027,23 @@ pub fn elementwise_pow(a: &Value, b: &Value) -> Result<Value, String> {
                     m1.rows, m1.cols, m2.rows, m2.cols
                 ));
             }
-            let lhs = complex_tensor_values(m1);
-            let rhs = complex_tensor_values(m2);
-            let mut out: Vec<(f64, f64)> = Vec::with_capacity(lhs.len());
-            for i in 0..lhs.len() {
-                let (ar, ai) = lhs.value_at(i);
-                let (br, bi) = rhs.value_at(i);
-                out.push(complex_pow_scalar(ar, ai, br, bi));
-            }
-            Ok(Value::ComplexTensor(
-                runmat_builtins::ComplexTensor::new_2d(out, m1.rows, m1.cols)?,
-            ))
+            power_complex_tensors(m1, m2)
         }
-        (Value::ComplexTensor(m), Value::Num(s)) => {
-            let values = complex_tensor_values(m);
-            let out: Vec<(f64, f64)> = (0..values.len())
-                .map(|index| {
-                    let (ar, ai) = values.value_at(index);
-                    complex_pow_scalar(ar, ai, *s, 0.0)
-                })
-                .collect();
-            Ok(Value::ComplexTensor(
-                runmat_builtins::ComplexTensor::new_2d(out, m.rows, m.cols)?,
-            ))
-        }
+        (Value::ComplexTensor(m), Value::Num(s)) => power_complex_tensor_scalar(m, (*s, 0.0)),
         (Value::ComplexTensor(m), Value::Int(s)) => {
             let sv = s.to_f64();
-            let values = complex_tensor_values(m);
-            let out: Vec<(f64, f64)> = (0..values.len())
-                .map(|index| {
-                    let (ar, ai) = values.value_at(index);
-                    complex_pow_scalar(ar, ai, sv, 0.0)
-                })
-                .collect();
-            Ok(Value::ComplexTensor(
-                runmat_builtins::ComplexTensor::new_2d(out, m.rows, m.cols)?,
-            ))
+            power_complex_tensor_scalar(m, (sv, 0.0))
         }
         (Value::ComplexTensor(m), Value::Complex(br, bi)) => {
-            let values = complex_tensor_values(m);
-            let out: Vec<(f64, f64)> = (0..values.len())
-                .map(|index| {
-                    let (ar, ai) = values.value_at(index);
-                    complex_pow_scalar(ar, ai, *br, *bi)
-                })
-                .collect();
-            Ok(Value::ComplexTensor(
-                runmat_builtins::ComplexTensor::new_2d(out, m.rows, m.cols)?,
-            ))
+            power_complex_tensor_scalar(m, (*br, *bi))
         }
-        (Value::Num(s), Value::ComplexTensor(m)) => {
-            let values = complex_tensor_values(m);
-            let out: Vec<(f64, f64)> = (0..values.len())
-                .map(|index| {
-                    let (br, bi) = values.value_at(index);
-                    complex_pow_scalar(*s, 0.0, br, bi)
-                })
-                .collect();
-            Ok(Value::ComplexTensor(
-                runmat_builtins::ComplexTensor::new_2d(out, m.rows, m.cols)?,
-            ))
-        }
+        (Value::Num(s), Value::ComplexTensor(m)) => power_scalar_complex_tensor((*s, 0.0), m),
         (Value::Int(s), Value::ComplexTensor(m)) => {
             let sv = s.to_f64();
-            let values = complex_tensor_values(m);
-            let out: Vec<(f64, f64)> = (0..values.len())
-                .map(|index| {
-                    let (br, bi) = values.value_at(index);
-                    complex_pow_scalar(sv, 0.0, br, bi)
-                })
-                .collect();
-            Ok(Value::ComplexTensor(
-                runmat_builtins::ComplexTensor::new_2d(out, m.rows, m.cols)?,
-            ))
+            power_scalar_complex_tensor((sv, 0.0), m)
         }
         (Value::Complex(br, bi), Value::ComplexTensor(m)) => {
-            let values = complex_tensor_values(m);
-            let out: Vec<(f64, f64)> = (0..values.len())
-                .map(|index| {
-                    let (er, ei) = values.value_at(index);
-                    complex_pow_scalar(*br, *bi, er, ei)
-                })
-                .collect();
-            Ok(Value::ComplexTensor(
-                runmat_builtins::ComplexTensor::new_2d(out, m.rows, m.cols)?,
-            ))
+            power_scalar_complex_tensor((*br, *bi), m)
         }
 
         _ => Err(format!(
@@ -1173,6 +1124,140 @@ fn power_real_tensors(base: &Tensor, exponent: &Tensor) -> Result<Value, String>
         _ => return Err("element-wise integer power did not use the exact integer path".into()),
     };
     Tensor::from_numeric_storage(output, shape).map(Value::Tensor)
+}
+
+fn power_complex_tensors(base: &ComplexTensor, exponent: &ComplexTensor) -> Result<Value, String> {
+    let shape = base.shape.clone();
+    let output = match (base.complex_storage(), exponent.complex_storage()) {
+        (ComplexStorage::F64(base), ComplexStorage::F64(exponent)) => ComplexStorage::F64(
+            base.iter()
+                .zip(exponent)
+                .map(|(&(br, bi), &(er, ei))| complex_pow_scalar(br, bi, er, ei))
+                .collect(),
+        ),
+        (ComplexStorage::F32(base), ComplexStorage::F32(exponent)) => ComplexStorage::F32(
+            base.iter()
+                .zip(exponent)
+                .map(|(&(br, bi), &(er, ei))| complex_pow_scalar_f32(br, bi, er, ei))
+                .collect(),
+        ),
+        (ComplexStorage::F32(base), ComplexStorage::F64(exponent)) => ComplexStorage::F32(
+            base.iter()
+                .zip(exponent)
+                .map(|(&(br, bi), &(er, ei))| {
+                    let (real, imag) = complex_pow_scalar(f64::from(br), f64::from(bi), er, ei);
+                    (real as f32, imag as f32)
+                })
+                .collect(),
+        ),
+        (ComplexStorage::F64(base), ComplexStorage::F32(exponent)) => ComplexStorage::F32(
+            base.iter()
+                .zip(exponent)
+                .map(|(&(br, bi), &(er, ei))| {
+                    let (real, imag) = complex_pow_scalar(br, bi, f64::from(er), f64::from(ei));
+                    (real as f32, imag as f32)
+                })
+                .collect(),
+        ),
+        _ => return power_promoted_complex_tensors(base, exponent),
+    };
+    ComplexTensor::from_complex_storage(output, shape).map(Value::ComplexTensor)
+}
+
+fn power_promoted_complex_tensors(
+    base: &ComplexTensor,
+    exponent: &ComplexTensor,
+) -> Result<Value, String> {
+    let base_values = complex_tensor_values(base);
+    let exponent_values = complex_tensor_values(exponent);
+    let output = (0..base_values.len())
+        .map(|index| {
+            let (br, bi) = base_values.value_at(index);
+            let (er, ei) = exponent_values.value_at(index);
+            complex_pow_scalar(br, bi, er, ei)
+        })
+        .collect();
+    ComplexTensor::new(output, base.shape.clone()).map(Value::ComplexTensor)
+}
+
+fn power_complex_tensor_scalar(
+    base: &ComplexTensor,
+    exponent: (f64, f64),
+) -> Result<Value, String> {
+    let shape = base.shape.clone();
+    let output = match base.complex_storage() {
+        ComplexStorage::F64(values) => ComplexStorage::F64(
+            values
+                .iter()
+                .map(|&(br, bi)| complex_pow_scalar(br, bi, exponent.0, exponent.1))
+                .collect(),
+        ),
+        ComplexStorage::F32(values) => {
+            let exponent = (exponent.0 as f32, exponent.1 as f32);
+            ComplexStorage::F32(
+                values
+                    .iter()
+                    .map(|&(br, bi)| complex_pow_scalar_f32(br, bi, exponent.0, exponent.1))
+                    .collect(),
+            )
+        }
+        ComplexStorage::Integer(_) => return power_promoted_complex_tensor_scalar(base, exponent),
+    };
+    ComplexTensor::from_complex_storage(output, shape).map(Value::ComplexTensor)
+}
+
+fn power_promoted_complex_tensor_scalar(
+    base: &ComplexTensor,
+    exponent: (f64, f64),
+) -> Result<Value, String> {
+    let values = complex_tensor_values(base);
+    let output = (0..values.len())
+        .map(|index| {
+            let (br, bi) = values.value_at(index);
+            complex_pow_scalar(br, bi, exponent.0, exponent.1)
+        })
+        .collect();
+    ComplexTensor::new(output, base.shape.clone()).map(Value::ComplexTensor)
+}
+
+fn power_scalar_complex_tensor(
+    base: (f64, f64),
+    exponent: &ComplexTensor,
+) -> Result<Value, String> {
+    let shape = exponent.shape.clone();
+    let output = match exponent.complex_storage() {
+        ComplexStorage::F64(values) => ComplexStorage::F64(
+            values
+                .iter()
+                .map(|&(er, ei)| complex_pow_scalar(base.0, base.1, er, ei))
+                .collect(),
+        ),
+        ComplexStorage::F32(values) => {
+            let base = (base.0 as f32, base.1 as f32);
+            ComplexStorage::F32(
+                values
+                    .iter()
+                    .map(|&(er, ei)| complex_pow_scalar_f32(base.0, base.1, er, ei))
+                    .collect(),
+            )
+        }
+        ComplexStorage::Integer(_) => return power_scalar_promoted_complex_tensor(base, exponent),
+    };
+    ComplexTensor::from_complex_storage(output, shape).map(Value::ComplexTensor)
+}
+
+fn power_scalar_promoted_complex_tensor(
+    base: (f64, f64),
+    exponent: &ComplexTensor,
+) -> Result<Value, String> {
+    let values = complex_tensor_values(exponent);
+    let output = (0..values.len())
+        .map(|index| {
+            let (er, ei) = values.value_at(index);
+            complex_pow_scalar(base.0, base.1, er, ei)
+        })
+        .collect();
+    ComplexTensor::new(output, exponent.shape.clone()).map(Value::ComplexTensor)
 }
 
 // Element-wise operations are not directly exposed as runtime builtins because they need
@@ -1376,6 +1461,65 @@ mod tests {
         assert!((result.materialize_f64()[0].1 - 24.0).abs() < 1e-12);
         assert!((result.materialize_f64()[1].0 + 3.0).abs() < 1e-12);
         assert!((result.materialize_f64()[1].1 + 4.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn elementwise_pow_preserves_native_complex_single_and_nd_shape() {
+        let shape = vec![1, 2, 1];
+        let base = ComplexTensor::from_f32(vec![(1.0, 2.0), (2.0, -1.0)], shape.clone()).unwrap();
+        let exponent =
+            ComplexTensor::from_f32(vec![(2.0, 0.0), (2.0, 0.0)], shape.clone()).unwrap();
+        let Value::ComplexTensor(result) =
+            elementwise_pow(&Value::ComplexTensor(base), &Value::ComplexTensor(exponent))
+                .expect("power")
+        else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(result.shape, shape);
+        let values = result.as_f32_slice().expect("single storage");
+        for (actual, expected) in values.iter().zip([(-3.0, 4.0), (3.0, -4.0)]) {
+            assert!((actual.0 - expected.0).abs() < 1e-5);
+            assert!((actual.1 - expected.1).abs() < 1e-5);
+        }
+    }
+
+    #[test]
+    fn elementwise_pow_mixed_complex_floating_returns_single() {
+        let single = ComplexTensor::from_f32(vec![(1.0, 2.0)], vec![1, 1]).unwrap();
+        let double = ComplexTensor::new(vec![(2.0, 0.0)], vec![1, 1]).unwrap();
+        for (base, exponent) in [
+            (single.clone(), double.clone()),
+            (double.clone(), single.clone()),
+        ] {
+            let Value::ComplexTensor(result) =
+                elementwise_pow(&Value::ComplexTensor(base), &Value::ComplexTensor(exponent))
+                    .expect("power")
+            else {
+                panic!("expected complex tensor");
+            };
+            assert!(result.as_f32_slice().is_some());
+        }
+    }
+
+    #[test]
+    fn elementwise_pow_complex_single_scalar_paths_preserve_single() {
+        let tensor = ComplexTensor::from_f32(vec![(1.0, 2.0)], vec![1, 1]).unwrap();
+        let Value::ComplexTensor(tensor_base) =
+            elementwise_pow(&Value::ComplexTensor(tensor.clone()), &Value::Num(2.0))
+                .expect("power")
+        else {
+            panic!("expected complex tensor");
+        };
+        let value = tensor_base.as_f32_slice().expect("single storage")[0];
+        assert!((value.0 + 3.0).abs() < 1e-5);
+        assert!((value.1 - 4.0).abs() < 1e-5);
+
+        let Value::ComplexTensor(tensor_exponent) =
+            elementwise_pow(&Value::Num(2.0), &Value::ComplexTensor(tensor)).expect("power")
+        else {
+            panic!("expected complex tensor");
+        };
+        assert!(tensor_exponent.as_f32_slice().is_some());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
