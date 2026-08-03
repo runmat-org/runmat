@@ -6,7 +6,7 @@ use runmat_accelerate_api::{GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, NumericDType, Tensor, Type, Value,
+    IntValue, NumericDType, Tensor, Type, Value,
 };
 const NAME: &str = "prod";
 
@@ -19,7 +19,7 @@ fn prod_type(args: &[Type], ctx: &ResolveContext) -> Type {
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::arg_tokens::tokens_from_values;
-use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
+use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
@@ -113,7 +113,7 @@ const PROD_INPUTS_OUTTYPE: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
         default: Some("\"double\""),
-        description: "Output class specifier: \"double\", \"default\", \"native\", or \"like\".",
+        description: "Output class specifier: \"double\", \"default\", or \"native\".",
     },
 ];
 
@@ -165,31 +165,7 @@ const PROD_INPUTS_NANFLAG_DIM: [BuiltinParamDescriptor; 3] = [
     },
 ];
 
-const PROD_INPUTS_LIKE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "like",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"like\""),
-        description: "Prototype keyword.",
-    },
-    BuiltinParamDescriptor {
-        name: "prototype",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Prototype value controlling output class/device.",
-    },
-];
-
-const PROD_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
+const PROD_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
     BuiltinSignatureDescriptor {
         label: "B = prod(A)",
         inputs: &PROD_INPUTS_CORE,
@@ -223,11 +199,6 @@ const PROD_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
     BuiltinSignatureDescriptor {
         label: "B = prod(A, nanflag, dim)",
         inputs: &PROD_INPUTS_NANFLAG_DIM,
-        outputs: &PROD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = prod(A, \"like\", prototype)",
-        inputs: &PROD_INPUTS_LIKE,
         outputs: &PROD_OUTPUT,
     },
 ];
@@ -427,7 +398,6 @@ struct ResolvedDims {
 enum OutputTemplate {
     Double,
     Native,
-    Like(Value),
 }
 
 struct ParsedArguments {
@@ -640,29 +610,6 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                     output_set = true;
                     idx += 1;
                     continue;
-                }
-                "like" => {
-                    if output_set {
-                        return Err(prod_descriptor_error_with_detail(
-                            &PROD_ERROR_INVALID_ARGUMENT,
-                            "cannot combine 'like' with another output class specifier",
-                        ));
-                    }
-                    let Some(proto) = args.get(idx + 1).cloned() else {
-                        return Err(prod_descriptor_error_with_detail(
-                            &PROD_ERROR_INVALID_ARGUMENT,
-                            "expected prototype after 'like'",
-                        ));
-                    };
-                    output = OutputTemplate::Like(proto);
-                    idx += 2;
-                    if idx < args.len() {
-                        return Err(prod_descriptor_error_with_detail(
-                            &PROD_ERROR_INVALID_ARGUMENT,
-                            "'like' must be the final argument",
-                        ));
-                    }
-                    break;
                 }
                 _ => {}
             }
@@ -1033,7 +980,6 @@ async fn apply_output_template(
             let value = apply_native_template(value, meta).await?;
             ensure_device(value, meta.device).await
         }
-        OutputTemplate::Like(proto) => apply_like_template(value, proto).await,
     }
 }
 
@@ -1143,92 +1089,13 @@ fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     Ok(Value::GpuTensor(handle))
 }
 
-async fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<Value> {
-    let analysed = analyse_like_prototype(prototype).await?;
-    match analysed.class {
-        PrototypeClass::Real => match analysed.device {
-            DevicePreference::Host => ensure_device(value, DevicePreference::Host).await,
-            DevicePreference::Gpu => ensure_device(value, DevicePreference::Gpu).await,
-        },
-        PrototypeClass::Complex => {
-            let host_value = ensure_device(value, DevicePreference::Host).await?;
-            real_to_complex(host_value)
-        }
-    }
-}
-
-fn real_to_complex(value: Value) -> BuiltinResult<Value> {
-    match value {
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
-        Value::Num(n) => Ok(Value::Complex(n, 0.0)),
-        Value::Tensor(t) => {
-            let data: Vec<(f64, f64)> = t
-                .materialize_f64()
-                .into_iter()
-                .map(|value| (value, 0.0))
-                .collect();
-            let tensor =
-                ComplexTensor::new(data, t.shape.clone()).map_err(|e| prod_internal_error(&e))?;
-            Ok(complex_tensor_into_value(tensor))
-        }
-        Value::LogicalArray(logical) => {
-            let tensor =
-                tensor::logical_to_tensor(&logical).map_err(|e| prod_internal_error(&e))?;
-            real_to_complex(Value::Tensor(tensor))
-        }
-        other => Err(prod_descriptor_error_with_detail(
-            &PROD_ERROR_INVALID_INPUT,
-            format!("cannot convert value {other:?} to a complex result"),
-        )),
-    }
-}
-
-struct LikeAnalysis {
-    device: DevicePreference,
-    class: PrototypeClass,
-}
-
-enum PrototypeClass {
-    Real,
-    Complex,
-}
-
-#[async_recursion::async_recursion(?Send)]
-async fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
-    match proto {
-        Value::GpuTensor(_) => Ok(LikeAnalysis {
-            device: DevicePreference::Gpu,
-            class: PrototypeClass::Real,
-        }),
-        Value::Tensor(_)
-        | Value::Num(_)
-        | Value::Int(_)
-        | Value::LogicalArray(_)
-        | Value::Bool(_) => Ok(LikeAnalysis {
-            device: DevicePreference::Host,
-            class: PrototypeClass::Real,
-        }),
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(LikeAnalysis {
-            device: DevicePreference::Host,
-            class: PrototypeClass::Complex,
-        }),
-        other => {
-            let gathered = crate::dispatcher::gather_if_needed_async(other)
-                .await
-                .map_err(|e| prod_internal_error(e.to_string()))?;
-            analyse_like_prototype(&gathered).await
-        }
-    }
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{
-        HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
-        IntegerElementType,
+        HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView, IntegerElementType,
     };
     use runmat_builtins::{IntValue, IntegerStorage};
 
@@ -1274,7 +1141,7 @@ pub(crate) mod tests {
         assert!(labels.contains(&"B = prod(A, outtype)"));
         assert!(labels.contains(&"B = prod(A, dim, nanflag)"));
         assert!(labels.contains(&"B = prod(A, nanflag, dim)"));
-        assert!(labels.contains(&"B = prod(A, \"like\", prototype)"));
+        assert!(!labels.iter().any(|label| label.contains("like")));
         assert!(PROD_DESCRIPTOR
             .errors
             .iter()
@@ -1491,29 +1358,14 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn prod_like_complex_prototype() {
-        let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let proto = Value::Complex(0.0, 1.0);
-        let result = prod_builtin(
-            Value::Tensor(tensor),
-            vec![Value::from("all"), Value::from("like"), proto.clone()],
-        )
-        .expect("prod");
-        match result {
-            Value::Complex(re, im) => {
-                assert_eq!(re, 6.0);
-                assert_eq!(im, 0.0);
-            }
-            other => panic!("expected complex result, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn prod_like_without_prototype_errors() {
+    fn prod_rejects_undocumented_like_option() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let err = prod_builtin(Value::Tensor(tensor), vec![Value::from("like")]).unwrap_err();
-        assert!(err.message().contains("expected prototype"));
+        let err = prod_builtin(
+            Value::Tensor(tensor),
+            vec![Value::from("like"), Value::Num(0.0)],
+        )
+        .unwrap_err();
+        assert_eq!(err.identifier(), PROD_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1571,32 +1423,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn prod_gpu_like_prototype() {
-        test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-            let proto_view = HostTensorView {
-                data: &[0.0],
-                shape: &[1, 1],
-            };
-            let proto_handle = provider.upload(&proto_view).expect("upload");
-            let result = prod_builtin(
-                Value::Tensor(tensor.clone()),
-                vec![Value::from("like"), Value::GpuTensor(proto_handle.clone())],
-            )
-            .expect("prod");
-            match result {
-                Value::GpuTensor(h) => {
-                    let gathered = test_support::gather(Value::GpuTensor(h)).expect("gather");
-                    assert_eq!(gathered.shape, vec![1, 2]);
-                    assert_eq!(values(&gathered), vec![2.0, 12.0]);
-                }
-                other => panic!("expected GPU tensor, got {other:?}"),
-            }
-        });
-    }
-
     #[cfg(feature = "wgpu")]
-    #[test]
     fn prod_native_integer_gpu_stays_resident() {
         match runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),

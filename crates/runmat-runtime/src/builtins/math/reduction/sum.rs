@@ -112,7 +112,7 @@ const SUM_INPUTS_A_OUTTYPE: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
         default: Some("\"double\""),
-        description: "Output class specifier: \"double\", \"default\", \"native\", or \"like\".",
+        description: "Output class specifier: \"double\", \"default\", or \"native\".",
     },
 ];
 
@@ -164,31 +164,7 @@ const SUM_INPUTS_A_NANFLAG_DIM: [BuiltinParamDescriptor; 3] = [
     },
 ];
 
-const SUM_INPUTS_A_LIKE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "like",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"like\""),
-        description: "Prototype keyword.",
-    },
-    BuiltinParamDescriptor {
-        name: "prototype",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Prototype value controlling output class/device.",
-    },
-];
-
-const SUM_SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
+const SUM_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
     BuiltinSignatureDescriptor {
         label: "S = sum(A)",
         inputs: &SUM_INPUTS_A,
@@ -222,11 +198,6 @@ const SUM_SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
     BuiltinSignatureDescriptor {
         label: "S = sum(A, nanflag, dim)",
         inputs: &SUM_INPUTS_A_NANFLAG_DIM,
-        outputs: &SUM_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = sum(A, \"like\", prototype)",
-        inputs: &SUM_INPUTS_A_LIKE,
         outputs: &SUM_OUTPUT,
     },
     BuiltinSignatureDescriptor {
@@ -344,7 +315,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name = "sum",
     category = "math/reduction",
     summary = "Sum array elements along dimensions with MATLAB-compatible options.",
-    keywords = "sum,reduction,gpu,omitnan,all,like",
+    keywords = "sum,reduction,gpu,omitnan,all",
     accel = "reduction",
     type_resolver(sum_type),
     descriptor(crate::builtins::math::reduction::sum::SUM_DESCRIPTOR),
@@ -436,7 +407,6 @@ struct ResolvedDims {
 enum OutputTemplate {
     Double,
     Native,
-    Like(Value),
 }
 
 struct ParsedArguments {
@@ -620,24 +590,6 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                     output_set = true;
                     idx += 1;
                     continue;
-                }
-                "like" => {
-                    if output_set {
-                        return Err(sum_invalid_argument(
-                            "sum: cannot combine 'like' with another output class specifier",
-                        ));
-                    }
-                    let Some(proto) = args.get(idx + 1).cloned() else {
-                        return Err(sum_invalid_argument("sum: expected prototype after 'like'"));
-                    };
-                    output = OutputTemplate::Like(proto);
-                    idx += 2;
-                    if idx < args.len() {
-                        return Err(sum_invalid_argument(
-                            "sum: 'like' must be the final argument",
-                        ));
-                    }
-                    break;
                 }
                 _ => {}
             }
@@ -1250,7 +1202,6 @@ async fn apply_output_template(
             let value = apply_native_template(value, meta).await?;
             ensure_device(value, meta.device).await
         }
-        OutputTemplate::Like(proto) => apply_like_template(value, proto).await,
     }
 }
 
@@ -1350,90 +1301,13 @@ fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     Ok(Value::GpuTensor(handle))
 }
 
-async fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<Value> {
-    let analysed = analyse_like_prototype(prototype).await?;
-    match analysed.class {
-        PrototypeClass::Real => match analysed.device {
-            DevicePreference::Host => ensure_device(value, DevicePreference::Host).await,
-            DevicePreference::Gpu => ensure_device(value, DevicePreference::Gpu).await,
-        },
-        PrototypeClass::Complex => {
-            let host_value = ensure_device(value, DevicePreference::Host).await?;
-            real_to_complex(host_value)
-        }
-    }
-}
-
-fn real_to_complex(value: Value) -> BuiltinResult<Value> {
-    match value {
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
-        Value::Num(n) => Ok(Value::Complex(n, 0.0)),
-        Value::Tensor(t) => {
-            let data: Vec<(f64, f64)> = t
-                .materialize_f64()
-                .into_iter()
-                .map(|value| (value, 0.0))
-                .collect();
-            let tensor = ComplexTensor::new(data, t.shape.clone())
-                .map_err(|e| sum_internal_error(format!("sum: {e}")))?;
-            Ok(complex_tensor_into_value(tensor))
-        }
-        Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(sum_internal_error)?;
-            real_to_complex(Value::Tensor(tensor))
-        }
-        other => Err(sum_invalid_input(format!(
-            "sum: cannot convert value {other:?} to a complex result"
-        ))),
-    }
-}
-
-struct LikeAnalysis {
-    device: DevicePreference,
-    class: PrototypeClass,
-}
-
-enum PrototypeClass {
-    Real,
-    Complex,
-}
-
-#[async_recursion::async_recursion(?Send)]
-async fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
-    match proto {
-        Value::GpuTensor(_) => Ok(LikeAnalysis {
-            device: DevicePreference::Gpu,
-            class: PrototypeClass::Real,
-        }),
-        Value::Tensor(_)
-        | Value::Num(_)
-        | Value::Int(_)
-        | Value::LogicalArray(_)
-        | Value::Bool(_) => Ok(LikeAnalysis {
-            device: DevicePreference::Host,
-            class: PrototypeClass::Real,
-        }),
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(LikeAnalysis {
-            device: DevicePreference::Host,
-            class: PrototypeClass::Complex,
-        }),
-        other => {
-            let gathered = crate::dispatcher::gather_if_needed_async(other)
-                .await
-                .map_err(|e| sum_internal_error(format!("sum: {e}")))?;
-            analyse_like_prototype(&gathered).await
-        }
-    }
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{
-        HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
-        IntegerElementType,
+        HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView, IntegerElementType,
     };
     use runmat_builtins::{IntValue, IntegerStorage};
 
@@ -1475,7 +1349,7 @@ pub(crate) mod tests {
         assert!(labels.contains(&"S = sum(A, outtype)"));
         assert!(labels.contains(&"S = sum(A, dim, nanflag)"));
         assert!(labels.contains(&"S = sum(A, nanflag, dim)"));
-        assert!(labels.contains(&"S = sum(A, \"like\", prototype)"));
+        assert!(!labels.iter().any(|label| label.contains("like")));
         assert!(labels.contains(&"S = sum(A, vecdim)"));
     }
 
@@ -1682,31 +1556,14 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn sum_like_complex_prototype() {
-        let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let proto = Value::Complex(0.0, 1.0);
-        let result = sum_builtin(
-            Value::Tensor(tensor),
-            vec![Value::from("all"), Value::from("like"), proto.clone()],
-        )
-        .expect("sum");
-        match result {
-            Value::Complex(re, im) => {
-                assert_eq!(re, 6.0);
-                assert_eq!(im, 0.0);
-            }
-            other => panic!("expected complex result, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn sum_like_without_prototype_errors() {
+    fn sum_rejects_undocumented_like_option() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let err = sum_builtin(Value::Tensor(tensor), vec![Value::from("like")])
-            .expect_err("expected error");
+        let err = sum_builtin(
+            Value::Tensor(tensor),
+            vec![Value::from("like"), Value::Num(0.0)],
+        )
+        .expect_err("expected error");
         assert_eq!(err.identifier(), SUM_ERROR_INVALID_ARGUMENT.identifier);
-        assert!(err.message().contains("prototype"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1773,32 +1630,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn sum_gpu_like_prototype() {
-        test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-            let proto_view = HostTensorView {
-                data: &[0.0],
-                shape: &[1, 1],
-            };
-            let proto_handle = provider.upload(&proto_view).expect("upload");
-            let result = sum_builtin(
-                Value::Tensor(tensor.clone()),
-                vec![Value::from("like"), Value::GpuTensor(proto_handle.clone())],
-            )
-            .expect("sum");
-            match result {
-                Value::GpuTensor(h) => {
-                    let gathered = test_support::gather(Value::GpuTensor(h)).expect("gather");
-                    assert_eq!(gathered.shape, vec![1, 2]);
-                    assert_eq!(values(&gathered), vec![3.0, 7.0]);
-                }
-                other => panic!("expected GPU tensor, got {other:?}"),
-            }
-        });
-    }
-
     #[cfg(feature = "wgpu")]
-    #[test]
     fn sum_native_integer_gpu_stays_resident() {
         match runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),

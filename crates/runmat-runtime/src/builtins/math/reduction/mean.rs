@@ -113,7 +113,7 @@ const MEAN_INPUTS_A_OUTTYPE: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
         default: Some("\"default\""),
-        description: "Output class specifier: \"double\", \"default\", \"native\", or \"like\".",
+        description: "Output class specifier: \"double\", \"default\", or \"native\".",
     },
 ];
 
@@ -165,30 +165,6 @@ const MEAN_INPUTS_A_MISSINGFLAG_DIM: [BuiltinParamDescriptor; 3] = [
     },
 ];
 
-const MEAN_INPUTS_A_LIKE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "like",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"like\""),
-        description: "Prototype keyword.",
-    },
-    BuiltinParamDescriptor {
-        name: "prototype",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Prototype value controlling output class/device.",
-    },
-];
-
 const MEAN_INPUTS_A_WEIGHTS: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "A",
@@ -213,7 +189,7 @@ const MEAN_INPUTS_A_WEIGHTS: [BuiltinParamDescriptor; 3] = [
     },
 ];
 
-const MEAN_SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
+const MEAN_SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
     BuiltinSignatureDescriptor {
         label: "M = mean(A)",
         inputs: &MEAN_INPUTS_A,
@@ -247,11 +223,6 @@ const MEAN_SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
     BuiltinSignatureDescriptor {
         label: "M = mean(A, missingflag, dim)",
         inputs: &MEAN_INPUTS_A_MISSINGFLAG_DIM,
-        outputs: &MEAN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = mean(A, \"like\", prototype)",
-        inputs: &MEAN_INPUTS_A_LIKE,
         outputs: &MEAN_OUTPUT,
     },
     BuiltinSignatureDescriptor {
@@ -378,7 +349,6 @@ enum OutputTemplate {
     Default,
     Double,
     Native,
-    Like(Value),
 }
 
 #[derive(Clone)]
@@ -877,26 +847,6 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                     idx += 1;
                     continue;
                 }
-                "like" => {
-                    if output_set {
-                        return Err(mean_invalid_argument(
-                            "mean: cannot combine 'like' with another output class specifier",
-                        ));
-                    }
-                    let Some(proto) = args.get(idx + 1).cloned() else {
-                        return Err(mean_invalid_argument(
-                            "mean: expected prototype after 'like'",
-                        ));
-                    };
-                    output = OutputTemplate::Like(proto);
-                    idx += 2;
-                    if idx < args.len() {
-                        return Err(mean_invalid_argument(
-                            "mean: 'like' must be the final argument",
-                        ));
-                    }
-                    break;
-                }
                 _ => {}
             }
         }
@@ -1000,7 +950,7 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<MeanAxes>> {
         return match lowered.as_str() {
             "all" => Ok(Some(MeanAxes::All)),
             "omitnan" | "includenan" | "omitmissing" | "includemissing" | "double" | "native"
-            | "default" | "like" | "weights" => Ok(None),
+            | "default" | "weights" => Ok(None),
             "" => Err(mean_invalid_argument(
                 "mean: dimension string must not be empty",
             )),
@@ -1103,7 +1053,7 @@ fn weighted_dimension(shape: &[usize], axes: &MeanAxes) -> BuiltinResult<usize> 
 
 fn weighted_computation_dtype(input: NumericDType, output: &OutputTemplate) -> NumericDType {
     match output {
-        OutputTemplate::Double | OutputTemplate::Like(_) => NumericDType::F64,
+        OutputTemplate::Double => NumericDType::F64,
         OutputTemplate::Default => {
             if input == NumericDType::F32 {
                 NumericDType::F32
@@ -2462,7 +2412,6 @@ async fn apply_output_template(
             let value = apply_native_template(value, meta).await?;
             ensure_device(value, meta.device).await
         }
-        OutputTemplate::Like(proto) => apply_like_template(value, proto).await,
     }
 }
 
@@ -2599,82 +2548,6 @@ fn upload_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
     Ok(Value::GpuTensor(handle))
 }
 
-async fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<Value> {
-    let analysed = analyse_like_prototype(prototype).await?;
-    match analysed.class {
-        PrototypeClass::Real => match analysed.device {
-            DevicePreference::Host => ensure_device(value, DevicePreference::Host).await,
-            DevicePreference::Gpu => ensure_device(value, DevicePreference::Gpu).await,
-        },
-        PrototypeClass::Complex => {
-            let host_value = ensure_device(value, DevicePreference::Host).await?;
-            real_to_complex(host_value)
-        }
-    }
-}
-
-fn real_to_complex(value: Value) -> BuiltinResult<Value> {
-    match value {
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
-        Value::Num(n) => Ok(Value::Complex(n, 0.0)),
-        Value::Tensor(t) => {
-            let data: Vec<(f64, f64)> = t
-                .materialize_f64()
-                .into_iter()
-                .map(|value| (value, 0.0))
-                .collect();
-            let tensor = ComplexTensor::new(data, t.shape.clone())
-                .map_err(|e| mean_internal_error(format!("mean: {e}")))?;
-            Ok(complex_tensor_into_value(tensor))
-        }
-        Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(mean_invalid_input)?;
-            real_to_complex(Value::Tensor(tensor))
-        }
-        other => Err(mean_invalid_input(format!(
-            "mean: cannot convert value {other:?} to a complex result"
-        ))),
-    }
-}
-
-struct LikeAnalysis {
-    device: DevicePreference,
-    class: PrototypeClass,
-}
-
-enum PrototypeClass {
-    Real,
-    Complex,
-}
-
-#[async_recursion::async_recursion(?Send)]
-async fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
-    match proto {
-        Value::GpuTensor(_) => Ok(LikeAnalysis {
-            device: DevicePreference::Gpu,
-            class: PrototypeClass::Real,
-        }),
-        Value::Tensor(_)
-        | Value::Num(_)
-        | Value::Int(_)
-        | Value::LogicalArray(_)
-        | Value::Bool(_) => Ok(LikeAnalysis {
-            device: DevicePreference::Host,
-            class: PrototypeClass::Real,
-        }),
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(LikeAnalysis {
-            device: DevicePreference::Host,
-            class: PrototypeClass::Complex,
-        }),
-        other => {
-            let gathered = dispatcher::gather_if_needed_async(other)
-                .await
-                .map_err(|e| mean_internal_error(format!("mean: {e}")))?;
-            analyse_like_prototype(&gathered).await
-        }
-    }
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -2720,7 +2593,7 @@ pub(crate) mod tests {
         assert!(labels.contains(&"M = mean(A, outtype)"));
         assert!(labels.contains(&"M = mean(A, dim, missingflag)"));
         assert!(labels.contains(&"M = mean(A, missingflag, dim)"));
-        assert!(labels.contains(&"M = mean(A, \"like\", prototype)"));
+        assert!(!labels.iter().any(|label| label.contains("like")));
         assert!(labels.contains(&"M = mean(A, vecdim)"));
         assert!(labels.contains(&"M = mean(___, Weights=W)"));
         assert_eq!(MEAN_INPUTS_A_OUTTYPE[1].default, Some("\"default\""));
@@ -3223,31 +3096,14 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn mean_like_complex_prototype() {
-        let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let proto = Value::Complex(0.0, 1.0);
-        let result = mean_builtin(
-            Value::Tensor(tensor),
-            vec![Value::from("all"), Value::from("like"), proto.clone()],
-        )
-        .expect("mean");
-        match result {
-            Value::Complex(re, im) => {
-                assert!((re - 2.0).abs() < 1e-12);
-                assert!(im.abs() < 1e-12);
-            }
-            other => panic!("expected complex result, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn mean_like_without_prototype_errors() {
+    fn mean_rejects_undocumented_like_option() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let err = mean_builtin(Value::Tensor(tensor), vec![Value::from("like")])
-            .expect_err("expected error");
+        let err = mean_builtin(
+            Value::Tensor(tensor),
+            vec![Value::from("like"), Value::Num(0.0)],
+        )
+        .expect_err("expected error");
         assert_eq!(err.identifier(), MEAN_ERROR_INVALID_ARGUMENT.identifier);
-        assert!(err.message().contains("prototype"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -3698,33 +3554,6 @@ pub(crate) mod tests {
         let b1 = mean_builtin(Value::Tensor(t), vec![Value::Num(2.0)]).unwrap();
         let b2 = mean_builtin(b1, vec![Value::Num(3.0)]).unwrap();
         assert_eq!(a, b2);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn mean_like_gpu_prototype_residency() {
-        test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-            let input = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
-            let prototype = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
-            let result = mean_builtin(
-                Value::GpuTensor(input),
-                vec![
-                    Value::from("omitnan"),
-                    Value::from("like"),
-                    Value::GpuTensor(prototype),
-                ],
-            )
-            .expect("mean");
-            match result {
-                Value::GpuTensor(handle) => {
-                    let gathered =
-                        test_support::gather(Value::GpuTensor(handle.clone())).expect("gather");
-                    assert_eq!(values(&gathered), vec![1.5]);
-                }
-                other => panic!("expected GPU tensor result, got {other:?}"),
-            }
-        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
