@@ -2,11 +2,13 @@
 
 use std::cmp::Ordering;
 
+use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
     ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericScalar, Tensor, Value,
 };
 
 use crate::builtins::common::broadcast::BroadcastPlan;
+use crate::builtins::common::gpu_helpers;
 
 #[derive(Clone, Copy)]
 pub(crate) enum IntegerComparisonOp {
@@ -22,6 +24,66 @@ pub(crate) enum IntegerComparisonOp {
 pub(crate) enum IntegerComparisonError {
     SizeMismatch,
     Internal,
+}
+
+/// Executes a resident ordering comparison, extracting real lanes first when
+/// either input is complex-interleaved. The logical result remains resident.
+pub(crate) async fn try_gpu_ordering_comparison(
+    lhs: &GpuTensorHandle,
+    rhs: &GpuTensorHandle,
+    operation: IntegerComparisonOp,
+) -> Option<crate::BuiltinResult<Value>> {
+    let provider = runmat_accelerate_api::provider()?;
+    let mut temporary_lhs = None;
+    let mut temporary_rhs = None;
+    let lhs_real =
+        if runmat_accelerate_api::handle_storage(lhs) == GpuTensorStorage::ComplexInterleaved {
+            match provider.unary_real(lhs).await {
+                Ok(handle) => {
+                    temporary_lhs = Some(handle);
+                    temporary_lhs.as_ref().expect("temporary lhs")
+                }
+                Err(_) => return None,
+            }
+        } else {
+            lhs
+        };
+    let rhs_real =
+        if runmat_accelerate_api::handle_storage(rhs) == GpuTensorStorage::ComplexInterleaved {
+            match provider.unary_real(rhs).await {
+                Ok(handle) => {
+                    temporary_rhs = Some(handle);
+                    temporary_rhs.as_ref().expect("temporary rhs")
+                }
+                Err(_) => {
+                    if let Some(handle) = temporary_lhs.as_ref() {
+                        let _ = provider.free(handle);
+                    }
+                    return None;
+                }
+            }
+        } else {
+            rhs
+        };
+    let result = match operation {
+        IntegerComparisonOp::Lt => provider.elem_lt(lhs_real, rhs_real).await,
+        IntegerComparisonOp::Le => provider.elem_le(lhs_real, rhs_real).await,
+        IntegerComparisonOp::Gt => provider.elem_gt(lhs_real, rhs_real).await,
+        IntegerComparisonOp::Ge => provider.elem_ge(lhs_real, rhs_real).await,
+        IntegerComparisonOp::Eq | IntegerComparisonOp::Ne => {
+            unreachable!("resident complex ordering helper only supports lt/le/gt/ge")
+        }
+    };
+    if let Some(handle) = temporary_lhs.as_ref() {
+        let _ = provider.free(handle);
+    }
+    if let Some(handle) = temporary_rhs.as_ref() {
+        let _ = provider.free(handle);
+    }
+    match result {
+        Ok(handle) => Some(Ok(gpu_helpers::logical_gpu_value(handle))),
+        Err(_) => None,
+    }
 }
 
 /// Performs a comparison when native integer storage is compared against other
@@ -89,6 +151,42 @@ pub(crate) fn try_complex_integer_equality_comparison(
             compare_complex_real(&rhs, &lhs, operation)?
         }
         _ => return Ok(None),
+    };
+    Ok(Some(result))
+}
+
+/// Performs MATLAB ordering comparisons for complex values by comparing only
+/// their real components. Integer-backed components remain exact across
+/// complex/complex and complex/real mixed-class comparisons.
+pub(crate) fn try_complex_ordering_comparison(
+    lhs: &Value,
+    rhs: &Value,
+    operation: IntegerComparisonOp,
+) -> Result<Option<Value>, IntegerComparisonError> {
+    debug_assert!(matches!(
+        operation,
+        IntegerComparisonOp::Lt
+            | IntegerComparisonOp::Le
+            | IntegerComparisonOp::Gt
+            | IntegerComparisonOp::Ge
+    ));
+    let lhs_complex = complex_operand(lhs);
+    let rhs_complex = complex_operand(rhs);
+    let result = match (lhs_complex, rhs_complex) {
+        (Some(lhs), Some(rhs)) => compare_complex_real_components(&lhs, &rhs, operation)?,
+        (Some(lhs), None) => {
+            let Some(rhs) = real_operand(rhs) else {
+                return Ok(None);
+            };
+            compare_complex_real_ordering(&lhs, &rhs, true, operation)?
+        }
+        (None, Some(rhs)) => {
+            let Some(lhs) = real_operand(lhs) else {
+                return Ok(None);
+            };
+            compare_complex_real_ordering(&rhs, &lhs, false, operation)?
+        }
+        (None, None) => return Ok(None),
     };
     Ok(Some(result))
 }
@@ -221,7 +319,7 @@ impl RealOperand<'_> {
         match self.source {
             RealSource::ScalarInteger(_) => true,
             RealSource::Dense(tensor) => tensor.integer_storage().is_some(),
-            RealSource::ScalarFloat(_) | RealSource::Logical { .. } => false,
+            RealSource::ScalarFloat(_) | RealSource::Logical { .. } | RealSource::Char(_) => false,
         }
     }
 
@@ -235,6 +333,11 @@ impl RealOperand<'_> {
                     .expect("tensor storage must match shape"),
             ),
             RealSource::Logical { data } => RealValue::Float(f64::from(data[index] != 0)),
+            RealSource::Char(array) => {
+                let row = index % array.rows;
+                let column = index / array.rows;
+                RealValue::Float(f64::from(array.data[row * array.cols + column] as u32))
+            }
         }
     }
 }
@@ -244,6 +347,7 @@ enum RealSource<'a> {
     ScalarFloat(f64),
     Dense(&'a Tensor),
     Logical { data: &'a [u8] },
+    Char(&'a runmat_builtins::CharArray),
 }
 
 fn compare_complex_operands(
@@ -260,6 +364,68 @@ fn compare_complex_operands(
         data.push(matches_relation_bool(matches, operation) as u8);
     }
     logical_result(data, plan.output_shape().to_vec())
+}
+
+fn compare_complex_real_components(
+    lhs: &ComplexOperand<'_>,
+    rhs: &ComplexOperand<'_>,
+    operation: IntegerComparisonOp,
+) -> Result<Value, IntegerComparisonError> {
+    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+        .map_err(|_| IntegerComparisonError::SizeMismatch)?;
+    let mut data = Vec::with_capacity(plan.len());
+    for (_, lhs_index, rhs_index) in plan.iter() {
+        let ordering = compare_real_values(
+            complex_real_component(lhs.real_imag_at(lhs_index)),
+            complex_real_component(rhs.real_imag_at(rhs_index)),
+        );
+        data.push(matches_optional_relation(ordering, operation) as u8);
+    }
+    logical_result(data, plan.output_shape().to_vec())
+}
+
+fn compare_complex_real_ordering(
+    complex: &ComplexOperand<'_>,
+    real: &RealOperand<'_>,
+    complex_is_left: bool,
+    operation: IntegerComparisonOp,
+) -> Result<Value, IntegerComparisonError> {
+    let plan = BroadcastPlan::new(&complex.shape, &real.shape)
+        .map_err(|_| IntegerComparisonError::SizeMismatch)?;
+    let mut data = Vec::with_capacity(plan.len());
+    for (_, complex_index, real_index) in plan.iter() {
+        let ordering = compare_real_values(
+            complex_real_component(complex.real_imag_at(complex_index)),
+            real.value_at(real_index),
+        );
+        let ordering = if complex_is_left {
+            ordering
+        } else {
+            ordering.map(Ordering::reverse)
+        };
+        data.push(matches_optional_relation(ordering, operation) as u8);
+    }
+    logical_result(data, plan.output_shape().to_vec())
+}
+
+fn complex_real_component(value: ComplexValue) -> RealValue {
+    match value {
+        ComplexValue::Integer(real, _) => RealValue::Integer(real),
+        ComplexValue::Float(real, _) => RealValue::Float(real),
+    }
+}
+
+fn compare_real_values(lhs: RealValue, rhs: RealValue) -> Option<Ordering> {
+    match (lhs, rhs) {
+        (RealValue::Integer(lhs), RealValue::Integer(rhs)) => {
+            Some(compare_integer_values(lhs, rhs))
+        }
+        (RealValue::Integer(lhs), RealValue::Float(rhs)) => integer_f64_order(lhs, rhs),
+        (RealValue::Float(lhs), RealValue::Integer(rhs)) => {
+            integer_f64_order(rhs, lhs).map(Ordering::reverse)
+        }
+        (RealValue::Float(lhs), RealValue::Float(rhs)) => lhs.partial_cmp(&rhs),
+    }
 }
 
 fn compare_complex_real(
@@ -410,6 +576,10 @@ fn real_operand(value: &Value) -> Option<RealOperand<'_>> {
         Value::LogicalArray(array) => Some(RealOperand {
             source: RealSource::Logical { data: &array.data },
             shape: array.shape.clone(),
+        }),
+        Value::CharArray(array) => Some(RealOperand {
+            source: RealSource::Char(array),
+            shape: vec![array.rows, array.cols],
         }),
         _ => None,
     }
@@ -590,6 +760,8 @@ pub(crate) fn matches_optional_relation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
+    use runmat_builtins::ComplexStorage;
 
     fn array(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         Value::Tensor(runmat_builtins::Tensor::new_integer(storage, shape).expect("integer tensor"))
@@ -779,5 +951,214 @@ mod tests {
                 ))
             );
         }
+    }
+
+    #[test]
+    fn complex_ordering_uses_only_real_components_for_all_relations() {
+        let lhs = Value::Complex(2.0, f64::NAN);
+        let rhs = Value::Complex(2.0, f64::INFINITY);
+        for (operation, expected) in [
+            (IntegerComparisonOp::Lt, false),
+            (IntegerComparisonOp::Le, true),
+            (IntegerComparisonOp::Gt, false),
+            (IntegerComparisonOp::Ge, true),
+        ] {
+            assert_eq!(
+                try_complex_ordering_comparison(&lhs, &rhs, operation).expect("comparison"),
+                Some(Value::Bool(expected))
+            );
+        }
+
+        let nan_real = Value::Complex(f64::NAN, 0.0);
+        for operation in [
+            IntegerComparisonOp::Lt,
+            IntegerComparisonOp::Le,
+            IntegerComparisonOp::Gt,
+            IntegerComparisonOp::Ge,
+        ] {
+            assert_eq!(
+                try_complex_ordering_comparison(&nan_real, &Value::Num(0.0), operation)
+                    .expect("NaN comparison"),
+                Some(Value::Bool(false))
+            );
+        }
+        assert_eq!(
+            try_complex_ordering_comparison(
+                &Value::Complex(1.0, 0.0),
+                &Value::Num(2.0),
+                IntegerComparisonOp::Lt,
+            )
+            .expect("structurally complex zero-imaginary comparison"),
+            Some(Value::Bool(true))
+        );
+    }
+
+    #[test]
+    fn complex_integer_ordering_preserves_wide_real_components_and_broadcasts() {
+        let storage = runmat_builtins::IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+            IntegerStorage::U64(vec![u64::MAX, 0]),
+        )
+        .expect("complex integer storage");
+        let complex = Value::ComplexTensor(
+            ComplexTensor::new_integer(storage, vec![2, 1]).expect("complex integer tensor"),
+        );
+        let rounded = Value::Tensor(
+            Tensor::new(vec![(1_u64 << 53) as f64, u64::MAX as f64], vec![1, 2])
+                .expect("double tensor"),
+        );
+
+        assert_eq!(
+            try_complex_ordering_comparison(&complex, &rounded, IntegerComparisonOp::Gt)
+                .expect("complex/double comparison"),
+            Some(Value::LogicalArray(
+                LogicalArray::new(vec![1, 1, 0, 0], vec![2, 2]).expect("logical result")
+            ))
+        );
+        assert_eq!(
+            try_complex_ordering_comparison(&rounded, &complex, IntegerComparisonOp::Lt)
+                .expect("double/complex comparison"),
+            Some(Value::LogicalArray(
+                LogicalArray::new(vec![1, 1, 0, 0], vec![2, 2]).expect("logical result")
+            ))
+        );
+
+        let rounded_complex = Value::ComplexTensor(
+            ComplexTensor::new(
+                vec![((1_u64 << 53) as f64, -1.0), (u64::MAX as f64, 1.0)],
+                vec![1, 2],
+            )
+            .expect("floating complex tensor"),
+        );
+        assert_eq!(
+            try_complex_ordering_comparison(&complex, &rounded_complex, IntegerComparisonOp::Gt,)
+                .expect("integer-complex/floating-complex comparison"),
+            Some(Value::LogicalArray(
+                LogicalArray::new(vec![1, 1, 0, 0], vec![2, 2]).expect("logical result")
+            ))
+        );
+    }
+
+    #[test]
+    fn complex_single_and_double_ordering_broadcasts_without_using_imaginary_components() {
+        let lhs = Value::ComplexTensor(
+            ComplexTensor::from_complex_storage(
+                ComplexStorage::F32(vec![(1.0, f32::NAN), (3.0, f32::INFINITY)]),
+                vec![2, 1],
+            )
+            .expect("complex single"),
+        );
+        let rhs = Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![1, 2]).expect("double tensor"));
+        let expected = LogicalArray::new(vec![1, 0, 1, 1], vec![2, 2]).expect("logical result");
+        assert_eq!(
+            try_complex_ordering_comparison(&lhs, &rhs, IntegerComparisonOp::Le)
+                .expect("complex-single/double comparison"),
+            Some(Value::LogicalArray(expected.clone()))
+        );
+        assert_eq!(
+            try_complex_ordering_comparison(&rhs, &lhs, IntegerComparisonOp::Ge)
+                .expect("double/complex-single comparison"),
+            Some(Value::LogicalArray(expected))
+        );
+    }
+
+    #[test]
+    fn complex_ordering_accepts_logical_and_character_numeric_operands() {
+        let logical =
+            Value::LogicalArray(LogicalArray::new(vec![0, 1], vec![1, 2]).expect("logical"));
+        assert_eq!(
+            try_complex_ordering_comparison(
+                &Value::Complex(0.5, 99.0),
+                &logical,
+                IntegerComparisonOp::Gt,
+            )
+            .expect("complex/logical comparison"),
+            Some(Value::LogicalArray(
+                LogicalArray::new(vec![1, 0], vec![1, 2]).expect("logical result")
+            ))
+        );
+
+        let chars = Value::CharArray(
+            runmat_builtins::CharArray::new(vec!['A', 'C', 'B', 'D'], 2, 2)
+                .expect("character array"),
+        );
+        assert_eq!(
+            try_complex_ordering_comparison(
+                &Value::Complex(66.0, -99.0),
+                &chars,
+                IntegerComparisonOp::Lt,
+            )
+            .expect("complex/character comparison"),
+            Some(Value::LogicalArray(
+                LogicalArray::new(vec![0, 0, 1, 1], vec![2, 2]).expect("logical result")
+            ))
+        );
+    }
+
+    fn assert_resident_complex_ordering(provider: &dyn runmat_accelerate_api::AccelProvider) {
+        let complex =
+            ComplexTensor::new(vec![(1.0, 99.0), (3.0, -99.0)], vec![1, 2]).expect("complex");
+        let complex_rhs =
+            ComplexTensor::new(vec![(2.0, -7.0), (2.0, 7.0)], vec![1, 2]).expect("complex rhs");
+        let real = Tensor::new(vec![2.0, 2.0], vec![1, 2]).expect("real");
+        let complex_handle = gpu_helpers::upload_complex_tensor(provider, &complex).unwrap();
+        let complex_rhs_handle =
+            gpu_helpers::upload_complex_tensor(provider, &complex_rhs).unwrap();
+        let real_handle = gpu_helpers::upload_tensor(provider, &real).unwrap();
+        for (builtin, expected, reverse_expected) in [
+            ("lt", vec![1.0, 0.0], vec![0.0, 1.0]),
+            ("le", vec![1.0, 0.0], vec![0.0, 1.0]),
+            ("gt", vec![0.0, 1.0], vec![1.0, 0.0]),
+            ("ge", vec![0.0, 1.0], vec![1.0, 0.0]),
+        ] {
+            for rhs in [&real_handle, &complex_rhs_handle] {
+                let result = crate::call_builtin(
+                    builtin,
+                    &[
+                        Value::GpuTensor(complex_handle.clone()),
+                        Value::GpuTensor(rhs.clone()),
+                    ],
+                )
+                .expect("resident complex ordering");
+                assert!(
+                    matches!(&result, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+                );
+                let gathered = test_support::gather(result).expect("gather logical result");
+                assert_eq!(gathered.shape, vec![1, 2]);
+                assert_eq!(gathered.materialize_f64(), expected);
+            }
+            let result = crate::call_builtin(
+                builtin,
+                &[
+                    Value::GpuTensor(real_handle.clone()),
+                    Value::GpuTensor(complex_handle.clone()),
+                ],
+            )
+            .expect("reverse resident complex ordering");
+            let gathered = test_support::gather(result).expect("gather reverse logical result");
+            assert_eq!(gathered.materialize_f64(), reverse_expected);
+        }
+        let _ = provider.free(&complex_handle);
+        let _ = provider.free(&complex_rhs_handle);
+        let _ = provider.free(&real_handle);
+    }
+
+    #[test]
+    fn resident_complex_ordering_uses_provider_real_component_paths() {
+        test_support::with_test_provider(assert_resident_complex_ordering);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn wgpu_complex_ordering_uses_provider_real_component_paths() {
+        if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .is_err()
+        {
+            return;
+        }
+        let provider = runmat_accelerate_api::provider().expect("WGPU provider");
+        assert_resident_complex_ordering(provider);
     }
 }

@@ -120,3 +120,32 @@ fn vm_integer_power_rejects_invalid_exponents_across_lowerings() {
                 == Some(&runmat_builtins::IntegerStorage::I16(vec![-8, 1]))
     )));
 }
+
+#[test]
+fn vm_complex_ordering_compares_real_components_and_preserves_wide_integers() {
+    let vars = execute_source(
+        r#"
+        exact = uint64(9007199254740992) + uint64([1 0]);
+        z = complex(exact, uint64([7 0]));
+        threshold = 9007199254740992;
+        a = z > threshold;
+        b = threshold < z;
+        c = le(z, threshold);
+        d = ge(z, threshold);
+        e = complex([2 2], [99 -99]) <= complex([2 1], [-99 99]);
+        "#,
+    )
+    .expect("compiled complex ordering");
+
+    let masks: Vec<&LogicalArray> = vars
+        .iter()
+        .filter_map(|value| match value {
+            Value::LogicalArray(array) => Some(array),
+            _ => None,
+        })
+        .collect();
+    assert!(masks.iter().any(|mask| mask.data == vec![1, 0]));
+    assert!(masks.iter().any(|mask| mask.data == vec![0, 1]));
+    assert!(masks.iter().any(|mask| mask.data == vec![1, 1]));
+    assert!(masks.iter().filter(|mask| mask.data == vec![1, 0]).count() >= 3);
+}

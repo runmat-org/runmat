@@ -16,7 +16,8 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::logical::rel::integer_comparison::{
-    try_integer_comparison, IntegerComparisonError, IntegerComparisonOp,
+    try_complex_ordering_comparison, try_gpu_ordering_comparison, try_integer_comparison,
+    IntegerComparisonError, IntegerComparisonOp,
 };
 use crate::builtins::logical::type_resolvers::logical_binary_type;
 use crate::{build_runtime_error, RuntimeError};
@@ -37,8 +38,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes:
-        "Prefers provider elem_le kernels when available; otherwise inputs gather to host tensors automatically.",
+    notes: "Prefers provider elem_le kernels; complex-interleaved inputs compare provider-extracted real lanes, and unsupported routes gather to authoritative host storage.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::logical::rel::le")]
@@ -111,18 +111,7 @@ const LE_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "le: array sizes are not compatible for broadcasting",
 };
 
-const LE_ERROR_COMPLEX_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LE.COMPLEX_UNSUPPORTED",
-    identifier: Some("RunMat:le:ComplexNotSupported"),
-    when: "At least one operand is complex.",
-    message: "le: complex numbers are not supported",
-};
-
-const LE_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    LE_ERROR_INVALID_INPUT,
-    LE_ERROR_SIZE_MISMATCH,
-    LE_ERROR_COMPLEX_UNSUPPORTED,
-];
+const LE_ERRORS: [BuiltinErrorDescriptor; 2] = [LE_ERROR_INVALID_INPUT, LE_ERROR_SIZE_MISMATCH];
 
 pub const LE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &LE_SIGNATURES,
@@ -162,14 +151,7 @@ async fn try_le_gpu(
     a: &GpuTensorHandle,
     b: &GpuTensorHandle,
 ) -> Option<crate::BuiltinResult<Value>> {
-    let provider = runmat_accelerate_api::provider()?;
-    match provider.elem_le(a, b).await {
-        Ok(handle) => Some(Ok(gpu_helpers::logical_gpu_value(handle))),
-        Err(err) => {
-            drop(err);
-            None
-        }
-    }
+    try_gpu_ordering_comparison(a, b, IntegerComparisonOp::Le).await
 }
 
 async fn le_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
@@ -181,6 +163,12 @@ async fn le_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
         return result;
     }
 
+    let lhs = gather_gpu_operand(lhs)
+        .await
+        .map_err(|_| le_error(&LE_ERROR_INVALID_INPUT))?;
+    let rhs = gather_gpu_operand(rhs)
+        .await
+        .map_err(|_| le_error(&LE_ERROR_INVALID_INPUT))?;
     let (lhs, rhs) = normalize_char_string(lhs, rhs);
 
     if let Some(result) = try_integer_comparison(&lhs, &rhs, IntegerComparisonOp::Le).map_err(
@@ -189,6 +177,15 @@ async fn le_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
             IntegerComparisonError::Internal => le_error(&LE_ERROR_INVALID_INPUT),
         },
     )? {
+        return Ok(result);
+    }
+
+    if let Some(result) = try_complex_ordering_comparison(&lhs, &rhs, IntegerComparisonOp::Le)
+        .map_err(|error| match error {
+            IntegerComparisonError::SizeMismatch => le_error(&LE_ERROR_SIZE_MISMATCH),
+            IntegerComparisonError::Internal => le_error(&LE_ERROR_INVALID_INPUT),
+        })?
+    {
         return Ok(result);
     }
 
@@ -210,6 +207,13 @@ async fn le_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
         }
         (LeOperand::Numeric(_), LeOperand::String(_))
         | (LeOperand::String(_), LeOperand::Numeric(_)) => Err(le_error(&LE_ERROR_INVALID_INPUT)),
+    }
+}
+
+async fn gather_gpu_operand(value: Value) -> crate::BuiltinResult<Value> {
+    match value {
+        Value::GpuTensor(_) => gpu_helpers::gather_value_async(&value).await,
+        _ => Ok(value),
     }
 }
 
@@ -312,7 +316,7 @@ impl LeOperand {
                 Ok(LeOperand::Numeric(NumericBuffer::from_tensor(tensor)))
             }
             Value::Complex(_, _) | Value::ComplexTensor(_) => {
-                Err(le_error(&LE_ERROR_COMPLEX_UNSUPPORTED))
+                Err(le_error(&LE_ERROR_INVALID_INPUT))
             }
             _ => Err(le_error(&LE_ERROR_INVALID_INPUT)),
         }
@@ -580,10 +584,9 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn le_complex_error() {
-        let err = run_le(Value::Complex(1.0, 1.0), Value::Num(0.0)).expect_err("le");
-        assert!(err.message().contains("complex"));
-        assert_eq!(err.identifier(), LE_ERROR_COMPLEX_UNSUPPORTED.identifier);
+    fn le_complex_compares_real_component() {
+        let result = run_le(Value::Complex(2.0, 99.0), Value::Num(2.0)).expect("le");
+        assert_eq!(result, Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

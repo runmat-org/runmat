@@ -16,7 +16,8 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::logical::rel::integer_comparison::{
-    try_integer_comparison, IntegerComparisonError, IntegerComparisonOp,
+    try_complex_ordering_comparison, try_gpu_ordering_comparison, try_integer_comparison,
+    IntegerComparisonError, IntegerComparisonOp,
 };
 use crate::builtins::logical::type_resolvers::logical_binary_type;
 use crate::{build_runtime_error, RuntimeError};
@@ -37,8 +38,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes:
-        "Prefers provider elem_ge kernels when available; otherwise inputs gather to host tensors automatically.",
+    notes: "Prefers provider elem_ge kernels; complex-interleaved inputs compare provider-extracted real lanes, and unsupported routes gather to authoritative host storage.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::logical::rel::ge")]
@@ -111,18 +111,7 @@ const GE_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "ge: array sizes are not compatible for broadcasting",
 };
 
-const GE_ERROR_COMPLEX_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GE.COMPLEX_UNSUPPORTED",
-    identifier: Some("RunMat:ge:ComplexNotSupported"),
-    when: "At least one operand is complex.",
-    message: "ge: complex numbers are not supported",
-};
-
-const GE_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    GE_ERROR_INVALID_INPUT,
-    GE_ERROR_SIZE_MISMATCH,
-    GE_ERROR_COMPLEX_UNSUPPORTED,
-];
+const GE_ERRORS: [BuiltinErrorDescriptor; 2] = [GE_ERROR_INVALID_INPUT, GE_ERROR_SIZE_MISMATCH];
 
 pub const GE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &GE_SIGNATURES,
@@ -180,14 +169,7 @@ async fn try_ge_gpu(
     a: &GpuTensorHandle,
     b: &GpuTensorHandle,
 ) -> Option<crate::BuiltinResult<Value>> {
-    let provider = runmat_accelerate_api::provider()?;
-    match provider.elem_ge(a, b).await {
-        Ok(handle) => Some(Ok(gpu_helpers::logical_gpu_value(handle))),
-        Err(err) => {
-            drop(err);
-            None
-        }
-    }
+    try_gpu_ordering_comparison(a, b, IntegerComparisonOp::Ge).await
 }
 
 fn try_fill_like(proto: &GpuTensorHandle, other: &Value) -> Option<GpuTensorHandle> {
@@ -212,6 +194,12 @@ async fn ge_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
         return result;
     }
 
+    let lhs = gather_gpu_operand(lhs)
+        .await
+        .map_err(|_| ge_error(&GE_ERROR_INVALID_INPUT))?;
+    let rhs = gather_gpu_operand(rhs)
+        .await
+        .map_err(|_| ge_error(&GE_ERROR_INVALID_INPUT))?;
     let (lhs, rhs) = normalize_char_string(lhs, rhs);
 
     if let Some(result) = try_integer_comparison(&lhs, &rhs, IntegerComparisonOp::Ge).map_err(
@@ -220,6 +208,15 @@ async fn ge_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
             IntegerComparisonError::Internal => ge_error(&GE_ERROR_INVALID_INPUT),
         },
     )? {
+        return Ok(result);
+    }
+
+    if let Some(result) = try_complex_ordering_comparison(&lhs, &rhs, IntegerComparisonOp::Ge)
+        .map_err(|error| match error {
+            IntegerComparisonError::SizeMismatch => ge_error(&GE_ERROR_SIZE_MISMATCH),
+            IntegerComparisonError::Internal => ge_error(&GE_ERROR_INVALID_INPUT),
+        })?
+    {
         return Ok(result);
     }
 
@@ -241,6 +238,13 @@ async fn ge_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
         }
         (GeOperand::Numeric(_), GeOperand::String(_))
         | (GeOperand::String(_), GeOperand::Numeric(_)) => Err(ge_error(&GE_ERROR_INVALID_INPUT)),
+    }
+}
+
+async fn gather_gpu_operand(value: Value) -> crate::BuiltinResult<Value> {
+    match value {
+        Value::GpuTensor(_) => gpu_helpers::gather_value_async(&value).await,
+        _ => Ok(value),
     }
 }
 
@@ -343,7 +347,7 @@ impl GeOperand {
                 Ok(GeOperand::Numeric(NumericBuffer::from_tensor(tensor)))
             }
             Value::Complex(_, _) | Value::ComplexTensor(_) => {
-                Err(ge_error(&GE_ERROR_COMPLEX_UNSUPPORTED))
+                Err(ge_error(&GE_ERROR_INVALID_INPUT))
             }
             _ => Err(ge_error(&GE_ERROR_INVALID_INPUT)),
         }
@@ -625,10 +629,9 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn ge_complex_error() {
-        let err = run_ge(Value::Complex(1.0, 1.0), Value::Num(0.0)).expect_err("ge");
-        assert!(err.message().contains("complex"));
-        assert_eq!(err.identifier(), GE_ERROR_COMPLEX_UNSUPPORTED.identifier);
+    fn ge_complex_compares_real_component() {
+        let result = run_ge(Value::Complex(2.0, -99.0), Value::Num(2.0)).expect("ge");
+        assert_eq!(result, Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

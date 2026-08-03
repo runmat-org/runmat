@@ -1,7 +1,10 @@
 #[cfg(target_arch = "wasm32")]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
-use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, SparseTensor, Tensor, Value};
+use runmat_builtins::{
+    ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, SparseTensor,
+    Tensor, Value,
+};
 
 fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
     Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
@@ -128,6 +131,70 @@ fn registered_integer_power_rejects_invalid_exponents_for_every_class() {
             .expect_err("negative signed integer exponent");
         assert_eq!(error.identifier(), Some("RunMat:power:InvalidInput"));
         assert!(error.message().contains("nonnegative integer values"));
+    }
+}
+
+#[test]
+fn registered_complex_integer_ordering_uses_exact_real_components_for_every_class() {
+    let cases = [
+        (
+            IntegerStorage::I8(vec![0, 2]),
+            IntegerStorage::I8(vec![i8::MAX, i8::MIN]),
+        ),
+        (
+            IntegerStorage::I16(vec![0, 2]),
+            IntegerStorage::I16(vec![i16::MAX, i16::MIN]),
+        ),
+        (
+            IntegerStorage::I32(vec![0, 2]),
+            IntegerStorage::I32(vec![i32::MAX, i32::MIN]),
+        ),
+        (
+            IntegerStorage::I64(vec![0, 2]),
+            IntegerStorage::I64(vec![i64::MAX, i64::MIN]),
+        ),
+        (
+            IntegerStorage::U8(vec![0, 2]),
+            IntegerStorage::U8(vec![u8::MAX, 0]),
+        ),
+        (
+            IntegerStorage::U16(vec![0, 2]),
+            IntegerStorage::U16(vec![u16::MAX, 0]),
+        ),
+        (
+            IntegerStorage::U32(vec![0, 2]),
+            IntegerStorage::U32(vec![u32::MAX, 0]),
+        ),
+        (
+            IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+            IntegerStorage::U64(vec![u64::MAX, 0]),
+        ),
+    ];
+    for (real, imag) in cases {
+        let is_wide = matches!(&real, IntegerStorage::U64(_));
+        let complex = Value::ComplexTensor(
+            ComplexTensor::new_integer(
+                IntegerComplexStorage::new(real, imag).expect("matching complex storage"),
+                vec![1, 2],
+            )
+            .expect("complex integer tensor"),
+        );
+        let threshold = if is_wide {
+            Value::Num((1_u64 << 53) as f64)
+        } else {
+            Value::Num(1.0)
+        };
+        for (builtin, expected) in [
+            ("lt", [if is_wide { 0 } else { 1 }, 0]),
+            ("le", [if is_wide { 0 } else { 1 }, 0]),
+            ("gt", [if is_wide { 1 } else { 0 }, 1]),
+            ("ge", [if is_wide { 1 } else { 0 }, 1]),
+        ] {
+            let result =
+                runmat_runtime::call_builtin(builtin, &[complex.clone(), threshold.clone()])
+                    .expect("registered complex integer comparison");
+            expect_logical(result, &[1, 2], &expected);
+        }
     }
 }
 
