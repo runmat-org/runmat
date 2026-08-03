@@ -62,11 +62,11 @@ const MEDIAN_INPUTS_A_NANFLAG: [BuiltinParamDescriptor; 2] = [
         description: "Input array.",
     },
     BuiltinParamDescriptor {
-        name: "nanflag",
+        name: "missingflag",
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
-        default: Some("\"includenan\""),
-        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+        default: Some("\"includemissing\""),
+        description: "Missing-value handling mode.",
     },
 ];
 
@@ -86,11 +86,11 @@ const MEDIAN_INPUTS_A_AXES_NANFLAG: [BuiltinParamDescriptor; 3] = [
         description: "Dimension selector, vector of dimensions, or \"all\".",
     },
     BuiltinParamDescriptor {
-        name: "nanflag",
+        name: "missingflag",
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
-        default: Some("\"includenan\""),
-        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+        default: Some("\"includemissing\""),
+        description: "Missing-value handling mode.",
     },
 ];
 
@@ -103,11 +103,11 @@ const MEDIAN_INPUTS_A_NANFLAG_AXES: [BuiltinParamDescriptor; 3] = [
         description: "Input array.",
     },
     BuiltinParamDescriptor {
-        name: "nanflag",
+        name: "missingflag",
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
-        default: Some("\"includenan\""),
-        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+        default: Some("\"includemissing\""),
+        description: "Missing-value handling mode.",
     },
     BuiltinParamDescriptor {
         name: "axes",
@@ -145,22 +145,22 @@ const MEDIAN_SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
         outputs: &MEDIAN_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "M = median(A, nanflag)",
+        label: "M = median(A, missingflag)",
         inputs: &MEDIAN_INPUTS_A_NANFLAG,
         outputs: &MEDIAN_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "M = median(A, axes, nanflag)",
+        label: "M = median(A, axes, missingflag)",
         inputs: &MEDIAN_INPUTS_A_AXES_NANFLAG,
         outputs: &MEDIAN_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "M = median(A, nanflag, axes)",
+        label: "M = median(A, missingflag, axes)",
         inputs: &MEDIAN_INPUTS_A_NANFLAG_AXES,
         outputs: &MEDIAN_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "M = median(A, nanflag, \"all\")",
+        label: "M = median(A, missingflag, \"all\")",
         inputs: &MEDIAN_INPUTS_A_NANFLAG_AXES,
         outputs: &MEDIAN_OUTPUT,
     },
@@ -169,7 +169,7 @@ const MEDIAN_SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
 const MEDIAN_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.MEDIAN.INVALID_ARGUMENT",
     identifier: Some("RunMat:median:InvalidArgument"),
-    when: "Dimension selectors, nanflags, or argument ordering are invalid.",
+    when: "Dimension selectors, missing flags, or argument ordering are invalid.",
     message: "median: invalid argument",
 };
 
@@ -318,12 +318,12 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
 
         if let Some(crate::builtins::common::arg_tokens::ArgToken::String(text)) = tokens.get(idx) {
             match text.as_str() {
-                "omitnan" => {
+                "omitnan" | "omitmissing" => {
                     nan_mode = ReductionNaN::Omit;
                     idx += 1;
                     continue;
                 }
-                "includenan" => {
+                "includenan" | "includemissing" => {
                     nan_mode = ReductionNaN::Include;
                     idx += 1;
                     continue;
@@ -345,12 +345,12 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
 
         if let Some(keyword) = keyword_of(arg) {
             match keyword.as_str() {
-                "omitnan" => {
+                "omitnan" | "omitmissing" => {
                     nan_mode = ReductionNaN::Omit;
                     idx += 1;
                     continue;
                 }
-                "includenan" => {
+                "includenan" | "includemissing" => {
                     nan_mode = ReductionNaN::Include;
                     idx += 1;
                     continue;
@@ -422,8 +422,11 @@ fn median_host(value: Value, args: &ParsedArguments) -> BuiltinResult<Value> {
 }
 
 async fn median_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Value> {
-    if args.nan_mode == ReductionNaN::Include {
-        if let Some(provider) = runmat_accelerate_api::provider() {
+    let is_integer = runmat_accelerate_api::handle_integer_type(&handle).is_some();
+    if !is_integer && args.nan_mode == ReductionNaN::Include {
+        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle)
+            .or_else(runmat_accelerate_api::provider)
+        {
             if let Some(device_result) = median_gpu_try(provider, &handle, &args.axes).await {
                 return Ok(Value::GpuTensor(device_result));
             }
@@ -432,7 +435,12 @@ async fn median_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinR
 
     let gathered = gpu_helpers::gather_tensor_async(&handle).await?;
     let reduced = median_tensor(gathered, args.axes.clone(), args.nan_mode)?;
-    Ok(tensor::tensor_into_value(reduced))
+    let provider = runmat_accelerate_api::provider_for_handle(&handle)
+        .or_else(runmat_accelerate_api::provider)
+        .ok_or_else(|| median_internal_error("median: GPU result has no owning provider"))?;
+    let uploaded = gpu_helpers::upload_tensor(provider, &reduced)
+        .map_err(|error| median_internal_error(format!("median: GPU upload failed: {error}")))?;
+    Ok(Value::GpuTensor(uploaded))
 }
 
 async fn median_gpu_try(
@@ -552,7 +560,7 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<MedianAxes>> {
         let lowered = trimmed.to_ascii_lowercase();
         return match lowered.as_str() {
             "all" => Ok(Some(MedianAxes::All)),
-            "omitnan" | "includenan" => Ok(None),
+            "omitnan" | "includenan" | "omitmissing" | "includemissing" => Ok(None),
             _ => Err(median_invalid_argument(format!(
                 "median: unrecognised argument '{trimmed}'"
             ))),
@@ -975,9 +983,13 @@ pub(crate) mod tests {
         assert!(labels.contains(&"M = median(A, dim)"));
         assert!(labels.contains(&"M = median(A, vecdim)"));
         assert!(labels.contains(&"M = median(A, \"all\")"));
-        assert!(labels.contains(&"M = median(A, nanflag)"));
-        assert!(labels.contains(&"M = median(A, axes, nanflag)"));
-        assert!(labels.contains(&"M = median(A, nanflag, axes)"));
+        assert!(labels.contains(&"M = median(A, missingflag)"));
+        assert!(labels.contains(&"M = median(A, axes, missingflag)"));
+        assert!(labels.contains(&"M = median(A, missingflag, axes)"));
+        assert_eq!(
+            MEDIAN_INPUTS_A_NANFLAG[1].default,
+            Some("\"includemissing\"")
+        );
     }
 
     #[test]
@@ -1186,6 +1198,25 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn median_accepts_generic_missing_aliases() {
+        let tensor = Tensor::new(vec![1.0, f64::NAN, 5.0], vec![3, 1]).unwrap();
+        let omitted = median_builtin(
+            Value::Tensor(tensor.clone()),
+            vec![Value::from("omitmissing")],
+        )
+        .expect("omitmissing");
+        assert_eq!(omitted, Value::Num(3.0));
+
+        let included = median_builtin(Value::Tensor(tensor), vec![Value::from("includemissing")])
+            .expect("includemissing");
+        let Value::Num(included) = included else {
+            panic!("expected scalar median");
+        };
+        assert!(included.is_nan());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn median_with_include_nan_propagates() {
         let tensor = Tensor::new(vec![1.0, f64::NAN, 5.0], vec![3, 1]).unwrap();
         let result = median_builtin(Value::Tensor(tensor), Vec::new()).expect("median");
@@ -1257,7 +1288,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn median_gpu_omit_nan_falls_back_to_host() {
+    fn median_gpu_omit_nan_host_compute_returns_resident_result() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![f64::NAN, 2.0, f64::NAN, 4.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
@@ -1267,6 +1298,7 @@ pub(crate) mod tests {
             let handle = provider.upload(&view).expect("upload");
             let result = median_builtin(Value::GpuTensor(handle), vec![Value::from("omitnan")])
                 .expect("median");
+            assert!(matches!(result, Value::GpuTensor(_)));
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 1]);
             assert_eq!(gathered.materialize_f64()[0], 3.0);
@@ -1275,11 +1307,45 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn median_integer_gpu_fallback_preserves_exact_class_and_residency() {
+        test_support::with_test_provider(|provider| {
+            let wide = 9_007_199_254_740_993_u64;
+            let tensor = Tensor::new_integer(
+                IntegerStorage::U64(vec![wide, u64::MAX, wide, wide + 2]),
+                vec![4, 1],
+            )
+            .expect("integer tensor");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
+            let result = median_builtin(Value::GpuTensor(handle), Vec::new()).expect("median");
+            let Value::GpuTensor(result_handle) = &result else {
+                panic!("expected resident integer median");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(result_handle),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            let gathered = test_support::gather(result).expect("gather");
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![wide + 1]))
+            );
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     #[cfg(feature = "wgpu")]
     fn median_wgpu_dim_matches_cpu() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        )
+        .is_err()
+        {
+            return;
+        }
+        let Some(provider) = runmat_accelerate_api::provider() else {
+            return;
+        };
         let tensor = Tensor::new(vec![1.0, 5.0, 9.0, 2.0, 6.0, 10.0], vec![3, 2]).unwrap();
         let args_dim1 = ParsedArguments {
             axes: MedianAxes::Dim(1),
@@ -1290,16 +1356,13 @@ pub(crate) mod tests {
             data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
-        let handle = runmat_accelerate_api::provider()
-            .unwrap()
-            .upload(&view)
-            .expect("upload");
+        let handle = provider.upload(&view).expect("upload");
         let gpu_value = block_on(median_gpu(handle, &args_dim1)).expect("gpu median");
         let gathered = test_support::gather(gpu_value).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
                 assert_eq!(ct.shape, gt.shape);
-                let tol = match runmat_accelerate_api::provider().unwrap().precision() {
+                let tol = match provider.precision() {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 5e-5,
                 };
@@ -1318,8 +1381,7 @@ pub(crate) mod tests {
         let cpu_all =
             median_host(Value::Tensor(tensor.clone()), &args_all).expect("cpu median all");
         let gpu_all = block_on(median_gpu(
-            runmat_accelerate_api::provider()
-                .unwrap()
+            provider
                 .upload(&runmat_accelerate_api::HostTensorView {
                     data: &tensor.materialize_f64(),
                     shape: &tensor.shape,

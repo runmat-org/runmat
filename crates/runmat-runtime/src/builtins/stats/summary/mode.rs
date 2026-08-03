@@ -205,27 +205,91 @@ fn mode_type_resolver(args: &[Type], ctx: &ResolveContext) -> Type {
 )]
 async fn mode_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let parsed = parse_arguments(&rest).await?;
+    let gpu_provider = match &value {
+        Value::GpuTensor(handle) => runmat_accelerate_api::provider_for_handle(handle)
+            .or_else(runmat_accelerate_api::provider),
+        _ => None,
+    };
     let value = crate::gather_if_needed_async(&value).await?;
     let output_class = OutputClass::from_value(&value);
     let eval = mode_evaluate(value, parsed, output_class)?;
-    if let Some(out_count) = crate::output_count::current_output_count() {
+    let result = if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
-        }
-        if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.into_values_value()?]));
-        }
-        if out_count == 2 {
+            Value::OutputList(Vec::new())
+        } else if out_count == 1 {
+            Value::OutputList(vec![eval.into_values_value()?])
+        } else if out_count == 2 {
             let (values, freq) = eval.into_pair()?;
-            return Ok(Value::OutputList(vec![values, freq]));
+            Value::OutputList(vec![values, freq])
+        } else {
+            let (values, freq, cells) = eval.into_triple()?;
+            crate::output_count::output_list_with_padding(out_count, vec![values, freq, cells])
         }
-        let (values, freq, cells) = eval.into_triple()?;
-        return Ok(crate::output_count::output_list_with_padding(
-            out_count,
-            vec![values, freq, cells],
-        ));
+    } else {
+        eval.into_values_value()?
+    };
+    if let Some(provider) = gpu_provider {
+        upload_mode_value(provider, result)
+    } else {
+        Ok(result)
     }
-    eval.into_values_value()
+}
+
+fn upload_mode_value(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    value: Value,
+) -> BuiltinResult<Value> {
+    let upload_tensor = |tensor: Tensor, logical: bool| -> BuiltinResult<Value> {
+        let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+            .map_err(|error| mode_internal_error(format!("mode: GPU upload failed: {error}")))?;
+        if logical {
+            runmat_accelerate_api::set_handle_logical(&handle, true);
+        }
+        Ok(Value::GpuTensor(handle))
+    };
+    match value {
+        gpu @ Value::GpuTensor(_) => Ok(gpu),
+        Value::Tensor(tensor) => upload_tensor(tensor, false),
+        Value::Num(number) => upload_tensor(
+            Tensor::new(vec![number], vec![1, 1])
+                .map_err(|error| mode_internal_error(format!("mode: {error}")))?,
+            false,
+        ),
+        Value::Int(integer) => upload_tensor(
+            Tensor::new_integer(
+                crate::builtins::math::reduction::integer_native::storage_from_scalar(&integer),
+                vec![1, 1],
+            )
+            .map_err(|error| mode_internal_error(format!("mode: {error}")))?,
+            false,
+        ),
+        Value::Bool(logical) => upload_tensor(
+            Tensor::new(vec![if logical { 1.0 } else { 0.0 }], vec![1, 1])
+                .map_err(|error| mode_internal_error(format!("mode: {error}")))?,
+            true,
+        ),
+        Value::LogicalArray(logical) => {
+            let tensor = tensor::logical_to_tensor(&logical).map_err(mode_internal_error)?;
+            upload_tensor(tensor, true)
+        }
+        Value::Cell(cell) => {
+            let shape = cell.shape.clone();
+            let data = cell
+                .data
+                .into_iter()
+                .map(|entry| upload_mode_value(provider, entry))
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            runmat_builtins::CellArray::new_with_shape(data, shape)
+                .map(Value::Cell)
+                .map_err(mode_internal_error)
+        }
+        Value::OutputList(values) => values
+            .into_iter()
+            .map(|entry| upload_mode_value(provider, entry))
+            .collect::<BuiltinResult<Vec<_>>>()
+            .map(Value::OutputList),
+        other => Ok(other),
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1696,7 +1760,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn mode_gathers_gpu_input_for_host_order_statistics() {
+    fn mode_gpu_fallback_preserves_residency_for_values_and_frequency() {
         use crate::builtins::common::test_support;
 
         test_support::with_test_provider(|provider| {
@@ -1707,8 +1771,18 @@ pub(crate) mod tests {
             };
             let handle = provider.upload(&view).expect("upload");
             let outputs = mode_outputs(Value::GpuTensor(handle), Vec::new(), 2).expect("mode");
-            assert_eq!(outputs[0], Value::Num(2.0));
-            assert_eq!(outputs[1], Value::Num(2.0));
+            assert_eq!(
+                test_support::gather(outputs[0].clone())
+                    .expect("gather mode")
+                    .materialize_f64(),
+                vec![2.0]
+            );
+            assert_eq!(
+                test_support::gather(outputs[1].clone())
+                    .expect("gather frequency")
+                    .materialize_f64(),
+                vec![2.0]
+            );
 
             let logical_source = Tensor::new(vec![0.0, 1.0, 1.0], vec![3, 1]).unwrap();
             let logical_handle = provider
@@ -1720,8 +1794,75 @@ pub(crate) mod tests {
             runmat_accelerate_api::set_handle_logical(&logical_handle, true);
             let logical_outputs =
                 mode_outputs(Value::GpuTensor(logical_handle), Vec::new(), 2).expect("mode");
-            assert_eq!(logical_outputs[0], Value::Bool(true));
-            assert_eq!(logical_outputs[1], Value::Num(2.0));
+            let Value::GpuTensor(logical_mode) = &logical_outputs[0] else {
+                panic!("expected resident logical mode");
+            };
+            assert!(runmat_accelerate_api::handle_is_logical(logical_mode));
+            assert_eq!(
+                test_support::gather(logical_outputs[0].clone())
+                    .expect("gather logical mode")
+                    .materialize_f64(),
+                vec![1.0]
+            );
+            assert_eq!(
+                test_support::gather(logical_outputs[1].clone())
+                    .expect("gather logical frequency")
+                    .materialize_f64(),
+                vec![2.0]
+            );
+        });
+    }
+
+    #[test]
+    fn mode_integer_gpu_fallback_preserves_exact_values_frequency_and_ties() {
+        use crate::builtins::common::{gpu_helpers, test_support};
+
+        test_support::with_test_provider(|provider| {
+            let wide = u64::MAX - 2;
+            let source = Tensor::new_integer(
+                IntegerStorage::U64(vec![wide, wide - 1, wide, wide - 1]),
+                vec![4, 1],
+            )
+            .expect("integer source");
+            let handle = gpu_helpers::upload_tensor(provider, &source).expect("integer upload");
+            let outputs =
+                mode_outputs(Value::GpuTensor(handle), Vec::new(), 3).expect("integer mode");
+
+            let Value::GpuTensor(mode_handle) = &outputs[0] else {
+                panic!("expected resident integer mode");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(mode_handle),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            assert_eq!(
+                test_support::gather(outputs[0].clone())
+                    .expect("gather mode")
+                    .integer_storage(),
+                Some(&IntegerStorage::U64(vec![wide - 1]))
+            );
+            assert_eq!(
+                test_support::gather(outputs[1].clone())
+                    .expect("gather frequency")
+                    .materialize_f64(),
+                vec![2.0]
+            );
+            let Value::Cell(ties) = &outputs[2] else {
+                panic!("expected tied-value cell");
+            };
+            let Value::GpuTensor(tie_handle) = &ties.data[0] else {
+                panic!("expected resident integer tied values");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(tie_handle),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            assert_eq!(
+                test_support::gather(ties.data[0].clone())
+                    .expect("gather ties")
+                    .integer_storage(),
+                Some(&IntegerStorage::U64(vec![wide - 1, wide]))
+            );
         });
     }
 
