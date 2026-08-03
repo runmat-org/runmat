@@ -9,7 +9,7 @@ pub mod ipc;
 pub mod shared_memory;
 
 pub use capability::HostCapability;
-pub use child::{ChildProcess, ChildStdio, ProcessExit};
-pub use command::{HostCommand, StdioPolicy};
+pub use child::{is_process_alive, terminate_process_tree, ChildProcess, ChildStdio, ProcessExit};
+pub use command::{ChildLifetime, HostCommand, StdioPolicy};
 pub use error::{ProcessHostError, ProcessHostResult};
 pub use ipc::hidden::{HiddenMode, HiddenModeRegistry};

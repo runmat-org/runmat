@@ -9,8 +9,8 @@ use crate::cli::parse::{parse_bool_env, parse_figure_size, parse_log_level_env};
 use crate::cli::remote::{FsCommand, OrgCommand, ProjectCommand, RemoteCommand};
 use crate::cli::value_types::{CaptureFiguresMode, FigureSize, GcPreset, LogLevel, OptLevel};
 use crate::cli::ColorMode;
-use crate::cli::PackageCommand;
 use crate::cli::TestArgs;
+use crate::cli::{BatchCommand, PackageCommand};
 
 #[derive(Parser, Clone)]
 #[command(
@@ -352,6 +352,11 @@ pub enum Commands {
     },
     /// Discover and run MATLAB-compatible tests
     Test(TestArgs),
+    /// Submit and manage durable local batch jobs
+    Batch {
+        #[command(subcommand)]
+        batch_command: BatchCommand,
+    },
 }
 
 #[derive(Subcommand, Clone)]
@@ -400,7 +405,8 @@ pub enum ConfigCommand {
 
 #[cfg(test)]
 mod tests {
-    use super::Cli;
+    use super::{Cli, Commands};
+    use crate::cli::BatchCommand;
     use clap::Parser;
 
     #[test]
@@ -422,6 +428,42 @@ mod tests {
             cli.script.as_deref(),
             Some(std::path::Path::new("snapshot"))
         );
+    }
+
+    #[test]
+    fn durable_batch_commands_parse_without_entering_script_mode() {
+        let cli = Cli::try_parse_from([
+            "runmat",
+            "batch",
+            "submit",
+            "job.m",
+            "--idempotency-key",
+            "stable",
+            "--retention-hours",
+            "24",
+            "--json",
+            "--",
+            "input",
+        ])
+        .unwrap();
+        let Some(Commands::Batch {
+            batch_command:
+                BatchCommand::Submit {
+                    file,
+                    idempotency_key,
+                    retention_hours,
+                    json,
+                    args,
+                },
+        }) = cli.command
+        else {
+            panic!("expected durable batch submit");
+        };
+        assert_eq!(file, std::path::Path::new("job.m"));
+        assert_eq!(idempotency_key.as_deref(), Some("stable"));
+        assert_eq!(retention_hours, 24);
+        assert!(json);
+        assert_eq!(args, ["input"]);
     }
 }
 

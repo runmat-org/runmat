@@ -1,3 +1,4 @@
+mod batch;
 mod package;
 mod parse;
 mod remote;
@@ -5,6 +6,7 @@ mod root;
 mod test;
 mod value_types;
 
+pub use batch::BatchCommand;
 pub use package::{
     PackageCacheCommand, PackageCommand, PackageInspectArgs, PackageKeyCommand, PackageKeyTarget,
     PackageProjectArgs, PackagePublishArgs,

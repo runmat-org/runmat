@@ -4,8 +4,8 @@ use std::sync::Mutex;
 
 use runmat_builtins::Value;
 use runmat_execution::{
-    CancellationReason, ExecutionScopeId, FutureHandle, FutureId, OutputContract, TaskHandle,
-    TaskId,
+    CancellationReason, ExecutionScopeId, FutureHandle, FutureId, JobHandle, OutputContract,
+    TaskHandle, TaskId,
 };
 
 use super::ExecutionServiceError;
@@ -25,6 +25,12 @@ pub struct DeferredCall {
     pub program: Option<Vec<u8>>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DurableJobOptions {
+    pub idempotency_key: Option<String>,
+    pub retention_millis: u64,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum AwaitAction {
     Passthrough(Value),
@@ -42,6 +48,20 @@ pub trait RuntimeExecutionServices {
     }
     fn create_future(&self, call: DeferredCall) -> Result<FutureHandle, ExecutionServiceError>;
     fn spawn(&self, future: &FutureHandle) -> Result<TaskHandle, ExecutionServiceError>;
+    fn submit_job(
+        &self,
+        _call: DeferredCall,
+        _options: DurableJobOptions,
+    ) -> Result<JobHandle, ExecutionServiceError> {
+        Err(ExecutionServiceError::Failed(
+            "durable jobs are unavailable in this execution backend".into(),
+        ))
+    }
+    fn await_job(&self, _job: &JobHandle) -> Result<Value, ExecutionServiceError> {
+        Err(ExecutionServiceError::Failed(
+            "durable jobs are unavailable in this execution backend".into(),
+        ))
+    }
     fn begin_await(&self, value: Value) -> Result<AwaitAction, ExecutionServiceError>;
     fn complete_future(
         &self,
@@ -166,6 +186,9 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
     }
 
     fn begin_await(&self, value: Value) -> Result<AwaitAction, ExecutionServiceError> {
+        if let Value::Job(handle) = &value {
+            return self.await_job(handle).map(AwaitAction::Completed);
+        }
         let future = match value {
             Value::Future(handle) => handle,
             Value::Task(task) => {

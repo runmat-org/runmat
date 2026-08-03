@@ -4,15 +4,17 @@ use std::sync::{Arc, Mutex};
 
 use runmat_builtins::Value;
 use runmat_execution::{
-    CancellationReason, Digest, ExecutionScopeId, FutureHandle, FutureId, OutputContract,
-    ProgramEnvironment, ProgramRevision, TaskHandle, TaskId,
+    value::ValuePayload, CancellationReason, Digest, ExecutionScopeId, FutureHandle, FutureId,
+    JobHandle, OutputContract, ProgramEnvironment, ProgramRevision, TaskHandle, TaskId,
 };
 use runmat_execution_artifact::{ExecutableForm, ProgramArtifact, ProgramBuildRecipe};
 use runmat_runtime::execution::{
-    AwaitAction, DeferredCall, ExecutionServiceError, RuntimeExecutionServices,
+    AwaitAction, DeferredCall, DurableJobOptions, ExecutionServiceError, RuntimeExecutionServices,
 };
 
 use crate::driver::{LocalDriver, TaskCompletion};
+use crate::durable::DurableJobBridge;
+use crate::supervisor::ProgramBatchSubmission;
 use crate::{NativeExecutionConfig, NativeExecutionResult};
 
 static NEXT_NATIVE_SCOPE: AtomicU64 = AtomicU64::new(1);
@@ -39,6 +41,7 @@ struct State {
 pub struct NativeExecutionService {
     scope_id: ExecutionScopeId,
     driver: Arc<LocalDriver>,
+    durable: DurableJobBridge,
     state: Mutex<State>,
 }
 
@@ -54,6 +57,8 @@ impl NativeExecutionService {
         Ok(Self {
             scope_id,
             driver: LocalDriver::new(config, scope_id)?,
+            durable: DurableJobBridge::start()
+                .map_err(|error| crate::NativeExecutionError::Configuration(error.to_string()))?,
             state: Mutex::new(State {
                 next_future: 0,
                 next_task: 0,
@@ -134,41 +139,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
             }
             None => return Err(ExecutionServiceError::UnknownHandle),
         };
-        let program = call.program.as_deref().ok_or_else(|| {
-            ExecutionServiceError::Failed("future is missing its exact program".into())
-        })?;
-        let revision = call
-            .program_revision
-            .clone()
-            .unwrap_or_else(|| local_program_revision(program));
-        let recipe = ProgramBuildRecipe {
-            schema_version: 1,
-            program_revision: revision,
-            entrypoint: call.function.to_string(),
-            outputs: future.outputs.clone(),
-            execution_mode: "interpreter".into(),
-            target_profile: format!(
-                "{}-{}-interpreter-bytecode-v1",
-                std::env::consts::ARCH,
-                std::env::consts::OS
-            ),
-            features: Default::default(),
-            compile_options: Default::default(),
-            source_objects: Vec::new(),
-            expected_artifact_id: None,
-        };
-        let artifact = ProgramArtifact::materialize(
-            &recipe,
-            ExecutableForm::InterpreterBytecodeV1,
-            program.to_vec(),
-        )
-        .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
-        let inputs = call
-            .arguments
-            .iter()
-            .map(runmat_runtime::execution::value_codec::encode_inline_value)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
+        let (recipe, artifact, inputs) = materialize_call(&call, future.outputs.clone())?;
         let sequence = state.next_task;
         state.next_task = sequence.wrapping_add(1);
         let id = TaskId::derive(&[self.scope_id.bytes(), &sequence.to_be_bytes()]);
@@ -202,7 +173,34 @@ impl RuntimeExecutionServices for NativeExecutionService {
         })
     }
 
+    fn submit_job(
+        &self,
+        call: DeferredCall,
+        options: DurableJobOptions,
+    ) -> Result<JobHandle, ExecutionServiceError> {
+        let requested_outputs = u16::try_from(call.requested_outputs)
+            .map_err(|_| ExecutionServiceError::InvalidOutputContract)?;
+        let outputs = OutputContract { requested_outputs };
+        let (recipe, artifact, arguments) = materialize_call(&call, outputs)?;
+        self.durable.submit(ProgramBatchSubmission {
+            recipe,
+            artifact,
+            function: call.function,
+            arguments,
+            requested_outputs,
+            idempotency_key: options.idempotency_key,
+            retention_millis: options.retention_millis,
+        })
+    }
+
+    fn await_job(&self, job: &JobHandle) -> Result<Value, ExecutionServiceError> {
+        self.durable.await_job(job.clone())
+    }
+
     fn begin_await(&self, value: Value) -> Result<AwaitAction, ExecutionServiceError> {
+        if let Value::Job(handle) = &value {
+            return self.await_job(handle).map(AwaitAction::Completed);
+        }
         let future = match self.future_for_value(value)? {
             Ok(future) => future,
             Err(value) => return Ok(AwaitAction::Passthrough(value)),
@@ -284,6 +282,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
                     .ok_or(ExecutionServiceError::UnknownHandle)?
                     .future_id
             }
+            Value::Job(handle) => return self.durable.cancel(handle.clone()),
             _ => return Err(ExecutionServiceError::UnknownHandle),
         };
         let mut state = self.state.lock().expect("native service poisoned");
@@ -310,6 +309,48 @@ impl RuntimeExecutionServices for NativeExecutionService {
             }
         }
     }
+}
+
+fn materialize_call(
+    call: &DeferredCall,
+    outputs: OutputContract,
+) -> Result<(ProgramBuildRecipe, ProgramArtifact, Vec<ValuePayload>), ExecutionServiceError> {
+    let program = call.program.as_deref().ok_or_else(|| {
+        ExecutionServiceError::Failed("execution is missing its exact program".into())
+    })?;
+    let revision = call
+        .program_revision
+        .clone()
+        .unwrap_or_else(|| local_program_revision(program));
+    let recipe = ProgramBuildRecipe {
+        schema_version: 1,
+        program_revision: revision,
+        entrypoint: call.function.to_string(),
+        outputs,
+        execution_mode: "interpreter".into(),
+        target_profile: format!(
+            "{}-{}-interpreter-bytecode-v1",
+            std::env::consts::ARCH,
+            std::env::consts::OS
+        ),
+        features: Default::default(),
+        compile_options: Default::default(),
+        source_objects: Vec::new(),
+        expected_artifact_id: None,
+    };
+    let artifact = ProgramArtifact::materialize(
+        &recipe,
+        ExecutableForm::InterpreterBytecodeV1,
+        program.to_vec(),
+    )
+    .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
+    let inputs = call
+        .arguments
+        .iter()
+        .map(runmat_runtime::execution::value_codec::encode_inline_value)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
+    Ok((recipe, artifact, inputs))
 }
 
 fn local_program_revision(program: &[u8]) -> ProgramRevision {

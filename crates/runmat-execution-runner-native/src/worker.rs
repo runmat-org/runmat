@@ -18,7 +18,7 @@ pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
     Ok(())
 }
 
-async fn execute(request: WorkerRequest) -> WorkerResponse {
+pub(crate) async fn execute(request: WorkerRequest) -> WorkerResponse {
     if request.protocol != PROTOCOL || request.artifact.validate_against(&request.recipe).is_err() {
         return WorkerResponse::Failure {
             message: "worker rejected a protocol or program identity mismatch".into(),

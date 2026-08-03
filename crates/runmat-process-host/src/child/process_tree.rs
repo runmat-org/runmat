@@ -48,3 +48,74 @@ pub(super) async fn terminate(child: &mut Child, process_id: Option<u32>) -> std
         Err(error) => Err(error),
     }
 }
+
+pub async fn terminate_id(process_id: u32) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let group = i32::try_from(process_id).unwrap_or(i32::MAX);
+        let result = unsafe { libc::kill(-group, libc::SIGKILL) };
+        if result == 0 {
+            return Ok(());
+        }
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == Some(libc::ESRCH) {
+            Ok(())
+        } else {
+            Err(error)
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        let status = Command::new("taskkill")
+            .args(["/PID", &process_id.to_string(), "/T", "/F"])
+            .status()
+            .await?;
+        if status.success() || !is_alive(process_id) {
+            Ok(())
+        } else {
+            Err(std::io::Error::other("taskkill rejected process tree"))
+        }
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = process_id;
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "process-tree termination is unsupported on this platform",
+        ))
+    }
+}
+
+pub fn is_alive(process_id: u32) -> bool {
+    #[cfg(unix)]
+    {
+        let process_id = i32::try_from(process_id).unwrap_or(i32::MAX);
+        let result = unsafe { libc::kill(process_id, 0) };
+        if result == 0 {
+            return true;
+        }
+        std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    }
+
+    #[cfg(windows)]
+    {
+        std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {process_id}"), "/FO", "CSV", "/NH"])
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .is_some_and(|output| {
+                String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .any(|line| line.contains(&format!("\"{process_id}\"")))
+            })
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = process_id;
+        false
+    }
+}

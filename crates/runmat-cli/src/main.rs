@@ -24,12 +24,28 @@ async fn main() -> ExitCode {
                 }
             };
         }
-        Ok(Some(mode)) => {
-            eprintln!(
-                "RunMat host mode '{}' is not available in this build",
-                mode.marker()
-            );
-            return ExitCode::from(2);
+        Ok(Some(runmat_process_host::HiddenMode::ExecutionDriver)) => {
+            return runmat::commands::batch::run_driver().await;
+        }
+        Ok(Some(runmat_process_host::HiddenMode::LocalSupervisor)) => {
+            return match runmat_execution_runner_native::supervisor::LocalSupervisorConfig::for_current_executable(
+            ) {
+                Ok(config) => {
+                    match runmat_execution_runner_native::supervisor::run_local_supervisor(config)
+                        .await
+                    {
+                        Ok(()) => ExitCode::SUCCESS,
+                        Err(error) => {
+                            eprintln!("runmat local execution supervisor failed: {error}");
+                            ExitCode::from(2)
+                        }
+                    }
+                }
+                Err(error) => {
+                    eprintln!("runmat local execution supervisor failed: {error}");
+                    ExitCode::from(2)
+                }
+            };
         }
         Ok(None) => {}
         Err(error) => {

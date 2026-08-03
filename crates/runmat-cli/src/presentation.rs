@@ -1,4 +1,4 @@
-use crate::cli::{Cli, ColorMode, Commands, ConfigCommand};
+use crate::cli::{BatchCommand, Cli, ColorMode, Commands, ConfigCommand};
 use owo_colors::{OwoColorize, Style};
 use std::ffi::OsString;
 use std::fmt::Display;
@@ -234,7 +234,14 @@ pub fn cli_output_mode(cli: &Cli) -> OutputMode {
     match cli.command.as_ref() {
         Some(Commands::Check { json: true, .. })
         | Some(Commands::Run { json: true, .. })
-        | Some(Commands::AccelInfo { json: true, .. }) => OutputMode::Machine,
+        | Some(Commands::AccelInfo { json: true, .. })
+        | Some(Commands::Batch {
+            batch_command:
+                BatchCommand::Submit { json: true, .. }
+                | BatchCommand::List { json: true }
+                | BatchCommand::Show { json: true, .. }
+                | BatchCommand::Cancel { json: true, .. },
+        }) => OutputMode::Machine,
         #[cfg(feature = "wgpu")]
         Some(Commands::AccelCalibrate { json: true, .. }) => OutputMode::Machine,
         Some(Commands::Config {

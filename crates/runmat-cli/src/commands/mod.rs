@@ -1,4 +1,5 @@
 pub mod accel;
+pub mod batch;
 pub mod benchmark;
 pub mod bytecode;
 pub mod check;

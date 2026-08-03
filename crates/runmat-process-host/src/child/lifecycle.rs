@@ -1,4 +1,4 @@
-use tokio::process::{Child, ChildStdin, ChildStdout};
+use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout};
 
 use super::CapturedStderr;
 use crate::{ProcessHostError, ProcessHostResult};
@@ -33,6 +33,18 @@ impl ChildProcess {
 
     pub(super) fn install_stdio(&mut self, stdio: ChildStdio) {
         self.stdio = Some(stdio);
+    }
+
+    pub(super) fn child_stdin(&mut self) -> Option<ChildStdin> {
+        self.child.stdin.take()
+    }
+
+    pub(super) fn child_stdout(&mut self) -> Option<ChildStdout> {
+        self.child.stdout.take()
+    }
+
+    pub(super) fn child_stderr(&mut self) -> Option<ChildStderr> {
+        self.child.stderr.take()
     }
 
     pub fn take_stdio(&mut self) -> ProcessHostResult<ChildStdio> {

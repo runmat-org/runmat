@@ -6210,6 +6210,7 @@ dependencies = [
 name = "runmat-execution-runner-native"
 version = "0.6.1"
 dependencies = [
+ "dirs 5.0.1",
  "runmat-builtins",
  "runmat-execution",
  "runmat-execution-artifact",
@@ -6222,6 +6223,8 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "uuid",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
