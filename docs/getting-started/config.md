@@ -128,9 +128,9 @@ runmat benchmark main --iterations 25 --jit
 
 ## Desktop Project Reference
 
-Desktop project behavior is stored in the same canonical `runmat.toml` or `runmat.json` document as package, source, test, and runtime configuration. RunMat parses, validates, migrates, and updates these settings through one Rust configuration authority in native, CLI, and WASM/browser hosts; an update preserves sections and comments owned by other subsystems.
+Desktop project settings are stored in the same `runmat.toml` or `runmat.json` document as package, source, test, and runtime configuration. Updating Desktop settings preserves unrelated sections and comments.
 
-When a legacy `.runmat` file is present, RunMat performs one finite promotion into the canonical project document. Existing canonical values win, missing legacy and unowned values are merged even when the destination is `runmat.json`, and `.runmat` is removed only after the canonical write is read back successfully; later reads and writes use only the canonical file.
+Legacy `.runmat` settings are migrated automatically into the project’s `runmat.toml` or `runmat.json` file.
 
 ```toml
 [desktop.artifacts]
@@ -160,8 +160,6 @@ rerun_after_cancel = "remaining"
 | `desktop.script.clear_figures_before_run` | boolean | `true` | Clears figures before a script run. |
 | `desktop.notebook.on_error` | string | `"stop"` | `stop`, `continue`. |
 | `desktop.notebook.rerun_after_cancel` | string | `"remaining"` | `remaining`, `all`. |
-
-Device and user-experience preferences are intentionally not project configuration. Command-window placement is stored per device; internal-artifact visibility and notebook workspace auto-restore are stored per user and project; background runtime diagnosis is explicit, default-off, account-level consent stored by RunMat Server. These preferences never alter the package graph, static analysis, type/shape analysis, or reproducible runtime configuration.
 
 ## Runtime Reference
 
