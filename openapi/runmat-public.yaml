@@ -160,6 +160,36 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/auth/preferences:
+    put:
+      tags:
+      - auth::preferences
+      operationId: update_user_preferences
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserPreferencesRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPreferencesResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
   /v1/auth/resend-verification:
     post:
       tags:
@@ -226,6 +256,37 @@ paths:
                 $ref: '#/components/schemas/PublicPricingResponse'
       security:
       - {}
+  /v1/execution/node-enrollments/consume:
+    post:
+      tags:
+      - Execution
+      operationId: consume_node_enrollment
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsumeEnrollmentRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeEnrollmentResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '410':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security: []
   /v1/lifecycle/intake:
     post:
       tags:
@@ -308,6 +369,292 @@ paths:
               schema:
                 $ref: '#/components/schemas/server_org.Org'
         '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/clusters:
+    get:
+      tags:
+      - Execution
+      operationId: list_clusters
+      parameters:
+      - name: after
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          nullable: true
+          maximum: 200
+          minimum: 1
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClusterListResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+    post:
+      tags:
+      - Execution
+      operationId: create_cluster
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateClusterRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClusterResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/clusters/{clusterId}:
+    patch:
+      tags:
+      - Execution
+      operationId: set_cluster_state
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: clusterId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetClusterStateRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClusterResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/clusters/{clusterId}/enrollments:
+    post:
+      tags:
+      - Execution
+      operationId: create_node_enrollment
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: clusterId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEnrollmentRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnrollmentResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/clusters/{clusterId}/nodes:
+    get:
+      tags:
+      - Execution
+      operationId: list_nodes
+      parameters:
+      - name: after
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          nullable: true
+          maximum: 200
+          minimum: 1
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: clusterId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeListResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/clusters/{clusterId}/nodes/{nodeId}:
+    patch:
+      tags:
+      - Execution
+      operationId: set_node_state
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: clusterId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: nodeId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetNodeStateRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
           description: ''
           content:
             application/json:
@@ -2477,6 +2824,446 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DataManifestDescriptorResponse'
+  /v1/projects/{projectId}/execution/artifact-grants/{grantId}/transfers:
+    post:
+      tags:
+      - Execution
+      operationId: begin_artifact_transfer
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: grantId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BeginTransferRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferTargetResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '410':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/execution/artifacts:
+    post:
+      tags:
+      - Execution
+      operationId: register_execution_artifact
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterArtifactRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtifactResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/execution/artifacts/{artifactId}:
+    get:
+      tags:
+      - Execution
+      operationId: get_execution_artifact
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: artifactId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtifactResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/execution/artifacts/{artifactId}/grants:
+    post:
+      tags:
+      - Execution
+      operationId: create_artifact_grant
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: artifactId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateArtifactGrantRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtifactGrantResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '410':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/execution/runs:
+    get:
+      tags:
+      - Execution
+      operationId: list_runs
+      parameters:
+      - name: after
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          nullable: true
+          maximum: 200
+          minimum: 1
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunListResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+    post:
+      tags:
+      - Execution
+      operationId: submit_run
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        description: Unique key for this run submission
+        required: true
+        schema:
+          type: string
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitRunRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/execution/runs/{runId}:
+    get:
+      tags:
+      - Execution
+      operationId: get_run
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: runId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/execution/runs/{runId}/cancel:
+    post:
+      tags:
+      - Execution
+      operationId: cancel_run
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: runId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/execution/runs/{runId}/events:
+    get:
+      tags:
+      - Execution
+      operationId: list_run_events
+      parameters:
+      - name: after
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          nullable: true
+          maximum: 200
+          minimum: 1
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: runId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunEventListResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/execution/transfers/{transferId}/complete:
+    post:
+      tags:
+      - Execution
+      operationId: complete_artifact_transfer
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: transferId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteTransferRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
   /v1/projects/{projectId}/fs/canonicalize:
     get:
       tags:
@@ -3988,6 +4775,104 @@ components:
         approve:
           type: boolean
       additionalProperties: false
+    ArtifactGrantPermissionRequest:
+      type: string
+      enum:
+      - upload
+      - download
+    ArtifactGrantResponse:
+      type: object
+      required:
+      - id
+      - artifactId
+      - subjectKind
+      - subjectId
+      - permission
+      - maximumBytes
+      - expiresAt
+      properties:
+        artifactId:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        id:
+          type: string
+        maximumBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        permission:
+          type: string
+        subjectId:
+          type: string
+        subjectKind:
+          type: string
+    ArtifactKindRequest:
+      type: string
+      enum:
+      - bundle
+      - program
+      - input
+      - result
+      - checkpoint
+      - diagnostic
+    ArtifactResponse:
+      type: object
+      required:
+      - id
+      - externalObjectId
+      - orgId
+      - projectId
+      - kind
+      - ciphertextDigest
+      - ciphertextSizeBytes
+      - mediaType
+      - encryptionSuite
+      - state
+      - retainUntil
+      - legalHold
+      - version
+      - createdAt
+      - updatedAt
+      properties:
+        ciphertextDigest:
+          type: string
+        ciphertextSizeBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+        encryptionSuite:
+          type: string
+        externalObjectId:
+          type: string
+        id:
+          type: string
+        kind:
+          type: string
+        legalHold:
+          type: boolean
+        mediaType:
+          type: string
+        orgId:
+          type: string
+        projectId:
+          type: string
+        retainUntil:
+          type: string
+          format: date-time
+        state:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+        version:
+          type: integer
+          format: int64
+          minimum: 0
     AttachAttestationRequest:
       type: object
       required:
@@ -4225,6 +5110,7 @@ components:
       - user
       - orgs
       - orgMemberships
+      - preferences
       properties:
         orgMemberships:
           type: array
@@ -4234,6 +5120,8 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/server_org.Org'
+        preferences:
+          $ref: '#/components/schemas/UserPreferencesResponse'
         user:
           $ref: '#/components/schemas/server_identity.UserProfile'
     AuthResendVerificationRequest:
@@ -4284,6 +5172,153 @@ components:
         scope:
           type: string
           nullable: true
+    BeginTransferRequest:
+      type: object
+      required:
+      - endpointFingerprint
+      properties:
+        endpointFingerprint:
+          type: string
+      additionalProperties: false
+    ClusterListResponse:
+      type: object
+      required:
+      - clusters
+      properties:
+        clusters:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClusterResponse'
+        nextCursor:
+          type: string
+          nullable: true
+    ClusterResponse:
+      type: object
+      required:
+      - id
+      - orgId
+      - name
+      - state
+      - queues
+      - version
+      - createdAt
+      - updatedAt
+      properties:
+        createdAt:
+          type: string
+          format: date-time
+        id:
+          type: string
+        name:
+          type: string
+        orgId:
+          type: string
+        projectId:
+          type: string
+          nullable: true
+        queues:
+          type: array
+          items:
+            type: string
+        state:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+        version:
+          type: integer
+          format: int64
+          minimum: 0
+    ClusterStateRequest:
+      type: string
+      enum:
+      - active
+      - draining
+      - disabled
+    CompleteTransferRequest:
+      type: object
+      required:
+      - bytesTransferred
+      properties:
+        bytesTransferred:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+    ConsumeEnrollmentRequest:
+      type: object
+      required:
+      - token
+      - identityFingerprint
+      - inventory
+      - heartbeatTtlSeconds
+      properties:
+        heartbeatTtlSeconds:
+          type: integer
+          format: int64
+          maximum: 300
+          minimum: 10
+        identityFingerprint:
+          type: string
+        inventory:
+          $ref: '#/components/schemas/ResourceInventoryBody'
+        token:
+          type: string
+      additionalProperties: false
+    CreateArtifactGrantRequest:
+      type: object
+      required:
+      - endpointFingerprint
+      - permission
+      - maximumBytes
+      - ttlSeconds
+      properties:
+        allocationLeaseId:
+          type: string
+          nullable: true
+        endpointFingerprint:
+          type: string
+        maximumBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        permission:
+          $ref: '#/components/schemas/ArtifactGrantPermissionRequest'
+        ttlSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+    CreateClusterRequest:
+      type: object
+      required:
+      - name
+      - queues
+      properties:
+        name:
+          type: string
+        projectId:
+          type: string
+          nullable: true
+        queues:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+    CreateEnrollmentRequest:
+      type: object
+      required:
+      - ttlSeconds
+      properties:
+        requestedIdentityFingerprint:
+          type: string
+          nullable: true
+        ttlSeconds:
+          type: integer
+          format: int64
+          maximum: 86400
+          minimum: 30
+      additionalProperties: false
     CreateGroupRequest:
       type: object
       required:
@@ -4440,6 +5475,23 @@ components:
           format: int64
           minimum: 0
         updated_at:
+          type: string
+    EnrollmentResponse:
+      type: object
+      required:
+      - id
+      - token
+      - clusterId
+      - expiresAt
+      properties:
+        clusterId:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        id:
+          type: string
+        token:
           type: string
     ErrorBody:
       type: object
@@ -5632,6 +6684,100 @@ components:
           minimum: 0
         skippedOnceKey:
           type: boolean
+    NodeEnrollmentResponse:
+      type: object
+      required:
+      - nodeId
+      - clusterId
+      - orgId
+      - credentialEpoch
+      - leaseEpoch
+      - heartbeatExpiresAt
+      properties:
+        clusterId:
+          type: string
+        credentialEpoch:
+          type: integer
+          format: int64
+          minimum: 0
+        heartbeatExpiresAt:
+          type: string
+          format: date-time
+        leaseEpoch:
+          type: integer
+          format: int64
+          minimum: 0
+        nodeId:
+          type: string
+        orgId:
+          type: string
+    NodeListResponse:
+      type: object
+      required:
+      - nodes
+      properties:
+        nextCursor:
+          type: string
+          nullable: true
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/NodeResponse'
+    NodeResponse:
+      type: object
+      required:
+      - id
+      - clusterId
+      - orgId
+      - identityFingerprint
+      - state
+      - inventory
+      - credentialEpoch
+      - leaseEpoch
+      - version
+      - lastHeartbeatAt
+      - heartbeatExpiresAt
+      properties:
+        attestationClass:
+          type: string
+          nullable: true
+        clusterId:
+          type: string
+        credentialEpoch:
+          type: integer
+          format: int64
+          minimum: 0
+        heartbeatExpiresAt:
+          type: string
+          format: date-time
+        id:
+          type: string
+        identityFingerprint:
+          type: string
+        inventory:
+          $ref: '#/components/schemas/ResourceInventoryBody'
+        lastHeartbeatAt:
+          type: string
+          format: date-time
+        leaseEpoch:
+          type: integer
+          format: int64
+          minimum: 0
+        orgId:
+          type: string
+        state:
+          type: string
+        version:
+          type: integer
+          format: int64
+          minimum: 0
+    NodeStateRequest:
+      type: string
+      enum:
+      - active
+      - draining
+      - offline
+      - revoked
     OrgCreateRequest:
       type: object
       required:
@@ -6462,6 +7608,33 @@ components:
           type: string
           format: date-time
           nullable: true
+    RegisterArtifactRequest:
+      type: object
+      required:
+      - kind
+      - ciphertextDigest
+      - ciphertextSizeBytes
+      - mediaType
+      - encryptionSuite
+      - retainForSeconds
+      properties:
+        ciphertextDigest:
+          type: string
+        ciphertextSizeBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        encryptionSuite:
+          type: string
+        kind:
+          $ref: '#/components/schemas/ArtifactKindRequest'
+        mediaType:
+          type: string
+        retainForSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
     RegisterRecipientKeyRequest:
       type: object
       required:
@@ -7215,6 +8388,81 @@ components:
           type: string
         version:
           type: string
+    ResourceInventoryBody:
+      type: object
+      required:
+      - cpuMillicores
+      - memoryBytes
+      - scratchBytes
+      - acceleratorCount
+      - acceleratorMemoryBytes
+      properties:
+        acceleratorClass:
+          type: string
+          nullable: true
+        acceleratorCount:
+          type: integer
+          format: int32
+          minimum: 0
+        acceleratorMemoryBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        capabilities:
+          type: object
+          additionalProperties:
+            type: string
+        cpuMillicores:
+          type: integer
+          format: int64
+          minimum: 0
+        memoryBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        scratchBytes:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+    ResourceRequestBody:
+      type: object
+      required:
+      - cpuMillicores
+      - memoryBytes
+      - scratchBytes
+      - acceleratorCount
+      - acceleratorMemoryBytes
+      - maximumWallMillis
+      properties:
+        acceleratorClass:
+          type: string
+          nullable: true
+        acceleratorCount:
+          type: integer
+          format: int32
+          minimum: 0
+        acceleratorMemoryBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        cpuMillicores:
+          type: integer
+          format: int64
+          minimum: 0
+        maximumWallMillis:
+          type: integer
+          format: int64
+          minimum: 0
+        memoryBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        scratchBytes:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
     RevokeTrustedPublisherRequest:
       type: object
       properties:
@@ -7223,6 +8471,110 @@ components:
           format: date-time
           nullable: true
       additionalProperties: false
+    RunEventListResponse:
+      type: object
+      required:
+      - events
+      properties:
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunEventResponse'
+        nextCursor:
+          type: string
+          nullable: true
+    RunEventResponse:
+      type: object
+      required:
+      - id
+      - kind
+      - createdAt
+      - payload
+      properties:
+        createdAt:
+          type: string
+          format: date-time
+        id:
+          type: string
+        kind:
+          type: string
+        payload: {}
+    RunListResponse:
+      type: object
+      required:
+      - runs
+      properties:
+        nextCursor:
+          type: string
+          nullable: true
+        runs:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunResponse'
+    RunResponse:
+      type: object
+      required:
+      - id
+      - orgId
+      - projectId
+      - clusterId
+      - queue
+      - projectRevision
+      - bundleArtifactId
+      - programArtifactId
+      - resources
+      - state
+      - version
+      - createdAt
+      - updatedAt
+      properties:
+        allocationLeaseId:
+          type: string
+          nullable: true
+        bundleArtifactId:
+          type: string
+        cancellationRequestedAt:
+          type: string
+          format: date-time
+          nullable: true
+        clusterId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        id:
+          type: string
+        inputArtifactId:
+          type: string
+          nullable: true
+        orgId:
+          type: string
+        programArtifactId:
+          type: string
+        projectId:
+          type: string
+        projectRevision:
+          type: string
+        queue:
+          type: string
+        reasonCode:
+          type: string
+          nullable: true
+        resources:
+          $ref: '#/components/schemas/ResourceRequestBody'
+        state:
+          type: string
+        terminalAt:
+          type: string
+          format: date-time
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+        version:
+          type: integer
+          format: int64
+          minimum: 0
     SecurityPolicyRequest:
       type: object
       required:
@@ -7284,6 +8636,22 @@ components:
           format: date-time
         updatedBy:
           type: string
+    SetClusterStateRequest:
+      type: object
+      required:
+      - state
+      properties:
+        state:
+          $ref: '#/components/schemas/ClusterStateRequest'
+      additionalProperties: false
+    SetNodeStateRequest:
+      type: object
+      required:
+      - state
+      properties:
+        state:
+          $ref: '#/components/schemas/NodeStateRequest'
+      additionalProperties: false
     SetReleaseStatusRequest:
       type: object
       required:
@@ -7616,6 +8984,35 @@ components:
           uploadUrl:
             type: string
             nullable: true
+    SubmitRunRequest:
+      type: object
+      required:
+      - clusterId
+      - queue
+      - requestDigest
+      - projectRevision
+      - bundleArtifactId
+      - programArtifactId
+      - resources
+      properties:
+        bundleArtifactId:
+          type: string
+        clusterId:
+          type: string
+        inputArtifactId:
+          type: string
+          nullable: true
+        programArtifactId:
+          type: string
+        projectRevision:
+          type: string
+        queue:
+          type: string
+        requestDigest:
+          type: string
+        resources:
+          $ref: '#/components/schemas/ResourceRequestBody'
+      additionalProperties: false
     TelemetryIngestRequest:
       type: object
       required:
@@ -7681,6 +9078,57 @@ components:
         accepted:
           type: boolean
         event:
+          type: string
+    TransferResponse:
+      type: object
+      required:
+      - id
+      - artifactId
+      - state
+      - bytesTransferred
+      - expiresAt
+      - updatedAt
+      properties:
+        artifactId:
+          type: string
+        bytesTransferred:
+          type: integer
+          format: int64
+          minimum: 0
+        expiresAt:
+          type: string
+          format: date-time
+        id:
+          type: string
+        state:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+    TransferTargetResponse:
+      type: object
+      required:
+      - transferId
+      - artifactId
+      - method
+      - url
+      - headers
+      - expiresAt
+      properties:
+        artifactId:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        method:
+          type: string
+        transferId:
+          type: string
+        url:
           type: string
     TrustTierBody:
       type: string
@@ -7951,6 +9399,21 @@ components:
         windowStart:
           type: string
           format: date-time
+    UserPreferencesRequest:
+      type: object
+      required:
+      - backgroundRuntimeDiagnosis
+      properties:
+        backgroundRuntimeDiagnosis:
+          type: boolean
+      additionalProperties: false
+    UserPreferencesResponse:
+      type: object
+      required:
+      - backgroundRuntimeDiagnosis
+      properties:
+        backgroundRuntimeDiagnosis:
+          type: boolean
     WebAttribution:
       type: object
       properties:
@@ -8315,3 +9778,4 @@ tags:
 - name: Auth
 - name: SSO
 - name: SCIM
+- name: Execution

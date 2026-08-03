@@ -10,7 +10,7 @@ use crate::cli::remote::{FsCommand, OrgCommand, ProjectCommand, RemoteCommand};
 use crate::cli::value_types::{CaptureFiguresMode, FigureSize, GcPreset, LogLevel, OptLevel};
 use crate::cli::ColorMode;
 use crate::cli::TestArgs;
-use crate::cli::{BatchCommand, PackageCommand};
+use crate::cli::{BatchCommand, ClusterCommand, PackageCommand};
 
 #[derive(Parser, Clone)]
 #[command(
@@ -357,6 +357,11 @@ pub enum Commands {
         #[command(subcommand)]
         batch_command: BatchCommand,
     },
+    /// Manage remote execution clusters and nodes
+    Cluster {
+        #[command(subcommand)]
+        cluster_command: ClusterCommand,
+    },
 }
 
 #[derive(Subcommand, Clone)]
@@ -406,7 +411,7 @@ pub enum ConfigCommand {
 #[cfg(test)]
 mod tests {
     use super::{Cli, Commands};
-    use crate::cli::BatchCommand;
+    use crate::cli::{BatchCommand, ClusterCommand, ClusterStateArg};
     use clap::Parser;
 
     #[test]
@@ -464,6 +469,28 @@ mod tests {
         assert_eq!(retention_hours, 24);
         assert!(json);
         assert_eq!(args, ["input"]);
+    }
+
+    #[test]
+    fn cluster_management_commands_parse_without_entering_script_mode() {
+        let cli = Cli::try_parse_from([
+            "runmat",
+            "cluster",
+            "state",
+            "--org",
+            "01234567-89ab-cdef-0123-456789abcdef",
+            "clu_0123456789abcdef0123456789abcdef",
+            "draining",
+        ])
+        .unwrap();
+        let Some(Commands::Cluster {
+            cluster_command: ClusterCommand::State { cluster, state, .. },
+        }) = cli.command
+        else {
+            panic!("expected cluster state command");
+        };
+        assert_eq!(cluster, "clu_0123456789abcdef0123456789abcdef");
+        assert!(matches!(state, ClusterStateArg::Draining));
     }
 }
 

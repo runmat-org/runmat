@@ -1,4 +1,5 @@
 mod batch;
+mod cluster;
 mod package;
 mod parse;
 mod remote;
@@ -7,6 +8,7 @@ mod test;
 mod value_types;
 
 pub use batch::BatchCommand;
+pub use cluster::{ClusterCommand, ClusterStateArg, NodeStateArg};
 pub use package::{
     PackageCacheCommand, PackageCommand, PackageInspectArgs, PackageKeyCommand, PackageKeyTarget,
     PackageProjectArgs, PackagePublishArgs,

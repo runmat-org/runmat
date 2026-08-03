@@ -1,3 +1,4 @@
+mod clusters;
 mod fs;
 mod git;
 mod history;
@@ -11,8 +12,8 @@ mod snapshots;
 use anyhow::Result;
 
 use crate::cli::{
-    FsCommand, OrgCommand, ProjectCommand, ProjectMembersCommand, ProjectRetentionCommand,
-    RemoteCommand,
+    ClusterCommand, FsCommand, OrgCommand, ProjectCommand, ProjectMembersCommand,
+    ProjectRetentionCommand, RemoteCommand,
 };
 
 pub async fn execute_login_command(
@@ -29,6 +30,41 @@ pub async fn execute_login_command(
 pub async fn execute_org_command(command: OrgCommand) -> Result<()> {
     match command {
         OrgCommand::List { limit, cursor } => orgs::list_orgs(limit, cursor).await,
+    }
+}
+
+pub async fn execute_cluster_command(command: ClusterCommand) -> Result<()> {
+    match command {
+        ClusterCommand::List { org, limit, cursor } => clusters::list(org, limit, cursor).await,
+        ClusterCommand::Create {
+            org,
+            name,
+            project,
+            queues,
+        } => clusters::create(org, name, project, queues).await,
+        ClusterCommand::State {
+            org,
+            cluster,
+            state,
+        } => clusters::set_state(org, cluster, state).await,
+        ClusterCommand::Enroll {
+            org,
+            cluster,
+            ttl_seconds,
+            identity_fingerprint,
+        } => clusters::enroll(org, cluster, ttl_seconds, identity_fingerprint).await,
+        ClusterCommand::Nodes {
+            org,
+            cluster,
+            limit,
+            cursor,
+        } => clusters::list_nodes(org, cluster, limit, cursor).await,
+        ClusterCommand::NodeState {
+            org,
+            cluster,
+            node,
+            state,
+        } => clusters::set_node_state(org, cluster, node, state).await,
     }
 }
 
