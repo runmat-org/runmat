@@ -23,6 +23,43 @@ pub(crate) enum IntegerRemainderOp {
     Mod,
 }
 
+/// Reject MATLAB integer/logical arithmetic before device dispatch can route
+/// the operands through floating-point provider hooks.
+pub(crate) fn reject_integer_logical_operands(
+    lhs: &Value,
+    rhs: &Value,
+    builtin: &str,
+) -> Result<(), String> {
+    let lhs_integer = value_is_integer(lhs);
+    let rhs_integer = value_is_integer(rhs);
+    let lhs_logical = value_is_logical(lhs);
+    let rhs_logical = value_is_logical(rhs);
+    if (lhs_integer && rhs_logical) || (lhs_logical && rhs_integer) {
+        return Err(format!(
+            "{builtin}: integer arrays can only be combined with scalar double values"
+        ));
+    }
+    Ok(())
+}
+
+fn value_is_integer(value: &Value) -> bool {
+    match value {
+        Value::Int(_) => true,
+        Value::Tensor(tensor) => tensor.integer_storage().is_some(),
+        Value::SparseTensor(tensor) => tensor.integer_storage().is_some(),
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle).is_some(),
+        _ => false,
+    }
+}
+
+fn value_is_logical(value: &Value) -> bool {
+    match value {
+        Value::Bool(_) | Value::LogicalArray(_) => true,
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_logical(handle),
+        _ => false,
+    }
+}
+
 /// Applies MATLAB integer `rem`/`mod` semantics when either operand has native
 /// integer storage. Same-class integer operands stay exact; scalar doubles use
 /// the integer class's arithmetic rules.

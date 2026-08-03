@@ -29,6 +29,42 @@ fn arithmetic_and_assignment() {
 }
 
 #[test]
+fn compiled_integer_arithmetic_rejects_ordered_logical_operands() {
+    let expressions = [
+        "integer_value + logical_value",
+        "logical_value + integer_value",
+        "integer_value - logical_value",
+        "logical_value - integer_value",
+        "integer_value .* logical_value",
+        "logical_value .* integer_value",
+        "integer_value ./ logical_value",
+        "logical_value ./ integer_value",
+        r"integer_value .\ logical_value",
+        r"logical_value .\ integer_value",
+        "integer_value .^ logical_value",
+        "logical_value .^ integer_value",
+        "rem(integer_value, logical_value)",
+        "rem(logical_value, integer_value)",
+        "mod(integer_value, logical_value)",
+        "mod(logical_value, integer_value)",
+    ];
+    for expression in expressions {
+        let source = format!(
+            "integer_value = int64([1 2]); logical_value = logical([1 0]); output = {expression};"
+        );
+        let bytecode = compile_source(&source).expect("compile integer/logical expression");
+        let error =
+            interpret(&bytecode).expect_err("compiled integer/logical arithmetic must fail");
+        assert!(
+            error
+                .to_string()
+                .contains("integer arrays can only be combined with scalar double values"),
+            "{expression}: unexpected error: {error}"
+        );
+    }
+}
+
+#[test]
 fn bare_random_builtin_identifiers_execute_as_zero_arg_calls() {
     let input = "\
         rng(123);

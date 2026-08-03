@@ -1,7 +1,7 @@
 #[cfg(target_arch = "wasm32")]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
-use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, Tensor, Value};
+use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, SparseTensor, Tensor, Value};
 
 fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
     Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
@@ -22,6 +22,109 @@ fn expect_logical(value: Value, shape: &[usize], data: &[u8]) {
         value,
         Value::LogicalArray(LogicalArray::new(data.to_vec(), shape.to_vec()).expect("logical"))
     );
+}
+
+fn expect_integer_logical_arithmetic_error(builtin: &str, lhs: Value, rhs: Value) {
+    let error = runmat_runtime::call_builtin(builtin, &[lhs, rhs])
+        .expect_err("integer/logical arithmetic must fail");
+    assert!(
+        error
+            .to_string()
+            .contains("integer arrays can only be combined with scalar double values"),
+        "{builtin}: unexpected error: {error}"
+    );
+}
+
+#[test]
+fn registered_integer_arithmetic_rejects_ordered_logicals_for_every_class() {
+    let integer_values = [
+        IntValue::I8(2),
+        IntValue::I16(2),
+        IntValue::I32(2),
+        IntValue::I64(2),
+        IntValue::U8(2),
+        IntValue::U16(2),
+        IntValue::U32(2),
+        IntValue::U64(2),
+    ];
+    let logical_values = [
+        Value::Bool(true),
+        Value::LogicalArray(LogicalArray::new(vec![1], vec![1, 1]).expect("scalar logical array")),
+    ];
+    for builtin in [
+        "plus", "minus", "times", "rdivide", "ldivide", "power", "rem", "mod",
+    ] {
+        for integer in &integer_values {
+            let integer_operands = [
+                Value::Int(integer.clone()),
+                integer_tensor(IntegerStorage::from_scalar(integer.clone()), vec![1, 1]),
+                Value::SparseTensor(
+                    SparseTensor::new_integer(
+                        1,
+                        1,
+                        vec![0, 1],
+                        vec![0],
+                        IntegerStorage::from_scalar(integer.clone()),
+                    )
+                    .expect("scalar sparse integer"),
+                ),
+            ];
+            for integer_operand in integer_operands {
+                for logical_operand in &logical_values {
+                    expect_integer_logical_arithmetic_error(
+                        builtin,
+                        integer_operand.clone(),
+                        logical_operand.clone(),
+                    );
+                    expect_integer_logical_arithmetic_error(
+                        builtin,
+                        logical_operand.clone(),
+                        integer_operand.clone(),
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn registered_integer_arithmetic_rejects_logicals_before_provider_dispatch() {
+    use runmat_accelerate_api::{GpuTensorHandle, IntegerElementType};
+
+    let integer_handle = GpuTensorHandle {
+        shape: vec![1, 1],
+        device_id: u32::MAX,
+        buffer_id: u64::MAX - 1,
+    };
+    let logical_handle = GpuTensorHandle {
+        shape: vec![1, 1],
+        device_id: u32::MAX,
+        buffer_id: u64::MAX,
+    };
+    runmat_accelerate_api::set_handle_integer_type(&integer_handle, IntegerElementType::I64);
+    runmat_accelerate_api::set_handle_logical(&logical_handle, true);
+
+    let resident_integer = Value::GpuTensor(integer_handle.clone());
+    let resident_logical = Value::GpuTensor(logical_handle.clone());
+    let host_integer = Value::Int(IntValue::I64(2));
+    let host_logical = Value::Bool(true);
+    for builtin in [
+        "plus", "minus", "times", "rdivide", "ldivide", "power", "rem", "mod",
+    ] {
+        for (lhs, rhs) in [
+            (resident_integer.clone(), host_logical.clone()),
+            (host_logical.clone(), resident_integer.clone()),
+            (host_integer.clone(), resident_logical.clone()),
+            (resident_logical.clone(), host_integer.clone()),
+            (resident_integer.clone(), resident_logical.clone()),
+            (resident_logical.clone(), resident_integer.clone()),
+        ] {
+            expect_integer_logical_arithmetic_error(builtin, lhs, rhs);
+        }
+    }
+
+    runmat_accelerate_api::clear_handle_integer_type(&integer_handle);
+    runmat_accelerate_api::clear_handle_logical(&logical_handle);
 }
 
 macro_rules! integer_class_cases {
