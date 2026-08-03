@@ -88,6 +88,50 @@ fn registered_integer_arithmetic_rejects_ordered_logicals_for_every_class() {
 }
 
 #[test]
+fn registered_integer_power_rejects_invalid_exponents_for_every_class() {
+    let bases = [
+        IntValue::I8(2),
+        IntValue::I16(2),
+        IntValue::I32(2),
+        IntValue::I64(2),
+        IntValue::U8(2),
+        IntValue::U16(2),
+        IntValue::U32(2),
+        IntValue::U64(2),
+    ];
+    for base in bases {
+        for exponent in [-1.0, 0.5, f64::INFINITY, f64::NAN] {
+            let error = runmat_runtime::call_builtin(
+                "power",
+                &[Value::Int(base.clone()), Value::Num(exponent)],
+            )
+            .expect_err("invalid integer exponent");
+            assert_eq!(error.identifier(), Some("RunMat:power:InvalidInput"));
+            assert!(error.message().contains("nonnegative integer values"));
+        }
+    }
+
+    let signed_exponents = [
+        integer_tensor(IntegerStorage::I8(vec![2, -1]), vec![1, 2]),
+        integer_tensor(IntegerStorage::I16(vec![2, -1]), vec![1, 2]),
+        integer_tensor(IntegerStorage::I32(vec![2, -1]), vec![1, 2]),
+        integer_tensor(IntegerStorage::I64(vec![2, -1]), vec![1, 2]),
+    ];
+    let signed_bases = [
+        integer_tensor(IntegerStorage::I8(vec![2]), vec![1, 1]),
+        integer_tensor(IntegerStorage::I16(vec![2]), vec![1, 1]),
+        integer_tensor(IntegerStorage::I32(vec![2]), vec![1, 1]),
+        integer_tensor(IntegerStorage::I64(vec![2]), vec![1, 1]),
+    ];
+    for (base, exponent) in signed_bases.into_iter().zip(signed_exponents) {
+        let error = runmat_runtime::call_builtin("power", &[base, exponent])
+            .expect_err("negative signed integer exponent");
+        assert_eq!(error.identifier(), Some("RunMat:power:InvalidInput"));
+        assert!(error.message().contains("nonnegative integer values"));
+    }
+}
+
+#[test]
 fn registered_integer_arithmetic_rejects_logicals_before_provider_dispatch() {
     use runmat_accelerate_api::{GpuTensorHandle, IntegerElementType};
 

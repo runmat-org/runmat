@@ -91,3 +91,32 @@ fn vm_power_paths_keep_uint64_integer_results_exact() {
         "elementwise uint64 power must saturate in the uint64 class: {vars:?}"
     );
 }
+
+#[test]
+fn vm_integer_power_rejects_invalid_exponents_across_lowerings() {
+    let cases = [
+        "out = int8(2) .^ (0 - 1);",
+        "out = int16(2) .^ 0.5;",
+        "out = power(int32(2), 0 - 1);",
+        "out = power(int64([2; 3]), int64([1, 0 - 1]));",
+        "out = 2.0 .^ int64(0 - 1);",
+    ];
+    for source in cases {
+        let error = execute_source(source).expect_err("invalid compiled integer exponent");
+        assert!(
+            error
+                .to_string()
+                .contains("integer exponents must be finite, nonnegative integer values"),
+            "{source}: unexpected error: {error}"
+        );
+    }
+
+    let vars =
+        execute_source("out = int16([-2 0]) .^ int16([3 0]);").expect("valid integer power edges");
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::Tensor(tensor)
+            if tensor.integer_storage()
+                == Some(&runmat_builtins::IntegerStorage::I16(vec![-8, 1]))
+    )));
+}

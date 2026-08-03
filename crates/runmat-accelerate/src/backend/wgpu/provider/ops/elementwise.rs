@@ -2869,7 +2869,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn wgpu_native_integer_power_preserves_all_classes_and_matches_runtime_edges() {
+    async fn wgpu_native_integer_power_preserves_all_classes_and_rejects_negative_exponents() {
         let Some(provider) = register_wgpu_provider_for_test() else {
             return;
         };
@@ -2877,23 +2877,23 @@ mod tests {
         let cases = [
             (
                 HostIntegerDataView::I8(&[2, -2, 0, -1]),
-                HostIntegerDataView::I8(&[7, 7, -1, -3]),
-                HostIntegerDataOwned::I8(vec![i8::MAX, i8::MIN, i8::MAX, -1]),
+                HostIntegerDataView::I8(&[7, 7, 0, 3]),
+                HostIntegerDataOwned::I8(vec![i8::MAX, i8::MIN, 1, -1]),
             ),
             (
                 HostIntegerDataView::I16(&[2, -2, 0, -1]),
-                HostIntegerDataView::I16(&[15, 15, -1, -3]),
-                HostIntegerDataOwned::I16(vec![i16::MAX, i16::MIN, i16::MAX, -1]),
+                HostIntegerDataView::I16(&[15, 15, 0, 3]),
+                HostIntegerDataOwned::I16(vec![i16::MAX, i16::MIN, 1, -1]),
             ),
             (
                 HostIntegerDataView::I32(&[2, -2, 0, -1]),
-                HostIntegerDataView::I32(&[31, 31, -1, -3]),
-                HostIntegerDataOwned::I32(vec![i32::MAX, i32::MIN, i32::MAX, -1]),
+                HostIntegerDataView::I32(&[31, 31, 0, 3]),
+                HostIntegerDataOwned::I32(vec![i32::MAX, i32::MIN, 1, -1]),
             ),
             (
                 HostIntegerDataView::I64(&[2, -2, 0, -1]),
-                HostIntegerDataView::I64(&[63, 63, -1, -3]),
-                HostIntegerDataOwned::I64(vec![i64::MAX, i64::MIN, i64::MAX, -1]),
+                HostIntegerDataView::I64(&[63, 63, 0, 3]),
+                HostIntegerDataOwned::I64(vec![i64::MAX, i64::MIN, 1, -1]),
             ),
             (
                 HostIntegerDataView::U8(&[2, u8::MAX, 0, 1]),
@@ -2941,6 +2941,29 @@ mod tests {
             for handle in [&lhs, &rhs, &value] {
                 provider.free(handle).expect("free power handle");
             }
+        }
+
+        let base = [2_i8];
+        let exponent = [-1_i8];
+        let lhs = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::I8(&base),
+                shape: &[1, 1],
+            })
+            .expect("upload negative-exponent base");
+        let rhs = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::I8(&exponent),
+                shape: &[1, 1],
+            })
+            .expect("upload negative exponent");
+        let error = provider
+            .elem_pow(&lhs, &rhs)
+            .await
+            .expect_err("negative integer exponent must reject");
+        assert!(error.to_string().contains("must be nonnegative"));
+        for handle in [&lhs, &rhs] {
+            provider.free(handle).expect("free rejection handle");
         }
     }
 

@@ -285,6 +285,9 @@ pub(crate) fn try_integer_binary(
                     "{builtin}: integer operands must have the same integer class"
                 ));
             }
+            if matches!(operation, IntegerBinaryOp::Power) {
+                validate_integer_exponent_storage(&right.storage, builtin)?;
+            }
             return apply_exact_integer_pair(&left, &right, operation)
                 .map(Some)
                 .map_err(|error| format!("{builtin}: {error}"));
@@ -299,6 +302,15 @@ pub(crate) fn try_integer_binary(
             "{builtin}: integer arrays can only be combined with scalar double values"
         ));
     };
+    if matches!(operation, IntegerBinaryOp::Power) {
+        if integer_is_left {
+            if !nonnegative_integer_exponent(scalar) {
+                return Err(invalid_integer_exponent_error(builtin));
+            }
+        } else {
+            validate_integer_exponent_storage(&integer.storage, builtin)?;
+        }
+    }
     apply_integer_scalar(&integer, scalar, integer_is_left, operation)
         .map(Some)
         .map_err(|error| format!("{builtin}: {error}"))
@@ -403,19 +415,16 @@ fn apply_integer_scalar(
     let exact_scalar = exact_integer_scalar(integer.target, scalar);
     for index in 0..integer.storage.len() {
         let integer_value = integer.storage.value_at(index);
+        if matches!(operation, IntegerBinaryOp::Power) && integer_is_left {
+            values.push(exact_integer_power_from_f64(integer_value, scalar));
+            continue;
+        }
         if let Some(scalar_value) = exact_scalar.clone() {
             values.push(if integer_is_left {
                 apply_exact(integer_value, scalar_value, operation)
             } else {
                 apply_exact(scalar_value, integer_value, operation)
             });
-            continue;
-        }
-        if matches!(operation, IntegerBinaryOp::Power)
-            && integer_is_left
-            && nonnegative_integer_exponent(scalar)
-        {
-            values.push(exact_integer_power(integer_value, scalar as u64));
             continue;
         }
         if integer.target.uses_extended_scalar_precision()
@@ -559,10 +568,23 @@ pub(crate) fn same_class_saturating_subtract(lhs: IntValue, rhs: IntValue) -> In
 }
 
 fn nonnegative_integer_exponent(value: f64) -> bool {
-    value.is_finite()
-        && value >= 0.0
-        && value.fract() == 0.0
-        && value < 18_446_744_073_709_551_616.0
+    value.is_finite() && value >= 0.0 && value.fract() == 0.0
+}
+
+fn validate_integer_exponent_storage(
+    storage: &IntegerStorageRef<'_>,
+    builtin: &str,
+) -> Result<(), String> {
+    for index in 0..storage.len() {
+        if integer_is_negative(&storage.value_at(index)) {
+            return Err(invalid_integer_exponent_error(builtin));
+        }
+    }
+    Ok(())
+}
+
+fn invalid_integer_exponent_error(builtin: &str) -> String {
+    format!("{builtin}: integer exponents must be finite, nonnegative integer values")
 }
 
 fn exact_integer_power_pair(base: IntValue, exponent: IntValue) -> IntValue {
@@ -638,23 +660,79 @@ fn exact_integer_power(base: IntValue, exponent: u64) -> IntValue {
     }
 }
 
-fn signed_integer_power(base: i128, exponent: i128, min: i128, max: i128) -> i128 {
-    if exponent < 0 {
-        return signed_negative_integer_power(base, exponent.unsigned_abs(), max);
+fn exact_integer_power_from_f64(base: IntValue, exponent: f64) -> IntValue {
+    if exponent < 18_446_744_073_709_551_616.0 {
+        return exact_integer_power(base, exponent as u64);
     }
-    saturated_signed_power(base, exponent as u128, min, max)
+    let even = exponent.rem_euclid(2.0) == 0.0;
+    match base {
+        IntValue::I8(base) => IntValue::I8(large_signed_integer_power(
+            i128::from(base),
+            even,
+            i128::from(i8::MIN),
+            i128::from(i8::MAX),
+        ) as i8),
+        IntValue::I16(base) => IntValue::I16(large_signed_integer_power(
+            i128::from(base),
+            even,
+            i128::from(i16::MIN),
+            i128::from(i16::MAX),
+        ) as i16),
+        IntValue::I32(base) => IntValue::I32(large_signed_integer_power(
+            i128::from(base),
+            even,
+            i128::from(i32::MIN),
+            i128::from(i32::MAX),
+        ) as i32),
+        IntValue::I64(base) => IntValue::I64(large_signed_integer_power(
+            i128::from(base),
+            even,
+            i128::from(i64::MIN),
+            i128::from(i64::MAX),
+        ) as i64),
+        IntValue::U8(base) => {
+            IntValue::U8(large_unsigned_integer_power(u128::from(base), u128::from(u8::MAX)) as u8)
+        }
+        IntValue::U16(base) => IntValue::U16(large_unsigned_integer_power(
+            u128::from(base),
+            u128::from(u16::MAX),
+        ) as u16),
+        IntValue::U32(base) => IntValue::U32(large_unsigned_integer_power(
+            u128::from(base),
+            u128::from(u32::MAX),
+        ) as u32),
+        IntValue::U64(base) => IntValue::U64(large_unsigned_integer_power(
+            u128::from(base),
+            u128::from(u64::MAX),
+        ) as u64),
+    }
 }
 
-fn signed_negative_integer_power(base: i128, exponent: u128, max: i128) -> i128 {
+fn large_signed_integer_power(base: i128, even: bool, min: i128, max: i128) -> i128 {
     match base {
-        0 => max,
+        0 => 0,
         1 => 1,
-        -1 if exponent.is_multiple_of(2) => 1,
+        -1 if even => 1,
         -1 => -1,
-        2 if exponent == 1 => 1,
-        -2 if exponent == 1 => -1,
-        _ => 0,
+        value if value < 0 && !even => min,
+        _ => max,
     }
+}
+
+fn large_unsigned_integer_power(base: u128, max: u128) -> u128 {
+    match base {
+        0 => 0,
+        1 => 1,
+        _ => max,
+    }
+}
+
+fn signed_integer_power(base: i128, exponent: i128, min: i128, max: i128) -> i128 {
+    debug_assert!(
+        exponent >= 0,
+        "integer exponent validated before evaluation"
+    );
+    saturated_signed_power(base, exponent as u128, min, max)
 }
 
 fn saturated_signed_power(mut base: i128, mut exponent: u128, min: i128, max: i128) -> i128 {
@@ -1018,19 +1096,58 @@ mod tests {
     }
 
     #[test]
-    fn signed_integer_power_handles_negative_exponents_and_zero_base() {
-        let result = try_integer_binary(
+    fn signed_integer_power_rejects_negative_exponents() {
+        let error = try_integer_binary(
             &integer(IntegerStorage::I8(vec![-2, 2, 0, -1]), vec![1, 4]),
             &integer(IntegerStorage::I8(vec![-1, -1, -1, -3]), vec![1, 4]),
             IntegerBinaryOp::Power,
             "power",
         )
-        .expect("integer operation")
-        .expect("integer path");
-        assert_eq!(
-            result,
-            integer(IntegerStorage::I8(vec![-1, 1, i8::MAX, -1]), vec![1, 4])
-        );
+        .expect_err("negative integer exponents must be rejected");
+        assert!(error.contains("nonnegative integer values"));
+    }
+
+    #[test]
+    fn every_integer_base_class_rejects_invalid_scalar_double_exponents() {
+        for (base, _) in integer_class_cases() {
+            for exponent in [-1.0, 0.5, f64::INFINITY, f64::NAN] {
+                let error = try_integer_binary(
+                    &Value::Int(base.clone()),
+                    &Value::Num(exponent),
+                    IntegerBinaryOp::Power,
+                    "power",
+                )
+                .expect_err("invalid scalar-double integer exponent");
+                assert!(error.contains("nonnegative integer values"));
+            }
+        }
+    }
+
+    #[test]
+    fn every_signed_integer_exponent_class_rejects_negative_values() {
+        let cases = [
+            (
+                Value::Int(IntValue::I8(2)),
+                integer(IntegerStorage::I8(vec![2, -1]), vec![1, 2]),
+            ),
+            (
+                Value::Int(IntValue::I16(2)),
+                integer(IntegerStorage::I16(vec![2, -1]), vec![1, 2]),
+            ),
+            (
+                Value::Int(IntValue::I32(2)),
+                integer(IntegerStorage::I32(vec![2, -1]), vec![1, 2]),
+            ),
+            (
+                Value::Int(IntValue::I64(2)),
+                integer(IntegerStorage::I64(vec![2, -1]), vec![1, 2]),
+            ),
+        ];
+        for (base, exponent) in cases {
+            let error = try_integer_binary(&base, &exponent, IntegerBinaryOp::Power, "power")
+                .expect_err("negative signed integer exponent");
+            assert!(error.contains("nonnegative integer values"));
+        }
     }
 
     #[test]
@@ -1044,6 +1161,29 @@ mod tests {
         .expect("integer operation")
         .expect("integer path");
         assert_eq!(result, Value::Int(IntValue::U64(u64::MAX)));
+    }
+
+    #[test]
+    fn large_integral_scalar_double_exponents_remain_valid_and_saturate_exactly() {
+        let exponent = Value::Num(1.0e20);
+        let cases = [
+            (Value::Int(IntValue::I8(0)), Value::Int(IntValue::I8(0))),
+            (Value::Int(IntValue::I16(1)), Value::Int(IntValue::I16(1))),
+            (Value::Int(IntValue::I32(-1)), Value::Int(IntValue::I32(1))),
+            (
+                Value::Int(IntValue::I64(2)),
+                Value::Int(IntValue::I64(i64::MAX)),
+            ),
+            (
+                Value::Int(IntValue::U64(2)),
+                Value::Int(IntValue::U64(u64::MAX)),
+            ),
+        ];
+        for (base, expected) in cases {
+            let result =
+                try_integer_binary(&base, &exponent, IntegerBinaryOp::Power, "power").unwrap();
+            assert_eq!(result, Some(expected));
+        }
     }
 
     #[test]
@@ -1409,16 +1549,15 @@ mod tests {
     }
 
     #[test]
-    fn nonintegral_scalar_double_powers_round_and_preserve_integer_class() {
+    fn invalid_scalar_double_integer_exponents_are_rejected() {
         let square_root = try_integer_binary(
             &Value::Int(IntValue::I8(2)),
             &Value::Num(0.5),
             IntegerBinaryOp::Power,
             "power",
         )
-        .expect("integer operation")
-        .expect("integer path");
-        assert_eq!(square_root, Value::Int(IntValue::I8(1)));
+        .expect_err("fractional exponent must be rejected");
+        assert!(square_root.contains("nonnegative integer values"));
 
         let fractional = try_integer_binary(
             &Value::Int(IntValue::I64(7)),
@@ -1426,9 +1565,8 @@ mod tests {
             IntegerBinaryOp::Power,
             "power",
         )
-        .expect("integer operation")
-        .expect("integer path");
-        assert_eq!(fractional, Value::Int(IntValue::I64(130)));
+        .expect_err("fractional exponent must be rejected");
+        assert!(fractional.contains("nonnegative integer values"));
 
         let complex_required = try_integer_binary(
             &Value::Int(IntValue::I8(-1)),
@@ -1436,9 +1574,8 @@ mod tests {
             IntegerBinaryOp::Power,
             "power",
         )
-        .expect("integer operation")
-        .expect("integer path");
-        assert_eq!(complex_required, Value::Int(IntValue::I8(0)));
+        .expect_err("fractional exponent must be rejected");
+        assert!(complex_required.contains("nonnegative integer values"));
 
         let inverse = try_integer_binary(
             &Value::Int(IntValue::U64(7)),
@@ -1446,8 +1583,16 @@ mod tests {
             IntegerBinaryOp::Power,
             "power",
         )
-        .expect("integer operation")
-        .expect("integer path");
-        assert_eq!(inverse, Value::Int(IntValue::U64(0)));
+        .expect_err("negative exponent must be rejected");
+        assert!(inverse.contains("nonnegative integer values"));
+
+        let integer_exponent = try_integer_binary(
+            &Value::Num(0.5),
+            &Value::Int(IntValue::I16(-2)),
+            IntegerBinaryOp::Power,
+            "power",
+        )
+        .expect_err("negative integer exponent must be rejected");
+        assert!(integer_exponent.contains("nonnegative integer values"));
     }
 }

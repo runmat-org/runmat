@@ -40,8 +40,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes:
-        "Providers execute element-wise pow when both operands reside on the device; host fallbacks cover implicit expansion and complex inputs.",
+    notes: "Providers execute floating element-wise pow when both operands reside on the device; integer operands gather for exact exponent-domain validation and arithmetic.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::power")]
@@ -328,7 +327,7 @@ fn power_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
         return Ok(result);
     }
     if let Some(result) = try_integer_binary(&lhs, &rhs, IntegerBinaryOp::Power, BUILTIN_NAME)
-        .map_err(builtin_error)?
+        .map_err(|error| power_error_with_detail(&POWER_ERROR_INVALID_INPUT, error))?
     {
         return Ok(result);
     }
@@ -665,6 +664,17 @@ fn char_array_to_tensor(chars: &CharArray) -> BuiltinResult<Tensor> {
 }
 
 async fn power_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_integer_type(&lhs).is_some()
+        || runmat_accelerate_api::handle_integer_type(&rhs).is_some()
+    {
+        let host_lhs = gpu_helpers::gather_tensor_async(&lhs)
+            .await
+            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+        let host_rhs = gpu_helpers::gather_tensor_async(&rhs)
+            .await
+            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+        return power_host(Value::Tensor(host_lhs), Value::Tensor(host_rhs));
+    }
     if let Some(provider) = runmat_accelerate_api::provider() {
         if lhs.shape == rhs.shape {
             if let Ok(handle) = provider.elem_pow(&lhs, &rhs).await {
@@ -1240,6 +1250,45 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn power_integer_exponent_domain_has_stable_public_error() {
+        let base = Tensor::new_integer(IntegerStorage::I32(vec![2, -2]), vec![2, 1])
+            .expect("integer base");
+        for exponent in [Value::Num(-1.0), Value::Num(0.5), Value::Num(f64::NAN)] {
+            let error = power_builtin(Value::Tensor(base.clone()), exponent, Vec::new())
+                .expect_err("invalid integer exponent");
+            assert_eq!(error.identifier(), Some("RunMat:power:InvalidInput"));
+            assert!(error.message().contains("nonnegative integer values"));
+        }
+
+        let exponent =
+            Tensor::new_integer(IntegerStorage::I32(vec![2, -1, 0]), vec![1, 3]).unwrap();
+        let error = power_builtin(
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::I32(vec![-2, 0]), vec![2, 1]).unwrap(),
+            ),
+            Value::Tensor(exponent),
+            Vec::new(),
+        )
+        .expect_err("broadcast negative integer exponent");
+        assert_eq!(error.identifier(), Some("RunMat:power:InvalidInput"));
+        assert!(error.message().contains("nonnegative integer values"));
+    }
+
+    #[test]
+    fn power_integer_zero_and_negative_base_edges_remain_exact() {
+        let base = Tensor::new_integer(IntegerStorage::I16(vec![0, -2, -2]), vec![1, 3]).unwrap();
+        let exponent = Tensor::new_integer(IntegerStorage::I16(vec![0, 2, 3]), vec![1, 3]).unwrap();
+        let result =
+            power_builtin(Value::Tensor(base), Value::Tensor(exponent), Vec::new()).unwrap();
+        assert_eq!(
+            result,
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::I16(vec![1, 4, -8]), vec![1, 3]).unwrap()
+            )
+        );
+    }
+
+    #[test]
     fn power_float_arrays_preserve_native_single_class() {
         let base = Tensor::from_f32(vec![2.0, 4.0], vec![1, 2]).unwrap();
         let exponent = Tensor::new(vec![3.0, 0.5], vec![1, 2]).unwrap();
@@ -1353,6 +1402,45 @@ pub(crate) mod tests {
                 .message()
                 .contains("integer arrays can only be combined with scalar double"));
             let _ = provider.free(&exponent_handle);
+        });
+    }
+
+    #[test]
+    fn power_gpu_integer_pairs_validate_exponents_before_provider_pow() {
+        test_support::with_test_provider(|provider| {
+            let base = Tensor::new_integer(IntegerStorage::I32(vec![2, -2]), vec![2, 1]).unwrap();
+            let invalid_exponent =
+                Tensor::new_integer(IntegerStorage::I32(vec![2, -1]), vec![1, 2]).unwrap();
+            let base_handle = gpu_helpers::upload_tensor(provider, &base).unwrap();
+            let invalid_handle = gpu_helpers::upload_tensor(provider, &invalid_exponent).unwrap();
+            let error = power_builtin(
+                Value::GpuTensor(base_handle.clone()),
+                Value::GpuTensor(invalid_handle.clone()),
+                Vec::new(),
+            )
+            .expect_err("resident negative integer exponent");
+            assert_eq!(error.identifier(), Some("RunMat:power:InvalidInput"));
+            assert!(error.message().contains("nonnegative integer values"));
+
+            let valid_exponent =
+                Tensor::new_integer(IntegerStorage::I32(vec![3, 0]), vec![1, 2]).unwrap();
+            let valid_handle = gpu_helpers::upload_tensor(provider, &valid_exponent).unwrap();
+            let result = power_builtin(
+                Value::GpuTensor(base_handle.clone()),
+                Value::GpuTensor(valid_handle.clone()),
+                Vec::new(),
+            )
+            .expect("resident valid integer exponent");
+            assert_eq!(
+                result,
+                Value::Tensor(
+                    Tensor::new_integer(IntegerStorage::I32(vec![8, -8, 1, 1]), vec![2, 2])
+                        .unwrap()
+                )
+            );
+            for handle in [&base_handle, &invalid_handle, &valid_handle] {
+                let _ = provider.free(handle);
+            }
         });
     }
 

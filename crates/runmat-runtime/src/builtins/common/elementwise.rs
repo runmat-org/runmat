@@ -1810,15 +1810,9 @@ mod tests {
             Some(&IntegerStorage::I64(vec![3, 2]))
         );
 
-        let Value::Tensor(powered) =
-            elementwise_pow(&Value::Tensor(input), &Value::Num(0.5)).expect("power")
-        else {
-            panic!("expected tensor");
-        };
-        assert_eq!(
-            powered.integer_storage(),
-            Some(&IntegerStorage::I64(vec![1, 2]))
-        );
+        let error = elementwise_pow(&Value::Tensor(input), &Value::Num(0.5))
+            .expect_err("fractional integer exponent must reject");
+        assert!(error.contains("nonnegative integer values"));
     }
 
     #[test]

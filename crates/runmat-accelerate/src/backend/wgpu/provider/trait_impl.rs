@@ -410,6 +410,36 @@ impl AccelProvider for WgpuProvider {
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            if matches!(
+                self.get_entry_raw(b)?.integer_type,
+                Some(
+                    IntegerElementType::I8
+                        | IntegerElementType::I16
+                        | IntegerElementType::I32
+                        | IntegerElementType::I64
+                )
+            ) {
+                let exponent = self.download_integer_exec(b).await?;
+                let has_negative = match exponent.data {
+                    runmat_accelerate_api::HostIntegerDataOwned::I8(values) => {
+                        values.into_iter().any(|value| value < 0)
+                    }
+                    runmat_accelerate_api::HostIntegerDataOwned::I16(values) => {
+                        values.into_iter().any(|value| value < 0)
+                    }
+                    runmat_accelerate_api::HostIntegerDataOwned::I32(values) => {
+                        values.into_iter().any(|value| value < 0)
+                    }
+                    runmat_accelerate_api::HostIntegerDataOwned::I64(values) => {
+                        values.into_iter().any(|value| value < 0)
+                    }
+                    _ => false,
+                };
+                ensure!(
+                    !has_negative,
+                    "elem_pow: integer exponents must be nonnegative"
+                );
+            }
             self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Pow, a, b)
         })
     }
