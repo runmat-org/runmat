@@ -256,6 +256,60 @@ fn registered_integer_scalar_mtimes_preserves_every_class_and_saturates() {
 }
 
 #[test]
+fn registered_integer_scalar_right_mrdivide_preserves_every_class() {
+    let cases = [
+        (
+            IntegerStorage::I8(vec![i8::MIN, 6]),
+            IntValue::I8(2),
+            IntegerStorage::I8(vec![i8::MIN / 2, 3]),
+        ),
+        (
+            IntegerStorage::I16(vec![i16::MIN, 6]),
+            IntValue::I16(2),
+            IntegerStorage::I16(vec![i16::MIN / 2, 3]),
+        ),
+        (
+            IntegerStorage::I32(vec![i32::MIN, 6]),
+            IntValue::I32(2),
+            IntegerStorage::I32(vec![i32::MIN / 2, 3]),
+        ),
+        (
+            IntegerStorage::I64(vec![i64::MIN, 6]),
+            IntValue::I64(2),
+            IntegerStorage::I64(vec![i64::MIN / 2, 3]),
+        ),
+        (
+            IntegerStorage::U8(vec![u8::MAX - 1, 6]),
+            IntValue::U8(2),
+            IntegerStorage::U8(vec![(u8::MAX - 1) / 2, 3]),
+        ),
+        (
+            IntegerStorage::U16(vec![u16::MAX - 1, 6]),
+            IntValue::U16(2),
+            IntegerStorage::U16(vec![(u16::MAX - 1) / 2, 3]),
+        ),
+        (
+            IntegerStorage::U32(vec![u32::MAX - 1, 6]),
+            IntValue::U32(2),
+            IntegerStorage::U32(vec![(u32::MAX - 1) / 2, 3]),
+        ),
+        (
+            IntegerStorage::U64(vec![u64::MAX - 1, (1_u64 << 53) + 2]),
+            IntValue::U64(2),
+            IntegerStorage::U64(vec![(u64::MAX - 1) / 2, (1_u64 << 52) + 1]),
+        ),
+    ];
+    for (array, scalar, expected) in cases {
+        let array = integer_tensor(array, vec![1, 2]);
+        for divisor in [Value::Int(scalar), Value::Num(2.0)] {
+            let result = runmat_runtime::call_builtin("mrdivide", &[array.clone(), divisor])
+                .expect("integer scalar-right mrdivide");
+            expect_integer(result, &[1, 2], expected.clone());
+        }
+    }
+}
+
+#[test]
 fn registered_integer_arithmetic_rejects_logicals_before_provider_dispatch() {
     use runmat_accelerate_api::{GpuTensorHandle, IntegerElementType};
 

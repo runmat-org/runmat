@@ -6,7 +6,7 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
+    ComplexTensor, IntegerStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -91,7 +91,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Prefers the provider `mrdivide` hook; WGPU currently supports selected real F32 device-resident square and rectangular solve cases, otherwise it performs the solve on the host and re-uploads the result.",
+    notes: "Prefers the provider `mrdivide` hook for supported floating solves; scalar-right integer division gathers through exact typed storage, applies class-preserving division, and restores GPU residency for integer results when an input was resident.",
 };
 
 fn mrdivide_error_with_message(
@@ -171,13 +171,7 @@ async fn mrdivide_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 
 pub(crate) async fn mrdivide_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Value> {
     if contains_integer(lhs) || contains_integer(rhs) {
-        let lhs_host = crate::dispatcher::gather_if_needed_async(lhs)
-            .await
-            .map_err(map_control_flow)?;
-        let rhs_host = crate::dispatcher::gather_if_needed_async(rhs)
-            .await
-            .map_err(map_control_flow)?;
-        return mrdivide_cpu(lhs_host, rhs_host);
+        return mrdivide_integer_eval(lhs, rhs).await;
     }
     if let Some(result) = try_gpu_mrdivide(lhs, rhs).await? {
         return Ok(result);
@@ -190,6 +184,32 @@ pub(crate) async fn mrdivide_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Val
         .await
         .map_err(map_control_flow)?;
     mrdivide_cpu(lhs_host, rhs_host)
+}
+
+async fn mrdivide_integer_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Value> {
+    let retain_gpu_residency =
+        matches!(lhs, Value::GpuTensor(_)) || matches!(rhs, Value::GpuTensor(_));
+    let lhs = crate::dispatcher::gather_if_needed_async(lhs)
+        .await
+        .map_err(map_control_flow)?;
+    let rhs = crate::dispatcher::gather_if_needed_async(rhs)
+        .await
+        .map_err(map_control_flow)?;
+    let result = mrdivide_cpu(lhs, rhs)?;
+    if !retain_gpu_residency {
+        return Ok(result);
+    }
+    let tensor = match result {
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => tensor,
+        Value::Int(value) => Tensor::new_integer(IntegerStorage::from_scalar(value), vec![1, 1])
+            .map_err(mrdivide_internal_error)?,
+        other => return Ok(other),
+    };
+    let provider = runmat_accelerate_api::provider()
+        .ok_or_else(|| mrdivide_internal_error("mrdivide: acceleration provider is unavailable"))?;
+    let handle = gpu_helpers::upload_tensor(provider, &tensor)
+        .map_err(|error| mrdivide_internal_error(format!("{NAME}: {error}")))?;
+    Ok(gpu_helpers::resident_gpu_value(handle))
 }
 
 async fn try_gpu_mrdivide(lhs: &Value, rhs: &Value) -> BuiltinResult<Option<Value>> {
@@ -234,7 +254,7 @@ fn mrdivide_cpu(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
         && !contains_complex(&lhs)
         && !contains_complex(&rhs)
     {
-        if !scalar_divide_input(&rhs) || (contains_integer(&rhs) && !scalar_divide_input(&lhs)) {
+        if !scalar_divide_input(&rhs) {
             return Err(mrdivide_invalid_input(
                 "mrdivide: integer inputs are only supported for scalar right division",
             ));
@@ -274,6 +294,7 @@ fn contains_integer(value: &Value) -> bool {
     match value {
         Value::Int(_) => true,
         Value::Tensor(tensor) => tensor.integer_storage().is_some(),
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle).is_some(),
         _ => false,
     }
 }
@@ -472,7 +493,7 @@ fn complex_tensor_is_scalar(tensor: &ComplexTensor) -> bool {
 }
 
 fn is_scalar_handle(handle: &GpuTensorHandle) -> bool {
-    crate::builtins::common::shape::is_scalar_shape(&handle.shape)
+    handle.shape.iter().copied().product::<usize>() == 1
 }
 
 struct PreparedOperand {
@@ -553,7 +574,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_accelerate_api::{HostTensorView, ProviderTelemetry};
+    use runmat_accelerate_api::{HostTensorView, IntegerElementType, ProviderTelemetry};
     use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Type};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
@@ -575,6 +596,64 @@ pub(crate) mod tests {
     fn clear_accel_provider_state() {
         runmat_accelerate_api::set_thread_provider(None);
         runmat_accelerate_api::clear_provider();
+    }
+
+    fn integer_scalar_mrdivide_cases() -> Vec<(IntegerStorage, IntValue, IntegerStorage)> {
+        vec![
+            (
+                IntegerStorage::I8(vec![i8::MIN, 6, 4]),
+                IntValue::I8(2),
+                IntegerStorage::I8(vec![i8::MIN / 2, 3, 2]),
+            ),
+            (
+                IntegerStorage::I16(vec![i16::MIN, 6, 4]),
+                IntValue::I16(2),
+                IntegerStorage::I16(vec![i16::MIN / 2, 3, 2]),
+            ),
+            (
+                IntegerStorage::I32(vec![i32::MIN, 6, 4]),
+                IntValue::I32(2),
+                IntegerStorage::I32(vec![i32::MIN / 2, 3, 2]),
+            ),
+            (
+                IntegerStorage::I64(vec![i64::MIN, 6, 4]),
+                IntValue::I64(2),
+                IntegerStorage::I64(vec![i64::MIN / 2, 3, 2]),
+            ),
+            (
+                IntegerStorage::U8(vec![u8::MAX - 1, 6, 4]),
+                IntValue::U8(2),
+                IntegerStorage::U8(vec![(u8::MAX - 1) / 2, 3, 2]),
+            ),
+            (
+                IntegerStorage::U16(vec![u16::MAX - 1, 6, 4]),
+                IntValue::U16(2),
+                IntegerStorage::U16(vec![(u16::MAX - 1) / 2, 3, 2]),
+            ),
+            (
+                IntegerStorage::U32(vec![u32::MAX - 1, 6, 4]),
+                IntValue::U32(2),
+                IntegerStorage::U32(vec![(u32::MAX - 1) / 2, 3, 2]),
+            ),
+            (
+                IntegerStorage::U64(vec![u64::MAX - 1, (1_u64 << 53) + 2, 4]),
+                IntValue::U64(2),
+                IntegerStorage::U64(vec![(u64::MAX - 1) / 2, (1_u64 << 52) + 1, 2]),
+            ),
+        ]
+    }
+
+    fn integer_element_type(storage: &IntegerStorage) -> IntegerElementType {
+        match storage {
+            IntegerStorage::I8(_) => IntegerElementType::I8,
+            IntegerStorage::I16(_) => IntegerElementType::I16,
+            IntegerStorage::I32(_) => IntegerElementType::I32,
+            IntegerStorage::I64(_) => IntegerElementType::I64,
+            IntegerStorage::U8(_) => IntegerElementType::U8,
+            IntegerStorage::U16(_) => IntegerElementType::U16,
+            IntegerStorage::U32(_) => IntegerElementType::U32,
+            IntegerStorage::U64(_) => IntegerElementType::U64,
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -656,12 +735,60 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn integer_array_scalar_right_division_is_exact_for_all_classes() {
+        for (array, scalar, expected) in integer_scalar_mrdivide_cases() {
+            let array =
+                Value::Tensor(Tensor::new_integer(array, vec![1, 3]).expect("integer array"));
+            for divisor in [
+                Value::Int(scalar.clone()),
+                Value::Tensor(
+                    Tensor::new_integer(IntegerStorage::from_scalar(scalar), vec![1, 1])
+                        .expect("integer scalar tensor"),
+                ),
+                Value::Num(2.0),
+            ] {
+                let result =
+                    mrdivide_builtin(array.clone(), divisor).expect("integer scalar mrdivide");
+                assert_eq!(
+                    result,
+                    Value::Tensor(
+                        Tensor::new_integer(expected.clone(), vec![1, 3]).expect("integer result")
+                    )
+                );
+            }
+        }
+    }
+
+    #[test]
     fn integer_scalar_divisor_rejects_nonscalar_double_numerator() {
         let numerator = Tensor::new(vec![2.0, 4.0], vec![1, 2]).expect("numerator");
         let err = mrdivide_builtin(Value::Tensor(numerator), Value::Int(IntValue::I32(2)))
             .expect_err("integer scalar divisor needs scalar numerator");
         assert_eq!(err.identifier(), MRDIVIDE_ERROR_INVALID_INPUT.identifier);
-        assert!(err.message().contains("only supported for scalar"));
+        assert!(err
+            .message()
+            .contains("integer arrays can only be combined with scalar double values"));
+    }
+
+    #[test]
+    fn integer_mrdivide_rejects_nonscalar_divisors_and_mixed_classes() {
+        let lhs = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I16(vec![6, 4]), vec![1, 2]).expect("lhs"),
+        );
+        let rhs = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I16(vec![2, 2]), vec![1, 2]).expect("rhs"),
+        );
+        let error = mrdivide_builtin(lhs, rhs).expect_err("nonscalar integer divisor must reject");
+        assert_eq!(error.identifier(), MRDIVIDE_ERROR_INVALID_INPUT.identifier);
+        assert!(error.message().contains("scalar right division"));
+
+        let lhs = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I16(vec![6, 4]), vec![1, 2]).expect("lhs"),
+        );
+        let error = mrdivide_builtin(lhs, Value::Int(IntValue::U16(2)))
+            .expect_err("mixed integer classes must reject");
+        assert_eq!(error.identifier(), MRDIVIDE_ERROR_INVALID_INPUT.identifier);
+        assert!(error.message().contains("same integer class"));
     }
 
     #[test]
@@ -886,6 +1013,112 @@ pub(crate) mod tests {
             let _ = provider.free(&hm);
             let _ = provider.free(&hs);
         });
+    }
+
+    #[test]
+    fn resident_integer_scalar_mrdivide_preserves_all_classes_and_residency() {
+        test_support::with_test_provider(|provider| {
+            for (array, scalar, expected) in integer_scalar_mrdivide_cases() {
+                let array = Tensor::new_integer(array, vec![1, 3]).expect("resident integer array");
+                let array_handle = gpu_helpers::upload_tensor(provider, &array).expect("upload");
+                let result =
+                    mrdivide_builtin(Value::GpuTensor(array_handle), Value::Int(scalar.clone()))
+                        .expect("resident integer array divided by host scalar");
+                let Value::GpuTensor(result_handle) = &result else {
+                    panic!("expected resident integer result, got {result:?}");
+                };
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(result_handle),
+                    Some(integer_element_type(&expected))
+                );
+                let gathered = test_support::gather(result).expect("gather integer result");
+                assert_eq!(gathered.integer_storage(), Some(&expected));
+
+                let scalar = Tensor::new_integer(IntegerStorage::from_scalar(scalar), vec![1, 1])
+                    .expect("resident scalar");
+                let array_handle = gpu_helpers::upload_tensor(provider, &array).expect("upload");
+                let scalar_handle = gpu_helpers::upload_tensor(provider, &scalar).expect("upload");
+                let result = mrdivide_builtin(
+                    Value::GpuTensor(array_handle),
+                    Value::GpuTensor(scalar_handle),
+                )
+                .expect("resident integer array divided by resident scalar");
+                let Value::GpuTensor(result_handle) = &result else {
+                    panic!("expected resident integer result, got {result:?}");
+                };
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(result_handle),
+                    Some(integer_element_type(&expected))
+                );
+                let gathered = test_support::gather(result).expect("gather integer result");
+                assert_eq!(gathered.integer_storage(), Some(&expected));
+            }
+
+            let array =
+                Tensor::new_integer(IntegerStorage::U16(vec![6, 4]), vec![1, 2]).expect("array");
+            let scalar =
+                Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1, 1]).expect("scalar");
+            let array_handle = gpu_helpers::upload_tensor(provider, &array).expect("upload");
+            let scalar_handle = gpu_helpers::upload_tensor(provider, &scalar).expect("upload");
+            let result = mrdivide_builtin(
+                Value::GpuTensor(array_handle),
+                Value::GpuTensor(scalar_handle),
+            )
+            .expect("singleton-N-D resident scalar mrdivide");
+            let gathered = test_support::gather(result).expect("gather integer result");
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U16(vec![3, 2]))
+            );
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn wgpu_integer_scalar_mrdivide_preserves_all_classes_and_residency() {
+        if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .is_err()
+        {
+            return;
+        }
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        for (array, scalar, expected) in integer_scalar_mrdivide_cases() {
+            let array = Tensor::new_integer(array, vec![1, 3]).expect("wgpu integer array");
+            let array_handle = gpu_helpers::upload_tensor(provider, &array).expect("upload");
+            let result =
+                mrdivide_builtin(Value::GpuTensor(array_handle), Value::Int(scalar.clone()))
+                    .expect("wgpu integer scalar mrdivide");
+            let Value::GpuTensor(result_handle) = &result else {
+                panic!("expected resident integer result, got {result:?}");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(result_handle),
+                Some(integer_element_type(&expected))
+            );
+            let gathered = test_support::gather(result).expect("gather wgpu integer result");
+            assert_eq!(gathered.integer_storage(), Some(&expected));
+
+            let scalar = Tensor::new_integer(IntegerStorage::from_scalar(scalar), vec![1, 1])
+                .expect("scalar");
+            let array_handle = gpu_helpers::upload_tensor(provider, &array).expect("upload");
+            let scalar_handle = gpu_helpers::upload_tensor(provider, &scalar).expect("upload");
+            let result = mrdivide_builtin(
+                Value::GpuTensor(array_handle),
+                Value::GpuTensor(scalar_handle),
+            )
+            .expect("wgpu integer array divided by resident scalar");
+            let Value::GpuTensor(result_handle) = &result else {
+                panic!("expected resident integer result, got {result:?}");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(result_handle),
+                Some(integer_element_type(&expected))
+            );
+            let gathered = test_support::gather(result).expect("gather wgpu integer result");
+            assert_eq!(gathered.integer_storage(), Some(&expected));
+        }
     }
 
     #[cfg(feature = "wgpu")]
