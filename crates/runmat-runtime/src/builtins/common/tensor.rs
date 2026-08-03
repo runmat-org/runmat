@@ -287,7 +287,11 @@ pub fn tensor_into_value(tensor: Tensor) -> Value {
         if let Some(storage) = tensor.integer_storage() {
             return Value::Int(storage.value_at(0).expect("one-element integer storage"));
         }
-        Value::Num(tensor_value_f64(&tensor, 0))
+        if tensor.numeric_dtype() == runmat_builtins::NumericDType::F64 {
+            Value::Num(tensor_value_f64(&tensor, 0))
+        } else {
+            Value::Tensor(tensor)
+        }
     } else {
         Value::Tensor(tensor)
     }
@@ -807,7 +811,7 @@ mod dimension_tests {
         tensor_values_f64_cow,
     };
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
+    use runmat_builtins::{IntValue, IntegerStorage, NumericStorage, Tensor, Value};
 
     #[test]
     fn typed_dimension_parsers_preserve_representable_uint64_values() {
@@ -995,6 +999,18 @@ mod dimension_tests {
             .expect("integer tensor");
 
         assert_eq!(tensor_into_value(tensor), Value::Int(IntValue::U64(wide)));
+    }
+
+    #[test]
+    fn tensor_into_value_preserves_native_single_scalar_storage() {
+        let tensor = Tensor::from_f32(vec![0.25], vec![1, 1]).expect("single tensor");
+        let Value::Tensor(output) = tensor_into_value(tensor) else {
+            panic!("single scalar must retain tensor class");
+        };
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![0.25])
+        );
     }
 
     #[test]

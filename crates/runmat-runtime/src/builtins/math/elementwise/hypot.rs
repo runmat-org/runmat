@@ -4,7 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    ComplexStorage, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -167,10 +167,15 @@ async fn hypot_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 }
 
 async fn hypot_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        if a.shape == b.shape {
-            if let Ok(handle) = provider.elem_hypot(&a, &b).await {
-                return Ok(gpu_helpers::resident_gpu_value(handle));
+    let has_integer_input = runmat_accelerate_api::handle_integer_type(&a).is_some()
+        || runmat_accelerate_api::handle_integer_type(&b).is_some();
+    if !has_integer_input {
+        let provider = runmat_accelerate_api::provider_for_handle(&a);
+        if let Some(provider) = provider {
+            if a.shape == b.shape {
+                if let Ok(handle) = provider.elem_hypot(&a, &b).await {
+                    return Ok(gpu_helpers::resident_gpu_value(handle));
+                }
             }
         }
     }
@@ -189,26 +194,58 @@ fn hypot_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     }
     let tensor_a = value_into_hypot_tensor(lhs)?;
     let tensor_b = value_into_hypot_tensor(rhs)?;
-    compute_hypot_tensor(&tensor_a, &tensor_b)
+    compute_hypot_tensor(tensor_a, tensor_b)
 }
 
-fn compute_hypot_tensor(a: &Tensor, b: &Tensor) -> BuiltinResult<Value> {
+fn compute_hypot_tensor(a: Tensor, b: Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&a.shape, &b.shape)
         .map_err(|err| hypot_error_with_detail(&HYPOT_ERROR_SIZE_MISMATCH, err))?;
-    if plan.is_empty() {
-        let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| hypot_error_with_detail(&HYPOT_ERROR_INTERNAL, e))?;
-        return Ok(tensor::tensor_into_value(tensor));
-    }
-    let a_data = tensor::tensor_values_f64_cow(a);
-    let b_data = tensor::tensor_values_f64_cow(b);
-    let mut result = vec![0.0f64; plan.len()];
-    for (out_idx, idx_a, idx_b) in plan.iter() {
-        result[out_idx] = a_data[idx_a].hypot(b_data[idx_b]);
-    }
-    let tensor = Tensor::new(result, plan.output_shape().to_vec())
+    let output_shape = plan.output_shape().to_vec();
+    let a_storage = a
+        .into_numeric_storage()
+        .map_err(|e| hypot_error_with_detail(&HYPOT_ERROR_INTERNAL, e))?;
+    let b_storage = b
+        .into_numeric_storage()
+        .map_err(|e| hypot_error_with_detail(&HYPOT_ERROR_INTERNAL, e))?;
+    let use_single =
+        matches!(a_storage, NumericStorage::F32(_)) || matches!(b_storage, NumericStorage::F32(_));
+    let storage = if use_single {
+        let a_values = promote_hypot_operand_to_single_domain(a_storage);
+        let b_values = promote_hypot_operand_to_single_domain(b_storage);
+        NumericStorage::F32(
+            plan.iter()
+                .map(|(_, idx_a, idx_b)| a_values[idx_a].hypot(b_values[idx_b]))
+                .collect(),
+        )
+    } else {
+        let a_values = promote_hypot_operand_to_double_domain(a_storage);
+        let b_values = promote_hypot_operand_to_double_domain(b_storage);
+        NumericStorage::F64(
+            plan.iter()
+                .map(|(_, idx_a, idx_b)| a_values[idx_a].hypot(b_values[idx_b]))
+                .collect(),
+        )
+    };
+    let tensor = Tensor::from_numeric_storage(storage, output_shape)
         .map_err(|e| hypot_error_with_detail(&HYPOT_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))
+}
+
+fn promote_hypot_operand_to_single_domain(storage: NumericStorage) -> Vec<f32> {
+    storage.materialize_f32()
+}
+
+fn promote_hypot_operand_to_double_domain(storage: NumericStorage) -> Vec<f64> {
+    match storage {
+        NumericStorage::F64(values) => values,
+        NumericStorage::F32(_) => {
+            unreachable!("single storage selects the native-single hypot domain")
+        }
+        storage => storage
+            .into_integer_storage()
+            .expect("hypot double-domain promotion received unsupported storage")
+            .to_f64_vec(),
+    }
 }
 
 fn value_into_hypot_tensor(value: Value) -> BuiltinResult<Tensor> {
@@ -221,12 +258,28 @@ fn value_into_hypot_tensor(value: Value) -> BuiltinResult<Tensor> {
         Value::Complex(re, im) => Tensor::new(vec![complex_magnitude(re, im)], vec![1, 1])
             .map_err(|e| hypot_error_with_detail(&HYPOT_ERROR_INTERNAL, e)),
         Value::ComplexTensor(ct) => {
-            let data: Vec<f64> = ct
-                .materialize_f64()
-                .iter()
-                .map(|(re, im)| re.hypot(*im))
-                .collect();
-            Tensor::new(data, ct.shape.clone())
+            let shape = ct.shape.clone();
+            let storage = match ct.into_complex_storage() {
+                ComplexStorage::F64(values) => NumericStorage::F64(
+                    values
+                        .into_iter()
+                        .map(|(real, imag)| real.hypot(imag))
+                        .collect(),
+                ),
+                ComplexStorage::F32(values) => NumericStorage::F32(
+                    values
+                        .into_iter()
+                        .map(|(real, imag)| real.hypot(imag))
+                        .collect(),
+                ),
+                ComplexStorage::Integer(_) => {
+                    return Err(hypot_error_with_detail(
+                        &HYPOT_ERROR_INVALID_INPUT,
+                        "typed complex integer input is not supported",
+                    ))
+                }
+            };
+            Tensor::from_numeric_storage(storage, shape)
                 .map_err(|e| hypot_error_with_detail(&HYPOT_ERROR_INTERNAL, e))
         }
         other => {
@@ -251,16 +304,11 @@ fn scalar_hypot_value(value: &Value) -> Option<f64> {
         Value::Num(n) => Some(*n),
         Value::Int(i) => Some(i.to_f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Some(tensor::tensor_value_f64(t, 0)),
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
         Value::CharArray(ca) if ca.rows * ca.cols == 1 => {
             Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
         }
         Value::Complex(re, im) => Some(complex_magnitude(*re, *im)),
-        Value::ComplexTensor(ct) if tensor::is_scalar_complex_tensor(ct) => {
-            let value = tensor::complex_tensor_value_complex64(ct, 0);
-            Some(complex_magnitude(value.re, value.im))
-        }
         _ => None,
     }
 }
@@ -280,25 +328,22 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn scalar_hypot_value_reads_typed_integer_tensor_storage_exactly() {
+    fn scalar_hypot_value_leaves_typed_integer_tensor_for_storage_dispatch() {
         let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
                 .expect("integer tensor");
 
-        assert_eq!(
-            scalar_hypot_value(&Value::Tensor(tensor)),
-            Some(9_007_199_254_740_993_u64 as f64)
-        );
+        assert_eq!(scalar_hypot_value(&Value::Tensor(tensor)), None);
     }
 
     #[test]
-    fn scalar_hypot_value_reads_typed_integer_complex_storage_without_mirror() {
+    fn scalar_hypot_value_leaves_complex_tensor_for_storage_dispatch() {
         let storage =
             IntegerComplexStorage::new(IntegerStorage::I16(vec![3]), IntegerStorage::I16(vec![4]))
                 .expect("complex integer storage");
         let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
 
-        assert_eq!(scalar_hypot_value(&Value::ComplexTensor(tensor)), Some(5.0));
+        assert_eq!(scalar_hypot_value(&Value::ComplexTensor(tensor)), None);
     }
 
     #[test]
@@ -456,6 +501,80 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn hypot_preserves_native_single_real_complex_mixed_and_empty_storage() {
+        let left = Tensor::from_f32(vec![3.0, 5.0], vec![2, 1]).unwrap();
+        let right = Tensor::from_f32(vec![4.0, 12.0], vec![2, 1]).unwrap();
+        let Value::Tensor(output) =
+            hypot_builtin(Value::Tensor(left), Value::Tensor(right)).expect("single hypot")
+        else {
+            panic!("expected single tensor");
+        };
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![5.0, 13.0])
+        );
+
+        let left = Tensor::new(vec![3.0, 5.0], vec![2, 1]).unwrap();
+        let right = Tensor::from_f32(vec![4.0, 12.0], vec![2, 1]).unwrap();
+        let Value::Tensor(output) =
+            hypot_builtin(Value::Tensor(left), Value::Tensor(right)).expect("mixed hypot")
+        else {
+            panic!("expected mixed result to retain single");
+        };
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![5.0, 13.0])
+        );
+
+        let complex = ComplexTensor::from_f32(vec![(3.0, 4.0)], vec![1, 1]).unwrap();
+        let real = Tensor::from_f32(vec![12.0], vec![1, 1]).unwrap();
+        let Value::Tensor(output) =
+            hypot_builtin(Value::ComplexTensor(complex), Value::Tensor(real))
+                .expect("complex single hypot")
+        else {
+            panic!("one-element single result must retain tensor class");
+        };
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![13.0])
+        );
+
+        let left = Tensor::from_f32(Vec::new(), vec![0, 3]).unwrap();
+        let right = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
+        let Value::Tensor(output) =
+            hypot_builtin(Value::Tensor(left), Value::Tensor(right)).expect("empty hypot")
+        else {
+            panic!("expected empty single tensor");
+        };
+        assert_eq!(output.shape, vec![0, 3]);
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(Vec::new())
+        );
+    }
+
+    #[test]
+    fn hypot_integer_gpu_pair_gathers_exact_storage_before_floating_provider_hook() {
+        test_support::with_test_provider(|provider| {
+            let wide = 9_007_199_254_740_993_u64;
+            let left = Tensor::new_integer(IntegerStorage::U64(vec![wide, 3]), vec![1, 2]).unwrap();
+            let right = Tensor::new_integer(IntegerStorage::U64(vec![1, 4]), vec![1, 2]).unwrap();
+            let left = gpu_helpers::upload_tensor(provider, &left).expect("upload left");
+            let right = gpu_helpers::upload_tensor(provider, &right).expect("upload right");
+            let Value::Tensor(output) =
+                hypot_builtin(Value::GpuTensor(left), Value::GpuTensor(right))
+                    .expect("integer gpu hypot")
+            else {
+                panic!("integer gpu pair must compute through host double domain");
+            };
+            assert_eq!(
+                output.into_numeric_storage().unwrap(),
+                NumericStorage::F64(vec![(wide as f64).hypot(1.0), 5.0])
+            );
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -724,7 +843,7 @@ pub(crate) mod tests {
         let lhs = Tensor::new(vec![3.0, 4.0, 5.0, 12.0], vec![2, 2]).unwrap();
         let rhs = Tensor::new(vec![4.0, 3.0, 12.0, 5.0], vec![2, 2]).unwrap();
 
-        let cpu_value = compute_hypot_tensor(&lhs, &rhs).expect("cpu hypot");
+        let cpu_value = compute_hypot_tensor(lhs.clone(), rhs.clone()).expect("cpu hypot");
         let expected = test_support::gather(cpu_value).expect("gather cpu result");
 
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
