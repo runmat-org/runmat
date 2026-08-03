@@ -74,11 +74,12 @@ async fn issortedrows_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinR
     let evaluation = crate::builtins::array::sorting_sets::sortrows::evaluate(value, &rest).await?;
     let indices = evaluation.indices_value();
     let sorted = match indices {
-        Value::Tensor(tensor) => tensor
-            .materialize_f64()
-            .iter()
-            .enumerate()
-            .all(|(idx, value)| *value == idx as f64 + 1.0),
+        Value::Tensor(tensor) => tensor.as_f64_slice().is_some_and(|values| {
+            values
+                .iter()
+                .enumerate()
+                .all(|(idx, value)| *value == idx as f64 + 1.0)
+        }),
         Value::Num(value) => value == 1.0,
         Value::Int(value) => value.to_i64() == 1,
         _ => false,
