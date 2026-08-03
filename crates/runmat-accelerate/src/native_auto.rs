@@ -1345,6 +1345,10 @@ fn value_kind(value: &Value) -> &'static str {
         Value::Listener(_) => "Listener",
         Value::MException(_) => "MException",
         Value::OutputList(_) => "OutputList",
+        Value::Future(_) => "Future",
+        Value::Task(_) => "Task",
+        Value::Pool(_) => "Pool",
+        Value::Job(_) => "Job",
     }
 }
 

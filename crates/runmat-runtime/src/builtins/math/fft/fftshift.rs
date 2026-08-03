@@ -268,6 +268,10 @@ async fn fftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
+        | Value::Future(_)
+        | Value::Task(_)
+        | Value::Pool(_)
+        | Value::Job(_)
         | Value::OutputList(_) => Err(fftshift_error(&FFTSHIFT_ERROR_UNSUPPORTED_INPUT)),
     }
 }

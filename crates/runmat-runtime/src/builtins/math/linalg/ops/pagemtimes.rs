@@ -831,6 +831,10 @@ fn type_name(value: &Value) -> &'static str {
         Value::ClassRef(_) => "class reference",
         Value::MException(_) => "MException",
         Value::OutputList(_) => "output list",
+        Value::Future(_) => "future",
+        Value::Task(_) => "task",
+        Value::Pool(_) => "pool",
+        Value::Job(_) => "job",
     }
 }
 

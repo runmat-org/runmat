@@ -134,7 +134,11 @@ fn clear_handles_in_value_excluding_with_visited(
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle { .. }
         | Value::ClassRef(_)
-        | Value::MException(_) => {}
+        | Value::MException(_)
+        | Value::Future(_)
+        | Value::Task(_)
+        | Value::Pool(_)
+        | Value::Job(_) => {}
     }
     Ok(())
 }
@@ -213,7 +217,11 @@ fn collect_gpu_buffer_ids_with_visited(
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle { .. }
         | Value::ClassRef(_)
-        | Value::MException(_) => {}
+        | Value::MException(_)
+        | Value::Future(_)
+        | Value::Task(_)
+        | Value::Pool(_)
+        | Value::Job(_) => {}
     }
     Ok(())
 }

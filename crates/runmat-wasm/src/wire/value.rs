@@ -270,6 +270,32 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
             "message": ex.message,
             "stack": ex.stack,
         }),
+        Value::Future(handle) => json!({
+            "kind": "future",
+            "id": handle.id.to_string(),
+            "scopeId": handle.scope_id.to_string(),
+            "requestedOutputs": handle.outputs.requested_outputs,
+        }),
+        Value::Task(handle) => json!({
+            "kind": "task",
+            "id": handle.id.to_string(),
+            "scopeId": handle.scope_id.to_string(),
+            "generation": handle.generation,
+            "requestedOutputs": handle.outputs.requested_outputs,
+        }),
+        Value::Pool(handle) => json!({
+            "kind": "pool",
+            "id": handle.id.to_string(),
+            "scopeId": handle.scope_id.to_string(),
+            "generation": handle.generation,
+        }),
+        Value::Job(handle) => json!({
+            "kind": "job",
+            "id": handle.id.to_string(),
+            "runId": handle.run_id.to_string(),
+            "generation": handle.generation,
+            "requestedOutputs": handle.outputs.requested_outputs,
+        }),
     }
 }
 

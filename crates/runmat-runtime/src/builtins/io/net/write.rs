@@ -555,6 +555,10 @@ fn flatten_numeric(value: &Value) -> BuiltinResult<Vec<f64>> {
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
+        | Value::Future(_)
+        | Value::Task(_)
+        | Value::Pool(_)
+        | Value::Job(_)
         | Value::OutputList(_) => Err(write_flow(
             &WRITE_ERROR_INVALID_DATA,
             "write: unsupported input type",

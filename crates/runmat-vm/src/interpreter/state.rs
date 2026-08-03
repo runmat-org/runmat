@@ -42,6 +42,24 @@ impl InterpreterState {
         current_function_name: Option<&str>,
         call_counts: Vec<(usize, usize)>,
     ) -> Self {
+        Self::new_in_context(
+            bytecode,
+            initial_vars,
+            current_function_name,
+            call_counts,
+            runmat_runtime::execution::InvocationExecutionContext::new(std::rc::Rc::new(
+                runmat_runtime::execution::RuntimeExecutionService::new(),
+            )),
+        )
+    }
+
+    pub fn new_in_context(
+        bytecode: Bytecode,
+        initial_vars: &mut [Value],
+        current_function_name: Option<&str>,
+        call_counts: Vec<(usize, usize)>,
+        execution: runmat_runtime::execution::InvocationExecutionContext,
+    ) -> Self {
         let initial_assigned_var_count = initial_vars.len();
         let mut vars = initial_vars.to_vec();
         if vars.len() < bytecode.var_count {
@@ -81,8 +99,7 @@ impl InterpreterState {
                 call_stack: Vec::new(),
                 locals: Vec::new(),
                 instruction_pointer: 0,
-                spawned_task_ids: std::collections::HashSet::new(),
-                next_spawn_task_id: 0,
+                execution,
             },
             try_stack: Vec::new(),
             last_exception: None,

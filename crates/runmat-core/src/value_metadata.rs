@@ -34,6 +34,10 @@ pub fn matlab_class_name(value: &Value) -> String {
         Value::Object(obj) => obj.class_name.clone(),
         Value::ClassRef(_) => "meta.class".to_string(),
         Value::MException(_) => "MException".to_string(),
+        Value::Future(_) => "parallel.Future".to_string(),
+        Value::Task(_) => "parallel.Task".to_string(),
+        Value::Pool(_) => "parallel.Pool".to_string(),
+        Value::Job(_) => "parallel.Job".to_string(),
     }
 }
 
@@ -147,6 +151,10 @@ pub fn preview_numeric_values(value: &Value, limit: usize) -> Option<(Vec<f64>, 
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
+        | Value::Future(_)
+        | Value::Task(_)
+        | Value::Pool(_)
+        | Value::Job(_)
         | Value::GpuTensor(_) => None,
     }
 }

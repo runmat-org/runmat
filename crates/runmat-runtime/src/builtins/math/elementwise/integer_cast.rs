@@ -227,7 +227,11 @@ pub(crate) async fn cast_value(value: Value, target: IntegerTarget) -> Result<Va
         | Value::BoundFunctionHandle { .. }
         | Value::Closure(_) => Err(CastError::Unsupported("function_handle".to_string())),
         Value::ClassRef(_) => Err(CastError::Unsupported("meta.class".to_string())),
-        Value::MException(_) => Err(CastError::Unsupported("MException".to_string())),
+        Value::MException(_)
+        | Value::Future(_)
+        | Value::Task(_)
+        | Value::Pool(_)
+        | Value::Job(_) => Err(CastError::Unsupported("MException".to_string())),
         Value::OutputList(_) => Err(CastError::Unsupported("OutputList".to_string())),
     }
 }

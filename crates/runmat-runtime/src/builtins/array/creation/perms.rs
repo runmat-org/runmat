@@ -173,6 +173,10 @@ fn evaluate_host(value: Value) -> BuiltinResult<Value> {
         | Value::GpuTensor(_)
         | Value::ClassRef(_)
         | Value::MException(_)
+        | Value::Future(_)
+        | Value::Task(_)
+        | Value::Pool(_)
+        | Value::Job(_)
         | Value::OutputList(_) => Err(perms_error(&ERROR_INVALID_INPUT)),
     }
 }

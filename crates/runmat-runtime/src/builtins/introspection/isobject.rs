@@ -92,6 +92,10 @@ pub(crate) fn isobject_value(value: &Value) -> bool {
             | Value::Listener(_)
             | Value::ClassRef(_)
             | Value::MException(_)
+            | Value::Future(_)
+            | Value::Task(_)
+            | Value::Pool(_)
+            | Value::Job(_)
             | Value::GpuTensor(_)
     )
 }

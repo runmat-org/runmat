@@ -27,8 +27,20 @@ pub struct ExecutionContext {
     pub call_stack: Vec<CallFrame>,
     pub locals: Vec<Value>,
     pub instruction_pointer: usize,
-    pub spawned_task_ids: HashSet<u64>,
-    pub next_spawn_task_id: u64,
+    pub execution: runmat_runtime::execution::InvocationExecutionContext,
+}
+
+impl Default for ExecutionContext {
+    fn default() -> Self {
+        Self {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            execution: runmat_runtime::execution::InvocationExecutionContext::new(
+                std::rc::Rc::new(runmat_runtime::execution::RuntimeExecutionService::new()),
+            ),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

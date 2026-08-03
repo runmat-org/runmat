@@ -90,12 +90,16 @@ pub async fn invoke_semantic_function_value(
     requested_outputs: usize,
     function_registry: &FunctionRegistry,
 ) -> Result<Value, RuntimeError> {
+    let execution = runmat_runtime::execution::InvocationExecutionContext::new(std::rc::Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ));
     let (value, _) = invoke_semantic_function_value_with_input_residency(
         function,
         args,
         requested_outputs,
         function_registry,
         InputResidency::Transferred,
+        execution,
     )
     .await?;
     Ok(value)
@@ -106,6 +110,7 @@ pub(crate) async fn invoke_semantic_function_value_with_capture_updates(
     args: &[Value],
     requested_outputs: usize,
     function_registry: &FunctionRegistry,
+    execution: runmat_runtime::execution::InvocationExecutionContext,
 ) -> Result<(Value, Vec<Value>), RuntimeError> {
     invoke_semantic_function_value_with_input_residency(
         function,
@@ -113,6 +118,7 @@ pub(crate) async fn invoke_semantic_function_value_with_capture_updates(
         requested_outputs,
         function_registry,
         InputResidency::Borrowed,
+        execution,
     )
     .await
 }
@@ -132,6 +138,7 @@ async fn invoke_semantic_function_value_with_input_residency(
     requested_outputs: usize,
     function_registry: &FunctionRegistry,
     input_residency: InputResidency,
+    execution: runmat_runtime::execution::InvocationExecutionContext,
 ) -> Result<(Value, Vec<Value>), RuntimeError> {
     let function_id = runmat_hir::FunctionId(function);
     let func = function_registry.get(function_id).ok_or_else(|| {
@@ -286,13 +293,14 @@ async fn invoke_semantic_function_value_with_input_residency(
     bytecode.bound_functions = function_registry.functions.clone();
     bytecode.function_registry = function_registry.clone();
     let result_vars = {
-        let future = interpret_function_with_counts(
+        let future = interpret_function_with_counts_in_context(
             &bytecode,
             vars,
             &func.display_name,
             requested_outputs,
             runtime_arg_count,
             missing_input_slots,
+            execution,
         );
         #[cfg(target_arch = "wasm32")]
         {
@@ -905,10 +913,23 @@ pub async fn interpret_with_vars(
     initial_vars: &mut Vec<Value>,
     current_function_name: Option<&str>,
 ) -> VmResult<InterpreterOutcome> {
+    let execution = runmat_runtime::execution::InvocationExecutionContext::new(std::rc::Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ));
+    interpret_with_vars_in_context(bytecode, initial_vars, current_function_name, execution).await
+}
+
+pub async fn interpret_with_vars_in_context(
+    bytecode: &Bytecode,
+    initial_vars: &mut Vec<Value>,
+    current_function_name: Option<&str>,
+    execution: runmat_runtime::execution::InvocationExecutionContext,
+) -> VmResult<InterpreterOutcome> {
     runmat_runtime::data::with_tx_registry_scope(interpret_with_vars_inner(
         bytecode,
         initial_vars,
         current_function_name,
+        execution,
     ))
     .await
 }
@@ -917,6 +938,7 @@ async fn interpret_with_vars_inner(
     bytecode: &Bytecode,
     initial_vars: &mut Vec<Value>,
     current_function_name: Option<&str>,
+    execution: runmat_runtime::execution::InvocationExecutionContext,
 ) -> VmResult<InterpreterOutcome> {
     let _debug_frame_guard = runmat_runtime::debug_context::push_frame(
         current_function_name.unwrap_or("<main>"),
@@ -924,11 +946,12 @@ async fn interpret_with_vars_inner(
         bytecode_frame_span(bytecode),
     );
     let call_counts = CALL_COUNTS.with(|cc| cc.borrow().clone());
-    let state = Box::new(InterpreterState::new(
+    let state = Box::new(InterpreterState::new_in_context(
         bytecode.clone(),
         initial_vars,
         current_function_name,
         call_counts,
+        execution,
     ));
     match Box::pin(run_interpreter(state, initial_vars)).await {
         Ok(outcome) => Ok(outcome),
@@ -955,6 +978,10 @@ async fn run_interpreter(
     Box::pin(run_interpreter_inner(state, initial_vars)).await
 }
 
+// Semantic invokers use the runtime's established Arc callback ABI, while live
+// execution contexts are intentionally thread-confined with the GC-owned Values
+// they contain. The callback never crosses the invocation thread.
+#[allow(clippy::arc_with_non_send_sync)]
 async fn run_interpreter_inner(
     state: InterpreterState,
     initial_vars: &mut Vec<Value>,
@@ -997,6 +1024,7 @@ async fn run_interpreter_inner(
             call_counts.clone(),
         );
     let function_registry = Arc::new(bytecode.function_registry());
+    let nested_execution = context.execution.clone();
     let previous_semantic_invoker = user_functions::current_semantic_function_invoker();
     let registry_for_function_invoker = Arc::clone(&function_registry);
     let _semantic_function_guard =
@@ -1005,6 +1033,7 @@ async fn run_interpreter_inner(
                 let args = args.to_vec();
                 let previous_invoker = previous_semantic_invoker.clone();
                 let function_registry = Arc::clone(&registry_for_function_invoker);
+                let execution = nested_execution.clone();
                 Box::pin(async move {
                     let local_function = function_registry
                         .get(runmat_hir::FunctionId(function))
@@ -1019,6 +1048,7 @@ async fn run_interpreter_inner(
                         &args,
                         requested_outputs,
                         &function_registry,
+                        execution,
                     )
                     .await
                     .map(|(value, _)| value)
@@ -1470,12 +1500,42 @@ pub async fn interpret_function_with_counts(
     in_count: usize,
     missing_input_slots: HashSet<usize>,
 ) -> Result<Vec<Value>, RuntimeError> {
+    let execution = runmat_runtime::execution::InvocationExecutionContext::new(std::rc::Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ));
+    interpret_function_with_counts_in_context(
+        bytecode,
+        vars,
+        name,
+        out_count,
+        in_count,
+        missing_input_slots,
+        execution,
+    )
+    .await
+}
+
+async fn interpret_function_with_counts_in_context(
+    bytecode: &Bytecode,
+    vars: Vec<Value>,
+    name: &str,
+    out_count: usize,
+    in_count: usize,
+    missing_input_slots: HashSet<usize>,
+    execution: runmat_runtime::execution::InvocationExecutionContext,
+) -> Result<Vec<Value>, RuntimeError> {
     let mut vars = vars;
     CALL_COUNTS.with(|cc| {
         cc.borrow_mut().push((in_count, out_count));
     });
     let call_counts = CALL_COUNTS.with(|cc| cc.borrow().clone());
-    let mut state = InterpreterState::new(bytecode.clone(), &mut vars, Some(name), call_counts);
+    let mut state = InterpreterState::new_in_context(
+        bytecode.clone(),
+        &mut vars,
+        Some(name),
+        call_counts,
+        execution,
+    );
     state.missing_input_slots = missing_input_slots;
     let _debug_frame_guard = runmat_runtime::debug_context::push_frame(
         name,
@@ -1503,9 +1563,7 @@ mod tests {
     use crate::bytecode::Instr;
     use crate::interpreter::api::InterpreterState;
     use futures::executor::block_on;
-    use runmat_builtins::{
-        CellArray, Closure, HandleRef, ObjectInstance, StructValue, Tensor, Value,
-    };
+    use runmat_builtins::{CellArray, HandleRef, StructValue, Tensor, Value};
     use runmat_hir::FunctionId;
     use runmat_runtime::builtins::common::validation::{
         value_is_empty, value_is_greater_than, value_is_greater_than_or_equal, value_is_integer,
@@ -2512,835 +2570,5 @@ mod tests {
         );
         fusion_residency::clear(&handle);
         let _ = TEST_PROVIDER.free(&handle);
-    }
-
-    #[cfg(feature = "native-accel")]
-    #[test]
-    fn spawn_await_completion_releases_stack_only_provider_handle() {
-        use runmat_accelerate::fusion_residency;
-
-        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
-        let handle = upload_provider_handle(vec![21.0], vec![1]);
-        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
-        fusion_residency::mark(&handle);
-
-        let bytecode =
-            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Await, Instr::Return], 1);
-        let mut seed_vars = vec![Value::Num(0.0)];
-        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
-        state.stack.push(Value::GpuTensor(handle.clone()));
-        state.vars = vec![Value::Num(0.0)];
-
-        let mut result_vars = vec![Value::Num(0.0)];
-        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
-            .expect("spawn/await flow should complete");
-        assert!(
-            !fusion_residency::is_resident(&handle),
-            "spawn/await completion should clear residency for stack-only handle"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_err(),
-            "spawn/await completion should release provider storage for stack-only handle"
-        );
-    }
-
-    #[cfg(feature = "native-accel")]
-    #[test]
-    fn spawn_await_completion_preserves_provider_handle_when_still_live_in_vars() {
-        use runmat_accelerate::fusion_residency;
-
-        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
-        let handle = upload_provider_handle(vec![31.0], vec![1]);
-        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
-        fusion_residency::mark(&handle);
-
-        let bytecode =
-            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Await, Instr::Return], 1);
-        let mut seed_vars = vec![Value::GpuTensor(handle.clone())];
-        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
-        state.stack.push(Value::GpuTensor(handle.clone()));
-        state.vars = vec![Value::GpuTensor(handle.clone())];
-
-        let mut result_vars = vec![Value::GpuTensor(handle.clone())];
-        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
-            .expect("spawn/await flow should complete");
-        assert!(
-            fusion_residency::is_resident(&handle),
-            "spawn/await completion should preserve residency for live-var handle"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_ok(),
-            "spawn/await completion should not release provider storage for live-var handle"
-        );
-        fusion_residency::clear(&handle);
-        let _ = TEST_PROVIDER.free(&handle);
-    }
-
-    #[cfg(feature = "native-accel")]
-    #[test]
-    fn spawn_pop_releases_stack_only_provider_handle() {
-        use runmat_accelerate::fusion_residency;
-
-        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
-        let handle = upload_provider_handle(vec![41.0], vec![1]);
-        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
-        fusion_residency::mark(&handle);
-
-        let bytecode =
-            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Pop, Instr::Return], 1);
-        let mut seed_vars = vec![Value::Num(0.0)];
-        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
-        state.stack.push(Value::GpuTensor(handle.clone()));
-        state.vars = vec![Value::Num(0.0)];
-
-        let mut result_vars = vec![Value::Num(0.0)];
-        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
-            .expect("spawn/pop should complete");
-        assert!(
-            !fusion_residency::is_resident(&handle),
-            "spawn/pop should clear residency for dropped spawned task payload"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_err(),
-            "spawn/pop should release provider storage for dropped spawned task payload"
-        );
-    }
-
-    #[cfg(feature = "native-accel")]
-    #[test]
-    fn spawn_pop_preserves_provider_handle_when_payload_still_live_in_vars() {
-        use runmat_accelerate::fusion_residency;
-
-        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
-        let handle = upload_provider_handle(vec![51.0], vec![1]);
-        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
-        fusion_residency::mark(&handle);
-
-        let bytecode =
-            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Pop, Instr::Return], 1);
-        let mut seed_vars = vec![Value::GpuTensor(handle.clone())];
-        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
-        state.stack.push(Value::GpuTensor(handle.clone()));
-        state.vars = vec![Value::GpuTensor(handle.clone())];
-
-        let mut result_vars = vec![Value::GpuTensor(handle.clone())];
-        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
-            .expect("spawn/pop should complete");
-        assert!(
-            fusion_residency::is_resident(&handle),
-            "spawn/pop should preserve residency for spawned payload handles still referenced by vars"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_ok(),
-            "spawn/pop should not release provider storage for spawned payload handles still referenced by vars"
-        );
-        fusion_residency::clear(&handle);
-        let _ = TEST_PROVIDER.free(&handle);
-    }
-
-    #[cfg(feature = "native-accel")]
-    #[test]
-    fn spawn_pop_preserves_provider_handle_when_payload_still_live_in_locals() {
-        use runmat_accelerate::fusion_residency;
-
-        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
-        let handle = upload_provider_handle(vec![56.0], vec![1]);
-        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
-        fusion_residency::mark(&handle);
-
-        let bytecode =
-            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Pop, Instr::Return], 1);
-        let mut seed_vars = vec![Value::Num(0.0)];
-        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
-        state.stack.push(Value::GpuTensor(handle.clone()));
-        state.vars = vec![Value::Num(0.0)];
-        state.context.locals.push(Value::GpuTensor(handle.clone()));
-
-        let mut result_vars = vec![Value::Num(0.0)];
-        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
-            .expect("spawn/pop should complete");
-        assert!(
-            fusion_residency::is_resident(&handle),
-            "spawn/pop should preserve residency for spawned payload handles still referenced by locals"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_ok(),
-            "spawn/pop should not release provider storage for spawned payload handles still referenced by locals"
-        );
-        fusion_residency::clear(&handle);
-        let _ = TEST_PROVIDER.free(&handle);
-    }
-
-    #[cfg(feature = "native-accel")]
-    #[test]
-    fn spawn_pop_releases_nested_closure_captured_provider_handle() {
-        use runmat_accelerate::fusion_residency;
-
-        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
-        let handle = upload_provider_handle(vec![61.0], vec![1]);
-        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
-        fusion_residency::mark(&handle);
-
-        let bytecode =
-            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Pop, Instr::Return], 1);
-        let mut seed_vars = vec![Value::Num(0.0)];
-        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
-        state.stack.push(Value::Closure(Closure {
-            function_name: "worker".to_string(),
-            bound_function: None,
-            captures: vec![Value::GpuTensor(handle.clone())],
-        }));
-        state.vars = vec![Value::Num(0.0)];
-
-        let mut result_vars = vec![Value::Num(0.0)];
-        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
-            .expect("spawn/pop should complete for closure payload");
-        assert!(
-            !fusion_residency::is_resident(&handle),
-            "spawn/pop should clear residency for nested closure-captured payload handles"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_err(),
-            "spawn/pop should release provider storage for nested closure-captured payload handles"
-        );
-    }
-
-    #[cfg(feature = "native-accel")]
-    #[test]
-    fn spawn_await_completion_releases_nested_output_list_provider_handle() {
-        use runmat_accelerate::fusion_residency;
-
-        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
-        let handle = upload_provider_handle(vec![71.0], vec![1]);
-        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
-        fusion_residency::mark(&handle);
-
-        let bytecode =
-            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Await, Instr::Return], 1);
-        let mut seed_vars = vec![Value::Num(0.0)];
-        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
-        state
-            .stack
-            .push(Value::OutputList(vec![Value::GpuTensor(handle.clone())]));
-        state.vars = vec![Value::Num(0.0)];
-
-        let mut result_vars = vec![Value::Num(0.0)];
-        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
-            .expect("spawn/await flow should complete for nested output payload");
-        assert!(
-            !fusion_residency::is_resident(&handle),
-            "spawn/await completion should clear residency for nested output-list payload handles"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_err(),
-            "spawn/await completion should release provider storage for nested output-list payload handles"
-        );
-    }
-
-    #[cfg(feature = "native-accel")]
-    #[test]
-    fn spawn_await_completion_releases_nested_struct_provider_handle() {
-        use runmat_accelerate::fusion_residency;
-
-        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
-        let handle = upload_provider_handle(vec![81.0], vec![1]);
-        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
-        fusion_residency::mark(&handle);
-
-        let bytecode =
-            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Await, Instr::Return], 1);
-        let mut seed_vars = vec![Value::Num(0.0)];
-        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
-        let mut payload = StructValue::new();
-        payload
-            .fields
-            .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
-        state.stack.push(Value::Struct(payload));
-        state.vars = vec![Value::Num(0.0)];
-
-        let mut result_vars = vec![Value::Num(0.0)];
-        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
-            .expect("spawn/await flow should complete for nested struct payload");
-        assert!(
-            !fusion_residency::is_resident(&handle),
-            "spawn/await completion should clear residency for nested struct payload handles"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_err(),
-            "spawn/await completion should release provider storage for nested struct payload handles"
-        );
-    }
-
-    #[cfg(feature = "native-accel")]
-    #[test]
-    fn spawn_await_completion_releases_nested_object_property_provider_handle() {
-        use runmat_accelerate::fusion_residency;
-
-        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
-        let handle = upload_provider_handle(vec![91.0], vec![1]);
-        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
-        fusion_residency::mark(&handle);
-
-        let bytecode =
-            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Await, Instr::Return], 1);
-        let mut seed_vars = vec![Value::Num(0.0)];
-        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
-        let mut payload = ObjectInstance::new("Payload".to_string());
-        payload
-            .properties
-            .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
-        state.stack.push(Value::Object(payload));
-        state.vars = vec![Value::Num(0.0)];
-
-        let mut result_vars = vec![Value::Num(0.0)];
-        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
-            .expect("spawn/await flow should complete for nested object payload");
-        assert!(
-            !fusion_residency::is_resident(&handle),
-            "spawn/await completion should clear residency for nested object-property payload handles"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_err(),
-            "spawn/await completion should release provider storage for nested object-property payload handles"
-        );
-    }
-
-    #[cfg(feature = "native-accel")]
-    #[test]
-    fn spawn_await_completion_preserves_nested_object_property_handle_when_alias_live() {
-        use runmat_accelerate::fusion_residency;
-
-        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
-        let handle = upload_provider_handle(vec![101.0], vec![1]);
-        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
-        fusion_residency::mark(&handle);
-
-        let bytecode =
-            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Await, Instr::Return], 1);
-        let mut seed_vars = vec![Value::Num(0.0)];
-        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
-        let mut payload = ObjectInstance::new("Payload".to_string());
-        payload
-            .properties
-            .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
-        state.stack.push(Value::Object(payload.clone()));
-        state.vars = vec![Value::Object(payload.clone())];
-
-        let mut result_vars = vec![Value::Object(payload)];
-        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
-            .expect("spawn/await flow should complete for aliased nested object payload");
-        assert!(
-            fusion_residency::is_resident(&handle),
-            "spawn/await completion should preserve residency for nested object handles still referenced by vars"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_ok(),
-            "spawn/await completion should not release provider storage for nested object handles still referenced by vars"
-        );
-        fusion_residency::clear(&handle);
-        let _ = TEST_PROVIDER.free(&handle);
-    }
-
-    #[cfg(feature = "native-accel")]
-    #[test]
-    fn spawn_await_completion_releases_nested_cell_provider_handle() {
-        use runmat_accelerate::fusion_residency;
-
-        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
-        let handle = upload_provider_handle(vec![111.0], vec![1]);
-        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
-        fusion_residency::mark(&handle);
-
-        let bytecode =
-            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Await, Instr::Return], 1);
-        let mut seed_vars = vec![Value::Num(0.0)];
-        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
-        let payload =
-            CellArray::new(vec![Value::GpuTensor(handle.clone())], 1, 1).expect("cell payload");
-        state.stack.push(Value::Cell(payload));
-        state.vars = vec![Value::Num(0.0)];
-
-        let mut result_vars = vec![Value::Num(0.0)];
-        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
-            .expect("spawn/await flow should complete for nested cell payload");
-        assert!(
-            !fusion_residency::is_resident(&handle),
-            "spawn/await completion should clear residency for nested cell payload handles"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_err(),
-            "spawn/await completion should release provider storage for nested cell payload handles"
-        );
-    }
-
-    #[cfg(feature = "native-accel")]
-    #[test]
-    fn spawn_await_completion_preserves_nested_cell_handle_when_alias_live() {
-        use runmat_accelerate::fusion_residency;
-
-        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
-        let handle = upload_provider_handle(vec![121.0], vec![1]);
-        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
-        fusion_residency::mark(&handle);
-
-        let bytecode =
-            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Await, Instr::Return], 1);
-        let mut seed_vars = vec![Value::Num(0.0)];
-        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
-        let payload =
-            CellArray::new(vec![Value::GpuTensor(handle.clone())], 1, 1).expect("cell payload");
-        state.stack.push(Value::Cell(payload.clone()));
-        state.vars = vec![Value::Cell(payload.clone())];
-
-        let mut result_vars = vec![Value::Cell(payload)];
-        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
-            .expect("spawn/await flow should complete for aliased nested cell payload");
-        assert!(
-            fusion_residency::is_resident(&handle),
-            "spawn/await completion should preserve residency for nested cell handles still referenced by vars"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_ok(),
-            "spawn/await completion should not release provider storage for nested cell handles still referenced by vars"
-        );
-        fusion_residency::clear(&handle);
-        let _ = TEST_PROVIDER.free(&handle);
-    }
-
-    #[cfg(feature = "native-accel")]
-    #[test]
-    fn spawn_await_completion_releases_nested_handle_object_target_provider_handle() {
-        use runmat_accelerate::fusion_residency;
-
-        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
-        let handle = upload_provider_handle(vec![131.0], vec![1]);
-        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
-        fusion_residency::mark(&handle);
-
-        let bytecode =
-            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Await, Instr::Return], 1);
-        let mut seed_vars = vec![Value::Num(0.0)];
-        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
-        let mut payload = StructValue::new();
-        payload
-            .fields
-            .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
-        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
-        let task_payload = Value::HandleObject(HandleRef {
-            class_name: "Payload".to_string(),
-            target,
-            valid: true,
-        });
-        state.stack.push(task_payload);
-        state.vars = vec![Value::Num(0.0)];
-
-        let mut result_vars = vec![Value::Num(0.0)];
-        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
-            .expect("spawn/await flow should complete for nested handle-object payload");
-        assert!(
-            !fusion_residency::is_resident(&handle),
-            "spawn/await completion should clear residency for nested handle-object target handles"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_err(),
-            "spawn/await completion should release provider storage for nested handle-object target handles"
-        );
-    }
-
-    #[cfg(feature = "native-accel")]
-    #[test]
-    fn spawn_await_completion_preserves_nested_handle_object_target_handle_when_alias_live() {
-        use runmat_accelerate::fusion_residency;
-
-        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
-        let handle = upload_provider_handle(vec![141.0], vec![1]);
-        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
-        fusion_residency::mark(&handle);
-
-        let bytecode =
-            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Await, Instr::Return], 1);
-        let mut seed_vars = vec![Value::Num(0.0)];
-        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
-        let mut payload = StructValue::new();
-        payload
-            .fields
-            .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
-        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
-        let task_payload = Value::HandleObject(HandleRef {
-            class_name: "Payload".to_string(),
-            target,
-            valid: true,
-        });
-        state.stack.push(task_payload.clone());
-        state.vars = vec![task_payload.clone()];
-
-        let mut result_vars = vec![task_payload];
-        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
-            .expect("spawn/await flow should complete for aliased nested handle-object payload");
-        assert!(
-            fusion_residency::is_resident(&handle),
-            "spawn/await completion should preserve residency for nested handle-object target handles still referenced by vars"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_ok(),
-            "spawn/await completion should not release provider storage for nested handle-object target handles still referenced by vars"
-        );
-        fusion_residency::clear(&handle);
-        let _ = TEST_PROVIDER.free(&handle);
-    }
-
-    #[cfg(feature = "native-accel")]
-    #[test]
-    fn spawn_await_preserves_nested_handle_object_target_alias() {
-        use runmat_accelerate::fusion_residency;
-
-        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
-        let handle = upload_provider_handle(vec![146.0], vec![1]);
-        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
-        fusion_residency::mark(&handle);
-
-        let bytecode =
-            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Await, Instr::Return], 1);
-        let mut seed_vars = vec![Value::Num(0.0)];
-        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
-        let mut payload = StructValue::new();
-        payload
-            .fields
-            .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
-        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
-        let task_payload = Value::HandleObject(HandleRef {
-            class_name: "Payload".to_string(),
-            target,
-            valid: true,
-        });
-        state.stack.push(task_payload.clone());
-        state.vars = vec![Value::Num(0.0)];
-        state.context.locals.push(task_payload.clone());
-
-        let mut result_vars = vec![Value::Num(0.0)];
-        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
-            .expect("spawn/await flow should complete for aliased nested handle-object payload");
-        assert!(
-            fusion_residency::is_resident(&handle),
-            "spawn/await completion should preserve residency for nested handle-object target handles still referenced by locals"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_ok(),
-            "spawn/await completion should not release provider storage for nested handle-object target handles still referenced by locals"
-        );
-        fusion_residency::clear(&handle);
-        let _ = TEST_PROVIDER.free(&handle);
-    }
-
-    #[cfg(feature = "native-accel")]
-    #[test]
-    fn spawn_pop_releases_nested_handle_object_target_provider_handle() {
-        use runmat_accelerate::fusion_residency;
-
-        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
-        let handle = upload_provider_handle(vec![151.0], vec![1]);
-        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
-        fusion_residency::mark(&handle);
-
-        let bytecode =
-            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Pop, Instr::Return], 1);
-        let mut seed_vars = vec![Value::Num(0.0)];
-        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
-        let mut payload = StructValue::new();
-        payload
-            .fields
-            .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
-        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
-        state.stack.push(Value::HandleObject(HandleRef {
-            class_name: "Payload".to_string(),
-            target,
-            valid: true,
-        }));
-        state.vars = vec![Value::Num(0.0)];
-
-        let mut result_vars = vec![Value::Num(0.0)];
-        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
-            .expect("spawn/pop flow should complete for nested handle-object payload");
-        assert!(
-            !fusion_residency::is_resident(&handle),
-            "spawn/pop should clear residency for nested handle-object target handles"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_err(),
-            "spawn/pop should release provider storage for nested handle-object target handles"
-        );
-    }
-
-    #[cfg(feature = "native-accel")]
-    #[test]
-    fn spawn_pop_preserves_nested_handle_object_target_handle_when_alias_live() {
-        use runmat_accelerate::fusion_residency;
-
-        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
-        let handle = upload_provider_handle(vec![161.0], vec![1]);
-        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
-        fusion_residency::mark(&handle);
-
-        let bytecode =
-            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Pop, Instr::Return], 1);
-        let mut seed_vars = vec![Value::Num(0.0)];
-        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
-        let mut payload = StructValue::new();
-        payload
-            .fields
-            .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
-        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
-        let task_payload = Value::HandleObject(HandleRef {
-            class_name: "Payload".to_string(),
-            target,
-            valid: true,
-        });
-        state.stack.push(task_payload.clone());
-        state.vars = vec![task_payload.clone()];
-
-        let mut result_vars = vec![task_payload];
-        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
-            .expect("spawn/pop flow should complete for aliased nested handle-object payload");
-        assert!(
-            fusion_residency::is_resident(&handle),
-            "spawn/pop should preserve residency for nested handle-object target handles still referenced by vars"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_ok(),
-            "spawn/pop should not release provider storage for nested handle-object target handles still referenced by vars"
-        );
-        fusion_residency::clear(&handle);
-        let _ = TEST_PROVIDER.free(&handle);
-    }
-
-    #[cfg(feature = "native-accel")]
-    #[test]
-    fn spawn_pop_preserves_nested_handle_object_target_handle_when_alias_live_in_locals() {
-        use runmat_accelerate::fusion_residency;
-
-        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
-        let handle = upload_provider_handle(vec![166.0], vec![1]);
-        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
-        fusion_residency::mark(&handle);
-
-        let bytecode =
-            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Pop, Instr::Return], 1);
-        let mut seed_vars = vec![Value::Num(0.0)];
-        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
-        let mut payload = StructValue::new();
-        payload
-            .fields
-            .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
-        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
-        let task_payload = Value::HandleObject(HandleRef {
-            class_name: "Payload".to_string(),
-            target,
-            valid: true,
-        });
-        state.stack.push(task_payload.clone());
-        state.vars = vec![Value::Num(0.0)];
-        state.context.locals.push(task_payload);
-
-        let mut result_vars = vec![Value::Num(0.0)];
-        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
-            .expect("spawn/pop flow should complete for aliased nested handle-object payload");
-        assert!(
-            fusion_residency::is_resident(&handle),
-            "spawn/pop should preserve residency for nested handle-object target handles still referenced by locals"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_ok(),
-            "spawn/pop should not release provider storage for nested handle-object target handles still referenced by locals"
-        );
-        fusion_residency::clear(&handle);
-        let _ = TEST_PROVIDER.free(&handle);
-    }
-
-    #[test]
-    fn await_passes_through_non_spawn_value_operand() {
-        let bytecode =
-            Bytecode::with_instructions(vec![Instr::Await, Instr::StoreVar(0), Instr::Return], 1);
-        let mut seed_vars = vec![Value::Num(0.0)];
-        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
-        state.stack.push(Value::Num(7.0));
-        state.vars = vec![Value::Num(0.0)];
-
-        let mut result_vars = vec![Value::Num(0.0)];
-        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
-            .expect("await should pass through non-task operand");
-        assert_eq!(result_vars[0], Value::Num(7.0));
-    }
-
-    #[test]
-    fn await_succeeds_after_spawn_handle_self_reassignment() {
-        let bytecode = Bytecode::with_instructions(
-            vec![
-                Instr::Spawn,
-                Instr::StoreVar(0),
-                Instr::LoadVar(0),
-                Instr::StoreVar(0),
-                Instr::LoadVar(0),
-                Instr::Await,
-                Instr::StoreVar(0),
-                Instr::Return,
-            ],
-            1,
-        );
-        let mut seed_vars = vec![Value::Num(0.0)];
-        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
-        state.stack.push(Value::Num(9.0));
-        state.vars = vec![Value::Num(0.0)];
-
-        let mut result_vars = vec![Value::Num(0.0)];
-        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
-            .expect("await should still succeed after self-reassignment of spawn handle");
-        assert_eq!(result_vars[0], Value::Num(9.0));
-    }
-
-    #[test]
-    fn await_succeeds_after_overwriting_one_spawn_handle_alias() {
-        let bytecode = Bytecode::with_instructions(
-            vec![
-                Instr::Spawn,
-                Instr::StoreVar(0),
-                Instr::LoadVar(0),
-                Instr::StoreVar(1),
-                Instr::LoadConst(0.0),
-                Instr::StoreVar(0),
-                Instr::LoadVar(1),
-                Instr::Await,
-                Instr::StoreVar(0),
-                Instr::Return,
-            ],
-            2,
-        );
-        let mut seed_vars = vec![Value::Num(0.0), Value::Num(0.0)];
-        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
-        state.stack.push(Value::Num(9.0));
-        state.vars = vec![Value::Num(0.0), Value::Num(0.0)];
-
-        let mut result_vars = vec![Value::Num(0.0), Value::Num(0.0)];
-        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
-            .expect("await should succeed when another alias still carries the spawn task handle");
-        assert_eq!(result_vars[0], Value::Num(9.0));
-    }
-
-    #[test]
-    fn await_succeeds_after_overwriting_one_local_spawn_handle_alias() {
-        let bytecode = Bytecode::with_instructions(
-            vec![
-                Instr::Spawn,
-                Instr::StoreLocal(0),
-                Instr::LoadLocal(0),
-                Instr::StoreLocal(1),
-                Instr::LoadConst(0.0),
-                Instr::StoreLocal(0),
-                Instr::LoadLocal(1),
-                Instr::Await,
-                Instr::StoreVar(0),
-                Instr::Return,
-            ],
-            1,
-        );
-        let mut seed_vars = vec![Value::Num(0.0)];
-        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
-        state.stack.push(Value::Num(9.0));
-        state.vars = vec![Value::Num(0.0)];
-        state
-            .context
-            .call_stack
-            .push(crate::bytecode::program::CallFrame {
-                function_name: "<local>".to_string(),
-                return_address: 0,
-                locals_start: 0,
-                locals_count: 2,
-                expected_outputs: 0,
-            });
-        state.context.locals = vec![Value::Num(0.0), Value::Num(0.0)];
-
-        let mut result_vars = vec![Value::Num(0.0)];
-        let _ = block_on(run_interpreter_inner(state, &mut result_vars)).expect(
-            "await should succeed when another local alias still carries the spawn task handle",
-        );
-        assert_eq!(result_vars[0], Value::Num(9.0));
-    }
-
-    #[test]
-    fn await_succeeds_after_overwriting_var_alias_when_local_spawn_handle_alias_live() {
-        let bytecode = Bytecode::with_instructions(
-            vec![
-                Instr::Spawn,
-                Instr::StoreLocal(0),
-                Instr::LoadLocal(0),
-                Instr::StoreVar(0),
-                Instr::LoadConst(0.0),
-                Instr::StoreVar(0),
-                Instr::LoadLocal(0),
-                Instr::Await,
-                Instr::StoreVar(0),
-                Instr::Return,
-            ],
-            1,
-        );
-        let mut seed_vars = vec![Value::Num(0.0)];
-        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
-        state.stack.push(Value::Num(9.0));
-        state.vars = vec![Value::Num(0.0)];
-        state
-            .context
-            .call_stack
-            .push(crate::bytecode::program::CallFrame {
-                function_name: "<local>".to_string(),
-                return_address: 0,
-                locals_start: 0,
-                locals_count: 1,
-                expected_outputs: 0,
-            });
-        state.context.locals = vec![Value::Num(0.0)];
-
-        let mut result_vars = vec![Value::Num(0.0)];
-        let _ = block_on(run_interpreter_inner(state, &mut result_vars)).expect(
-            "await should succeed when var alias is overwritten but local alias still carries the spawn task handle",
-        );
-        assert_eq!(result_vars[0], Value::Num(9.0));
-    }
-
-    #[test]
-    fn await_succeeds_after_scope_exit_when_var_alias_keeps_spawn_task_id_live() {
-        let mut task = runmat_builtins::StructValue::new();
-        task.fields.insert(
-            "__runmat_spawn_kind".to_string(),
-            Value::String("task".to_string()),
-        );
-        task.fields.insert(
-            "__runmat_spawn_id".to_string(),
-            Value::Int(runmat_builtins::IntValue::U64(23)),
-        );
-        task.fields
-            .insert("__runmat_spawn_payload".to_string(), Value::Num(4.0));
-        let task_value = Value::Struct(task);
-
-        let bytecode = Bytecode::with_instructions(
-            vec![
-                Instr::ExitScope(1),
-                Instr::LoadVar(0),
-                Instr::Await,
-                Instr::Return,
-            ],
-            1,
-        );
-        let mut seed_vars = vec![task_value.clone()];
-        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
-        state.context.locals.push(task_value);
-        state.context.spawned_task_ids.insert(23);
-        state.vars = seed_vars.clone();
-
-        let mut result_vars = seed_vars.clone();
-        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
-            .expect("await should succeed when var alias keeps the spawn task id live");
-        assert!(
-            matches!(result_vars[0], Value::Struct(_)),
-            "await in this sequence does not overwrite var0"
-        );
     }
 }

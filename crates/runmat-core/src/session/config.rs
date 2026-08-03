@@ -40,6 +40,9 @@ impl RunMatSession {
     /// Request cooperative cancellation for the currently running execution.
     pub fn cancel_execution(&self) {
         self.interrupt_flag.store(true, Ordering::Relaxed);
+        self.execution_context
+            .services()
+            .drain_scope(runmat_execution::CancellationReason::User);
     }
 
     /// Shared interrupt flag used by the VM to implement cooperative cancellation.

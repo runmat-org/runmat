@@ -593,6 +593,10 @@ fn parse_ifft2_single(value: &Value) -> BuiltinResult<(Option<usize>, Option<usi
         | Value::Object(_)
         | Value::ClassRef(_)
         | Value::MException(_)
+        | Value::Future(_)
+        | Value::Task(_)
+        | Value::Pool(_)
+        | Value::Job(_)
         | Value::OutputList(_) => Err(ifft2_error(&IFFT2_ERROR_INVALID_LENGTH)),
     }
 }

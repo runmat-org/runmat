@@ -127,10 +127,11 @@ impl RunMatSession {
             result?;
             return Ok(Value::OutputList(Vec::new()));
         }
-        match runmat_vm::interpret_with_vars(
+        match runmat_vm::interpret_with_vars_in_context(
             unit.bytecode(),
             &mut variables,
             Some(&unit.source().relative_path),
+            self.execution_context.clone(),
         )
         .await?
         {

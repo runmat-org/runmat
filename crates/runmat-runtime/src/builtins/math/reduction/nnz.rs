@@ -671,6 +671,10 @@ fn describe_value_kind(value: &Value) -> String {
         Value::ClassRef(_) => "class reference".to_string(),
         Value::MException(_) => "exception".to_string(),
         Value::OutputList(_) => "output list".to_string(),
+        Value::Future(_) => "future".to_string(),
+        Value::Task(_) => "task".to_string(),
+        Value::Pool(_) => "pool".to_string(),
+        Value::Job(_) => "job".to_string(),
     }
 }
 

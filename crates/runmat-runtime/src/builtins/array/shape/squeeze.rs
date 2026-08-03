@@ -186,6 +186,10 @@ fn value_kind(value: &Value) -> &'static str {
         Value::ClassRef(_) => "class reference",
         Value::MException(_) => "exception",
         Value::OutputList(_) => "output list",
+        Value::Future(_) => "future",
+        Value::Task(_) => "task",
+        Value::Pool(_) => "pool",
+        Value::Job(_) => "job",
     }
 }
 

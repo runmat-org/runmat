@@ -85,6 +85,8 @@ pub struct RunMatSession {
     source_pool: SourcePool,
     /// Cooperative cancellation flag shared with the runtime.
     interrupt_flag: Arc<AtomicBool>,
+    /// Root-scoped execution authority inherited by every invocation.
+    execution_context: runmat_runtime::execution::InvocationExecutionContext,
     /// Tracks whether an execution is currently active.
     is_executing: bool,
     /// Optional async input handler (Phase 2). When set, stdin interactions are awaited
@@ -182,6 +184,14 @@ impl Drop for ActiveExecutionGuard {
                 *flag = false;
             }
         }
+    }
+}
+
+impl Drop for RunMatSession {
+    fn drop(&mut self) {
+        self.execution_context
+            .services()
+            .drain_scope(runmat_execution::CancellationReason::Shutdown);
     }
 }
 

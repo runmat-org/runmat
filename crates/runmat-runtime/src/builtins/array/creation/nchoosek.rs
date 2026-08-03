@@ -344,6 +344,10 @@ fn combinations_value(value: Value, k: usize) -> BuiltinResult<Value> {
         | Value::GpuTensor(_)
         | Value::ClassRef(_)
         | Value::MException(_)
+        | Value::Future(_)
+        | Value::Task(_)
+        | Value::Pool(_)
+        | Value::Job(_)
         | Value::OutputList(_) => Err(nchoosek_error(&ERROR_INVALID_INPUT)),
     }
 }

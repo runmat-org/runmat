@@ -1448,10 +1448,11 @@ impl RunMatSession {
         bytecode: &runmat_vm::Bytecode,
     ) -> Result<runmat_vm::InterpreterOutcome, RuntimeError> {
         let source_name = self.current_source_name().to_string();
-        runmat_vm::interpret_with_vars(
+        runmat_vm::interpret_with_vars_in_context(
             bytecode,
             &mut self.variable_array,
             Some(source_name.as_str()),
+            self.execution_context.clone(),
         )
         .await
     }

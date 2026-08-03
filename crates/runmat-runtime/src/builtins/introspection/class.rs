@@ -117,6 +117,10 @@ pub(crate) fn class_name_for_value(value: &Value) -> String {
         Value::ClassRef(_) => "meta.class".to_string(),
         Value::MException(_) => "MException".to_string(),
         Value::OutputList(_) => "output_list".to_string(),
+        Value::Future(_) => "parallel.Future".to_string(),
+        Value::Task(_) => "parallel.Task".to_string(),
+        Value::Pool(_) => "parallel.Pool".to_string(),
+        Value::Job(_) => "parallel.Job".to_string(),
     }
 }
 

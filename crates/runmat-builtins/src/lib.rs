@@ -126,6 +126,14 @@ pub enum Value {
     Closure(Closure),
     ClassRef(String),
     MException(MException),
+    /// Lazy executable work owned by the active runtime execution service.
+    Future(runmat_execution::FutureHandle),
+    /// Scheduled work owned by the active runtime execution service.
+    Task(runmat_execution::TaskHandle),
+    /// Execution pool capability owned by an execution service.
+    Pool(runmat_execution::PoolHandle),
+    /// Durable batch execution capability.
+    Job(runmat_execution::JobHandle),
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IntValue {
@@ -1874,6 +1882,7 @@ impl Type {
             },
             Value::ClassRef(_) => Type::Unknown,
             Value::MException(_) => Type::Unknown,
+            Value::Future(_) | Value::Task(_) | Value::Pool(_) | Value::Job(_) => Type::Unknown,
             Value::CharArray(ca) => {
                 // Treat as cell of char for type purposes; or a 2-D char matrix conceptually
                 Type::Cell {
@@ -2713,7 +2722,11 @@ impl Trace for Value {
             | Value::MethodFunctionHandle(_)
             | Value::BoundFunctionHandle { .. }
             | Value::ClassRef(_)
-            | Value::MException(_) => {}
+            | Value::MException(_)
+            | Value::Future(_)
+            | Value::Task(_)
+            | Value::Pool(_)
+            | Value::Job(_) => {}
         }
     }
 }
@@ -2812,6 +2825,10 @@ impl fmt::Display for Value {
                 "MException(identifier='{}', message='{}')",
                 e.identifier, e.message
             ),
+            Value::Future(handle) => write!(f, "<future {}>", handle.id),
+            Value::Task(handle) => write!(f, "<task {}>", handle.id),
+            Value::Pool(handle) => write!(f, "<pool {}>", handle.id),
+            Value::Job(handle) => write!(f, "<job {}>", handle.id),
         }
     }
 }

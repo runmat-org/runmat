@@ -482,6 +482,10 @@ fn value_tag(value: &Value) -> &'static str {
         Value::ClassRef(_) => "ClassRef",
         Value::MException(_) => "MException",
         Value::OutputList(_) => "OutputList",
+        Value::Future(_) => "Future",
+        Value::Task(_) => "Task",
+        Value::Pool(_) => "Pool",
+        Value::Job(_) => "Job",
     }
 }
 

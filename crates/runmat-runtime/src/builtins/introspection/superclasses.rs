@@ -137,7 +137,11 @@ fn requested_class_name(value: &Value) -> BuiltinResult<String> {
         | Value::HandleObject(_)
         | Value::GpuTensor(_)
         | Value::Listener(_)
-        | Value::MException(_) => Ok(class_name_for_value(value)),
+        | Value::MException(_)
+        | Value::Future(_)
+        | Value::Task(_)
+        | Value::Pool(_)
+        | Value::Job(_) => Ok(class_name_for_value(value)),
         _ => Err(superclasses_error(&SUPERCLASSES_ERROR_CLASS_INVALID)),
     }
 }

@@ -1152,7 +1152,11 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
-        | Value::ClassRef(_) => {
+        | Value::ClassRef(_)
+        | Value::Future(_)
+        | Value::Task(_)
+        | Value::Pool(_)
+        | Value::Job(_) => {
             return Err(format_error(format!(
                 "{context}: unsupported argument type"
             )));

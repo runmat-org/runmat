@@ -48,6 +48,10 @@ pub fn value_kind(value: &Value) -> &'static str {
         Value::ClassRef(_) => "ClassRef",
         Value::MException(_) => "MException",
         Value::OutputList(_) => "OutputList",
+        Value::Future(_) => "Future",
+        Value::Task(_) => "Task",
+        Value::Pool(_) => "Pool",
+        Value::Job(_) => "Job",
     }
 }
 
@@ -1012,8 +1016,7 @@ mod tests {
             call_stack: Vec::new(),
             locals: Vec::new(),
             instruction_pointer: 0,
-            spawned_task_ids: std::collections::HashSet::new(),
-            next_spawn_task_id: 0,
+            ..ExecutionContext::default()
         };
         write_elementwise_materialized_stores(
             vec![(

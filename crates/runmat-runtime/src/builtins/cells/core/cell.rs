@@ -498,6 +498,10 @@ fn empty_value_like(proto: Option<&Value>) -> BuiltinResult<Value> {
             | Value::Closure(_)
             | Value::ClassRef(_)
             | Value::MException(_)
+            | Value::Future(_)
+            | Value::Task(_)
+            | Value::Pool(_)
+            | Value::Job(_)
             | Value::OutputList(_) => default_empty_double(),
         },
         None => default_empty_double(),

@@ -57,6 +57,9 @@ impl RunMatSession {
             project_handoff: None,
             source_pool: SourcePool::default(),
             interrupt_flag: Arc::new(AtomicBool::new(false)),
+            execution_context: runmat_runtime::execution::InvocationExecutionContext::new(
+                std::rc::Rc::new(runmat_runtime::execution::RuntimeExecutionService::new()),
+            ),
             is_executing: false,
             async_input_handler: None,
             callstack_limit: runmat_vm::DEFAULT_CALLSTACK_LIMIT,

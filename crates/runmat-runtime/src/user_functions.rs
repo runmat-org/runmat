@@ -10,7 +10,7 @@ use std::sync::Arc;
 pub type UserFunctionFuture = Pin<Box<dyn Future<Output = Result<Value, RuntimeError>>>>;
 pub type DynamicFunctionLoadFuture =
     Pin<Box<dyn Future<Output = Option<Result<Value, RuntimeError>>>>>;
-pub type FunctionInvoker = dyn Fn(usize, &[Value], usize) -> UserFunctionFuture + Send + Sync;
+pub type FunctionInvoker = dyn Fn(usize, &[Value], usize) -> UserFunctionFuture;
 pub type FunctionResolver = dyn Fn(&str) -> Option<usize> + Send + Sync;
 pub type DynamicFunctionLoader =
     dyn Fn(String, Vec<Value>, usize) -> DynamicFunctionLoadFuture + Send + Sync;

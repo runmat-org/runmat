@@ -703,6 +703,7 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> BuiltinResult
             }
             total
         }
+        Value::Future(_) | Value::Task(_) | Value::Pool(_) | Value::Job(_) => 0,
     };
     Ok(bytes)
 }

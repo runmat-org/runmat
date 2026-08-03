@@ -384,6 +384,10 @@ async fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeError> {
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
+        | Value::Future(_)
+        | Value::Task(_)
+        | Value::Pool(_)
+        | Value::Job(_)
         | Value::OutputList(_) => Err(pause_error_with_message(
             PAUSE_ERROR_INVALID_ARG.message,
             &PAUSE_ERROR_INVALID_ARG,

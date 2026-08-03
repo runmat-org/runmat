@@ -11,4 +11,7 @@ pub mod task;
 pub mod value;
 
 pub use error::ContractError;
+pub use handle::{FutureHandle, JobHandle, OutputContract, PoolHandle, TaskHandle};
 pub use identity::{Digest, DomainContribution, ProgramEnvironment, ProgramRevision};
+pub use identity::{ExecutionScopeId, FutureId, JobId, PoolId, RunId, TaskId};
+pub use state::CancellationReason;
