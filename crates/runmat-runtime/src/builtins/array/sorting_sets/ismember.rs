@@ -8,11 +8,12 @@ use runmat_accelerate_api::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, LogicalArray, StringArray, Tensor, Value,
+    CharArray, ComplexStorage, ComplexTensor, IntValue, LogicalArray, NumericStorage, StringArray,
+    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
-use super::type_resolvers::logical_output_type;
+use super::{float_order::SetFloat, type_resolvers::logical_output_type};
 use crate::build_runtime_error;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
@@ -403,10 +404,48 @@ fn ismember_numeric_tensors(
             };
         }
     }
-    if opts.rows {
-        ismember_numeric_rows(a, b)
+    let a_shape = a.shape.clone();
+    let b_shape = b.shape.clone();
+    let a_storage = a.into_numeric_storage().map_err(ismember_internal_error)?;
+    let b_storage = b.into_numeric_storage().map_err(ismember_internal_error)?;
+    match (a_storage, b_storage) {
+        (NumericStorage::F64(a), NumericStorage::F64(b)) => {
+            ismember_floating(a, a_shape, b, b_shape, opts.rows)
+        }
+        (NumericStorage::F32(a), NumericStorage::F32(b)) => {
+            ismember_floating(a, a_shape, b, b_shape, opts.rows)
+        }
+        (a, b) => ismember_promoted_f64(a, a_shape, b, b_shape, opts.rows),
+    }
+}
+
+fn ismember_promoted_f64(
+    a: NumericStorage,
+    a_shape: Vec<usize>,
+    b: NumericStorage,
+    b_shape: Vec<usize>,
+    rows: bool,
+) -> crate::BuiltinResult<IsMemberEvaluation> {
+    ismember_floating(
+        a.materialize_f64(),
+        a_shape,
+        b.materialize_f64(),
+        b_shape,
+        rows,
+    )
+}
+
+fn ismember_floating<T: SetFloat>(
+    a: Vec<T>,
+    a_shape: Vec<usize>,
+    b: Vec<T>,
+    b_shape: Vec<usize>,
+    rows: bool,
+) -> crate::BuiltinResult<IsMemberEvaluation> {
+    if rows {
+        ismember_floating_rows(a, a_shape, b, b_shape)
     } else {
-        ismember_numeric_elements(a, b)
+        ismember_floating_elements(a, a_shape, b)
     }
 }
 
@@ -479,19 +518,26 @@ pub fn ismember_numeric_from_tensors(
     ismember_numeric_tensors(a, b, &opts)
 }
 
+#[cfg(test)]
 fn ismember_numeric_elements(a: Tensor, b: Tensor) -> crate::BuiltinResult<IsMemberEvaluation> {
-    let a_values = tensor::tensor_values_f64_cow(&a);
-    let b_values = tensor::tensor_values_f64_cow(&b);
+    ismember_numeric_tensors(a, b, &IsMemberOptions { rows: false })
+}
+
+fn ismember_floating_elements<T: SetFloat>(
+    a_values: Vec<T>,
+    a_shape: Vec<usize>,
+    b_values: Vec<T>,
+) -> crate::BuiltinResult<IsMemberEvaluation> {
     let mut map: HashMap<u64, usize> = HashMap::new();
     for (idx, &value) in b_values.iter().enumerate() {
-        map.entry(canonicalize_f64(value)).or_insert(idx + 1);
+        map.entry(value.canonical_key()).or_insert(idx + 1);
     }
 
     let mut mask_data = Vec::<u8>::with_capacity(a_values.len());
     let mut loc_data = Vec::<f64>::with_capacity(a_values.len());
 
     for &value in a_values.iter() {
-        let key = canonicalize_f64(value);
+        let key = value.canonical_key();
         if let Some(&pos) = map.get(&key) {
             mask_data.push(1);
             loc_data.push(pos as f64);
@@ -501,30 +547,37 @@ fn ismember_numeric_elements(a: Tensor, b: Tensor) -> crate::BuiltinResult<IsMem
         }
     }
 
-    let logical = LogicalArray::new(mask_data, a.shape.clone())
+    let logical = LogicalArray::new(mask_data, a_shape.clone())
         .map_err(|e| ismember_internal_error(format!("ismember: {e}")))?;
-    let loc_tensor = Tensor::new(loc_data, a.shape.clone())
+    let loc_tensor = Tensor::new(loc_data, a_shape)
         .map_err(|e| ismember_internal_error(format!("ismember: {e}")))?;
     Ok(IsMemberEvaluation::new(logical, loc_tensor))
 }
 
+#[cfg(test)]
 fn ismember_numeric_rows(a: Tensor, b: Tensor) -> crate::BuiltinResult<IsMemberEvaluation> {
-    let (rows_a, cols_a) = tensor_rows_cols(&a, "ismember")?;
-    let (rows_b, cols_b) = tensor_rows_cols(&b, "ismember")?;
+    ismember_numeric_tensors(a, b, &IsMemberOptions { rows: true })
+}
+
+fn ismember_floating_rows<T: SetFloat>(
+    a_values: Vec<T>,
+    a_shape: Vec<usize>,
+    b_values: Vec<T>,
+    b_shape: Vec<usize>,
+) -> crate::BuiltinResult<IsMemberEvaluation> {
+    let (rows_a, cols_a) = shape_rows_cols(&a_shape, "ismember")?;
+    let (rows_b, cols_b) = shape_rows_cols(&b_shape, "ismember")?;
     if cols_a != cols_b {
         return Err(ismember_error(&ISMEMBER_ERROR_ROWS_COLUMN_MISMATCH));
     }
-    let a_values = tensor::tensor_values_f64_cow(&a);
-    let b_values = tensor::tensor_values_f64_cow(&b);
-
-    let mut map: HashMap<NumericRowKey, usize> = HashMap::new();
+    let mut map: HashMap<FloatingRowKey, usize> = HashMap::new();
     for r in 0..rows_b {
         let mut row_values = Vec::with_capacity(cols_b);
         for c in 0..cols_b {
             let idx = r + c * rows_b;
             row_values.push(b_values[idx]);
         }
-        let key = NumericRowKey::from_slice(&row_values);
+        let key = FloatingRowKey::from_slice(&row_values);
         map.entry(key).or_insert(r + 1);
     }
 
@@ -537,7 +590,7 @@ fn ismember_numeric_rows(a: Tensor, b: Tensor) -> crate::BuiltinResult<IsMemberE
             let idx = r + c * rows_a;
             row_values.push(a_values[idx]);
         }
-        let key = NumericRowKey::from_slice(&row_values);
+        let key = FloatingRowKey::from_slice(&row_values);
         if let Some(&pos) = map.get(&key) {
             mask_data[r] = 1;
             loc_data[r] = pos as f64;
@@ -557,26 +610,71 @@ fn ismember_complex(
     b: ComplexTensor,
     rows: bool,
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
-    if rows {
-        ismember_complex_rows(a, b)
-    } else {
-        ismember_complex_elements(a, b)
+    let a_shape = a.shape.clone();
+    let b_shape = b.shape.clone();
+    match (a.into_complex_storage(), b.into_complex_storage()) {
+        (ComplexStorage::F64(a), ComplexStorage::F64(b)) => {
+            ismember_floating_complex(a, a_shape, b, b_shape, rows)
+        }
+        (ComplexStorage::F32(a), ComplexStorage::F32(b)) => {
+            ismember_floating_complex(a, a_shape, b, b_shape, rows)
+        }
+        (a, b) => ismember_promoted_complex_f64(a, a_shape, b, b_shape, rows),
     }
 }
 
+fn ismember_promoted_complex_f64(
+    a: ComplexStorage,
+    a_shape: Vec<usize>,
+    b: ComplexStorage,
+    b_shape: Vec<usize>,
+    rows: bool,
+) -> crate::BuiltinResult<IsMemberEvaluation> {
+    ismember_floating_complex(
+        a.materialize_f64(),
+        a_shape,
+        b.materialize_f64(),
+        b_shape,
+        rows,
+    )
+}
+
+fn ismember_floating_complex<T: SetFloat>(
+    a: Vec<(T, T)>,
+    a_shape: Vec<usize>,
+    b: Vec<(T, T)>,
+    b_shape: Vec<usize>,
+    rows: bool,
+) -> crate::BuiltinResult<IsMemberEvaluation> {
+    if rows {
+        ismember_floating_complex_rows(a, a_shape, b, b_shape)
+    } else {
+        ismember_floating_complex_elements(a, a_shape, b)
+    }
+}
+
+#[cfg(test)]
 fn ismember_complex_elements(
     a: ComplexTensor,
     b: ComplexTensor,
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
+    ismember_complex(a, b, false)
+}
+
+fn ismember_floating_complex_elements<T: SetFloat>(
+    a: Vec<(T, T)>,
+    a_shape: Vec<usize>,
+    b: Vec<(T, T)>,
+) -> crate::BuiltinResult<IsMemberEvaluation> {
     let mut map: HashMap<ComplexKey, usize> = HashMap::new();
-    for (idx, &value) in b.materialize_f64().iter().enumerate() {
+    for (idx, &value) in b.iter().enumerate() {
         map.entry(ComplexKey::new(value)).or_insert(idx + 1);
     }
 
-    let mut mask_data = Vec::<u8>::with_capacity(a.materialize_f64().len());
-    let mut loc_data = Vec::<f64>::with_capacity(a.materialize_f64().len());
+    let mut mask_data = Vec::<u8>::with_capacity(a.len());
+    let mut loc_data = Vec::<f64>::with_capacity(a.len());
 
-    for &value in &a.materialize_f64() {
+    for &value in &a {
         let key = ComplexKey::new(value);
         if let Some(&pos) = map.get(&key) {
             mask_data.push(1);
@@ -587,19 +685,29 @@ fn ismember_complex_elements(
         }
     }
 
-    let logical = LogicalArray::new(mask_data, a.shape.clone())
+    let logical = LogicalArray::new(mask_data, a_shape.clone())
         .map_err(|e| ismember_internal_error(format!("ismember: {e}")))?;
-    let loc_tensor = Tensor::new(loc_data, a.shape.clone())
+    let loc_tensor = Tensor::new(loc_data, a_shape)
         .map_err(|e| ismember_internal_error(format!("ismember: {e}")))?;
     Ok(IsMemberEvaluation::new(logical, loc_tensor))
 }
 
+#[cfg(test)]
 fn ismember_complex_rows(
     a: ComplexTensor,
     b: ComplexTensor,
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
-    let (rows_a, cols_a) = complex_rows_cols(&a)?;
-    let (rows_b, cols_b) = complex_rows_cols(&b)?;
+    ismember_complex(a, b, true)
+}
+
+fn ismember_floating_complex_rows<T: SetFloat>(
+    a: Vec<(T, T)>,
+    a_shape: Vec<usize>,
+    b: Vec<(T, T)>,
+    b_shape: Vec<usize>,
+) -> crate::BuiltinResult<IsMemberEvaluation> {
+    let (rows_a, cols_a) = shape_rows_cols(&a_shape, "ismember")?;
+    let (rows_b, cols_b) = shape_rows_cols(&b_shape, "ismember")?;
     if cols_a != cols_b {
         return Err(ismember_error(&ISMEMBER_ERROR_ROWS_COLUMN_MISMATCH).into());
     }
@@ -609,7 +717,7 @@ fn ismember_complex_rows(
         let mut row_keys = Vec::with_capacity(cols_b);
         for c in 0..cols_b {
             let idx = r + c * rows_b;
-            row_keys.push(ComplexKey::new(b.materialize_f64()[idx]));
+            row_keys.push(ComplexKey::new(b[idx]));
         }
         map.entry(row_keys).or_insert(r + 1);
     }
@@ -621,7 +729,7 @@ fn ismember_complex_rows(
         let mut row_keys = Vec::with_capacity(cols_a);
         for c in 0..cols_a {
             let idx = r + c * rows_a;
-            row_keys.push(ComplexKey::new(a.materialize_f64()[idx]));
+            row_keys.push(ComplexKey::new(a[idx]));
         }
         if let Some(&pos) = map.get(&row_keys) {
             mask_data[r] = 1;
@@ -826,10 +934,14 @@ fn ismember_string_rows(
 }
 
 fn tensor_rows_cols(t: &Tensor, name: &str) -> crate::BuiltinResult<(usize, usize)> {
-    match t.shape.len() {
+    shape_rows_cols(&t.shape, name)
+}
+
+fn shape_rows_cols(shape: &[usize], name: &str) -> crate::BuiltinResult<(usize, usize)> {
+    match shape.len() {
         0 => Ok((1, 1)),
-        1 => Ok((t.shape[0], 1)),
-        2 => Ok((t.shape[0], t.shape[1])),
+        1 => Ok((shape[0], 1)),
+        2 => Ok((shape[0], shape[1])),
         _ => Err(ismember_internal_error(format!(
             "{name}: 'rows' option requires 2-D numeric matrices"
         ))
@@ -837,23 +949,12 @@ fn tensor_rows_cols(t: &Tensor, name: &str) -> crate::BuiltinResult<(usize, usiz
     }
 }
 
-fn complex_rows_cols(t: &ComplexTensor) -> crate::BuiltinResult<(usize, usize)> {
-    match t.shape.len() {
-        0 => Ok((1, 1)),
-        1 => Ok((t.shape[0], 1)),
-        2 => Ok((t.shape[0], t.shape[1])),
-        _ => Err(ismember_internal_error(
-            "ismember: 'rows' option requires 2-D complex matrices",
-        )),
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct NumericRowKey(Vec<u64>);
+struct FloatingRowKey(Vec<u64>);
 
-impl NumericRowKey {
-    fn from_slice(values: &[f64]) -> Self {
-        NumericRowKey(values.iter().map(|&v| canonicalize_f64(v)).collect())
+impl FloatingRowKey {
+    fn from_slice<T: SetFloat>(values: &[T]) -> Self {
+        FloatingRowKey(values.iter().map(|&value| value.canonical_key()).collect())
     }
 }
 
@@ -864,10 +965,10 @@ struct ComplexKey {
 }
 
 impl ComplexKey {
-    fn new(value: (f64, f64)) -> Self {
+    fn new<T: SetFloat>(value: (T, T)) -> Self {
         Self {
-            re: canonicalize_f64(value.0),
-            im: canonicalize_f64(value.1),
+            re: value.0.canonical_key(),
+            im: value.1.canonical_key(),
         }
     }
 }
@@ -883,16 +984,6 @@ impl RowCharKey {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct RowStringKey(Vec<String>);
-
-fn canonicalize_f64(value: f64) -> u64 {
-    if value.is_nan() {
-        0x7ff8_0000_0000_0000u64
-    } else if value == 0.0 {
-        0u64
-    } else {
-        value.to_bits()
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct IsMemberEvaluation {
@@ -976,6 +1067,22 @@ pub(crate) mod tests {
         let eval = ismember_numeric_elements(a, b).expect("ismember");
         assert_eq!(eval.mask.data, vec![1, 1, 0, 1]);
         assert_eq!(eval.loc.materialize_f64(), vec![3.0, 1.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn numeric_membership_uses_native_single_elements_and_rows() {
+        let a = Tensor::from_f32(vec![1.0, 2.0, f32::NAN], vec![3, 1]).unwrap();
+        let b = Tensor::from_f32(vec![2.0, f32::NAN], vec![2, 1]).unwrap();
+        let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("single ismember");
+        assert_eq!(eval.mask.data, vec![0, 1, 1]);
+        assert_eq!(eval.loc.materialize_f64(), vec![0.0, 1.0, 2.0]);
+
+        let a = Tensor::from_f32(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
+        let b = Tensor::from_f32(vec![3.0, 5.0, 4.0, 6.0], vec![2, 2]).unwrap();
+        let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
+            .expect("single row ismember");
+        assert_eq!(eval.mask.data, vec![0, 1]);
+        assert_eq!(eval.loc.materialize_f64(), vec![0.0, 1.0]);
     }
 
     #[test]
@@ -1081,6 +1188,35 @@ pub(crate) mod tests {
         let eval = ismember_complex_elements(a, b).expect("ismember");
         assert_eq!(eval.mask.data, vec![1, 1]);
         assert_eq!(eval.loc.materialize_f64(), vec![2.0, 1.0]);
+    }
+
+    #[test]
+    fn complex_membership_uses_native_single_elements_and_rows() {
+        let a = ComplexTensor::from_f32(vec![(1.0, 1.0), (2.0, 0.0)], vec![2, 1]).unwrap();
+        let b = ComplexTensor::from_f32(vec![(2.0, 0.0), (1.0, 1.0)], vec![2, 1]).unwrap();
+        let eval = evaluate_sync(Value::ComplexTensor(a), Value::ComplexTensor(b), &[])
+            .expect("complex single ismember");
+        assert_eq!(eval.mask.data, vec![1, 1]);
+        assert_eq!(eval.loc.materialize_f64(), vec![2.0, 1.0]);
+
+        let a = ComplexTensor::from_f32(
+            vec![(1.0, 0.0), (3.0, 0.0), (2.0, 1.0), (4.0, 1.0)],
+            vec![2, 2],
+        )
+        .unwrap();
+        let b = ComplexTensor::from_f32(
+            vec![(3.0, 0.0), (5.0, 0.0), (4.0, 1.0), (6.0, 1.0)],
+            vec![2, 2],
+        )
+        .unwrap();
+        let eval = evaluate_sync(
+            Value::ComplexTensor(a),
+            Value::ComplexTensor(b),
+            &[Value::from("rows")],
+        )
+        .expect("complex single row ismember");
+        assert_eq!(eval.mask.data, vec![0, 1]);
+        assert_eq!(eval.loc.materialize_f64(), vec![0.0, 1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
