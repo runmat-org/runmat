@@ -1045,6 +1045,56 @@ mod tests {
     }
 
     #[test]
+    fn extrema_first_tie_indices_are_one_for_every_integer_class() {
+        let prototypes = [
+            IntegerStorage::I8(Vec::new()),
+            IntegerStorage::I16(Vec::new()),
+            IntegerStorage::I32(Vec::new()),
+            IntegerStorage::I64(Vec::new()),
+            IntegerStorage::U8(Vec::new()),
+            IntegerStorage::U16(Vec::new()),
+            IntegerStorage::U32(Vec::new()),
+            IntegerStorage::U64(Vec::new()),
+        ];
+
+        for prototype in prototypes {
+            let one = prototype.cast_exact_assignment(&IntValue::I8(1));
+            let two = prototype.cast_exact_assignment(&IntValue::I8(2));
+            for (values, direction, expected) in [
+                (
+                    vec![one.clone(), one.clone(), two.clone()],
+                    ExtremaDirection::Min,
+                    one.clone(),
+                ),
+                (
+                    vec![two.clone(), two.clone(), one.clone()],
+                    ExtremaDirection::Max,
+                    two.clone(),
+                ),
+            ] {
+                let storage = prototype
+                    .from_same_class_values(values)
+                    .expect("same-class storage");
+                let result = extrema(
+                    &storage,
+                    &[3, 1],
+                    vec![1, 1],
+                    &[0],
+                    &[true, false],
+                    &[1],
+                    false,
+                    false,
+                    direction,
+                    ExtremaComparison::Natural,
+                )
+                .expect("extrema");
+                assert_eq!(result.values, Value::Int(expected));
+                assert_eq!(result.indices, Value::Num(1.0));
+            }
+        }
+    }
+
+    #[test]
     fn extrema_absolute_comparison_handles_int64_minimum_without_overflow() {
         let storage = IntegerStorage::I64(vec![i64::MIN, -3, 3]);
         let result = extrema(

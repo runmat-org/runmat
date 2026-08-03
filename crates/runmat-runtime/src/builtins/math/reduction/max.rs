@@ -3352,19 +3352,28 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn max_gpu_uint64_reduction_matches_cpu_and_preserves_residency() {
-        let tensor = Tensor::new_integer(
-            IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63, 9, 7]),
-            vec![2, 2],
-        )
-        .expect("uint64 tensor");
+        let data = [u64::MAX, u64::MAX, 9, 9];
+        let tensor = Tensor::new_integer(IntegerStorage::U64(data.to_vec()), vec![2, 2])
+            .expect("uint64 tensor");
         let (values_cpu, indices_cpu) = evaluate(Value::Tensor(tensor.clone()), &[])
             .expect("cpu max")
             .into_pair();
+        assert_eq!(
+            values_cpu,
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 9]), vec![1, 2])
+                    .expect("expected values")
+            )
+        );
+        assert_eq!(
+            indices_cpu,
+            Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).expect("expected indices"))
+        );
 
         test_support::with_test_provider(|provider| {
             let handle = provider
                 .upload_integer(&HostIntegerTensorView {
-                    data: HostIntegerDataView::U64(&[u64::MAX, 1_u64 << 63, 9, 7]),
+                    data: HostIntegerDataView::U64(&data),
                     shape: &[2, 2],
                 })
                 .expect("upload exact uint64");
