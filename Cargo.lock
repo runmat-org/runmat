@@ -5964,6 +5964,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-execution-runner"
+version = "0.6.1"
+dependencies = [
+ "futures",
+ "runmat-execution",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "runmat-filesystem"
 version = "0.6.1"
 dependencies = [
