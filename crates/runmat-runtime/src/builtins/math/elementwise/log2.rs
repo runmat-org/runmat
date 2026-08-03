@@ -9,11 +9,12 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
+    CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
-use super::log::{detect_gpu_requires_complex, log_complex_parts};
+use super::log::{detect_gpu_requires_complex, log_complex_parts, log_complex_parts_f32};
+use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
@@ -152,6 +153,12 @@ async fn log2_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn log2_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
+        let tensor = gpu_helpers::gather_tensor_async(&handle)
+            .await
+            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+        return log2_tensor(tensor);
+    }
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         match detect_gpu_requires_complex(provider, &handle).await {
             Ok(false) => {
@@ -187,28 +194,31 @@ fn log2_real(value: Value) -> BuiltinResult<Value> {
 
 fn log2_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     let shape = tensor.shape.clone();
-    let values = tensor::tensor_values_f64_cow(&tensor);
-    let len = values.len();
-    let mut complex_values = Vec::with_capacity(len);
-    let mut has_imag = false;
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| builtin_error(format!("log2: {e}")))?;
+    match storage {
+        NumericStorage::F64(values) => log2_real_f64_values(values, shape),
+        NumericStorage::F32(values) => log2_real_f32_values(values, shape),
+        storage => log2_real_f64_values(promote_integer_storage_to_log2_domain(storage), shape),
+    }
+}
 
-    for &v in values.iter() {
+fn log2_real_f64_values(values: Vec<f64>, shape: Vec<usize>) -> BuiltinResult<Value> {
+    let mut complex_values = Vec::with_capacity(values.len());
+    let mut has_imag = false;
+    for v in values {
         let (re_part, im_part) = log2_complex_parts(v, 0.0);
         if im_part != 0.0 {
             has_imag = true;
         }
         complex_values.push((re_part, im_part));
     }
-
     if has_imag {
-        if len == 1 {
-            let (re, im) = complex_values[0];
-            Ok(Value::Complex(re, im))
-        } else {
-            let tensor = ComplexTensor::new(complex_values, shape)
+        let tensor =
+            ComplexTensor::from_complex_storage(ComplexStorage::F64(complex_values), shape)
                 .map_err(|e| builtin_error(format!("log2: {e}")))?;
-            Ok(Value::ComplexTensor(tensor))
-        }
+        Ok(complex_tensor_into_value(tensor))
     } else {
         let data: Vec<f64> = complex_values
             .into_iter()
@@ -219,24 +229,73 @@ fn log2_tensor(tensor: Tensor) -> BuiltinResult<Value> {
                 re
             })
             .collect();
-        let tensor = Tensor::new(data, shape).map_err(|e| builtin_error(format!("log2: {e}")))?;
+        let tensor = Tensor::from_numeric_storage(NumericStorage::F64(data), shape)
+            .map_err(|e| builtin_error(format!("log2: {e}")))?;
+        Ok(tensor::tensor_into_value(tensor))
+    }
+}
+
+fn log2_real_f32_values(values: Vec<f32>, shape: Vec<usize>) -> BuiltinResult<Value> {
+    let mut complex_values = Vec::with_capacity(values.len());
+    let mut has_imag = false;
+    for value in values {
+        let (real, imag) = log2_complex_parts_f32(value, 0.0);
+        has_imag |= imag != 0.0;
+        complex_values.push((real, imag));
+    }
+    if has_imag {
+        let tensor =
+            ComplexTensor::from_complex_storage(ComplexStorage::F32(complex_values), shape)
+                .map_err(|e| builtin_error(format!("log2: {e}")))?;
+        Ok(complex_tensor_into_value(tensor))
+    } else {
+        let values = complex_values
+            .into_iter()
+            .map(|(mut real, _)| {
+                if real.is_finite() && real.abs() < IMAG_EPS as f32 {
+                    real = 0.0;
+                }
+                real
+            })
+            .collect();
+        let tensor = Tensor::from_numeric_storage(NumericStorage::F32(values), shape)
+            .map_err(|e| builtin_error(format!("log2: {e}")))?;
         Ok(tensor::tensor_into_value(tensor))
     }
 }
 
 fn log2_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let mut data = Vec::with_capacity(ct.materialize_f64().len());
-    for &(re, im) in &ct.materialize_f64() {
-        data.push(log2_complex_parts(re, im));
-    }
-    if data.len() == 1 {
-        let (re, im) = data[0];
-        Ok(Value::Complex(re, im))
-    } else {
-        let tensor = ComplexTensor::new(data, ct.shape.clone())
-            .map_err(|e| builtin_error(format!("log2: {e}")))?;
-        Ok(Value::ComplexTensor(tensor))
-    }
+    let shape = ct.shape.clone();
+    let storage = match ct.into_complex_storage() {
+        ComplexStorage::F64(values) => ComplexStorage::F64(
+            values
+                .into_iter()
+                .map(|(real, imag)| log2_complex_parts(real, imag))
+                .collect(),
+        ),
+        ComplexStorage::F32(values) => ComplexStorage::F32(
+            values
+                .into_iter()
+                .map(|(real, imag)| log2_complex_parts_f32(real, imag))
+                .collect(),
+        ),
+        ComplexStorage::Integer(_) => {
+            return Err(log2_error_with_detail(
+                &LOG2_ERROR_INVALID_INPUT,
+                "typed complex integer input is not supported",
+            ))
+        }
+    };
+    let tensor = ComplexTensor::from_complex_storage(storage, shape)
+        .map_err(|e| builtin_error(format!("log2: {e}")))?;
+    Ok(complex_tensor_into_value(tensor))
+}
+
+fn promote_integer_storage_to_log2_domain(storage: NumericStorage) -> Vec<f64> {
+    storage
+        .into_integer_storage()
+        .expect("log2 integer-promotion boundary received floating storage")
+        .to_f64_vec()
 }
 
 fn log2_char_array(ca: CharArray) -> BuiltinResult<Value> {
@@ -258,6 +317,19 @@ fn log2_complex_parts(re: f64, im: f64) -> (f64, f64) {
         imag_part = 0.0;
     }
 
+    (real_part, imag_part)
+}
+
+fn log2_complex_parts_f32(re: f32, im: f32) -> (f32, f32) {
+    let (real_ln, imag_ln) = log_complex_parts_f32(re, im);
+    let mut real_part = real_ln * std::f32::consts::LOG2_E;
+    let mut imag_part = imag_ln * std::f32::consts::LOG2_E;
+    if real_part.is_finite() && real_part.abs() < IMAG_EPS as f32 {
+        real_part = 0.0;
+    }
+    if imag_part.abs() < IMAG_EPS as f32 {
+        imag_part = 0.0;
+    }
     (real_part, imag_part)
 }
 
@@ -462,6 +534,70 @@ pub(crate) mod tests {
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn log2_preserves_native_single_real_complex_negative_and_empty_storage() {
+        let tensor = Tensor::from_f32(vec![1.0, 2.0], vec![2, 1]).unwrap();
+        let Value::Tensor(output) = log2_builtin(Value::Tensor(tensor)).expect("log2") else {
+            panic!("expected single real tensor");
+        };
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![0.0, 1.0])
+        );
+
+        let tensor = Tensor::from_f32(vec![-2.0, 2.0], vec![1, 2]).unwrap();
+        let Value::ComplexTensor(output) = log2_builtin(Value::Tensor(tensor)).expect("log2")
+        else {
+            panic!("expected complex single tensor");
+        };
+        assert_eq!(
+            output.as_f32_slice(),
+            Some(
+                &[
+                    log2_complex_parts_f32(-2.0, 0.0),
+                    log2_complex_parts_f32(2.0, 0.0),
+                ][..]
+            )
+        );
+
+        let complex = ComplexTensor::from_f32(vec![(1.0, 1.0)], vec![1, 1]).unwrap();
+        let Value::ComplexTensor(output) =
+            log2_builtin(Value::ComplexTensor(complex)).expect("log2")
+        else {
+            panic!("one-element complex single must retain class");
+        };
+        assert_eq!(
+            output.as_f32_slice(),
+            Some(&[log2_complex_parts_f32(1.0, 1.0)][..])
+        );
+
+        let empty = ComplexTensor::from_f32(Vec::new(), vec![0, 2]).unwrap();
+        let Value::ComplexTensor(output) = log2_builtin(Value::ComplexTensor(empty)).expect("log2")
+        else {
+            panic!("expected empty complex single tensor");
+        };
+        assert_eq!(output.shape, vec![0, 2]);
+        assert_eq!(output.as_f32_slice(), Some(&[][..]));
+    }
+
+    #[test]
+    fn log2_integer_gpu_gathers_exact_storage_before_floating_domain() {
+        test_support::with_test_provider(|provider| {
+            let wide = 9_007_199_254_740_993_u64;
+            let tensor =
+                Tensor::new_integer(IntegerStorage::U64(vec![1, wide]), vec![1, 2]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
+            let Value::Tensor(output) = log2_builtin(Value::GpuTensor(handle)).expect("log2")
+            else {
+                panic!("expected host double tensor");
+            };
+            assert_eq!(
+                output.into_numeric_storage().unwrap(),
+                NumericStorage::F64(vec![0.0, (wide as f64).log2()])
+            );
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
