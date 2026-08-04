@@ -75,6 +75,11 @@ pub async fn execute_program_request(request: ProgramExecutionRequest) -> Progra
     if request.artifact.form == ExecutableForm::InterpreterScriptV1 {
         return execute_script_request(request).await;
     }
+    if request.artifact.form == ExecutableForm::TestAttemptV1 {
+        return ProgramExecutionResponse::Failure {
+            message: "test-attempt programs require a test-capable execution host".into(),
+        };
+    }
     let registry: crate::FunctionRegistry =
         match serde_json::from_slice(&request.artifact.executable_bytes) {
             Ok(registry) => registry,

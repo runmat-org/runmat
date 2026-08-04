@@ -10,12 +10,15 @@ repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 runmat-builtins = { workspace = true }
+runmat-core = { workspace = true }
 runmat-execution = { workspace = true }
 runmat-execution-artifact = { workspace = true }
 runmat-execution-runner = { workspace = true }
 runmat-execution-transport-native = { workspace = true }
 runmat-process-host = { workspace = true }
 runmat-runtime = { workspace = true }
+runmat-test-runner = { workspace = true }
+runmat-test-runner-execution = { workspace = true }
 runmat-vm = { workspace = true }
 dirs = "5.0"
 base64 = "0.22"
@@ -33,5 +36,6 @@ windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 rcgen = "0.14"
+runmat-test = { workspace = true }
 tempfile = "3.12"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

@@ -15,6 +15,7 @@ use runmat_test_runner::reporter::{
 use runmat_test_runner::schedule::RetryPolicy;
 use runmat_test_runner::worker::{RunSubmission, WorkerBackend};
 use runmat_test_runner::{CoordinatedRun, Coordinator, CoordinatorConfig};
+use runmat_test_runner_execution::{ExecutionBackendConfig, ExecutionWorkerBackend};
 use runmat_test_runner_native::artifact::FilesystemArtifactStore;
 use runmat_test_runner_native::host::{NativeCancellation, NativeClock};
 use runmat_test_runner_native::telemetry::NativeTelemetry;
@@ -27,6 +28,7 @@ use crate::presentation;
 
 use super::discovery::prepare;
 use super::exit::TestCommandError;
+use super::remote::{RemoteTestBackend, RemoteTestBackendConfig};
 
 pub async fn execute(args: TestArgs, cli: &Cli, _runtime: &RunMatRuntimeConfig) -> Result<()> {
     match execute_inner(args, cli).await {
@@ -115,7 +117,25 @@ async fn execute_inner(args: TestArgs, cli: &Cli) -> Result<()> {
         }
     });
     let mut reporters = reporters(&args, &prepared.test_config.reports);
-    let jobs = args.jobs.or(prepared.test_config.jobs).unwrap_or(1);
+    let cluster = args.cluster.clone().or_else(|| {
+        prepared
+            .test_config
+            .cluster
+            .as_ref()
+            .and_then(|cluster| cluster.profile.clone())
+    });
+    let cluster_max_workers = args.max_workers.or_else(|| {
+        prepared
+            .test_config
+            .cluster
+            .as_ref()
+            .and_then(|cluster| cluster.max_workers)
+            .and_then(|value| usize::try_from(value).ok())
+    });
+    let mut jobs = args.jobs.or(prepared.test_config.jobs).unwrap_or(1);
+    if let Some(max_workers) = cluster_max_workers {
+        jobs = jobs.min(max_workers);
+    }
     let config = CoordinatorConfig {
         isolation,
         jobs,
@@ -131,49 +151,106 @@ async fn execute_inner(args: TestArgs, cli: &Cli) -> Result<()> {
     };
     let submission = RunSubmission::new(plan, prepared.snapshot)?;
     let coordinator = Coordinator::new(config)?;
-    let mut run = match isolation {
-        IsolationMode::Auto | IsolationMode::Process => {
-            let mut backend_config = ProcessBackendConfig::same_binary(
-                std::env::current_exe().context("failed to locate the runmat executable")?,
+    let mut run = if let Some(cluster) = cluster {
+        if !matches!(isolation, IsolationMode::Auto | IsolationMode::Process) {
+            anyhow::bail!(
+                "remote tests provide process isolation; '{}' was requested",
+                isolation.as_str()
             );
-            backend_config.project_handoff = prepared.project_handoff.clone();
-            backend_config.environment.insert(
-                "RUNMAT_TEST_JIT".into(),
-                if cli.no_jit { "0" } else { "1" }.into(),
-            );
-            for name in allowed_environment {
-                if let Ok(value) = std::env::var(&name) {
-                    backend_config.environment.insert(name, value);
+        }
+        let trust_identity = args
+            .trust_identity
+            .clone()
+            .context("remote tests require --trust-identity with a pinned endpoint fingerprint")?;
+        let queue = args
+            .queue
+            .clone()
+            .or_else(|| {
+                prepared
+                    .test_config
+                    .cluster
+                    .as_ref()
+                    .and_then(|cluster| cluster.queue.clone())
+            })
+            .unwrap_or_else(|| "default".into());
+        let project_handoff = prepared
+            .project_handoff
+            .clone()
+            .context("remote tests require a project manifest with an exact frozen graph")?;
+        let backend = RemoteTestBackend::new(RemoteTestBackendConfig {
+            project: args.project,
+            cluster: cluster.clone(),
+            queue: queue.clone(),
+            trust_identity,
+            max_workers: jobs,
+            project_handoff,
+        })
+        .map_err(|error| anyhow::anyhow!("failed to configure remote tests: {error}"))?;
+        run_coordinator(
+            &coordinator,
+            submission,
+            &backend,
+            &cancellation,
+            &mut reporters,
+        )
+        .await?
+    } else {
+        match isolation {
+            IsolationMode::Auto | IsolationMode::Process => {
+                let mut backend_config = ProcessBackendConfig::same_binary(
+                    std::env::current_exe().context("failed to locate the runmat executable")?,
+                );
+                backend_config.project_handoff = prepared.project_handoff.clone();
+                backend_config.environment.insert(
+                    "RUNMAT_TEST_JIT".into(),
+                    if cli.no_jit { "0" } else { "1" }.into(),
+                );
+                for name in allowed_environment {
+                    if let Ok(value) = std::env::var(&name) {
+                        backend_config.environment.insert(name, value);
+                    }
                 }
+                let backend = ProcessBackend::new(backend_config).map_err(|error| {
+                    anyhow::anyhow!("failed to configure native workers: {error}")
+                })?;
+                let backend =
+                    ExecutionWorkerBackend::new(backend, ExecutionBackendConfig::local(jobs))
+                        .map_err(|error| {
+                            anyhow::anyhow!("failed to configure execution-backed tests: {error}")
+                        })?;
+                run_coordinator(
+                    &coordinator,
+                    submission,
+                    &backend,
+                    &cancellation,
+                    &mut reporters,
+                )
+                .await?
             }
-            let backend = ProcessBackend::new(backend_config)
-                .map_err(|error| anyhow::anyhow!("failed to configure native workers: {error}"))?;
-            run_coordinator(
-                &coordinator,
-                submission,
-                &backend,
-                &cancellation,
-                &mut reporters,
-            )
-            .await?
+            IsolationMode::Session | IsolationMode::None => {
+                let mut backend_config = LocalBackendConfig::new(isolation);
+                backend_config.enable_jit = !cli.no_jit;
+                backend_config.max_workers = jobs;
+                backend_config.project_handoff = prepared.project_handoff.clone();
+                let backend = LocalBackend::new(backend_config).map_err(|error| {
+                    anyhow::anyhow!("failed to configure native sessions: {error}")
+                })?;
+                let backend =
+                    ExecutionWorkerBackend::new(backend, ExecutionBackendConfig::local(jobs))
+                        .map_err(|error| {
+                            anyhow::anyhow!("failed to configure execution-backed tests: {error}")
+                        })?;
+                run_coordinator(
+                    &coordinator,
+                    submission,
+                    &backend,
+                    &cancellation,
+                    &mut reporters,
+                )
+                .await?
+            }
+            IsolationMode::Worker => unreachable!("native worker isolation was rejected"),
         }
-        IsolationMode::Session | IsolationMode::None => {
-            let mut backend_config = LocalBackendConfig::new(isolation);
-            backend_config.enable_jit = !cli.no_jit;
-            backend_config.max_workers = jobs;
-            backend_config.project_handoff = prepared.project_handoff.clone();
-            let backend = LocalBackend::new(backend_config)
-                .map_err(|error| anyhow::anyhow!("failed to configure native sessions: {error}"))?;
-            run_coordinator(
-                &coordinator,
-                submission,
-                &backend,
-                &cancellation,
-                &mut reporters,
-            )
-            .await?
-        }
-        IsolationMode::Worker => unreachable!("native worker isolation was rejected"),
     };
     signal_task.abort();
 

@@ -340,7 +340,7 @@ async fn run_worker_loop(
                     let response = match materialized {
                         Ok(arguments) => {
                             program.arguments = arguments;
-                            runmat_vm::execute_program_request(program).await
+                            crate::execute_host_program_request(program).await
                         }
                         Err(error) => {
                             runmat_execution_artifact::ProgramExecutionResponse::Failure {

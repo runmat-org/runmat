@@ -351,7 +351,7 @@ pub enum Commands {
         package_command: PackageCommand,
     },
     /// Discover and run MATLAB-compatible tests
-    Test(TestArgs),
+    Test(Box<TestArgs>),
     /// Submit and manage durable local batch jobs
     Batch {
         #[command(subcommand)]

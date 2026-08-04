@@ -192,11 +192,14 @@ runmat test
 runmat test tests/solver --name convergence --tag fast
 runmat test --jobs 4 --isolation process --report junit
 runmat test --coverage --coverage-format lcov
+runmat test --cluster CLUSTER_ID --project PROJECT_ID --trust-identity SHA256_FINGERPRINT --max-workers 8
 ```
 
 Runtime and test dependency groups are resolved together before discovery. The default native isolation is a fresh killable process; `session` and `none` are explicit weaker modes. Reports, captured output, diagnostics, artifacts, retries, cancellation, and coverage are projections of one deterministic event/result stream. Human, JSON, JUnit, and TAP reports are supported, as are JSON, LCOV, Cobertura, and HTML coverage reports. Exact options and defaults are available from `runmat test --help`.
 
 The same portable discovery, plan, coordinator, result, and coverage authorities back `runtests`, browser Web Worker execution, and Desktop. Browser hosts use fresh dedicated Web Workers as their strongest available isolation and preserve selected source and fixture bytes in an immutable worker-local filesystem snapshot.
+
+Remote tests use the same coordinator through the general execution scheduler and encrypted execution control/data plane. `--cluster` overrides `[test.cluster].profile`, `--queue` overrides `[test.cluster].queue`, and `--max-workers` caps concurrent remote fixture groups. A pinned `--trust-identity` is required before protected plan, source, result, event, artifact, or coverage content is encrypted to the admitted endpoint. The Server sees only the coarse execution metadata needed for admission, leases, routing, retention, and billing; it cannot decrypt test content or detailed results.
 
 ## Color and Terminal Output
 

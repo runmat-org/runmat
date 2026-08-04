@@ -1,6 +1,6 @@
-mod attach;
+pub(crate) mod attach;
 mod secret;
-mod submit;
+pub(crate) mod submit;
 
 use anyhow::{Context, Result};
 use runmat_server_client::auth::{
@@ -70,4 +70,14 @@ async fn client(project: Option<uuid::Uuid>) -> Result<(ExecutionClient, String,
     let client =
         ExecutionClient::new(&server_url, &token).context("initialize execution client")?;
     Ok((client, server_url, project_id))
+}
+
+pub(crate) async fn cancel_remote_run(project: Option<uuid::Uuid>, run_id: &str) -> Result<()> {
+    let (client, _, project_id) = client(project).await?;
+    client
+        .api()
+        .cancel_run(&project_id, run_id)
+        .await
+        .map_err(runmat_server_client::execution::public_error)?;
+    Ok(())
 }

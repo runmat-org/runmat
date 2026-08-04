@@ -6187,6 +6187,7 @@ dependencies = [
  "runmat-telemetry",
  "runmat-test",
  "runmat-test-runner",
+ "runmat-test-runner-execution",
  "runmat-test-runner-native",
  "runmat-time",
  "runmat-vm",
@@ -6416,12 +6417,16 @@ dependencies = [
  "rand 0.8.6",
  "rcgen",
  "runmat-builtins",
+ "runmat-core",
  "runmat-execution",
  "runmat-execution-artifact",
  "runmat-execution-runner",
  "runmat-execution-transport-native",
  "runmat-process-host",
  "runmat-runtime",
+ "runmat-test",
+ "runmat-test-runner",
+ "runmat-test-runner-execution",
  "runmat-vm",
  "serde",
  "serde_json",
@@ -7063,6 +7068,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-test-runner-execution"
+version = "0.6.1"
+dependencies = [
+ "futures",
+ "runmat-execution",
+ "runmat-execution-artifact",
+ "runmat-execution-runner",
+ "runmat-test",
+ "runmat-test-runner",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "runmat-test-runner-native"
 version = "0.6.1"
 dependencies = [
@@ -7179,6 +7198,7 @@ dependencies = [
  "runmat-telemetry",
  "runmat-test",
  "runmat-test-runner",
+ "runmat-test-runner-execution",
  "runmat-thread-local",
  "runmat-vm",
  "serde",

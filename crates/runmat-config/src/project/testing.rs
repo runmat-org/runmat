@@ -93,6 +93,21 @@ impl ProjectTestConfig {
         if self.artifacts.max_runs == Some(0) {
             messages.push("[test.artifacts].max-runs must be greater than zero".into());
         }
+        if let Some(cluster) = &self.cluster {
+            if cluster.max_workers == Some(0) {
+                messages.push("[test.cluster].max-workers must be greater than zero".into());
+            }
+            for (field, value) in [
+                ("profile", cluster.profile.as_deref()),
+                ("queue", cluster.queue.as_deref()),
+            ] {
+                if value.is_some_and(|value| value.trim().is_empty() || value.len() > 256) {
+                    messages.push(format!(
+                        "[test.cluster].{field} must be a non-empty value of at most 256 bytes"
+                    ));
+                }
+            }
+        }
         messages
     }
 
@@ -205,6 +220,20 @@ mod tests {
         };
         let messages = config.validation_messages();
         assert_eq!(messages.len(), 4, "{messages:#?}");
+    }
+
+    #[test]
+    fn validates_cluster_selection_and_capacity() {
+        let config = ProjectTestConfig {
+            cluster: Some(ProjectTestCluster {
+                profile: Some(" ".into()),
+                queue: Some("q".repeat(257)),
+                max_workers: Some(0),
+            }),
+            ..ProjectTestConfig::default()
+        };
+        let messages = config.validation_messages();
+        assert_eq!(messages.len(), 3, "{messages:#?}");
     }
 
     #[test]

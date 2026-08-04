@@ -9,6 +9,7 @@ mod protocol;
 mod remote;
 mod service;
 pub mod supervisor;
+mod test_workload;
 mod worker;
 
 pub use config::NativeExecutionConfig;
@@ -21,4 +22,5 @@ pub use remote::{
     RemoteWorkerChannel,
 };
 pub use service::NativeExecutionService;
+pub use test_workload::execute_host_program_request;
 pub use worker::run_worker_stdio;

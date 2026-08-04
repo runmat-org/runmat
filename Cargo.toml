@@ -33,6 +33,7 @@ members = [
     "crates/runmat-package-cache-native",
     "crates/runmat-test",
     "crates/runmat-test-runner",
+    "crates/runmat-test-runner-execution",
     "crates/runmat-test-runner-native",
     "crates/runmat-execution",
     "crates/runmat-execution-artifact",
@@ -123,6 +124,7 @@ runmat-package-cache = { version = "=0.6.1", path = "crates/runmat-package-cache
 runmat-package-cache-native = { version = "=0.6.1", path = "crates/runmat-package-cache-native" }
 runmat-test = { version = "=0.6.1", path = "crates/runmat-test" }
 runmat-test-runner = { version = "=0.6.1", path = "crates/runmat-test-runner" }
+runmat-test-runner-execution = { version = "=0.6.1", path = "crates/runmat-test-runner-execution" }
 runmat-test-runner-native = { version = "=0.6.1", path = "crates/runmat-test-runner-native" }
 runmat-execution = { version = "=0.6.1", path = "crates/runmat-execution" }
 runmat-execution-artifact = { version = "=0.6.1", path = "crates/runmat-execution-artifact" }

@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{Args, ValueEnum};
+use uuid::Uuid;
 
 #[derive(Args, Clone, Debug)]
 pub struct TestArgs {
@@ -23,6 +24,26 @@ pub struct TestArgs {
     /// Maximum local fixture groups executing concurrently
     #[arg(short = 'j', long)]
     pub jobs: Option<usize>,
+
+    /// Remote cluster ID; overrides [test.cluster].profile
+    #[arg(long)]
+    pub cluster: Option<String>,
+
+    /// Remote project used for admission and billing
+    #[arg(long)]
+    pub project: Option<Uuid>,
+
+    /// Authorized remote execution queue
+    #[arg(long)]
+    pub queue: Option<String>,
+
+    /// Pinned endpoint identity fingerprint trusted for remote tests
+    #[arg(long)]
+    pub trust_identity: Option<String>,
+
+    /// Maximum remote fixture groups executing concurrently
+    #[arg(long = "max-workers")]
+    pub max_workers: Option<usize>,
 
     /// Worker isolation policy
     #[arg(long, value_enum)]

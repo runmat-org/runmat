@@ -22,6 +22,11 @@ use runmat_execution_transport_native::control::{
 };
 use runmat_execution_transport_native::identity::EndpointIdentityMaterial;
 use runmat_execution_transport_native::{TransportError, TransportResult};
+use runmat_test::descriptor::TestSelector;
+use runmat_test::discovery::{FrozenTestRunSnapshot, SavedRunSource};
+use runmat_test::result::TerminalDisposition;
+use runmat_test_runner::worker::RunSubmission;
+use runmat_test_runner_execution::{decode_execution, TestAttemptWorkload};
 
 use super::config::RemoteDriverConfig;
 use super::crypto::{ciphertext_digest, open_object, project_revision_identity, seal_object};
@@ -143,6 +148,63 @@ async fn remote_driver_executes_exact_encrypted_program_and_commits_once() {
         serde_json::to_vec(&registry).unwrap(),
     )
     .unwrap();
+    let response = run_encrypted_remote_request(run_id, revision, recipe, artifact).await;
+    assert!(matches!(response, ProgramExecutionResponse::Success { .. }));
+}
+
+#[tokio::test]
+async fn remote_driver_preserves_exact_test_result_events_and_coverage() {
+    let snapshot = FrozenTestRunSnapshot::freeze(
+        Digest::sha256(b"graph").to_string(),
+        Digest::sha256(b"base-sources").to_string(),
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
+        Digest::sha256(b"test-config").to_string(),
+        vec![SavedRunSource {
+            owner_identity: "path:workspace".into(),
+            relative_path: "tests/remoteTest.m".into(),
+            content: "function tests = remoteTest()\n tests = functiontests(localfunctions);\nend\nfunction testRemote(testCase)\n testCase.verifyEqual(6 * 7, 42);\nend\n".into(),
+        }],
+        Vec::new(),
+    )
+    .unwrap();
+    let session = runmat_core::RunMatSession::with_options(false, false).unwrap();
+    let prepared = session
+        .prepare_tests(&snapshot, &TestSelector::default())
+        .unwrap();
+    let test_id = prepared.plan.tests().next().unwrap().id.clone();
+    let workload = TestAttemptWorkload::new(
+        RunSubmission::new(prepared.plan, snapshot).unwrap(),
+        test_id,
+        1,
+    )
+    .unwrap();
+    let request = workload.program_request().unwrap();
+    let response = run_encrypted_remote_request(
+        "run-remote-test-conformance",
+        request.recipe.program_revision.clone(),
+        request.recipe,
+        request.artifact,
+    )
+    .await;
+    let ProgramExecutionResponse::Success { value } = response else {
+        panic!("remote driver rejected an exact test workload: {response:?}");
+    };
+    let execution = decode_execution(&value).unwrap();
+    assert_eq!(
+        execution.result.state.disposition,
+        TerminalDisposition::Passed,
+        "{execution:#?}"
+    );
+    assert!(!execution.events.is_empty());
+    assert!(!execution.coverage.is_empty());
+}
+
+async fn run_encrypted_remote_request(
+    run_id: &str,
+    revision: ProgramRevision,
+    recipe: ProgramBuildRecipe,
+    artifact: ProgramArtifact,
+) -> ProgramExecutionResponse {
     let bundle = ExecutionBundle {
         manifest: BundleManifest {
             schema_version: 1,
@@ -268,10 +330,7 @@ async fn remote_driver_executes_exact_encrypted_program_and_commits_once() {
         EncryptionPurpose::Result,
     )
     .unwrap();
-    assert!(matches!(
-        serde_json::from_slice::<ProgramExecutionResponse>(&result).unwrap(),
-        ProgramExecutionResponse::Success { .. }
-    ));
+    serde_json::from_slice::<ProgramExecutionResponse>(&result).unwrap()
 }
 
 fn resource_request() -> runmat_execution_transport_native::control::ResourceRequest {

@@ -101,7 +101,7 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
         }
         Commands::Fs { fs_command } => remote::execute_fs_command(fs_command).await,
         Commands::Package { package_command } => package::execute(package_command, cli).await,
-        Commands::Test(args) => test::execute(args, cli, config).await,
+        Commands::Test(args) => test::execute(*args, cli, config).await,
         Commands::Batch { batch_command } => batch::execute(batch_command).await,
         Commands::Cluster { cluster_command } => {
             remote::execute_cluster_command(cluster_command).await

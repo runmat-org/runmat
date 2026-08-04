@@ -38,7 +38,7 @@ impl RunMatWasm {
 }
 
 #[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TestAttemptInput {
     snapshot: runmat_test::discovery::FrozenTestRunSnapshot,
     plan: runmat_test::plan::TestPlan,

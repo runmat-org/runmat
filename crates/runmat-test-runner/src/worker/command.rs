@@ -1,10 +1,11 @@
 use runmat_test::discovery::FrozenTestRunSnapshot;
 use runmat_test::identity::{RunId, TestId};
 use runmat_test::plan::TestPlan;
+use serde::{Deserialize, Serialize};
 
 use crate::host::IsolationMode;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RunSubmission {
     pub plan: TestPlan,
     pub snapshot: FrozenTestRunSnapshot,

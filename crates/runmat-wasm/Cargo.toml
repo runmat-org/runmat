@@ -37,6 +37,7 @@ runmat-package = { workspace = true }
 runmat-package-cache = { workspace = true }
 runmat-test = { workspace = true }
 runmat-test-runner = { workspace = true }
+runmat-test-runner-execution = { workspace = true }
 sha2 = { workspace = true }
 runmat-thread-local = { workspace = true }
 glam = "0.24"

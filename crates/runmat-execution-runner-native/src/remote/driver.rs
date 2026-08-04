@@ -170,7 +170,7 @@ pub(super) async fn run_remote_driver(
         if bootstrap.desired_worker_count == 0 {
             Ok(
                 super::pool_execution::RemotePoolExecutionOutcome::Completed(
-                    runmat_vm::execute_program_request(request).await,
+                    crate::execute_host_program_request(request).await,
                 ),
             )
         } else {

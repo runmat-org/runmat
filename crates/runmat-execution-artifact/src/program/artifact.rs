@@ -7,9 +7,11 @@ use crate::{ArtifactError, ArtifactResult};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[repr(u8)]
 pub enum ExecutableForm {
-    InterpreterBytecodeV1,
-    InterpreterScriptV1,
+    InterpreterBytecodeV1 = 0,
+    InterpreterScriptV1 = 1,
+    TestAttemptV1 = 2,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

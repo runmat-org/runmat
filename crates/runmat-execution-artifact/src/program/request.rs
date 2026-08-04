@@ -97,8 +97,10 @@ impl ProgramExecutionRequest {
         if !entrypoint_matches(self.artifact.form, self.function, &self.recipe.entrypoint)
             || self.requested_outputs != self.recipe.outputs.requested_outputs
             || self.arguments.len() > MAX_PROGRAM_EXECUTION_ARGUMENTS
-            || (self.artifact.form == ExecutableForm::InterpreterScriptV1
-                && !self.arguments.is_empty())
+            || (matches!(
+                self.artifact.form,
+                ExecutableForm::InterpreterScriptV1 | ExecutableForm::TestAttemptV1
+            ) && !self.arguments.is_empty())
         {
             return Err(ArtifactError::Invalid(
                 "program execution request has an inconsistent callable, output contract, or argument count".into(),
@@ -117,6 +119,7 @@ fn entrypoint_matches(form: ExecutableForm, function: usize, entrypoint: &str) -
     match form {
         ExecutableForm::InterpreterBytecodeV1 => function.to_string() == entrypoint,
         ExecutableForm::InterpreterScriptV1 => function == 0 && entrypoint == "script",
+        ExecutableForm::TestAttemptV1 => function == 0 && entrypoint == "test_attempt",
     }
 }
 

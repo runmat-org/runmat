@@ -5,6 +5,7 @@ use runmat_test_runner::reporter::{
 };
 use runmat_test_runner::telemetry::NoopTelemetry;
 use runmat_test_runner::Coordinator;
+use runmat_test_runner_execution::{ExecutionBackendConfig, ExecutionWorkerBackend};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
@@ -49,9 +50,13 @@ async fn run_tests_inner(
     let (submission, config) = input
         .into_parts()
         .map_err(|error| js_error(&error.to_string()))?;
+    let jobs = config.jobs;
     let coordinator = Coordinator::new(config).map_err(|error| js_error(&error.to_string()))?;
     let worker_backend =
         JsWorkerBackend::new(backend.clone()).map_err(|error| js_error(&error.to_string()))?;
+    let worker_backend =
+        ExecutionWorkerBackend::new(worker_backend, ExecutionBackendConfig::local(jobs))
+            .map_err(|error| js_error(&error.to_string()))?;
     let cancellation = BrowserCancellation::new(backend);
     let mut reporters = ReporterFanout::default();
     if let Some(observer) = observer.clone() {

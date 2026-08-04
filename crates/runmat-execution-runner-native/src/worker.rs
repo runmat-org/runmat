@@ -19,7 +19,7 @@ pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
 }
 
 pub(crate) async fn execute(request: WorkerRequest) -> WorkerResponse {
-    runmat_vm::execute_program_request(request).await
+    crate::execute_host_program_request(request).await
 }
 
 #[cfg(test)]

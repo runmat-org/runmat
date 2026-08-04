@@ -77,6 +77,54 @@ pub async fn cancel(run_id: &str, json: bool) -> Result<()> {
     Ok(())
 }
 
+pub(crate) async fn await_result(run_id: &str) -> Result<ProgramExecutionResponse> {
+    let (client, saved) = saved_client(run_id).await?;
+    loop {
+        let run = client
+            .api()
+            .get_run(&saved.project_id, run_id)
+            .await
+            .map_err(public_error)?
+            .into_inner();
+        if !terminal(&run.state) {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            continue;
+        }
+        if let Some(artifact_id) = &run.result_artifact_id {
+            let ciphertext = client
+                .download_artifact(&saved.project_id, artifact_id, &saved.endpoint_fingerprint)
+                .await?;
+            let plaintext = open(
+                &saved.key()?,
+                &run.id,
+                EncryptionPurpose::Result,
+                &ciphertext,
+            )?;
+            return serde_json::from_slice(&plaintext)
+                .context("remote result payload is malformed");
+        }
+        if let Some(artifact_id) = &run.diagnostic_artifact_id {
+            let ciphertext = client
+                .download_artifact(&saved.project_id, artifact_id, &saved.endpoint_fingerprint)
+                .await?;
+            let diagnostic = open(
+                &saved.key()?,
+                &run.id,
+                EncryptionPurpose::DetailedEvent,
+                &ciphertext,
+            )?;
+            bail!(
+                "{}",
+                String::from_utf8(diagnostic).context("remote diagnostic is not valid UTF-8")?
+            );
+        }
+        bail!(
+            "remote test attempt ended in state '{}' without a result",
+            run.state
+        );
+    }
+}
+
 pub async fn attach(run_id: &str, no_follow: bool, json: bool) -> Result<()> {
     let (client, saved) = saved_client(run_id).await?;
     loop {

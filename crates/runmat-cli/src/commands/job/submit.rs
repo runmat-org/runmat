@@ -1,5 +1,6 @@
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Context, Result};
@@ -29,6 +30,23 @@ use crate::commands::session::create_session;
 const RETENTION_SECONDS: u64 = 7 * 24 * 60 * 60;
 const MEDIA_TYPE: &str = "application/vnd.runmat.execution+ciphertext";
 const ENCRYPTION_SUITE: &str = "hkdf-sha256-aes256gcm-v1";
+
+pub(crate) struct PreparedRemoteExecution {
+    pub revision: ProgramRevision,
+    pub bundle_archive: Vec<u8>,
+    pub descriptor: Vec<u8>,
+    pub inputs: Vec<u8>,
+}
+
+pub(crate) struct RemoteSubmissionOptions {
+    pub project: Option<Uuid>,
+    pub cluster: String,
+    pub queue: String,
+    pub trust_identity: String,
+    pub idempotency_key: Option<String>,
+    pub workers: u32,
+    pub on_run_created: Option<Arc<dyn Fn(String) + Send + Sync>>,
+}
 
 #[allow(clippy::too_many_arguments)]
 pub async fn submit(
@@ -124,28 +142,82 @@ pub async fn submit(
     let mut bundle_archive = Vec::new();
     write_bundle(&bundle, &mut bundle_archive, ArchiveLimits::default())?;
 
-    let (client, server_url, project_id) = super::client(project).await?;
-    let idempotency_key = idempotency_key.unwrap_or_else(|| Uuid::new_v4().to_string());
-    let request_digest = request_digest(&idempotency_key, &revision, &cluster, &queue, workers);
+    let committed = submit_prepared(
+        PreparedRemoteExecution {
+            revision,
+            bundle_archive,
+            descriptor,
+            inputs,
+        },
+        RemoteSubmissionOptions {
+            project,
+            cluster,
+            queue,
+            trust_identity,
+            idempotency_key,
+            workers,
+            on_run_created: None,
+        },
+    )
+    .await?;
+    if json {
+        println!("{}", serde_json::to_string(&committed)?);
+    } else {
+        println!(
+            "{} {} ({})",
+            crate::presentation::stdout().success("Job"),
+            committed.id,
+            committed.state
+        );
+    }
+    if !detach {
+        super::attach::attach(&committed.id, false, json).await?;
+    }
+    Ok(())
+}
+
+pub(crate) async fn submit_prepared(
+    prepared: PreparedRemoteExecution,
+    options: RemoteSubmissionOptions,
+) -> Result<types::RunResponse> {
+    let (client, server_url, project_id) = super::client(options.project).await?;
+    let idempotency_key = options
+        .idempotency_key
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+    let request_digest = request_digest(
+        &idempotency_key,
+        &prepared.revision,
+        &options.cluster,
+        &options.queue,
+        options.workers,
+    );
     let run = client
         .api()
         .submit_run(
             &project_id,
             &idempotency_key,
             &types::SubmitRunRequest {
-                cluster_id: cluster.clone(),
-                queue,
+                cluster_id: options.cluster.clone(),
+                queue: options.queue,
                 request_digest,
-                project_revision: project_revision_identity(&revision),
-                bundle_ciphertext_size_class: size_class(bundle_archive.len()),
+                project_revision: project_revision_identity(&prepared.revision),
+                bundle_ciphertext_size_class: size_class(prepared.bundle_archive.len()),
                 compatibility_fingerprints: HashMap::from([
                     (
                         "runtime".into(),
-                        revision.environment().runtime_fingerprint.to_string(),
+                        prepared
+                            .revision
+                            .environment()
+                            .runtime_fingerprint
+                            .to_string(),
                     ),
                     (
                         "catalog".into(),
-                        revision.environment().catalog_fingerprint.to_string(),
+                        prepared
+                            .revision
+                            .environment()
+                            .catalog_fingerprint
+                            .to_string(),
                     ),
                 ]),
                 resources: types::ResourceRequestBody {
@@ -158,9 +230,9 @@ pub async fn submit(
                     maximum_wall_millis: 60 * 60 * 1_000,
                 },
                 worker_count: Some(
-                    i32::try_from(workers).context("worker count exceeds API range")?,
+                    i32::try_from(options.workers).context("worker count exceeds API range")?,
                 ),
-                worker_resources: (workers > 0).then_some(types::ResourceRequestBody {
+                worker_resources: (options.workers > 0).then_some(types::ResourceRequestBody {
                     cpu_millicores: 1_000,
                     memory_bytes: 1024 * 1024 * 1024,
                     scratch_bytes: 1024 * 1024 * 1024,
@@ -174,6 +246,9 @@ pub async fn submit(
         .await
         .map_err(public_error)?
         .into_inner();
+    if let Some(observer) = &options.on_run_created {
+        observer(run.id.clone());
+    }
     let admission = wait_for_admission(&client, &project_id, &run.id).await?;
     let identity = admission
         .endpoint_identity
@@ -183,13 +258,15 @@ pub async fn submit(
         &evidence,
         &run,
         &admission.allocation_lease_id,
-        &trust_identity,
+        &options.trust_identity,
     )?;
     let evidence_digest = admission
         .evidence_digest
         .context("admission omitted its signed evidence digest")?;
-    let recipient =
-        ExecutionRecipientKey::from_verified_endpoint(&evidence, &trust_policy(&trust_identity)?)?;
+    let recipient = ExecutionRecipientKey::from_verified_endpoint(
+        &evidence,
+        &trust_policy(&options.trust_identity)?,
+    )?;
     client
         .api()
         .confirm_run_admission(
@@ -209,10 +286,20 @@ pub async fn submit(
         &run_key,
         &run.id,
         EncryptionPurpose::Bundle,
-        &bundle_archive,
+        &prepared.bundle_archive,
     )?;
-    let program = seal(&run_key, &run.id, EncryptionPurpose::Program, &descriptor)?;
-    let input = seal(&run_key, &run.id, EncryptionPurpose::Input, &inputs)?;
+    let program = seal(
+        &run_key,
+        &run.id,
+        EncryptionPurpose::Program,
+        &prepared.descriptor,
+    )?;
+    let input = seal(
+        &run_key,
+        &run.id,
+        EncryptionPurpose::Input,
+        &prepared.inputs,
+    )?;
     let bundle_id = upload(
         &client,
         &project_id,
@@ -271,20 +358,7 @@ pub async fn submit(
         endpoint_fingerprint,
         &run_key,
     ))?;
-    if json {
-        println!("{}", serde_json::to_string(&committed)?);
-    } else {
-        println!(
-            "{} {} ({})",
-            crate::presentation::stdout().success("Job"),
-            committed.id,
-            committed.state
-        );
-    }
-    if !detach {
-        super::attach::attach(&committed.id, false, json).await?;
-    }
-    Ok(())
+    Ok(committed)
 }
 
 async fn wait_for_admission(
