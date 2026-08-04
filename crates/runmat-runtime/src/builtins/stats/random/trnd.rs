@@ -2,9 +2,10 @@
 
 use runmat_accelerate_api::{GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, ResolveContext, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor, NumericDType, ResolveContext, Tensor, Type,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -15,6 +16,23 @@ use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "trnd";
+
+const TRND_INTEGER_NU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "trnd-integer-degrees-of-freedom",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "trnd with typed-integer degrees of freedom is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TrndIntegerDegreesOfFreedomExtension"),
+};
+
+const TRND_INTEGER_SIZE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "trnd-integer-size",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "trnd with typed-integer size arguments is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TrndIntegerSizeExtension"),
+};
+
+pub const TRND_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [TRND_INTEGER_NU_EXTENSION, TRND_INTEGER_SIZE_EXTENSION];
 
 const OUTPUT_R: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "r",
@@ -109,10 +127,36 @@ fn trnd_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     keywords = "trnd,student t,random,statistics,distribution",
     type_resolver(trnd_type),
     descriptor(crate::builtins::stats::random::trnd::TRND_DESCRIPTOR),
+    extensions(crate::builtins::stats::random::trnd::TRND_EXTENSIONS),
     builtin_path = "crate::builtins::stats::random::trnd"
 )]
 pub(crate) async fn trnd_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let (nu, shape, output_precision, gpu_source) = parse_args(args).await?;
+    if args.first().is_some_and(is_resident_typed_integer_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TRND_INTEGER_NU_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if args.iter().skip(1).any(is_resident_typed_integer_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TRND_INTEGER_SIZE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    let (nu, shape, output_precision, gpu_source, integer_nu, integer_size) =
+        parse_args(args).await?;
+    if integer_nu {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TRND_INTEGER_NU_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if integer_size {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TRND_INTEGER_SIZE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let len = tensor::element_count(&shape);
     let data = random::generate_student_t(&nu, len, BUILTIN_NAME)?;
     build_output(data, shape, output_precision, gpu_source)
@@ -189,6 +233,8 @@ async fn parse_args(
     Vec<usize>,
     OutputPrecision,
     Option<GpuTensorHandle>,
+    bool,
+    bool,
 )> {
     if args.is_empty() {
         return Err(trnd_error(
@@ -196,6 +242,8 @@ async fn parse_args(
             "trnd: nu argument is required",
         ));
     }
+    let integer_nu = is_typed_integer_value(&args[0]);
+    let integer_size = args[1..].iter().any(is_typed_integer_value);
     let output_precision = output_precision(&args[0]);
     let gpu_source = match &args[0] {
         Value::GpuTensor(handle) => Some(handle.clone()),
@@ -226,7 +274,24 @@ async fn parse_args(
             "trnd: requested size must match non-scalar nu",
         ));
     }
-    Ok((nu, shape, output_precision, gpu_source))
+    Ok((
+        nu,
+        shape,
+        output_precision,
+        gpu_source,
+        integer_nu,
+        integer_size,
+    ))
+}
+
+fn is_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn is_resident_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
 }
 
 async fn parse_shape_args(rest: &[Value]) -> BuiltinResult<Vec<usize>> {
@@ -340,6 +405,7 @@ mod tests {
     #[test]
     fn trnd_reads_typed_integer_nu_and_size_exactly() {
         let _guard = random::test_lock().lock().unwrap();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         reset();
         let nu = integer_tensor(IntegerStorage::U16(vec![5, 6, 7]), vec![3, 1]);
         let out = block_on(trnd_builtin(vec![Value::Tensor(nu)])).expect("trnd");
@@ -361,6 +427,87 @@ mod tests {
         match out {
             Value::Tensor(tensor) => assert_eq!(tensor.shape, vec![2, 3]),
             other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn trnd_typed_integer_arguments_follow_compatibility_mode() {
+        let _guard = random::test_lock().lock().unwrap();
+        reset();
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(trnd_builtin(vec![Value::Int(
+                runmat_builtins::IntValue::U16(0),
+            )]))
+            .expect_err("invalid typed-integer nu retains ordinary validation");
+            assert_eq!(error.identifier(), ERROR_INVALID_ARGUMENT.identifier);
+
+            let error = block_on(trnd_builtin(vec![Value::Int(
+                runmat_builtins::IntValue::U16(5),
+            )]))
+            .expect_err("MATLAB mode rejects typed-integer degrees of freedom");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:TrndIntegerDegreesOfFreedomExtension")
+            );
+
+            let size = integer_tensor(IntegerStorage::U64(vec![2, 3]), vec![1, 2]);
+            let error = block_on(trnd_builtin(vec![Value::Num(5.0), Value::Tensor(size)]))
+                .expect_err("MATLAB mode rejects typed-integer size controls");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:TrndIntegerSizeExtension")
+            );
+
+            let resident_nu = GpuTensorHandle {
+                shape: vec![1, 1],
+                device_id: 0,
+                buffer_id: 9_305_001,
+            };
+            runmat_accelerate_api::set_handle_integer_type(
+                &resident_nu,
+                runmat_accelerate_api::IntegerElementType::U16,
+            );
+            let error = block_on(trnd_builtin(vec![Value::GpuTensor(resident_nu.clone())]))
+                .expect_err("MATLAB mode rejects resident integer nu before gather");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:TrndIntegerDegreesOfFreedomExtension")
+            );
+            runmat_accelerate_api::clear_handle_integer_type(&resident_nu);
+
+            let resident_size = GpuTensorHandle {
+                shape: vec![1, 2],
+                device_id: 0,
+                buffer_id: 9_305_002,
+            };
+            runmat_accelerate_api::set_handle_integer_type(
+                &resident_size,
+                runmat_accelerate_api::IntegerElementType::U16,
+            );
+            let error = block_on(trnd_builtin(vec![
+                Value::Num(5.0),
+                Value::GpuTensor(resident_size.clone()),
+            ]))
+            .expect_err("MATLAB mode rejects resident integer size before gather");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:TrndIntegerSizeExtension")
+            );
+            runmat_accelerate_api::clear_handle_integer_type(&resident_size);
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let size = integer_tensor(IntegerStorage::U64(vec![2, 3]), vec![1, 2]);
+            let out = block_on(trnd_builtin(vec![
+                Value::Int(runmat_builtins::IntValue::U16(5)),
+                Value::Tensor(size),
+            ]))
+            .expect("RunMat mode accepts typed-integer trnd arguments");
+            let Value::Tensor(tensor) = out else {
+                panic!("expected tensor output");
+            };
+            assert_eq!(tensor.shape, vec![2, 3]);
         }
     }
 

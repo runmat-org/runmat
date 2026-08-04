@@ -217,6 +217,8 @@ mod tests {
                 ("sparse", "sparse-integer-storage"),
                 ("square", "square-gpu-input"),
                 ("square", "square-nonfloating-input"),
+                ("trnd", "trnd-integer-degrees-of-freedom"),
+                ("trnd", "trnd-integer-size"),
             ])
         );
     }

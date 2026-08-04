@@ -107366,6 +107366,20 @@
           "when": "Internal tensor conversion or allocation fails.",
           "message": "trnd: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "trnd-integer-degrees-of-freedom",
+          "mode": "RunMatOnly",
+          "description": "trnd with typed-integer degrees of freedom is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TrndIntegerDegreesOfFreedomExtension"
+        },
+        {
+          "id": "trnd-integer-size",
+          "mode": "RunMatOnly",
+          "description": "trnd with typed-integer size arguments is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TrndIntegerSizeExtension"
+        }
       ]
     },
     {
