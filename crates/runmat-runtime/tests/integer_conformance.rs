@@ -20,6 +20,43 @@ fn expect_integer(value: Value, shape: &[usize], storage: IntegerStorage) {
     }
 }
 
+fn expect_integer_class(value: Value, class_name: &str) {
+    match value {
+        Value::Tensor(tensor) => assert_eq!(
+            tensor
+                .integer_storage()
+                .expect("integer result storage")
+                .class_name(),
+            class_name
+        ),
+        Value::Int(value) => assert_eq!(value.class_name(), class_name),
+        other => panic!("expected {class_name} result, got {other:?}"),
+    }
+}
+
+fn expect_double_numeric(value: &Value) {
+    match value {
+        Value::Num(_) => {}
+        Value::Tensor(tensor) => {
+            assert_eq!(tensor.numeric_dtype(), runmat_builtins::NumericDType::F64)
+        }
+        other => panic!("expected double numeric result, got {other:?}"),
+    }
+}
+
+fn integer_set_classes() -> Vec<IntegerStorage> {
+    vec![
+        IntegerStorage::I8(vec![1, 2, 2, 3]),
+        IntegerStorage::I16(vec![1, 2, 2, 3]),
+        IntegerStorage::I32(vec![1, 2, 2, 3]),
+        IntegerStorage::I64(vec![1, 2, 2, 3]),
+        IntegerStorage::U8(vec![1, 2, 2, 3]),
+        IntegerStorage::U16(vec![1, 2, 2, 3]),
+        IntegerStorage::U32(vec![1, 2, 2, 3]),
+        IntegerStorage::U64(vec![1, 2, 2, 3]),
+    ]
+}
+
 fn expect_logical(value: Value, shape: &[usize], data: &[u8]) {
     assert_eq!(
         value,
@@ -889,4 +926,203 @@ fn integer_logical_reductions_and_nnz_use_typed_storage_for_all_classes() {
     check!(U16, vec![0u16, 1, 2, 3]);
     check!(U32, vec![0u32, 1, 2, 3]);
     check!(U64, vec![0u64, (1_u64 << 53) + 1, 2, u64::MAX]);
+}
+
+#[test]
+fn registered_set_functions_cover_all_ordered_integer_class_pairs_and_rows() {
+    let classes = integer_set_classes();
+    let builtins = [
+        ("ismember", "RunMat:ismember:NumericClassMismatch"),
+        ("intersect", "RunMat:intersect:NumericClassMismatch"),
+        ("union", "RunMat:union:NumericClassMismatch"),
+        ("setdiff", "RunMat:setdiff:NumericClassMismatch"),
+        ("setxor", "RunMat:setxor:NumericClassMismatch"),
+    ];
+    for (left_index, left_storage) in classes.iter().enumerate() {
+        for (right_index, right_storage) in classes.iter().enumerate() {
+            for (builtin, mismatch_identifier) in builtins {
+                for rows in [false, true] {
+                    let left = integer_tensor(left_storage.clone(), vec![2, 2]);
+                    let right = integer_tensor(right_storage.clone(), vec![2, 2]);
+                    let mut args = vec![left, right];
+                    if rows {
+                        args.push(Value::from("rows"));
+                    }
+                    if left_index == right_index {
+                        let result = runmat_runtime::call_builtin(builtin, &args)
+                            .unwrap_or_else(|error| panic!("{builtin} same-class call: {error}"));
+                        if builtin == "ismember" {
+                            assert!(matches!(result, Value::Bool(_) | Value::LogicalArray(_)));
+                        } else {
+                            expect_integer_class(result, left_storage.class_name());
+                        }
+                    } else {
+                        let error = runmat_runtime::call_builtin(builtin, &args)
+                            .expect_err("unlike nondouble integer classes must reject");
+                        assert_eq!(
+                            error.identifier(),
+                            Some(mismatch_identifier),
+                            "{builtin} pair {} / {} in {} mode",
+                            left_storage.class_name(),
+                            right_storage.class_name(),
+                            if rows { "rows" } else { "elements" }
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn registered_set_functions_apply_double_exception_and_index_classes_for_every_integer() {
+    let classes = integer_set_classes();
+    for storage in classes {
+        let class_name = storage.class_name();
+        let integer = integer_tensor(storage, vec![4, 1]);
+        let double =
+            Value::Tensor(Tensor::new(vec![2.0, 3.0, 4.0, 5.0], vec![4, 1]).expect("double"));
+
+        for builtin in ["intersect", "union", "setxor"] {
+            for args in [
+                [integer.clone(), double.clone()],
+                [double.clone(), integer.clone()],
+            ] {
+                expect_integer_class(
+                    runmat_runtime::call_builtin(builtin, &args)
+                        .unwrap_or_else(|error| panic!("{builtin} double exception: {error}")),
+                    class_name,
+                );
+            }
+        }
+
+        expect_integer_class(
+            runmat_runtime::call_builtin("setdiff", &[integer.clone(), double.clone()])
+                .expect("integer-left setdiff"),
+            class_name,
+        );
+        expect_double_numeric(
+            &runmat_runtime::call_builtin("setdiff", &[double.clone(), integer.clone()])
+                .expect("double-left setdiff"),
+        );
+
+        for args in [
+            [integer.clone(), double.clone()],
+            [double.clone(), integer.clone()],
+        ] {
+            let result = futures::executor::block_on(
+                runmat_runtime::call_builtin_async_with_outputs("ismember", &args, 2),
+            )
+            .expect("ismember double exception");
+            let Value::OutputList(outputs) = result else {
+                panic!("ismember multi-output result")
+            };
+            assert!(matches!(
+                outputs.first(),
+                Some(Value::Bool(_) | Value::LogicalArray(_))
+            ));
+            expect_double_numeric(&outputs[1]);
+        }
+    }
+
+    let integer = integer_tensor(IntegerStorage::U64(vec![1, 2, 3, 4]), vec![4, 1]);
+    for (builtin, output_count) in [
+        ("intersect", 3),
+        ("union", 3),
+        ("setdiff", 2),
+        ("setxor", 3),
+    ] {
+        let result = futures::executor::block_on(runmat_runtime::call_builtin_async_with_outputs(
+            builtin,
+            &[integer.clone(), integer.clone()],
+            output_count,
+        ))
+        .expect("set index outputs");
+        let Value::OutputList(outputs) = result else {
+            panic!("{builtin} multi-output result")
+        };
+        expect_integer_class(outputs[0].clone(), "uint64");
+        for output in &outputs[1..] {
+            expect_double_numeric(output);
+        }
+    }
+}
+
+#[test]
+fn registered_set_double_exception_keeps_wide_integer_comparison_exact() {
+    let wide = (1_u64 << 53) + 1;
+    let rounded = 1_u64 << 53;
+    assert_eq!(wide as f64, rounded as f64);
+    let integer = integer_tensor(IntegerStorage::U64(vec![wide]), vec![1, 1]);
+    let double = Value::Num(rounded as f64);
+
+    let member = runmat_runtime::call_builtin("ismember", &[integer.clone(), double.clone()])
+        .expect("wide ismember");
+    assert_eq!(member, Value::Bool(false));
+
+    expect_integer(
+        runmat_runtime::call_builtin("intersect", &[integer.clone(), double.clone()])
+            .expect("wide intersect"),
+        &[0, 1],
+        IntegerStorage::U64(Vec::new()),
+    );
+    expect_integer(
+        runmat_runtime::call_builtin("union", &[integer.clone(), double.clone()])
+            .expect("wide union"),
+        &[2, 1],
+        IntegerStorage::U64(vec![rounded, wide]),
+    );
+    expect_integer(
+        runmat_runtime::call_builtin("setdiff", &[integer.clone(), double.clone()])
+            .expect("wide setdiff"),
+        &[1, 1],
+        IntegerStorage::U64(vec![wide]),
+    );
+    expect_integer(
+        runmat_runtime::call_builtin("setxor", &[integer, double]).expect("wide setxor"),
+        &[1, 2],
+        IntegerStorage::U64(vec![rounded, wide]),
+    );
+}
+
+#[test]
+fn registered_set_functions_reject_64_bit_integer_gpu_inputs_before_provider_dispatch() {
+    use runmat_accelerate_api::{GpuTensorHandle, IntegerElementType};
+
+    for (offset, integer_type) in [IntegerElementType::I64, IntegerElementType::U64]
+        .into_iter()
+        .enumerate()
+    {
+        let handle = GpuTensorHandle {
+            shape: vec![2, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX - 100 - offset as u64,
+        };
+        runmat_accelerate_api::set_handle_integer_type(&handle, integer_type);
+        let resident = Value::GpuTensor(handle.clone());
+        let host = integer_tensor(IntegerStorage::I32(vec![1, 2]), vec![2, 1]);
+        for builtin in ["ismember", "intersect", "union", "setdiff", "setxor"] {
+            for args in [
+                [resident.clone(), host.clone()],
+                [host.clone(), resident.clone()],
+                [resident.clone(), resident.clone()],
+            ] {
+                let error = runmat_runtime::call_builtin(builtin, &args)
+                    .expect_err("64-bit integer gpuArray must reject");
+                assert!(
+                    error.identifier().is_some_and(|identifier| {
+                        identifier.ends_with(":UnsupportedInputType")
+                    }),
+                    "{builtin}: {error}"
+                );
+                assert!(
+                    error
+                        .message()
+                        .contains("resident 64-bit integer inputs are not supported"),
+                    "{builtin}: {error}"
+                );
+            }
+        }
+        runmat_accelerate_api::clear_handle_integer_type(&handle);
+    }
 }

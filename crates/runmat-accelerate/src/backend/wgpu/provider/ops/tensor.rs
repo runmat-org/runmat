@@ -74,6 +74,11 @@ impl WgpuProvider {
         b: &GpuTensorHandle,
         options: &IsMemberOptions,
     ) -> Result<IsMemberResult> {
+        ensure!(
+            runmat_accelerate_api::handle_integer_type(a).is_none()
+                && runmat_accelerate_api::handle_integer_type(b).is_none(),
+            "ismember: resident integer inputs require exact runtime fallback"
+        );
         let host_a = self.download_exec(a).await?;
         let host_b = self.download_exec(b).await?;
         let tensor_a =
@@ -97,6 +102,11 @@ impl WgpuProvider {
         b: &GpuTensorHandle,
         options: &UnionOptions,
     ) -> Result<UnionResult> {
+        ensure!(
+            runmat_accelerate_api::handle_integer_type(a).is_none()
+                && runmat_accelerate_api::handle_integer_type(b).is_none(),
+            "union: resident integer inputs require exact runtime fallback"
+        );
         let host_a = self.download_exec(a).await?;
         let host_b = self.download_exec(b).await?;
         let tensor_a = Tensor::new(host_a.data, host_a.shape).map_err(|e| anyhow!("union: {e}"))?;
@@ -116,6 +126,11 @@ impl WgpuProvider {
         b: &GpuTensorHandle,
         options: &SetdiffOptions,
     ) -> Result<SetdiffResult> {
+        ensure!(
+            runmat_accelerate_api::handle_integer_type(a).is_none()
+                && runmat_accelerate_api::handle_integer_type(b).is_none(),
+            "setdiff: resident integer inputs require exact runtime fallback"
+        );
         let host_a = self.download_exec(a).await?;
         let host_b = self.download_exec(b).await?;
         let tensor_a =

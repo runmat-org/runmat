@@ -8,8 +8,8 @@ use runmat_accelerate_api::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexStorage, ComplexTensor, IntValue, LogicalArray, NumericStorage, StringArray,
-    Tensor, Value,
+    CharArray, ComplexStorage, ComplexTensor, IntValue, LogicalArray, NumericDType, NumericStorage,
+    StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -21,6 +21,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::sorting_sets::ismember")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -163,6 +164,20 @@ const ISMEMBER_ERROR_ROWS_COLUMN_MISMATCH: BuiltinErrorDescriptor = BuiltinError
     message: "ismember: inputs must have the same number of columns when using 'rows'",
 };
 
+const ISMEMBER_ERROR_UNSUPPORTED_INPUT_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISMEMBER.UNSUPPORTED_INPUT_TYPE",
+    identifier: Some("RunMat:ismember:UnsupportedInputType"),
+    when: "Input classes or execution residency are unsupported.",
+    message: "ismember: unsupported input type",
+};
+
+const ISMEMBER_ERROR_NUMERIC_CLASS_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISMEMBER.NUMERIC_CLASS_MISMATCH",
+    identifier: Some("RunMat:ismember:NumericClassMismatch"),
+    when: "Numeric inputs have incompatible nondouble classes.",
+    message: "ismember: numeric inputs must have the same class, except double may be combined with one nondouble class",
+};
+
 const ISMEMBER_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.ISMEMBER.INVALID_ARGUMENT",
     identifier: Some("RunMat:ismember:InvalidArgument"),
@@ -177,10 +192,12 @@ const ISMEMBER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "ismember: internal operation failed",
 };
 
-const ISMEMBER_ERRORS: [BuiltinErrorDescriptor; 5] = [
+const ISMEMBER_ERRORS: [BuiltinErrorDescriptor; 7] = [
     ISMEMBER_ERROR_LEGACY_OPTION_UNSUPPORTED,
     ISMEMBER_ERROR_UNKNOWN_OPTION,
     ISMEMBER_ERROR_ROWS_COLUMN_MISMATCH,
+    ISMEMBER_ERROR_UNSUPPORTED_INPUT_TYPE,
+    ISMEMBER_ERROR_NUMERIC_CLASS_MISMATCH,
     ISMEMBER_ERROR_INVALID_ARGUMENT,
     ISMEMBER_ERROR_INTERNAL,
 ];
@@ -249,6 +266,16 @@ pub async fn evaluate(
     crate::builtins::common::validation::reject_typed_complex_integer(&a, "ismember")?;
     crate::builtins::common::validation::reject_typed_complex_integer(&b, "ismember")?;
     let opts = parse_options(rest)?;
+    for value in [&a, &b] {
+        if let Value::GpuTensor(handle) = value {
+            if super::is_unsupported_set_gpu_integer(handle) {
+                return Err(ismember_error_with(
+                    &ISMEMBER_ERROR_UNSUPPORTED_INPUT_TYPE,
+                    "ismember: resident 64-bit integer inputs are not supported",
+                ));
+            }
+        }
+    }
     match (a, b) {
         (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {
             ismember_gpu_pair(handle_a, handle_b, &opts).await
@@ -395,6 +422,8 @@ fn ismember_numeric_tensors(
     b: Tensor,
     opts: &IsMemberOptions,
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
+    let a_dtype = a.numeric_dtype();
+    let b_dtype = b.numeric_dtype();
     if let (Some(a_storage), Some(b_storage)) = (a.integer_storage(), b.integer_storage()) {
         if a_storage.class_name() == b_storage.class_name() {
             return if opts.rows {
@@ -403,6 +432,23 @@ fn ismember_numeric_tensors(
                 ismember_integer_elements(&a, &b)
             };
         }
+        return Err(ismember_error(&ISMEMBER_ERROR_NUMERIC_CLASS_MISMATCH));
+    }
+    match (a.integer_storage(), b.integer_storage()) {
+        (Some(storage), None) if b_dtype == NumericDType::F64 => {
+            let target = IntegerTarget::from_storage(storage);
+            let b = target.cast_tensor(b).map_err(ismember_internal_error)?;
+            return ismember_numeric_tensors(a, b, opts);
+        }
+        (None, Some(storage)) if a_dtype == NumericDType::F64 => {
+            let target = IntegerTarget::from_storage(storage);
+            let a = target.cast_tensor(a).map_err(ismember_internal_error)?;
+            return ismember_numeric_tensors(a, b, opts);
+        }
+        _ => {}
+    }
+    if a_dtype != b_dtype && a_dtype != NumericDType::F64 && b_dtype != NumericDType::F64 {
+        return Err(ismember_error(&ISMEMBER_ERROR_NUMERIC_CLASS_MISMATCH));
     }
     let a_shape = a.shape.clone();
     let b_shape = b.shape.clone();
@@ -1118,7 +1164,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn mixed_integer_membership_reads_exact_storage_without_mirror() {
+    fn mixed_integer_membership_rejects_nondouble_class_mismatch() {
         let a = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U16(vec![7, 2, 9, 7]),
             vec![4, 1],
@@ -1127,25 +1173,212 @@ pub(crate) mod tests {
         let b = Tensor::new_integer(runmat_builtins::IntegerStorage::I32(vec![2, 7]), vec![2, 1])
             .expect("input");
 
-        let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("ismember");
-        assert_eq!(eval.mask.data, vec![1, 1, 0, 1]);
-        assert_eq!(eval.loc.materialize_f64(), vec![2.0, 1.0, 0.0, 2.0]);
+        let error = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
+            .expect_err("mixed integer classes must reject");
+        assert_eq!(
+            error.identifier(),
+            ISMEMBER_ERROR_NUMERIC_CLASS_MISMATCH.identifier
+        );
+    }
 
-        let a = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U16(vec![1, 3, 2, 4]),
-            vec![2, 2],
-        )
-        .expect("input");
-        let b = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I32(vec![3, 5, 4, 6]),
-            vec![2, 2],
-        )
-        .expect("input");
+    #[test]
+    fn resident_integer_set_functions_use_exact_runtime_fallback_and_class_rules() {
+        test_support::with_test_provider(|provider| {
+            let left = Tensor::new_integer(
+                runmat_builtins::IntegerStorage::I32(vec![7, 2, 9, 7]),
+                vec![4, 1],
+            )
+            .unwrap();
+            let right =
+                Tensor::new_integer(runmat_builtins::IntegerStorage::I32(vec![2, 7]), vec![2, 1])
+                    .unwrap();
+            let left =
+                Value::GpuTensor(gpu_helpers::upload_tensor(provider, &left).expect("upload left"));
+            let right = Value::GpuTensor(
+                gpu_helpers::upload_tensor(provider, &right).expect("upload right"),
+            );
 
-        let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
-            .expect("ismember rows");
-        assert_eq!(eval.mask.data, vec![0, 1]);
-        assert_eq!(eval.loc.materialize_f64(), vec![0.0, 1.0]);
+            let member = futures::executor::block_on(evaluate(left.clone(), right.clone(), &[]))
+                .expect("resident integer ismember");
+            assert_eq!(member.mask.data, vec![1, 1, 0, 1]);
+
+            for (builtin, result) in [
+                (
+                    "intersect",
+                    futures::executor::block_on(super::super::intersect::evaluate(
+                        left.clone(),
+                        right.clone(),
+                        &[],
+                    ))
+                    .map(|eval| eval.values_value()),
+                ),
+                (
+                    "union",
+                    futures::executor::block_on(super::super::union::evaluate(
+                        left.clone(),
+                        right.clone(),
+                        &[],
+                    ))
+                    .map(|eval| eval.values_value()),
+                ),
+                (
+                    "setdiff",
+                    futures::executor::block_on(super::super::setdiff::evaluate(
+                        left.clone(),
+                        right.clone(),
+                        &[],
+                    ))
+                    .map(|eval| eval.values_value()),
+                ),
+                (
+                    "setxor",
+                    futures::executor::block_on(super::super::setxor::evaluate(
+                        left.clone(),
+                        right.clone(),
+                        &[],
+                    ))
+                    .map(|eval| eval.values_value()),
+                ),
+            ] {
+                let value = result.unwrap_or_else(|error| panic!("{builtin}: {error}"));
+                let Value::Tensor(tensor) = value else {
+                    panic!("{builtin}: expected integer tensor")
+                };
+                assert_eq!(
+                    tensor.integer_storage().map(|storage| storage.class_name()),
+                    Some("int32"),
+                    "{builtin}"
+                );
+            }
+
+            let mismatched =
+                Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![2, 7]), vec![2, 1])
+                    .unwrap();
+            let mismatched =
+                Value::GpuTensor(gpu_helpers::upload_tensor(provider, &mismatched).unwrap());
+            for (builtin, error) in [
+                (
+                    "ismember",
+                    futures::executor::block_on(evaluate(left.clone(), mismatched.clone(), &[]))
+                        .expect_err("mismatch"),
+                ),
+                (
+                    "intersect",
+                    futures::executor::block_on(super::super::intersect::evaluate(
+                        left.clone(),
+                        mismatched.clone(),
+                        &[],
+                    ))
+                    .expect_err("mismatch"),
+                ),
+                (
+                    "union",
+                    futures::executor::block_on(super::super::union::evaluate(
+                        left.clone(),
+                        mismatched.clone(),
+                        &[],
+                    ))
+                    .expect_err("mismatch"),
+                ),
+                (
+                    "setdiff",
+                    futures::executor::block_on(super::super::setdiff::evaluate(
+                        left.clone(),
+                        mismatched.clone(),
+                        &[],
+                    ))
+                    .expect_err("mismatch"),
+                ),
+                (
+                    "setxor",
+                    futures::executor::block_on(super::super::setxor::evaluate(
+                        left.clone(),
+                        mismatched,
+                        &[],
+                    ))
+                    .expect_err("mismatch"),
+                ),
+            ] {
+                assert!(
+                    error
+                        .identifier()
+                        .is_some_and(|identifier| identifier.ends_with(":NumericClassMismatch")),
+                    "{builtin}: {error}"
+                );
+            }
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn resident_i32_set_functions_use_exact_wgpu_runtime_fallback() {
+        let _guard = test_support::accel_test_lock();
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) else {
+            return;
+        };
+        let left = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I32(vec![7, 2, 9, 7]),
+            vec![4, 1],
+        )
+        .unwrap();
+        let right =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::I32(vec![2, 7]), vec![2, 1])
+                .unwrap();
+        let left =
+            Value::GpuTensor(gpu_helpers::upload_tensor(provider, &left).expect("upload left"));
+        let right =
+            Value::GpuTensor(gpu_helpers::upload_tensor(provider, &right).expect("upload right"));
+
+        let member = futures::executor::block_on(evaluate(left.clone(), right.clone(), &[]))
+            .expect("wgpu integer ismember");
+        assert_eq!(member.mask.data, vec![1, 1, 0, 1]);
+
+        for (builtin, result) in [
+            (
+                "intersect",
+                futures::executor::block_on(super::super::intersect::evaluate(
+                    left.clone(),
+                    right.clone(),
+                    &[],
+                ))
+                .map(|eval| eval.values_value()),
+            ),
+            (
+                "union",
+                futures::executor::block_on(super::super::union::evaluate(
+                    left.clone(),
+                    right.clone(),
+                    &[],
+                ))
+                .map(|eval| eval.values_value()),
+            ),
+            (
+                "setdiff",
+                futures::executor::block_on(super::super::setdiff::evaluate(
+                    left.clone(),
+                    right.clone(),
+                    &[],
+                ))
+                .map(|eval| eval.values_value()),
+            ),
+            (
+                "setxor",
+                futures::executor::block_on(super::super::setxor::evaluate(left, right, &[]))
+                    .map(|eval| eval.values_value()),
+            ),
+        ] {
+            let value = result.unwrap_or_else(|error| panic!("{builtin}: {error}"));
+            let Value::Tensor(tensor) = value else {
+                panic!("{builtin}: expected integer tensor")
+            };
+            assert_eq!(
+                tensor.integer_storage().map(|storage| storage.class_name()),
+                Some("int32"),
+                "{builtin}"
+            );
+        }
     }
 
     #[test]

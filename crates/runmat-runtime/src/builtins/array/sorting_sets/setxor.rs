@@ -361,6 +361,16 @@ pub async fn evaluate(
     crate::builtins::common::validation::reject_typed_complex_integer(&a, "setxor")?;
     crate::builtins::common::validation::reject_typed_complex_integer(&b, "setxor")?;
     let opts = parse_options(rest)?;
+    for value in [&a, &b] {
+        if let Value::GpuTensor(handle) = value {
+            if super::is_unsupported_set_gpu_integer(handle) {
+                return Err(setxor_error_with(
+                    &SETXOR_ERROR_UNSUPPORTED_INPUT_TYPE,
+                    "setxor: resident 64-bit integer inputs are not supported",
+                ));
+            }
+        }
+    }
     match (a, b) {
         (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {
             setxor_gpu_pair(handle_a, handle_b, &opts).await

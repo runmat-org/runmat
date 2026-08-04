@@ -12,8 +12,8 @@ use runmat_accelerate_api::{GpuTensorHandle, UnionOptions, UnionOrder, UnionResu
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericStorage,
-    StringArray, Tensor, Value,
+    CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericDType,
+    NumericStorage, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -27,6 +27,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::sorting_sets::union")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -215,6 +216,13 @@ const UNION_ERROR_UNSUPPORTED_INPUT_TYPE: BuiltinErrorDescriptor = BuiltinErrorD
     message: "union: unsupported input type",
 };
 
+const UNION_ERROR_NUMERIC_CLASS_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.UNION.NUMERIC_CLASS_MISMATCH",
+    identifier: Some("RunMat:union:NumericClassMismatch"),
+    when: "Numeric inputs have incompatible nondouble classes.",
+    message: "union: numeric inputs must have the same class, except double may be combined with one nondouble class",
+};
+
 const UNION_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.UNION.INVALID_ARGUMENT",
     identifier: Some("RunMat:union:InvalidArgument"),
@@ -229,12 +237,13 @@ const UNION_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "union: internal operation failed",
 };
 
-const UNION_ERRORS: [BuiltinErrorDescriptor; 7] = [
+const UNION_ERRORS: [BuiltinErrorDescriptor; 8] = [
     UNION_ERROR_LEGACY_OPTION_UNSUPPORTED,
     UNION_ERROR_CONFLICTING_ORDER_OPTIONS,
     UNION_ERROR_UNKNOWN_OPTION,
     UNION_ERROR_ROWS_COLUMN_MISMATCH,
     UNION_ERROR_UNSUPPORTED_INPUT_TYPE,
+    UNION_ERROR_NUMERIC_CLASS_MISMATCH,
     UNION_ERROR_INVALID_ARGUMENT,
     UNION_ERROR_INTERNAL,
 ];
@@ -303,6 +312,16 @@ pub async fn evaluate(a: Value, b: Value, rest: &[Value]) -> crate::BuiltinResul
     crate::builtins::common::validation::reject_typed_complex_integer(&a, "union")?;
     crate::builtins::common::validation::reject_typed_complex_integer(&b, "union")?;
     let opts = parse_options(rest)?;
+    for value in [&a, &b] {
+        if let Value::GpuTensor(handle) = value {
+            if super::is_unsupported_set_gpu_integer(handle) {
+                return Err(union_error_with(
+                    &UNION_ERROR_UNSUPPORTED_INPUT_TYPE,
+                    "union: resident 64-bit integer inputs are not supported",
+                ));
+            }
+        }
+    }
     match (a, b) {
         (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {
             union_gpu_pair(handle_a, handle_b, &opts).await
@@ -473,6 +492,8 @@ fn union_numeric(
     b: Tensor,
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
+    let a_dtype = a.numeric_dtype();
+    let b_dtype = b.numeric_dtype();
     if let (Some(a_storage), Some(b_storage)) = (a.integer_storage(), b.integer_storage()) {
         if a_storage.class_name() == b_storage.class_name() {
             return if opts.rows {
@@ -481,6 +502,23 @@ fn union_numeric(
                 union_integer_elements(a_storage, b_storage, opts)
             };
         }
+        return Err(union_error(&UNION_ERROR_NUMERIC_CLASS_MISMATCH));
+    }
+    match (a.integer_storage(), b.integer_storage()) {
+        (Some(storage), None) if b_dtype == NumericDType::F64 => {
+            let target = IntegerTarget::from_storage(storage);
+            let b = target.cast_tensor(b).map_err(union_internal_error)?;
+            return union_numeric(a, b, opts);
+        }
+        (None, Some(storage)) if a_dtype == NumericDType::F64 => {
+            let target = IntegerTarget::from_storage(storage);
+            let a = target.cast_tensor(a).map_err(union_internal_error)?;
+            return union_numeric(a, b, opts);
+        }
+        _ => {}
+    }
+    if a_dtype != b_dtype && a_dtype != NumericDType::F64 && b_dtype != NumericDType::F64 {
+        return Err(union_error(&UNION_ERROR_NUMERIC_CLASS_MISMATCH));
     }
     let a_shape = a.shape.clone();
     let b_shape = b.shape.clone();
@@ -2144,43 +2182,17 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn union_numeric_fallback_reads_mirrorless_integer_storage() {
+    fn union_rejects_mixed_nondouble_integer_classes() {
         let a = Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![7, 2]), vec![2, 1])
             .expect("input");
         let b = Tensor::new_integer(runmat_builtins::IntegerStorage::I32(vec![2, 9]), vec![2, 1])
             .expect("input");
-        let (values, ia, ib) = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
-            .expect("union")
-            .into_triple();
-        let values = tensor::value_into_tensor_for("union", values).expect("values");
-        assert_eq!(values.materialize_f64(), vec![2.0, 7.0, 9.0]);
-        assert_eq!(values.shape, vec![3, 1]);
-        let ia = tensor::value_into_tensor_for("union", ia).expect("indices");
-        assert_eq!(ia.materialize_f64(), vec![2.0, 1.0]);
-        let ib = tensor::value_into_tensor_for("union", ib).expect("indices");
-        assert_eq!(ib.materialize_f64(), vec![2.0]);
-
-        let a = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U16(vec![1, 3, 1, 2, 4, 2]),
-            vec![3, 2],
-        )
-        .expect("rows input");
-        let b = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I32(vec![3, 5, 4, 6]),
-            vec![2, 2],
-        )
-        .expect("rows input");
-        let (values, ia, ib) =
-            evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
-                .expect("union rows")
-                .into_triple();
-        let values = tensor::value_into_tensor_for("union", values).expect("row values");
-        assert_eq!(values.shape, vec![3, 2]);
-        assert_eq!(values.materialize_f64(), vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]);
-        let ia = tensor::value_into_tensor_for("union", ia).expect("row indices");
-        assert_eq!(ia.materialize_f64(), vec![1.0, 2.0]);
-        let ib = tensor::value_into_tensor_for("union", ib).expect("row indices");
-        assert_eq!(ib.materialize_f64(), vec![2.0]);
+        let error = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
+            .expect_err("mixed integer classes must reject");
+        assert_eq!(
+            error.identifier(),
+            UNION_ERROR_NUMERIC_CLASS_MISMATCH.identifier
+        );
     }
 
     #[test]

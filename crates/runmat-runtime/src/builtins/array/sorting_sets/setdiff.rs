@@ -12,8 +12,8 @@ use runmat_accelerate_api::{GpuTensorHandle, SetdiffOptions, SetdiffOrder, Setdi
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericStorage,
-    StringArray, Tensor, Value,
+    CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericDType,
+    NumericStorage, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -27,6 +27,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::sorting_sets::setdiff")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -183,6 +184,13 @@ const SETDIFF_ERROR_UNSUPPORTED_INPUT_TYPE: BuiltinErrorDescriptor = BuiltinErro
     message: "setdiff: unsupported input type",
 };
 
+const SETDIFF_ERROR_NUMERIC_CLASS_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETDIFF.NUMERIC_CLASS_MISMATCH",
+    identifier: Some("RunMat:setdiff:NumericClassMismatch"),
+    when: "Numeric inputs have incompatible nondouble classes.",
+    message: "setdiff: numeric inputs must have the same class, except double may be combined with one nondouble class",
+};
+
 const SETDIFF_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.SETDIFF.INVALID_ARGUMENT",
     identifier: Some("RunMat:setdiff:InvalidArgument"),
@@ -197,12 +205,13 @@ const SETDIFF_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "setdiff: internal operation failed",
 };
 
-const SETDIFF_ERRORS: [BuiltinErrorDescriptor; 7] = [
+const SETDIFF_ERRORS: [BuiltinErrorDescriptor; 8] = [
     SETDIFF_ERROR_LEGACY_OPTION_UNSUPPORTED,
     SETDIFF_ERROR_CONFLICTING_ORDER_OPTIONS,
     SETDIFF_ERROR_UNKNOWN_OPTION,
     SETDIFF_ERROR_ROWS_COLUMN_MISMATCH,
     SETDIFF_ERROR_UNSUPPORTED_INPUT_TYPE,
+    SETDIFF_ERROR_NUMERIC_CLASS_MISMATCH,
     SETDIFF_ERROR_INVALID_ARGUMENT,
     SETDIFF_ERROR_INTERNAL,
 ];
@@ -271,6 +280,16 @@ pub async fn evaluate(
     crate::builtins::common::validation::reject_typed_complex_integer(&a, "setdiff")?;
     crate::builtins::common::validation::reject_typed_complex_integer(&b, "setdiff")?;
     let opts = parse_options(rest)?;
+    for value in [&a, &b] {
+        if let Value::GpuTensor(handle) = value {
+            if super::is_unsupported_set_gpu_integer(handle) {
+                return Err(setdiff_error_with(
+                    &SETDIFF_ERROR_UNSUPPORTED_INPUT_TYPE,
+                    "setdiff: resident 64-bit integer inputs are not supported",
+                ));
+            }
+        }
+    }
     match (a, b) {
         (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {
             setdiff_gpu_pair(handle_a, handle_b, &opts).await
@@ -445,6 +464,8 @@ fn setdiff_numeric(
     b: Tensor,
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
+    let a_dtype = a.numeric_dtype();
+    let b_dtype = b.numeric_dtype();
     if let (Some(a_storage), Some(b_storage)) = (a.integer_storage(), b.integer_storage()) {
         if a_storage.class_name() == b_storage.class_name() {
             return if opts.rows {
@@ -453,6 +474,18 @@ fn setdiff_numeric(
                 setdiff_integer_elements(a_storage, b_storage, opts)
             };
         }
+        return Err(setdiff_error(&SETDIFF_ERROR_NUMERIC_CLASS_MISMATCH));
+    }
+    match (a.integer_storage(), b.integer_storage()) {
+        (Some(storage), None) if b_dtype == NumericDType::F64 => {
+            let target = IntegerTarget::from_storage(storage);
+            let b = target.cast_tensor(b).map_err(setdiff_internal_error)?;
+            return setdiff_numeric(a, b, opts);
+        }
+        _ => {}
+    }
+    if a_dtype != b_dtype && a_dtype != NumericDType::F64 && b_dtype != NumericDType::F64 {
+        return Err(setdiff_error(&SETDIFF_ERROR_NUMERIC_CLASS_MISMATCH));
     }
     let a_shape = a.shape.clone();
     let b_shape = b.shape.clone();
@@ -1765,7 +1798,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn setdiff_numeric_fallback_reads_mirrorless_integer_storage() {
+    fn setdiff_rejects_mixed_nondouble_integer_classes() {
         let a = Tensor::new_integer(
             runmat_builtins::IntegerStorage::U16(vec![7, 2, 9]),
             vec![3, 1],
@@ -1773,31 +1806,12 @@ pub(crate) mod tests {
         .expect("input");
         let b = Tensor::new_integer(runmat_builtins::IntegerStorage::I32(vec![2]), vec![1, 1])
             .expect("input");
-        let (values, ia) = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
-            .expect("setdiff")
-            .into_pair();
-        let values = tensor::value_into_tensor_for("setdiff", values).expect("values");
-        assert_eq!(values.materialize_f64(), vec![7.0, 9.0]);
-        assert_eq!(values.shape, vec![2, 1]);
-        let ia = tensor::value_into_tensor_for("setdiff", ia).expect("indices");
-        assert_eq!(ia.materialize_f64(), vec![1.0, 3.0]);
-
-        let a = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U16(vec![1, 3, 1, 2, 4, 2]),
-            vec![3, 2],
-        )
-        .expect("rows input");
-        let b = Tensor::new_integer(runmat_builtins::IntegerStorage::I32(vec![3, 4]), vec![1, 2])
-            .expect("rows input");
-        let (values, ia) =
-            evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
-                .expect("setdiff rows")
-                .into_pair();
-        let values = tensor::value_into_tensor_for("setdiff", values).expect("row values");
-        assert_eq!(values.shape, vec![1, 2]);
-        assert_eq!(values.materialize_f64(), vec![1.0, 2.0]);
-        let ia = tensor::value_into_tensor_for("setdiff", ia).expect("row indices");
-        assert_eq!(ia.materialize_f64(), vec![1.0]);
+        let error = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
+            .expect_err("mixed integer classes must reject");
+        assert_eq!(
+            error.identifier(),
+            SETDIFF_ERROR_NUMERIC_CLASS_MISMATCH.identifier
+        );
     }
 
     #[test]

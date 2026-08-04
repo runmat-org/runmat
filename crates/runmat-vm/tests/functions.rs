@@ -2518,6 +2518,48 @@ fn union_ismember_sortrows_builtin_multi_assign_execute() {
 }
 
 #[test]
+fn compiled_set_functions_enforce_integer_class_compatibility() {
+    for builtin in ["ismember", "intersect", "union", "setdiff", "setxor"] {
+        let source = format!("out = {builtin}(int8([1 2]), uint8([1 2]));");
+        let error = execute_source_result(&source).expect_err("unlike integer classes must reject");
+        assert_eq!(
+            error.identifier(),
+            Some(match builtin {
+                "ismember" => "RunMat:ismember:NumericClassMismatch",
+                "intersect" => "RunMat:intersect:NumericClassMismatch",
+                "union" => "RunMat:union:NumericClassMismatch",
+                "setdiff" => "RunMat:setdiff:NumericClassMismatch",
+                "setxor" => "RunMat:setxor:NumericClassMismatch",
+                _ => unreachable!(),
+            })
+        );
+    }
+}
+
+#[test]
+fn compiled_set_functions_preserve_integer_double_result_classes() {
+    let vars = execute_source(
+        "a = uint32([1 3]); b = [2 3]; [i,ii,ij] = intersect(a,b); [u,ui,uj] = union(b,a); [d,di] = setdiff(a,b); [x,xi,xj] = setxor(b,a); [tf,loc] = ismember(a,b); ci = class(i); cu = class(u); cd = class(d); cx = class(x); cii = class(ii); cui = class(ui); cdi = class(di); cxi = class(xi); cloc = class(loc);",
+    );
+    assert!(
+        vars.iter()
+            .filter(
+                |value| matches!(value, runmat_builtins::Value::String(class) if class == "uint32")
+            )
+            .count()
+            >= 4
+    );
+    assert!(
+        vars.iter()
+            .filter(
+                |value| matches!(value, runmat_builtins::Value::String(class) if class == "double")
+            )
+            .count()
+            >= 5
+    );
+}
+
+#[test]
 fn chol_builtin_multi_assign_execute() {
     let bytecode = compile_source("[r,p] = chol([4 0; 0 9]); z = r(1,1) + r(2,2) + p;").unwrap();
     let vars = interpret(&bytecode).expect("semantic chol multi-assign should execute");

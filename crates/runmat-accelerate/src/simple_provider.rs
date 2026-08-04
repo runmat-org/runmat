@@ -8036,6 +8036,13 @@ impl AccelProvider for InProcessProvider {
         options: &'a SetdiffOptions,
     ) -> AccelProviderFuture<'a, SetdiffResult> {
         Box::pin(async move {
+            if runmat_accelerate_api::handle_integer_type(a).is_some()
+                || runmat_accelerate_api::handle_integer_type(b).is_some()
+            {
+                return Err(anyhow!(
+                    "setdiff: resident integer inputs require exact runtime fallback"
+                ));
+            }
             let data_a = {
                 let guard = registry().lock().unwrap();
                 guard

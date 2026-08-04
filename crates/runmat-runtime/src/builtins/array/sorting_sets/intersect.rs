@@ -12,8 +12,8 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericStorage,
-    StringArray, Tensor, Value,
+    CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericDType,
+    NumericStorage, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -27,6 +27,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
 
 #[runmat_macros::register_gpu_spec(
     builtin_path = "crate::builtins::array::sorting_sets::intersect"
@@ -220,6 +221,13 @@ const INTERSECT_ERROR_UNSUPPORTED_INPUT_TYPE: BuiltinErrorDescriptor = BuiltinEr
     message: "intersect: unsupported input type",
 };
 
+const INTERSECT_ERROR_NUMERIC_CLASS_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INTERSECT.NUMERIC_CLASS_MISMATCH",
+    identifier: Some("RunMat:intersect:NumericClassMismatch"),
+    when: "Numeric inputs have incompatible nondouble classes.",
+    message: "intersect: numeric inputs must have the same class, except double may be combined with one nondouble class",
+};
+
 const INTERSECT_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.INTERSECT.INVALID_ARGUMENT",
     identifier: Some("RunMat:intersect:InvalidArgument"),
@@ -234,12 +242,13 @@ const INTERSECT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor 
     message: "intersect: internal operation failed",
 };
 
-const INTERSECT_ERRORS: [BuiltinErrorDescriptor; 7] = [
+const INTERSECT_ERRORS: [BuiltinErrorDescriptor; 8] = [
     INTERSECT_ERROR_LEGACY_OPTION_UNSUPPORTED,
     INTERSECT_ERROR_CONFLICTING_ORDER_OPTIONS,
     INTERSECT_ERROR_UNKNOWN_OPTION,
     INTERSECT_ERROR_ROWS_COLUMN_MISMATCH,
     INTERSECT_ERROR_UNSUPPORTED_INPUT_TYPE,
+    INTERSECT_ERROR_NUMERIC_CLASS_MISMATCH,
     INTERSECT_ERROR_INVALID_ARGUMENT,
     INTERSECT_ERROR_INTERNAL,
 ];
@@ -312,6 +321,16 @@ pub async fn evaluate(
     crate::builtins::common::validation::reject_typed_complex_integer(&a, "intersect")?;
     crate::builtins::common::validation::reject_typed_complex_integer(&b, "intersect")?;
     let opts = parse_options(rest)?;
+    for value in [&a, &b] {
+        if let Value::GpuTensor(handle) = value {
+            if super::is_unsupported_set_gpu_integer(handle) {
+                return Err(intersect_error_with(
+                    &INTERSECT_ERROR_UNSUPPORTED_INPUT_TYPE,
+                    "intersect: resident 64-bit integer inputs are not supported",
+                ));
+            }
+        }
+    }
     match (a, b) {
         (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {
             intersect_gpu_pair(handle_a, handle_b, &opts).await
@@ -504,6 +523,8 @@ fn intersect_numeric(
     b: Tensor,
     opts: &IntersectOptions,
 ) -> crate::BuiltinResult<IntersectEvaluation> {
+    let a_dtype = a.numeric_dtype();
+    let b_dtype = b.numeric_dtype();
     if let (Some(a_storage), Some(b_storage)) = (a.integer_storage(), b.integer_storage()) {
         if a_storage.class_name() == b_storage.class_name() {
             return if opts.rows {
@@ -512,6 +533,23 @@ fn intersect_numeric(
                 intersect_integer_elements(a_storage, b_storage, opts)
             };
         }
+        return Err(intersect_error(&INTERSECT_ERROR_NUMERIC_CLASS_MISMATCH));
+    }
+    match (a.integer_storage(), b.integer_storage()) {
+        (Some(storage), None) if b_dtype == NumericDType::F64 => {
+            let target = IntegerTarget::from_storage(storage);
+            let b = target.cast_tensor(b).map_err(intersect_internal_error)?;
+            return intersect_numeric(a, b, opts);
+        }
+        (None, Some(storage)) if a_dtype == NumericDType::F64 => {
+            let target = IntegerTarget::from_storage(storage);
+            let a = target.cast_tensor(a).map_err(intersect_internal_error)?;
+            return intersect_numeric(a, b, opts);
+        }
+        _ => {}
+    }
+    if a_dtype != b_dtype && a_dtype != NumericDType::F64 && b_dtype != NumericDType::F64 {
+        return Err(intersect_error(&INTERSECT_ERROR_NUMERIC_CLASS_MISMATCH));
     }
     let a_shape = a.shape.clone();
     let b_shape = b.shape.clone();
@@ -1936,30 +1974,16 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn intersect_mixed_integer_classes_read_exact_storage_without_mirror() {
+    fn intersect_rejects_mixed_nondouble_integer_classes() {
         let a = Tensor::new_integer(IntegerStorage::U16(vec![7, 2, 9, 7]), vec![4, 1]).unwrap();
         let b = Tensor::new_integer(IntegerStorage::I32(vec![2, 7]), vec![2, 1]).unwrap();
 
-        let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("intersect");
-        let values = tensor::value_into_tensor_for("intersect", eval.values_value()).unwrap();
-        assert_eq!(values.materialize_f64(), vec![2.0, 7.0]);
-        let ia = tensor::value_into_tensor_for("intersect", eval.ia_value()).unwrap();
-        let ib = tensor::value_into_tensor_for("intersect", eval.ib_value()).unwrap();
-        assert_eq!(ia.materialize_f64(), vec![2.0, 1.0]);
-        assert_eq!(ib.materialize_f64(), vec![1.0, 2.0]);
-
-        let a = Tensor::new_integer(IntegerStorage::U16(vec![1, 3, 2, 4]), vec![2, 2]).unwrap();
-        let b = Tensor::new_integer(IntegerStorage::I32(vec![3, 5, 4, 6]), vec![2, 2]).unwrap();
-
-        let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
-            .expect("intersect rows");
-        let values = tensor::value_into_tensor_for("intersect", eval.values_value()).unwrap();
-        assert_eq!(values.shape, vec![1, 2]);
-        assert_eq!(values.materialize_f64(), vec![3.0, 4.0]);
-        let ia = tensor::value_into_tensor_for("intersect", eval.ia_value()).unwrap();
-        let ib = tensor::value_into_tensor_for("intersect", eval.ib_value()).unwrap();
-        assert_eq!(ia.materialize_f64(), vec![2.0]);
-        assert_eq!(ib.materialize_f64(), vec![1.0]);
+        let error = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
+            .expect_err("mixed integer classes must reject");
+        assert_eq!(
+            error.identifier(),
+            INTERSECT_ERROR_NUMERIC_CLASS_MISMATCH.identifier
+        );
     }
 
     #[test]
