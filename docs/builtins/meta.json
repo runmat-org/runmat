@@ -58256,6 +58256,14 @@
           "when": "Output construction fails.",
           "message": "macd: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "macd-nondouble-matrix",
+          "mode": "RunMatOnly",
+          "description": "raw non-double macd matrix input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MacdNondoubleMatrixExtension"
+        }
       ]
     },
     {

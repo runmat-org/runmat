@@ -192,6 +192,7 @@ mod tests {
                 ("gpuArray", "gpuarray-dtype-selector"),
                 ("gpuArray", "gpuarray-like"),
                 ("gpuArray", "gpuarray-size-arguments"),
+                ("macd", "macd-nondouble-matrix"),
                 ("meshgrid", "meshgrid-complex-axes"),
                 ("meshgrid", "meshgrid-like"),
                 ("randi", "randi-implicit-prototype"),

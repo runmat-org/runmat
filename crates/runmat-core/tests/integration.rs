@@ -397,6 +397,35 @@ fn test_gpuarray_construction_extensions_follow_session_compatibility_mode() {
 }
 
 #[test]
+fn test_macd_nondouble_matrix_extension_follows_session_compatibility_mode() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+        let matlab = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = macd(uint8([2 1 1 1]));",
+        )
+        .expect("runtime failure should be returned in the execution outcome");
+        assert_eq!(
+            matlab.error.as_ref().and_then(|error| error.identifier()),
+            Some("RunMat:compatibility:MacdNondoubleMatrixExtension")
+        );
+
+        engine.set_compat_mode(CompatMode::RunMat);
+        let runmat = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = macd(uint8([2 1 1 1])); class(out)",
+        )
+        .expect("RunMat mode accepts raw integer macd matrix");
+        assert!(runmat.error.is_none(), "{:?}", runmat.error);
+        assert_eq!(
+            runmat.value,
+            Some(runmat_builtins::Value::String("double".to_string()))
+        );
+    });
+}
+
+#[test]
 fn test_sparse_integer_outputs_follow_session_compatibility_mode() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();

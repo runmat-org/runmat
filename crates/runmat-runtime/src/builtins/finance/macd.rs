@@ -1,9 +1,10 @@
 //! Moving Average Convergence/Divergence indicator.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor, NumericDType, ResolveContext, Tensor, Type,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -17,6 +18,15 @@ const NAME: &str = "macd";
 const FAST_ALPHA: f64 = 0.15;
 const SLOW_ALPHA: f64 = 0.075;
 const SIGNAL_ALPHA: f64 = 0.20;
+
+const MACD_NONDOUBLE_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "macd-nondouble-matrix",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "raw non-double macd matrix input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:MacdNondoubleMatrixExtension"),
+};
+
+pub const MACD_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [MACD_NONDOUBLE_MATRIX_EXTENSION];
 
 const PARAM_DATA: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "Data",
@@ -110,6 +120,7 @@ fn macd_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     keywords = "macd,finance,technical indicator,ema,moving average",
     type_resolver(macd_type),
     descriptor(crate::builtins::finance::macd::DESCRIPTOR),
+    extensions(crate::builtins::finance::macd::MACD_EXTENSIONS),
     builtin_path = "crate::builtins::finance::macd"
 )]
 async fn macd_builtin(data: Value) -> BuiltinResult<Value> {
@@ -156,6 +167,20 @@ struct MacdEval {
 
 impl MacdInput {
     async fn from_value(value: Value) -> BuiltinResult<Self> {
+        let mut resident_declared_double = false;
+        if let Value::GpuTensor(handle) = &value {
+            resident_declared_double = runmat_accelerate_api::handle_class_name(handle)
+                .is_some_and(|class| class.eq_ignore_ascii_case("double"));
+            let nondouble_numeric = runmat_accelerate_api::handle_integer_type(handle).is_some()
+                || runmat_accelerate_api::handle_class_name(handle)
+                    .is_some_and(|class| class.eq_ignore_ascii_case("single"));
+            if nondouble_numeric {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &MACD_NONDOUBLE_MATRIX_EXTENSION,
+                    NAME,
+                )?;
+            }
+        }
         let value = gather_if_needed_async(&value)
             .await
             .map_err(|err| macd_internal(format!("macd: {err}")))?;
@@ -166,6 +191,12 @@ impl MacdInput {
                     return Err(macd_invalid(
                         "macd: matrix input must have exactly four columns [High Low Open Close]",
                     ));
+                }
+                if tensor.numeric_dtype() != NumericDType::F64 && !resident_declared_double {
+                    crate::compatibility::ensure_builtin_extension_enabled(
+                        &MACD_NONDOUBLE_MATRIX_EXTENSION,
+                        NAME,
+                    )?;
                 }
                 Ok(MacdInput::Matrix {
                     close: close_column_from_matrix(&tensor, &shape)?,
@@ -355,6 +386,11 @@ mod tests {
         block_on(macd_builtin(value))
     }
 
+    fn call_with_mode(value: Value, extensions_enabled: bool) -> BuiltinResult<Value> {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(extensions_enabled);
+        block_on(macd_builtin(value))
+    }
+
     fn matrix(rows: usize, columns: [[f64; 4]; 5]) -> Value {
         let mut data = Vec::with_capacity(rows * 4);
         for col in 0..4 {
@@ -416,6 +452,7 @@ mod tests {
 
     #[test]
     fn matrix_input_reads_typed_integer_storage_exactly_as_double() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let out = expect_tensor(
             call(integer_matrix(
                 5,
@@ -436,6 +473,64 @@ mod tests {
         assert_close(out.materialize_f64()[2], 0.283125);
         assert_close(out.materialize_f64()[3], 0.743578125);
         assert_close(out.materialize_f64()[4], 1.697244140625);
+    }
+
+    #[test]
+    fn raw_nondouble_matrix_follows_compatibility_mode() {
+        let integer = || integer_matrix(1, [[2, 1, 1, 1], [0; 4], [0; 4], [0; 4], [0; 4]]);
+        let error = call_with_mode(integer(), false)
+            .expect_err("MATLAB mode rejects raw integer macd matrix");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:MacdNondoubleMatrixExtension")
+        );
+        call_with_mode(integer(), true).expect("RunMat mode accepts raw integer macd matrix");
+
+        let single = Tensor::from_f32(vec![2.0, 1.0, 1.0, 1.0], vec![1, 4]).expect("single matrix");
+        let error = call_with_mode(Value::Tensor(single), false)
+            .expect_err("MATLAB mode rejects raw single macd matrix");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:MacdNondoubleMatrixExtension")
+        );
+    }
+
+    #[test]
+    fn resident_nondouble_matrix_uses_the_same_compatibility_gate() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let double = Tensor::new(vec![2.0, 1.0, 1.0, 1.0], vec![1, 4]).expect("matrix");
+            let double_handle =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &double)
+                    .expect("upload");
+            runmat_accelerate_api::set_handle_precision(
+                &double_handle,
+                runmat_accelerate_api::ProviderPrecision::F32,
+            );
+            runmat_accelerate_api::set_handle_class_name(&double_handle, "double");
+            call_with_mode(Value::GpuTensor(double_handle), false)
+                .expect("provider precision does not change documented double class");
+
+            let upload = || {
+                let matrix =
+                    Tensor::from_f32(vec![2.0, 1.0, 1.0, 1.0], vec![1, 4]).expect("matrix");
+                let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &matrix)
+                    .expect("upload");
+                runmat_accelerate_api::set_handle_precision(
+                    &handle,
+                    runmat_accelerate_api::ProviderPrecision::F32,
+                );
+                runmat_accelerate_api::set_handle_class_name(&handle, "single");
+                handle
+            };
+            let error = call_with_mode(Value::GpuTensor(upload()), false)
+                .expect_err("MATLAB mode rejects resident single matrix");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:MacdNondoubleMatrixExtension")
+            );
+            call_with_mode(Value::GpuTensor(upload()), true)
+                .expect("RunMat mode accepts resident single matrix");
+        });
     }
 
     #[test]
