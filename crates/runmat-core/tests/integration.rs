@@ -687,6 +687,44 @@ fn test_db_nonfloating_inputs_follow_session_compatibility_mode() {
 }
 
 #[test]
+fn test_delaunaytri_integer_extensions_follow_session_compatibility_mode() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+
+        for (source, identifier) in [
+            (
+                "dt = DelaunayTri(uint16([0 0; 1 0; 0 1]));",
+                "RunMat:compatibility:DelaunayTriIntegerCoordinatesExtension",
+            ),
+            (
+                "dt = DelaunayTri([0 0; 1 0; 0 1], uint16(zeros(0, 2)));",
+                "RunMat:compatibility:DelaunayTriIntegerTopologyExtension",
+            ),
+        ] {
+            let outcome = runmat_core::execute_text_request_for_testing(&mut engine, source)
+                .expect("runtime failure should be returned in the execution outcome");
+            assert_eq!(
+                outcome.error.as_ref().and_then(|error| error.identifier()),
+                Some(identifier)
+            );
+        }
+
+        engine.set_compat_mode(CompatMode::RunMat);
+        let outcome = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "dt = DelaunayTri(uint16([0 0; 1 0; 0 1])); out = nearestNeighbor(dt, uint16([0 0])); out",
+        )
+        .expect("RunMat mode accepts typed-integer DelaunayTri coordinates");
+        assert!(outcome.error.is_none(), "{:?}", outcome.error);
+        let Some(runmat_builtins::Value::Tensor(indices)) = outcome.value else {
+            panic!("expected nearest-neighbor index tensor");
+        };
+        assert_eq!(indices.materialize_f64(), vec![1.0]);
+    });
+}
+
+#[test]
 fn test_sparse_integer_outputs_follow_session_compatibility_mode() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();

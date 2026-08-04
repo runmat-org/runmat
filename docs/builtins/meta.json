@@ -1900,6 +1900,301 @@
       ]
     },
     {
+      "name": "DelaunayTri",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "dt = DelaunayTri()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "dt",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Legacy DelaunayTri triangulation object."
+            }
+          ]
+        },
+        {
+          "label": "dt = DelaunayTri(X)",
+          "inputs": [
+            {
+              "name": "varargin",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Point matrix, coordinate vectors, and optional constraints."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "dt",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Legacy DelaunayTri triangulation object."
+            }
+          ]
+        },
+        {
+          "label": "dt = DelaunayTri(x, y)",
+          "inputs": [
+            {
+              "name": "varargin",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Point matrix, coordinate vectors, and optional constraints."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "dt",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Legacy DelaunayTri triangulation object."
+            }
+          ]
+        },
+        {
+          "label": "dt = DelaunayTri(X, C)",
+          "inputs": [
+            {
+              "name": "varargin",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Point matrix, coordinate vectors, and optional constraints."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "dt",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Legacy DelaunayTri triangulation object."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DELAUNAY_TRI.INVALID_ARGUMENT",
+          "identifier": "RunMat:DelaunayTri:InvalidArgument",
+          "when": "Constructor, object, constraint, or query inputs are malformed.",
+          "message": "DelaunayTri: invalid argument"
+        },
+        {
+          "code": "RM.DELAUNAY_TRI.UNSUPPORTED",
+          "identifier": "RunMat:DelaunayTri:Unsupported",
+          "when": "The legacy class is used with constrained or 3-D triangulation forms that RunMat does not implement yet.",
+          "message": "DelaunayTri: unsupported form"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "delaunaytri-integer-coordinates",
+          "mode": "RunMatOnly",
+          "description": "DelaunayTri construction, object points, or queries with typed-integer coordinates are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DelaunayTriIntegerCoordinatesExtension"
+        },
+        {
+          "id": "delaunaytri-integer-topology",
+          "mode": "RunMatOnly",
+          "description": "DelaunayTri constraints or object connectivity with typed-integer topology are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DelaunayTriIntegerTopologyExtension"
+        }
+      ]
+    },
+    {
+      "name": "DelaunayTri.freeBoundary",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "out = helper(dt, varargin)",
+          "inputs": [
+            {
+              "name": "dt",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "DelaunayTri object."
+            },
+            {
+              "name": "varargin",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Query point matrix or coordinate vectors."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DELAUNAY_TRI.INVALID_ARGUMENT",
+          "identifier": "RunMat:DelaunayTri:InvalidArgument",
+          "when": "Constructor, object, constraint, or query inputs are malformed.",
+          "message": "DelaunayTri: invalid argument"
+        },
+        {
+          "code": "RM.DELAUNAY_TRI.UNSUPPORTED",
+          "identifier": "RunMat:DelaunayTri:Unsupported",
+          "when": "The legacy class is used with constrained or 3-D triangulation forms that RunMat does not implement yet.",
+          "message": "DelaunayTri: unsupported form"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "delaunaytri-integer-topology",
+          "mode": "RunMatOnly",
+          "description": "DelaunayTri constraints or object connectivity with typed-integer topology are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DelaunayTriIntegerTopologyExtension"
+        }
+      ]
+    },
+    {
+      "name": "DelaunayTri.nearestNeighbor",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "out = helper(dt, varargin)",
+          "inputs": [
+            {
+              "name": "dt",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "DelaunayTri object."
+            },
+            {
+              "name": "varargin",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Query point matrix or coordinate vectors."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DELAUNAY_TRI.INVALID_ARGUMENT",
+          "identifier": "RunMat:DelaunayTri:InvalidArgument",
+          "when": "Constructor, object, constraint, or query inputs are malformed.",
+          "message": "DelaunayTri: invalid argument"
+        },
+        {
+          "code": "RM.DELAUNAY_TRI.UNSUPPORTED",
+          "identifier": "RunMat:DelaunayTri:Unsupported",
+          "when": "The legacy class is used with constrained or 3-D triangulation forms that RunMat does not implement yet.",
+          "message": "DelaunayTri: unsupported form"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "delaunaytri-integer-coordinates",
+          "mode": "RunMatOnly",
+          "description": "DelaunayTri construction, object points, or queries with typed-integer coordinates are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DelaunayTriIntegerCoordinatesExtension"
+        }
+      ]
+    },
+    {
+      "name": "DelaunayTri.pointLocation",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "[ti, bc] = pointLocation(dt, q)",
+          "inputs": [
+            {
+              "name": "dt",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "DelaunayTri object."
+            },
+            {
+              "name": "varargin",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Query point matrix or coordinate vectors."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ti",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Containing triangle indices, or NaN outside the triangulation."
+            },
+            {
+              "name": "bc",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Barycentric coordinates for each query point."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DELAUNAY_TRI.INVALID_ARGUMENT",
+          "identifier": "RunMat:DelaunayTri:InvalidArgument",
+          "when": "Constructor, object, constraint, or query inputs are malformed.",
+          "message": "DelaunayTri: invalid argument"
+        },
+        {
+          "code": "RM.DELAUNAY_TRI.UNSUPPORTED",
+          "identifier": "RunMat:DelaunayTri:Unsupported",
+          "when": "The legacy class is used with constrained or 3-D triangulation forms that RunMat does not implement yet.",
+          "message": "DelaunayTri: unsupported form"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "delaunaytri-integer-coordinates",
+          "mode": "RunMatOnly",
+          "description": "DelaunayTri construction, object points, or queries with typed-integer coordinates are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DelaunayTriIntegerCoordinatesExtension"
+        },
+        {
+          "id": "delaunaytri-integer-topology",
+          "mode": "RunMatOnly",
+          "description": "DelaunayTri constraints or object connectivity with typed-integer topology are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DelaunayTriIntegerTopologyExtension"
+        }
+      ]
+    },
+    {
       "name": "abs",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -37259,6 +37554,63 @@
       ]
     },
     {
+      "name": "freeBoundary",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "out = helper(dt, varargin)",
+          "inputs": [
+            {
+              "name": "dt",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "DelaunayTri object."
+            },
+            {
+              "name": "varargin",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Query point matrix or coordinate vectors."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DELAUNAY_TRI.INVALID_ARGUMENT",
+          "identifier": "RunMat:DelaunayTri:InvalidArgument",
+          "when": "Constructor, object, constraint, or query inputs are malformed.",
+          "message": "DelaunayTri: invalid argument"
+        },
+        {
+          "code": "RM.DELAUNAY_TRI.UNSUPPORTED",
+          "identifier": "RunMat:DelaunayTri:Unsupported",
+          "when": "The legacy class is used with constrained or 3-D triangulation forms that RunMat does not implement yet.",
+          "message": "DelaunayTri: unsupported form"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "delaunaytri-integer-topology",
+          "mode": "RunMatOnly",
+          "description": "DelaunayTri constraints or object connectivity with typed-integer topology are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DelaunayTriIntegerTopologyExtension"
+        }
+      ]
+    },
+    {
       "name": "freqz",
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
@@ -70070,6 +70422,63 @@
       ]
     },
     {
+      "name": "nearestNeighbor",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "out = helper(dt, varargin)",
+          "inputs": [
+            {
+              "name": "dt",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "DelaunayTri object."
+            },
+            {
+              "name": "varargin",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Query point matrix or coordinate vectors."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DELAUNAY_TRI.INVALID_ARGUMENT",
+          "identifier": "RunMat:DelaunayTri:InvalidArgument",
+          "when": "Constructor, object, constraint, or query inputs are malformed.",
+          "message": "DelaunayTri: invalid argument"
+        },
+        {
+          "code": "RM.DELAUNAY_TRI.UNSUPPORTED",
+          "identifier": "RunMat:DelaunayTri:Unsupported",
+          "when": "The legacy class is used with constrained or 3-D triangulation forms that RunMat does not implement yet.",
+          "message": "DelaunayTri: unsupported form"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "delaunaytri-integer-coordinates",
+          "mode": "RunMatOnly",
+          "description": "DelaunayTri construction, object points, or queries with typed-integer coordinates are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DelaunayTriIntegerCoordinatesExtension"
+        }
+      ]
+    },
+    {
       "name": "new_object",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -76686,6 +77095,76 @@
           "identifier": "RunMat:readtable:UnsupportedFileType",
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
+        }
+      ]
+    },
+    {
+      "name": "pointLocation",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "[ti, bc] = pointLocation(dt, q)",
+          "inputs": [
+            {
+              "name": "dt",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "DelaunayTri object."
+            },
+            {
+              "name": "varargin",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Query point matrix or coordinate vectors."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ti",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Containing triangle indices, or NaN outside the triangulation."
+            },
+            {
+              "name": "bc",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Barycentric coordinates for each query point."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DELAUNAY_TRI.INVALID_ARGUMENT",
+          "identifier": "RunMat:DelaunayTri:InvalidArgument",
+          "when": "Constructor, object, constraint, or query inputs are malformed.",
+          "message": "DelaunayTri: invalid argument"
+        },
+        {
+          "code": "RM.DELAUNAY_TRI.UNSUPPORTED",
+          "identifier": "RunMat:DelaunayTri:Unsupported",
+          "when": "The legacy class is used with constrained or 3-D triangulation forms that RunMat does not implement yet.",
+          "message": "DelaunayTri: unsupported form"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "delaunaytri-integer-coordinates",
+          "mode": "RunMatOnly",
+          "description": "DelaunayTri construction, object points, or queries with typed-integer coordinates are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DelaunayTriIntegerCoordinatesExtension"
+        },
+        {
+          "id": "delaunaytri-integer-topology",
+          "mode": "RunMatOnly",
+          "description": "DelaunayTri constraints or object connectivity with typed-integer topology are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DelaunayTriIntegerTopologyExtension"
         }
       ]
     },

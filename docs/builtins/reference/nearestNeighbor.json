@@ -29,6 +29,7 @@
   "description": "`nearestNeighbor(dt, q)` returns one-based indices of the nearest triangulation vertices for an N-by-2 query matrix. `nearestNeighbor(dt, x, y)` accepts coordinate vectors.",
   "behaviors": [
     "Accepts query matrices or paired coordinate vectors.",
+    "MATLAB-compatible object and query coordinates use double storage; typed-integer coordinates are available in `runmat` compatibility mode.",
     "Returns an N-by-1 tensor of one-based vertex indices.",
     "Returns NaN for queries against an empty point set."
   ],
