@@ -5,7 +5,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, LogicalArray, NumericStorage, Tensor, Value,
+    CharArray, ComplexTensor, LogicalArray, NumericStorage, SparseTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -201,7 +201,7 @@ async fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
         Value::Int(i) => Ok(Value::Num(cast_f64_to_single(i.to_f64()))),
         Value::Bool(flag) => Ok(Value::Num(if flag { 1.0 } else { 0.0 })),
         Value::Tensor(tensor) => single_from_tensor(tensor),
-        Value::SparseTensor(_) => Err(conversion_error("sparse")),
+        Value::SparseTensor(sparse) => single_from_sparse_tensor(sparse),
         Value::Complex(re, im) => Ok(Value::Complex(
             cast_f64_to_single(re),
             cast_f64_to_single(im),
@@ -238,6 +238,23 @@ fn single_from_tensor(tensor: Tensor) -> BuiltinResult<Value> {
 
 fn single_from_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
     single_complex_tensor_to_host(tensor).map(Value::ComplexTensor)
+}
+
+fn single_from_sparse_tensor(sparse: SparseTensor) -> BuiltinResult<Value> {
+    let values = sparse
+        .materialize_f64()
+        .into_iter()
+        .map(|value| value as f32)
+        .collect();
+    SparseTensor::new_f32(
+        sparse.rows,
+        sparse.cols,
+        sparse.col_ptrs,
+        sparse.row_indices,
+        values,
+    )
+    .map(Value::SparseTensor)
+    .map_err(|error| single_error_with_detail(&SINGLE_ERROR_INTERNAL, error))
 }
 
 fn single_from_logical_array(array: LogicalArray) -> BuiltinResult<Value> {
@@ -566,6 +583,29 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn single_sparse_tensor_preserves_sparsity_and_converts_storage() {
+        let sparse = SparseTensor::new(
+            3,
+            2,
+            vec![0, 1, 2],
+            vec![1, 2],
+            vec![std::f64::consts::PI, -1.25],
+        )
+        .unwrap();
+        let result = single_builtin(Value::SparseTensor(sparse), Vec::new()).expect("single");
+        let Value::SparseTensor(output) = result else {
+            panic!("expected sparse tensor");
+        };
+        assert_eq!(output.shape(), vec![3, 2]);
+        assert_eq!(output.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(
+            output.as_f32_slice(),
+            Some(&[std::f64::consts::PI as f32, -1.25][..])
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

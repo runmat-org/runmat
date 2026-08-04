@@ -249,13 +249,16 @@ fn double_from_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
 }
 
 fn double_from_sparse_tensor(sparse: SparseTensor) -> BuiltinResult<Value> {
-    let tensor = sparse.to_dense().map_err(|err| {
-        double_error_with_detail(
-            &DOUBLE_ERROR_INTERNAL,
-            format!("failed to densify sparse input: {err}"),
-        )
-    })?;
-    double_from_tensor(tensor)
+    let values = sparse.materialize_f64();
+    SparseTensor::new(
+        sparse.rows,
+        sparse.cols,
+        sparse.col_ptrs,
+        sparse.row_indices,
+        values,
+    )
+    .map(Value::SparseTensor)
+    .map_err(|error| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, error))
 }
 
 fn double_from_char_array(chars: CharArray) -> BuiltinResult<Value> {
@@ -648,16 +651,16 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn double_sparse_tensor_densifies() {
-        let sparse = SparseTensor::new(3, 2, vec![0, 1, 2], vec![1, 2], vec![4.0, -1.0]).unwrap();
+    fn double_sparse_tensor_preserves_sparsity_and_converts_storage() {
+        let sparse =
+            SparseTensor::new_f32(3, 2, vec![0, 1, 2], vec![1, 2], vec![4.0, -1.0]).unwrap();
         let result = double_builtin(Value::SparseTensor(sparse), Vec::new()).expect("double");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 2]);
-                assert_eq!(t.materialize_f64(), vec![0.0, 4.0, 0.0, 0.0, 0.0, -1.0]);
-            }
-            other => panic!("expected dense tensor, got {other:?}"),
-        }
+        let Value::SparseTensor(output) = result else {
+            panic!("expected sparse tensor");
+        };
+        assert_eq!(output.shape(), vec![3, 2]);
+        assert_eq!(output.numeric_dtype(), NumericDType::F64);
+        assert_eq!(output.as_f64_slice(), Some(&[4.0, -1.0][..]));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -672,18 +675,16 @@ pub(crate) mod tests {
         )
         .unwrap();
         let result = double_builtin(Value::SparseTensor(sparse), Vec::new()).expect("double");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.numeric_dtype(), NumericDType::F64);
-                assert!(t.integer_storage().is_none());
-                assert_eq!(
-                    t.materialize_f64(),
-                    vec![0.0, i64::MIN as f64, i64::MAX as f64, 0.0]
-                );
-            }
-            other => panic!("expected dense tensor, got {other:?}"),
-        }
+        let Value::SparseTensor(output) = result else {
+            panic!("expected sparse tensor");
+        };
+        assert_eq!(output.shape(), vec![2, 2]);
+        assert_eq!(output.numeric_dtype(), NumericDType::F64);
+        assert!(output.integer_storage().is_none());
+        assert_eq!(
+            output.as_f64_slice(),
+            Some(&[i64::MIN as f64, i64::MAX as f64][..])
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

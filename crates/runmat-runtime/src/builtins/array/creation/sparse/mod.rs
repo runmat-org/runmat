@@ -1195,6 +1195,16 @@ impl ExtractionMatrix {
             Self::Sparse(sparse) => sparse.get(row, col).unwrap_or(0.0),
         }
     }
+
+    fn dtype(&self) -> NumericDType {
+        match self {
+            Self::Dense(matrix) => matrix.dtype,
+            Self::Sparse(sparse) if sparse.numeric_dtype() == NumericDType::F32 => {
+                NumericDType::F32
+            }
+            Self::Sparse(_) => NumericDType::F64,
+        }
+    }
 }
 
 fn extraction_matrix_from_value(value: &Value, label: &str) -> BuiltinResult<ExtractionMatrix> {
@@ -1254,6 +1264,7 @@ struct DenseMatrix {
     rows: usize,
     cols: usize,
     data: Vec<f64>,
+    dtype: NumericDType,
 }
 
 impl DenseMatrix {
@@ -1275,6 +1286,11 @@ fn dense_matrix_from_value(value: &Value, label: &str) -> BuiltinResult<DenseMat
                 rows: tensor.rows(),
                 cols: tensor.cols(),
                 data: tensor_utils::tensor_values_f64(tensor),
+                dtype: if tensor.numeric_dtype() == NumericDType::F32 {
+                    NumericDType::F32
+                } else {
+                    NumericDType::F64
+                },
             })
         }
         Value::SparseTensor(sparse) => {
@@ -1299,6 +1315,11 @@ fn dense_matrix_from_value(value: &Value, label: &str) -> BuiltinResult<DenseMat
                 rows: dense.rows(),
                 cols: dense.cols(),
                 data: tensor_utils::tensor_into_values_f64(dense),
+                dtype: if sparse.numeric_dtype() == NumericDType::F32 {
+                    NumericDType::F32
+                } else {
+                    NumericDType::F64
+                },
             })
         }
         Value::LogicalArray(logical) => {
@@ -1318,22 +1339,26 @@ fn dense_matrix_from_value(value: &Value, label: &str) -> BuiltinResult<DenseMat
                     .iter()
                     .map(|&bit| if bit != 0 { 1.0 } else { 0.0 })
                     .collect(),
+                dtype: NumericDType::F64,
             })
         }
         Value::Num(n) => Ok(DenseMatrix {
             rows: 1,
             cols: 1,
             data: vec![*n],
+            dtype: NumericDType::F64,
         }),
         Value::Int(i) => Ok(DenseMatrix {
             rows: 1,
             cols: 1,
             data: vec![i.to_f64()],
+            dtype: NumericDType::F64,
         }),
         Value::Bool(b) => Ok(DenseMatrix {
             rows: 1,
             cols: 1,
             data: vec![if *b { 1.0 } else { 0.0 }],
+            dtype: NumericDType::F64,
         }),
         other => Err(sparse_error(
             &SPARSE_ERROR_INVALID_INPUT,
@@ -1451,8 +1476,15 @@ fn extract_diagonals(matrix: &ExtractionMatrix, offsets: &[isize]) -> BuiltinRes
             }
         }
     }
-    Tensor::new(data, vec![out_rows, offsets.len()])
-        .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("spdiags: {err}")))
+    match matrix.dtype() {
+        NumericDType::F32 => Tensor::from_f32(
+            data.into_iter().map(|value| value as f32).collect(),
+            vec![out_rows, offsets.len()],
+        ),
+        NumericDType::F64 => Tensor::new(data, vec![out_rows, offsets.len()]),
+        _ => unreachable!("diagonal extraction normalizes non-floating inputs to double"),
+    }
+    .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("spdiags: {err}")))
 }
 
 fn construct_sparse_diagonals(
@@ -1463,7 +1495,11 @@ fn construct_sparse_diagonals(
 ) -> BuiltinResult<SparseTensor> {
     let bin = dense_matrix_from_value(bin, "spdiags")?;
     if offsets.is_empty() {
-        return Ok(SparseTensor::zeros(rows, cols));
+        return Ok(match bin.dtype {
+            NumericDType::F32 => SparseTensor::zeros_f32(rows, cols),
+            NumericDType::F64 => SparseTensor::zeros(rows, cols),
+            _ => unreachable!("diagonal construction normalizes non-floating inputs to double"),
+        });
     }
     if bin.cols != offsets.len() {
         return Err(sparse_error(
@@ -1493,7 +1529,7 @@ fn construct_sparse_diagonals(
             }
         }
     }
-    sparse_from_entries(rows, cols, entries, "spdiags")
+    sparse_from_entries_with_dtype(rows, cols, entries, bin.dtype, "spdiags")
 }
 
 fn replace_sparse_diagonals(
@@ -1527,7 +1563,18 @@ fn replace_sparse_diagonals(
             }
         }
     }
-    sparse_from_entries(target_sparse.rows, target_sparse.cols, entries, "spdiags")
+    let dtype = if target_sparse.numeric_dtype() == NumericDType::F32 {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
+    };
+    sparse_from_entries_with_dtype(
+        target_sparse.rows,
+        target_sparse.cols,
+        entries,
+        dtype,
+        "spdiags",
+    )
 }
 
 fn diag_len(rows: usize, cols: usize, offset: isize) -> usize {
@@ -1568,6 +1615,16 @@ fn sparse_from_entries(
     entries: BTreeMap<(usize, usize), f64>,
     label: &str,
 ) -> BuiltinResult<SparseTensor> {
+    sparse_from_entries_with_dtype(rows, cols, entries, NumericDType::F64, label)
+}
+
+fn sparse_from_entries_with_dtype(
+    rows: usize,
+    cols: usize,
+    entries: BTreeMap<(usize, usize), f64>,
+    dtype: NumericDType,
+    label: &str,
+) -> BuiltinResult<SparseTensor> {
     let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
     let mut row_indices = Vec::new();
     let mut values = Vec::new();
@@ -1584,8 +1641,18 @@ fn sparse_from_entries(
         }
         col_ptrs.push(values.len());
     }
-    SparseTensor::new(rows, cols, col_ptrs, row_indices, values)
-        .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("{label}: {err}")))
+    let sparse = match dtype {
+        NumericDType::F32 => SparseTensor::new_f32(
+            rows,
+            cols,
+            col_ptrs,
+            row_indices,
+            values.into_iter().map(|value| value as f32).collect(),
+        ),
+        NumericDType::F64 => SparseTensor::new(rows, cols, col_ptrs, row_indices, values),
+        _ => unreachable!("sparse entry reconstruction requires a floating dtype"),
+    };
+    sparse.map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("{label}: {err}")))
 }
 
 fn scalar_f64(value: &Value, name: &str, label: &str) -> BuiltinResult<f64> {
@@ -3178,6 +3245,55 @@ pub(crate) mod tests {
         assert_eq!(replaced.get(1, 1), Some(7.0));
         assert_eq!(replaced.get(2, 2), Some(6.0));
         assert_eq!(replaced.get(1, 2), Some(2.0));
+    }
+
+    #[test]
+    fn spdiags_preserves_native_single_extraction_construction_and_replacement() {
+        let bin = Tensor::from_f32(
+            vec![
+                10.0, 20.0, 0.0, // -1 source column
+                0.0, 1.0, 2.0, // +1 source column
+            ],
+            vec![3, 2],
+        )
+        .unwrap();
+        let offsets = Tensor::new(vec![-1.0, 1.0], vec![1, 2]).unwrap();
+        let constructed = expect_sparse(
+            spdiags_builtin(vec![
+                Value::Tensor(bin.clone()),
+                Value::Tensor(offsets.clone()),
+                Value::Num(3.0),
+                Value::Num(3.0),
+            ])
+            .expect("construct single spdiags"),
+        );
+        assert_eq!(constructed.numeric_dtype(), NumericDType::F32);
+
+        let extracted = expect_tensor(
+            spdiags_builtin(vec![
+                Value::SparseTensor(constructed.clone()),
+                Value::Tensor(offsets.clone()),
+            ])
+            .expect("extract single spdiags"),
+        );
+        assert_eq!(extracted.numeric_dtype(), NumericDType::F32);
+
+        let target =
+            SparseTensor::new_f32(3, 3, vec![0, 1, 2, 3], vec![0, 1, 2], vec![9.0, 7.0, 6.0])
+                .unwrap();
+        let replaced = expect_sparse(
+            spdiags_builtin(vec![
+                Value::Tensor(bin),
+                Value::Tensor(offsets),
+                Value::SparseTensor(target),
+            ])
+            .expect("replace single spdiags"),
+        );
+        assert_eq!(replaced.numeric_dtype(), NumericDType::F32);
+        assert_eq!(replaced.get(0, 0), Some(9.0));
+        assert_eq!(replaced.get(1, 0), Some(10.0));
+        assert_eq!(replaced.get(1, 1), Some(7.0));
+        assert_eq!(replaced.get(2, 2), Some(6.0));
     }
 
     #[test]

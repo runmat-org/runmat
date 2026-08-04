@@ -256,24 +256,33 @@ fn realsqrt_sparse(sparse: SparseTensor) -> BuiltinResult<Value> {
             "expected real single or double input",
         ));
     }
-    let values = sparse
-        .as_f64_slice()
-        .expect("integer sparse input rejected above")
-        .to_vec();
+    let dtype = sparse.numeric_dtype();
+    let values = sparse.materialize_f64();
     ensure_nonnegative(&values)?;
     let values: Vec<f64> = values
         .into_iter()
         .map(|value| canonical_zero(value.sqrt()))
         .collect();
-    SparseTensor::new(
-        sparse.rows,
-        sparse.cols,
-        sparse.col_ptrs,
-        sparse.row_indices,
-        values,
-    )
-    .map(Value::SparseTensor)
-    .map_err(|detail| error_with_detail(&ERROR_INTERNAL, detail))
+    let output = match dtype {
+        NumericDType::F32 => SparseTensor::new_f32(
+            sparse.rows,
+            sparse.cols,
+            sparse.col_ptrs,
+            sparse.row_indices,
+            values.into_iter().map(|value| value as f32).collect(),
+        ),
+        NumericDType::F64 => SparseTensor::new(
+            sparse.rows,
+            sparse.cols,
+            sparse.col_ptrs,
+            sparse.row_indices,
+            values,
+        ),
+        _ => unreachable!("integer sparse input rejected above"),
+    };
+    output
+        .map(Value::SparseTensor)
+        .map_err(|detail| error_with_detail(&ERROR_INTERNAL, detail))
 }
 
 fn tensor_into_realsqrt_value(tensor: Tensor) -> Value {
@@ -518,6 +527,18 @@ mod tests {
             }
             other => panic!("expected sparse tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn sparse_single_inputs_preserve_native_single_storage() {
+        let sparse =
+            SparseTensor::new_f32(3, 2, vec![0, 2, 3], vec![0, 2, 1], vec![4.0, 9.0, 16.0])
+                .unwrap();
+        let Value::SparseTensor(output) = call(Value::SparseTensor(sparse)).unwrap() else {
+            panic!("expected sparse tensor");
+        };
+        assert_eq!(output.numeric_dtype(), NumericDType::F32);
+        assert_eq!(output.as_f32_slice(), Some(&[2.0, 3.0, 4.0][..]));
     }
 
     #[test]

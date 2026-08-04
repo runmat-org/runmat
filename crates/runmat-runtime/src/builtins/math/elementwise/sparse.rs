@@ -1,4 +1,6 @@
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, SparseTensor, Tensor, Value};
+use runmat_builtins::{
+    CharArray, ComplexTensor, LogicalArray, NumericDType, SparseTensor, Tensor, Value,
+};
 
 use crate::builtins::common::broadcast::{broadcast_shapes, BroadcastPlan};
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -116,20 +118,127 @@ fn is_sparse_scalar(sparse: &SparseTensor) -> bool {
     sparse.rows == 1 && sparse.cols == 1
 }
 
+#[derive(Clone, Copy)]
+struct RealScalar {
+    value: f64,
+    dtype: NumericDType,
+}
+
+fn floating_dtype(dtype: NumericDType) -> NumericDType {
+    if dtype == NumericDType::F32 {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
+    }
+}
+
+fn combined_floating_dtype(lhs: NumericDType, rhs: NumericDType) -> NumericDType {
+    if lhs == NumericDType::F32 || rhs == NumericDType::F32 {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
+    }
+}
+
+fn sparse_from_f64_values(
+    rows: usize,
+    cols: usize,
+    col_ptrs: Vec<usize>,
+    row_indices: Vec<usize>,
+    values: Vec<f64>,
+    dtype: NumericDType,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let sparse = match dtype {
+        NumericDType::F32 => SparseTensor::new_f32(
+            rows,
+            cols,
+            col_ptrs,
+            row_indices,
+            values.into_iter().map(|value| value as f32).collect(),
+        ),
+        NumericDType::F64 => SparseTensor::new(rows, cols, col_ptrs, row_indices, values),
+        _ => unreachable!("floating sparse arithmetic requested an integer output dtype"),
+    }
+    .map_err(|err| map_internal_error(builtin, err))?;
+    Ok(Value::SparseTensor(sparse))
+}
+
+fn sparse_zeros_with_dtype(rows: usize, cols: usize, dtype: NumericDType) -> SparseTensor {
+    match dtype {
+        NumericDType::F32 => SparseTensor::zeros_f32(rows, cols),
+        NumericDType::F64 => SparseTensor::zeros(rows, cols),
+        _ => unreachable!("floating sparse arithmetic requested an integer output dtype"),
+    }
+}
+
+fn preserve_sparse_with_dtype(
+    sparse: &SparseTensor,
+    dtype: NumericDType,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    if floating_dtype(sparse.numeric_dtype()) == dtype {
+        return Ok(Value::SparseTensor(sparse.clone()));
+    }
+    sparse_from_f64_values(
+        sparse.rows,
+        sparse.cols,
+        sparse.col_ptrs.clone(),
+        sparse.row_indices.clone(),
+        sparse.materialize_f64(),
+        dtype,
+        builtin,
+    )
+}
+
+fn dense_from_f64_values(
+    values: Vec<f64>,
+    shape: Vec<usize>,
+    dtype: NumericDType,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let tensor = match dtype {
+        NumericDType::F32 => Tensor::from_f32(
+            values.into_iter().map(|value| value as f32).collect(),
+            shape,
+        ),
+        NumericDType::F64 => Tensor::new(values, shape),
+        _ => unreachable!("floating sparse arithmetic requested an integer output dtype"),
+    }
+    .map_err(|err| map_internal_error(builtin, err))?;
+    Ok(Value::Tensor(tensor))
+}
+
 fn sparse_scalar_value(sparse: &SparseTensor) -> f64 {
     sparse.get(0, 0).unwrap_or(0.0)
 }
 
-fn scalar_real(value: &Value) -> Option<f64> {
+fn scalar_real(value: &Value) -> Option<RealScalar> {
     match value {
-        Value::Num(n) => Some(*n),
-        Value::Int(i) => Some(i.to_f64()),
-        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Some(tensor::tensor_value_f64(t, 0)),
-        Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
-        Value::CharArray(ca) if ca.rows.checked_mul(ca.cols) == Some(1) => {
-            Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
-        }
+        Value::Num(n) => Some(RealScalar {
+            value: *n,
+            dtype: NumericDType::F64,
+        }),
+        Value::Int(i) => Some(RealScalar {
+            value: i.to_f64(),
+            dtype: NumericDType::F64,
+        }),
+        Value::Bool(b) => Some(RealScalar {
+            value: if *b { 1.0 } else { 0.0 },
+            dtype: NumericDType::F64,
+        }),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Some(RealScalar {
+            value: tensor::tensor_value_f64(t, 0),
+            dtype: floating_dtype(t.numeric_dtype()),
+        }),
+        Value::LogicalArray(l) if l.data.len() == 1 => Some(RealScalar {
+            value: if l.data[0] != 0 { 1.0 } else { 0.0 },
+            dtype: NumericDType::F64,
+        }),
+        Value::CharArray(ca) if ca.rows.checked_mul(ca.cols) == Some(1) => Some(RealScalar {
+            value: ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0),
+            dtype: NumericDType::F64,
+        }),
         _ => None,
     }
 }
@@ -187,65 +296,73 @@ fn sparse_sparse(
     op: SparseBinaryOp,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
+    let dtype = combined_floating_dtype(
+        floating_dtype(lhs.numeric_dtype()),
+        floating_dtype(rhs.numeric_dtype()),
+    );
     if lhs.rows == rhs.rows && lhs.cols == rhs.cols {
         return match op {
-            SparseBinaryOp::Add => sparse_sparse_union(lhs, rhs, |a, b| a + b, builtin),
-            SparseBinaryOp::Sub => sparse_sparse_union(lhs, rhs, |a, b| a - b, builtin),
+            SparseBinaryOp::Add => sparse_sparse_union(lhs, rhs, |a, b| a + b, dtype, builtin),
+            SparseBinaryOp::Sub => sparse_sparse_union(lhs, rhs, |a, b| a - b, dtype, builtin),
             SparseBinaryOp::Mul
                 if sparse_stored_values_are_finite(lhs) && sparse_stored_values_are_finite(rhs) =>
             {
-                sparse_sparse_intersection(lhs, rhs, |a, b| a * b, builtin)
+                sparse_sparse_intersection(lhs, rhs, |a, b| a * b, dtype, builtin)
             }
-            SparseBinaryOp::Mul => sparse_sparse_union(lhs, rhs, |a, b| a * b, builtin),
+            SparseBinaryOp::Mul => sparse_sparse_union(lhs, rhs, |a, b| a * b, dtype, builtin),
         };
     }
     if is_sparse_scalar(lhs) {
-        return sparse_scalar_sparse(sparse_scalar_value(lhs), rhs, op, builtin);
+        return sparse_scalar_sparse(sparse_scalar_value(lhs), rhs, op, dtype, builtin);
     }
     if is_sparse_scalar(rhs) {
-        return sparse_sparse_scalar(lhs, sparse_scalar_value(rhs), op, builtin);
+        return sparse_sparse_scalar(lhs, sparse_scalar_value(rhs), op, dtype, builtin);
     }
-    sparse_sparse_broadcast(lhs, rhs, op, builtin)
+    sparse_sparse_broadcast(lhs, rhs, op, dtype, builtin)
 }
 
 fn sparse_scalar_sparse(
     scalar: f64,
     sparse: &SparseTensor,
     op: SparseBinaryOp,
+    dtype: NumericDType,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
     match op {
         SparseBinaryOp::Add => {
             if scalar == 0.0 {
-                Ok(Value::SparseTensor(sparse.clone()))
+                preserve_sparse_with_dtype(sparse, dtype, builtin)
             } else {
                 sparse_sparse_scalar_full(
                     sparse,
                     scalar,
                     |sparse_value, scalar| scalar + sparse_value,
+                    dtype,
                     builtin,
                 )
             }
         }
         SparseBinaryOp::Sub => {
             if scalar == 0.0 {
-                scale_sparse(sparse, -1.0, builtin)
+                scale_sparse(sparse, -1.0, dtype, builtin)
             } else {
                 sparse_sparse_scalar_full(
                     sparse,
                     scalar,
                     |sparse_value, scalar| scalar - sparse_value,
+                    dtype,
                     builtin,
                 )
             }
         }
         SparseBinaryOp::Mul if scalar.is_finite() || !sparse_has_implicit_zeros(sparse) => {
-            scale_sparse(sparse, scalar, builtin)
+            scale_sparse(sparse, scalar, dtype, builtin)
         }
         SparseBinaryOp::Mul => sparse_sparse_scalar_full(
             sparse,
             scalar,
             |sparse_value, scalar| scalar * sparse_value,
+            dtype,
             builtin,
         ),
     }
@@ -255,40 +372,44 @@ fn sparse_sparse_scalar(
     sparse: &SparseTensor,
     scalar: f64,
     op: SparseBinaryOp,
+    dtype: NumericDType,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
     match op {
         SparseBinaryOp::Add => {
             if scalar == 0.0 {
-                Ok(Value::SparseTensor(sparse.clone()))
+                preserve_sparse_with_dtype(sparse, dtype, builtin)
             } else {
                 sparse_sparse_scalar_full(
                     sparse,
                     scalar,
                     |sparse_value, scalar| sparse_value + scalar,
+                    dtype,
                     builtin,
                 )
             }
         }
         SparseBinaryOp::Sub => {
             if scalar == 0.0 {
-                Ok(Value::SparseTensor(sparse.clone()))
+                preserve_sparse_with_dtype(sparse, dtype, builtin)
             } else {
                 sparse_sparse_scalar_full(
                     sparse,
                     scalar,
                     |sparse_value, scalar| sparse_value - scalar,
+                    dtype,
                     builtin,
                 )
             }
         }
         SparseBinaryOp::Mul if scalar.is_finite() || !sparse_has_implicit_zeros(sparse) => {
-            scale_sparse(sparse, scalar, builtin)
+            scale_sparse(sparse, scalar, dtype, builtin)
         }
         SparseBinaryOp::Mul => sparse_sparse_scalar_full(
             sparse,
             scalar,
             |sparse_value, scalar| sparse_value * scalar,
+            dtype,
             builtin,
         ),
     }
@@ -298,6 +419,7 @@ fn sparse_sparse_scalar_full(
     sparse: &SparseTensor,
     scalar: f64,
     combine: impl Fn(f64, f64) -> f64,
+    dtype: NumericDType,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
     checked_len(&sparse.shape(), builtin)?;
@@ -315,15 +437,22 @@ fn sparse_sparse_scalar_full(
         }
         col_ptrs.push(values.len());
     }
-    SparseTensor::new(sparse.rows, sparse.cols, col_ptrs, row_indices, values)
-        .map(Value::SparseTensor)
-        .map_err(|err| map_internal_error(builtin, err))
+    sparse_from_f64_values(
+        sparse.rows,
+        sparse.cols,
+        col_ptrs,
+        row_indices,
+        values,
+        dtype,
+        builtin,
+    )
 }
 
 fn sparse_sparse_union(
     lhs: &SparseTensor,
     rhs: &SparseTensor,
     combine: impl Fn(f64, f64) -> f64,
+    dtype: NumericDType,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
     let lhs_values = lhs.materialize_f64();
@@ -363,15 +492,22 @@ fn sparse_sparse_union(
         }
         col_ptrs.push(values.len());
     }
-    SparseTensor::new(lhs.rows, lhs.cols, col_ptrs, row_indices, values)
-        .map(Value::SparseTensor)
-        .map_err(|err| map_internal_error(builtin, err))
+    sparse_from_f64_values(
+        lhs.rows,
+        lhs.cols,
+        col_ptrs,
+        row_indices,
+        values,
+        dtype,
+        builtin,
+    )
 }
 
 fn sparse_sparse_intersection(
     lhs: &SparseTensor,
     rhs: &SparseTensor,
     combine: impl Fn(f64, f64) -> f64,
+    dtype: NumericDType,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
     let lhs_values = lhs.materialize_f64();
@@ -402,15 +538,22 @@ fn sparse_sparse_intersection(
         }
         col_ptrs.push(values.len());
     }
-    SparseTensor::new(lhs.rows, lhs.cols, col_ptrs, row_indices, values)
-        .map(Value::SparseTensor)
-        .map_err(|err| map_internal_error(builtin, err))
+    sparse_from_f64_values(
+        lhs.rows,
+        lhs.cols,
+        col_ptrs,
+        row_indices,
+        values,
+        dtype,
+        builtin,
+    )
 }
 
 fn sparse_sparse_broadcast(
     lhs: &SparseTensor,
     rhs: &SparseTensor,
     op: SparseBinaryOp,
+    dtype: NumericDType,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
     let left_shape = sparse_shape(lhs);
@@ -453,9 +596,7 @@ fn sparse_sparse_broadcast(
     while col_ptrs.len() <= cols {
         col_ptrs.push(values.len());
     }
-    SparseTensor::new(rows, cols, col_ptrs, row_indices, values)
-        .map(Value::SparseTensor)
-        .map_err(|err| map_internal_error(builtin, err))
+    sparse_from_f64_values(rows, cols, col_ptrs, row_indices, values, dtype, builtin)
 }
 
 fn sparse_other(
@@ -469,10 +610,15 @@ fn sparse_other(
         return sparse_complex(sparse, &complex, op, sparse_is_lhs, builtin);
     }
     if let Some(scalar) = scalar_real(other) {
-        return sparse_scalar(sparse, scalar, op, sparse_is_lhs, builtin);
+        let dtype = combined_floating_dtype(floating_dtype(sparse.numeric_dtype()), scalar.dtype);
+        return sparse_scalar(sparse, scalar.value, op, sparse_is_lhs, dtype, builtin);
     }
     if let Some(dense) = dense_tensor(other, builtin)? {
-        return sparse_dense(sparse, &dense, op, sparse_is_lhs, builtin);
+        let dtype = combined_floating_dtype(
+            floating_dtype(sparse.numeric_dtype()),
+            floating_dtype(dense.numeric_dtype()),
+        );
+        return sparse_dense(sparse, &dense, op, sparse_is_lhs, dtype, builtin);
     }
     Err(unsupported_error(
         builtin,
@@ -485,29 +631,30 @@ fn sparse_scalar(
     scalar: f64,
     op: SparseBinaryOp,
     sparse_is_lhs: bool,
+    dtype: NumericDType,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
     match op {
         SparseBinaryOp::Add => {
             if scalar == 0.0 {
-                return Ok(Value::SparseTensor(sparse.clone()));
+                return preserve_sparse_with_dtype(sparse, dtype, builtin);
             }
-            sparse_dense_scalar_result(sparse, scalar, |a, b| a + b, sparse_is_lhs, builtin)
+            sparse_dense_scalar_result(sparse, scalar, |a, b| a + b, sparse_is_lhs, dtype, builtin)
         }
         SparseBinaryOp::Sub => {
             if scalar == 0.0 && sparse_is_lhs {
-                return Ok(Value::SparseTensor(sparse.clone()));
+                return preserve_sparse_with_dtype(sparse, dtype, builtin);
             }
             if scalar == 0.0 {
-                return scale_sparse(sparse, -1.0, builtin);
+                return scale_sparse(sparse, -1.0, dtype, builtin);
             }
-            sparse_dense_scalar_result(sparse, scalar, |a, b| a - b, sparse_is_lhs, builtin)
+            sparse_dense_scalar_result(sparse, scalar, |a, b| a - b, sparse_is_lhs, dtype, builtin)
         }
         SparseBinaryOp::Mul if scalar.is_finite() || !sparse_has_implicit_zeros(sparse) => {
-            scale_sparse(sparse, scalar, builtin)
+            scale_sparse(sparse, scalar, dtype, builtin)
         }
         SparseBinaryOp::Mul => {
-            sparse_dense_scalar_result(sparse, scalar, |a, b| a * b, sparse_is_lhs, builtin)
+            sparse_dense_scalar_result(sparse, scalar, |a, b| a * b, sparse_is_lhs, dtype, builtin)
         }
     }
 }
@@ -517,6 +664,7 @@ fn sparse_dense_scalar_result(
     scalar: f64,
     combine: impl Fn(f64, f64) -> f64,
     sparse_is_lhs: bool,
+    dtype: NumericDType,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
     checked_len(&sparse.shape(), builtin)?;
@@ -531,16 +679,20 @@ fn sparse_dense_scalar_result(
             combine(scalar, *value)
         };
     }
-    Tensor::new(out, dense.shape)
-        .map(Value::Tensor)
-        .map_err(|err| map_internal_error(builtin, err))
+    dense_from_f64_values(out, dense.shape, dtype, builtin)
 }
 
-fn scale_sparse(sparse: &SparseTensor, scalar: f64, builtin: &'static str) -> BuiltinResult<Value> {
+fn scale_sparse(
+    sparse: &SparseTensor,
+    scalar: f64,
+    dtype: NumericDType,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
     if scalar == 0.0 || sparse.nnz() == 0 {
-        return Ok(Value::SparseTensor(SparseTensor::zeros(
+        return Ok(Value::SparseTensor(sparse_zeros_with_dtype(
             sparse.rows,
             sparse.cols,
+            dtype,
         )));
     }
     let stored_values = sparse.materialize_f64();
@@ -558,9 +710,15 @@ fn scale_sparse(sparse: &SparseTensor, scalar: f64, builtin: &'static str) -> Bu
         }
         col_ptrs.push(values.len());
     }
-    SparseTensor::new(sparse.rows, sparse.cols, col_ptrs, row_indices, values)
-        .map(Value::SparseTensor)
-        .map_err(|err| map_internal_error(builtin, err))
+    sparse_from_f64_values(
+        sparse.rows,
+        sparse.cols,
+        col_ptrs,
+        row_indices,
+        values,
+        dtype,
+        builtin,
+    )
 }
 
 fn sparse_dense(
@@ -568,6 +726,7 @@ fn sparse_dense(
     dense: &Tensor,
     op: SparseBinaryOp,
     sparse_is_lhs: bool,
+    dtype: NumericDType,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
     let sparse_shape = sparse_shape(sparse);
@@ -584,6 +743,7 @@ fn sparse_dense(
             &output_shape,
             |a, b| a + b,
             sparse_is_lhs,
+            dtype,
             builtin,
         ),
         SparseBinaryOp::Sub => sparse_dense_full(
@@ -592,6 +752,7 @@ fn sparse_dense(
             &output_shape,
             |a, b| a - b,
             sparse_is_lhs,
+            dtype,
             builtin,
         ),
         SparseBinaryOp::Mul => {
@@ -603,10 +764,11 @@ fn sparse_dense(
                         &output_shape,
                         |a, b| a * b,
                         sparse_is_lhs,
+                        dtype,
                         builtin,
                     )
                 } else {
-                    sparse_dense_times_preserve_sparse(sparse, dense, sparse_is_lhs, builtin)
+                    sparse_dense_times_preserve_sparse(sparse, dense, sparse_is_lhs, dtype, builtin)
                 }
             } else {
                 sparse_dense_full(
@@ -615,6 +777,7 @@ fn sparse_dense(
                     &output_shape,
                     |a, b| a * b,
                     sparse_is_lhs,
+                    dtype,
                     builtin,
                 )
             }
@@ -628,6 +791,7 @@ fn sparse_dense_full(
     output_shape: &[usize],
     combine: impl Fn(f64, f64) -> f64,
     sparse_is_lhs: bool,
+    dtype: NumericDType,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
     checked_len(output_shape, builtin)?;
@@ -649,9 +813,7 @@ fn sparse_dense_full(
             combine(dense_value, sparse_value)
         };
     }
-    Tensor::new(out, output_shape.to_vec())
-        .map(Value::Tensor)
-        .map_err(|err| map_internal_error(builtin, err))
+    dense_from_f64_values(out, output_shape.to_vec(), dtype, builtin)
 }
 
 fn sparse_has_implicit_zeros(sparse: &SparseTensor) -> bool {
@@ -693,6 +855,7 @@ fn sparse_dense_times_preserve_sparse(
     sparse: &SparseTensor,
     dense: &Tensor,
     _sparse_is_lhs: bool,
+    dtype: NumericDType,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
     let dense_values = tensor::tensor_values_f64_cow(dense);
@@ -713,9 +876,15 @@ fn sparse_dense_times_preserve_sparse(
         }
         col_ptrs.push(values.len());
     }
-    SparseTensor::new(sparse.rows, sparse.cols, col_ptrs, row_indices, values)
-        .map(Value::SparseTensor)
-        .map_err(|err| map_internal_error(builtin, err))
+    sparse_from_f64_values(
+        sparse.rows,
+        sparse.cols,
+        col_ptrs,
+        row_indices,
+        values,
+        dtype,
+        builtin,
+    )
 }
 
 fn dense_index_for_sparse_position(dense: &Tensor, row: usize, col: usize) -> usize {
@@ -731,6 +900,10 @@ fn sparse_complex(
     sparse_is_lhs: bool,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
+    let dtype = combined_floating_dtype(
+        floating_dtype(sparse.numeric_dtype()),
+        floating_dtype(complex.numeric_dtype()),
+    );
     let sparse_shape = sparse_shape(sparse);
     let output_shape = checked_broadcast_shape(
         &sparse_shape,
@@ -755,8 +928,8 @@ fn sparse_complex(
             apply_complex_real_op((cr, ci), sparse_value, op)
         };
     }
-    let tensor =
-        ComplexTensor::new(out, output_shape).map_err(|err| map_internal_error(builtin, err))?;
+    let tensor = ComplexTensor::from_f64_values_with_dtype(out, output_shape, dtype)
+        .map_err(|err| map_internal_error(builtin, err))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
@@ -814,9 +987,12 @@ pub(crate) fn map_sparse_real_values(
         for value in &mut out {
             *value = map(*value)?;
         }
-        return Tensor::new(out, dense.shape)
-            .map(Value::Tensor)
-            .map_err(|err| map_internal_error(builtin, err));
+        return dense_from_f64_values(
+            out,
+            dense.shape,
+            floating_dtype(sparse.numeric_dtype()),
+            builtin,
+        );
     }
 
     let stored_values = sparse.materialize_f64();
@@ -834,9 +1010,15 @@ pub(crate) fn map_sparse_real_values(
         }
         col_ptrs.push(values.len());
     }
-    SparseTensor::new(sparse.rows, sparse.cols, col_ptrs, row_indices, values)
-        .map(Value::SparseTensor)
-        .map_err(|err| map_internal_error(builtin, err))
+    sparse_from_f64_values(
+        sparse.rows,
+        sparse.cols,
+        col_ptrs,
+        row_indices,
+        values,
+        floating_dtype(sparse.numeric_dtype()),
+        builtin,
+    )
 }
 
 #[cfg(test)]
@@ -876,6 +1058,105 @@ mod tests {
             Value::ComplexTensor(tensor) => tensor,
             other => panic!("expected complex tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn native_single_sparse_arithmetic_preserves_single_dominance() {
+        let single = SparseTensor::new_f32(2, 2, vec![0, 1, 2], vec![0, 1], vec![1.0 / 3.0, 2.0])
+            .expect("single sparse");
+        let double =
+            SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![0.5, 4.0]).expect("double");
+
+        let sum = expect_sparse(
+            sparse_binary(
+                &Value::SparseTensor(single.clone()),
+                &Value::SparseTensor(double),
+                SparseBinaryOp::Add,
+                "plus",
+            )
+            .expect("mixed sparse sum"),
+        );
+        assert_eq!(sum.numeric_dtype(), NumericDType::F32);
+        assert_eq!(
+            sum.as_f32_slice(),
+            Some(&[((1.0f32 / 3.0) as f64 + 0.5) as f32, 6.0][..])
+        );
+
+        let dense_single = Tensor::from_f32(vec![3.0, 4.0, 5.0, 6.0], vec![2, 2]).unwrap();
+        let product = expect_sparse(
+            sparse_binary(
+                &Value::SparseTensor(
+                    SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![2.0, 3.0]).unwrap(),
+                ),
+                &Value::Tensor(dense_single),
+                SparseBinaryOp::Mul,
+                "times",
+            )
+            .expect("sparse dense product"),
+        );
+        assert_eq!(product.numeric_dtype(), NumericDType::F32);
+        assert_eq!(product.as_f32_slice(), Some(&[6.0, 18.0][..]));
+
+        let single_zero = Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap();
+        let promoted_identity = expect_sparse(
+            sparse_binary(
+                &Value::SparseTensor(
+                    SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![2.0, 3.0]).unwrap(),
+                ),
+                &Value::Tensor(single_zero),
+                SparseBinaryOp::Add,
+                "plus",
+            )
+            .expect("sparse single-zero sum"),
+        );
+        assert_eq!(promoted_identity.numeric_dtype(), NumericDType::F32);
+        assert_eq!(promoted_identity.as_f32_slice(), Some(&[2.0, 3.0][..]));
+
+        let dense_sum = expect_tensor(
+            sparse_binary(
+                &Value::SparseTensor(single.clone()),
+                &Value::Num(1.0),
+                SparseBinaryOp::Add,
+                "plus",
+            )
+            .expect("single sparse scalar sum"),
+        );
+        assert_eq!(dense_sum.numeric_dtype(), NumericDType::F32);
+        assert_eq!(
+            dense_sum.as_f32_slice(),
+            Some(&[1.0f32 / 3.0 + 1.0, 1.0, 1.0, 3.0][..])
+        );
+
+        let zero = expect_sparse(
+            sparse_binary(
+                &Value::SparseTensor(single),
+                &Value::Num(0.0),
+                SparseBinaryOp::Mul,
+                "times",
+            )
+            .expect("single sparse zero product"),
+        );
+        assert_eq!(zero.numeric_dtype(), NumericDType::F32);
+        assert_eq!(zero.as_f32_slice(), Some(&[][..]));
+    }
+
+    #[test]
+    fn sparse_complex_arithmetic_preserves_single_dominance() {
+        let sparse =
+            SparseTensor::new(2, 1, vec![0, 1], vec![0], vec![2.0]).expect("double sparse");
+        let complex =
+            ComplexTensor::from_f32(vec![(1.0, 0.5), (2.0, -1.0)], vec![2, 1]).expect("single");
+        let output = expect_complex(
+            sparse_binary(
+                &Value::SparseTensor(sparse),
+                &Value::ComplexTensor(complex),
+                SparseBinaryOp::Add,
+                "plus",
+            )
+            .expect("sparse complex sum"),
+        );
+        assert_eq!(output.numeric_dtype(), NumericDType::F32);
+        assert_eq!(output.as_f32_slice(), Some(&[(3.0, 0.5), (2.0, -1.0)][..]));
     }
 
     fn double_values(tensor: &Tensor) -> &[f64] {
