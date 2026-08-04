@@ -32,6 +32,7 @@ struct FakeState {
     downloads: BTreeMap<String, Vec<u8>>,
     stored: Vec<(String, DriverArtifactKind, Vec<u8>)>,
     transitions: Vec<(DriverRunTarget, Option<String>)>,
+    usage: Vec<u64>,
 }
 
 struct FakeControl {
@@ -55,6 +56,15 @@ impl DriverControlPlane for FakeControl {
             cancellation_requested: false,
             expires_at_millis: i64::MAX,
         })
+    }
+
+    async fn record_usage(
+        &self,
+        _authority: &DriverAuthority,
+        source_sequence: u64,
+    ) -> TransportResult<bool> {
+        self.state.lock().unwrap().usage.push(source_sequence);
+        Ok(true)
     }
 
     async fn download(&self, artifact: &DriverArtifactDownload) -> TransportResult<Vec<u8>> {
@@ -208,16 +218,9 @@ async fn remote_driver_executes_exact_encrypted_program_and_commits_once() {
             artifacts: downloads.clone(),
             checkpoint: None,
             cancellation_requested: false,
+            driver_resources: resource_request(),
             desired_worker_count: 0,
-            worker_resources: runmat_execution_transport_native::control::ResourceRequest {
-                cpu_millicores: 1_000,
-                memory_bytes: 1 << 30,
-                scratch_bytes: 1 << 30,
-                accelerator_count: 0,
-                accelerator_class: None,
-                accelerator_memory_bytes: 0,
-                maximum_wall_millis: 60_000,
-            },
+            worker_resources: resource_request(),
         },
         state: Mutex::new(FakeState {
             downloads: downloads
@@ -252,6 +255,8 @@ async fn remote_driver_executes_exact_encrypted_program_and_commits_once() {
             (DriverRunTarget::Succeeded, Some("stored-3".into()))
         ]
     );
+    assert_eq!(state.usage.len(), 1);
+    assert_eq!(state.usage[0], 1);
     assert_eq!(state.stored.len(), 3);
     assert_eq!(state.stored[0].1, DriverArtifactKind::Checkpoint);
     assert_eq!(state.stored[1].1, DriverArtifactKind::Checkpoint);
@@ -267,6 +272,18 @@ async fn remote_driver_executes_exact_encrypted_program_and_commits_once() {
         serde_json::from_slice::<ProgramExecutionResponse>(&result).unwrap(),
         ProgramExecutionResponse::Success { .. }
     ));
+}
+
+fn resource_request() -> runmat_execution_transport_native::control::ResourceRequest {
+    runmat_execution_transport_native::control::ResourceRequest {
+        cpu_millicores: 1_000,
+        memory_bytes: 1 << 30,
+        scratch_bytes: 1 << 30,
+        accelerator_count: 0,
+        accelerator_class: None,
+        accelerator_memory_bytes: 0,
+        maximum_wall_millis: 60_000,
+    }
 }
 
 fn revision() -> ProgramRevision {

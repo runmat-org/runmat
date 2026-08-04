@@ -486,6 +486,62 @@ paths:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
       security: []
+  /v1/execution/drivers/{driverLeaseId}/usage:
+    post:
+      tags:
+      - Execution
+      operationId: record_driver_usage
+      parameters:
+      - name: fencingToken
+        in: query
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: X-RunMat-Driver-Credential
+        in: header
+        description: Scoped driver credential
+        required: true
+        schema:
+          type: string
+      - name: driverLeaseId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DriverUsageRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriverUsageResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security: []
   /v1/execution/drivers/{driverLeaseId}/workers:
     get:
       tags:
@@ -4214,6 +4270,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/execution/runs/{runId}/usage:
+    get:
+      tags:
+      - Execution
+      operationId: get_run_usage
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: runId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunUsageResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
   /v1/projects/{projectId}/execution/transfers/{transferId}:
     get:
       tags:
@@ -6823,6 +6914,7 @@ components:
       - runKeyEnvelope
       - artifacts
       - cancellationRequested
+      - driverResources
       - desiredWorkerCount
       - workerResources
       - relayPath
@@ -6846,6 +6938,8 @@ components:
           minimum: 0
         driverLeaseId:
           type: string
+        driverResources:
+          $ref: '#/components/schemas/ResourceRequestBody'
         endpointFingerprint:
           type: string
         fencingToken:
@@ -6894,6 +6988,23 @@ components:
       - failed
       - cancelled
       - indeterminate
+    DriverUsageRequest:
+      type: object
+      required:
+      - sourceSequence
+      properties:
+        sourceSequence:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+    DriverUsageResponse:
+      type: object
+      required:
+      - accepted
+      properties:
+        accepted:
+          type: boolean
     DriverWorkerAllocationResponse:
       type: object
       required:
@@ -7098,6 +7209,49 @@ components:
       - customer-trusted
       - hosted-ordinary
       - attested-confidential
+    ExecutionUsageBody:
+      type: object
+      required:
+      - cpuCoreMillis
+      - memoryByteMillis
+      - acceleratorMillis
+      - wallMillis
+      - retainedByteMillis
+      - egressBytes
+      - relayBytes
+      properties:
+        acceleratorClass:
+          type: string
+          nullable: true
+        acceleratorMillis:
+          type: integer
+          format: int64
+          minimum: 0
+        cpuCoreMillis:
+          type: integer
+          format: int64
+          minimum: 0
+        egressBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        memoryByteMillis:
+          type: integer
+          format: int64
+          minimum: 0
+        relayBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        retainedByteMillis:
+          type: integer
+          format: int64
+          minimum: 0
+        wallMillis:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
     FinalizePublicationResponse:
       type: object
       required:
@@ -10274,6 +10428,8 @@ components:
       - resources
       - workerCount
       - workerResources
+      - billingState
+      - reservedMicrousd
       - state
       - version
       - createdAt
@@ -10282,6 +10438,8 @@ components:
         allocationLeaseId:
           type: string
           nullable: true
+        billingState:
+          type: string
         bundleArtifactId:
           type: string
           nullable: true
@@ -10310,6 +10468,9 @@ components:
           nullable: true
         orgId:
           type: string
+        pricingVersion:
+          type: string
+          nullable: true
         programArtifactId:
           type: string
           nullable: true
@@ -10322,11 +10483,20 @@ components:
         reasonCode:
           type: string
           nullable: true
+        reservedMicrousd:
+          type: integer
+          format: int64
+          minimum: 0
         resources:
           $ref: '#/components/schemas/ResourceRequestBody'
         resultArtifactId:
           type: string
           nullable: true
+        settledMicrousd:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
         state:
           type: string
         terminalAt:
@@ -10349,6 +10519,29 @@ components:
           minimum: 0
         workerResources:
           $ref: '#/components/schemas/ResourceRequestBody'
+    RunUsageResponse:
+      type: object
+      required:
+      - runId
+      - reservedMicrousd
+      - usage
+      properties:
+        pricingVersion:
+          type: string
+          nullable: true
+        reservedMicrousd:
+          type: integer
+          format: int64
+          minimum: 0
+        runId:
+          type: string
+        settledMicrousd:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        usage:
+          $ref: '#/components/schemas/ExecutionUsageBody'
     SecurityPolicyRequest:
       type: object
       required:

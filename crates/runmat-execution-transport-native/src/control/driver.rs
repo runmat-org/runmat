@@ -55,6 +55,7 @@ pub struct DriverBootstrap {
     pub artifacts: Vec<DriverArtifactDownload>,
     pub checkpoint: Option<DriverArtifactDownload>,
     pub cancellation_requested: bool,
+    pub driver_resources: ResourceRequest,
     pub desired_worker_count: u32,
     pub worker_resources: ResourceRequest,
 }
@@ -121,6 +122,11 @@ pub trait DriverControlPlane: Send + Sync {
         authority: &DriverAuthority,
         ttl_seconds: u64,
     ) -> TransportResult<DriverHeartbeat>;
+    async fn record_usage(
+        &self,
+        authority: &DriverAuthority,
+        source_sequence: u64,
+    ) -> TransportResult<bool>;
     async fn download(&self, artifact: &DriverArtifactDownload) -> TransportResult<Vec<u8>>;
     async fn store_artifact(
         &self,
@@ -224,6 +230,7 @@ impl DriverControlPlane for HttpDriverControlPlane {
                 .collect::<TransportResult<_>>()?,
             checkpoint: response.checkpoint.map(download_from_api).transpose()?,
             cancellation_requested: response.cancellation_requested,
+            driver_resources: worker_pool::resource_from_api(response.driver_resources)?,
             desired_worker_count: u32::try_from(response.desired_worker_count)
                 .map_err(|_| TransportError::Overflow)?,
             worker_resources: ResourceRequest {
@@ -239,6 +246,27 @@ impl DriverControlPlane for HttpDriverControlPlane {
                 maximum_wall_millis: to_u64(response.worker_resources.maximum_wall_millis)?,
             },
         })
+    }
+
+    async fn record_usage(
+        &self,
+        authority: &DriverAuthority,
+        source_sequence: u64,
+    ) -> TransportResult<bool> {
+        let response = self
+            .client
+            .record_driver_usage(
+                &authority.driver_lease_id,
+                to_i64(authority.fencing_token)?,
+                &authority.credential,
+                &types::DriverUsageRequest {
+                    source_sequence: to_i64(source_sequence)?,
+                },
+            )
+            .await
+            .map_err(map_error)?
+            .into_inner();
+        Ok(response.accepted)
     }
 
     async fn heartbeat(

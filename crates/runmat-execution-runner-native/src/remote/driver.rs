@@ -163,6 +163,7 @@ pub(super) async fn run_remote_driver(
     )
     .await?;
 
+    let mut usage_sequence = 0_u64;
     let (cancellation_sender, cancellation_receiver) = tokio::sync::watch::channel(false);
     let uses_remote_pool = bootstrap.desired_worker_count > 0;
     let execution = async {
@@ -195,6 +196,11 @@ pub(super) async fn run_remote_driver(
                         break response;
                     }
                     super::pool_execution::RemotePoolExecutionOutcome::Cancelled => {
+                        report_usage(
+                            control.as_ref(),
+                            &config,
+                            &mut usage_sequence,
+                        ).await?;
                         transition(
                             control.as_ref(),
                             &config,
@@ -216,6 +222,11 @@ pub(super) async fn run_remote_driver(
                             None,
                         )
                         .await?;
+                        report_usage(
+                            control.as_ref(),
+                            &config,
+                            &mut usage_sequence,
+                        ).await?;
                         transition(
                             control.as_ref(),
                             &config,
@@ -229,6 +240,11 @@ pub(super) async fn run_remote_driver(
                 }
             },
             _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                report_usage(
+                    control.as_ref(),
+                    &config,
+                    &mut usage_sequence,
+                ).await?;
                 let heartbeat = control
                     .heartbeat(&config.authority, 60)
                     .await
@@ -238,6 +254,11 @@ pub(super) async fn run_remote_driver(
                         cancellation_sender.send_replace(true);
                         continue;
                     }
+                    report_usage(
+                        control.as_ref(),
+                        &config,
+                        &mut usage_sequence,
+                    ).await?;
                     transition(
                         control.as_ref(),
                         &config,
@@ -251,7 +272,23 @@ pub(super) async fn run_remote_driver(
             }
         }
     };
+    report_usage(control.as_ref(), &config, &mut usage_sequence).await?;
     commit_response(control.as_ref(), &config, &run_key, response).await
+}
+
+async fn report_usage(
+    control: &dyn DriverControlPlane,
+    config: &RemoteDriverConfig,
+    sequence: &mut u64,
+) -> NativeExecutionResult<()> {
+    *sequence = sequence
+        .checked_add(1)
+        .ok_or_else(|| protocol("remote usage sequence overflow"))?;
+    control
+        .record_usage(&config.authority, *sequence)
+        .await
+        .map_err(protocol)?;
+    Ok(())
 }
 
 async fn commit_response(
