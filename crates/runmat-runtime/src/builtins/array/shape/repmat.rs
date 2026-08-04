@@ -15,8 +15,8 @@ use runmat_builtins::ResolveContext;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
-    LogicalArray, NumericScalar, NumericStorage, StringArray, Tensor, Type, Value,
+    CellArray, CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericScalar,
+    NumericStorage, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -561,41 +561,14 @@ fn repmat_complex_tensor(
     tensor: &ComplexTensor,
     reps: &[usize],
 ) -> crate::BuiltinResult<ComplexTensor> {
-    if let Some(storage) = &tensor.integer_storage() {
-        let (real, shape) = repmat_integer_storage(&storage.real, &tensor.shape, reps)?;
-        let (imag, imag_shape) = repmat_integer_storage(&storage.imag, &tensor.shape, reps)?;
-        debug_assert_eq!(shape, imag_shape);
-        return IntegerComplexStorage::new(real, imag)
-            .and_then(|storage| ComplexTensor::new_integer(storage, shape))
-            .map_err(|e| repmat_internal(format!("repmat: {e}")));
-    }
-    let (data, shape) =
-        repmat_column_major(&tensor.materialize_f64(), &tensor.shape, reps, "repmat")?;
-    ComplexTensor::new(data, shape).map_err(|e| repmat_internal(format!("repmat: {e}")))
-}
-
-fn repmat_integer_storage(
-    storage: &IntegerStorage,
-    shape: &[usize],
-    reps: &[usize],
-) -> crate::BuiltinResult<(IntegerStorage, Vec<usize>)> {
-    macro_rules! tile_storage {
-        ($values:expr, $variant:ident) => {{
-            let (values, shape) = repmat_column_major($values, shape, reps, "repmat")?;
-            Ok((IntegerStorage::$variant(values), shape))
-        }};
-    }
-
-    match storage {
-        IntegerStorage::I8(values) => tile_storage!(values, I8),
-        IntegerStorage::I16(values) => tile_storage!(values, I16),
-        IntegerStorage::I32(values) => tile_storage!(values, I32),
-        IntegerStorage::I64(values) => tile_storage!(values, I64),
-        IntegerStorage::U8(values) => tile_storage!(values, U8),
-        IntegerStorage::U16(values) => tile_storage!(values, U16),
-        IntegerStorage::U32(values) => tile_storage!(values, U32),
-        IntegerStorage::U64(values) => tile_storage!(values, U64),
-    }
+    let indices = (0..tensor.len()).collect::<Vec<_>>();
+    let (indices, shape) = repmat_column_major(&indices, &tensor.shape, reps, "repmat")?;
+    let storage = tensor
+        .complex_storage()
+        .gather(&indices)
+        .map_err(|e| repmat_internal(format!("repmat: {e}")))?;
+    ComplexTensor::from_complex_storage(storage, shape)
+        .map_err(|e| repmat_internal(format!("repmat: {e}")))
 }
 
 fn repmat_numeric_storage(
@@ -834,7 +807,9 @@ pub(crate) mod tests {
     use runmat_accelerate_api::{
         HostIntegerDataView, HostIntegerTensorView, HostTensorView, IntegerElementType,
     };
-    use runmat_builtins::{IntValue, IntegerStorage, NumericStorage, Tensor};
+    use runmat_builtins::{
+        IntValue, IntegerComplexStorage, IntegerStorage, NumericStorage, Tensor,
+    };
 
     #[test]
     fn repmat_type_preserves_logical_kind() {

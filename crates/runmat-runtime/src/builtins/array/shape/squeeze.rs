@@ -203,11 +203,7 @@ fn squeeze_complex_tensor(ct: ComplexTensor) -> crate::BuiltinResult<ComplexTens
     if shape == ct.shape {
         return Ok(ct);
     }
-    if let Some(storage) = ct.integer_storage() {
-        return ComplexTensor::new_integer(storage.clone(), shape)
-            .map_err(|e| squeeze_error(format!("squeeze: {e}")));
-    }
-    ComplexTensor::new(ct.materialize_f64(), shape)
+    ComplexTensor::from_complex_storage(ct.into_complex_storage(), shape)
         .map_err(|e| squeeze_error(format!("squeeze: {e}")))
 }
 

@@ -528,17 +528,14 @@ pub(crate) fn flip_complex_tensor_with(
     if tensor::complex_tensor_element_len(&tensor) == 0 || dims.is_empty() {
         return Ok(tensor);
     }
-    if let Some(storage) = tensor.integer_storage() {
-        let storage = storage
-            .reorder(|values| {
-                flip_generic(values, &tensor.shape, dims, builtin).map_err(|e| e.to_string())
-            })
-            .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))?;
-        return ComplexTensor::new_integer(storage, tensor.shape.clone())
-            .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")));
-    }
-    let data = flip_generic(&tensor.materialize_f64(), &tensor.shape, dims, builtin)?;
-    ComplexTensor::new(data, tensor.shape.clone())
+    let shape = tensor.shape.clone();
+    let indices = (0..tensor.len()).collect::<Vec<_>>();
+    let indices = flip_generic(&indices, &shape, dims, builtin)?;
+    let storage = tensor
+        .into_complex_storage()
+        .gather(&indices)
+        .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))?;
+    ComplexTensor::from_complex_storage(storage, shape)
         .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))
 }
 

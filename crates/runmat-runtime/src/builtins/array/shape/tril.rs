@@ -506,7 +506,9 @@ pub(crate) mod tests {
         block_on(super::tril_builtin(value, rest))
     }
     use crate::builtins::common::test_support;
-    use runmat_accelerate_api::HostTensorView;
+    use runmat_accelerate_api::{
+        HostIntegerDataView, HostIntegerTensorView, HostTensorView, IntegerElementType,
+    };
     use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, Type};
 
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
@@ -523,6 +525,39 @@ pub(crate) mod tests {
         let err = scalar_to_isize(&Value::Int(IntValue::U64(u64::MAX)), "tril")
             .expect_err("unrepresentable typed offset must not saturate");
         assert_eq!(err.identifier(), TRIL_ERROR_INVALID_OFFSET.identifier);
+    }
+
+    #[test]
+    fn tril_gpu_integer_fallback_preserves_exact_storage_resident() {
+        test_support::with_test_provider(|provider| {
+            let values = [u64::MAX, 9_007_199_254_740_993, 7_u64, 0_u64];
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&values),
+                    shape: &[2, 2],
+                })
+                .expect("upload integer");
+            let Value::GpuTensor(result) =
+                tril_builtin(Value::GpuTensor(handle), Vec::new()).expect("tril integer gpu")
+            else {
+                panic!("expected resident gpuArray");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&result),
+                Some(IntegerElementType::U64)
+            );
+            let gathered = block_on(gpu_helpers::gather_tensor_async(&result)).expect("gather");
+            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![
+                    u64::MAX,
+                    9_007_199_254_740_993,
+                    0,
+                    0,
+                ]))
+            );
+        });
     }
 
     #[test]

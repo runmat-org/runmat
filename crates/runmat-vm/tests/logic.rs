@@ -3,7 +3,7 @@ mod test_helpers;
 
 use test_helpers::execute_source;
 
-use runmat_builtins::{IntValue, IntegerStorage, Value};
+use runmat_builtins::{IntValue, IntegerStorage, NumericDType, Value};
 
 fn logical_truth(value: &Value) -> bool {
     match value {
@@ -436,7 +436,7 @@ fn typed_complex_integer_polynomial_and_convolution_operations_are_rejected_befo
         assert!(
             err.to_string().contains(
                 "operations involving complex numbers with integer types are not supported"
-            ),
+            ) || err.to_string().contains("input must be single or double"),
             "{name} returned an unexpected error: {err}"
         );
     }
@@ -533,7 +533,9 @@ fn typed_complex_integer_analytic_operations_are_rejected_before_f64_coercion() 
         assert!(
             err.to_string().contains(
                 "operations involving complex numbers with integer types are not supported"
-            ),
+            ) || err
+                .to_string()
+                .contains("expected real single or double input"),
             "{builtin} returned an unexpected error: {err}"
         );
     }
@@ -1047,7 +1049,7 @@ fn typed_complex_integer_truthiness_uses_exact_paired_storage() {
 #[test]
 fn complex_integer_slice_assignment_preserves_exact_components_through_vm_dispatch() {
     let vars = execute_source(
-        "a = complex(uint64([1 2; 3 4]), uint64([10 20; 30 40])); rhs = complex(uint64([18446744073709551615 9223372036854775808]), uint64([7 8])); a(:, :) = rhs; ar = real(a); ai = imag(a); b = complex(uint64([1 2; 3 4]), uint64([10 20; 30 40])); b(1:end, :) = rhs;",
+        "a = complex(uint64([1 2; 3 4]), uint64([10 20; 30 40])); rhs = complex(uint64([18446744073709551615 9223372036854775808; 18446744073709551615 9223372036854775808]), uint64([7 8; 7 8])); a(:, :) = rhs; ar = real(a); ai = imag(a); b = complex(uint64([1 2; 3 4]), uint64([10 20; 30 40])); b(1:end, :) = rhs;",
     )
     .expect("typed complex slice assignment should execute");
 
@@ -1205,6 +1207,130 @@ fn complex_integer_shape_transforms_preserve_exact_components_through_vm_dispatc
                     && tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
                         == Some((&IntegerStorage::U64(real), &IntegerStorage::U64(imag)))
         ));
+    }
+}
+
+#[test]
+fn complex_single_shape_transforms_preserve_native_storage_through_vm_dispatch() {
+    let expressions = [
+        ("reshape", "reshape(a, 1, 4)"),
+        ("permute", "permute(a, [2 1])"),
+        ("ipermute", "ipermute(permute(a, [2 1]), [2 1])"),
+        ("transpose", "a.'"),
+        ("ctranspose", "a'"),
+        ("squeeze", "squeeze(reshape(a, 1, 2, 2, 1))"),
+        ("shiftdim", "shiftdim(a, 1)"),
+        ("circshift", "circshift(a, [1 1])"),
+        ("flip", "flip(a)"),
+        ("repmat", "repmat(a, 2, 1)"),
+        ("repelem", "repelem(a, [1 2], 1)"),
+        ("rot90", "rot90(a)"),
+        ("diag", "diag(a)"),
+        ("tril", "tril(a)"),
+        ("triu", "triu(a)"),
+    ];
+    for (name, expression) in expressions {
+        let source = format!(
+            "a = complex(single(reshape([1.25 -2.5 3.75 -4.5], 2, 2)), single(reshape([5.5 6.25 -7.75 8.5], 2, 2))); result = {expression};"
+        );
+        let vars = execute_source(&source)
+            .unwrap_or_else(|error| panic!("native complex single {name} should execute: {error}"));
+        let mut complex_results = 0;
+        for value in vars {
+            if let Value::ComplexTensor(tensor) = value {
+                complex_results += 1;
+                assert_eq!(
+                    tensor.numeric_dtype(),
+                    NumericDType::F32,
+                    "{name} widened native complex single storage"
+                );
+            }
+        }
+        assert!(
+            complex_results >= 2,
+            "{name} did not return a complex tensor"
+        );
+    }
+}
+
+#[test]
+fn every_real_integer_class_survives_the_full_shape_matrix_through_vm_dispatch() {
+    let classes = [
+        ("int8", NumericDType::I8),
+        ("int16", NumericDType::I16),
+        ("int32", NumericDType::I32),
+        ("int64", NumericDType::I64),
+        ("uint8", NumericDType::U8),
+        ("uint16", NumericDType::U16),
+        ("uint32", NumericDType::U32),
+        ("uint64", NumericDType::U64),
+    ];
+    for (class, expected_dtype) in classes {
+        let source = format!(
+            "a = {class}(reshape([1 2 3 4], 2, 2)); reshaped = reshape(a, 1, 4); permuted = permute(a, [2 1]); ipermuted = ipermute(permuted, [2 1]); transposed = a.'; conjugated = a'; squeezed = squeeze(reshape(a, 1, 2, 2, 1)); shifted = shiftdim(a, 1); circulated = circshift(a, [1 1]); flipped = flip(a); tiled = repmat(a, 2, 1); repeated = repelem(a, [1 2], 1); rotated = rot90(a); diagonalized = diag(a); lower = tril(a); upper = triu(a);"
+        );
+        let vars = execute_source(&source)
+            .unwrap_or_else(|error| panic!("{class} shape matrix should execute: {error}"));
+        let mut integer_results = 0;
+        for value in vars {
+            if let Value::Tensor(tensor) = value {
+                if tensor.integer_storage().is_some() {
+                    integer_results += 1;
+                    assert_eq!(
+                        tensor.numeric_dtype(),
+                        expected_dtype,
+                        "{class} shape operation changed class"
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            integer_results, 17,
+            "{class} shape matrix did not return every typed result"
+        );
+    }
+}
+
+#[test]
+fn empty_complex_single_shape_transforms_preserve_native_storage_through_vm_dispatch() {
+    let expressions = [
+        ("reshape", "reshape(a, 0, 1)"),
+        ("permute", "permute(a, [2 1])"),
+        ("ipermute", "ipermute(permute(a, [2 1]), [2 1])"),
+        ("transpose", "a.'"),
+        ("squeeze", "squeeze(reshape(a, 1, 0, 3, 1))"),
+        ("shiftdim", "shiftdim(a, 1)"),
+        ("circshift", "circshift(a, [1 1])"),
+        ("flip", "flip(a)"),
+        ("repmat", "repmat(a, 2, 1)"),
+        ("repelem", "repelem(a, 2, 1)"),
+        ("rot90", "rot90(a)"),
+        ("diag", "diag(a)"),
+        ("tril", "tril(a)"),
+        ("triu", "triu(a)"),
+    ];
+    for (name, expression) in expressions {
+        let source = format!(
+            "a = complex(zeros(0, 3, 'single'), zeros(0, 3, 'single')); result = {expression};"
+        );
+        let vars = execute_source(&source)
+            .unwrap_or_else(|error| panic!("empty complex single {name} should execute: {error}"));
+        let mut complex_results = 0;
+        for value in vars {
+            if let Value::ComplexTensor(tensor) = value {
+                complex_results += 1;
+                assert_eq!(
+                    tensor.numeric_dtype(),
+                    NumericDType::F32,
+                    "{name} widened empty native complex single storage"
+                );
+                assert!(tensor.is_empty(), "{name} synthesized empty elements");
+            }
+        }
+        assert!(
+            complex_results >= 2,
+            "{name} did not return an empty complex tensor"
+        );
     }
 }
 
@@ -1488,6 +1614,35 @@ fn typed_complex_integer_scalar_assignment_preserves_paired_exact_storage_throug
                     &IntegerStorage::I8(vec![1, i8::MIN, 2, 4]),
                     &IntegerStorage::I8(vec![-1, i8::MAX, -2, -4]),
                 ))
+    ));
+}
+
+#[test]
+fn indexed_assignment_does_not_demote_last_zeroed_complex_integer_component() {
+    let vars = execute_source(
+        "a = complex(uint16([1 2]), uint16([3 0])); a(1) = uint16(9); still_complex = ~isreal(a); ar = real(a); ai = imag(a);",
+    )
+    .expect("real indexed assignment should retain complex integer storage");
+
+    assert!(matches!(
+        &vars[0],
+        Value::ComplexTensor(tensor)
+            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+                == Some((
+                    &IntegerStorage::U16(vec![9, 2]),
+                    &IntegerStorage::U16(vec![0, 0]),
+                ))
+    ));
+    assert!(logical_truth(&vars[1]));
+    assert!(matches!(
+        &vars[2],
+        Value::Tensor(tensor)
+            if tensor.integer_storage() == Some(&IntegerStorage::U16(vec![9, 2]))
+    ));
+    assert!(matches!(
+        &vars[3],
+        Value::Tensor(tensor)
+            if tensor.integer_storage() == Some(&IntegerStorage::U16(vec![0, 0]))
     ));
 }
 

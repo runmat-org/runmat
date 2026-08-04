@@ -257,12 +257,7 @@ fn reshape_value(value: Value, dims: &[usize]) -> crate::BuiltinResult<Value> {
                 .map_err(|e| reshape_error(format!("reshape: {e}")))
         }
         Value::ComplexTensor(ct) => {
-            if let Some(storage) = ct.integer_storage() {
-                return ComplexTensor::new_integer(storage.clone(), dims.to_vec())
-                    .map(Value::ComplexTensor)
-                    .map_err(|e| reshape_error(format!("reshape: {e}")));
-            }
-            ComplexTensor::new(ct.materialize_f64(), dims.to_vec())
+            ComplexTensor::from_complex_storage(ct.into_complex_storage(), dims.to_vec())
                 .map(Value::ComplexTensor)
                 .map_err(|e| reshape_error(format!("reshape: {e}")))
         }

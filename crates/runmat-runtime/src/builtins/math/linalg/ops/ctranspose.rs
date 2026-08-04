@@ -20,7 +20,7 @@ use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, HostTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
+    CellArray, CharArray, ComplexStorage, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -220,20 +220,13 @@ fn ctranspose_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     }
     ensure_vector_or_matrix_shape(&ct.shape)?;
     let rank = ct.shape.len();
-    if rank == 0 {
-        return ctranspose_complex_tensor_value(ct);
-    }
-    if rank <= 2 {
-        let data = ctranspose_complex_matrix(&ct);
-        let shape = vec![ct.cols, ct.rows];
-        let transposed = ComplexTensor::new(data, shape.clone())
-            .map_err(|e| internal_error(format!("{NAME}: {e}")))?;
-        ctranspose_complex_tensor_value(transposed)
+    let transposed = if rank == 0 {
+        ct
     } else {
         let order = ctranspose_order(rank);
-        let permuted = permute_complex_tensor(NAME, ct, &order)?;
-        ctranspose_complex_tensor_value(permuted)
-    }
+        permute_complex_tensor(NAME, ct, &order)?
+    };
+    ctranspose_complex_tensor_value(transposed)
 }
 
 fn ctranspose_complex_tensor_preserve_complex(ct: ComplexTensor) -> BuiltinResult<ComplexTensor> {
@@ -241,44 +234,80 @@ fn ctranspose_complex_tensor_preserve_complex(ct: ComplexTensor) -> BuiltinResul
     let rank = ct.shape.len();
     let transposed = if rank == 0 {
         ct
-    } else if rank <= 2 {
-        let data = ctranspose_complex_matrix(&ct);
-        ComplexTensor::new(data, vec![ct.cols, ct.rows])
-            .map_err(|e| internal_error(format!("{NAME}: {e}")))?
     } else {
         let order = ctranspose_order(rank);
         permute_complex_tensor(NAME, ct, &order)?
     };
     let shape = transposed.shape.clone();
-    let data = transposed
-        .materialize_f64()
-        .into_iter()
-        .map(|(re, im)| (re, -im))
-        .collect();
-    ComplexTensor::new(data, shape).map_err(|e| internal_error(format!("{NAME}: {e}")))
+    let storage = match transposed.into_complex_storage() {
+        ComplexStorage::F64(values) => {
+            ComplexStorage::F64(values.into_iter().map(|(re, im)| (re, -im)).collect())
+        }
+        ComplexStorage::F32(values) => {
+            ComplexStorage::F32(values.into_iter().map(|(re, im)| (re, -im)).collect())
+        }
+        ComplexStorage::Integer(_) => {
+            return Err(invalid_input(
+                "ctranspose: complex integer input is not supported",
+            ));
+        }
+    };
+    ComplexTensor::from_complex_storage(storage, shape)
+        .map_err(|e| internal_error(format!("{NAME}: {e}")))
 }
 
 fn ctranspose_complex_tensor_value(ct: ComplexTensor) -> BuiltinResult<Value> {
     let shape = ct.shape.clone();
-    let data = ct.materialize_f64();
-    let mut all_real = true;
-    let mut conj_data = Vec::with_capacity(data.len());
-    for (re, im) in data {
-        let imag = -im;
-        if imag != 0.0 || imag.is_nan() {
-            all_real = false;
+    match ct.into_complex_storage() {
+        ComplexStorage::F64(values) => {
+            let mut all_real = true;
+            let conj_data = values
+                .into_iter()
+                .map(|(re, im)| {
+                    let imag = -im;
+                    if imag != 0.0 || imag.is_nan() {
+                        all_real = false;
+                    }
+                    (re, imag)
+                })
+                .collect::<Vec<_>>();
+            if all_real {
+                let real = conj_data.iter().map(|(re, _)| *re).collect();
+                let tensor =
+                    Tensor::new(real, shape).map_err(|e| internal_error(format!("{NAME}: {e}")))?;
+                Ok(tensor::tensor_into_value(tensor))
+            } else {
+                ComplexTensor::from_complex_storage(ComplexStorage::F64(conj_data), shape)
+                    .map(Value::ComplexTensor)
+                    .map_err(|e| internal_error(format!("{NAME}: {e}")))
+            }
         }
-        conj_data.push((re, imag));
-    }
-    if all_real {
-        let real: Vec<f64> = conj_data.iter().map(|(re, _)| *re).collect();
-        let tensor =
-            Tensor::new(real, shape).map_err(|e| internal_error(format!("{NAME}: {e}")))?;
-        Ok(tensor::tensor_into_value(tensor))
-    } else {
-        let tensor = ComplexTensor::new(conj_data, shape)
-            .map_err(|e| internal_error(format!("{NAME}: {e}")))?;
-        Ok(Value::ComplexTensor(tensor))
+        ComplexStorage::F32(values) => {
+            let mut all_real = true;
+            let conj_data = values
+                .into_iter()
+                .map(|(re, im)| {
+                    let imag = -im;
+                    if imag != 0.0 || imag.is_nan() {
+                        all_real = false;
+                    }
+                    (re, imag)
+                })
+                .collect::<Vec<_>>();
+            if all_real {
+                let real = conj_data.iter().map(|(re, _)| *re).collect();
+                let tensor = Tensor::from_f32(real, shape)
+                    .map_err(|e| internal_error(format!("{NAME}: {e}")))?;
+                Ok(tensor::tensor_into_value(tensor))
+            } else {
+                ComplexTensor::from_complex_storage(ComplexStorage::F32(conj_data), shape)
+                    .map(Value::ComplexTensor)
+                    .map_err(|e| internal_error(format!("{NAME}: {e}")))
+            }
+        }
+        ComplexStorage::Integer(_) => Err(invalid_input(
+            "ctranspose: complex integer input is not supported",
+        )),
     }
 }
 
@@ -544,25 +573,6 @@ fn ctranspose_order(rank: usize) -> Vec<usize> {
         order.truncate(rank.max(2));
     }
     order
-}
-
-fn ctranspose_complex_matrix(ct: &ComplexTensor) -> Vec<(f64, f64)> {
-    let rows = ct.rows;
-    let cols = ct.cols;
-    if ct.materialize_f64().is_empty() {
-        return Vec::new();
-    }
-    let mut out = vec![(0.0, 0.0); ct.materialize_f64().len()];
-    for r in 0..rows {
-        for c in 0..cols {
-            let src = r + c * rows;
-            let dst = c + r * cols;
-            if src < ct.materialize_f64().len() && dst < out.len() {
-                out[dst] = ct.materialize_f64()[src];
-            }
-        }
-    }
-    out
 }
 
 #[cfg(test)]

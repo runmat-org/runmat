@@ -17,11 +17,12 @@ use crate::builtins::math::linalg::type_resolvers::matrix_transpose_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use log::warn;
 use runmat_accelerate_api::GpuTensorHandle;
+#[cfg(test)]
+use runmat_builtins::IntegerStorage;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray,
-    StringArray, Tensor, Value,
+    CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -221,22 +222,11 @@ fn transpose_complex_tensor(ct: ComplexTensor) -> BuiltinResult<ComplexTensor> {
     if rank == 0 {
         return Ok(ct);
     }
-    if rank <= 2 {
-        if let Some(storage) = ct.integer_storage() {
-            let real = transpose_integer_storage(storage.real.clone(), ct.rows, ct.cols);
-            let imag = transpose_integer_storage(storage.imag.clone(), ct.rows, ct.cols);
-            return IntegerComplexStorage::new(real, imag)
-                .and_then(|storage| ComplexTensor::new_integer(storage, vec![ct.cols, ct.rows]))
-                .map_err(|e| internal_error(format!("{NAME}: {e}")));
-        }
-        ComplexTensor::new(transpose_complex_matrix(&ct), vec![ct.cols, ct.rows])
-            .map_err(|e| internal_error(format!("{NAME}: {e}")))
-    } else {
-        let order = transpose_order(rank);
-        permute_complex_tensor(NAME, ct, &order)
-    }
+    let order = transpose_order(rank);
+    permute_complex_tensor(NAME, ct, &order)
 }
 
+#[cfg(test)]
 pub(crate) fn transpose_integer_storage(
     storage: IntegerStorage,
     rows: usize,
@@ -413,25 +403,6 @@ fn transpose_order(rank: usize) -> Vec<usize> {
         order.truncate(rank.max(2));
     }
     order
-}
-
-fn transpose_complex_matrix(ct: &ComplexTensor) -> Vec<(f64, f64)> {
-    let rows = ct.rows;
-    let cols = ct.cols;
-    if ct.materialize_f64().is_empty() {
-        return Vec::new();
-    }
-    let mut out = vec![(0.0, 0.0); ct.materialize_f64().len()];
-    for r in 0..rows {
-        for c in 0..cols {
-            let src = r + c * rows;
-            let dst = c + r * cols;
-            if src < ct.materialize_f64().len() && dst < out.len() {
-                out[dst] = ct.materialize_f64()[src];
-            }
-        }
-    }
-    out
 }
 
 #[cfg(test)]

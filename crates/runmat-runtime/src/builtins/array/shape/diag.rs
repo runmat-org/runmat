@@ -15,8 +15,8 @@ use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, HostTensorView, P
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntegerStorage, LiteralValue, LogicalArray, NumericDType,
-    NumericScalar, NumericStorage, ResolveContext, Tensor, Type, Value,
+    CharArray, ComplexStorage, ComplexTensor, IntegerStorage, LiteralValue, LogicalArray,
+    NumericDType, NumericScalar, NumericStorage, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -879,32 +879,41 @@ fn evaluate_logical(array: LogicalArray, args: &ParsedDiagArgs) -> BuiltinResult
 }
 
 fn evaluate_complex(tensor: ComplexTensor, args: &ParsedDiagArgs) -> BuiltinResult<Value> {
-    if let Some(storage) = tensor.integer_storage() {
-        let zero = storage
-            .real
-            .zeros_like(1)
-            .value_at(0)
-            .expect("one typed integer zero");
-        let (_, shape) = evaluate_column_major_diag(
-            &storage.real.exact_values(),
-            &tensor.shape,
-            args,
-            zero.clone(),
-        )?;
-        let storage = storage
-            .reorder(|values| {
-                evaluate_column_major_diag(values, &tensor.shape, args, zero.clone())
-                    .map(|(values, _)| values)
-                    .map_err(|e| e.to_string())
-            })
-            .map_err(|e| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {e}")))?;
-        return ComplexTensor::new_integer(storage, shape)
-            .map(Value::ComplexTensor)
-            .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")));
-    }
-    let (data, shape) =
-        evaluate_column_major_diag(&tensor.materialize_f64(), &tensor.shape, args, (0.0, 0.0))?;
-    ComplexTensor::new(data, shape)
+    let input_shape = tensor.shape.clone();
+    let (storage, shape) = match tensor.into_complex_storage() {
+        ComplexStorage::F64(values) => {
+            let (values, shape) =
+                evaluate_column_major_diag(&values, &input_shape, args, (0.0f64, 0.0f64))?;
+            (ComplexStorage::F64(values), shape)
+        }
+        ComplexStorage::F32(values) => {
+            let (values, shape) =
+                evaluate_column_major_diag(&values, &input_shape, args, (0.0f32, 0.0f32))?;
+            (ComplexStorage::F32(values), shape)
+        }
+        ComplexStorage::Integer(storage) => {
+            let zero = storage
+                .real
+                .zeros_like(1)
+                .value_at(0)
+                .expect("one typed integer zero");
+            let (_, shape) = evaluate_column_major_diag(
+                &storage.real.exact_values(),
+                &input_shape,
+                args,
+                zero.clone(),
+            )?;
+            let storage = storage
+                .reorder(|values| {
+                    evaluate_column_major_diag(values, &input_shape, args, zero.clone())
+                        .map(|(values, _)| values)
+                        .map_err(|e| e.to_string())
+                })
+                .map_err(|e| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {e}")))?;
+            (ComplexStorage::Integer(storage), shape)
+        }
+    };
+    ComplexTensor::from_complex_storage(storage, shape)
         .map(Value::ComplexTensor)
         .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
 }
