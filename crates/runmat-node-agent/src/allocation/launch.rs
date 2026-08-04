@@ -3,6 +3,7 @@ use std::path::Path;
 
 use runmat_execution_transport_native::control::DriverBootstrapCredential;
 use runmat_execution_transport_native::control::NodeAllocation;
+use runmat_execution_transport_native::control::WorkerBootstrapCredential;
 use runmat_process_host::{
     ChildLifetime, ChildProcess, HiddenMode, HostCommand, ResourceLimits, StdioPolicy,
 };
@@ -26,6 +27,104 @@ struct ManagedProcess {
 }
 
 impl AllocationProcesses {
+    pub async fn launch_worker(
+        &mut self,
+        runmat_executable: &Path,
+        allocation: &NodeAllocation,
+        sandbox: &Sandbox,
+        server_url: &str,
+        bootstrap: &WorkerBootstrapCredential,
+    ) -> AgentResult<u32> {
+        use base64::Engine as _;
+
+        if self.children.contains_key(&allocation.id) {
+            return Err(AgentError::AllocationRejected(
+                "allocation already has a worker".to_string(),
+            ));
+        }
+        let mut command = HostCommand::new(runmat_executable);
+        command.arguments = vec![HiddenMode::ExecutionWorker.marker().to_string()];
+        command.environment.insert(
+            "RUNMAT_EXECUTION_WORKER_REMOTE".to_string(),
+            "1".to_string(),
+        );
+        for (name, value) in [
+            ("RUNMAT_EXECUTION_SERVER_URL", server_url.to_string()),
+            ("RUNMAT_EXECUTION_RUN_ID", bootstrap.run_id.clone()),
+            ("RUNMAT_EXECUTION_ORG_ID", bootstrap.org_id.clone()),
+            ("RUNMAT_EXECUTION_PROJECT_ID", bootstrap.project_id.clone()),
+            (
+                "RUNMAT_EXECUTION_ALLOCATION_ID",
+                bootstrap.allocation_lease_id.clone(),
+            ),
+            (
+                "RUNMAT_EXECUTION_ALLOCATION_FENCING_TOKEN",
+                bootstrap.allocation_fencing_token.to_string(),
+            ),
+            (
+                "RUNMAT_EXECUTION_DRIVER_FENCING_TOKEN",
+                bootstrap.driver_fencing_token.to_string(),
+            ),
+            (
+                "RUNMAT_EXECUTION_ENDPOINT_FINGERPRINT",
+                bootstrap.endpoint_fingerprint.clone(),
+            ),
+            (
+                "RUNMAT_EXECUTION_RUN_KEY_ENVELOPE",
+                base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .encode(&bootstrap.run_key_envelope),
+            ),
+            (
+                "RUNMAT_EXECUTION_WORKER_RELAY_PATH",
+                bootstrap.relay_path.clone(),
+            ),
+            (
+                "RUNMAT_EXECUTION_WORKER_RELAY_PROTOCOL",
+                bootstrap.relay_protocol.clone(),
+            ),
+            (
+                "RUNMAT_EXECUTION_WORKER_RELAY_TICKET",
+                bootstrap.relay_ticket.clone(),
+            ),
+            (
+                "RUNMAT_EXECUTION_WORKER_RESOURCES",
+                serde_json::to_string(&allocation.resources)?,
+            ),
+            (
+                "RUNMAT_EXECUTION_ENDPOINT_IDENTITY_FILE",
+                sandbox
+                    .root
+                    .join("endpoint-identity.json")
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+            (
+                "RUNMAT_EXECUTION_NODE_BUNDLE_CACHE",
+                sandbox
+                    .root
+                    .parent()
+                    .ok_or_else(|| {
+                        AgentError::AllocationRejected(
+                            "allocation sandbox has no node cache parent".into(),
+                        )
+                    })?
+                    .join("bundle-cache")
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+        ] {
+            command.environment.insert(name.to_string(), value);
+        }
+        command.working_directory = Some(sandbox.root.clone());
+        command.lifetime = ChildLifetime::Owned;
+        command.stdio = StdioPolicy::Files {
+            stdout: sandbox.stdout.clone(),
+            stderr: sandbox.stderr.clone(),
+        };
+        command.resource_limits = allocation_limits(allocation);
+        self.spawn(allocation, command, "worker").await
+    }
+
     pub async fn launch_driver(
         &mut self,
         runmat_executable: &Path,
@@ -90,20 +189,19 @@ impl AllocationProcesses {
             stdout: sandbox.stdout.clone(),
             stderr: sandbox.stderr.clone(),
         };
-        command.resource_limits = ResourceLimits {
-            memory_bytes: Some(allocation.resources.memory_bytes),
-            cpu_seconds: Some(
-                allocation
-                    .resources
-                    .maximum_wall_millis
-                    .div_ceil(1_000)
-                    .max(1),
-            ),
-            process_count: Some(64),
-        };
+        command.resource_limits = allocation_limits(allocation);
+        self.spawn(allocation, command, "driver").await
+    }
+
+    async fn spawn(
+        &mut self,
+        allocation: &NodeAllocation,
+        command: HostCommand,
+        process_kind: &str,
+    ) -> AgentResult<u32> {
         let child = command.spawn().await?;
         let process_id = child.id().ok_or_else(|| {
-            AgentError::AllocationRejected("driver process has no id".to_string())
+            AgentError::AllocationRejected(format!("{process_kind} process has no id"))
         })?;
         self.children.insert(
             allocation.id.clone(),
@@ -201,5 +299,19 @@ impl AllocationProcesses {
 
     pub fn contains(&self, allocation_id: &str) -> bool {
         self.children.contains_key(allocation_id)
+    }
+}
+
+fn allocation_limits(allocation: &NodeAllocation) -> ResourceLimits {
+    ResourceLimits {
+        memory_bytes: Some(allocation.resources.memory_bytes),
+        cpu_seconds: Some(
+            allocation
+                .resources
+                .maximum_wall_millis
+                .div_ceil(1_000)
+                .max(1),
+        ),
+        process_count: Some(64),
     }
 }

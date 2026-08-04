@@ -5,6 +5,8 @@ use futures_util::{SinkExt as _, StreamExt as _};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
 use tokio_tungstenite::tungstenite::Message;
 
+const DUPLEX_CAPACITY: usize = 64;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpaqueRelayRoute(pub OverlayRoute);
 
@@ -20,6 +22,11 @@ pub struct WebSocketRelayConnection {
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
     >,
     limits: FrameLimits,
+}
+
+pub struct WebSocketRelayDuplex {
+    outbound: tokio::sync::mpsc::Sender<WireFrame>,
+    inbound: tokio::sync::Mutex<tokio::sync::mpsc::Receiver<TransportResult<WireFrame>>>,
 }
 
 impl WebSocketRelayConnection {
@@ -103,6 +110,78 @@ impl WebSocketRelayConnection {
 
     pub async fn close(mut self) -> TransportResult<()> {
         self.socket.close(None).await.map_err(unavailable)
+    }
+
+    pub fn into_duplex(self) -> WebSocketRelayDuplex {
+        let (outbound, mut outbound_rx) = tokio::sync::mpsc::channel::<WireFrame>(DUPLEX_CAPACITY);
+        let (inbound_tx, inbound) = tokio::sync::mpsc::channel(DUPLEX_CAPACITY);
+        let limits = self.limits;
+        let (mut sink, mut source) = self.socket.split();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    outgoing = outbound_rx.recv() => {
+                        let Some(frame) = outgoing else { break; };
+                        let encoded = match frame.encode(limits) {
+                            Ok(encoded) => encoded,
+                            Err(error) => {
+                                let _ = inbound_tx.send(Err(error)).await;
+                                break;
+                            }
+                        };
+                        if let Err(error) = sink.send(Message::Binary(encoded)).await {
+                            let _ = inbound_tx.send(Err(unavailable(error))).await;
+                            break;
+                        }
+                    }
+                    incoming = source.next() => {
+                        let result = match incoming {
+                            Some(Ok(Message::Binary(bytes))) => WireFrame::decode(&bytes, limits),
+                            Some(Ok(Message::Ping(bytes))) => {
+                                if let Err(error) = sink.send(Message::Pong(bytes)).await {
+                                    Err(unavailable(error))
+                                } else {
+                                    continue;
+                                }
+                            }
+                            Some(Ok(Message::Pong(_))) | Some(Ok(Message::Text(_)))
+                            | Some(Ok(Message::Frame(_))) => continue,
+                            Some(Ok(Message::Close(_))) | None => {
+                                Err(TransportError::Unavailable("relay closed".into()))
+                            }
+                            Some(Err(error)) => Err(unavailable(error)),
+                        };
+                        let terminal = result.is_err();
+                        if inbound_tx.send(result).await.is_err() || terminal {
+                            break;
+                        }
+                    }
+                }
+            }
+            let _ = sink.close().await;
+        });
+        WebSocketRelayDuplex {
+            outbound,
+            inbound: tokio::sync::Mutex::new(inbound),
+        }
+    }
+}
+
+impl WebSocketRelayDuplex {
+    pub async fn send(&self, frame: WireFrame) -> TransportResult<()> {
+        self.outbound
+            .send(frame)
+            .await
+            .map_err(|_| TransportError::Unavailable("relay closed".into()))
+    }
+
+    pub async fn receive(&self) -> TransportResult<WireFrame> {
+        self.inbound
+            .lock()
+            .await
+            .recv()
+            .await
+            .unwrap_or_else(|| Err(TransportError::Unavailable("relay closed".into())))
     }
 }
 

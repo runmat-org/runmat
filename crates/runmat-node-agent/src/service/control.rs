@@ -1,8 +1,9 @@
 use async_trait::async_trait;
 
 use runmat_execution_transport_native::control::{
-    DriverBootstrapCredential, EnrolledNode, EnrollmentRequest, NodeAllocation, NodeControlPlane,
-    NodeHeartbeat, NodeInventory, NodeStatus, ResourceRequest, RotatedCredential,
+    AllocationRole, DriverBootstrapCredential, EnrolledNode, EnrollmentRequest, NodeAllocation,
+    NodeControlPlane, NodeHeartbeat, NodeInventory, NodeStatus, ResourceRequest, RotatedCredential,
+    WorkerBootstrapCredential,
 };
 use runmat_execution_transport_native::{TransportError, TransportResult};
 use runmat_server_client::public_api::{self, types};
@@ -181,6 +182,41 @@ impl NodeControlPlane for HttpNodeControlPlane {
         })
     }
 
+    async fn worker_bootstrap(
+        &self,
+        heartbeat: &NodeHeartbeat,
+        allocation: &NodeAllocation,
+    ) -> TransportResult<WorkerBootstrapCredential> {
+        let response = self
+            .client
+            .create_worker_bootstrap(
+                &heartbeat.node_id,
+                &allocation.id,
+                &heartbeat.credential,
+                &transition_body(heartbeat, allocation)?,
+            )
+            .await
+            .map_err(map_bootstrap_error)?
+            .into_inner();
+        Ok(WorkerBootstrapCredential {
+            run_id: response.run_id,
+            org_id: response.org_id,
+            project_id: response.project_id,
+            allocation_lease_id: response.allocation_lease_id,
+            allocation_fencing_token: to_u64(
+                response.allocation_fencing_token,
+                "allocation fencing token",
+            )?,
+            driver_fencing_token: to_u64(response.driver_fencing_token, "driver fencing token")?,
+            endpoint_fingerprint: response.endpoint_fingerprint,
+            run_key_envelope: decode_bytes(&response.run_key_envelope)?,
+            expires_at_millis: response.expires_at.timestamp_millis(),
+            relay_path: response.relay_path,
+            relay_protocol: response.relay_protocol,
+            relay_ticket: response.relay_ticket,
+        })
+    }
+
     async fn release(
         &self,
         heartbeat: &NodeHeartbeat,
@@ -266,6 +302,15 @@ fn allocation_from_api(value: types::AllocationLeaseResponse) -> TransportResult
             )?,
             maximum_wall_millis: to_u64(value.resources.maximum_wall_millis, "maximum wall time")?,
         },
+        role: match value.role.as_str() {
+            "driver" => AllocationRole::Driver,
+            "worker" => AllocationRole::Worker,
+            _ => {
+                return Err(TransportError::MalformedFrame(
+                    "allocation role is unsupported".into(),
+                ))
+            }
+        },
         state: value.state,
         fencing_token: to_u64(value.fencing_token, "fencing token")?,
         expires_at_millis: value.expires_at.timestamp_millis(),
@@ -332,6 +377,13 @@ fn evidence_to_api(
 fn encode_bytes(value: &[u8]) -> String {
     use base64::Engine as _;
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(value)
+}
+
+fn decode_bytes(value: &str) -> TransportResult<Vec<u8>> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(value)
+        .map_err(|_| TransportError::Integrity)
 }
 
 fn to_i64(value: u64, field: &str) -> TransportResult<i64> {

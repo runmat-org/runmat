@@ -16,7 +16,12 @@ async fn main() -> ExitCode {
             };
         }
         Ok(Some(runmat_process_host::HiddenMode::ExecutionWorker)) => {
-            return match runmat_execution_runner_native::run_worker_stdio().await {
+            let result = if std::env::var_os("RUNMAT_EXECUTION_WORKER_REMOTE").is_some() {
+                runmat_execution_runner_native::run_remote_worker_from_env().await
+            } else {
+                runmat_execution_runner_native::run_worker_stdio().await
+            };
+            return match result {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(error) => {
                     eprintln!("runmat execution worker failed: {error}");

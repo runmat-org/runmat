@@ -6414,6 +6414,7 @@ dependencies = [
  "base64 0.22.1",
  "dirs 5.0.1",
  "rand 0.8.6",
+ "rcgen",
  "runmat-builtins",
  "runmat-execution",
  "runmat-execution-artifact",

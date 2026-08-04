@@ -39,6 +39,7 @@ pub async fn submit(
     trust_identity: String,
     function: Option<String>,
     idempotency_key: Option<String>,
+    workers: u32,
     detach: bool,
     json: bool,
     args: Vec<String>,
@@ -125,7 +126,7 @@ pub async fn submit(
 
     let (client, server_url, project_id) = super::client(project).await?;
     let idempotency_key = idempotency_key.unwrap_or_else(|| Uuid::new_v4().to_string());
-    let request_digest = request_digest(&idempotency_key, &revision, &cluster, &queue);
+    let request_digest = request_digest(&idempotency_key, &revision, &cluster, &queue, workers);
     let run = client
         .api()
         .submit_run(
@@ -156,6 +157,18 @@ pub async fn submit(
                     accelerator_class: None,
                     maximum_wall_millis: 60 * 60 * 1_000,
                 },
+                worker_count: Some(
+                    i32::try_from(workers).context("worker count exceeds API range")?,
+                ),
+                worker_resources: (workers > 0).then_some(types::ResourceRequestBody {
+                    cpu_millicores: 1_000,
+                    memory_bytes: 1024 * 1024 * 1024,
+                    scratch_bytes: 1024 * 1024 * 1024,
+                    accelerator_count: 0,
+                    accelerator_memory_bytes: 0,
+                    accelerator_class: None,
+                    maximum_wall_millis: 60 * 60 * 1_000,
+                }),
             },
         )
         .await
@@ -407,6 +420,7 @@ fn request_digest(
     revision: &ProgramRevision,
     cluster: &str,
     queue: &str,
+    workers: u32,
 ) -> String {
     let mut digest = Sha256::new();
     digest.update(b"runmat-remote-run-request-v1\0");
@@ -414,6 +428,7 @@ fn request_digest(
     digest.update(revision.canonical_identity().as_bytes());
     digest.update(cluster.as_bytes());
     digest.update(queue.as_bytes());
+    digest.update(workers.to_be_bytes());
     format!("{:x}", digest.finalize())
 }
 

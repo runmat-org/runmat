@@ -80,7 +80,7 @@ pub(super) async fn run_remote_driver(
     let bundle = required_artifact(&bootstrap.artifacts, "bundle")?;
     let program = required_artifact(&bootstrap.artifacts, "program")?;
     let input = required_artifact(&bootstrap.artifacts, "input")?;
-    let bundle = open_download(
+    let bundle_archive = open_download(
         control.as_ref(),
         &run_key,
         bundle,
@@ -88,7 +88,8 @@ pub(super) async fn run_remote_driver(
         EncryptionPurpose::Bundle,
     )
     .await?;
-    let bundle = read_bundle(bundle.as_slice(), ArchiveLimits::default()).map_err(protocol)?;
+    let bundle =
+        read_bundle(bundle_archive.as_slice(), ArchiveLimits::default()).map_err(protocol)?;
     let descriptor: ProgramExecutionDescriptor = serde_json::from_slice(
         &open_download(
             control.as_ref(),
@@ -162,17 +163,81 @@ pub(super) async fn run_remote_driver(
     )
     .await?;
 
-    let execution = runmat_vm::execute_program_request(request);
+    let (cancellation_sender, cancellation_receiver) = tokio::sync::watch::channel(false);
+    let uses_remote_pool = bootstrap.desired_worker_count > 0;
+    let execution = async {
+        if bootstrap.desired_worker_count == 0 {
+            Ok(
+                super::pool_execution::RemotePoolExecutionOutcome::Completed(
+                    runmat_vm::execute_program_request(request).await,
+                ),
+            )
+        } else {
+            super::pool_execution::execute(
+                control.as_ref(),
+                &config.authority,
+                &run_key,
+                bundle_archive,
+                request,
+                bootstrap.desired_worker_count,
+                bootstrap.worker_resources,
+                cancellation_receiver,
+            )
+            .await
+        }
+    };
     tokio::pin!(execution);
     let response = loop {
         tokio::select! {
-            response = &mut execution => break response,
+            response = &mut execution => {
+                match response? {
+                    super::pool_execution::RemotePoolExecutionOutcome::Completed(response) => {
+                        break response;
+                    }
+                    super::pool_execution::RemotePoolExecutionOutcome::Cancelled => {
+                        transition(
+                            control.as_ref(),
+                            &config,
+                            DriverRunTarget::Indeterminate,
+                            Some("cancelled-during-execution"),
+                            None,
+                            None,
+                        ).await?;
+                        return Ok(());
+                    }
+                    super::pool_execution::RemotePoolExecutionOutcome::Indeterminate(message) => {
+                        let diagnostic = store_encrypted(
+                            control.as_ref(),
+                            &config,
+                            &run_key,
+                            DriverArtifactKind::Diagnostic,
+                            EncryptionPurpose::DetailedEvent,
+                            message.as_bytes(),
+                            None,
+                        )
+                        .await?;
+                        transition(
+                            control.as_ref(),
+                            &config,
+                            DriverRunTarget::Indeterminate,
+                            Some("worker-lost"),
+                            None,
+                            Some(diagnostic),
+                        ).await?;
+                        return Ok(());
+                    }
+                }
+            },
             _ = tokio::time::sleep(Duration::from_secs(5)) => {
                 let heartbeat = control
                     .heartbeat(&config.authority, 60)
                     .await
                     .map_err(protocol)?;
                 if heartbeat.cancellation_requested {
+                    if uses_remote_pool {
+                        cancellation_sender.send_replace(true);
+                        continue;
+                    }
                     transition(
                         control.as_ref(),
                         &config,

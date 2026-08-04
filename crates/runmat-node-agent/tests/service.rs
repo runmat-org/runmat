@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use runmat_execution_transport_native::control::{
-    DriverBootstrapCredential, EnrolledNode, EnrollmentRequest, NodeAllocation, NodeControlPlane,
-    NodeHeartbeat, NodeStatus, ResourceRequest, RotatedCredential,
+    AllocationRole, DriverBootstrapCredential, EnrolledNode, EnrollmentRequest, NodeAllocation,
+    NodeControlPlane, NodeHeartbeat, NodeStatus, ResourceRequest, RotatedCredential,
 };
 use runmat_execution_transport_native::TransportResult;
 use runmat_node_agent::enrollment::{CredentialStore, NodeCredential};
@@ -63,6 +63,7 @@ impl NodeControlPlane for Control {
                     accelerator_memory_bytes: 0,
                     maximum_wall_millis: 10_000,
                 },
+                role: AllocationRole::Driver,
                 state: state.lease_state.clone(),
                 fencing_token: 1,
                 expires_at_millis: 4_000_000_000_000,

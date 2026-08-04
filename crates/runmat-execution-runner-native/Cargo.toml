@@ -19,6 +19,7 @@ runmat-runtime = { workspace = true }
 runmat-vm = { workspace = true }
 dirs = "5.0"
 base64 = "0.22"
+async-trait = "0.1"
 rand = "0.8"
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -31,6 +32,6 @@ uuid = { workspace = true }
 windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
-async-trait = "0.1"
+rcgen = "0.14"
 tempfile = "3.12"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

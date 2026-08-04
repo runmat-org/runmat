@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use base64::Engine as _;
 use runmat_server_client::public_api::{self, types};
 
+use super::ResourceRequest;
 use crate::{TransportError, TransportResult};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +55,8 @@ pub struct DriverBootstrap {
     pub artifacts: Vec<DriverArtifactDownload>,
     pub checkpoint: Option<DriverArtifactDownload>,
     pub cancellation_requested: bool,
+    pub desired_worker_count: u32,
+    pub worker_resources: ResourceRequest,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,6 +111,8 @@ pub struct DriverRunTransition {
     pub diagnostic_artifact_id: Option<String>,
 }
 
+use super::worker_pool::{self, DriverWorkerPool};
+
 #[async_trait]
 pub trait DriverControlPlane: Send + Sync {
     async fn bootstrap(&self, authority: &DriverAuthority) -> TransportResult<DriverBootstrap>;
@@ -127,6 +132,41 @@ pub trait DriverControlPlane: Send + Sync {
         authority: &DriverAuthority,
         transition: DriverRunTransition,
     ) -> TransportResult<()>;
+    async fn resize_workers(
+        &self,
+        authority: &DriverAuthority,
+        expected_generation: u64,
+        desired_workers: u32,
+        resources: ResourceRequest,
+    ) -> TransportResult<DriverWorkerPool> {
+        let _ = (authority, expected_generation, desired_workers, resources);
+        Err(TransportError::Unavailable(
+            "remote worker allocation is not implemented".into(),
+        ))
+    }
+    async fn list_workers(&self, authority: &DriverAuthority) -> TransportResult<DriverWorkerPool> {
+        let _ = authority;
+        Err(TransportError::Unavailable(
+            "remote worker listing is not implemented".into(),
+        ))
+    }
+    async fn authorize_worker(
+        &self,
+        authority: &DriverAuthority,
+        allocation_lease_id: &str,
+        endpoint_fingerprint: &str,
+        run_key_envelope: &[u8],
+    ) -> TransportResult<()> {
+        let _ = (
+            authority,
+            allocation_lease_id,
+            endpoint_fingerprint,
+            run_key_envelope,
+        );
+        Err(TransportError::Unavailable(
+            "remote worker authorization is not implemented".into(),
+        ))
+    }
 }
 
 #[derive(Clone)]
@@ -184,6 +224,20 @@ impl DriverControlPlane for HttpDriverControlPlane {
                 .collect::<TransportResult<_>>()?,
             checkpoint: response.checkpoint.map(download_from_api).transpose()?,
             cancellation_requested: response.cancellation_requested,
+            desired_worker_count: u32::try_from(response.desired_worker_count)
+                .map_err(|_| TransportError::Overflow)?,
+            worker_resources: ResourceRequest {
+                cpu_millicores: to_u64(response.worker_resources.cpu_millicores)?,
+                memory_bytes: to_u64(response.worker_resources.memory_bytes)?,
+                scratch_bytes: to_u64(response.worker_resources.scratch_bytes)?,
+                accelerator_count: u32::try_from(response.worker_resources.accelerator_count)
+                    .map_err(|_| TransportError::Overflow)?,
+                accelerator_class: response.worker_resources.accelerator_class,
+                accelerator_memory_bytes: to_u64(
+                    response.worker_resources.accelerator_memory_bytes,
+                )?,
+                maximum_wall_millis: to_u64(response.worker_resources.maximum_wall_millis)?,
+            },
         })
     }
 
@@ -326,6 +380,70 @@ impl DriverControlPlane for HttpDriverControlPlane {
                             types::DriverTransitionTargetRequest::Indeterminate
                         }
                     },
+                },
+            )
+            .await
+            .map_err(map_error)?;
+        Ok(())
+    }
+
+    async fn resize_workers(
+        &self,
+        authority: &DriverAuthority,
+        expected_generation: u64,
+        desired_workers: u32,
+        resources: ResourceRequest,
+    ) -> TransportResult<DriverWorkerPool> {
+        let response = self
+            .client
+            .resize_driver_workers(
+                &authority.driver_lease_id,
+                to_i64(authority.fencing_token)?,
+                &authority.credential,
+                &types::ResizeDriverWorkersRequest {
+                    expected_generation: to_i64(expected_generation)?,
+                    desired_workers: i32::try_from(desired_workers)
+                        .map_err(|_| TransportError::Overflow)?,
+                    resources: worker_pool::resource_to_api(resources)?,
+                },
+            )
+            .await
+            .map_err(map_error)?
+            .into_inner();
+        worker_pool::from_api(response)
+    }
+
+    async fn list_workers(&self, authority: &DriverAuthority) -> TransportResult<DriverWorkerPool> {
+        let response = self
+            .client
+            .list_driver_workers(
+                &authority.driver_lease_id,
+                to_i64(authority.fencing_token)?,
+                &authority.credential,
+            )
+            .await
+            .map_err(map_error)?
+            .into_inner();
+        worker_pool::from_api(response)
+    }
+
+    async fn authorize_worker(
+        &self,
+        authority: &DriverAuthority,
+        allocation_lease_id: &str,
+        endpoint_fingerprint: &str,
+        run_key_envelope: &[u8],
+    ) -> TransportResult<()> {
+        self.client
+            .authorize_driver_worker(
+                &authority.driver_lease_id,
+                allocation_lease_id,
+                to_i64(authority.fencing_token)?,
+                &authority.credential,
+                &types::AuthorizeDriverWorkerRequest {
+                    endpoint_fingerprint: endpoint_fingerprint.to_string(),
+                    run_key_envelope: base64::engine::general_purpose::URL_SAFE_NO_PAD
+                        .encode(run_key_envelope),
                 },
             )
             .await

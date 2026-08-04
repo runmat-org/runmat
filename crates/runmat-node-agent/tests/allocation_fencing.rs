@@ -1,4 +1,6 @@
-use runmat_execution_transport_native::control::{NodeAllocation, NodeInventory, ResourceRequest};
+use runmat_execution_transport_native::control::{
+    AllocationRole, NodeAllocation, NodeInventory, ResourceRequest,
+};
 use runmat_node_agent::allocation::{prepare, validate_offer};
 
 #[test]
@@ -50,6 +52,7 @@ fn allocation() -> NodeAllocation {
             accelerator_memory_bytes: 0,
             maximum_wall_millis: 1_000,
         },
+        role: AllocationRole::Driver,
         state: "offered".into(),
         fencing_token: 1,
         expires_at_millis: 200,

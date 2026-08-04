@@ -58,9 +58,16 @@ pub struct NodeAllocation {
     pub project_id: String,
     pub queue: String,
     pub resources: ResourceRequest,
+    pub role: AllocationRole,
     pub state: String,
     pub fencing_token: u64,
     pub expires_at_millis: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AllocationRole {
+    Driver,
+    Worker,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,6 +100,22 @@ pub struct DriverBootstrapCredential {
     pub expires_at_millis: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkerBootstrapCredential {
+    pub run_id: String,
+    pub org_id: String,
+    pub project_id: String,
+    pub allocation_lease_id: String,
+    pub allocation_fencing_token: u64,
+    pub driver_fencing_token: u64,
+    pub endpoint_fingerprint: String,
+    pub run_key_envelope: Vec<u8>,
+    pub expires_at_millis: i64,
+    pub relay_path: String,
+    pub relay_protocol: String,
+    pub relay_ticket: String,
+}
+
 #[async_trait]
 pub trait NodeControlPlane: Send + Sync {
     async fn enroll(&self, request: EnrollmentRequest) -> TransportResult<EnrolledNode>;
@@ -115,6 +138,16 @@ pub trait NodeControlPlane: Send + Sync {
         let _ = (heartbeat, allocation);
         Err(crate::TransportError::Unavailable(
             "driver bootstrap is not implemented".into(),
+        ))
+    }
+    async fn worker_bootstrap(
+        &self,
+        heartbeat: &NodeHeartbeat,
+        allocation: &NodeAllocation,
+    ) -> TransportResult<WorkerBootstrapCredential> {
+        let _ = (heartbeat, allocation);
+        Err(crate::TransportError::Unavailable(
+            "worker bootstrap is not implemented".into(),
         ))
     }
     async fn publish_endpoint_identity(

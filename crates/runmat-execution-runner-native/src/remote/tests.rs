@@ -208,6 +208,16 @@ async fn remote_driver_executes_exact_encrypted_program_and_commits_once() {
             artifacts: downloads.clone(),
             checkpoint: None,
             cancellation_requested: false,
+            desired_worker_count: 0,
+            worker_resources: runmat_execution_transport_native::control::ResourceRequest {
+                cpu_millicores: 1_000,
+                memory_bytes: 1 << 30,
+                scratch_bytes: 1 << 30,
+                accelerator_count: 0,
+                accelerator_class: None,
+                accelerator_memory_bytes: 0,
+                maximum_wall_millis: 60_000,
+            },
         },
         state: Mutex::new(FakeState {
             downloads: downloads

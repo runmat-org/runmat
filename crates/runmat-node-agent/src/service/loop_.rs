@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use runmat_execution_transport_native::control::{
-    NodeControlPlane, NodeHeartbeat, ReconnectBackoff,
+    AllocationRole, NodeControlPlane, NodeHeartbeat, ReconnectBackoff,
 };
 
 use crate::allocation::{
@@ -141,23 +141,59 @@ impl NodeAgentService {
             }
             validate_active(allocation, &inventory, now_millis)?;
             let sandbox = prepare(&self.config.state_directory, allocation, &inventory)?;
-            let bootstrap = match self.control.driver_bootstrap(&heartbeat, allocation).await {
-                Ok(bootstrap) => bootstrap,
-                Err(runmat_execution_transport_native::TransportError::NotReady) => continue,
-                Err(error) => return Err(error.into()),
+            let launch = match allocation.role {
+                AllocationRole::Driver => {
+                    let bootstrap =
+                        match self.control.driver_bootstrap(&heartbeat, allocation).await {
+                            Ok(bootstrap) => bootstrap,
+                            Err(runmat_execution_transport_native::TransportError::NotReady) => {
+                                continue
+                            }
+                            Err(error) => return Err(error.into()),
+                        };
+                    validate_driver_bootstrap(
+                        &self.credential,
+                        allocation,
+                        &bootstrap,
+                        now_millis,
+                    )?;
+                    self.processes
+                        .launch_driver(
+                            &self.config.runmat_executable,
+                            allocation,
+                            &sandbox,
+                            &self.config.server_url,
+                            &bootstrap,
+                        )
+                        .await
+                }
+                AllocationRole::Worker => {
+                    let bootstrap =
+                        match self.control.worker_bootstrap(&heartbeat, allocation).await {
+                            Ok(bootstrap) => bootstrap,
+                            Err(runmat_execution_transport_native::TransportError::NotReady) => {
+                                continue
+                            }
+                            Err(error) => return Err(error.into()),
+                        };
+                    validate_worker_bootstrap(
+                        &self.credential,
+                        allocation,
+                        &bootstrap,
+                        now_millis,
+                    )?;
+                    self.processes
+                        .launch_worker(
+                            &self.config.runmat_executable,
+                            allocation,
+                            &sandbox,
+                            &self.config.server_url,
+                            &bootstrap,
+                        )
+                        .await
+                }
             };
-            validate_driver_bootstrap(&self.credential, allocation, &bootstrap, now_millis)?;
-            if let Err(error) = self
-                .processes
-                .launch_driver(
-                    &self.config.runmat_executable,
-                    allocation,
-                    &sandbox,
-                    &self.config.server_url,
-                    &bootstrap,
-                )
-                .await
-            {
+            if let Err(error) = launch {
                 let _ = self.control.release(&heartbeat, allocation).await;
                 return Err(error);
             }
@@ -226,6 +262,33 @@ impl NodeAgentService {
         self.drain.begin();
         Ok(())
     }
+}
+
+fn validate_worker_bootstrap(
+    credential: &NodeCredential,
+    allocation: &runmat_execution_transport_native::control::NodeAllocation,
+    bootstrap: &runmat_execution_transport_native::control::WorkerBootstrapCredential,
+    now_millis: i64,
+) -> AgentResult<()> {
+    if allocation.role != AllocationRole::Worker
+        || bootstrap.org_id != credential.org_id
+        || bootstrap.run_id != allocation.run_id
+        || bootstrap.project_id != allocation.project_id
+        || bootstrap.allocation_lease_id != allocation.id
+        || bootstrap.allocation_fencing_token != allocation.fencing_token
+        || bootstrap.driver_fencing_token == 0
+        || bootstrap.endpoint_fingerprint.len() != 64
+        || bootstrap.run_key_envelope.is_empty()
+        || bootstrap.relay_path.is_empty()
+        || bootstrap.relay_protocol != "runmat-worker-relay-v1"
+        || bootstrap.relay_ticket.is_empty()
+        || bootstrap.expires_at_millis <= now_millis
+    {
+        return Err(AgentError::AllocationRejected(
+            "worker bootstrap authority does not match its allocation".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_driver_bootstrap(

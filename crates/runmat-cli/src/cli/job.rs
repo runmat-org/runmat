@@ -21,6 +21,9 @@ pub enum JobCommand {
         function: Option<String>,
         #[arg(long)]
         idempotency_key: Option<String>,
+        /// Number of remote worker allocations for driver-owned scheduling
+        #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(u32).range(0..=1024))]
+        workers: u32,
         #[arg(long)]
         detach: bool,
         #[arg(long)]

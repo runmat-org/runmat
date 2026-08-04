@@ -486,6 +486,166 @@ paths:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
       security: []
+  /v1/execution/drivers/{driverLeaseId}/workers:
+    get:
+      tags:
+      - Execution
+      operationId: list_driver_workers
+      parameters:
+      - name: fencingToken
+        in: query
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: X-RunMat-Driver-Credential
+        in: header
+        description: Scoped driver credential
+        required: true
+        schema:
+          type: string
+      - name: driverLeaseId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriverWorkerListResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security: []
+    post:
+      tags:
+      - Execution
+      operationId: resize_driver_workers
+      parameters:
+      - name: fencingToken
+        in: query
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: X-RunMat-Driver-Credential
+        in: header
+        description: Scoped driver credential
+        required: true
+        schema:
+          type: string
+      - name: driverLeaseId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResizeDriverWorkersRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriverWorkerListResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security: []
+  /v1/execution/drivers/{driverLeaseId}/workers/{allocationLeaseId}/envelope:
+    put:
+      tags:
+      - Execution
+      operationId: authorize_driver_worker
+      parameters:
+      - name: fencingToken
+        in: query
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: X-RunMat-Driver-Credential
+        in: header
+        description: Scoped driver credential
+        required: true
+        schema:
+          type: string
+      - name: driverLeaseId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: allocationLeaseId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthorizeDriverWorkerRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriverWorkerAuthorizationResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security: []
   /v1/execution/node-enrollments/consume:
     post:
       tags:
@@ -769,6 +929,60 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AllocationLeaseResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security: []
+  /v1/execution/nodes/{nodeId}/allocations/{leaseId}/worker-bootstrap:
+    post:
+      tags:
+      - Execution
+      operationId: create_worker_bootstrap
+      parameters:
+      - name: X-RunMat-Node-Credential
+        in: header
+        description: Current node credential
+        required: true
+        schema:
+          type: string
+      - name: nodeId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: leaseId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransitionAllocationRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkerBootstrapResponse'
         '401':
           description: ''
           content:
@@ -5624,6 +5838,7 @@ components:
       - projectId
       - queue
       - resources
+      - role
       - state
       - fencingToken
       - expiresAt
@@ -5643,6 +5858,8 @@ components:
           type: string
         resources:
           $ref: '#/components/schemas/ResourceRequestBody'
+        role:
+          type: string
         runId:
           type: string
         state:
@@ -6113,6 +6330,18 @@ components:
         scope:
           type: string
           nullable: true
+    AuthorizeDriverWorkerRequest:
+      type: object
+      required:
+      - endpointFingerprint
+      - runKeyEnvelope
+      properties:
+        endpointFingerprint:
+          type: string
+        runKeyEnvelope:
+          type: string
+          description: Base64url-encoded canonical run-key envelope for the verified worker.
+      additionalProperties: false
     BeginTransferRequest:
       type: object
       required:
@@ -6594,6 +6823,8 @@ components:
       - runKeyEnvelope
       - artifacts
       - cancellationRequested
+      - desiredWorkerCount
+      - workerResources
       - relayPath
       - relayProtocol
       properties:
@@ -6609,6 +6840,10 @@ components:
           allOf:
           - $ref: '#/components/schemas/DriverArtifactDownloadResponse'
           nullable: true
+        desiredWorkerCount:
+          type: integer
+          format: int32
+          minimum: 0
         driverLeaseId:
           type: string
         endpointFingerprint:
@@ -6632,6 +6867,8 @@ components:
         runKeyEnvelope:
           type: string
           description: Base64url-encoded canonical run-key envelope for this driver.
+        workerResources:
+          $ref: '#/components/schemas/ResourceRequestBody'
     DriverTransitionRequest:
       type: object
       required:
@@ -6657,6 +6894,76 @@ components:
       - failed
       - cancelled
       - indeterminate
+    DriverWorkerAllocationResponse:
+      type: object
+      required:
+      - allocationLeaseId
+      - fencingToken
+      - state
+      - resources
+      - runKeyEnvelopeAuthorized
+      properties:
+        allocationLeaseId:
+          type: string
+        endpointIdentity:
+          allOf:
+          - $ref: '#/components/schemas/AllocationEndpointIdentityResponse'
+          nullable: true
+        fencingToken:
+          type: integer
+          format: int64
+          minimum: 0
+        resources:
+          $ref: '#/components/schemas/ResourceRequestBody'
+        runKeyEnvelopeAuthorized:
+          type: boolean
+        state:
+          type: string
+    DriverWorkerAuthorizationResponse:
+      type: object
+      required:
+      - allocationLeaseId
+      - allocationFencingToken
+      - driverLeaseId
+      - driverFencingToken
+      - endpointFingerprint
+      properties:
+        allocationFencingToken:
+          type: integer
+          format: int64
+          minimum: 0
+        allocationLeaseId:
+          type: string
+        driverFencingToken:
+          type: integer
+          format: int64
+          minimum: 0
+        driverLeaseId:
+          type: string
+        endpointFingerprint:
+          type: string
+    DriverWorkerListResponse:
+      type: object
+      required:
+      - generation
+      - desiredWorkers
+      - resources
+      - workers
+      properties:
+        desiredWorkers:
+          type: integer
+          format: int32
+          minimum: 0
+        generation:
+          type: integer
+          format: int64
+          minimum: 0
+        resources:
+          $ref: '#/components/schemas/ResourceRequestBody'
+        workers:
+          type: array
+          items:
+            $ref: '#/components/schemas/DriverWorkerAllocationResponse'
     EndpointIdentityEvidenceBody:
       type: object
       required:
@@ -9743,6 +10050,25 @@ components:
           type: string
         version:
           type: string
+    ResizeDriverWorkersRequest:
+      type: object
+      required:
+      - expectedGeneration
+      - desiredWorkers
+      - resources
+      properties:
+        desiredWorkers:
+          type: integer
+          format: int32
+          maximum: 1024
+          minimum: 0
+        expectedGeneration:
+          type: integer
+          format: int64
+          minimum: 0
+        resources:
+          $ref: '#/components/schemas/ResourceRequestBody'
+      additionalProperties: false
     ResourceInventoryBody:
       type: object
       required:
@@ -9946,6 +10272,8 @@ components:
       - bundleCiphertextSizeClass
       - compatibilityFingerprints
       - resources
+      - workerCount
+      - workerResources
       - state
       - version
       - createdAt
@@ -10015,6 +10343,12 @@ components:
           type: integer
           format: int64
           minimum: 0
+        workerCount:
+          type: integer
+          format: int32
+          minimum: 0
+        workerResources:
+          $ref: '#/components/schemas/ResourceRequestBody'
     SecurityPolicyRequest:
       type: object
       required:
@@ -10503,6 +10837,15 @@ components:
           type: string
         resources:
           $ref: '#/components/schemas/ResourceRequestBody'
+        workerCount:
+          type: integer
+          format: int32
+          maximum: 1024
+          minimum: 0
+        workerResources:
+          allOf:
+          - $ref: '#/components/schemas/ResourceRequestBody'
+          nullable: true
       additionalProperties: false
     TelemetryIngestRequest:
       type: object
@@ -11107,6 +11450,53 @@ components:
         queuedJobs:
           type: integer
           minimum: 0
+    WorkerBootstrapResponse:
+      type: object
+      required:
+      - runId
+      - orgId
+      - projectId
+      - allocationLeaseId
+      - allocationFencingToken
+      - driverFencingToken
+      - endpointFingerprint
+      - runKeyEnvelope
+      - expiresAt
+      - relayPath
+      - relayProtocol
+      - relayTicket
+      properties:
+        allocationFencingToken:
+          type: integer
+          format: int64
+          minimum: 0
+        allocationLeaseId:
+          type: string
+        driverFencingToken:
+          type: integer
+          format: int64
+          minimum: 0
+        endpointFingerprint:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        orgId:
+          type: string
+        projectId:
+          type: string
+        relayPath:
+          type: string
+        relayProtocol:
+          type: string
+        relayTicket:
+          type: string
+          description: Single-use, short-lived capability for the allocation-owned worker.
+        runId:
+          type: string
+        runKeyEnvelope:
+          type: string
+          description: Base64url-encoded canonical run-key envelope for this worker.
     crate.errors.ErrorResponse:
       type: object
       required:
