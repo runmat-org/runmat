@@ -5,9 +5,10 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, IntegerStorage, NumericDType, StringArray, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor, CharArray, IntegerStorage, NumericDType,
+    StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode, SurfacePlot};
@@ -23,6 +24,17 @@ use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "imshow";
+
+const IMSHOW_FOUR_CHANNEL_IMAGE_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "imshow-four-channel-image",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "imshow with numeric M-by-N-by-4 image data is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ImshowFourChannelImageExtension"),
+    };
+
+pub const IMSHOW_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [IMSHOW_FOUR_CHANNEL_IMAGE_EXTENSION];
 
 const IMSHOW_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "h",
@@ -171,6 +183,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::imshow::IMSHOW_DESCRIPTOR),
+    extensions(crate::builtins::plotting::imshow::IMSHOW_EXTENSIONS),
     builtin_path = "crate::builtins::plotting::imshow"
 )]
 pub async fn imshow_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
@@ -192,6 +205,12 @@ pub async fn imshow_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         return Err(imshow_error(
             "imshow: truecolor image data must be single, double, uint8, or uint16",
         ));
+    }
+    if range == DisplayRange::Default && is_supported_four_channel_image(&image_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &IMSHOW_FOUR_CHANNEL_IMAGE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
     }
     let image_value = normalize_image_value(image_value).map_err(map_imshow_invalid)?;
     if is_truecolor_value(&image_value) {
@@ -283,11 +302,42 @@ fn normalize_image_value(value: Value) -> crate::BuiltinResult<Value> {
 }
 
 fn is_logical_truecolor_value(value: &Value) -> bool {
-    matches!(
-        value,
-        Value::LogicalArray(array)
-            if array.shape.get(2).is_some_and(|&channels| channels == 3 || channels == 4)
-    )
+    match value {
+        Value::LogicalArray(array) => array
+            .shape
+            .get(2)
+            .is_some_and(|&channels| channels == 3 || channels == 4),
+        Value::GpuTensor(handle) => {
+            runmat_accelerate_api::handle_is_logical(handle)
+                && handle
+                    .shape
+                    .get(2)
+                    .is_some_and(|&channels| channels == 3 || channels == 4)
+        }
+        _ => false,
+    }
+}
+
+fn is_supported_four_channel_image(value: &Value) -> bool {
+    match value {
+        Value::Tensor(tensor) if tensor.shape.get(2) == Some(&4) => matches!(
+            tensor.numeric_dtype(),
+            NumericDType::F64 | NumericDType::F32 | NumericDType::U8 | NumericDType::U16
+        ),
+        Value::GpuTensor(handle)
+            if handle.shape.get(2) == Some(&4)
+                && !runmat_accelerate_api::handle_is_logical(handle) =>
+        {
+            matches!(
+                runmat_accelerate_api::handle_integer_type(handle),
+                None | Some(
+                    runmat_accelerate_api::IntegerElementType::U8
+                        | runmat_accelerate_api::IntegerElementType::U16
+                )
+            )
+        }
+        _ => false,
+    }
 }
 
 fn is_truecolor_value(value: &Value) -> bool {
@@ -1042,6 +1092,66 @@ mod tests {
         assert_eq!(grid.len(), 2);
         assert_eq!(grid[0].len(), 2);
         assert_eq!(surface.color_limits, None);
+    }
+
+    #[test]
+    fn imshow_four_channel_image_follows_compatibility_mode() {
+        let rgba = || {
+            Value::Tensor(
+                Tensor::new(vec![1.0, 0.0, 0.0, 0.5], vec![1, 1, 4]).expect("four-channel image"),
+            )
+        };
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = futures::executor::block_on(imshow_builtin(vec![rgba()]))
+                .expect_err("MATLAB mode rejects four-channel numeric image data");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:ImshowFourChannelImageExtension")
+            );
+
+            let range =
+                Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).expect("display range"));
+            let error = futures::executor::block_on(imshow_builtin(vec![rgba(), range]))
+                .expect_err("display ranges remain invalid for four-channel data");
+            assert_eq!(error.identifier(), Some("RunMat:imshow:InvalidArgument"));
+        }
+        {
+            let _guard = reset();
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            assert!(futures::executor::block_on(imshow_builtin(vec![rgba()])).is_ok());
+        }
+
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1, 4],
+            device_id: 0,
+            buffer_id: u64::MAX - 156,
+        };
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = futures::executor::block_on(imshow_builtin(vec![Value::GpuTensor(handle)]))
+            .expect_err("MATLAB mode rejects resident four-channel input before gather");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:ImshowFourChannelImageExtension")
+        );
+    }
+
+    #[test]
+    fn imshow_rejects_resident_logical_truecolor_before_gather() {
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1, 3],
+            device_id: 0,
+            buffer_id: u64::MAX - 157,
+        };
+        runmat_accelerate_api::set_handle_logical(&handle, true);
+        let error =
+            futures::executor::block_on(imshow_builtin(vec![Value::GpuTensor(handle.clone())]))
+                .expect_err("logical truecolor is not numeric truecolor");
+        runmat_accelerate_api::clear_handle_logical(&handle);
+        assert_eq!(error.identifier(), Some("RunMat:imshow:InvalidArgument"));
+        assert!(error
+            .message()
+            .contains("must be single, double, uint8, or uint16"));
     }
 
     #[test]

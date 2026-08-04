@@ -47629,6 +47629,14 @@
           "when": "Internal image decoding or render preparation fails unexpectedly.",
           "message": "imshow: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "imshow-four-channel-image",
+          "mode": "RunMatOnly",
+          "description": "imshow with numeric M-by-N-by-4 image data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ImshowFourChannelImageExtension"
+        }
       ]
     },
     {
