@@ -20,7 +20,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "Construction gathers gpuArray inputs to host object storage. Solving through the object delegates to mldivide or mrdivide, so GPU residency follows those solve builtins when a provider accepts the transformed matrix."
+    "notes": "In `runmat` compatibility mode, construction accepts gpuArray arguments as a RunMat extension and gathers them to host object storage. Solving through the object delegates to mldivide or mrdivide, so GPU residency follows those solve builtins when a provider accepts the transformed matrix."
   },
   "fusion": {
     "elementwise": false,
@@ -34,7 +34,7 @@
   },
   "description": "`dA = decomposition(A)` creates a decomposition object that can be reused with `dA \\ b` and `b / dA`. RunMat stores a validated coefficient matrix and routes solves through the same MATLAB-compatible `mldivide` and `mrdivide` engines used by ordinary matrix division.",
   "behaviors": [
-    "The constructor accepts dense real, dense complex, scalar numeric, logical scalar, and integer scalar coefficient matrices. Sparse inputs are rejected until RunMat has a sparse solve path behind the decomposition object.",
+    "MATLAB-compatible construction accepts full real or complex coefficient matrices of class `single` or `double`. In `runmat` compatibility mode, supported integer coefficient arrays and integer or logical scalars are retained as a RunMat extension. Sparse inputs remain rejected until RunMat has a sparse solve path behind the decomposition object.",
     "Supported type strings are `'auto'`, `'lu'`, `'qr'`, `'chol'`, `'triangular'`, and `'diagonal'`. The default `'auto'` selects `diagonal`, `triangular`, `lu`, or `qr` based on the matrix shape and structure.",
     "Square-only types reject rectangular matrices. The `diagonal` and `triangular` types validate the corresponding structure. The optional `'upper'` or `'lower'` triangular flag is supported for `decomposition(A, 'triangular', flag)` and ignores the opposite triangle.",
     "Name-value options include `CheckCondition` and `RankTolerance`. `CheckCondition` is exposed as an object property; `RankTolerance` is accepted and stored for QR compatibility metadata.",
@@ -118,7 +118,7 @@
     "url": "crates/runmat-runtime/src/builtins/math/linalg/factor/decomposition.rs"
   },
   "gpu_behavior": [
-    "Constructing a decomposition object gathers any gpuArray coefficient matrix to host storage because the object owns normalized matrix metadata.",
+    "R2026a does not document GPU Array support for `decomposition`. RunMat retains gpuArray arguments behind its explicit extension mode and gathers them to host storage because the object owns normalized matrix metadata.",
     "Solves through `dA \\ b` and `b / dA` call the existing `mldivide` and `mrdivide` implementations with the effective coefficient matrix. If a provider accepts that solve, residency follows the same provider behavior as direct matrix division; otherwise RunMat uses the host fallback."
   ]
 }

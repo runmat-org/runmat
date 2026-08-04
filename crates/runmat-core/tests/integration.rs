@@ -488,6 +488,53 @@ fn test_pagefun_host_extension_follows_session_compatibility_mode() {
 }
 
 #[test]
+fn test_linalg_coefficient_extensions_follow_session_compatibility_mode() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+
+        let decomposition = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = decomposition(int16([2 0; 0 4]));",
+        )
+        .expect("runtime failure should be returned in the execution outcome");
+        assert_eq!(
+            decomposition
+                .error
+                .as_ref()
+                .and_then(|error| error.identifier()),
+            Some("RunMat:compatibility:DecompositionNonfloatingInputExtension")
+        );
+
+        let eigs = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = eigs(int16([1 0; 0 8]), 1);",
+        )
+        .expect("runtime failure should be returned in the execution outcome");
+        assert_eq!(
+            eigs.error.as_ref().and_then(|error| error.identifier()),
+            Some("RunMat:compatibility:EigsNonfloatingMatrixExtension")
+        );
+
+        engine.set_compat_mode(CompatMode::RunMat);
+        let decomposition = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = decomposition(int16([2 0; 0 4]));",
+        )
+        .expect("RunMat mode accepts integer decomposition coefficients");
+        assert!(decomposition.error.is_none(), "{:?}", decomposition.error);
+
+        let eigs = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = eigs(int16([1 0; 0 8]), 1); out(1)",
+        )
+        .expect("RunMat mode accepts integer eigs coefficients");
+        assert!(eigs.error.is_none(), "{:?}", eigs.error);
+        assert_eq!(eigs.value, Some(runmat_builtins::Value::Num(8.0)));
+    });
+}
+
+#[test]
 fn test_sparse_integer_outputs_follow_session_compatibility_mode() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();

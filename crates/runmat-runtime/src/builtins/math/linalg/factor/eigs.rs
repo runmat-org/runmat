@@ -10,9 +10,10 @@ use std::cmp::Ordering;
 
 use num_complex::Complex64;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, ResolveContext, StructValue, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor, ComplexTensor, IntValue, NumericDType,
+    ResolveContext, StructValue, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -27,6 +28,23 @@ use super::eig;
 
 const NAME: &str = "eigs";
 const DEFAULT_K: usize = 6;
+
+const EIGS_NONFLOATING_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "eigs-nonfloating-matrix",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "eigs with a non-single/non-double coefficient matrix is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:EigsNonfloatingMatrixExtension"),
+};
+
+const EIGS_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "eigs-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "eigs with a gpuArray argument is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:EigsGpuInputExtension"),
+};
+
+pub const EIGS_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [EIGS_NONFLOATING_MATRIX_EXTENSION, EIGS_GPU_INPUT_EXTENSION];
 
 const OUTPUT_D: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "d",
@@ -222,9 +240,18 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     type_resolver(eigs_type),
     descriptor(crate::builtins::math::linalg::factor::eigs::EIGS_DESCRIPTOR),
+    extensions(crate::builtins::math::linalg::factor::eigs::EIGS_EXTENSIONS),
     builtin_path = "crate::builtins::math::linalg::factor::eigs"
 )]
 async fn eigs_builtin(a: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if matches!(&a, Value::GpuTensor(_))
+        || rest
+            .iter()
+            .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(&EIGS_GPU_INPUT_EXTENSION, NAME)?;
+    }
+    ensure_eigs_coefficient_class_enabled(&a)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&a, "eigs")?;
     for value in &rest {
         crate::builtins::common::validation::reject_typed_complex_integer(value, "eigs")?;
@@ -243,6 +270,38 @@ async fn eigs_builtin(a: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         ])),
         Some(_) => Err(eigs_error(&ERROR_INVALID_ARGUMENT)),
         None => Ok(eval.values),
+    }
+}
+
+fn ensure_eigs_coefficient_class_enabled(value: &Value) -> BuiltinResult<()> {
+    if is_nonfloating_supported_coefficient_matrix(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &EIGS_NONFLOATING_MATRIX_EXTENSION,
+            NAME,
+        )?;
+    }
+    Ok(())
+}
+
+fn is_nonfloating_supported_coefficient_matrix(value: &Value) -> bool {
+    match value {
+        Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_) => true,
+        Value::Tensor(tensor) => !matches!(
+            tensor.numeric_dtype(),
+            NumericDType::F64 | NumericDType::F32
+        ),
+        Value::SparseTensor(sparse) => {
+            sparse.is_logical()
+                || sparse
+                    .numeric_dtype()
+                    .is_some_and(|dtype| !matches!(dtype, NumericDType::F64 | NumericDType::F32))
+        }
+        Value::GpuTensor(handle) => {
+            runmat_accelerate_api::handle_is_logical(handle)
+                || runmat_accelerate_api::handle_integer_type(handle).is_some()
+        }
+        Value::ComplexTensor(_) => false,
+        _ => false,
     }
 }
 
@@ -322,6 +381,7 @@ impl Request {
             if is_empty_matrix(candidate) {
                 cursor += 1;
             } else if is_generalized_b(candidate) {
+                ensure_eigs_coefficient_class_enabled(candidate)?;
                 b = Some(matrix_host_value(args.remove(0))?);
                 cursor = 0;
             }
@@ -1320,6 +1380,61 @@ mod tests {
     }
 
     #[test]
+    fn eigs_nonfloating_coefficients_follow_compatibility_mode() {
+        let integer_matrix = || {
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::I16(vec![1, 0, 0, 8]), vec![2, 2])
+                    .expect("integer coefficient matrix"),
+            )
+        };
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error =
+                call(integer_matrix(), Vec::new()).expect_err("MATLAB mode rejects integer A");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:EigsNonfloatingMatrixExtension")
+            );
+
+            let a = real_matrix(vec![1.0, 0.0, 0.0, 8.0], 2, 2);
+            let error = call(a, vec![integer_matrix()])
+                .expect_err("MATLAB mode rejects integer generalized B");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:EigsNonfloatingMatrixExtension")
+            );
+
+            let a = real_matrix(vec![1.0, 0.0, 0.0, 8.0], 2, 2);
+            let k = Value::Int(IntValue::I16(1));
+            assert!(call(a, vec![k]).is_ok(), "integer k is not a coefficient");
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            assert!(call(integer_matrix(), Vec::new()).is_ok());
+        }
+
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, 0, 0, 8]), vec![2, 2])
+                .expect("integer coefficient matrix");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("upload integer coefficient matrix");
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = call(Value::GpuTensor(handle.clone()), Vec::new())
+                    .expect_err("MATLAB mode rejects resident integer A before gather");
+                assert_eq!(
+                    error.identifier(),
+                    Some("RunMat:compatibility:EigsGpuInputExtension")
+                );
+            }
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+                assert!(call(Value::GpuTensor(handle), Vec::new()).is_ok());
+            }
+        });
+    }
+
+    #[test]
     fn eigs_defaults_to_largest_magnitude_six_clamped() {
         let a = real_matrix(vec![1.0, 0.0, 0.0, 4.0], 2, 2);
         let out = tensor(call(a, Vec::new()).unwrap());
@@ -1536,6 +1651,7 @@ mod tests {
 
     #[test]
     fn eigs_cholesky_factor_reads_typed_integer_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let a = real_matrix(vec![2.0, 0.0, 0.0, 9.0], 2, 2);
         let r = Tensor::new_integer(IntegerStorage::U16(vec![1, 0, 0, 2]), vec![2, 2]).unwrap();
         let mut opts = StructValue::new();

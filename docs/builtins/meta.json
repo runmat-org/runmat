@@ -22932,6 +22932,20 @@
           "when": "Runtime cannot materialize a decomposition object or transformed coefficient matrix.",
           "message": "decomposition: internal runtime failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "decomposition-nonfloating-input",
+          "mode": "RunMatOnly",
+          "description": "decomposition with a non-single/non-double coefficient matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DecompositionNonfloatingInputExtension"
+        },
+        {
+          "id": "decomposition-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "decomposition with a gpuArray argument is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DecompositionGpuInputExtension"
+        }
       ]
     },
     {
@@ -26551,6 +26565,291 @@
           "identifier": "RunMat:eig:Internal",
           "when": "Runtime cannot compute or materialize eig outputs.",
           "message": "eig: internal runtime failure"
+        }
+      ]
+    },
+    {
+      "name": "eigs",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "d = eigs(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Square numeric, sparse, logical, complex, or gpuArray matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "d",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Selected eigenvalues as a column vector."
+            }
+          ]
+        },
+        {
+          "label": "d = eigs(A, k)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Square numeric, sparse, logical, complex, or gpuArray matrix."
+            },
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional B, k, sigma, opts, and name-value arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "d",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Selected eigenvalues as a column vector."
+            }
+          ]
+        },
+        {
+          "label": "d = eigs(A, k, sigma)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Square numeric, sparse, logical, complex, or gpuArray matrix."
+            },
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional B, k, sigma, opts, and name-value arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "d",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Selected eigenvalues as a column vector."
+            }
+          ]
+        },
+        {
+          "label": "d = eigs(A, k, sigma, opts)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Square numeric, sparse, logical, complex, or gpuArray matrix."
+            },
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional B, k, sigma, opts, and name-value arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "d",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Selected eigenvalues as a column vector."
+            }
+          ]
+        },
+        {
+          "label": "d = eigs(A, k, sigma, Name, Value)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Square numeric, sparse, logical, complex, or gpuArray matrix."
+            },
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional B, k, sigma, opts, and name-value arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "d",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Selected eigenvalues as a column vector."
+            }
+          ]
+        },
+        {
+          "label": "d = eigs(A, B, ...)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Square numeric, sparse, logical, complex, or gpuArray matrix."
+            },
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional B, k, sigma, opts, and name-value arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "d",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Selected eigenvalues as a column vector."
+            }
+          ]
+        },
+        {
+          "label": "[V, D] = eigs(...)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Square numeric, sparse, logical, complex, or gpuArray matrix."
+            },
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional B, k, sigma, opts, and name-value arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "V",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Selected right eigenvectors."
+            },
+            {
+              "name": "D",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Diagonal matrix of selected eigenvalues."
+            }
+          ]
+        },
+        {
+          "label": "[V, D, flag] = eigs(...)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Square numeric, sparse, logical, complex, or gpuArray matrix."
+            },
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional B, k, sigma, opts, and name-value arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "V",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Selected right eigenvectors."
+            },
+            {
+              "name": "D",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Diagonal matrix of selected eigenvalues."
+            },
+            {
+              "name": "flag",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Convergence flag; exact host fallback returns 0."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.EIGS.INVALID_ARGUMENT",
+          "identifier": "RunMat:eigs:InvalidArgument",
+          "when": "Inputs, options, or requested output count are invalid.",
+          "message": "eigs: invalid argument"
+        },
+        {
+          "code": "RM.EIGS.INVALID_INPUT",
+          "identifier": "RunMat:eigs:InvalidInput",
+          "when": "The matrix input is unsupported or has invalid shape.",
+          "message": "eigs: input matrix must be square"
+        },
+        {
+          "code": "RM.EIGS.UNSUPPORTED",
+          "identifier": "RunMat:eigs:UnsupportedInput",
+          "when": "Function-handle or provider-only eigs behavior is requested.",
+          "message": "eigs: unsupported input form"
+        },
+        {
+          "code": "RM.EIGS.INTERNAL",
+          "identifier": "RunMat:eigs:Internal",
+          "when": "Runtime cannot materialize selected eigen outputs.",
+          "message": "eigs: internal runtime failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "eigs-nonfloating-matrix",
+          "mode": "RunMatOnly",
+          "description": "eigs with a non-single/non-double coefficient matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EigsNonfloatingMatrixExtension"
+        },
+        {
+          "id": "eigs-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "eigs with a gpuArray argument is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EigsGpuInputExtension"
         }
       ]
     },

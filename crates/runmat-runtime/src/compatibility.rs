@@ -189,6 +189,10 @@ mod tests {
         assert_eq!(
             declared,
             std::collections::BTreeSet::from([
+                ("decomposition", "decomposition-gpu-input"),
+                ("decomposition", "decomposition-nonfloating-input"),
+                ("eigs", "eigs-gpu-input"),
+                ("eigs", "eigs-nonfloating-matrix"),
                 ("gpuArray", "gpuarray-dtype-selector"),
                 ("gpuArray", "gpuarray-like"),
                 ("gpuArray", "gpuarray-size-arguments"),

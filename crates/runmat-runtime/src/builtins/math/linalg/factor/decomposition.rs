@@ -6,9 +6,10 @@ use std::collections::HashMap;
 
 use num_complex::Complex64;
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ClassDef, ComplexTensor, MethodDef, NumericDType, ObjectInstance, PropertyDef, Tensor, Value,
+    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, ClassDef, ComplexTensor,
+    MethodDef, NumericDType, ObjectInstance, PropertyDef, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -18,6 +19,27 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError, OBJECT_INDEX_MEMBE
 
 const NAME: &str = "decomposition";
 const CLASS_NAME: &str = "decomposition";
+
+const DECOMPOSITION_NONFLOATING_INPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "decomposition-nonfloating-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "decomposition with a non-single/non-double coefficient matrix is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:DecompositionNonfloatingInputExtension"),
+    };
+
+const DECOMPOSITION_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "decomposition-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "decomposition with a gpuArray argument is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:DecompositionGpuInputExtension"),
+};
+
+pub const DECOMPOSITION_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    DECOMPOSITION_NONFLOATING_INPUT_EXTENSION,
+    DECOMPOSITION_GPU_INPUT_EXTENSION,
+];
 
 const MATRIX_FIELD: &str = "__matrix";
 const TYPE_FIELD: &str = "Type";
@@ -331,12 +353,41 @@ fn ensure_decomposition_class_registered() {
     summary = "Create a matrix decomposition object for reusable linear solves.",
     keywords = "decomposition,linear solve,lu,qr,chol,triangular,diagonal",
     descriptor(crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_DESCRIPTOR),
+    extensions(crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_EXTENSIONS),
     builtin_path = "crate::builtins::math::linalg::factor::decomposition"
 )]
 async fn decomposition_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args
+        .iter()
+        .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DECOMPOSITION_GPU_INPUT_EXTENSION,
+            NAME,
+        )?;
+    }
+    if args.first().is_some_and(is_nonfloating_coefficient_matrix) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DECOMPOSITION_NONFLOATING_INPUT_EXTENSION,
+            NAME,
+        )?;
+    }
     ensure_decomposition_class_registered();
     let spec = parse_constructor(args).await?;
     Ok(Value::Object(spec_to_object(&spec)?))
+}
+
+fn is_nonfloating_coefficient_matrix(value: &Value) -> bool {
+    match value {
+        Value::Int(_) | Value::Bool(_) => true,
+        Value::Tensor(tensor) => !matches!(
+            tensor.numeric_dtype(),
+            NumericDType::F64 | NumericDType::F32
+        ),
+        Value::ComplexTensor(tensor) => tensor.integer_storage().is_some(),
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle).is_some(),
+        _ => false,
+    }
 }
 
 #[runtime_builtin(
@@ -1507,6 +1558,51 @@ mod tests {
             Value::Tensor(t) => t.materialize_f64(),
             other => panic!("expected real tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn decomposition_nonfloating_input_follows_compatibility_mode() {
+        let matrix = || typed_int_tensor(IntegerStorage::I16(vec![2, 0, 0, 4]), vec![2, 2]);
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = call_constructor(vec![matrix()])
+                .expect_err("MATLAB mode rejects integer decomposition coefficients");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:DecompositionNonfloatingInputExtension")
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            assert!(matches!(
+                call_constructor(vec![matrix()]).expect("RunMat mode accepts integer coefficients"),
+                Value::Object(_)
+            ));
+        }
+
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new_integer(IntegerStorage::I16(vec![2, 0, 0, 4]), vec![2, 2])
+                .expect("integer coefficient matrix");
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("upload integer coefficient matrix");
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = call_constructor(vec![Value::GpuTensor(handle.clone())])
+                    .expect_err("MATLAB mode rejects resident integer coefficients before gather");
+                assert_eq!(
+                    error.identifier(),
+                    Some("RunMat:compatibility:DecompositionGpuInputExtension")
+                );
+            }
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+                assert!(matches!(
+                    call_constructor(vec![Value::GpuTensor(handle)])
+                        .expect("RunMat mode accepts resident integer coefficients"),
+                    Value::Object(_)
+                ));
+            }
+        });
     }
 
     #[test]
