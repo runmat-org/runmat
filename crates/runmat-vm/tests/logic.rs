@@ -678,6 +678,32 @@ fn typed_complex_integer_set_operations_are_rejected_before_f64_coercion() {
 }
 
 #[test]
+fn unique_preserves_every_integer_row_class_through_vm_dispatch() {
+    let vars = execute_source(
+        "a = unique(int8([3 1 3])); b = unique(int16([3 1 3])); c = unique(int32([3 1 3])); d = unique(int64([3 1 3])); e = unique(uint8([3 1 3])); f = unique(uint16([3 1 3])); g = unique(uint32([3 1 3])); h = unique(uint64([18446744073709551615 0 18446744073709551615]));",
+    )
+    .expect("compiled integer unique rows");
+    let expected = [
+        IntegerStorage::I8(vec![1, 3]),
+        IntegerStorage::I16(vec![1, 3]),
+        IntegerStorage::I32(vec![1, 3]),
+        IntegerStorage::I64(vec![1, 3]),
+        IntegerStorage::U8(vec![1, 3]),
+        IntegerStorage::U16(vec![1, 3]),
+        IntegerStorage::U32(vec![1, 3]),
+        IntegerStorage::U64(vec![0, u64::MAX]),
+    ];
+    for (value, expected_storage) in vars.iter().zip(expected.iter()) {
+        assert!(matches!(
+            value,
+            Value::Tensor(tensor)
+                if tensor.shape == vec![1, 2]
+                    && tensor.integer_storage() == Some(expected_storage)
+        ));
+    }
+}
+
+#[test]
 fn typed_complex_integer_fft_operations_are_rejected_before_f64_coercion() {
     for operation in [
         "fft(z)", "ifft(z)", "fft2(z)", "ifft2(z)", "fftn(z)", "ifftn(z)",
