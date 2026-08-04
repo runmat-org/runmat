@@ -653,6 +653,40 @@ fn test_trnd_integer_arguments_follow_session_compatibility_mode() {
 }
 
 #[test]
+fn test_db_nonfloating_inputs_follow_session_compatibility_mode() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+
+        for source in [
+            "out = db(int16(10));",
+            "out = db(logical([1 0]));",
+            "out = db(complex(int16(3), int16(4)));",
+            "out = db(10, uint16(50));",
+        ] {
+            let outcome = runmat_core::execute_text_request_for_testing(&mut engine, source)
+                .expect("runtime failure should be returned in the execution outcome");
+            assert_eq!(
+                outcome.error.as_ref().and_then(|error| error.identifier()),
+                Some("RunMat:compatibility:DbNonfloatingInputExtension")
+            );
+        }
+
+        engine.set_compat_mode(CompatMode::RunMat);
+        let outcome = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = [db(int16(10)), db(logical(1)), db(complex(int16(3), int16(4))), db(10, uint16(50))]; size(out)",
+        )
+        .expect("RunMat mode accepts nonfloating db inputs");
+        assert!(outcome.error.is_none(), "{:?}", outcome.error);
+        let Some(runmat_builtins::Value::Tensor(shape)) = outcome.value else {
+            panic!("expected size vector");
+        };
+        assert_eq!(shape.materialize_f64(), vec![1.0, 4.0]);
+    });
+}
+
+#[test]
 fn test_sparse_integer_outputs_follow_session_compatibility_mode() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();

@@ -1,9 +1,9 @@
 //! MATLAB-compatible `db` decibel conversion builtin for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, NumericDType, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor, ComplexTensor, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -17,6 +17,15 @@ use crate::builtins::control::type_resolvers::db_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "db";
+const DB_NONFLOATING_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "db-nonfloating-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "db with integer, logical, or complex-integer computation input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:DbNonfloatingInputExtension"),
+};
+pub const DB_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [DB_NONFLOATING_INPUT_EXTENSION];
+
 const DB_OUTPUT_YDB: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "yDb",
     ty: BuiltinParamType::NumericArray,
@@ -180,6 +189,7 @@ enum DbMode {
     accel = "metadata",
     type_resolver(db_type),
     descriptor(crate::builtins::control::db::DB_DESCRIPTOR),
+    extensions(crate::builtins::control::db::DB_EXTENSIONS),
     builtin_path = "crate::builtins::control::db"
 )]
 async fn db_builtin(y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -189,6 +199,16 @@ async fn db_builtin(y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
             "expected db(y), db(y, 'voltage'), db(y, 'power'), or db(y, R)",
         ));
     }
+    let nonfloating_extension =
+        is_nonfloating_extension_value(&y) || rest.iter().any(is_nonfloating_extension_value);
+    if is_resident_nonfloating_extension_value(&y)
+        || rest.iter().any(is_resident_nonfloating_extension_value)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DB_NONFLOATING_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
 
     let y = crate::gather_if_needed_async(&y).await?;
     let mode = match rest.into_iter().next() {
@@ -197,14 +217,46 @@ async fn db_builtin(y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     };
 
     match mode {
-        DbMode::Voltage => map_real_input(magnitude_input(y)?, |m| 20.0 * m.log10()),
-        DbMode::Power => map_real_input(power_input(y)?, |power| 10.0 * power.log10()),
+        DbMode::Voltage => {
+            let input = magnitude_input(y)?;
+            ensure_nonfloating_extension_enabled(nonfloating_extension)?;
+            map_real_input(input, |m| 20.0 * m.log10())
+        }
+        DbMode::Power => {
+            let input = power_input(y)?;
+            ensure_nonfloating_extension_enabled(nonfloating_extension)?;
+            map_real_input(input, |power| 10.0 * power.log10())
+        }
         DbMode::Resistance(reference) => {
             let magnitudes = magnitude_input(y)?;
             let reference = resistance_input(reference)?;
+            ensure_nonfloating_extension_enabled(nonfloating_extension)?;
             db_with_resistance(&magnitudes, &reference)
         }
     }
+}
+
+fn ensure_nonfloating_extension_enabled(enabled: bool) -> BuiltinResult<()> {
+    if enabled {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DB_NONFLOATING_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
+}
+
+fn is_nonfloating_extension_value(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_)
+    ) || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some())
+        || is_resident_nonfloating_extension_value(value)
+}
+
+fn is_resident_nonfloating_extension_value(value: &Value) -> bool {
+    matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some() || runmat_accelerate_api::handle_is_logical(handle))
 }
 
 fn parse_mode(value: Value) -> BuiltinResult<DbMode> {
@@ -290,6 +342,11 @@ fn magnitude_input(value: Value) -> BuiltinResult<RealInput> {
 
 fn complex_magnitudes(tensor: ComplexTensor) -> RealInput {
     let shape = tensor.shape.clone();
+    let precision = if tensor.numeric_dtype() == NumericDType::F32 {
+        OutputPrecision::Single
+    } else {
+        OutputPrecision::Double
+    };
     let values = tensor::complex_tensor_into_values_complex64(tensor)
         .into_iter()
         .map(|value| value.norm())
@@ -297,7 +354,7 @@ fn complex_magnitudes(tensor: ComplexTensor) -> RealInput {
     RealInput {
         values,
         shape,
-        precision: OutputPrecision::Double,
+        precision,
     }
 }
 
@@ -662,6 +719,22 @@ pub(crate) mod tests {
         assert_tensor_close(result, &[2, 1], &[20.0 * 5.0f64.log10(), 20.0]);
     }
 
+    #[test]
+    fn db_complex_single_returns_real_single() {
+        let tensor = ComplexTensor::from_f32(vec![(3.0, 4.0), (0.0, -10.0)], vec![2, 1])
+            .expect("complex single input");
+        let result = db_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("db");
+        let Value::Tensor(tensor) = result else {
+            panic!("expected real single tensor");
+        };
+        assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
+        assert_eq!(tensor.shape, vec![2, 1]);
+        assert_eq!(
+            tensor.materialize_f64(),
+            vec![f64::from((20.0_f64 * 5.0_f64.log10()) as f32), 20.0]
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn db_resistance_scalar() {
@@ -708,6 +781,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn db_magnitude_and_resistance_read_typed_integer_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let y = integer_tensor(IntegerStorage::I16(vec![-10, 20]), vec![2, 1]);
         let r = integer_tensor(IntegerStorage::U16(vec![50, 100]), vec![1, 2]);
         let result = db_builtin(Value::Tensor(y), vec![Value::Tensor(r)]).expect("db");
@@ -726,6 +800,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn db_complex_magnitudes_read_typed_integer_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = complex_integer_tensor(
             IntegerStorage::I16(vec![3, 0]),
             IntegerStorage::I16(vec![4, -10]),
@@ -738,12 +813,78 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn db_logical_and_integer_inputs_promote_to_double() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let logical = LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap();
         let result = db_builtin(Value::LogicalArray(logical), Vec::new()).expect("db");
         assert_tensor_close(result, &[1, 2], &[0.0, f64::NEG_INFINITY]);
 
         let result = db_builtin(Value::Int(IntValue::I32(10)), Vec::new()).expect("db");
         assert_num_close(result, 20.0);
+    }
+
+    #[test]
+    fn db_nonfloating_inputs_follow_compatibility_mode() {
+        let integer = || {
+            Value::Tensor(integer_tensor(
+                IntegerStorage::I16(vec![10, 20]),
+                vec![1, 2],
+            ))
+        };
+        let logical = || {
+            Value::LogicalArray(LogicalArray::new(vec![1, 0], vec![1, 2]).expect("logical input"))
+        };
+        let complex_integer = || {
+            Value::ComplexTensor(complex_integer_tensor(
+                IntegerStorage::I16(vec![3]),
+                IntegerStorage::I16(vec![4]),
+                vec![1, 1],
+            ))
+        };
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            for input in [integer(), logical(), complex_integer()] {
+                let error = db_builtin(input, vec![])
+                    .expect_err("MATLAB mode rejects nonfloating db input");
+                assert_eq!(
+                    error.identifier(),
+                    Some("RunMat:compatibility:DbNonfloatingInputExtension")
+                );
+            }
+            let error = db_builtin(Value::Num(10.0), vec![Value::Int(IntValue::U16(50))])
+                .expect_err("MATLAB mode rejects typed-integer resistance");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:DbNonfloatingInputExtension")
+            );
+
+            let invalid = db_builtin(Value::Num(10.0), vec![Value::Int(IntValue::I16(0))])
+                .expect_err("invalid resistance retains ordinary validation");
+            assert_eq!(invalid.identifier(), DB_ERROR_INVALID_RESISTANCE.identifier);
+
+            let resident = runmat_accelerate_api::GpuTensorHandle {
+                shape: vec![1, 1],
+                device_id: 0,
+                buffer_id: 9_306_001,
+            };
+            runmat_accelerate_api::set_handle_integer_type(
+                &resident,
+                runmat_accelerate_api::IntegerElementType::I16,
+            );
+            let error = db_builtin(Value::GpuTensor(resident.clone()), vec![])
+                .expect_err("MATLAB mode rejects resident integer before gather");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:DbNonfloatingInputExtension")
+            );
+            runmat_accelerate_api::clear_handle_integer_type(&resident);
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            assert!(db_builtin(integer(), vec![]).is_ok());
+            assert!(db_builtin(logical(), vec![]).is_ok());
+            assert!(db_builtin(complex_integer(), vec![]).is_ok());
+            assert!(db_builtin(Value::Num(10.0), vec![Value::Int(IntValue::U16(50))]).is_ok());
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

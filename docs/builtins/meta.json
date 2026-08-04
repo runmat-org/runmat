@@ -22411,6 +22411,14 @@
           "when": "Internal tensor conversion or allocation failed.",
           "message": "db: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "db-nonfloating-input",
+          "mode": "RunMatOnly",
+          "description": "db with integer, logical, or complex-integer computation input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DbNonfloatingInputExtension"
+        }
       ]
     },
     {

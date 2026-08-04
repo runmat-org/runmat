@@ -191,6 +191,7 @@ mod tests {
             std::collections::BTreeSet::from([
                 ("decomposition", "decomposition-gpu-input"),
                 ("decomposition", "decomposition-nonfloating-input"),
+                ("db", "db-nonfloating-input"),
                 ("eigs", "eigs-gpu-input"),
                 ("eigs", "eigs-nonfloating-matrix"),
                 ("gpuArray", "gpuarray-dtype-selector"),

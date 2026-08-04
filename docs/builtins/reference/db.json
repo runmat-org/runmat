@@ -36,7 +36,7 @@
     "Complex inputs are converted through their magnitude before applying the decibel formula.",
     "The resistance form supports MATLAB implicit expansion between `X` and `R`.",
     "Zero input returns `-Inf`, matching the logarithm singularity at zero.",
-    "Integer and logical inputs are promoted to double precision."
+    "MATLAB-compatible computation inputs use `single` or `double`; voltage input may also be floating complex. Integer, logical, complex-integer, and typed-integer resistance inputs are promoted to double only in `runmat` compatibility mode."
   ],
   "examples": [
     {
