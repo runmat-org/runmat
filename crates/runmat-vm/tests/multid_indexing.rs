@@ -102,6 +102,34 @@ fn slice_assignment_column_and_row() {
 }
 
 #[test]
+fn indexed_assignment_rejects_nonscalar_singleton_expansion() {
+    let error = execute_source("A = uint8([0 0; 0 0]); A(:, :) = uint8([5 6]);")
+        .expect_err("nonscalar singleton expansion must reject");
+    assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
+
+    let vars = execute_source(
+        "A = uint8([0 0; 0 0]); \
+         A(:, :) = uint8([1 2; 3 4]); \
+         exact = A; \
+         A(:, :) = uint8(9); \
+         scalar = A;",
+    )
+    .expect("exact and scalar indexed assignment");
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_builtins::Value::Tensor(tensor)
+            if tensor.integer_storage()
+                == Some(&runmat_builtins::IntegerStorage::U8(vec![1, 3, 2, 4]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_builtins::Value::Tensor(tensor)
+            if tensor.integer_storage()
+                == Some(&runmat_builtins::IntegerStorage::U8(vec![9, 9, 9, 9]))
+    )));
+}
+
+#[test]
 fn slice_assignment_3d_entire_slice() {
     let vars = execute_source("A = reshape([1 2 3 4 5 6 7 8 9 10 11 12], 2, 3, 2); Z = reshape([0 0 0 0 0 0], 2, 3); A(:, :, 1) = Z;").unwrap();
     // After assignment, first 2x3 slice zeros; the second slice remains [7..12]
@@ -217,4 +245,16 @@ fn gpu_integer_short_linear_logical_mask_preserves_residency_and_class() {
                 && tensor.integer_storage()
                     == Some(&runmat_builtins::IntegerStorage::U64(vec![7, 20, 9, 40]))
     )));
+}
+
+#[test]
+fn gpu_integer_indexed_assignment_rejects_nonscalar_singleton_expansion() {
+    runmat_accelerate::simple_provider::register_inprocess_provider();
+    let error = execute_source(
+        "A = gpuArray(uint8([0 0; 0 0])); \
+         rhs = gpuArray(uint8([5 6])); \
+         A(:, :) = rhs;",
+    )
+    .expect_err("gpu nonscalar singleton expansion must reject");
+    assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
 }

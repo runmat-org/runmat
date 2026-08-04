@@ -159,6 +159,39 @@ fn scalar_integer_value(value: &Value) -> Result<IntegerAssignmentValue, Runtime
     }
 }
 
+fn validated_assignment_rhs_shape(
+    rhs_shape: &[usize],
+    rhs_len: usize,
+    selection_lengths: &[usize],
+) -> Result<Vec<usize>, RuntimeError> {
+    let dims = selection_lengths.len();
+    if rhs_len == 1 {
+        return Ok(vec![1; dims]);
+    }
+    if dims == 1 {
+        if rhs_len == selection_lengths[0] {
+            return Ok(vec![rhs_len]);
+        }
+        return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+    }
+    if rhs_shape.len() > dims && rhs_shape.iter().skip(dims).any(|&dimension| dimension != 1) {
+        return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+    }
+    let mut shape = rhs_shape.iter().copied().take(dims).collect::<Vec<_>>();
+    shape.resize(dims, 1);
+    if shape != selection_lengths {
+        return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+    }
+    let expected = shape
+        .iter()
+        .try_fold(1usize, |length, dimension| length.checked_mul(*dimension))
+        .ok_or_else(|| mex("ShapeMismatch", "shape mismatch for slice assign"))?;
+    if rhs_len != expected {
+        return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+    }
+    Ok(shape)
+}
+
 pub enum ComplexRhsView {
     Scalar((f64, f64)),
     Tensor {
@@ -177,23 +210,7 @@ pub fn build_complex_rhs_view(
         Value::Num(n) => Ok(ComplexRhsView::Scalar((*n, 0.0))),
         Value::ComplexTensor(rt) => {
             let dims = selection_lengths.len();
-            let mut shape = rt.shape.clone();
-            if shape.len() < dims {
-                shape.resize(dims, 1);
-            }
-            if shape.len() > dims {
-                if shape.iter().skip(dims).any(|&s| s != 1) {
-                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-                }
-                shape.truncate(dims);
-            }
-            for d in 0..dims {
-                let out_len = selection_lengths[d];
-                let rhs_len = shape[d];
-                if !(rhs_len == 1 || rhs_len == out_len) {
-                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-                }
-            }
+            let shape = validated_assignment_rhs_shape(&rt.shape, rt.len(), selection_lengths)?;
             let mut rstrides = vec![0usize; dims];
             let mut racc = 1usize;
             for d in 0..dims {
@@ -311,31 +328,7 @@ pub fn build_string_rhs_view(
     }
     if let Value::StringArray(rt) = rhs {
         let dims = selection_lengths.len();
-        let mut shape = rt.shape.clone();
-        if dims == 1 && shape.iter().filter(|&&dim| dim != 1).count() <= 1 {
-            shape = vec![rt.data.len()];
-        } else if shape.len() < dims {
-            shape.resize(dims, 1);
-        }
-        if shape.len() > dims {
-            if shape.iter().skip(dims).any(|&s| s != 1) {
-                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-            }
-            shape.truncate(dims);
-        }
-        for d in 0..dims {
-            let out_len = selection_lengths[d];
-            let rhs_len = shape[d];
-            if !(rhs_len == 1 || rhs_len == out_len) {
-                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-            }
-        }
-        let expected = shape
-            .iter()
-            .try_fold(1usize, |acc, &len| acc.checked_mul(len));
-        if expected != Some(rt.data.len()) {
-            return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-        }
+        let shape = validated_assignment_rhs_shape(&rt.shape, rt.data.len(), selection_lengths)?;
         let mut rstrides = vec![0usize; dims];
         let mut racc = 1usize;
         for d in 0..dims {
@@ -369,31 +362,8 @@ pub fn build_string_rhs_view(
                 }
             }
         }
-        let mut shape = cell.shape.clone();
-        if dims == 1 && shape.iter().filter(|&&dim| dim != 1).count() <= 1 {
-            shape = vec![cell.data.len()];
-        } else if shape.len() < dims {
-            shape.resize(dims, 1);
-        }
-        if shape.len() > dims {
-            if shape.iter().skip(dims).any(|&s| s != 1) {
-                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-            }
-            shape.truncate(dims);
-        }
-        for d in 0..dims {
-            let out_len = selection_lengths[d];
-            let rhs_len = shape[d];
-            if !(rhs_len == 1 || rhs_len == out_len) {
-                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-            }
-        }
-        let expected = shape
-            .iter()
-            .try_fold(1usize, |acc, &len| acc.checked_mul(len));
-        if expected != Some(data.len()) {
-            return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-        }
+        let shape =
+            validated_assignment_rhs_shape(&cell.shape, cell.data.len(), selection_lengths)?;
         let mut rstrides = vec![0usize; dims];
         let mut racc = 1usize;
         for d in 0..dims {
@@ -625,28 +595,7 @@ fn materialize_complex_integer_values_for_plan(
     }
 
     let dims = plan.selection_lengths.len();
-    let mut shape = rhs_shape.to_vec();
-    if shape.len() < dims {
-        shape.resize(dims, 1);
-    }
-    if shape.len() > dims {
-        if shape.iter().skip(dims).any(|&dimension| dimension != 1) {
-            return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-        }
-        shape.truncate(dims);
-    }
-    for (&rhs_len, &selection_len) in shape.iter().zip(&plan.selection_lengths) {
-        if rhs_len != 1 && rhs_len != selection_len {
-            return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-        }
-    }
-    let expected = shape
-        .iter()
-        .copied()
-        .fold(1usize, |acc, length| acc.saturating_mul(length.max(1)));
-    if values.len() != expected {
-        return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-    }
+    let shape = validated_assignment_rhs_shape(rhs_shape, values.len(), &plan.selection_lengths)?;
     let mut strides = vec![1usize; dims];
     for dimension in 1..dims {
         strides[dimension] = strides[dimension - 1] * shape[dimension - 1].max(1);
@@ -698,7 +647,7 @@ pub fn scatter_real_with_plan(
 
 /// Assigns an index-plan selection into a host-resident CSC sparse matrix.
 /// Sparse storage owns the batched merge; this module owns MATLAB selector and
-/// RHS broadcasting semantics shared with dense tensor assignment.
+/// RHS assignment-shape semantics shared with dense tensor assignment.
 pub async fn assign_sparse_with_plan(
     sparse: SparseTensor,
     plan: &IndexPlan,
@@ -1129,30 +1078,7 @@ fn integer_gpu_rhs_indices_for_plan(
     }
 
     let dims = plan.selection_lengths.len();
-    let mut shape = rhs_shape.to_vec();
-    if shape.len() < dims {
-        shape.resize(dims, 1);
-    }
-    if shape.len() > dims {
-        if shape.iter().skip(dims).any(|&dimension| dimension != 1) {
-            return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-        }
-        shape.truncate(dims);
-    }
-    for (&rhs_len, &selection_len) in shape.iter().zip(&plan.selection_lengths) {
-        if rhs_len != 1 && rhs_len != selection_len {
-            return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-        }
-    }
-    let expected = shape
-        .iter()
-        .try_fold(1usize, |len, dimension| {
-            len.checked_mul((*dimension).max(1))
-        })
-        .ok_or_else(|| mex("ShapeMismatch", "shape mismatch for slice assign"))?;
-    if rhs_len != expected {
-        return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-    }
+    let shape = validated_assignment_rhs_shape(rhs_shape, rhs_len, &plan.selection_lengths)?;
     let mut strides = vec![1usize; dims];
     for dimension in 1..dims {
         strides[dimension] = strides[dimension - 1]
@@ -1292,21 +1218,11 @@ pub async fn materialize_rhs_nd_real(
         Value::Int(iv) => RhsView::Scalar(iv.to_f64()),
         Value::Bool(b) => RhsView::Scalar(if b { 1.0 } else { 0.0 }),
         Value::Tensor(t) => {
-            let mut shape = t.shape.clone();
-            if shape.len() < selection_lengths.len() {
-                shape.resize(selection_lengths.len(), 1);
-            }
-            if shape.len() > selection_lengths.len() {
-                if shape.iter().skip(selection_lengths.len()).any(|&s| s != 1) {
-                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-                }
-                shape.truncate(selection_lengths.len());
-            }
-            for (dim_len, &sel_len) in shape.iter().zip(selection_lengths.iter()) {
-                if *dim_len != 1 && *dim_len != sel_len {
-                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-                }
-            }
+            let shape = validated_assignment_rhs_shape(
+                &t.shape,
+                tensor_element_len(&t),
+                selection_lengths,
+            )?;
             let mut strides = vec![1usize; selection_lengths.len()];
             for d in 1..selection_lengths.len() {
                 strides[d] = strides[d - 1] * shape[d - 1].max(1);
@@ -1327,26 +1243,8 @@ pub async fn materialize_rhs_nd_real(
             }
         }
         Value::LogicalArray(la) => {
-            if la.shape.len() > selection_lengths.len()
-                && la
-                    .shape
-                    .iter()
-                    .skip(selection_lengths.len())
-                    .any(|&s| s != 1)
-            {
-                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-            }
-            let mut shape = la.shape.clone();
-            if shape.len() < selection_lengths.len() {
-                shape.resize(selection_lengths.len(), 1);
-            } else {
-                shape.truncate(selection_lengths.len());
-            }
-            for (dim_len, &sel_len) in shape.iter().zip(selection_lengths.iter()) {
-                if *dim_len != 1 && *dim_len != sel_len {
-                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-                }
-            }
+            let shape =
+                validated_assignment_rhs_shape(&la.shape, la.data.len(), selection_lengths)?;
             let mut strides = vec![1usize; selection_lengths.len()];
             for d in 1..selection_lengths.len() {
                 strides[d] = strides[d - 1] * shape[d - 1].max(1);
@@ -1538,7 +1436,7 @@ mod tests {
         build_complex_rhs_view, build_string_rhs_view, delete_complex_with_plan,
         delete_gpu_slice_with_plan, delete_tensor_with_plan, integer_gpu_rhs_indices_for_plan,
         map_acceleration_error, materialize_rhs_linear_real, materialize_rhs_nd_real,
-        ComplexRhsView,
+        validated_assignment_rhs_shape, ComplexRhsView,
     };
     use crate::indexing::plan::IndexPlan;
     use futures::executor::block_on;
@@ -1778,26 +1676,72 @@ mod tests {
     }
 
     #[test]
-    fn integer_plan_assignment_broadcasts_exact_tensor_rhs() {
+    fn integer_plan_assignment_rejects_nonscalar_singleton_expansion() {
         let tensor =
             Tensor::new_integer(IntegerStorage::I8(vec![0; 4]), vec![2, 2]).expect("tensor");
         let rhs = Value::Tensor(
             Tensor::new_integer(IntegerStorage::I8(vec![5, 6]), vec![1, 2]).expect("rhs"),
         );
         let plan = IndexPlan::new(vec![0, 1, 2, 3], vec![2, 2], vec![2, 2], 2, vec![2, 2]);
-        let result = block_on(assign_tensor_with_plan(tensor, &plan, &rhs)).expect("assign");
-
-        let Value::Tensor(output) = result else {
-            panic!("expected tensor");
-        };
-        assert_eq!(
-            output.integer_storage(),
-            Some(&IntegerStorage::I8(vec![5, 5, 6, 6]))
-        );
+        let error = block_on(assign_tensor_with_plan(tensor, &plan, &rhs))
+            .expect_err("nonscalar singleton expansion must reject");
+        assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
     }
 
     #[test]
-    fn integer_gpu_rhs_indices_cover_exact_scalar_and_nd_broadcast_forms() {
+    fn assignment_rhs_shape_allows_only_scalar_linear_count_or_exact_nd_shape() {
+        assert_eq!(
+            validated_assignment_rhs_shape(&[1, 1, 1], 1, &[2, 3]).expect("scalar"),
+            vec![1, 1]
+        );
+        assert_eq!(
+            validated_assignment_rhs_shape(&[1, 6], 6, &[6]).expect("linear count"),
+            vec![6]
+        );
+        assert_eq!(
+            validated_assignment_rhs_shape(&[2, 3, 1], 6, &[2, 3]).expect("exact shape"),
+            vec![2, 3]
+        );
+        assert!(validated_assignment_rhs_shape(&[1, 3], 3, &[2, 3]).is_err());
+        assert!(validated_assignment_rhs_shape(&[2, 1], 2, &[2, 3]).is_err());
+    }
+
+    #[test]
+    fn floating_logical_complex_and_string_rhs_reject_singleton_expansion() {
+        let floating = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("floating"));
+        let error = block_on(materialize_rhs_nd_real(&floating, &[2, 2]))
+            .expect_err("floating singleton expansion must reject");
+        assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
+
+        let logical = Value::LogicalArray(
+            runmat_builtins::LogicalArray::new(vec![1, 0], vec![1, 2]).expect("logical"),
+        );
+        let error = block_on(materialize_rhs_nd_real(&logical, &[2, 2]))
+            .expect_err("logical singleton expansion must reject");
+        assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
+
+        let complex = Value::ComplexTensor(
+            ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![1, 2]).expect("complex"),
+        );
+        let error = match build_complex_rhs_view(&complex, &[2, 2]) {
+            Ok(_) => panic!("complex singleton expansion must reject"),
+            Err(error) => error,
+        };
+        assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
+
+        let strings = Value::StringArray(
+            runmat_builtins::StringArray::new(vec!["a".to_string(), "b".to_string()], vec![1, 2])
+                .expect("strings"),
+        );
+        let error = match build_string_rhs_view(&strings, &[2, 2]) {
+            Ok(_) => panic!("string singleton expansion must reject"),
+            Err(error) => error,
+        };
+        assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
+    }
+
+    #[test]
+    fn integer_gpu_rhs_indices_cover_linear_scalar_and_exact_nd_forms() {
         let linear = IndexPlan::new(vec![5, 1, 3], vec![1, 3], vec![3], 1, vec![2, 3]);
         assert_eq!(
             integer_gpu_rhs_indices_for_plan(&[1, 3], &linear).expect("linear indices"),
@@ -1816,9 +1760,10 @@ mod tests {
             vec![2, 3],
         );
         assert_eq!(
-            integer_gpu_rhs_indices_for_plan(&[1, 3], &nd).expect("nd broadcast indices"),
-            vec![0, 0, 1, 1, 2, 2]
+            integer_gpu_rhs_indices_for_plan(&[2, 3], &nd).expect("exact nd indices"),
+            vec![0, 1, 2, 3, 4, 5]
         );
+        assert!(integer_gpu_rhs_indices_for_plan(&[1, 3], &nd).is_err());
     }
 
     #[test]
@@ -1961,7 +1906,7 @@ mod tests {
     }
 
     #[test]
-    fn typed_complex_integer_plan_assignment_preserves_exact_components_and_broadcasts() {
+    fn typed_complex_integer_plan_assignment_rejects_nonscalar_singleton_expansion() {
         let tensor = ComplexTensor::new_integer(
             IntegerComplexStorage::new(
                 IntegerStorage::U64(vec![1, 2, 3, 4]),
@@ -1983,26 +1928,9 @@ mod tests {
             .expect("rhs"),
         );
         let plan = IndexPlan::new(vec![0, 1, 2, 3], vec![2, 2], vec![2, 2], 2, vec![2, 2]);
-        let result = block_on(assign_complex_with_plan(tensor, &plan, &rhs)).expect("assign");
-
-        let Value::ComplexTensor(output) = result else {
-            panic!("expected complex tensor");
-        };
-        assert_eq!(
-            output
-                .integer_storage()
-                .as_ref()
-                .map(|storage| (&storage.real, &storage.imag)),
-            Some((
-                &IntegerStorage::U64(vec![
-                    u64::MAX,
-                    u64::MAX,
-                    9_223_372_036_854_775_808,
-                    9_223_372_036_854_775_808
-                ]),
-                &IntegerStorage::U64(vec![7, 7, 8, 8]),
-            ))
-        );
+        let error = block_on(assign_complex_with_plan(tensor, &plan, &rhs))
+            .expect_err("complex nonscalar singleton expansion must reject");
+        assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
     }
 
     #[test]
@@ -2094,7 +2022,7 @@ mod tests {
     }
 
     #[test]
-    fn sparse_integer_plan_assignment_broadcasts_exact_rhs_across_rows() {
+    fn sparse_integer_plan_assignment_rejects_nonscalar_singleton_expansion() {
         let sparse =
             SparseTensor::new_integer(2, 2, vec![0, 0, 0], vec![], IntegerStorage::I8(vec![]))
                 .expect("sparse");
@@ -2102,17 +2030,9 @@ mod tests {
             Tensor::new_integer(IntegerStorage::I8(vec![5, 6]), vec![1, 2]).expect("rhs"),
         );
         let plan = IndexPlan::new(vec![0, 1, 2, 3], vec![2, 2], vec![2, 2], 2, vec![2, 2]);
-        let result = block_on(assign_sparse_with_plan(sparse, &plan, &rhs)).expect("assign");
-
-        let Value::SparseTensor(output) = result else {
-            panic!("expected sparse output");
-        };
-        assert_eq!(output.col_ptrs, vec![0, 2, 4]);
-        assert_eq!(output.row_indices, vec![0, 1, 0, 1]);
-        assert_eq!(
-            output.integer_storage(),
-            Some(&IntegerStorage::I8(vec![5, 5, 6, 6]))
-        );
+        let error = block_on(assign_sparse_with_plan(sparse, &plan, &rhs))
+            .expect_err("sparse nonscalar singleton expansion must reject");
+        assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
     }
 
     #[test]
