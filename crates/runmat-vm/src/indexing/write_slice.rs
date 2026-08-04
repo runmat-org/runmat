@@ -671,7 +671,18 @@ pub async fn assign_sparse_with_plan(
     if plan.indices.is_empty() {
         return Ok(Value::SparseTensor(sparse));
     }
-    let updated = if let Some(storage) = sparse.integer_storage() {
+    let updated = if sparse.is_logical() {
+        let rhs_values = materialize_rhs_real_for_plan(rhs, plan).await?;
+        let updates = plan
+            .indices
+            .iter()
+            .zip(rhs_values)
+            .map(|(&index, value)| (index as usize, value != 0.0))
+            .collect::<Vec<_>>();
+        sparse
+            .with_updated_logical_linear_values(&updates)
+            .map_err(|error| map_slice_shape_error("sparse slice assign", error))?
+    } else if let Some(storage) = sparse.integer_storage() {
         let rhs_values = materialize_integer_rhs_for_plan(rhs, plan).await?;
         let updates = plan
             .indices
@@ -687,7 +698,7 @@ pub async fn assign_sparse_with_plan(
         sparse
             .with_updated_integer_linear_values(&updates)
             .map_err(|error| map_slice_shape_error("sparse slice assign", error))?
-    } else if sparse.numeric_dtype() == NumericDType::F32 {
+    } else if sparse.numeric_dtype() == Some(NumericDType::F32) {
         let rhs_values = materialize_rhs_real_for_plan(rhs, plan).await?;
         let updates = plan
             .indices
@@ -2073,10 +2084,25 @@ mod tests {
         let Value::SparseTensor(output) = result else {
             panic!("expected sparse output");
         };
-        assert_eq!(output.numeric_dtype(), NumericDType::F32);
+        assert_eq!(output.numeric_dtype(), Some(NumericDType::F32));
         assert_eq!(output.col_ptrs, vec![0, 1, 2]);
         assert_eq!(output.row_indices, vec![1, 1]);
         assert_eq!(output.as_f32_slice(), Some(&[(1.0 / 3.0) as f32, 3.0][..]));
+    }
+
+    #[test]
+    fn sparse_logical_plan_assignment_preserves_class_and_truth_conversion() {
+        let sparse =
+            SparseTensor::new_logical(2, 2, vec![0, 1, 2], vec![0, 1]).expect("logical sparse");
+        let plan = IndexPlan::new(vec![0, 1], vec![2, 1], vec![2, 1], 2, vec![2, 2]);
+        let rhs = Value::Tensor(Tensor::new(vec![0.0, -2.0], vec![2, 1]).expect("rhs"));
+        let result = block_on(assign_sparse_with_plan(sparse, &plan, &rhs)).expect("assign");
+        let Value::SparseTensor(output) = result else {
+            panic!("expected sparse output");
+        };
+        assert!(output.is_logical());
+        assert_eq!(output.col_ptrs, vec![0, 1, 2]);
+        assert_eq!(output.row_indices, vec![1, 1]);
     }
 
     #[test]

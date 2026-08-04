@@ -250,7 +250,7 @@ fn realsqrt_tensor(tensor: Tensor) -> BuiltinResult<Value> {
 }
 
 fn realsqrt_sparse(sparse: SparseTensor) -> BuiltinResult<Value> {
-    if sparse.integer_storage().is_some() {
+    if sparse.integer_storage().is_some() || sparse.is_logical() {
         return Err(error_with_detail(
             &ERROR_INVALID_INPUT,
             "expected real single or double input",
@@ -264,21 +264,21 @@ fn realsqrt_sparse(sparse: SparseTensor) -> BuiltinResult<Value> {
         .map(|value| canonical_zero(value.sqrt()))
         .collect();
     let output = match dtype {
-        NumericDType::F32 => SparseTensor::new_f32(
+        Some(NumericDType::F32) => SparseTensor::new_f32(
             sparse.rows,
             sparse.cols,
             sparse.col_ptrs,
             sparse.row_indices,
             values.into_iter().map(|value| value as f32).collect(),
         ),
-        NumericDType::F64 => SparseTensor::new(
+        Some(NumericDType::F64) => SparseTensor::new(
             sparse.rows,
             sparse.cols,
             sparse.col_ptrs,
             sparse.row_indices,
             values,
         ),
-        _ => unreachable!("integer sparse input rejected above"),
+        Some(_) | None => unreachable!("integer and logical sparse input rejected above"),
     };
     output
         .map(Value::SparseTensor)
@@ -537,7 +537,7 @@ mod tests {
         let Value::SparseTensor(output) = call(Value::SparseTensor(sparse)).unwrap() else {
             panic!("expected sparse tensor");
         };
-        assert_eq!(output.numeric_dtype(), NumericDType::F32);
+        assert_eq!(output.numeric_dtype(), Some(NumericDType::F32));
         assert_eq!(output.as_f32_slice(), Some(&[2.0, 3.0, 4.0][..]));
     }
 

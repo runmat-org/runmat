@@ -1283,8 +1283,19 @@ impl XlsTable {
         let rows = sparse.rows;
         let cols = sparse.cols;
         checked_cell_count(rows, cols, "sparse array")?;
-        let mut cells = vec![CellValue::Number(0.0); rows * cols];
-        if let Some(storage) = sparse.integer_storage() {
+        let mut cells = if sparse.is_logical() {
+            vec![CellValue::Boolean(false); rows * cols]
+        } else {
+            vec![CellValue::Number(0.0); rows * cols]
+        };
+        if sparse.is_logical() {
+            for col in 0..cols {
+                for entry in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
+                    let row = sparse.row_indices[entry];
+                    cells[row * cols + col] = CellValue::Boolean(true);
+                }
+            }
+        } else if let Some(storage) = sparse.integer_storage() {
             for col in 0..cols {
                 let start = sparse.col_ptrs[col];
                 let end = sparse.col_ptrs[col + 1];

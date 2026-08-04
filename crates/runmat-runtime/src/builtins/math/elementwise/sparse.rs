@@ -132,6 +132,10 @@ fn floating_dtype(dtype: NumericDType) -> NumericDType {
     }
 }
 
+fn sparse_floating_dtype(dtype: Option<NumericDType>) -> NumericDType {
+    dtype.map(floating_dtype).unwrap_or(NumericDType::F64)
+}
+
 fn combined_floating_dtype(lhs: NumericDType, rhs: NumericDType) -> NumericDType {
     if lhs == NumericDType::F32 || rhs == NumericDType::F32 {
         NumericDType::F32
@@ -177,7 +181,7 @@ fn preserve_sparse_with_dtype(
     dtype: NumericDType,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
-    if floating_dtype(sparse.numeric_dtype()) == dtype {
+    if sparse_floating_dtype(sparse.numeric_dtype()) == dtype && !sparse.is_logical() {
         return Ok(Value::SparseTensor(sparse.clone()));
     }
     sparse_from_f64_values(
@@ -297,8 +301,8 @@ fn sparse_sparse(
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
     let dtype = combined_floating_dtype(
-        floating_dtype(lhs.numeric_dtype()),
-        floating_dtype(rhs.numeric_dtype()),
+        sparse_floating_dtype(lhs.numeric_dtype()),
+        sparse_floating_dtype(rhs.numeric_dtype()),
     );
     if lhs.rows == rhs.rows && lhs.cols == rhs.cols {
         return match op {
@@ -610,12 +614,13 @@ fn sparse_other(
         return sparse_complex(sparse, &complex, op, sparse_is_lhs, builtin);
     }
     if let Some(scalar) = scalar_real(other) {
-        let dtype = combined_floating_dtype(floating_dtype(sparse.numeric_dtype()), scalar.dtype);
+        let dtype =
+            combined_floating_dtype(sparse_floating_dtype(sparse.numeric_dtype()), scalar.dtype);
         return sparse_scalar(sparse, scalar.value, op, sparse_is_lhs, dtype, builtin);
     }
     if let Some(dense) = dense_tensor(other, builtin)? {
         let dtype = combined_floating_dtype(
-            floating_dtype(sparse.numeric_dtype()),
+            sparse_floating_dtype(sparse.numeric_dtype()),
             floating_dtype(dense.numeric_dtype()),
         );
         return sparse_dense(sparse, &dense, op, sparse_is_lhs, dtype, builtin);
@@ -668,9 +673,7 @@ fn sparse_dense_scalar_result(
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
     checked_len(&sparse.shape(), builtin)?;
-    let dense = sparse
-        .to_dense()
-        .map_err(|err| map_internal_error(builtin, err))?;
+    let dense = sparse_numeric_dense_tensor(sparse, builtin)?;
     let mut out = dense.materialize_f64();
     for value in &mut out {
         *value = if sparse_is_lhs {
@@ -901,7 +904,7 @@ fn sparse_complex(
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
     let dtype = combined_floating_dtype(
-        floating_dtype(sparse.numeric_dtype()),
+        sparse_floating_dtype(sparse.numeric_dtype()),
         floating_dtype(complex.numeric_dtype()),
     );
     let sparse_shape = sparse_shape(sparse);
@@ -980,9 +983,7 @@ pub(crate) fn map_sparse_real_values(
     let implicit_zero = map(0.0)?;
     if implicit_zero != 0.0 {
         checked_len(&sparse.shape(), builtin)?;
-        let dense = sparse
-            .to_dense()
-            .map_err(|err| map_internal_error(builtin, err))?;
+        let dense = sparse_numeric_dense_tensor(sparse, builtin)?;
         let mut out = dense.materialize_f64();
         for value in &mut out {
             *value = map(*value)?;
@@ -990,7 +991,7 @@ pub(crate) fn map_sparse_real_values(
         return dense_from_f64_values(
             out,
             dense.shape,
-            floating_dtype(sparse.numeric_dtype()),
+            sparse_floating_dtype(sparse.numeric_dtype()),
             builtin,
         );
     }
@@ -1016,9 +1017,28 @@ pub(crate) fn map_sparse_real_values(
         col_ptrs,
         row_indices,
         values,
-        floating_dtype(sparse.numeric_dtype()),
+        sparse_floating_dtype(sparse.numeric_dtype()),
         builtin,
     )
+}
+
+fn sparse_numeric_dense_tensor(
+    sparse: &SparseTensor,
+    builtin: &'static str,
+) -> BuiltinResult<Tensor> {
+    if sparse.is_logical() {
+        let logical = sparse
+            .to_dense_logical()
+            .map_err(|err| map_internal_error(builtin, err))?;
+        return Tensor::new(
+            logical.data.into_iter().map(f64::from).collect(),
+            logical.shape,
+        )
+        .map_err(|err| map_internal_error(builtin, err));
+    }
+    sparse
+        .to_dense()
+        .map_err(|err| map_internal_error(builtin, err))
 }
 
 #[cfg(test)]
@@ -1076,7 +1096,7 @@ mod tests {
             )
             .expect("mixed sparse sum"),
         );
-        assert_eq!(sum.numeric_dtype(), NumericDType::F32);
+        assert_eq!(sum.numeric_dtype(), Some(NumericDType::F32));
         assert_eq!(
             sum.as_f32_slice(),
             Some(&[((1.0f32 / 3.0) as f64 + 0.5) as f32, 6.0][..])
@@ -1094,7 +1114,7 @@ mod tests {
             )
             .expect("sparse dense product"),
         );
-        assert_eq!(product.numeric_dtype(), NumericDType::F32);
+        assert_eq!(product.numeric_dtype(), Some(NumericDType::F32));
         assert_eq!(product.as_f32_slice(), Some(&[6.0, 18.0][..]));
 
         let single_zero = Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap();
@@ -1109,7 +1129,7 @@ mod tests {
             )
             .expect("sparse single-zero sum"),
         );
-        assert_eq!(promoted_identity.numeric_dtype(), NumericDType::F32);
+        assert_eq!(promoted_identity.numeric_dtype(), Some(NumericDType::F32));
         assert_eq!(promoted_identity.as_f32_slice(), Some(&[2.0, 3.0][..]));
 
         let dense_sum = expect_tensor(
@@ -1136,7 +1156,7 @@ mod tests {
             )
             .expect("single sparse zero product"),
         );
-        assert_eq!(zero.numeric_dtype(), NumericDType::F32);
+        assert_eq!(zero.numeric_dtype(), Some(NumericDType::F32));
         assert_eq!(zero.as_f32_slice(), Some(&[][..]));
     }
 

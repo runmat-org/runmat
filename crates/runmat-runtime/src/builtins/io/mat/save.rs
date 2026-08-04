@@ -819,7 +819,10 @@ fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray
                 data: MatData::Logical { data: la.data },
             }),
             Value::SparseTensor(sparse) => {
-                let values = if let Some(storage) = sparse.integer_storage() {
+                let logical = sparse.is_logical();
+                let values = if logical {
+                    NumericStorage::U8(vec![1; sparse.nnz()])
+                } else if let Some(storage) = sparse.integer_storage() {
                     NumericStorage::from(storage.clone())
                 } else if let Some(values) = sparse.as_f32_slice() {
                     NumericStorage::F32(values.to_vec())
@@ -840,6 +843,7 @@ fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray
                         col_ptrs: sparse.col_ptrs,
                         row_indices: sparse.row_indices,
                         values,
+                        logical,
                     },
                 })
             }
@@ -1056,7 +1060,12 @@ fn build_matrix_bytes(array: &MatArray, name: Option<&str>) -> BuiltinResult<Vec
             (f0, 0u32)
         }
         MatData::Logical { .. } => ((array.class.class_code()) | FLAG_LOGICAL, 0u32),
-        MatData::Sparse { values, .. } => (array.class.class_code(), values.len() as u32),
+        MatData::Sparse {
+            values, logical, ..
+        } => (
+            array.class.class_code() | if *logical { FLAG_LOGICAL } else { 0 },
+            values.len() as u32,
+        ),
         _ => (array.class.class_code(), 0u32),
     };
 

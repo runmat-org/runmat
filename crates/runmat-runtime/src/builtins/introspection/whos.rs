@@ -577,7 +577,7 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> BuiltinResult
         // transitional compatibility representation.
         Value::Tensor(t) => t.len().saturating_mul(t.numeric_dtype().byte_size()),
         Value::SparseTensor(t) => {
-            let value_bytes = t.nnz().saturating_mul(t.numeric_dtype().byte_size());
+            let value_bytes = t.nnz().saturating_mul(t.value_byte_size());
             value_bytes
                 .saturating_add(
                     t.row_indices

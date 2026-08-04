@@ -659,7 +659,7 @@ enum OutputClass {
     Real(NumericDType),
     Logical,
     Complex(NumericDType),
-    Sparse(NumericDType),
+    Sparse(Option<NumericDType>),
     Char,
 }
 
@@ -705,16 +705,24 @@ impl OutputClass {
     }
 }
 
-fn promoted_sparse_dtype(blocks: &[Block]) -> NumericDType {
+fn promoted_sparse_dtype(blocks: &[Block]) -> Option<NumericDType> {
+    let has_numeric = blocks.iter().any(|block| match block {
+        Block::Real(_) | Block::Complex(_) => true,
+        Block::Sparse(tensor) => !tensor.is_logical(),
+        Block::Logical(_) | Block::Char(_) => false,
+    });
+    if !has_numeric {
+        return None;
+    }
     if blocks.iter().any(|block| match block {
         Block::Real(tensor) => tensor.numeric_dtype() == NumericDType::F32,
         Block::Complex(tensor) => tensor.numeric_dtype() == NumericDType::F32,
-        Block::Sparse(tensor) => tensor.numeric_dtype() == NumericDType::F32,
+        Block::Sparse(tensor) => tensor.numeric_dtype() == Some(NumericDType::F32),
         Block::Logical(_) | Block::Char(_) => false,
     }) {
-        NumericDType::F32
+        Some(NumericDType::F32)
     } else {
-        NumericDType::F64
+        Some(NumericDType::F64)
     }
 }
 
@@ -722,7 +730,7 @@ fn promoted_complex_dtype(blocks: &[Block]) -> NumericDType {
     if blocks.iter().any(|block| match block {
         Block::Real(tensor) => tensor.numeric_dtype() == NumericDType::F32,
         Block::Complex(tensor) => tensor.numeric_dtype() == NumericDType::F32,
-        Block::Sparse(tensor) => tensor.numeric_dtype() == NumericDType::F32,
+        Block::Sparse(tensor) => tensor.numeric_dtype() == Some(NumericDType::F32),
         Block::Logical(_) | Block::Char(_) => false,
     }) {
         NumericDType::F32
@@ -920,7 +928,7 @@ fn assemble_complex(blocks: Vec<Block>, dtype: NumericDType) -> BuiltinResult<Va
     Ok(complex_tensor_into_blkdiag_value(tensor))
 }
 
-fn assemble_sparse(blocks: Vec<Block>, dtype: NumericDType) -> BuiltinResult<Value> {
+fn assemble_sparse(blocks: Vec<Block>, dtype: Option<NumericDType>) -> BuiltinResult<Value> {
     let (rows, cols) = output_dims(&blocks)?;
     let mut sparse_blocks = Vec::with_capacity(blocks.len());
     for block in blocks {
@@ -958,15 +966,16 @@ fn assemble_sparse(blocks: Vec<Block>, dtype: NumericDType) -> BuiltinResult<Val
     }
 
     let sparse = match dtype {
-        NumericDType::F32 => SparseTensor::new_f32(
+        Some(NumericDType::F32) => SparseTensor::new_f32(
             rows,
             cols,
             col_ptrs,
             row_indices,
             values.into_iter().map(|value| value as f32).collect(),
         ),
-        NumericDType::F64 => SparseTensor::new(rows, cols, col_ptrs, row_indices, values),
-        _ => unreachable!("floating sparse block assembly requested integer output"),
+        Some(NumericDType::F64) => SparseTensor::new(rows, cols, col_ptrs, row_indices, values),
+        None => SparseTensor::new_logical(rows, cols, col_ptrs, row_indices),
+        Some(_) => unreachable!("floating sparse block assembly requested integer output"),
     };
     sparse
         .map(Value::SparseTensor)
@@ -1048,7 +1057,6 @@ fn dense_to_sparse(data: &[f64], rows: usize, cols: usize) -> BuiltinResult<Spar
 fn logical_to_sparse(data: &[u8], rows: usize, cols: usize) -> BuiltinResult<SparseTensor> {
     let mut col_ptrs = Vec::new();
     let mut row_indices = Vec::new();
-    let mut values = Vec::new();
     col_ptrs
         .try_reserve_exact(cols.checked_add(1).ok_or_else(size_overflow)?)
         .map_err(|_| allocation_error("sparse column pointer allocation failed"))?;
@@ -1057,12 +1065,11 @@ fn logical_to_sparse(data: &[u8], rows: usize, cols: usize) -> BuiltinResult<Spa
         for row in 0..rows {
             if data[row + col * rows] != 0 {
                 row_indices.push(row);
-                values.push(1.0);
             }
         }
-        col_ptrs.push(values.len());
+        col_ptrs.push(row_indices.len());
     }
-    SparseTensor::new(rows, cols, col_ptrs, row_indices, values)
+    SparseTensor::new_logical(rows, cols, col_ptrs, row_indices)
         .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail))
 }
 
@@ -1601,11 +1608,28 @@ mod tests {
         else {
             panic!("expected sparse output");
         };
-        assert_eq!(output.numeric_dtype(), NumericDType::F32);
+        assert_eq!(output.numeric_dtype(), Some(NumericDType::F32));
         assert_eq!(output.shape(), vec![3, 2]);
         assert_eq!(output.col_ptrs, vec![0, 1, 2]);
         assert_eq!(output.row_indices, vec![1, 2]);
         assert_eq!(output.as_f32_slice(), Some(&[4.25, 2.5][..]));
+    }
+
+    #[test]
+    fn sparse_block_diagonal_preserves_all_logical_class() {
+        let sparse = SparseTensor::new_logical(2, 1, vec![0, 1], vec![1]).expect("logical sparse");
+        let dense = LogicalArray::new(vec![1, 0], vec![1, 2]).expect("logical dense");
+        let Value::SparseTensor(output) = call(vec![
+            Value::SparseTensor(sparse),
+            Value::LogicalArray(dense),
+        ])
+        .expect("blkdiag") else {
+            panic!("expected sparse output");
+        };
+        assert!(output.is_logical());
+        assert_eq!(output.shape(), vec![3, 3]);
+        assert_eq!(output.col_ptrs, vec![0, 1, 2, 2]);
+        assert_eq!(output.row_indices, vec![1, 2]);
     }
 
     #[test]

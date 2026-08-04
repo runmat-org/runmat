@@ -130,7 +130,16 @@ fn sparse_scalar_index(sparse: &SparseTensor, indices: &[f64]) -> Result<Value, 
             return Ok(Value::SparseTensor(result));
         }
 
-        if sparse.numeric_dtype() == NumericDType::F32 {
+        if sparse.is_logical() {
+            let result = if sparse.logical_at(row, col).unwrap_or(false) {
+                SparseTensor::new_logical(1, 1, vec![0, 1], vec![0]).map_err(indexing_error)?
+            } else {
+                SparseTensor::zeros_logical(1, 1)
+            };
+            return Ok(Value::SparseTensor(result));
+        }
+
+        if sparse.numeric_dtype() == Some(NumericDType::F32) {
             let value = sparse.get(row, col).unwrap_or(0.0) as f32;
             let result = if value == 0.0 {
                 SparseTensor::zeros_f32(1, 1)

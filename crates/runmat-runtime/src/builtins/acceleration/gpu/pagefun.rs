@@ -1071,9 +1071,13 @@ impl TypeName for Value {
             Value::CharArray(_) => "char array",
             Value::Symbolic(_) => "sym",
             Value::Tensor(tensor) => numeric_array_type_name(tensor.numeric_dtype(), ""),
-            Value::SparseTensor(tensor) => {
-                numeric_array_type_name(tensor.numeric_dtype(), "sparse")
-            }
+            Value::SparseTensor(tensor) if tensor.is_logical() => "sparse logical array",
+            Value::SparseTensor(tensor) => numeric_array_type_name(
+                tensor
+                    .numeric_dtype()
+                    .expect("non-logical sparse tensor has a numeric dtype"),
+                "sparse",
+            ),
             Value::ComplexTensor(tensor) => {
                 numeric_array_type_name(tensor.numeric_dtype(), "complex")
             }

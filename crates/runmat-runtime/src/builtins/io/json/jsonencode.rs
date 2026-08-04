@@ -432,6 +432,12 @@ fn value_to_json(value: &Value, options: &JsonEncodeOptions) -> BuiltinResult<Js
                     format!("jsonencode: cannot densify sparse tensor {}x{} ({} elements exceeds safe threshold)", sparse.rows, sparse.cols, total_elements),
                 ));
             }
+            if sparse.is_logical() {
+                let dense = sparse.to_dense_logical().map_err(|err| {
+                    jsonencode_error_with(&JSONENCODE_ERROR_INTERNAL, format!("jsonencode: {err}"))
+                })?;
+                return logical_array_to_json(&dense, options);
+            }
             let dense = sparse.to_dense().map_err(|err| {
                 jsonencode_error_with(&JSONENCODE_ERROR_INTERNAL, format!("jsonencode: {err}"))
             })?;

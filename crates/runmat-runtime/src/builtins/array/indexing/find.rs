@@ -4,8 +4,8 @@ use runmat_accelerate_api::ProviderFindResult;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, ResolveContext, Tensor, Type,
-    Value,
+    ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, ResolveContext,
+    Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -456,6 +456,7 @@ struct FindResult {
 enum FindValues {
     Real(Vec<f64>),
     F32(Vec<f32>),
+    Logical(Vec<u8>),
     Integer(IntegerStorage),
     Complex(Vec<(f64, f64)>),
     IntegerComplex(IntegerComplexStorage),
@@ -584,12 +585,19 @@ async fn materialize_input(value: Value) -> crate::BuiltinResult<(DataStorage, b
             Ok((DataStorage::Real(tensor), true))
         }
         Value::Tensor(tensor) => Ok((DataStorage::Real(tensor), false)),
-        Value::SparseTensor(sparse) => Ok((
-            DataStorage::Real(sparse.to_dense().map_err(|e| {
-                find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL)
-            })?),
-            false,
-        )),
+        Value::SparseTensor(sparse) => {
+            let dense = if sparse.is_logical() {
+                tensor::logical_to_tensor(&sparse.to_dense_logical().map_err(|e| {
+                    find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL)
+                })?)
+                .map_err(|message| find_error_with_message(message, &FIND_ERROR_INTERNAL))?
+            } else {
+                sparse.to_dense().map_err(|e| {
+                    find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL)
+                })?
+            };
+            Ok((DataStorage::Real(dense), false))
+        }
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)
                 .map_err(|message| find_error_with_message(message, &FIND_ERROR_INTERNAL))?;
@@ -779,9 +787,12 @@ fn sparse_find_values(
     sparse: &runmat_builtins::SparseTensor,
     real_values: Vec<f64>,
     single_values: Vec<f32>,
+    logical_values: Vec<u8>,
     integer_value_indices: &[usize],
 ) -> FindValues {
-    if let Some(storage) = sparse.integer_storage() {
+    if sparse.is_logical() {
+        FindValues::Logical(logical_values)
+    } else if let Some(storage) = sparse.integer_storage() {
         FindValues::Integer(select_integer_values(storage, integer_value_indices))
     } else if sparse.as_f32_slice().is_some() {
         FindValues::F32(single_values)
@@ -807,13 +818,20 @@ fn compute_find_sparse(
     let mut indices = Vec::new();
     let mut values = Vec::new();
     let mut single_values = Vec::new();
+    let mut logical_values = Vec::new();
     let integer_storage = sparse.integer_storage();
     let floating_values = sparse.as_f64_slice();
     let native_single_values = sparse.as_f32_slice();
     let mut integer_value_indices = Vec::new();
 
     if matches!(limit, Some(0)) {
-        let values = sparse_find_values(sparse, values, single_values, &integer_value_indices);
+        let values = sparse_find_values(
+            sparse,
+            values,
+            single_values,
+            logical_values,
+            &integer_value_indices,
+        );
         return FindResult::new(shape, indices, values);
     }
 
@@ -827,7 +845,9 @@ fn compute_find_sparse(
                     if sparse_stored_value_is_nonzero(sparse, idx) {
                         let linear_idx = row + col * sparse.rows;
                         indices.push(linear_idx + 1);
-                        if integer_storage.is_some() {
+                        if sparse.is_logical() {
+                            logical_values.push(1);
+                        } else if integer_storage.is_some() {
                             integer_value_indices.push(idx);
                         } else if let Some(native_single_values) = native_single_values {
                             single_values.push(native_single_values[idx]);
@@ -839,6 +859,7 @@ fn compute_find_sparse(
                                 sparse,
                                 values,
                                 single_values,
+                                logical_values,
                                 &integer_value_indices,
                             );
                             return FindResult::new(shape, indices, values);
@@ -856,7 +877,9 @@ fn compute_find_sparse(
                     if sparse_stored_value_is_nonzero(sparse, idx) {
                         let linear_idx = row + col * sparse.rows;
                         indices.push(linear_idx + 1);
-                        if integer_storage.is_some() {
+                        if sparse.is_logical() {
+                            logical_values.push(1);
+                        } else if integer_storage.is_some() {
                             integer_value_indices.push(idx);
                         } else if let Some(native_single_values) = native_single_values {
                             single_values.push(native_single_values[idx]);
@@ -867,11 +890,13 @@ fn compute_find_sparse(
                             indices.reverse();
                             values.reverse();
                             single_values.reverse();
+                            logical_values.reverse();
                             integer_value_indices.reverse();
                             let values = sparse_find_values(
                                 sparse,
                                 values,
                                 single_values,
+                                logical_values,
                                 &integer_value_indices,
                             );
                             return FindResult::new(shape, indices, values);
@@ -886,9 +911,16 @@ fn compute_find_sparse(
         indices.reverse();
         values.reverse();
         single_values.reverse();
+        logical_values.reverse();
         integer_value_indices.reverse();
     }
-    let values = sparse_find_values(sparse, values, single_values, &integer_value_indices);
+    let values = sparse_find_values(
+        sparse,
+        values,
+        single_values,
+        logical_values,
+        &integer_value_indices,
+    );
     FindResult::new(shape, indices, values)
 }
 
@@ -955,6 +987,9 @@ impl FindResult {
                     })?;
                 Ok(tensor_to_value(tensor, prefer_gpu))
             }
+            FindValues::Logical(values) => LogicalArray::new(values.clone(), vec![values.len(), 1])
+                .map(Value::LogicalArray)
+                .map_err(|e| find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL)),
             FindValues::Integer(values) => integer_values_to_value(values.clone(), prefer_gpu),
             FindValues::Complex(values) => {
                 let tensor =
@@ -1409,6 +1444,18 @@ pub(crate) mod tests {
         };
         assert_eq!(values.numeric_dtype(), runmat_builtins::NumericDType::F32);
         assert_eq!(values.as_f32_slice(), Some(&[1.25, 3.5, 7.75][..]));
+    }
+
+    #[test]
+    fn find_sparse_values_preserve_logical_class_and_order() {
+        let sparse = runmat_builtins::SparseTensor::new_logical(3, 2, vec![0, 2, 3], vec![0, 2, 1])
+            .expect("logical sparse");
+        let eval = evaluate(Value::SparseTensor(sparse), &[]).expect("find sparse");
+        let Value::LogicalArray(values) = eval.values_value().expect("values") else {
+            panic!("expected logical sparse find values");
+        };
+        assert_eq!(values.shape, vec![3, 1]);
+        assert_eq!(values.data, vec![1, 1, 1]);
     }
 
     #[test]

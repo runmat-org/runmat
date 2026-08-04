@@ -187,6 +187,7 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
                 "shape": vec![st.rows, st.cols],
                 "rows": st.rows,
                 "cols": st.cols,
+                "dtype": st.class_name(),
                 "nnz": st.nnz(),
                 "colPtrsPreview": col_ptrs_preview,
                 "colPtrsLength": st.col_ptrs.len(),

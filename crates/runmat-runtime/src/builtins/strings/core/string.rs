@@ -549,7 +549,19 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
         Value::Tensor(tensor) => tensor_into_argument_data(tensor),
         Value::SparseTensor(s) => {
             ensure_sparse_dense_conversion(&s, "format argument")?;
-            tensor_into_argument_data(s.to_dense().map_err(string_flow)?)
+            if s.is_logical() {
+                let logical = s.to_dense_logical().map_err(string_flow)?;
+                Ok(ArgumentData {
+                    values: logical
+                        .data
+                        .into_iter()
+                        .map(|value| Value::Num(f64::from(value)))
+                        .collect(),
+                    shape: logical.shape,
+                })
+            } else {
+                tensor_into_argument_data(s.to_dense().map_err(string_flow)?)
+            }
         }
         Value::Complex(re, im) => Ok(ArgumentData {
             values: vec![Value::String(complex_to_string(re, im))],
@@ -685,7 +697,11 @@ async fn convert_to_string_array(
         Value::Tensor(tensor) => tensor_to_string_array(tensor),
         Value::SparseTensor(sparse) => {
             ensure_sparse_dense_conversion(&sparse, "dense string array")?;
-            tensor_to_string_array(sparse.to_dense().map_err(string_flow)?)
+            if sparse.is_logical() {
+                logical_array_to_string_array(sparse.to_dense_logical().map_err(string_flow)?)
+            } else {
+                tensor_to_string_array(sparse.to_dense().map_err(string_flow)?)
+            }
         }
         Value::ComplexTensor(tensor) => complex_tensor_to_string_array(tensor),
         Value::LogicalArray(logical) => logical_array_to_string_array(logical),
@@ -994,6 +1010,18 @@ pub(crate) mod tests {
             }
             other => panic!("expected string array, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn string_from_logical_sparse_uses_boolean_text() {
+        let sparse =
+            SparseTensor::new_logical(2, 2, vec![0, 1, 2], vec![1, 0]).expect("logical sparse");
+        let out = string_builtin(Value::SparseTensor(sparse), Vec::new()).expect("string");
+        let Value::StringArray(out) = out else {
+            panic!("expected string array");
+        };
+        assert_eq!(out.shape, vec![2, 2]);
+        assert_eq!(out.data, vec!["false", "true", "true", "false"]);
     }
 
     #[test]

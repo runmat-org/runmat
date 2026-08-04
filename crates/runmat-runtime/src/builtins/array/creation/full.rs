@@ -154,6 +154,17 @@ async fn full_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 fn full_from_sparse(sparse: SparseTensor) -> BuiltinResult<Value> {
+    if sparse.is_logical() {
+        return sparse
+            .to_dense_logical()
+            .map(Value::LogicalArray)
+            .map_err(|err| {
+                full_error_with_detail(
+                    &FULL_ERROR_INTERNAL,
+                    format!("failed to densify sparse input: {err}"),
+                )
+            });
+    }
     let tensor = sparse.to_dense().map_err(|err| {
         full_error_with_detail(
             &FULL_ERROR_INTERNAL,
@@ -238,6 +249,18 @@ pub(crate) mod tests {
                 0
             ]))
         );
+    }
+
+    #[test]
+    fn full_preserves_logical_sparse_class_and_shape() {
+        let sparse =
+            SparseTensor::new_logical(3, 2, vec![0, 2, 3], vec![0, 2, 1]).expect("logical");
+        let dense = run_full(Value::SparseTensor(sparse)).expect("full logical sparse");
+        let Value::LogicalArray(dense) = dense else {
+            panic!("expected logical array");
+        };
+        assert_eq!(dense.shape, vec![3, 2]);
+        assert_eq!(dense.data, vec![1, 0, 1, 0, 1, 0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -33,16 +33,16 @@
   },
   "description": "`sparse` creates a sparse matrix. RunMat stores sparse matrices in compressed sparse column form and supports the common MATLAB construction forms: conversion from a full array, empty sparse allocation by size, and triplet assembly from row indices, column indices, and values.",
   "behaviors": [
-    "`sparse(A)` converts a full numeric or logical array to sparse storage, storing only nonzero values. Exact integer arrays retain their integer class.",
+    "`sparse(A)` converts a full numeric or logical array to sparse storage, storing only nonzero values. Logical inputs retain logical class with the CSC pattern as the authoritative set of true elements; RunMat-extension exact integer arrays retain their integer class.",
     "`sparse(m, n)` returns an `m x n` sparse double matrix with zero stored entries.",
     "`sparse(i, j, v)` creates a sparse matrix whose size is inferred from the largest row and column subscripts.",
     "`sparse(i, j, v, m, n)` creates an `m x n` sparse matrix and errors if any subscript falls outside those dimensions.",
     "`sparse(i, j, v, m, n, nzmax)` accepts the MATLAB allocation hint for compatibility; RunMat's storage is still sized from the produced nonzero entries.",
-    "Duplicate `(i, j)` entries are summed. Entries whose final value is zero are not stored. Integer triplet values are summed in their exact integer class.",
+    "Duplicate numeric `(i, j)` entries are summed and entries whose final value is zero are not stored. Duplicate logical triplets combine by logical OR and false values are not stored. RunMat-extension integer triplet values are summed in their exact integer class.",
     "Row and column subscripts are one-based positive integers, matching MATLAB.",
     "Sparse matrices support scalar row/column indexing and linear indexing; scalar selections return sparse `1 x 1` values, unstored entries read as zero, and linear indices are resolved in column-major order.",
     "Sparse slice indexing preserves sparse storage for non-scalar selections.",
-    "Sparse indexed assignment currently raises `RunMat:SparseAssignmentUnsupported` instead of silently densifying or partially mutating storage.",
+    "Sparse indexed reads and assignments preserve CSC storage and the sparse value class, including logical, single, double, and RunMat-extension integer payloads.",
     "Sparse real matrices interoperate with `+`, `-`, and `.*` for sparse-sparse, sparse-dense, dense-sparse, sparse-scalar, character, logical, and complex operands. Addition and subtraction with dense, complex, or nonzero scalar operands return full storage when unstored sparse zeros become nonzero; sparse-preserving real products and sparse-sparse sums/differences return sparse storage."
   ],
   "examples": [
@@ -85,15 +85,15 @@
   "faqs": [
     {
       "question": "Which sparse construction forms are supported?",
-      "answer": "RunMat supports `sparse(A)`, `sparse(m,n)`, `sparse(i,j,v)`, `sparse(i,j,v,m,n)`, and `sparse(i,j,v,m,n,nzmax)` for real double, logical, and exact integer data."
+      "answer": "RunMat supports `sparse(A)`, `sparse(m,n)`, `sparse(i,j,v)`, `sparse(i,j,v,m,n)`, and `sparse(i,j,v,m,n,nzmax)` for real single, double, and logical data, plus RunMat-extension exact integer payloads."
     },
     {
       "question": "Does RunMat store sparse matrices densely?",
-      "answer": "No. The runtime uses compressed sparse column storage with column pointers, row indices, and stored values."
+      "answer": "No. The runtime uses compressed sparse column storage with column pointers and row indices plus class-native stored numeric values. Sparse logical matrices need no parallel value payload because each stored CSC position is true."
     },
     {
       "question": "What happens to duplicate triplets?",
-      "answer": "Duplicate row/column pairs are summed, matching MATLAB sparse assembly semantics."
+      "answer": "Duplicate numeric row/column pairs are summed; duplicate logical values combine with `any`, matching MATLAB sparse assembly semantics."
     },
     {
       "question": "Can sparse matrices live on the GPU?",
@@ -105,7 +105,7 @@
     },
     {
       "question": "Can sparse matrices be assigned through indexing?",
-      "answer": "Not yet. RunMat currently raises `RunMat:SparseAssignmentUnsupported` for sparse indexed assignment before validating slice selectors, so unsupported writes fail deterministically."
+      "answer": "Yes. Scalar, linear, and planned slice assignment preserve sparse storage and the target sparse class while removing entries assigned the class-appropriate zero or false value."
     }
   ],
   "links": [

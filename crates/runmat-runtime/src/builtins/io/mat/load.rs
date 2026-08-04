@@ -693,7 +693,7 @@ fn parse_matrix(buffer: &[u8], endian: Endian) -> BuiltinResult<ParsedMatrix> {
         .ok_or_else(|| load_error("load: unsupported MATLAB class"))?;
     let is_logical = (flags0 & FLAG_LOGICAL) != 0;
     let has_imag = (flags0 & FLAG_COMPLEX) != 0;
-    if is_logical {
+    if is_logical && class != MatClass::Sparse {
         class = MatClass::Logical;
     }
 
@@ -755,7 +755,7 @@ fn parse_matrix(buffer: &[u8], endian: Endian) -> BuiltinResult<ParsedMatrix> {
         MatClass::Char => parse_char_array(&mut cursor, dims, endian)?,
         MatClass::Cell => parse_cell_array(&mut cursor, dims, endian)?,
         MatClass::Struct => parse_struct(&mut cursor, dims, endian)?,
-        MatClass::Sparse => parse_sparse_array(&mut cursor, dims, has_imag, endian)?,
+        MatClass::Sparse => parse_sparse_array(&mut cursor, dims, has_imag, is_logical, endian)?,
     };
 
     Ok(ParsedMatrix { name, array })
@@ -1038,6 +1038,7 @@ fn parse_sparse_array(
     cursor: &mut Cursor<&[u8]>,
     dims: Vec<usize>,
     has_imag: bool,
+    logical: bool,
     endian: Endian,
 ) -> BuiltinResult<MatArray> {
     if has_imag {
@@ -1078,6 +1079,7 @@ fn parse_sparse_array(
             col_ptrs,
             row_indices,
             values,
+            logical,
         },
     })
 }
@@ -1384,23 +1386,42 @@ fn mat_array_to_value(array: MatArray) -> BuiltinResult<Value> {
             col_ptrs,
             row_indices,
             values,
+            logical,
         } => {
-            let sparse = match values {
-                NumericStorage::F64(values) => {
-                    SparseTensor::new(rows, cols, col_ptrs, row_indices, values)
+            let sparse = if logical {
+                let mut filtered_col_ptrs = Vec::with_capacity(cols.saturating_add(1));
+                let mut filtered_row_indices = Vec::new();
+                filtered_col_ptrs.push(0);
+                for col in 0..cols {
+                    for index in col_ptrs[col]..col_ptrs[col + 1] {
+                        let value = values.value_at(index).ok_or_else(|| {
+                            load_error("load: logical sparse value count does not match structure")
+                        })?;
+                        if !value.is_zero() {
+                            filtered_row_indices.push(row_indices[index]);
+                        }
+                    }
+                    filtered_col_ptrs.push(filtered_row_indices.len());
                 }
-                NumericStorage::F32(values) => {
-                    SparseTensor::new_f32(rows, cols, col_ptrs, row_indices, values)
+                SparseTensor::new_logical(rows, cols, filtered_col_ptrs, filtered_row_indices)
+            } else {
+                match values {
+                    NumericStorage::F64(values) => {
+                        SparseTensor::new(rows, cols, col_ptrs, row_indices, values)
+                    }
+                    NumericStorage::F32(values) => {
+                        SparseTensor::new_f32(rows, cols, col_ptrs, row_indices, values)
+                    }
+                    storage => SparseTensor::new_integer(
+                        rows,
+                        cols,
+                        col_ptrs,
+                        row_indices,
+                        storage
+                            .into_integer_storage()
+                            .expect("non-floating sparse MAT storage is integer"),
+                    ),
                 }
-                storage => SparseTensor::new_integer(
-                    rows,
-                    cols,
-                    col_ptrs,
-                    row_indices,
-                    storage
-                        .into_integer_storage()
-                        .expect("non-floating sparse MAT storage is integer"),
-                ),
             }
             .map_err(|e| load_error(format!("load: {e}")))?;
             Ok(Value::SparseTensor(sparse))
@@ -2170,6 +2191,22 @@ pub(crate) mod tests {
         assert_eq!(
             entries,
             vec![("single_sparse".to_string(), Value::SparseTensor(sparse))]
+        );
+    }
+
+    #[test]
+    fn load_save_logical_sparse_roundtrip_preserves_pattern_and_class() {
+        let sparse =
+            SparseTensor::new_logical(3, 3, vec![0, 1, 1, 3], vec![1, 0, 2]).expect("logical");
+        let bytes = block_on(encode_workspace_to_mat_bytes(&[(
+            "logical_sparse".to_string(),
+            Value::SparseTensor(sparse.clone()),
+        )]))
+        .expect("save logical sparse");
+        let entries = load_entries_from_bytes(bytes);
+        assert_eq!(
+            entries,
+            vec![("logical_sparse".to_string(), Value::SparseTensor(sparse))]
         );
     }
 

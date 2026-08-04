@@ -2152,6 +2152,7 @@ enum SparseValueStorage {
     F64(Vec<f64>),
     F32(Vec<f32>),
     Integer(IntegerStorage),
+    Logical,
 }
 
 type SparseCscParts<T> = (Vec<usize>, Vec<usize>, Vec<T>);
@@ -2777,6 +2778,24 @@ impl SparseTensor {
         })
     }
 
+    /// Constructs a sparse logical matrix whose CSC pattern is the complete
+    /// authoritative set of true elements.
+    pub fn new_logical(
+        rows: usize,
+        cols: usize,
+        col_ptrs: Vec<usize>,
+        row_indices: Vec<usize>,
+    ) -> Result<Self, String> {
+        Self::validate_structure(rows, cols, &col_ptrs, &row_indices, row_indices.len())?;
+        Ok(Self {
+            rows,
+            cols,
+            col_ptrs,
+            row_indices,
+            storage: SparseValueStorage::Logical,
+        })
+    }
+
     fn validate_structure(
         rows: usize,
         cols: usize,
@@ -2847,6 +2866,17 @@ impl SparseTensor {
         }
     }
 
+    /// Creates an all-false sparse logical matrix.
+    pub fn zeros_logical(rows: usize, cols: usize) -> Self {
+        Self {
+            rows,
+            cols,
+            col_ptrs: vec![0; cols.saturating_add(1)],
+            row_indices: Vec::new(),
+            storage: SparseValueStorage::Logical,
+        }
+    }
+
     /// Creates an all-zero sparse matrix retaining an exact integer class.
     pub fn zeros_with_integer_storage(rows: usize, cols: usize, storage: &IntegerStorage) -> Self {
         Self {
@@ -2881,6 +2911,7 @@ impl SparseTensor {
             SparseValueStorage::F64(values) => values.len(),
             SparseValueStorage::F32(values) => values.len(),
             SparseValueStorage::Integer(storage) => storage.len(),
+            SparseValueStorage::Logical => self.row_indices.len(),
         }
     }
 
@@ -2931,7 +2962,30 @@ impl SparseTensor {
                 }
                 Tensor::new_integer(data, self.shape())
             }
+            SparseValueStorage::Logical => {
+                Err("SparseTensor logical storage requires to_dense_logical".to_string())
+            }
         }
+    }
+
+    pub fn to_dense_logical(&self) -> Result<LogicalArray, String> {
+        if !self.is_logical() {
+            return Err("SparseTensor numeric storage requires to_dense".to_string());
+        }
+        let len = self
+            .rows
+            .checked_mul(self.cols)
+            .ok_or_else(|| "SparseTensor dense dimensions overflow usize".to_string())?;
+        let mut data = Vec::new();
+        data.try_reserve_exact(len)
+            .map_err(|err| format!("SparseTensor dense allocation failed: {err}"))?;
+        data.resize(len, 0);
+        for col in 0..self.cols {
+            for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
+                data[self.row_indices[idx] + col * self.rows] = 1;
+            }
+        }
+        LogicalArray::new(data, self.shape())
     }
 
     pub fn get(&self, row: usize, col: usize) -> Option<f64> {
@@ -2952,8 +3006,18 @@ impl SparseTensor {
                         .value_at(index)
                         .expect("validated sparse storage index")
                         .to_f64(),
+                    SparseValueStorage::Logical => 1.0,
                 }
             })
+    }
+
+    pub fn logical_at(&self, row: usize, col: usize) -> Option<bool> {
+        if !self.is_logical() || row >= self.rows || col >= self.cols {
+            return None;
+        }
+        let start = self.col_ptrs[col];
+        let end = self.col_ptrs[col + 1];
+        Some(self.row_indices[start..end].binary_search(&row).is_ok())
     }
 
     /// Returns an exact stored integer value when this sparse matrix is typed.
@@ -2973,7 +3037,9 @@ impl SparseTensor {
     pub fn integer_storage(&self) -> Option<&IntegerStorage> {
         match &self.storage {
             SparseValueStorage::Integer(storage) => Some(storage),
-            SparseValueStorage::F64(_) | SparseValueStorage::F32(_) => None,
+            SparseValueStorage::F64(_)
+            | SparseValueStorage::F32(_)
+            | SparseValueStorage::Logical => None,
         }
     }
 
@@ -2981,7 +3047,9 @@ impl SparseTensor {
     pub fn as_f64_slice(&self) -> Option<&[f64]> {
         match &self.storage {
             SparseValueStorage::F64(values) => Some(values),
-            SparseValueStorage::F32(_) | SparseValueStorage::Integer(_) => None,
+            SparseValueStorage::F32(_)
+            | SparseValueStorage::Integer(_)
+            | SparseValueStorage::Logical => None,
         }
     }
 
@@ -2989,7 +3057,23 @@ impl SparseTensor {
     pub fn as_f32_slice(&self) -> Option<&[f32]> {
         match &self.storage {
             SparseValueStorage::F32(values) => Some(values),
-            SparseValueStorage::F64(_) | SparseValueStorage::Integer(_) => None,
+            SparseValueStorage::F64(_)
+            | SparseValueStorage::Integer(_)
+            | SparseValueStorage::Logical => None,
+        }
+    }
+
+    pub fn is_logical(&self) -> bool {
+        matches!(self.storage, SparseValueStorage::Logical)
+    }
+
+    pub fn value_byte_size(&self) -> usize {
+        match &self.storage {
+            SparseValueStorage::Logical => 0,
+            _ => self
+                .numeric_dtype()
+                .expect("non-logical sparse storage has a numeric dtype")
+                .byte_size(),
         }
     }
 
@@ -3001,6 +3085,7 @@ impl SparseTensor {
             SparseValueStorage::F64(values) => values.clone(),
             SparseValueStorage::F32(values) => values.iter().copied().map(f64::from).collect(),
             SparseValueStorage::Integer(storage) => storage.to_f64_vec(),
+            SparseValueStorage::Logical => vec![1.0; self.nnz()],
         }
     }
 
@@ -3012,14 +3097,16 @@ impl SparseTensor {
             SparseValueStorage::Integer(storage) => {
                 storage.value_at(index).map(NumericScalar::from)
             }
+            SparseValueStorage::Logical => (index < self.nnz()).then_some(NumericScalar::F64(1.0)),
         }
     }
 
-    pub fn numeric_dtype(&self) -> NumericDType {
+    pub fn numeric_dtype(&self) -> Option<NumericDType> {
         match &self.storage {
-            SparseValueStorage::F64(_) => NumericDType::F64,
-            SparseValueStorage::F32(_) => NumericDType::F32,
-            SparseValueStorage::Integer(storage) => storage.numeric_dtype(),
+            SparseValueStorage::F64(_) => Some(NumericDType::F64),
+            SparseValueStorage::F32(_) => Some(NumericDType::F32),
+            SparseValueStorage::Integer(storage) => Some(storage.numeric_dtype()),
+            SparseValueStorage::Logical => None,
         }
     }
 
@@ -3147,6 +3234,18 @@ impl SparseTensor {
         Self::new_integer_like(self.rows, self.cols, col_ptrs, row_indices, values, storage)
     }
 
+    pub fn with_updated_logical_linear_values(
+        &self,
+        updates: &[(usize, bool)],
+    ) -> Result<Self, String> {
+        if !self.is_logical() {
+            return Err("cannot assign logical sparse value to numeric storage".to_string());
+        }
+        let (col_ptrs, row_indices, _) =
+            self.merged_linear_updates(updates, |_| Ok(true), |value| !*value)?;
+        Self::new_logical(self.rows, self.cols, col_ptrs, row_indices)
+    }
+
     pub fn with_updated_value(&self, row: usize, col: usize, value: f64) -> Result<Self, String> {
         let index = self.checked_assignment_linear_index(row, col)?;
         self.with_updated_linear_values(&[(index, value)])
@@ -3170,6 +3269,16 @@ impl SparseTensor {
     ) -> Result<Self, String> {
         let index = self.checked_assignment_linear_index(row, col)?;
         self.with_updated_integer_linear_values(&[(index, value)])
+    }
+
+    pub fn with_updated_logical_value(
+        &self,
+        row: usize,
+        col: usize,
+        value: bool,
+    ) -> Result<Self, String> {
+        let index = self.checked_assignment_linear_index(row, col)?;
+        self.with_updated_logical_linear_values(&[(index, value)])
     }
 
     /// Expands sparse dimensions without materializing implicit zero entries.
@@ -3208,6 +3317,9 @@ impl SparseTensor {
                 self.row_indices.clone(),
                 storage.clone(),
             ),
+            SparseValueStorage::Logical => {
+                Self::new_logical(rows, cols, col_ptrs, self.row_indices.clone())
+            }
         }
     }
 
@@ -3330,6 +3442,11 @@ impl SparseTensor {
                     storage,
                 )
             }
+            SparseValueStorage::Logical => {
+                let (col_ptrs, row_indices, _) =
+                    self.rebuilt_csc(&source_columns, map_row, |_| Ok(true))?;
+                Self::new_logical(output_rows, self.cols, col_ptrs, row_indices)
+            }
         }
     }
 
@@ -3386,11 +3503,18 @@ impl SparseTensor {
                     storage,
                 )
             }
+            SparseValueStorage::Logical => {
+                let (col_ptrs, row_indices, _) =
+                    self.rebuilt_csc(&source_columns, Some, |_| Ok(true))?;
+                Self::new_logical(self.rows, source_columns.len(), col_ptrs, row_indices)
+            }
         }
     }
 
     pub fn class_name(&self) -> &'static str {
-        self.numeric_dtype().class_name()
+        self.numeric_dtype()
+            .map(NumericDType::class_name)
+            .unwrap_or("logical")
     }
 }
 
@@ -3455,7 +3579,7 @@ mod sparse_tensor_tests {
             vec![1.25, 3.5, 2.0, 4.0, 5.75],
         )
         .expect("single sparse");
-        assert_eq!(sparse.numeric_dtype(), NumericDType::F32);
+        assert_eq!(sparse.numeric_dtype(), Some(NumericDType::F32));
         assert_eq!(sparse.class_name(), "single");
         assert_eq!(sparse.numeric_value_at(1), Some(NumericScalar::F32(3.5)));
         assert_eq!(
@@ -3478,17 +3602,17 @@ mod sparse_tensor_tests {
         assert_eq!(updated.as_f32_slice(), Some(&[1.25, 2.0, 4.0, 5.75][..]));
 
         let expanded = sparse.with_expanded_shape(4, 4).expect("expand single");
-        assert_eq!(expanded.numeric_dtype(), NumericDType::F32);
+        assert_eq!(expanded.numeric_dtype(), Some(NumericDType::F32));
         assert_eq!(expanded.col_ptrs, vec![0, 2, 3, 5, 5]);
         assert_eq!(expanded.as_f32_slice(), sparse.as_f32_slice());
 
         let rows = sparse.with_deleted_rows(&[1]).expect("delete row");
-        assert_eq!(rows.numeric_dtype(), NumericDType::F32);
+        assert_eq!(rows.numeric_dtype(), Some(NumericDType::F32));
         assert_eq!(rows.shape(), vec![2, 3]);
         assert_eq!(rows.as_f32_slice(), Some(&[1.25, 3.5, 4.0, 5.75][..]));
 
         let columns = sparse.with_deleted_columns(&[1]).expect("delete column");
-        assert_eq!(columns.numeric_dtype(), NumericDType::F32);
+        assert_eq!(columns.numeric_dtype(), Some(NumericDType::F32));
         assert_eq!(columns.shape(), vec![3, 2]);
         assert_eq!(columns.as_f32_slice(), Some(&[1.25, 3.5, 4.0, 5.75][..]));
     }
@@ -3526,6 +3650,43 @@ mod sparse_tensor_tests {
 
         assert!(sparse.with_deleted_rows(&[1, 1]).is_err());
         assert!(sparse.with_deleted_columns(&[3]).is_err());
+    }
+
+    #[test]
+    fn logical_sparse_pattern_is_authoritative_across_core_structural_paths() {
+        let sparse =
+            SparseTensor::new_logical(3, 3, vec![0, 2, 3, 4], vec![0, 2, 1, 2]).expect("logical");
+        assert!(sparse.is_logical());
+        assert_eq!(sparse.numeric_dtype(), None);
+        assert_eq!(sparse.class_name(), "logical");
+        assert_eq!(sparse.nnz(), 4);
+        assert_eq!(sparse.logical_at(2, 0), Some(true));
+        assert_eq!(sparse.logical_at(0, 1), Some(false));
+        assert_eq!(
+            sparse.to_dense_logical().expect("dense").data,
+            vec![1, 0, 1, 0, 1, 0, 0, 0, 1]
+        );
+
+        let updated = sparse
+            .with_updated_logical_value(1, 0, true)
+            .expect("insert true")
+            .with_updated_logical_value(2, 0, false)
+            .expect("remove false");
+        assert_eq!(updated.row_indices, vec![0, 1, 1, 2]);
+
+        let expanded = updated.with_expanded_shape(4, 4).expect("expand");
+        assert!(expanded.is_logical());
+        assert_eq!(expanded.col_ptrs, vec![0, 2, 3, 4, 4]);
+
+        let rows = sparse.with_deleted_rows(&[1]).expect("delete row");
+        assert!(rows.is_logical());
+        assert_eq!(rows.shape(), vec![2, 3]);
+        assert_eq!(rows.row_indices, vec![0, 1, 1]);
+
+        let columns = sparse.with_deleted_columns(&[1]).expect("delete column");
+        assert!(columns.is_logical());
+        assert_eq!(columns.shape(), vec![3, 2]);
+        assert_eq!(columns.row_indices, vec![0, 2, 2]);
     }
 
     #[test]
@@ -4118,6 +4279,7 @@ impl fmt::Display for SparseTensor {
                     SparseValueStorage::Integer(storage) => {
                         format_int_value(storage.value_at(idx).expect("validated sparse storage"))
                     }
+                    SparseValueStorage::Logical => "1".to_string(),
                 };
                 writeln!(f, "  ({},{})  {}", row + 1, col + 1, value)?;
             }

@@ -659,7 +659,7 @@ pub(crate) mod tests {
             panic!("expected sparse tensor");
         };
         assert_eq!(output.shape(), vec![3, 2]);
-        assert_eq!(output.numeric_dtype(), NumericDType::F64);
+        assert_eq!(output.numeric_dtype(), Some(NumericDType::F64));
         assert_eq!(output.as_f64_slice(), Some(&[4.0, -1.0][..]));
     }
 
@@ -679,7 +679,7 @@ pub(crate) mod tests {
             panic!("expected sparse tensor");
         };
         assert_eq!(output.shape(), vec![2, 2]);
-        assert_eq!(output.numeric_dtype(), NumericDType::F64);
+        assert_eq!(output.numeric_dtype(), Some(NumericDType::F64));
         assert!(output.integer_storage().is_none());
         assert_eq!(
             output.as_f64_slice(),

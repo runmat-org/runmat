@@ -168,6 +168,14 @@ fn sparse_scalar_value(
     row: usize,
     col: usize,
 ) -> Result<Value, RuntimeError> {
+    if sparse.is_logical() {
+        let scalar = if sparse.logical_at(row, col).unwrap_or(false) {
+            SparseTensor::new_logical(1, 1, vec![0, 1], vec![0]).map_err(map_slice_shape_error)?
+        } else {
+            SparseTensor::zeros_logical(1, 1)
+        };
+        return Ok(Value::SparseTensor(scalar));
+    }
     if let Some(storage) = sparse.integer_storage() {
         let scalar = match sparse.integer_at(row, col) {
             Some(value) => {
@@ -179,7 +187,7 @@ fn sparse_scalar_value(
         return Ok(Value::SparseTensor(scalar));
     }
 
-    if sparse.numeric_dtype() == NumericDType::F32 {
+    if sparse.numeric_dtype() == Some(NumericDType::F32) {
         let value = sparse.get(row, col).unwrap_or(0.0) as f32;
         let scalar = if value == 0.0 {
             SparseTensor::zeros_f32(1, 1)
@@ -205,9 +213,11 @@ fn checked_sparse_numel(sparse: &SparseTensor) -> Result<usize, RuntimeError> {
 }
 
 fn sparse_zeros_like(sparse: &SparseTensor, rows: usize, cols: usize) -> SparseTensor {
-    if let Some(storage) = sparse.integer_storage() {
+    if sparse.is_logical() {
+        SparseTensor::zeros_logical(rows, cols)
+    } else if let Some(storage) = sparse.integer_storage() {
         SparseTensor::zeros_with_integer_storage(rows, cols, storage)
-    } else if sparse.numeric_dtype() == NumericDType::F32 {
+    } else if sparse.numeric_dtype() == Some(NumericDType::F32) {
         SparseTensor::zeros_f32(rows, cols)
     } else {
         SparseTensor::zeros(rows, cols)
@@ -253,7 +263,9 @@ fn linear_sparse_slice(
                 row_indices.push(sparse.row_indices[entry] + col * sparse.rows);
             }
         }
-        let sparse = if let Some(storage) = sparse.integer_storage() {
+        let sparse = if sparse.is_logical() {
+            SparseTensor::new_logical(total, 1, vec![0, sparse.nnz()], row_indices)
+        } else if let Some(storage) = sparse.integer_storage() {
             SparseTensor::new_integer(
                 total,
                 1,
@@ -332,6 +344,19 @@ fn linear_sparse_slice(
         )));
     }
 
+    if sparse.is_logical() {
+        let mut col_rows = vec![Vec::new(); out_cols];
+        for (out_pos, &index) in indices.iter().enumerate() {
+            let base_lin = index - 1;
+            let base_row = base_lin % sparse.rows;
+            let base_col = base_lin / sparse.rows;
+            if sparse.logical_at(base_row, base_col).unwrap_or(false) {
+                col_rows[out_pos / out_rows].push(out_pos % out_rows);
+            }
+        }
+        return sparse_logical_from_column_rows(out_rows, out_cols, col_rows);
+    }
+
     if let Some(storage) = sparse.integer_storage() {
         let mut col_entries: Vec<Vec<(usize, IntValue)>> = vec![Vec::new(); out_cols];
         for (out_pos, &index) in indices.iter().enumerate() {
@@ -347,7 +372,7 @@ fn linear_sparse_slice(
         return typed_sparse_from_column_entries(out_rows, out_cols, col_entries, storage);
     }
 
-    if sparse.numeric_dtype() == NumericDType::F32 {
+    if sparse.numeric_dtype() == Some(NumericDType::F32) {
         let mut col_entries: Vec<Vec<(usize, f32)>> = vec![Vec::new(); out_cols];
         for (out_pos, &index) in indices.iter().enumerate() {
             let base_lin = index - 1;
@@ -439,6 +464,24 @@ fn sparse_f32_from_column_entries(
     Ok(Value::SparseTensor(sparse))
 }
 
+fn sparse_logical_from_column_rows(
+    rows: usize,
+    cols: usize,
+    mut col_rows: Vec<Vec<usize>>,
+) -> Result<Value, RuntimeError> {
+    let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
+    let mut row_indices = Vec::new();
+    col_ptrs.push(0);
+    for rows in col_rows.iter_mut().take(cols) {
+        rows.sort_unstable();
+        row_indices.extend(rows.iter().copied());
+        col_ptrs.push(row_indices.len());
+    }
+    let sparse = SparseTensor::new_logical(rows, cols, col_ptrs, row_indices)
+        .map_err(map_slice_shape_error)?;
+    Ok(Value::SparseTensor(sparse))
+}
+
 fn matrix_sparse_slice(
     sparse: &SparseTensor,
     selectors: &[SliceSelector],
@@ -507,6 +550,31 @@ fn matrix_sparse_slice(
             return Ok(Value::SparseTensor(scalar));
         }
         return typed_sparse_from_column_entries(out_rows, out_cols, col_entries, storage);
+    }
+
+    if sparse.is_logical() {
+        let mut col_rows = vec![Vec::new(); out_cols];
+        for (out_col, &col) in cols.iter().enumerate() {
+            let base_col = col - 1;
+            for entry in sparse.col_ptrs[base_col]..sparse.col_ptrs[base_col + 1] {
+                let base_row = sparse.row_indices[entry];
+                if all_rows {
+                    col_rows[out_col].push(base_row);
+                } else if let Some(output_rows) = row_positions.get(&base_row) {
+                    col_rows[out_col].extend(output_rows.iter().copied());
+                }
+            }
+        }
+        if out_rows == 1 && out_cols == 1 {
+            let scalar = if col_rows.first().is_some_and(|rows| !rows.is_empty()) {
+                SparseTensor::new_logical(1, 1, vec![0, 1], vec![0])
+                    .map_err(map_slice_shape_error)?
+            } else {
+                SparseTensor::zeros_logical(1, 1)
+            };
+            return Ok(Value::SparseTensor(scalar));
+        }
+        return sparse_logical_from_column_rows(out_rows, out_cols, col_rows);
     }
 
     if let Some(values) = sparse.as_f32_slice() {
@@ -695,7 +763,9 @@ pub fn read_sparse_slice_from_plan(
         col_ptrs.push(values.len());
     }
 
-    let out = if sparse.numeric_dtype() == NumericDType::F32 {
+    let out = if sparse.is_logical() {
+        SparseTensor::new_logical(out_rows, out_cols, col_ptrs, row_indices)
+    } else if sparse.numeric_dtype() == Some(NumericDType::F32) {
         SparseTensor::new_f32(
             out_rows,
             out_cols,
@@ -981,7 +1051,10 @@ mod tests {
         let Value::SparseTensor(output) = result else {
             panic!("expected sparse output");
         };
-        assert_eq!(output.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(
+            output.numeric_dtype(),
+            Some(runmat_builtins::NumericDType::F32)
+        );
         assert_eq!(output.col_ptrs, vec![0, 2, 2]);
         assert_eq!(output.row_indices, vec![0, 1]);
         assert_eq!(output.as_f32_slice(), Some(&[1.25, 3.5][..]));
@@ -991,9 +1064,35 @@ mod tests {
         let Value::SparseTensor(empty) = empty else {
             panic!("expected sparse output");
         };
-        assert_eq!(empty.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(
+            empty.numeric_dtype(),
+            Some(runmat_builtins::NumericDType::F32)
+        );
         assert_eq!(empty.shape(), vec![0, 1]);
         assert_eq!(empty.as_f32_slice(), Some(&[][..]));
+    }
+
+    #[test]
+    fn sparse_slice_plan_preserves_logical_pattern_and_empty_class() {
+        let sparse =
+            SparseTensor::new_logical(2, 2, vec![0, 1, 2], vec![0, 1]).expect("logical sparse");
+        let plan = IndexPlan::new(vec![0, 3, 1, 2], vec![2, 2], vec![2, 2], 2, vec![2, 2]);
+        let result = read_sparse_slice_from_plan(&sparse, &plan).expect("slice");
+        let Value::SparseTensor(output) = result else {
+            panic!("expected sparse output");
+        };
+        assert!(output.is_logical());
+        assert_eq!(output.col_ptrs, vec![0, 2, 2]);
+        assert_eq!(output.row_indices, vec![0, 1]);
+
+        let empty_plan = IndexPlan::new(Vec::new(), vec![0, 1], vec![0], 1, vec![2, 2]);
+        let empty = read_sparse_slice_from_plan(&sparse, &empty_plan).expect("empty slice");
+        let Value::SparseTensor(empty) = empty else {
+            panic!("expected sparse output");
+        };
+        assert!(empty.is_logical());
+        assert_eq!(empty.shape(), vec![0, 1]);
+        assert_eq!(empty.nnz(), 0);
     }
 
     #[test]

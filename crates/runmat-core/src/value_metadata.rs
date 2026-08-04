@@ -15,7 +15,7 @@ pub fn matlab_class_name(value: &Value) -> String {
     match value {
         Value::Num(_) | Value::Complex(_, _) => "double".to_string(),
         Value::Tensor(tensor) => tensor.numeric_dtype().class_name().to_string(),
-        Value::SparseTensor(tensor) => tensor.numeric_dtype().class_name().to_string(),
+        Value::SparseTensor(tensor) => tensor.class_name().to_string(),
         Value::ComplexTensor(tensor) => tensor.numeric_dtype().class_name().to_string(),
         Value::Int(iv) => iv.class_name().to_string(),
         Value::Bool(_) | Value::LogicalArray(_) => "logical".to_string(),
@@ -78,6 +78,7 @@ pub fn numeric_dtype_label(value: &Value) -> Option<&'static str> {
     match value {
         Value::Num(_) | Value::Complex(_, _) => Some("double"),
         Value::Tensor(t) => Some(t.numeric_dtype().class_name()),
+        Value::SparseTensor(s) => Some(s.class_name()),
         Value::LogicalArray(_) => Some("logical"),
         Value::Int(iv) => Some(iv.class_name()),
         _ => None,
@@ -106,7 +107,7 @@ pub fn approximate_size_bytes(value: &Value) -> Option<u64> {
 pub fn sparse_tensor_memory_bytes(sparse: &SparseTensor) -> u64 {
     sparse_tensor_memory_bytes_from_lengths(
         sparse.nnz(),
-        sparse.numeric_dtype().byte_size(),
+        sparse.value_byte_size(),
         sparse.row_indices.len(),
         sparse.col_ptrs.len(),
     )
@@ -267,6 +268,17 @@ mod tests {
             sparse_tensor_memory_bytes_from_lengths(usize::MAX, usize::MAX, usize::MAX, usize::MAX,),
             u64::MAX
         );
+    }
+
+    #[test]
+    fn logical_sparse_metadata_counts_only_authoritative_pattern_storage() {
+        let sparse =
+            SparseTensor::new_logical(3, 2, vec![0, 1, 2], vec![0, 2]).expect("logical sparse");
+        let value = Value::SparseTensor(sparse);
+        let expected = (2 * std::mem::size_of::<usize>()) + (3 * std::mem::size_of::<usize>());
+        assert_eq!(matlab_class_name(&value), "logical");
+        assert_eq!(numeric_dtype_label(&value), Some("logical"));
+        assert_eq!(approximate_size_bytes(&value), Some(expected as u64));
     }
 
     #[test]

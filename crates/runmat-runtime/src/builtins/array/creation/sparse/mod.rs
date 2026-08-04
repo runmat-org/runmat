@@ -432,10 +432,13 @@ fn construct_sparse(args: Vec<Value>) -> BuiltinResult<SparseTensor> {
         3 if keyword_of(&args[2]).is_some() => {
             let rows = parse_size_arg(&args[0], "m")?;
             let cols = parse_size_arg(&args[1], "n")?;
-            match sparse_float_dtype(&args[2], "sparse")? {
-                NumericDType::F64 => Ok(SparseTensor::zeros(rows, cols)),
-                NumericDType::F32 => Ok(SparseTensor::zeros_f32(rows, cols)),
-                _ => unreachable!("sparse floating typename parser returned integer dtype"),
+            match sparse_storage_class(&args[2], "sparse")? {
+                MatrixClass::Floating(NumericDType::F64) => Ok(SparseTensor::zeros(rows, cols)),
+                MatrixClass::Floating(NumericDType::F32) => Ok(SparseTensor::zeros_f32(rows, cols)),
+                MatrixClass::Logical => Ok(SparseTensor::zeros_logical(rows, cols)),
+                MatrixClass::Floating(_) => {
+                    unreachable!("sparse typename parser returned integer dtype")
+                }
             }
         }
         3 | 5 | 6 => sparse_from_triplet_form(args),
@@ -446,12 +449,12 @@ fn construct_sparse(args: Vec<Value>) -> BuiltinResult<SparseTensor> {
     }
 }
 
-fn parse_speye_shape(args: &[Value]) -> BuiltinResult<(usize, usize, NumericDType)> {
+fn parse_speye_shape(args: &[Value]) -> BuiltinResult<(usize, usize, MatrixClass)> {
     let mut args = args;
-    let mut dtype = NumericDType::F64;
+    let mut class = MatrixClass::Floating(NumericDType::F64);
     if let Some((last, rest)) = args.split_last() {
         if keyword_of(last).is_some() {
-            dtype = sparse_float_dtype(last, "speye")?;
+            class = sparse_storage_class(last, "speye")?;
             args = rest;
         }
     }
@@ -469,9 +472,20 @@ fn parse_speye_shape(args: &[Value]) -> BuiltinResult<(usize, usize, NumericDTyp
                 Ok((rows, cols))
             }
             Value::SparseTensor(sparse) if is_vector_shape(&[sparse.rows, sparse.cols]) => {
-                let dense = sparse
-                    .to_dense()
-                    .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("speye: {err}")))?;
+                let dense = if sparse.is_logical() {
+                    let logical = sparse.to_dense_logical().map_err(|err| {
+                        sparse_error(&SPARSE_ERROR_INTERNAL, format!("speye: {err}"))
+                    })?;
+                    Tensor::new(
+                        logical.data.into_iter().map(f64::from).collect(),
+                        logical.shape,
+                    )
+                    .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("speye: {err}")))?
+                } else {
+                    sparse.to_dense().map_err(|err| {
+                        sparse_error(&SPARSE_ERROR_INTERNAL, format!("speye: {err}"))
+                    })?
+                };
                 if dense.len() != 2 {
                     return Err(sparse_error(
                         &SPARSE_ERROR_INVALID_INPUT,
@@ -497,7 +511,7 @@ fn parse_speye_shape(args: &[Value]) -> BuiltinResult<(usize, usize, NumericDTyp
             "speye: expected speye(), speye(n), speye([m n]), or speye(m,n)",
         )),
     }?;
-    Ok((shape.0, shape.1, dtype))
+    Ok((shape.0, shape.1, class))
 }
 
 fn parse_speye_shape_tensor(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
@@ -529,6 +543,26 @@ fn sparse_float_dtype(value: &Value, label: &str) -> BuiltinResult<NumericDType>
         _ => Err(sparse_error(
             &SPARSE_ERROR_INVALID_INPUT,
             format!("{label}: typename must be \"double\" or \"single\", got {type_name}"),
+        )),
+    }
+}
+
+fn sparse_storage_class(value: &Value, label: &str) -> BuiltinResult<MatrixClass> {
+    let type_name = keyword_of(value).ok_or_else(|| {
+        sparse_error(
+            &SPARSE_ERROR_INVALID_INPUT,
+            format!("{label}: typename must be \"double\", \"single\", or \"logical\""),
+        )
+    })?;
+    match type_name.as_str() {
+        "double" => Ok(MatrixClass::Floating(NumericDType::F64)),
+        "single" => Ok(MatrixClass::Floating(NumericDType::F32)),
+        "logical" => Ok(MatrixClass::Logical),
+        _ => Err(sparse_error(
+            &SPARSE_ERROR_INVALID_INPUT,
+            format!(
+                "{label}: typename must be \"double\", \"single\", or \"logical\", got {type_name}"
+            ),
         )),
     }
 }
@@ -587,29 +621,26 @@ fn parse_speye_size_raw(raw: f64, name: &str) -> BuiltinResult<usize> {
     Ok(raw as usize)
 }
 
-fn sparse_identity(rows: usize, cols: usize, dtype: NumericDType) -> BuiltinResult<SparseTensor> {
+fn sparse_identity(rows: usize, cols: usize, class: MatrixClass) -> BuiltinResult<SparseTensor> {
     let diagonal = rows.min(cols);
     let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
     let mut row_indices = Vec::with_capacity(diagonal);
-    let mut values = Vec::with_capacity(diagonal);
     col_ptrs.push(0);
     for col in 0..cols {
         if col < diagonal {
             row_indices.push(col);
-            values.push(1.0);
         }
-        col_ptrs.push(values.len());
+        col_ptrs.push(row_indices.len());
     }
-    match dtype {
-        NumericDType::F64 => SparseTensor::new(rows, cols, col_ptrs, row_indices, values),
-        NumericDType::F32 => SparseTensor::new_f32(
-            rows,
-            cols,
-            col_ptrs,
-            row_indices,
-            values.into_iter().map(|value| value as f32).collect(),
-        ),
-        _ => unreachable!("sparse identity requested with integer dtype"),
+    match class {
+        MatrixClass::Floating(NumericDType::F64) => {
+            SparseTensor::new(rows, cols, col_ptrs, row_indices, vec![1.0; diagonal])
+        }
+        MatrixClass::Floating(NumericDType::F32) => {
+            SparseTensor::new_f32(rows, cols, col_ptrs, row_indices, vec![1.0; diagonal])
+        }
+        MatrixClass::Logical => SparseTensor::new_logical(rows, cols, col_ptrs, row_indices),
+        MatrixClass::Floating(_) => unreachable!("sparse identity requested with integer dtype"),
     }
     .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("speye: {err}")))
 }
@@ -617,6 +648,13 @@ fn sparse_identity(rows: usize, cols: usize, dtype: NumericDType) -> BuiltinResu
 fn nonzeros_value(value: &Value) -> BuiltinResult<Value> {
     match value {
         Value::SparseTensor(sparse) => {
+            if sparse.is_logical() {
+                return LogicalArray::new(vec![1; sparse.nnz()], vec![sparse.nnz(), 1])
+                    .map(Value::LogicalArray)
+                    .map_err(|err| {
+                        sparse_error(&SPARSE_ERROR_INTERNAL, format!("nonzeros: {err}"))
+                    });
+            }
             if let Some(storage) = sparse.integer_storage() {
                 return integer_tensor_column(storage.clone(), "nonzeros");
             }
@@ -1174,6 +1212,12 @@ enum ExtractionMatrix {
     Sparse(SparseTensor),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MatrixClass {
+    Floating(NumericDType),
+    Logical,
+}
+
 impl ExtractionMatrix {
     fn rows(&self) -> usize {
         match self {
@@ -1196,13 +1240,14 @@ impl ExtractionMatrix {
         }
     }
 
-    fn dtype(&self) -> NumericDType {
+    fn class(&self) -> MatrixClass {
         match self {
-            Self::Dense(matrix) => matrix.dtype,
-            Self::Sparse(sparse) if sparse.numeric_dtype() == NumericDType::F32 => {
-                NumericDType::F32
+            Self::Dense(matrix) => matrix.class,
+            Self::Sparse(sparse) if sparse.is_logical() => MatrixClass::Logical,
+            Self::Sparse(sparse) if sparse.numeric_dtype() == Some(NumericDType::F32) => {
+                MatrixClass::Floating(NumericDType::F32)
             }
-            Self::Sparse(_) => NumericDType::F64,
+            Self::Sparse(_) => MatrixClass::Floating(NumericDType::F64),
         }
     }
 }
@@ -1232,18 +1277,18 @@ fn spdiags_value(args: Vec<Value>) -> BuiltinResult<Value> {
             let id = tensor_column(offsets.iter().map(|&d| d as f64).collect(), "spdiags")?;
             match crate::output_count::current_output_count() {
                 Some(0) => Ok(Value::OutputList(Vec::new())),
-                Some(1) => Ok(Value::OutputList(vec![Value::Tensor(bout)])),
+                Some(1) => Ok(Value::OutputList(vec![bout])),
                 Some(out_count) => Ok(crate::output_count::output_list_with_padding(
                     out_count,
-                    vec![Value::Tensor(bout), id],
+                    vec![bout, id],
                 )),
-                None => Ok(Value::Tensor(bout)),
+                None => Ok(bout),
             }
         }
         2 => {
             let matrix = extraction_matrix_from_value(&args[0], "spdiags")?;
             let offsets = parse_diag_offsets(&args[1], "spdiags")?;
-            extract_diagonals(&matrix, &offsets).map(Value::Tensor)
+            extract_diagonals(&matrix, &offsets)
         }
         3 => replace_sparse_diagonals(&args[0], &args[1], &args[2]).map(Value::SparseTensor),
         4 => {
@@ -1264,7 +1309,7 @@ struct DenseMatrix {
     rows: usize,
     cols: usize,
     data: Vec<f64>,
-    dtype: NumericDType,
+    class: MatrixClass,
 }
 
 impl DenseMatrix {
@@ -1286,10 +1331,10 @@ fn dense_matrix_from_value(value: &Value, label: &str) -> BuiltinResult<DenseMat
                 rows: tensor.rows(),
                 cols: tensor.cols(),
                 data: tensor_utils::tensor_values_f64(tensor),
-                dtype: if tensor.numeric_dtype() == NumericDType::F32 {
-                    NumericDType::F32
+                class: if tensor.numeric_dtype() == NumericDType::F32 {
+                    MatrixClass::Floating(NumericDType::F32)
                 } else {
-                    NumericDType::F64
+                    MatrixClass::Floating(NumericDType::F64)
                 },
             })
         }
@@ -1308,17 +1353,29 @@ fn dense_matrix_from_value(value: &Value, label: &str) -> BuiltinResult<DenseMat
                     ),
                 ));
             }
-            let dense = sparse
-                .to_dense()
-                .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("{label}: {err}")))?;
+            let data = if sparse.is_logical() {
+                sparse
+                    .to_dense_logical()
+                    .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("{label}: {err}")))?
+                    .data
+                    .into_iter()
+                    .map(f64::from)
+                    .collect()
+            } else {
+                tensor_utils::tensor_into_values_f64(sparse.to_dense().map_err(|err| {
+                    sparse_error(&SPARSE_ERROR_INTERNAL, format!("{label}: {err}"))
+                })?)
+            };
             Ok(DenseMatrix {
-                rows: dense.rows(),
-                cols: dense.cols(),
-                data: tensor_utils::tensor_into_values_f64(dense),
-                dtype: if sparse.numeric_dtype() == NumericDType::F32 {
-                    NumericDType::F32
+                rows: sparse.rows,
+                cols: sparse.cols,
+                data,
+                class: if sparse.is_logical() {
+                    MatrixClass::Logical
+                } else if sparse.numeric_dtype() == Some(NumericDType::F32) {
+                    MatrixClass::Floating(NumericDType::F32)
                 } else {
-                    NumericDType::F64
+                    MatrixClass::Floating(NumericDType::F64)
                 },
             })
         }
@@ -1339,26 +1396,26 @@ fn dense_matrix_from_value(value: &Value, label: &str) -> BuiltinResult<DenseMat
                     .iter()
                     .map(|&bit| if bit != 0 { 1.0 } else { 0.0 })
                     .collect(),
-                dtype: NumericDType::F64,
+                class: MatrixClass::Logical,
             })
         }
         Value::Num(n) => Ok(DenseMatrix {
             rows: 1,
             cols: 1,
             data: vec![*n],
-            dtype: NumericDType::F64,
+            class: MatrixClass::Floating(NumericDType::F64),
         }),
         Value::Int(i) => Ok(DenseMatrix {
             rows: 1,
             cols: 1,
             data: vec![i.to_f64()],
-            dtype: NumericDType::F64,
+            class: MatrixClass::Floating(NumericDType::F64),
         }),
         Value::Bool(b) => Ok(DenseMatrix {
             rows: 1,
             cols: 1,
             data: vec![if *b { 1.0 } else { 0.0 }],
-            dtype: NumericDType::F64,
+            class: MatrixClass::Logical,
         }),
         other => Err(sparse_error(
             &SPARSE_ERROR_INVALID_INPUT,
@@ -1457,7 +1514,7 @@ fn parse_integer_diag_offsets(value: &Value, label: &str) -> Option<BuiltinResul
     )
 }
 
-fn extract_diagonals(matrix: &ExtractionMatrix, offsets: &[isize]) -> BuiltinResult<Tensor> {
+fn extract_diagonals(matrix: &ExtractionMatrix, offsets: &[isize]) -> BuiltinResult<Value> {
     let rows = matrix.rows();
     let cols = matrix.cols();
     let out_rows = rows.min(cols);
@@ -1476,13 +1533,25 @@ fn extract_diagonals(matrix: &ExtractionMatrix, offsets: &[isize]) -> BuiltinRes
             }
         }
     }
-    match matrix.dtype() {
-        NumericDType::F32 => Tensor::from_f32(
+    match matrix.class() {
+        MatrixClass::Floating(NumericDType::F32) => Tensor::from_f32(
             data.into_iter().map(|value| value as f32).collect(),
             vec![out_rows, offsets.len()],
-        ),
-        NumericDType::F64 => Tensor::new(data, vec![out_rows, offsets.len()]),
-        _ => unreachable!("diagonal extraction normalizes non-floating inputs to double"),
+        )
+        .map(Value::Tensor),
+        MatrixClass::Floating(NumericDType::F64) => {
+            Tensor::new(data, vec![out_rows, offsets.len()]).map(Value::Tensor)
+        }
+        MatrixClass::Logical => LogicalArray::new(
+            data.into_iter()
+                .map(|value| u8::from(value != 0.0))
+                .collect(),
+            vec![out_rows, offsets.len()],
+        )
+        .map(Value::LogicalArray),
+        MatrixClass::Floating(_) => {
+            unreachable!("diagonal extraction normalizes integer inputs to double")
+        }
     }
     .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("spdiags: {err}")))
 }
@@ -1495,10 +1564,13 @@ fn construct_sparse_diagonals(
 ) -> BuiltinResult<SparseTensor> {
     let bin = dense_matrix_from_value(bin, "spdiags")?;
     if offsets.is_empty() {
-        return Ok(match bin.dtype {
-            NumericDType::F32 => SparseTensor::zeros_f32(rows, cols),
-            NumericDType::F64 => SparseTensor::zeros(rows, cols),
-            _ => unreachable!("diagonal construction normalizes non-floating inputs to double"),
+        return Ok(match bin.class {
+            MatrixClass::Floating(NumericDType::F32) => SparseTensor::zeros_f32(rows, cols),
+            MatrixClass::Floating(NumericDType::F64) => SparseTensor::zeros(rows, cols),
+            MatrixClass::Logical => SparseTensor::zeros_logical(rows, cols),
+            MatrixClass::Floating(_) => {
+                unreachable!("diagonal construction normalizes integer inputs to double")
+            }
         });
     }
     if bin.cols != offsets.len() {
@@ -1529,7 +1601,7 @@ fn construct_sparse_diagonals(
             }
         }
     }
-    sparse_from_entries_with_dtype(rows, cols, entries, bin.dtype, "spdiags")
+    sparse_from_entries_with_class(rows, cols, entries, bin.class, "spdiags")
 }
 
 fn replace_sparse_diagonals(
@@ -1563,16 +1635,18 @@ fn replace_sparse_diagonals(
             }
         }
     }
-    let dtype = if target_sparse.numeric_dtype() == NumericDType::F32 {
-        NumericDType::F32
+    let class = if target_sparse.is_logical() {
+        MatrixClass::Logical
+    } else if target_sparse.numeric_dtype() == Some(NumericDType::F32) {
+        MatrixClass::Floating(NumericDType::F32)
     } else {
-        NumericDType::F64
+        MatrixClass::Floating(NumericDType::F64)
     };
-    sparse_from_entries_with_dtype(
+    sparse_from_entries_with_class(
         target_sparse.rows,
         target_sparse.cols,
         entries,
-        dtype,
+        class,
         "spdiags",
     )
 }
@@ -1655,6 +1729,35 @@ fn sparse_from_entries_with_dtype(
     sparse.map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("{label}: {err}")))
 }
 
+fn sparse_from_entries_with_class(
+    rows: usize,
+    cols: usize,
+    entries: BTreeMap<(usize, usize), f64>,
+    class: MatrixClass,
+    label: &str,
+) -> BuiltinResult<SparseTensor> {
+    if let MatrixClass::Floating(dtype) = class {
+        return sparse_from_entries_with_dtype(rows, cols, entries, dtype, label);
+    }
+
+    let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
+    let mut row_indices = Vec::new();
+    col_ptrs.push(0);
+    for col in 0..cols {
+        for (&(entry_col, row), &value) in entries.range((col, 0)..=(col, usize::MAX)) {
+            if entry_col != col {
+                break;
+            }
+            if row < rows && value != 0.0 {
+                row_indices.push(row);
+            }
+        }
+        col_ptrs.push(row_indices.len());
+    }
+    SparseTensor::new_logical(rows, cols, col_ptrs, row_indices)
+        .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("{label}: {err}")))
+}
+
 fn scalar_f64(value: &Value, name: &str, label: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(n) => Ok(*n),
@@ -1699,10 +1802,14 @@ fn sparse_from_value(value: Value) -> BuiltinResult<SparseTensor> {
                 .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))?,
         ),
         Value::Int(i) => sparse_from_integer_scalar(i),
-        Value::Bool(b) => sparse_from_dense_tensor(
-            &Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
-                .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))?,
-        ),
+        Value::Bool(b) => {
+            if b {
+                SparseTensor::new_logical(1, 1, vec![0, 1], vec![0])
+                    .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))
+            } else {
+                Ok(SparseTensor::zeros_logical(1, 1))
+            }
+        }
         other => Err(sparse_error(
             &SPARSE_ERROR_INVALID_INPUT,
             format!("sparse: unsupported conversion input {other:?}"),
@@ -1826,14 +1933,21 @@ fn sparse_from_logical_array(logical: &LogicalArray) -> BuiltinResult<SparseTens
         [n] => vec![1, *n],
         [rows, cols, ..] => vec![*rows, *cols],
     };
-    let data = logical
-        .data
-        .iter()
-        .map(|&bit| if bit != 0 { 1.0 } else { 0.0 })
-        .collect();
-    let tensor = Tensor::new(data, shape)
-        .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))?;
-    sparse_from_dense_tensor(&tensor)
+    let rows = shape[0];
+    let cols = shape[1];
+    let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
+    let mut row_indices = Vec::new();
+    col_ptrs.push(0);
+    for col in 0..cols {
+        for row in 0..rows {
+            if logical.data[row + col * rows] != 0 {
+                row_indices.push(row);
+            }
+        }
+        col_ptrs.push(row_indices.len());
+    }
+    SparseTensor::new_logical(rows, cols, col_ptrs, row_indices)
+        .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))
 }
 
 fn sparse_from_triplet_form(args: Vec<Value>) -> BuiltinResult<SparseTensor> {
@@ -1896,6 +2010,9 @@ fn sparse_from_triplet_form(args: Vec<Value>) -> BuiltinResult<SparseTensor> {
     match values {
         TripletValues::F64(values) => sparse_from_float_triplets(rows, cols, coordinates, values),
         TripletValues::F32(values) => sparse_from_f32_triplets(rows, cols, coordinates, values),
+        TripletValues::Logical(values) => {
+            sparse_from_logical_triplets(rows, cols, coordinates, values)
+        }
         TripletValues::Integer(values) => {
             sparse_from_integer_triplets(rows, cols, coordinates, values)
         }
@@ -1905,6 +2022,7 @@ fn sparse_from_triplet_form(args: Vec<Value>) -> BuiltinResult<SparseTensor> {
 enum TripletValues {
     F64(Vec<f64>),
     F32(Vec<f32>),
+    Logical(Vec<u8>),
     Integer(IntegerStorage),
 }
 
@@ -1913,6 +2031,7 @@ impl TripletValues {
         match self {
             Self::F64(values) => values.len(),
             Self::F32(values) => values.len(),
+            Self::Logical(values) => values.len(),
             Self::Integer(values) => values.len(),
         }
     }
@@ -1924,6 +2043,7 @@ impl TripletValues {
         match self {
             Self::F64(values) => Ok(Self::F64(vec![values[0]; len])),
             Self::F32(values) => Ok(Self::F32(vec![values[0]; len])),
+            Self::Logical(values) => Ok(Self::Logical(vec![values[0]; len])),
             Self::Integer(storage) => {
                 let value = storage.value_at(0).expect("single integer storage value");
                 let values = vec![value; len];
@@ -1938,6 +2058,12 @@ impl TripletValues {
 
 fn triplet_values(value: &Value) -> BuiltinResult<TripletValues> {
     match value {
+        Value::Bool(value) => Ok(TripletValues::Logical(vec![u8::from(*value)])),
+        Value::LogicalArray(values) => Ok(TripletValues::Logical(values.data.clone())),
+        Value::SparseTensor(sparse) if sparse.is_logical() => sparse
+            .to_dense_logical()
+            .map(|dense| TripletValues::Logical(dense.data))
+            .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}"))),
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => Ok(TripletValues::Integer(
             tensor
                 .integer_storage()
@@ -1969,12 +2095,47 @@ fn triplet_values(value: &Value) -> BuiltinResult<TripletValues> {
                     .to_vec(),
             ))
         }
-        Value::SparseTensor(sparse) if sparse.numeric_dtype() == NumericDType::F32 => {
+        Value::SparseTensor(sparse) if sparse.numeric_dtype() == Some(NumericDType::F32) => {
             dense_typed_triplet_sparse(sparse, "v")
                 .and_then(|dense| triplet_values(&Value::Tensor(dense)))
         }
         _ => numeric_triplet_array(value, "v").map(TripletValues::F64),
     }
+}
+
+fn sparse_from_logical_triplets(
+    rows: usize,
+    cols: usize,
+    coordinates: Vec<(usize, usize)>,
+    values: Vec<u8>,
+) -> BuiltinResult<SparseTensor> {
+    let mut entries = BTreeMap::new();
+    for (coordinate, value) in coordinates.into_iter().zip(values) {
+        if value != 0 {
+            entries.insert(coordinate, ());
+        }
+    }
+
+    let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
+    let mut row_indices = Vec::new();
+    col_ptrs.push(0);
+    for col in 0..cols {
+        for (&(entry_col, row), ()) in entries.range((col, 0)..=(col, usize::MAX)) {
+            if entry_col != col {
+                break;
+            }
+            if row >= rows {
+                return Err(sparse_error(
+                    &SPARSE_ERROR_INVALID_INDEX,
+                    "sparse: row index exceeds matrix dimensions",
+                ));
+            }
+            row_indices.push(row);
+        }
+        col_ptrs.push(row_indices.len());
+    }
+    SparseTensor::new_logical(rows, cols, col_ptrs, row_indices)
+        .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))
 }
 
 fn sparse_from_float_triplets(
@@ -2135,10 +2296,17 @@ fn numeric_triplet_array(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
                     ),
                 ));
             }
-            sparse
-                .to_dense()
-                .map(tensor_utils::tensor_into_values_f64)
-                .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))
+            if sparse.is_logical() {
+                sparse
+                    .to_dense_logical()
+                    .map(|logical| logical.data.into_iter().map(f64::from).collect())
+                    .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))
+            } else {
+                sparse
+                    .to_dense()
+                    .map(tensor_utils::tensor_into_values_f64)
+                    .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))
+            }
         }
         Value::LogicalArray(logical) => Ok(logical
             .data
@@ -2257,10 +2425,17 @@ fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
                     ),
                 ));
             }
-            sparse
-                .to_dense()
-                .map(tensor_utils::tensor_into_values_f64)
-                .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))
+            if sparse.is_logical() {
+                sparse
+                    .to_dense_logical()
+                    .map(|logical| logical.data.into_iter().map(f64::from).collect())
+                    .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))
+            } else {
+                sparse
+                    .to_dense()
+                    .map(tensor_utils::tensor_into_values_f64)
+                    .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))
+            }
         }
         Value::LogicalArray(logical) => {
             if !is_vector_shape(&logical.shape) {
@@ -2310,10 +2485,17 @@ fn numeric_vector_for_label(value: &Value, name: &str, label: &str) -> BuiltinRe
                     ),
                 ));
             }
-            sparse
-                .to_dense()
-                .map(tensor_utils::tensor_into_values_f64)
-                .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("{label}: {err}")))
+            if sparse.is_logical() {
+                sparse
+                    .to_dense_logical()
+                    .map(|logical| logical.data.into_iter().map(f64::from).collect())
+                    .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("{label}: {err}")))
+            } else {
+                sparse
+                    .to_dense()
+                    .map(tensor_utils::tensor_into_values_f64)
+                    .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("{label}: {err}")))
+            }
         }
         Value::LogicalArray(logical) => {
             if !is_vector_shape(&logical.shape) {
@@ -2803,11 +2985,46 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sparse_from_logical_uses_pattern_as_authoritative_storage() {
+        let logical = LogicalArray::new(vec![0, 1, 1, 0], vec![2, 2]).unwrap();
+        let sparse =
+            expect_sparse(sparse_builtin(vec![Value::LogicalArray(logical)]).expect("sparse"));
+        assert!(sparse.is_logical());
+        assert_eq!(sparse.numeric_dtype(), None);
+        assert_eq!(sparse.col_ptrs, vec![0, 1, 2]);
+        assert_eq!(sparse.row_indices, vec![1, 0]);
+        assert_eq!(
+            sparse.to_dense_logical().expect("dense logical").data,
+            vec![0, 1, 1, 0]
+        );
+    }
+
+    #[test]
+    fn sparse_logical_triplets_merge_with_or_and_discard_false_values() {
+        let i = Tensor::new(vec![1.0, 1.0, 2.0, 2.0], vec![4, 1]).unwrap();
+        let j = Tensor::new(vec![1.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap();
+        let values = LogicalArray::new(vec![0, 1, 1, 0], vec![4, 1]).unwrap();
+        let sparse = expect_sparse(
+            sparse_builtin(vec![
+                Value::Tensor(i),
+                Value::Tensor(j),
+                Value::LogicalArray(values),
+                Value::Num(2.0),
+                Value::Num(3.0),
+            ])
+            .expect("logical triplet sparse"),
+        );
+        assert!(sparse.is_logical());
+        assert_eq!(sparse.col_ptrs, vec![0, 1, 2, 2]);
+        assert_eq!(sparse.row_indices, vec![0, 1]);
+    }
+
+    #[test]
     fn native_single_sparse_constructors_and_nonzeros_preserve_class() {
         let dense = Tensor::from_f32(vec![0.0, 4.25, 5.5, 0.0], vec![2, 2]).unwrap();
         let from_dense =
             expect_sparse(sparse_builtin(vec![Value::Tensor(dense)]).expect("single sparse"));
-        assert_eq!(from_dense.numeric_dtype(), NumericDType::F32);
+        assert_eq!(from_dense.numeric_dtype(), Some(NumericDType::F32));
         assert_eq!(from_dense.as_f32_slice(), Some(&[4.25, 5.5][..]));
 
         let rows = Tensor::new(vec![1.0, 1.0, 2.0], vec![3, 1]).unwrap();
@@ -2821,7 +3038,7 @@ pub(crate) mod tests {
             ])
             .expect("single triplets"),
         );
-        assert_eq!(triplets.numeric_dtype(), NumericDType::F32);
+        assert_eq!(triplets.numeric_dtype(), Some(NumericDType::F32));
         assert_eq!(triplets.as_f32_slice(), Some(&[0.75, 3.0][..]));
 
         let empty = expect_sparse(
@@ -2833,13 +3050,13 @@ pub(crate) mod tests {
             .expect("typed empty sparse"),
         );
         assert_eq!(empty.shape(), vec![3, 4]);
-        assert_eq!(empty.numeric_dtype(), NumericDType::F32);
+        assert_eq!(empty.numeric_dtype(), Some(NumericDType::F32));
 
         let eye = expect_sparse(
             super::speye_builtin(vec![Value::Num(3.0), Value::String("single".to_string())])
                 .expect("single speye"),
         );
-        assert_eq!(eye.numeric_dtype(), NumericDType::F32);
+        assert_eq!(eye.numeric_dtype(), Some(NumericDType::F32));
         assert_eq!(eye.as_f32_slice(), Some(&[1.0, 1.0, 1.0][..]));
 
         let random_empty = expect_sparse(
@@ -2852,12 +3069,45 @@ pub(crate) mod tests {
             .expect("single sprand"),
         );
         assert_eq!(random_empty.shape(), vec![2, 3]);
-        assert_eq!(random_empty.numeric_dtype(), NumericDType::F32);
+        assert_eq!(random_empty.numeric_dtype(), Some(NumericDType::F32));
 
         let nonzeros =
             expect_tensor(nonzeros_builtin(Value::SparseTensor(triplets)).expect("nonzeros"));
         assert_eq!(nonzeros.numeric_dtype(), NumericDType::F32);
         assert_eq!(nonzeros.as_f32_slice(), Some(&[0.75, 3.0][..]));
+    }
+
+    #[test]
+    fn logical_typename_constructs_empty_sparse_and_identity_without_value_payload() {
+        let empty = expect_sparse(
+            sparse_builtin(vec![
+                Value::Num(3.0),
+                Value::Num(4.0),
+                Value::String("logical".to_string()),
+            ])
+            .expect("logical empty sparse"),
+        );
+        assert!(empty.is_logical());
+        assert_eq!(empty.shape(), vec![3, 4]);
+        assert_eq!(empty.nnz(), 0);
+
+        let eye = expect_sparse(
+            super::speye_builtin(vec![Value::Num(3.0), Value::String("logical".to_string())])
+                .expect("logical speye"),
+        );
+        assert!(eye.is_logical());
+        assert_eq!(eye.col_ptrs, vec![0, 1, 2, 3]);
+        assert_eq!(eye.row_indices, vec![0, 1, 2]);
+
+        let err = sprand_builtin(vec![
+            Value::Num(2.0),
+            Value::Num(3.0),
+            Value::Num(0.5),
+            Value::String("logical".to_string()),
+        ])
+        .expect_err("sprand logical typename is not documented");
+        assert!(err.message().contains("double"));
+        assert!(err.message().contains("single"));
     }
 
     #[test]
@@ -2965,6 +3215,20 @@ pub(crate) mod tests {
                 assert_eq!(tensor.materialize_f64(), vec![(1.0, 2.0), (0.0, 3.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn nonzeros_of_logical_sparse_preserves_logical_class() {
+        let sparse =
+            SparseTensor::new_logical(3, 2, vec![0, 2, 3], vec![0, 2, 1]).expect("logical sparse");
+        let out = nonzeros_builtin(Value::SparseTensor(sparse)).expect("nonzeros");
+        match out {
+            Value::LogicalArray(logical) => {
+                assert_eq!(logical.shape, vec![3, 1]);
+                assert_eq!(logical.data, vec![1, 1, 1]);
+            }
+            other => panic!("expected logical array, got {other:?}"),
         }
     }
 
@@ -3120,7 +3384,7 @@ pub(crate) mod tests {
             ])
             .expect("single sprand"),
         );
-        assert_eq!(single.numeric_dtype(), NumericDType::F32);
+        assert_eq!(single.numeric_dtype(), Some(NumericDType::F32));
     }
 
     #[test]
@@ -3267,7 +3531,7 @@ pub(crate) mod tests {
             ])
             .expect("construct single spdiags"),
         );
-        assert_eq!(constructed.numeric_dtype(), NumericDType::F32);
+        assert_eq!(constructed.numeric_dtype(), Some(NumericDType::F32));
 
         let extracted = expect_tensor(
             spdiags_builtin(vec![
@@ -3289,11 +3553,68 @@ pub(crate) mod tests {
             ])
             .expect("replace single spdiags"),
         );
-        assert_eq!(replaced.numeric_dtype(), NumericDType::F32);
+        assert_eq!(replaced.numeric_dtype(), Some(NumericDType::F32));
         assert_eq!(replaced.get(0, 0), Some(9.0));
         assert_eq!(replaced.get(1, 0), Some(10.0));
         assert_eq!(replaced.get(1, 1), Some(7.0));
         assert_eq!(replaced.get(2, 2), Some(6.0));
+    }
+
+    #[test]
+    fn spdiags_preserves_logical_extraction_construction_and_replacement() {
+        let bin = LogicalArray::new(
+            vec![
+                1, 0, 0, // -1 source column
+                0, 1, 1, // +1 source column
+            ],
+            vec![3, 2],
+        )
+        .unwrap();
+        let offsets = Tensor::new(vec![-1.0, 1.0], vec![1, 2]).unwrap();
+        let constructed = expect_sparse(
+            spdiags_builtin(vec![
+                Value::LogicalArray(bin.clone()),
+                Value::Tensor(offsets.clone()),
+                Value::Num(3.0),
+                Value::Num(3.0),
+            ])
+            .expect("construct logical spdiags"),
+        );
+        assert!(constructed.is_logical());
+        assert_eq!(constructed.col_ptrs, vec![0, 1, 2, 3]);
+        assert_eq!(constructed.row_indices, vec![1, 0, 1]);
+
+        let extracted = spdiags_builtin(vec![
+            Value::SparseTensor(constructed.clone()),
+            Value::Tensor(offsets.clone()),
+        ])
+        .expect("extract logical spdiags");
+        match extracted {
+            Value::LogicalArray(logical) => {
+                assert_eq!(logical.shape, vec![3, 2]);
+                assert_eq!(logical.data, bin.data);
+            }
+            other => panic!("expected logical extraction, got {other:?}"),
+        }
+
+        let target = SparseTensor::new_logical(3, 3, vec![0, 1, 2, 3], vec![0, 1, 2]).unwrap();
+        let replaced = expect_sparse(
+            spdiags_builtin(vec![
+                Value::LogicalArray(bin),
+                Value::Tensor(offsets),
+                Value::SparseTensor(target),
+            ])
+            .expect("replace logical spdiags"),
+        );
+        assert!(replaced.is_logical());
+        assert_eq!(
+            replaced.to_dense_logical().expect("dense logical").data,
+            vec![
+                1, 1, 0, // column 1
+                1, 1, 0, // column 2
+                0, 1, 1, // column 3
+            ]
+        );
     }
 
     #[test]

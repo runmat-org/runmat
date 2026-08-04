@@ -490,9 +490,9 @@ async fn inf_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value>
             Err(inf_error(&INF_ERROR_INTEGER_LIKE_PROTOTYPE))
         }
         Value::SparseTensor(sparse) => match sparse.numeric_dtype() {
-            NumericDType::F32 => inf_single(shape),
-            NumericDType::F64 => inf_double(shape),
-            _ => unreachable!("integer sparse prototypes are rejected above"),
+            Some(NumericDType::F32) => inf_single(shape),
+            Some(NumericDType::F64) | None => inf_double(shape),
+            Some(_) => unreachable!("integer sparse prototypes are rejected above"),
         },
         Value::Int(_) => Err(inf_error(&INF_ERROR_INTEGER_LIKE_PROTOTYPE)),
         Value::Num(_) | Value::Bool(_) => inf_double(shape),

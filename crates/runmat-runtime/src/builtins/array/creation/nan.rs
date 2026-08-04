@@ -489,9 +489,9 @@ async fn nan_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value>
             Err(nan_error(&NAN_ERROR_INTEGER_LIKE_PROTOTYPE))
         }
         Value::SparseTensor(sparse) => match sparse.numeric_dtype() {
-            NumericDType::F32 => nan_single(shape),
-            NumericDType::F64 => nan_double(shape),
-            _ => unreachable!("integer sparse prototypes are rejected above"),
+            Some(NumericDType::F32) => nan_single(shape),
+            Some(NumericDType::F64) | None => nan_double(shape),
+            Some(_) => unreachable!("integer sparse prototypes are rejected above"),
         },
         Value::Int(_) => Err(nan_error(&NAN_ERROR_INTEGER_LIKE_PROTOTYPE)),
         Value::Num(_) | Value::Bool(_) => nan_double(shape),

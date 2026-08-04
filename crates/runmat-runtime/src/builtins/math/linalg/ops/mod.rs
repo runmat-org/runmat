@@ -25,6 +25,11 @@ pub(super) fn is_vector_or_matrix_shape(shape: &[usize]) -> bool {
 pub(super) fn transpose_real_sparse_tensor(
     sparse: runmat_builtins::SparseTensor,
 ) -> Result<runmat_builtins::SparseTensor, String> {
+    if sparse.is_logical() {
+        let values = vec![(); sparse.nnz()];
+        let (rows, cols, col_ptrs, row_indices, _) = transpose_sparse_values(&sparse, &values)?;
+        return runmat_builtins::SparseTensor::new_logical(rows, cols, col_ptrs, row_indices);
+    }
     if let Some(storage) = sparse.integer_storage() {
         return transpose_integer_sparse_tensor(&sparse, storage);
     }
@@ -131,10 +136,21 @@ mod tests {
         let transposed = transpose_real_sparse_tensor(sparse).expect("transpose");
         assert_eq!(
             transposed.numeric_dtype(),
-            runmat_builtins::NumericDType::F32
+            Some(runmat_builtins::NumericDType::F32)
         );
         assert_eq!(transposed.shape(), vec![2, 3]);
         assert_eq!(transposed.as_f32_slice(), Some(&[1.25, 2.0, 3.5][..]));
+    }
+
+    #[test]
+    fn transpose_real_sparse_tensor_preserves_logical_pattern_storage() {
+        let sparse =
+            SparseTensor::new_logical(3, 2, vec![0, 2, 3], vec![0, 2, 1]).expect("logical");
+        let transposed = transpose_real_sparse_tensor(sparse).expect("transpose");
+        assert!(transposed.is_logical());
+        assert_eq!(transposed.shape(), vec![2, 3]);
+        assert_eq!(transposed.col_ptrs, vec![0, 1, 2, 3]);
+        assert_eq!(transposed.row_indices, vec![0, 1, 0]);
     }
 
     #[test]

@@ -601,7 +601,10 @@ pub(crate) mod tests {
             panic!("expected sparse tensor");
         };
         assert_eq!(output.shape(), vec![3, 2]);
-        assert_eq!(output.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(
+            output.numeric_dtype(),
+            Some(runmat_builtins::NumericDType::F32)
+        );
         assert_eq!(
             output.as_f32_slice(),
             Some(&[std::f64::consts::PI as f32, -1.25][..])

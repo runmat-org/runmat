@@ -574,6 +574,16 @@ fn flatten_numeric(value: &Value) -> BuiltinResult<Vec<WriteElement>> {
                     &WRITE_ERROR_INTERNAL,
                 ));
             }
+            if s.is_logical() {
+                let dense = s.to_dense_logical().map_err(|err| {
+                    write_error_with_message(format!("write: {err}"), &WRITE_ERROR_INTERNAL)
+                })?;
+                return Ok(dense
+                    .data
+                    .into_iter()
+                    .map(|value| WriteElement::Floating(f64::from(value)))
+                    .collect());
+            }
             let dense = s.to_dense().map_err(|err| {
                 write_error_with_message(format!("write: {err}"), &WRITE_ERROR_INTERNAL)
             })?;

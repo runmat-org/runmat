@@ -125,5 +125,6 @@ pub enum MatData {
         col_ptrs: Vec<usize>,
         row_indices: Vec<usize>,
         values: NumericStorage,
+        logical: bool,
     },
 }

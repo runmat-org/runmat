@@ -18,7 +18,7 @@ const SPARSE_TYPENAME: BuiltinParamDescriptor = BuiltinParamDescriptor {
     ty: BuiltinParamType::StringScalar,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Sparse storage type: double or single.",
+    description: "Sparse storage type: double, single, or logical.",
 };
 
 const DENSE_VECTOR_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {

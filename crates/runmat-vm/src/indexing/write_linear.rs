@@ -503,13 +503,18 @@ pub async fn assign_sparse_scalar(
         }
     };
 
-    let updated = if let Some(storage) = sparse.integer_storage() {
+    let updated = if sparse.is_logical() {
+        let value = rhs_to_real_scalar(rhs).await? != 0.0;
+        sparse
+            .with_updated_logical_value(row, col, value)
+            .map_err(map_assignment_shape_error)?
+    } else if let Some(storage) = sparse.integer_storage() {
         let rhs = rhs_to_integer_assignment_scalar(rhs).await?;
         let value = integer_assignment::scalar_value(storage, &rhs);
         sparse
             .with_updated_integer_value(row, col, value)
             .map_err(map_assignment_shape_error)?
-    } else if sparse.numeric_dtype() == NumericDType::F32 {
+    } else if sparse.numeric_dtype() == Some(NumericDType::F32) {
         let value = rhs_to_real_scalar(rhs).await? as f32;
         sparse
             .with_updated_f32_value(row, col, value)
@@ -1040,11 +1045,29 @@ mod tests {
         .expect("single sparse assignment") else {
             panic!("expected sparse output");
         };
-        assert_eq!(updated.numeric_dtype(), NumericDType::F32);
+        assert_eq!(updated.numeric_dtype(), Some(NumericDType::F32));
         assert_eq!(updated.shape(), vec![2, 2]);
         assert_eq!(updated.col_ptrs, vec![0, 0, 1]);
         assert_eq!(updated.row_indices, vec![1]);
         assert_eq!(updated.as_f32_slice(), Some(&[(1.0 / 3.0) as f32][..]));
+    }
+
+    #[test]
+    fn sparse_logical_scalar_assignment_preserves_class_and_growth() {
+        let sparse = runmat_builtins::SparseTensor::zeros_logical(1, 1);
+        let Value::SparseTensor(updated) = block_on(assign_sparse_scalar(
+            sparse,
+            &[2, 2],
+            &Value::Num(-3.0),
+            false,
+        ))
+        .expect("logical sparse assignment") else {
+            panic!("expected sparse output");
+        };
+        assert!(updated.is_logical());
+        assert_eq!(updated.shape(), vec![2, 2]);
+        assert_eq!(updated.col_ptrs, vec![0, 0, 1]);
+        assert_eq!(updated.row_indices, vec![1]);
     }
 
     #[test]

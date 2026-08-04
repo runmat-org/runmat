@@ -181,12 +181,11 @@ fn tensor_all_finite(tensor: &Tensor) -> bool {
 }
 
 fn sparse_all_finite(sparse: &SparseTensor) -> bool {
-    if sparse.integer_storage().is_some() {
+    if sparse.integer_storage().is_some() || sparse.is_logical() {
         return true;
     }
     sparse
-        .as_f64_slice()
-        .expect("double sparse storage")
+        .materialize_f64()
         .iter()
         .all(|value| value.is_finite())
 }

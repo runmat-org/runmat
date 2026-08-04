@@ -192,13 +192,32 @@ fn logical_from_tensor(tensor: Tensor) -> BuiltinResult<Value> {
 }
 
 fn logical_from_sparse_tensor(sparse: runmat_builtins::SparseTensor) -> BuiltinResult<Value> {
-    let tensor = sparse.to_dense().map_err(|err| {
-        logical_error_with_message(
-            format!("logical: failed to densify sparse input: {err}"),
-            &LOGICAL_ERROR_INTERNAL,
-        )
-    })?;
-    logical_from_tensor(tensor)
+    if sparse.is_logical() {
+        return Ok(Value::SparseTensor(sparse));
+    }
+    let mut col_ptrs = Vec::with_capacity(sparse.cols.saturating_add(1));
+    let mut row_indices = Vec::new();
+    col_ptrs.push(0);
+    for col in 0..sparse.cols {
+        for index in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
+            if !sparse
+                .numeric_value_at(index)
+                .expect("validated sparse storage index")
+                .is_zero()
+            {
+                row_indices.push(sparse.row_indices[index]);
+            }
+        }
+        col_ptrs.push(row_indices.len());
+    }
+    runmat_builtins::SparseTensor::new_logical(sparse.rows, sparse.cols, col_ptrs, row_indices)
+        .map(Value::SparseTensor)
+        .map_err(|err| {
+            logical_error_with_message(
+                format!("logical: failed to convert sparse input: {err}"),
+                &LOGICAL_ERROR_INTERNAL,
+            )
+        })
 }
 
 fn logical_from_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
@@ -486,15 +505,21 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn logical_sparse_tensor_densifies() {
+    fn logical_sparse_tensor_preserves_sparse_storage() {
         let sparse = SparseTensor::new(3, 2, vec![0, 1, 2], vec![1, 2], vec![4.0, -1.0]).unwrap();
         let result = logical_builtin(Value::SparseTensor(sparse), Vec::new()).expect("logical");
         match result {
-            Value::LogicalArray(array) => {
-                assert_eq!(array.shape, vec![3, 2]);
-                assert_eq!(array.data, vec![0, 1, 0, 0, 0, 1]);
+            Value::SparseTensor(sparse) => {
+                assert!(sparse.is_logical());
+                assert_eq!(sparse.shape(), vec![3, 2]);
+                assert_eq!(sparse.col_ptrs, vec![0, 1, 2]);
+                assert_eq!(sparse.row_indices, vec![1, 2]);
+                assert_eq!(
+                    sparse.to_dense_logical().expect("dense logical").data,
+                    vec![0, 1, 0, 0, 0, 1]
+                );
             }
-            other => panic!("expected logical array, got {:?}", other),
+            other => panic!("expected logical sparse tensor, got {other:?}"),
         }
     }
 

@@ -633,9 +633,10 @@ fn zeros_complex_integer_like(
 fn zeros_sparse_like(proto: &SparseTensor, shape: &[usize]) -> crate::BuiltinResult<Value> {
     match shape {
         [rows, cols] => Ok(Value::SparseTensor(match proto.numeric_dtype() {
-            NumericDType::F32 => SparseTensor::zeros_f32(*rows, *cols),
-            NumericDType::F64 => SparseTensor::zeros(*rows, *cols),
-            _ => SparseTensor::zeros_with_integer_storage(
+            Some(NumericDType::F32) => SparseTensor::zeros_f32(*rows, *cols),
+            Some(NumericDType::F64) => SparseTensor::zeros(*rows, *cols),
+            None => SparseTensor::zeros_logical(*rows, *cols),
+            Some(_) => SparseTensor::zeros_with_integer_storage(
                 *rows,
                 *cols,
                 proto
@@ -1168,7 +1169,7 @@ pub(crate) mod tests {
             panic!("expected sparse tensor");
         };
         assert_eq!(sparse.shape(), vec![3, 4]);
-        assert_eq!(sparse.numeric_dtype(), NumericDType::F32);
+        assert_eq!(sparse.numeric_dtype(), Some(NumericDType::F32));
         assert!(sparse.as_f32_slice().is_some_and(<[f32]>::is_empty));
     }
 

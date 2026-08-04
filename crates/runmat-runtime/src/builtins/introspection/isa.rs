@@ -188,8 +188,8 @@ fn is_numeric(value: &Value) -> bool {
         | Value::Tensor(_)
         | Value::ComplexTensor(_)
         | Value::Complex(_, _)
-        | Value::Int(_)
-        | Value::SparseTensor(_) => true,
+        | Value::Int(_) => true,
+        Value::SparseTensor(sparse) => !sparse.is_logical(),
         Value::GpuTensor(handle) => !handle_is_logical(handle),
         _ => false,
     }
@@ -200,7 +200,7 @@ fn is_float(value: &Value) -> bool {
         Value::Num(_) | Value::Complex(_, _) => true,
         Value::Tensor(tensor) => tensor.integer_storage().is_none(),
         Value::ComplexTensor(tensor) => tensor.integer_storage().is_none(),
-        Value::SparseTensor(sparse) => sparse.integer_storage().is_none(),
+        Value::SparseTensor(sparse) => !sparse.is_logical() && sparse.integer_storage().is_none(),
         Value::GpuTensor(handle) => {
             !handle_is_logical(handle) && handle_integer_type(handle).is_none()
         }
@@ -222,6 +222,7 @@ fn is_integer(value: &Value) -> bool {
 fn is_logical(value: &Value) -> bool {
     match value {
         Value::Bool(_) | Value::LogicalArray(_) => true,
+        Value::SparseTensor(sparse) => sparse.is_logical(),
         Value::GpuTensor(handle) => handle_is_logical(handle),
         _ => false,
     }
