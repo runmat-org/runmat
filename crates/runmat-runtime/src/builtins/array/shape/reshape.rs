@@ -340,41 +340,33 @@ fn reshape_complex_scalar(re: f64, im: f64, dims: &[usize]) -> crate::BuiltinRes
 }
 
 fn reshape_char_array(ca: CharArray, dims: &[usize]) -> crate::BuiltinResult<Value> {
-    let (rows, cols) = match dims.len() {
-        0 => {
-            return Err(reshape_error(
-                "reshape: size vector must contain at least one element",
-            ))
-        }
-        1 => (dims[0], 1),
-        2 => (dims[0], dims[1]),
-        _ => {
-            return Err(reshape_error(
-                "reshape: char arrays currently support at most two dimensions",
-            ))
-        }
+    if dims.is_empty() {
+        return Err(reshape_error(
+            "reshape: size vector must contain at least one element",
+        ));
+    }
+    let shape = if dims.len() == 1 {
+        vec![dims[0], 1]
+    } else {
+        dims.to_vec()
     };
-    CharArray::new(ca.data, rows, cols)
+    CharArray::from_column_major(ca.to_column_major(), shape)
         .map(Value::CharArray)
         .map_err(|e| reshape_error(format!("reshape: {e}")))
 }
 
 fn reshape_cell_array(ca: CellArray, dims: &[usize]) -> crate::BuiltinResult<Value> {
-    let (rows, cols) = match dims.len() {
-        0 => {
-            return Err(reshape_error(
-                "reshape: size vector must contain at least one element",
-            ))
-        }
-        1 => (dims[0], 1),
-        2 => (dims[0], dims[1]),
-        _ => {
-            return Err(reshape_error(
-                "reshape: cell arrays currently support at most two dimensions",
-            ))
-        }
+    if dims.is_empty() {
+        return Err(reshape_error(
+            "reshape: size vector must contain at least one element",
+        ));
+    }
+    let shape = if dims.len() == 1 {
+        vec![dims[0], 1]
+    } else {
+        dims.to_vec()
     };
-    CellArray::new(ca.data, rows, cols)
+    CellArray::from_column_major(ca.to_column_major(), shape)
         .map(Value::Cell)
         .map_err(|e| reshape_error(format!("reshape: {e}")))
 }

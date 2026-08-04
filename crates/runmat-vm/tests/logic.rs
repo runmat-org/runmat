@@ -1450,6 +1450,44 @@ fn complex_integer_concatenation_preserves_exact_components_through_vm_dispatch(
 }
 
 #[test]
+fn mixed_concatenation_precedence_and_nd_shapes_flow_through_vm_dispatch() {
+    let vars = execute_source(
+        "m = uint16([1 2; 3 4]); c = {'head'}; wrapped = [c m]; text = [\"id\" uint64(9223372036854775808) true]; chars = cat(3, 'ab', 'cd'); cells = cat(3, {1}, {2});",
+    )
+    .expect("mixed concatenation should execute");
+
+    assert!(matches!(
+        &vars[2],
+        Value::Cell(cell)
+            if cell.shape == vec![1, 2]
+                && cell.data[0] == Value::CharArray(runmat_builtins::CharArray::new_row("head"))
+                && cell.data[1] == vars[0]
+    ));
+    assert!(matches!(
+        &vars[3],
+        Value::StringArray(array)
+            if array.shape == vec![1, 3]
+                && array.data == vec!["id", "9223372036854775808", "1"]
+    ));
+    assert!(matches!(
+        &vars[4],
+        Value::CharArray(array)
+            if array.shape == vec![1, 2, 2]
+                && array.data.iter().collect::<String>() == "abcd"
+    ));
+    assert!(matches!(
+        &vars[5],
+        Value::Cell(cell)
+            if cell.shape == vec![1, 1, 2]
+                && cell.data == vec![Value::Num(1.0), Value::Num(2.0)]
+    ));
+
+    let error =
+        execute_source("bad = ['a' true];").expect_err("char plus logical must be rejected");
+    assert!(error.to_string().contains("char"), "{error}");
+}
+
+#[test]
 fn integer_casts_preserve_complex_storage_for_every_integer_class_through_vm_dispatch() {
     let vars = execute_source(
         "z = complex([1.5 -2.5], [0.49 -1.5]); a = int8(z); b = int16(z); c = int32(z); d = int64(z); e = uint8(z); f = uint16(z); g = uint32(z); h = uint64(z); flags = [isreal(a) isreal(b) isreal(c) isreal(d) isreal(e) isreal(f) isreal(g) isreal(h)]; q = complex(uint64([9223372036854775808 18446744073709551615]), uint64([1 2])); q64 = int64(q);",

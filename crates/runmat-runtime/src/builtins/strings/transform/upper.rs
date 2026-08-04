@@ -155,9 +155,19 @@ fn upper_string_array(array: StringArray) -> BuiltinResult<Value> {
 }
 
 fn upper_char_array(array: CharArray) -> BuiltinResult<Value> {
-    let CharArray { data, rows, cols } = array;
+    let CharArray {
+        data,
+        shape,
+        rows,
+        cols,
+    } = array;
     if rows == 0 || cols == 0 {
-        return Ok(Value::CharArray(CharArray { data, rows, cols }));
+        return Ok(Value::CharArray(CharArray {
+            data,
+            shape,
+            rows,
+            cols,
+        }));
     }
 
     let mut upper_rows = Vec::with_capacity(rows);

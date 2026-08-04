@@ -426,7 +426,7 @@ fn value_shape(value: &Value) -> Result<Vec<usize>, RuntimeError> {
         Value::ComplexTensor(tensor) => Ok(tensor.shape.clone()),
         Value::LogicalArray(array) => Ok(array.shape.clone()),
         Value::StringArray(array) => Ok(array.shape.clone()),
-        Value::CharArray(array) => Ok(vec![array.rows, array.cols]),
+        Value::CharArray(array) => Ok(array.shape.clone()),
         Value::Cell(array) => Ok(array.shape.clone()),
         Value::GpuTensor(handle) => Ok(handle.shape.clone()),
         Value::Num(_)
@@ -484,8 +484,9 @@ async fn permute_value(value: Value, order: &[usize]) -> crate::BuiltinResult<Va
         }
         Value::CharArray(array) => permute_char_array(NAME, array, order).map(Value::CharArray),
         Value::Cell(array) => {
-            let (data, shape) = permute_generic(NAME, &array.data, &array.shape, order)?;
-            CellArray::new_with_shape(data, shape)
+            let (data, shape) =
+                permute_generic(NAME, &array.to_column_major(), &array.shape, order)?;
+            CellArray::from_column_major(data, shape)
                 .map(Value::Cell)
                 .map_err(|error| shiftdim_error(&ERROR_UNSUPPORTED_INPUT, error))
         }
@@ -524,7 +525,7 @@ fn reshape_value(value: Value, shape: &[usize]) -> crate::BuiltinResult<Value> {
         Value::StringArray(array) => StringArray::new(array.data, shape.to_vec())
             .map(Value::StringArray)
             .map_err(|error| shiftdim_error(&ERROR_UNSUPPORTED_INPUT, error)),
-        Value::Cell(array) => CellArray::new_with_shape(array.data, shape.to_vec())
+        Value::Cell(array) => CellArray::from_column_major(array.to_column_major(), shape.to_vec())
             .map(Value::Cell)
             .map_err(|error| shiftdim_error(&ERROR_UNSUPPORTED_INPUT, error)),
         Value::CharArray(array) => reshape_char(array, shape).map(Value::CharArray),
@@ -554,13 +555,7 @@ fn reshape_value(value: Value, shape: &[usize]) -> crate::BuiltinResult<Value> {
 }
 
 fn reshape_char(array: CharArray, shape: &[usize]) -> crate::BuiltinResult<CharArray> {
-    if shape.len() != 2 {
-        return Err(shiftdim_error(
-            &ERROR_UNSUPPORTED_INPUT,
-            "shiftdim: char arrays currently support at most two dimensions",
-        ));
-    }
-    CharArray::new(array.data, shape[0], shape[1])
+    CharArray::from_column_major(array.to_column_major(), shape.to_vec())
         .map_err(|error| shiftdim_error(&ERROR_UNSUPPORTED_INPUT, error))
 }
 
@@ -891,15 +886,15 @@ mod tests {
             panic!("expected chars")
         };
         assert_eq!((chars.rows, chars.cols), (3, 1));
-        let error = call(
+        let Value::CharArray(chars) = call(
             Value::CharArray(CharArray::new_row("abc")),
             Some(Value::Num(-1.0)),
         )
-        .unwrap_err();
-        assert_eq!(
-            error.identifier.as_deref(),
-            Some("RunMat:shiftdim:UnsupportedInput")
-        );
+        .expect("N-D char shiftdim") else {
+            panic!("expected chars")
+        };
+        assert_eq!(chars.shape, vec![1, 1, 3]);
+        assert_eq!(chars.data.iter().collect::<String>(), "abc");
     }
 
     #[test]

@@ -70,7 +70,7 @@ fn is_scalarish_runtime_value(value: &Value) -> bool {
         Value::ComplexTensor(tensor) => is_scalar_shape(&tensor.shape),
         Value::LogicalArray(array) => is_scalar_shape(&array.shape),
         Value::GpuTensor(handle) => is_scalar_shape(&handle.shape),
-        Value::CharArray(array) => array.rows * array.cols == 1,
+        Value::CharArray(array) => array.data.len() == 1,
         _ => false,
     }
 }

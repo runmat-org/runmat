@@ -311,7 +311,7 @@ fn ensure_empty_shape(shape: &[usize]) -> BuiltinResult<()> {
 fn prototype_dims(proto: &Value) -> Vec<usize> {
     match proto {
         Value::StringArray(sa) => sa.shape.clone(),
-        Value::CharArray(ca) => vec![ca.rows, ca.cols],
+        Value::CharArray(ca) => ca.shape.clone(),
         Value::Tensor(t) => t.shape.clone(),
         Value::ComplexTensor(t) => t.shape.clone(),
         Value::LogicalArray(l) => l.shape.clone(),

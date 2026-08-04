@@ -707,18 +707,6 @@ fn build_shift_plan(
     })
 }
 
-fn normalize_shift_amount(shift: isize, len: usize) -> usize {
-    if len <= 1 {
-        return 0;
-    }
-    let len_isize = len as isize;
-    let mut normalized = shift % len_isize;
-    if normalized < 0 {
-        normalized += len_isize;
-    }
-    normalized as usize
-}
-
 fn circshift_tensor(
     tensor: Tensor,
     dims: &[usize],
@@ -848,53 +836,21 @@ fn circshift_char_array(
     dims: &[usize],
     shifts: &[isize],
 ) -> crate::BuiltinResult<Value> {
-    let mut row_shift = 0isize;
-    let mut col_shift = 0isize;
-    for (&axis, &shift) in dims.iter().zip(shifts.iter()) {
-        match axis {
-            0 => row_shift = shift,
-            1 => col_shift = shift,
-            _ => {
-                if shift != 0 {
-                    return Err(circshift_invalid_dims(
-                        "circshift: character arrays only support dimensions 1 and 2",
-                    ));
-                }
-            }
-        }
-    }
-    let CharArray { data, rows, cols } = array;
-    if data.is_empty() {
-        return CharArray::new(data, rows, cols)
+    let shape = array.shape.clone();
+    let plan = build_shift_plan(&shape, dims, shifts)?;
+    let data = array.to_column_major();
+    if data.is_empty() || plan.is_noop() {
+        return CharArray::from_column_major(data, shape)
             .map(Value::CharArray)
             .map_err(|e| circshift_internal(format!("circshift: {e}")));
     }
-    let row_shift = normalize_shift_amount(row_shift, rows);
-    let col_shift = normalize_shift_amount(col_shift, cols);
-    if row_shift == 0 && col_shift == 0 {
-        return CharArray::new(data, rows, cols)
-            .map(Value::CharArray)
-            .map_err(|e| circshift_internal(format!("circshift: {e}")));
-    }
-    let mut out = vec!['\0'; data.len()];
-    for row in 0..rows {
-        for col in 0..cols {
-            let src_row = if rows == 0 {
-                0
-            } else {
-                (row + rows - row_shift) % rows
-            };
-            let src_col = if cols == 0 {
-                0
-            } else {
-                (col + cols - col_shift) % cols
-            };
-            let dst_idx = row * cols + col;
-            let src_idx = src_row * cols + src_col;
-            out[dst_idx] = data[src_idx];
-        }
-    }
-    CharArray::new(out, rows, cols)
+    let ShiftPlan {
+        ext_shape,
+        positive,
+        ..
+    } = plan;
+    let rotated = circshift_generic(&data, &ext_shape, &positive)?;
+    CharArray::from_column_major(rotated, ext_shape)
         .map(Value::CharArray)
         .map_err(|e| circshift_internal(format!("circshift: {e}")))
 }

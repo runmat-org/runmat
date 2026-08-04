@@ -183,7 +183,7 @@ async fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Val
             Ok(permute_string_array("permute", sa, &order_vec).map(Value::StringArray)?)
         }
         Value::CharArray(ca) => {
-            validate_rank("permute", &order_vec, 2)?;
+            validate_rank("permute", &order_vec, ca.shape.len())?;
             Ok(permute_char_array("permute", ca, &order_vec).map(Value::CharArray)?)
         }
         Value::GpuTensor(handle) => {
@@ -463,56 +463,11 @@ pub(crate) fn permute_char_array(
     ca: CharArray,
     order: &[usize],
 ) -> crate::BuiltinResult<CharArray> {
-    match order.len() {
-        0 => Err(permute_error(
-            builtin,
-            format!("{builtin}: order must contain at least one dimension"),
-        )),
-        1 => {
-            if order[0] == 1 {
-                Ok(ca)
-            } else {
-                Err(permute_error(
-                    builtin,
-                    format!("{builtin}: character arrays are 2-D; invalid dimension index"),
-                ))
-            }
-        }
-        2 => {
-            if order.iter().copied().any(|idx| idx == 0 || idx > 2) {
-                return Err(permute_error(
-                    builtin,
-                    format!("{builtin}: character arrays only support dimensions 1 and 2"),
-                ));
-            }
-            if order[0] == 1 && order[1] == 2 {
-                return Ok(ca);
-            }
-            if order[0] == 2 && order[1] == 1 {
-                let shape = vec![ca.rows, ca.cols];
-                let (data, new_shape) = permute_generic(builtin, &ca.data, &shape, order)?;
-                if new_shape.len() != 2 {
-                    return Err(permute_error(
-                        builtin,
-                        format!("{builtin}: character arrays must remain 2-D"),
-                    ));
-                }
-                let rows = new_shape[0];
-                let cols = new_shape[1];
-                CharArray::new(data, rows, cols)
-                    .map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))
-            } else {
-                Err(permute_error(
-                    builtin,
-                    format!("{builtin}: character arrays require order [1 2] or [2 1]"),
-                ))
-            }
-        }
-        _ => Err(permute_error(
-            builtin,
-            format!("{builtin}: character arrays only support 2-D permutations"),
-        )),
-    }
+    let shape = ca.shape.clone();
+    let column_major = ca.to_column_major();
+    let (data, new_shape) = permute_generic(builtin, &column_major, &shape, order)?;
+    CharArray::from_column_major(data, new_shape)
+        .map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))
 }
 
 pub(crate) async fn permute_gpu(

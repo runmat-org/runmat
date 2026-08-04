@@ -80,7 +80,7 @@ pub enum Value {
     String(String),
     // String array (R2016b+): N-D array of string scalars
     StringArray(StringArray),
-    // Char array (single-quoted): 2-D character array (rows x cols)
+    // Char array (single-quoted): N-D character array with 2-D row/column caches
     CharArray(CharArray),
     Tensor(Tensor),
     /// Real sparse matrix in compressed sparse column form.
@@ -2269,7 +2269,13 @@ impl LogicalArray {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CharArray {
     pub data: Vec<char>,
+    /// Full MATLAB-visible shape vector. Character payloads retain their
+    /// historical row-major layout within each 2-D page.
+    pub shape: Vec<usize>,
+    /// Cached row count for 2-D interop; equals `shape[0]` when present.
     pub rows: usize,
+    /// Cached column count for 2-D interop; equals `shape[1]` when present,
+    /// otherwise 1 (or 0 for an empty shape).
     pub cols: usize,
 }
 
@@ -2277,20 +2283,86 @@ impl CharArray {
     pub fn new_row(s: &str) -> Self {
         CharArray {
             data: s.chars().collect(),
+            shape: vec![1, s.chars().count()],
             rows: 1,
             cols: s.chars().count(),
         }
     }
     pub fn new(data: Vec<char>, rows: usize, cols: usize) -> Result<Self, String> {
-        if rows * cols != data.len() {
+        Self::new_with_shape(data, vec![rows, cols])
+    }
+    pub fn new_with_shape(data: Vec<char>, shape: Vec<usize>) -> Result<Self, String> {
+        let expected = total_len(&shape)
+            .ok_or_else(|| "Char data shape exceeds platform limits".to_string())?;
+        if expected != data.len() {
             return Err(format!(
-                "Char data length {} doesn't match dimensions {}x{}",
+                "Char data length {} doesn't match shape {:?} ({} elements)",
                 data.len(),
-                rows,
-                cols
+                shape,
+                expected
             ));
         }
-        Ok(CharArray { data, rows, cols })
+        let (rows, cols) = shape_rows_cols(&shape);
+        Ok(CharArray {
+            data,
+            shape,
+            rows,
+            cols,
+        })
+    }
+    pub fn from_column_major(data: Vec<char>, shape: Vec<usize>) -> Result<Self, String> {
+        let normalized = match shape.as_slice() {
+            [] => vec![0, 0],
+            [length] => vec![1, *length],
+            _ => shape,
+        };
+        let expected = total_len(&normalized)
+            .ok_or_else(|| "Char data shape exceeds platform limits".to_string())?;
+        if expected != data.len() {
+            return Err(format!(
+                "Char data length {} doesn't match shape {:?} ({} elements)",
+                data.len(),
+                normalized,
+                expected
+            ));
+        }
+        let rows = normalized[0];
+        let cols = normalized[1];
+        let pages = total_len(&normalized[2..])
+            .ok_or_else(|| "Char page shape exceeds platform limits".to_string())?;
+        let pages = if normalized.len() <= 2 { 1 } else { pages };
+        let mut row_major = Vec::with_capacity(data.len());
+        for page in 0..pages {
+            let page_offset = page * rows * cols;
+            for row in 0..rows {
+                for col in 0..cols {
+                    row_major.push(data[page_offset + row + col * rows]);
+                }
+            }
+        }
+        Self::new_with_shape(row_major, normalized)
+    }
+    pub fn to_column_major(&self) -> Vec<char> {
+        let rows = self.rows;
+        let cols = self.cols;
+        let pages = if self.shape.len() <= 2 {
+            1
+        } else {
+            self.shape[2..].iter().product()
+        };
+        let mut column_major = Vec::with_capacity(self.data.len());
+        for page in 0..pages {
+            let page_offset = page * rows * cols;
+            for col in 0..cols {
+                for row in 0..rows {
+                    column_major.push(self.data[page_offset + row * cols + col]);
+                }
+            }
+        }
+        column_major
+    }
+    pub fn shape(&self) -> &[usize] {
+        &self.shape
     }
 }
 
@@ -4006,6 +4078,10 @@ impl fmt::Display for LogicalArray {
 
 impl fmt::Display for CharArray {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.shape.len() > 2 {
+            let dims: Vec<String> = self.shape.iter().map(|d| d.to_string()).collect();
+            return write!(f, "{} char array", dims.join("x"));
+        }
         for r in 0..self.rows {
             writeln!(f)?;
             write!(f, "  ")?; // Indent
@@ -4141,7 +4217,7 @@ impl TryFrom<&Value> for String {
             }
             Value::CharArray(ca) => {
                 // Convert full char array to one string if it is a single row; else error
-                if ca.rows == 1 {
+                if ca.shape.len() <= 2 && ca.rows == 1 {
                     Ok(ca.data.iter().collect())
                 } else {
                     Err("cannot convert multi-row char array to scalar string".to_string())
@@ -4441,7 +4517,7 @@ impl Type {
                 // Treat as cell of char for type purposes; or a 2-D char matrix conceptually
                 Type::Cell {
                     element_type: Some(Box::new(Type::String)),
-                    length: Some(ca.rows * ca.cols),
+                    length: Some(ca.data.len()),
                 }
             }
             Value::OutputList(values) => {
@@ -5562,7 +5638,8 @@ mod display_tests {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CellArray {
     pub data: Vec<Value>,
-    /// Full MATLAB-visible shape vector (column-major semantics).
+    /// Full MATLAB-visible shape vector. Cell payloads retain their historical
+    /// row-major layout within each 2-D page.
     pub shape: Vec<usize>,
     /// Cached row count for 2-D interop; equals `shape[0]` when present.
     pub rows: usize,
@@ -5593,6 +5670,60 @@ impl CellArray {
             rows,
             cols,
         })
+    }
+
+    pub fn from_column_major(data: Vec<Value>, shape: Vec<usize>) -> Result<Self, String> {
+        let normalized = match shape.as_slice() {
+            [] => vec![0, 0],
+            [length] => vec![1, *length],
+            _ => shape,
+        };
+        let expected = total_len(&normalized)
+            .ok_or_else(|| "Cell data shape exceeds platform limits".to_string())?;
+        if expected != data.len() {
+            return Err(format!(
+                "Cell data length {} doesn't match shape {:?} ({} elements)",
+                data.len(),
+                normalized,
+                expected
+            ));
+        }
+        let rows = normalized[0];
+        let cols = normalized[1];
+        let pages = if normalized.len() <= 2 {
+            1
+        } else {
+            total_len(&normalized[2..])
+                .ok_or_else(|| "Cell page shape exceeds platform limits".to_string())?
+        };
+        let mut row_major = Vec::with_capacity(data.len());
+        for page in 0..pages {
+            let page_offset = page * rows * cols;
+            for row in 0..rows {
+                for col in 0..cols {
+                    row_major.push(data[page_offset + row + col * rows].clone());
+                }
+            }
+        }
+        Self::new_with_shape(row_major, normalized)
+    }
+
+    pub fn to_column_major(&self) -> Vec<Value> {
+        let pages = if self.shape.len() <= 2 {
+            1
+        } else {
+            self.shape[2..].iter().product()
+        };
+        let mut column_major = Vec::with_capacity(self.data.len());
+        for page in 0..pages {
+            let page_offset = page * self.rows * self.cols;
+            for col in 0..self.cols {
+                for row in 0..self.rows {
+                    column_major.push(self.data[page_offset + row * self.cols + col].clone());
+                }
+            }
+        }
+        column_major
     }
 
     pub fn get(&self, row: usize, col: usize) -> Result<Value, String> {

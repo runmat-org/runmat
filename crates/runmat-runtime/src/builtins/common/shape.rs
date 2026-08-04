@@ -45,7 +45,7 @@ pub async fn value_dimensions(value: &Value) -> Result<Vec<usize>, RuntimeError>
         Value::ComplexTensor(t) => normalize_shape(&t.shape),
         Value::LogicalArray(la) => normalize_shape(&la.shape),
         Value::StringArray(sa) => normalize_shape(&sa.shape),
-        Value::CharArray(ca) => vec![ca.rows, ca.cols],
+        Value::CharArray(ca) => ca.shape.clone(),
         Value::Cell(ca) => normalize_shape(&ca.shape),
         Value::GpuTensor(handle) => {
             if handle.shape.is_empty() {
@@ -68,7 +68,7 @@ pub async fn value_numel(value: &Value) -> Result<usize, RuntimeError> {
         Value::ComplexTensor(t) => tensor_utils::complex_tensor_element_len(t),
         Value::LogicalArray(la) => la.data.len(),
         Value::StringArray(sa) => sa.data.len(),
-        Value::CharArray(ca) => ca.rows * ca.cols,
+        Value::CharArray(ca) => ca.data.len(),
         Value::Cell(ca) => ca.data.len(),
         Value::GpuTensor(handle) => {
             if handle.shape.is_empty() {

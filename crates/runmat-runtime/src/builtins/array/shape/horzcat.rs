@@ -123,13 +123,21 @@ fn concat_shape(shapes: &[Vec<Option<usize>>], dim_1based: usize) -> Option<Vec<
     if shapes.is_empty() || dim_1based == 0 {
         return None;
     }
-    let rank = shapes
+    let mut active = shapes.to_vec();
+    let has_known_nonempty = active.iter().any(|shape| {
+        shape.iter().all(Option::is_some)
+            && shape.iter().all(|dimension| dimension.unwrap_or(0) > 0)
+    });
+    if has_known_nonempty {
+        active.retain(|shape| !shape.iter().any(|dimension| matches!(dimension, Some(0))));
+    }
+    let rank = active
         .iter()
         .map(|shape| shape.len())
         .max()?
         .max(dim_1based);
-    let mut padded = Vec::with_capacity(shapes.len());
-    for shape in shapes {
+    let mut padded = Vec::with_capacity(active.len());
+    for shape in &active {
         let mut current = shape.clone();
         while current.len() < rank {
             current.push(Some(1));
@@ -204,16 +212,16 @@ fn concat_type_with_dim(args: &[Type], dim_1based: usize) -> Type {
         return args[0].clone();
     }
 
-    let all_cells = args.iter().all(|arg| matches!(arg, Type::Cell { .. }));
-    if all_cells {
+    let has_cell = args.iter().any(|arg| matches!(arg, Type::Cell { .. }));
+    if has_cell {
         return Type::Cell {
             element_type: cell_element_type(args),
             length: None,
         };
     }
 
-    let all_strings = args.iter().all(|arg| matches!(arg, Type::String));
-    if all_strings {
+    let has_string = args.iter().any(|arg| matches!(arg, Type::String));
+    if has_string {
         return Type::cell_of(Type::String);
     }
 

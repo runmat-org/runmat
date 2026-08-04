@@ -155,9 +155,19 @@ fn strtrim_string_array(array: StringArray) -> BuiltinResult<Value> {
 }
 
 fn strtrim_char_array(array: CharArray) -> BuiltinResult<Value> {
-    let CharArray { data, rows, cols } = array;
+    let CharArray {
+        data,
+        shape,
+        rows,
+        cols,
+    } = array;
     if rows == 0 {
-        return Ok(Value::CharArray(CharArray { data, rows, cols }));
+        return Ok(Value::CharArray(CharArray {
+            data,
+            shape,
+            rows,
+            cols,
+        }));
     }
 
     let mut trimmed_rows: Vec<Vec<char>> = Vec::with_capacity(rows);

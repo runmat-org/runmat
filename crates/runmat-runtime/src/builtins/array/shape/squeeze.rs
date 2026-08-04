@@ -10,7 +10,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+    CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -147,8 +147,10 @@ async fn squeeze_value(value: Value) -> crate::BuiltinResult<Value> {
         Value::ComplexTensor(ct) => squeeze_complex_tensor(ct).map(Value::ComplexTensor),
         Value::LogicalArray(logical) => squeeze_logical_array(logical).map(Value::LogicalArray),
         Value::StringArray(strings) => squeeze_string_array(strings).map(Value::StringArray),
+        Value::CharArray(chars) => squeeze_char_array(chars).map(Value::CharArray),
+        Value::Cell(cell) => squeeze_cell_array(cell).map(Value::Cell),
         Value::GpuTensor(handle) => squeeze_gpu(handle).await,
-        Value::String(_) | Value::CharArray(_) | Value::Cell(_) | Value::Struct(_) => Ok(value),
+        Value::String(_) | Value::Struct(_) => Ok(value),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Ok(value),
         other => Err(squeeze_error(format!(
             "squeeze: unsupported input type {}; expected numeric, logical, string, char, cell, or gpu array",
@@ -221,6 +223,26 @@ fn squeeze_string_array(strings: StringArray) -> crate::BuiltinResult<StringArra
         return Ok(strings);
     }
     StringArray::new(strings.data, shape).map_err(|e| squeeze_error(format!("squeeze: {e}")))
+}
+
+fn squeeze_char_array(chars: CharArray) -> crate::BuiltinResult<CharArray> {
+    let shape = squeeze_shape(&chars.shape);
+    if shape == chars.shape {
+        return Ok(chars);
+    }
+    CharArray::from_column_major(chars.to_column_major(), shape)
+        .map_err(|e| squeeze_error(format!("squeeze: {e}")))
+}
+
+fn squeeze_cell_array(
+    cell: runmat_builtins::CellArray,
+) -> crate::BuiltinResult<runmat_builtins::CellArray> {
+    let shape = squeeze_shape(&cell.shape);
+    if shape == cell.shape {
+        return Ok(cell);
+    }
+    runmat_builtins::CellArray::from_column_major(cell.to_column_major(), shape)
+        .map_err(|e| squeeze_error(format!("squeeze: {e}")))
 }
 
 async fn squeeze_gpu(handle: GpuTensorHandle) -> crate::BuiltinResult<Value> {

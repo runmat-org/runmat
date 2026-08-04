@@ -285,14 +285,14 @@ fn complex_tensor_to_logical_buffer(tensor: ComplexTensor) -> BuiltinResult<Logi
 }
 
 fn char_array_to_logical_buffer(array: CharArray) -> BuiltinResult<LogicalBuffer> {
-    let CharArray { data, rows, cols } = array;
+    let CharArray { data, shape, .. } = array;
     let mapped = data
         .into_iter()
         .map(|ch| if ch == '\0' { 0 } else { 1 })
         .collect();
     Ok(LogicalBuffer {
         data: mapped,
-        shape: vec![rows, cols],
+        shape,
     })
 }
 

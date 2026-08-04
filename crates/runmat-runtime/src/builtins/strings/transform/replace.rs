@@ -236,9 +236,19 @@ fn replace_string_array(array: StringArray, spec: &ReplacementSpec) -> BuiltinRe
 }
 
 fn replace_char_array(array: CharArray, spec: &ReplacementSpec) -> BuiltinResult<Value> {
-    let CharArray { data, rows, cols } = array;
+    let CharArray {
+        data,
+        shape,
+        rows,
+        cols,
+    } = array;
     if rows == 0 {
-        return Ok(Value::CharArray(CharArray { data, rows, cols }));
+        return Ok(Value::CharArray(CharArray {
+            data,
+            shape,
+            rows,
+            cols,
+        }));
     }
 
     let mut replaced_rows = Vec::with_capacity(rows);
@@ -322,7 +332,9 @@ fn extract_text_list(
         Value::String(text) => Ok(vec![text.clone()]),
         Value::StringArray(array) => Ok(array.data.clone()),
         Value::CharArray(array) => {
-            let CharArray { data, rows, cols } = array.clone();
+            let CharArray {
+                data, rows, cols, ..
+            } = array.clone();
             if rows == 0 {
                 Ok(Vec::new())
             } else {

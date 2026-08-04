@@ -194,7 +194,7 @@ async fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Va
                 .map(Value::StringArray)?)
         }
         Value::CharArray(ca) => {
-            validate_rank("ipermute", &order_vec, 2)?;
+            validate_rank("ipermute", &order_vec, ca.shape.len())?;
             Ok(permute_char_array("ipermute", ca, &inverse)
                 .map(Value::CharArray)?)
         }

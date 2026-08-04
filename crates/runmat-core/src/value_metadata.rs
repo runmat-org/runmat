@@ -58,7 +58,7 @@ pub fn value_shape(value: &Value) -> Option<Vec<usize>> {
         Value::LogicalArray(arr) => Some(arr.shape.clone()),
         Value::StringArray(sa) => Some(sa.shape.clone()),
         Value::String(s) => Some(vec![1, s.chars().count()]),
-        Value::CharArray(ca) => Some(vec![ca.rows, ca.cols]),
+        Value::CharArray(ca) => Some(ca.shape.clone()),
         Value::Tensor(t) => Some(t.shape.clone()),
         Value::SparseTensor(s) => Some(vec![s.rows, s.cols]),
         Value::ComplexTensor(t) => Some(t.shape.clone()),
@@ -97,7 +97,7 @@ pub fn approximate_size_bytes(value: &Value) -> Option<u64> {
             .saturating_mul(2),
         Value::String(s) => s.len() as u64,
         Value::StringArray(sa) => sa.data.iter().map(|s| s.len() as u64).sum(),
-        Value::CharArray(ca) => (ca.rows * ca.cols) as u64,
+        Value::CharArray(ca) => ca.data.len() as u64,
         _ => return None,
     })
 }

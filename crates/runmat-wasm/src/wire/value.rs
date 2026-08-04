@@ -78,7 +78,7 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
                 "kind": "char-array",
                 "rows": ca.rows,
                 "cols": ca.cols,
-                "shape": vec![ca.rows, ca.cols],
+                "shape": ca.shape.clone(),
                 "text": s,
             })
         }

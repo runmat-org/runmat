@@ -47,8 +47,8 @@ pub(crate) fn shape_from_value(value: &Value, label: &str) -> Result<Vec<usize>,
         Value::ComplexTensor(t) => Ok(t.shape.clone()),
         Value::LogicalArray(l) => Ok(l.shape.clone()),
         Value::GpuTensor(h) => Ok(h.shape.clone()),
-        Value::CharArray(ca) => Ok(vec![ca.rows, ca.cols]),
-        Value::Cell(cell) => Ok(vec![cell.rows, cell.cols]),
+        Value::CharArray(ca) => Ok(ca.shape.clone()),
+        Value::Cell(cell) => Ok(cell.shape.clone()),
         Value::Num(_)
         | Value::Int(_)
         | Value::Bool(_)

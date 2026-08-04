@@ -404,8 +404,8 @@ fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {
         Value::ComplexTensor(t) => Ok(t.shape.clone()),
         Value::LogicalArray(l) => Ok(l.shape.clone()),
         Value::GpuTensor(h) => Ok(normalize_scalar_shape(&h.shape)),
-        Value::CharArray(ca) => Ok(vec![ca.rows, ca.cols]),
-        Value::Cell(cell) => Ok(vec![cell.rows, cell.cols]),
+        Value::CharArray(ca) => Ok(ca.shape.clone()),
+        Value::Cell(cell) => Ok(cell.shape.clone()),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Ok(vec![1, 1]),
         other => Err(format!("unsupported prototype {other:?}")),
     }

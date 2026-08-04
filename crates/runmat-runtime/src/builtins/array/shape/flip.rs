@@ -218,7 +218,7 @@ async fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
             Ok(flip_string_array(strings, &dims).map(Value::StringArray)?)
         }
         Value::CharArray(chars) => {
-            let dims = resolve_dims(&spec, &[chars.rows, chars.cols]);
+            let dims = resolve_dims(&spec, &chars.shape);
             Ok(flip_char_array(chars, &dims).map(Value::CharArray)?)
         }
         Value::String(scalar) => Ok(Value::String(scalar)),
@@ -591,37 +591,10 @@ pub(crate) fn flip_char_array_with(
     if array.data.is_empty() || dims.is_empty() {
         return Ok(array);
     }
-    let rows = array.rows;
-    let cols = array.cols;
-    let mut flip_rows = false;
-    let mut flip_cols = false;
-    for &dim in dims {
-        if dim == 0 {
-            return Err(flip_error_for(
-                builtin,
-                format!("{builtin}: dimension must be >= 1"),
-            ));
-        }
-        match dim {
-            1 => flip_rows = !flip_rows,
-            2 => flip_cols = !flip_cols,
-            _ => {}
-        }
-    }
-    if !flip_rows && !flip_cols {
-        return Ok(array);
-    }
-    let mut out = vec!['\0'; array.data.len()];
-    for row in 0..rows {
-        for col in 0..cols {
-            let dest_idx = row * cols + col;
-            let src_row = if flip_rows { rows - 1 - row } else { row };
-            let src_col = if flip_cols { cols - 1 - col } else { col };
-            let src_idx = src_row * cols + src_col;
-            out[dest_idx] = array.data[src_idx];
-        }
-    }
-    CharArray::new(out, rows, cols).map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))
+    let shape = array.shape.clone();
+    let data = flip_generic(&array.to_column_major(), &shape, dims, builtin)?;
+    CharArray::from_column_major(data, shape)
+        .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))
 }
 
 pub(crate) async fn flip_gpu(

@@ -9,8 +9,8 @@ use regex::Regex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
-    NumericStorage, SparseTensor, StringArray, StructValue, Tensor, Value,
+    CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
+    LogicalArray, NumericStorage, SparseTensor, StringArray, StructValue, Tensor, Value,
 };
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
@@ -25,7 +25,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::introspection::object_serialization::restore_value_from_mat_load;
-use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const LOAD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "S",
@@ -1327,15 +1327,13 @@ fn mat_array_to_value(array: MatArray) -> BuiltinResult<Value> {
             }
         }
         MatData::Char { data } => {
-            let rows = array.dims.first().copied().unwrap_or(1);
-            let cols = array.dims.get(1).copied().unwrap_or(1);
-            let mut chars = Vec::with_capacity(rows.saturating_mul(cols));
+            let mut chars = Vec::with_capacity(data.len());
             for code in data {
                 let ch = char::from_u32(code as u32).unwrap_or('\u{FFFD}');
                 chars.push(ch);
             }
-            let char_array =
-                CharArray::new(chars, rows, cols).map_err(|e| load_error(format!("load: {e}")))?;
+            let char_array = CharArray::from_column_major(chars, array.dims.clone())
+                .map_err(|e| load_error(format!("load: {e}")))?;
             Ok(Value::CharArray(char_array))
         }
         MatData::Cell { elements } => {
@@ -1344,14 +1342,11 @@ fn mat_array_to_value(array: MatArray) -> BuiltinResult<Value> {
                     .map_err(|e| load_error(format!("load: {e}")))?;
                 return Ok(Value::StringArray(string_array));
             }
-            if array.dims.len() != 2 {
-                return Err(load_error(
-                    "load: cell arrays with more than two dimensions are not supported yet",
-                ));
-            }
-            let rows = array.dims[0];
-            let cols = array.dims[1];
-            let expected = rows.saturating_mul(cols);
+            let expected = array
+                .dims
+                .iter()
+                .try_fold(1usize, |product, &dim| product.checked_mul(dim))
+                .ok_or_else(|| load_error("load: cell array shape exceeds platform limits"))?;
             if elements.len() != expected {
                 return Err(load_error("load: cell array element count mismatch"));
             }
@@ -1359,15 +1354,9 @@ fn mat_array_to_value(array: MatArray) -> BuiltinResult<Value> {
             for elem in elements {
                 converted.push(mat_array_to_value(elem)?);
             }
-            let mut row_major = vec![Value::Num(0.0); expected];
-            for col in 0..cols {
-                for row in 0..rows {
-                    let cm_idx = col * rows + row;
-                    let rm_idx = row * cols + col;
-                    row_major[rm_idx] = converted[cm_idx].clone();
-                }
-            }
-            make_cell(row_major, rows, cols).map_err(|err| load_error(format!("load: {err}")))
+            CellArray::from_column_major(converted, array.dims.clone())
+                .map(Value::Cell)
+                .map_err(|err| load_error(format!("load: {err}")))
         }
         MatData::Struct {
             field_names,
@@ -1857,6 +1846,37 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn load_save_nd_char_and_cell_roundtrip_preserves_shape_and_order() {
+        let _guard = workspace_guard();
+        ensure_test_resolver();
+        let chars =
+            CharArray::new_with_shape("abcd".chars().collect(), vec![1, 2, 2]).expect("chars");
+        let cells =
+            CellArray::new_with_shape(vec![Value::Num(1.0), Value::Num(2.0)], vec![1, 1, 2])
+                .expect("cells");
+        set_workspace(&[
+            ("chars", Value::CharArray(chars.clone())),
+            ("cells", Value::Cell(cells.clone())),
+        ]);
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("nd_char_cell.mat");
+        let save_arg = Value::from(path.to_string_lossy().to_string());
+        block_on(crate::call_builtin_async(
+            "save",
+            std::slice::from_ref(&save_arg),
+        ))
+        .expect("save nd values");
+
+        let eval = block_on(evaluate(&[Value::from(path.to_string_lossy().to_string())]))
+            .expect("load nd values");
+        let Value::Struct(output) = eval.first_output() else {
+            panic!("expected struct");
+        };
+        assert_eq!(output.fields.get("chars"), Some(&Value::CharArray(chars)));
+        assert_eq!(output.fields.get("cells"), Some(&Value::Cell(cells)));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_compressed_level5_payload() {
@@ -2062,7 +2082,7 @@ pub(crate) mod tests {
                 .expect("unsigned tensor");
         let signed = Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![2, 1])
             .expect("signed tensor");
-        let cell = make_cell(
+        let cell = crate::make_cell(
             vec![
                 Value::Tensor(unsigned.clone()),
                 Value::Tensor(signed.clone()),

@@ -641,7 +641,9 @@ impl TextMatrix {
     }
 
     fn from_char_array(array: CharArray) -> BuiltinResult<Self> {
-        let CharArray { data, rows, cols } = array;
+        let CharArray {
+            data, rows, cols, ..
+        } = array;
         if rows == 0 {
             return Ok(Self {
                 data: Vec::new(),

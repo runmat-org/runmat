@@ -842,7 +842,7 @@ fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray
             }
             Value::CharArray(ca) => Ok(MatArray {
                 class: MatClass::Char,
-                dims: vec![ca.rows, ca.cols],
+                dims: ca.shape.clone(),
                 data: MatData::Char {
                     data: char_array_to_utf16(&ca),
                 },
@@ -876,17 +876,13 @@ fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray
             }
             Value::Cell(cell) => {
                 let mut elements = Vec::with_capacity(cell.data.len());
-                for col in 0..cell.cols {
-                    for row in 0..cell.rows {
-                        let idx = row * cell.cols + col;
-                        let element = &cell.data[idx];
-                        let gathered = gather_if_needed_async(element).await?;
-                        elements.push(convert_value(gathered).await?);
-                    }
+                for element in cell.to_column_major() {
+                    let gathered = gather_if_needed_async(&element).await?;
+                    elements.push(convert_value(gathered).await?);
                 }
                 Ok(MatArray {
                     class: MatClass::Cell,
-                    dims: vec![cell.rows, cell.cols],
+                    dims: canonical_dims(&cell.shape),
                     data: MatData::Cell { elements },
                 })
             }
@@ -926,14 +922,10 @@ fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray
 }
 
 fn char_array_to_utf16(ca: &CharArray) -> Vec<u16> {
-    let mut data = Vec::with_capacity(ca.rows * ca.cols);
-    for col in 0..ca.cols {
-        for row in 0..ca.rows {
-            let idx = row * ca.cols + col;
-            data.push(ca.data[idx] as u16);
-        }
-    }
-    data
+    ca.to_column_major()
+        .into_iter()
+        .map(|value| value as u16)
+        .collect()
 }
 
 fn int_value_mat_class(value: &IntValue) -> MatClass {
