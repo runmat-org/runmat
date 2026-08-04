@@ -18,6 +18,10 @@ pub use dot::dot_host_real_for_provider;
 pub use mldivide::mldivide_host_real_for_provider;
 pub use mrdivide::mrdivide_host_real_for_provider;
 
+pub(super) fn is_vector_or_matrix_shape(shape: &[usize]) -> bool {
+    shape.iter().skip(2).all(|&extent| extent == 1)
+}
+
 pub(super) fn transpose_real_sparse_tensor(
     sparse: runmat_builtins::SparseTensor,
 ) -> Result<runmat_builtins::SparseTensor, String> {

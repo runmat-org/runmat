@@ -1209,11 +1209,11 @@ fn complex_integer_shape_transforms_preserve_exact_components_through_vm_dispatc
 }
 
 #[test]
-fn complex_integer_transpose_and_ctranspose_preserve_exact_components_through_vm_dispatch() {
+fn complex_integer_nonconjugate_transpose_preserves_exact_components_through_vm_dispatch() {
     let vars = execute_source(
-        "a = complex(int8([1 -128; 3 4]), int8([-128 2; 3 4])); t = a.'; c = a'; z = complex(uint64([9223372036854775808 18446744073709551615]), uint64([0 0])); zc = z'; nd = reshape(a, 2, 2, 1); ndc = nd';",
+        "a = complex(int8([1 -128; 3 4]), int8([-128 2; 3 4])); t = a.'; z = complex(uint64([9223372036854775808 18446744073709551615]), uint64([0 0])); zt = z.';",
     )
-    .expect("typed complex integer transpose operations should execute");
+    .expect("typed complex integer nonconjugate transpose should execute");
 
     assert!(matches!(
         &vars[1],
@@ -1225,33 +1225,56 @@ fn complex_integer_transpose_and_ctranspose_preserve_exact_components_through_vm
                 ))
     ));
     assert!(matches!(
-        &vars[2],
-        Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
-                == Some((
-                    &IntegerStorage::I8(vec![1, -128, 3, 4]),
-                    &IntegerStorage::I8(vec![127, -2, -3, -4]),
-                ))
-    ));
-    assert!(matches!(
-        &vars[4],
+        &vars[3],
         Value::ComplexTensor(tensor)
             if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
                 == Some((
                     &IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX]),
                     &IntegerStorage::U64(vec![0, 0]),
-                ))
+            ))
     ));
-    assert!(matches!(
-        &vars[6],
-        Value::ComplexTensor(tensor)
-            if tensor.shape == vec![2, 2, 1]
-                && tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
-                    == Some((
-                        &IntegerStorage::I8(vec![1, -128, 3, 4]),
-                        &IntegerStorage::I8(vec![127, -2, -3, -4]),
-                    ))
-    ));
+}
+
+#[test]
+fn complex_integer_ctranspose_is_rejected_through_vm_dispatch() {
+    for source in [
+        "z = complex(int8([1 2]), int8([3 4])); out = z';",
+        "z = complex(uint64([9223372036854775808 18446744073709551615]), uint64([0 1])); out = ctranspose(z);",
+    ] {
+        let error =
+            execute_source(source).expect_err("complex integer ctranspose must be rejected");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:ctranspose:InvalidInput"),
+            "{source}: unexpected error: {error}"
+        );
+        assert!(error.to_string().contains("complex integer"), "{source}");
+    }
+}
+
+#[test]
+fn transpose_operators_reject_nd_arrays_but_accept_trailing_singletons() {
+    for source in [
+        "x = reshape(int8(1:8), 2, 2, 2); out = x.';",
+        "x = reshape(int8(1:8), 2, 2, 2); out = x';",
+    ] {
+        let error = execute_source(source).expect_err("N-D transpose must be rejected");
+        assert!(
+            error.to_string().contains("use permute"),
+            "{source}: {error}"
+        );
+    }
+
+    let vars = execute_source("x = reshape(int8([1 2; 3 4]), 2, 2, 1); t = x.'; c = x';")
+        .expect("explicit trailing singleton dimensions remain a matrix");
+    for value in [&vars[1], &vars[2]] {
+        assert!(matches!(
+            value,
+            Value::Tensor(tensor)
+                if tensor.shape == vec![2, 2, 1]
+                    && tensor.integer_storage() == Some(&IntegerStorage::I8(vec![1, 2, 3, 4]))
+        ));
+    }
 }
 
 #[test]

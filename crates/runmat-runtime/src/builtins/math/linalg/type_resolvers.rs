@@ -75,6 +75,20 @@ pub fn matrix_unary_type(args: &[Type], ctx: &ResolveContext) -> Type {
     }
 }
 
+pub fn matrix_transpose_type(args: &[Type], context: &ResolveContext) -> Type {
+    match args.first() {
+        Some(Type::Tensor { shape: Some(shape) }) | Some(Type::Logical { shape: Some(shape) })
+            if shape
+                .iter()
+                .skip(2)
+                .any(|extent| !matches!(extent, Some(1))) =>
+        {
+            Type::Unknown
+        }
+        _ => transpose_type(args, context),
+    }
+}
+
 pub fn transpose_type(args: &[Type], _context: &ResolveContext) -> Type {
     let Some(input) = args.first() else {
         return Type::Unknown;
