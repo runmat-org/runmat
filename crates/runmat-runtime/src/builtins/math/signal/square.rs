@@ -10,9 +10,9 @@ use std::f64::consts::PI;
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericStorage, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor, NumericDType, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -23,6 +23,25 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "square";
 const TWO_PI: f64 = 2.0 * PI;
+
+const SQUARE_NONFLOATING_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "square-nonfloating-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "square with an integer or logical argument is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SquareNonfloatingInputExtension"),
+};
+
+const SQUARE_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "square-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "interactive square gpuArray input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SquareGpuInputExtension"),
+};
+
+pub const SQUARE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    SQUARE_NONFLOATING_INPUT_EXTENSION,
+    SQUARE_GPU_INPUT_EXTENSION,
+];
 
 const SQUARE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -191,9 +210,29 @@ fn square_scalar(t: f64, duty: f64) -> f64 {
     keywords = "square,waveform,signal processing,duty cycle,periodic",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::signal::square::SQUARE_DESCRIPTOR),
+    extensions(crate::builtins::math::signal::square::SQUARE_EXTENSIONS),
     builtin_path = "crate::builtins::math::signal::square"
 )]
 async fn square_builtin(t: Value, varargin: Vec<Value>) -> BuiltinResult<Value> {
+    if matches!(&t, Value::GpuTensor(_))
+        || varargin
+            .iter()
+            .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SQUARE_GPU_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if varargin.len() <= 1
+        && (is_supported_nonfloating_argument(&t)
+            || varargin.iter().any(is_supported_nonfloating_argument))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SQUARE_NONFLOATING_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let duty = parse_duty(&varargin).await?;
     match t {
         Value::GpuTensor(handle) => square_gpu(handle, duty).await,
@@ -204,6 +243,21 @@ async fn square_builtin(t: Value, varargin: Vec<Value>) -> BuiltinResult<Value> 
             Err(square_error(&SQUARE_ERROR_INVALID_INPUT))
         }
         other => square_real(other, duty),
+    }
+}
+
+fn is_supported_nonfloating_argument(value: &Value) -> bool {
+    match value {
+        Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_) => true,
+        Value::Tensor(tensor) => !matches!(
+            tensor.numeric_dtype(),
+            NumericDType::F64 | NumericDType::F32
+        ),
+        Value::GpuTensor(handle) => {
+            runmat_accelerate_api::handle_is_logical(handle)
+                || runmat_accelerate_api::handle_integer_type(handle).is_some()
+        }
+        _ => false,
     }
 }
 
@@ -438,6 +492,7 @@ mod tests {
 
     #[test]
     fn square_int_and_logical_promote_to_double() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         assert_eq!(expect_num(call(Value::Int(IntValue::I32(0))).unwrap()), 1.0);
         assert_eq!(expect_num(call(Value::Bool(true)).unwrap()), 1.0);
 
@@ -445,6 +500,36 @@ mod tests {
         let result = expect_tensor(call(Value::LogicalArray(logical)).unwrap());
         assert_eq!(result.shape, vec![1, 2]);
         assert_eq!(result.materialize_f64(), vec![1.0, 1.0]);
+    }
+
+    #[test]
+    fn square_extensions_follow_compatibility_mode() {
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error =
+                call(Value::Int(IntValue::I16(0))).expect_err("MATLAB mode rejects integer input");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:SquareNonfloatingInputExtension")
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            assert!(call(Value::Int(IntValue::I16(0))).is_ok());
+        }
+
+        let handle = GpuTensorHandle {
+            shape: vec![1, 2],
+            device_id: 0,
+            buffer_id: 9_300_004,
+        };
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = call(Value::GpuTensor(handle))
+            .expect_err("MATLAB mode rejects interactive gpuArray input before gather");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:SquareGpuInputExtension")
+        );
     }
 
     #[test]

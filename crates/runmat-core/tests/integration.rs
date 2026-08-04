@@ -535,6 +535,47 @@ fn test_linalg_coefficient_extensions_follow_session_compatibility_mode() {
 }
 
 #[test]
+fn test_waveform_dtype_extensions_follow_session_compatibility_mode() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+
+        for (source, identifier) in [
+            (
+                "out = sawtooth(single([0 1]));",
+                "RunMat:compatibility:SawtoothNondoubleInputExtension",
+            ),
+            (
+                "out = square(int16([0 4]));",
+                "RunMat:compatibility:SquareNonfloatingInputExtension",
+            ),
+            (
+                "out = sinc(int16([0 1]));",
+                "RunMat:compatibility:SincNonfloatingInputExtension",
+            ),
+        ] {
+            let outcome = runmat_core::execute_text_request_for_testing(&mut engine, source)
+                .expect("runtime failure should be returned in the execution outcome");
+            assert_eq!(
+                outcome.error.as_ref().and_then(|error| error.identifier()),
+                Some(identifier)
+            );
+        }
+
+        engine.set_compat_mode(CompatMode::RunMat);
+        for source in [
+            "out = sawtooth(single([0 1]));",
+            "out = square(int16([0 4]));",
+            "out = sinc(int16([0 1]));",
+        ] {
+            let outcome = runmat_core::execute_text_request_for_testing(&mut engine, source)
+                .expect("RunMat mode accepts waveform dtype extension");
+            assert!(outcome.error.is_none(), "{:?}", outcome.error);
+        }
+    });
+}
+
+#[test]
 fn test_sparse_integer_outputs_follow_session_compatibility_mode() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();

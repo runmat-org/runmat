@@ -36,7 +36,7 @@
     "Preserves the input shape for vector, matrix, and N-D tensor inputs.",
     "Returns `1` for exactly zero real inputs.",
     "Returns exact `0` for finite nonzero integer-valued real inputs, matching MATLAB's `sinpi`-style integer accuracy where practical.",
-    "Logical and integer inputs are promoted to double precision before evaluation.",
+    "MATLAB-compatible calls use single or double real or complex inputs. In `runmat` compatibility mode, supported integer and logical inputs are accepted as a RunMat extension and promoted to double precision before evaluation.",
     "Complex inputs use the analytic extension `sin(pi*z)/(pi*z)` and return `1 + 0i` for `z == 0`.",
     "GPU inputs stay resident when the active provider supports `unary_sinc`; otherwise RunMat gathers automatically and evaluates with the host implementation."
   ],

@@ -11,9 +11,9 @@ use std::f64::consts::PI;
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -24,6 +24,25 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "sawtooth";
 const TWO_PI: f64 = 2.0 * PI;
+
+const SAWTOOTH_NONDOUBLE_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "sawtooth-nondouble-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "sawtooth with a non-double numeric argument is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SawtoothNondoubleInputExtension"),
+};
+
+const SAWTOOTH_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "sawtooth-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "interactive sawtooth gpuArray input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SawtoothGpuInputExtension"),
+};
+
+pub const SAWTOOTH_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    SAWTOOTH_NONDOUBLE_INPUT_EXTENSION,
+    SAWTOOTH_GPU_INPUT_EXTENSION,
+];
 
 const SAWTOOTH_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -201,9 +220,29 @@ fn sawtooth_scalar(t: f64, xmax: f64) -> f64 {
     keywords = "sawtooth,waveform,signal processing,triangle,periodic",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::signal::sawtooth::SAWTOOTH_DESCRIPTOR),
+    extensions(crate::builtins::math::signal::sawtooth::SAWTOOTH_EXTENSIONS),
     builtin_path = "crate::builtins::math::signal::sawtooth"
 )]
 async fn sawtooth_builtin(t: Value, varargin: Vec<Value>) -> BuiltinResult<Value> {
+    if matches!(&t, Value::GpuTensor(_))
+        || varargin
+            .iter()
+            .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SAWTOOTH_GPU_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if varargin.len() <= 1
+        && (is_supported_nondouble_argument(&t)
+            || varargin.iter().any(is_supported_nondouble_argument))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SAWTOOTH_NONDOUBLE_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let xmax = parse_xmax(&varargin).await?;
     match t {
         Value::GpuTensor(handle) => sawtooth_gpu(handle, xmax).await,
@@ -214,6 +253,20 @@ async fn sawtooth_builtin(t: Value, varargin: Vec<Value>) -> BuiltinResult<Value
             Err(sawtooth_error(&SAWTOOTH_ERROR_INVALID_INPUT))
         }
         other => sawtooth_real(other, xmax),
+    }
+}
+
+fn is_supported_nondouble_argument(value: &Value) -> bool {
+    match value {
+        Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_) => true,
+        Value::Tensor(tensor) => tensor.numeric_dtype() != NumericDType::F64,
+        Value::GpuTensor(handle) => {
+            runmat_accelerate_api::handle_is_logical(handle)
+                || runmat_accelerate_api::handle_integer_type(handle).is_some()
+                || runmat_accelerate_api::handle_precision(handle)
+                    == Some(runmat_accelerate_api::ProviderPrecision::F32)
+        }
+        _ => false,
     }
 }
 
@@ -486,6 +539,7 @@ mod tests {
 
     #[test]
     fn sawtooth_int_and_logical_promote_to_double() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let int_result = expect_num(call(Value::Int(IntValue::I32(0))).unwrap());
         assert_close(int_result, -1.0);
 
@@ -501,6 +555,7 @@ mod tests {
 
     #[test]
     fn sawtooth_single_extension_promotes_to_documented_double_domain() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let input = Tensor::from_numeric_storage(
             runmat_builtins::NumericStorage::F32(vec![0.0, 1.0]),
             vec![1, 2],
@@ -510,6 +565,44 @@ mod tests {
         assert_eq!(result.numeric_dtype(), runmat_builtins::NumericDType::F64);
         assert_close(result.materialize_f64()[0], -1.0);
         assert_close(result.materialize_f64()[1], sawtooth_scalar(1.0, 1.0));
+    }
+
+    #[test]
+    fn sawtooth_extensions_follow_compatibility_mode() {
+        let single = || {
+            Value::Tensor(
+                Tensor::from_numeric_storage(
+                    runmat_builtins::NumericStorage::F32(vec![0.0, 1.0]),
+                    vec![1, 2],
+                )
+                .expect("single input"),
+            )
+        };
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = call(single()).expect_err("MATLAB mode rejects single input");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:SawtoothNondoubleInputExtension")
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            assert!(call(single()).is_ok());
+        }
+
+        let handle = GpuTensorHandle {
+            shape: vec![1, 2],
+            device_id: 0,
+            buffer_id: 9_300_003,
+        };
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = call(Value::GpuTensor(handle))
+            .expect_err("MATLAB mode rejects interactive gpuArray input before gather");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:SawtoothGpuInputExtension")
+        );
     }
 
     #[test]

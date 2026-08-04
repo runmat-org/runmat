@@ -90640,6 +90640,20 @@
           "when": "Internal tensor construction or GPU gather fails.",
           "message": "sawtooth: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "sawtooth-nondouble-input",
+          "mode": "RunMatOnly",
+          "description": "sawtooth with a non-double numeric argument is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SawtoothNondoubleInputExtension"
+        },
+        {
+          "id": "sawtooth-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "interactive sawtooth gpuArray input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SawtoothGpuInputExtension"
+        }
       ]
     },
     {
@@ -93266,6 +93280,14 @@
           "identifier": "RunMat:sinc:InternalError",
           "when": "Internal tensor conversion/materialization fails.",
           "message": "sinc: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "sinc-nonfloating-input",
+          "mode": "RunMatOnly",
+          "description": "sinc with integer or logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SincNonfloatingInputExtension"
         }
       ]
     },
@@ -96489,6 +96511,20 @@
           "identifier": "RunMat:square:InternalError",
           "when": "Internal tensor construction or GPU gather fails.",
           "message": "square: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "square-nonfloating-input",
+          "mode": "RunMatOnly",
+          "description": "square with an integer or logical argument is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SquareNonfloatingInputExtension"
+        },
+        {
+          "id": "square-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "interactive square gpuArray input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SquareGpuInputExtension"
         }
       ]
     },

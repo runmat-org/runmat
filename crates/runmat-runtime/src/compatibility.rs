@@ -207,7 +207,12 @@ mod tests {
                 ("randi", "randi-wide-integer-output"),
                 ("randperm", "randperm-explicit-double"),
                 ("randperm", "randperm-like"),
+                ("sawtooth", "sawtooth-gpu-input"),
+                ("sawtooth", "sawtooth-nondouble-input"),
+                ("sinc", "sinc-nonfloating-input"),
                 ("sparse", "sparse-integer-storage"),
+                ("square", "square-gpu-input"),
+                ("square", "square-nonfloating-input"),
             ])
         );
     }

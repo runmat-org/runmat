@@ -2,9 +2,10 @@
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, NumericDType, NumericStorage, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor, ComplexTensor, NumericDType, NumericStorage,
+    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -19,6 +20,15 @@ use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "sinc";
+
+const SINC_NONFLOATING_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "sinc-nonfloating-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "sinc with integer or logical input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SincNonfloatingInputExtension"),
+};
+
+pub const SINC_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [SINC_NONFLOATING_INPUT_EXTENSION];
 
 const SINC_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -199,9 +209,16 @@ fn provider_error(err: anyhow::Error) -> RuntimeError {
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::signal::sinc::SINC_DESCRIPTOR),
+    extensions(crate::builtins::math::signal::sinc::SINC_EXTENSIONS),
     builtin_path = "crate::builtins::math::signal::sinc"
 )]
 async fn sinc_builtin(value: Value) -> BuiltinResult<Value> {
+    if is_supported_nonfloating_input(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SINC_NONFLOATING_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     match value {
         Value::GpuTensor(handle) => sinc_gpu(handle).await,
@@ -214,6 +231,21 @@ async fn sinc_builtin(value: Value) -> BuiltinResult<Value> {
             Err(sinc_error(&SINC_ERROR_INVALID_INPUT))
         }
         other => sinc_real(other),
+    }
+}
+
+fn is_supported_nonfloating_input(value: &Value) -> bool {
+    match value {
+        Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_) => true,
+        Value::Tensor(tensor) => !matches!(
+            tensor.numeric_dtype(),
+            NumericDType::F64 | NumericDType::F32
+        ),
+        Value::GpuTensor(handle) => {
+            runmat_accelerate_api::handle_is_logical(handle)
+                || runmat_accelerate_api::handle_integer_type(handle).is_some()
+        }
+        _ => false,
     }
 }
 
@@ -560,6 +592,7 @@ mod tests {
             other => panic!("expected tensor, got {other:?}"),
         }
 
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let result = call(Value::Int(IntValue::I32(-3))).expect("sinc int");
         match result {
             Value::Num(value) => assert_eq!(value, 0.0),
@@ -628,6 +661,7 @@ mod tests {
 
     #[test]
     fn sinc_logical_inputs_are_numeric() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let zero = call(Value::Bool(false)).expect("sinc false");
         let one = call(Value::Bool(true)).expect("sinc true");
         match (zero, one) {
@@ -637,6 +671,43 @@ mod tests {
             }
             other => panic!("expected scalar results, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn sinc_nonfloating_input_follows_compatibility_mode() {
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error =
+                call(Value::Int(IntValue::I16(1))).expect_err("MATLAB mode rejects integer input");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:SincNonfloatingInputExtension")
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            assert!(call(Value::Int(IntValue::I16(1))).is_ok());
+        }
+
+        let handle = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 9_300_005,
+        };
+        runmat_accelerate_api::set_handle_integer_type(
+            &handle,
+            runmat_accelerate_api::IntegerElementType::I16,
+        );
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = call(Value::GpuTensor(handle.clone()))
+                .expect_err("MATLAB mode rejects resident integer input before dispatch");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:SincNonfloatingInputExtension")
+            );
+        }
+        runmat_accelerate_api::clear_handle_integer_type(&handle);
     }
 
     #[test]
