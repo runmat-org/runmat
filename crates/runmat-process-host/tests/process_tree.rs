@@ -1,5 +1,5 @@
 #[cfg(unix)]
-use runmat_process_host::HostCommand;
+use runmat_process_host::{is_process_alive, HostCommand};
 #[cfg(unix)]
 use tokio::io::AsyncReadExt;
 
@@ -21,8 +21,12 @@ async fn terminate_kills_the_child_process_group() {
     }
     let descendant: i32 = String::from_utf8(pid_line).unwrap().parse().unwrap();
     child.terminate_tree().await.unwrap();
-    let result = unsafe { libc::kill(descendant, 0) };
-    if result == 0 {
-        panic!("descendant process {descendant} survived process-tree termination");
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
+    while is_process_alive(descendant.try_into().unwrap()) {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "descendant process {descendant} survived process-tree termination"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 }

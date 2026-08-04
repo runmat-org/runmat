@@ -177,6 +177,10 @@ pub fn is_alive(process_id: u32) -> bool {
         let process_id = i32::try_from(process_id).unwrap_or(i32::MAX);
         let result = unsafe { libc::kill(process_id, 0) };
         if result == 0 {
+            #[cfg(target_os = "linux")]
+            if linux_process_is_zombie(process_id) {
+                return false;
+            }
             return true;
         }
         std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
@@ -201,4 +205,14 @@ pub fn is_alive(process_id: u32) -> bool {
         let _ = process_id;
         false
     }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_process_is_zombie(process_id: i32) -> bool {
+    let Ok(stat) = std::fs::read_to_string(format!("/proc/{process_id}/stat")) else {
+        return false;
+    };
+    stat.rsplit_once(')')
+        .and_then(|(_, fields)| fields.split_whitespace().next())
+        == Some("Z")
 }
