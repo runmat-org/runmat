@@ -119,24 +119,13 @@ pub(crate) fn integer_broadcast_plan(
     use crate::backend::wgpu::params::{AlignedU32, BCAST_MAX_RANK};
 
     let same_shape = input_shape_a == input_shape_b;
-    let rank = input_shape_a.len().max(input_shape_b.len());
-    ensure!(
-        rank <= BCAST_MAX_RANK,
-        "{operation_name}: broadcast rank exceeds limit"
-    );
-    let mut shape_a = vec![1usize; rank - input_shape_a.len()];
-    shape_a.extend_from_slice(input_shape_a);
-    let mut shape_b = vec![1usize; rank - input_shape_b.len()];
-    shape_b.extend_from_slice(input_shape_b);
-    let mut output_shape = vec![1usize; rank];
-    for index in 0..rank {
-        output_shape[index] = match (shape_a[index], shape_b[index]) {
-            (left, right) if left == right => left,
-            (1, right) => right,
-            (left, 1) => left,
-            _ => return Err(anyhow!("{operation_name}: shape mismatch between inputs")),
-        };
-    }
+    let (shape_a, shape_b, output_shape) = super::backend_shared::matlab_broadcast_shapes(
+        operation_name,
+        input_shape_a,
+        input_shape_b,
+        BCAST_MAX_RANK,
+    )?;
+    let rank = output_shape.len();
     let checked_product = |shape: &[usize], description: &str| {
         shape.iter().try_fold(1usize, |product, &dimension| {
             product
@@ -1523,6 +1512,38 @@ mod tests {
             Err(error) if error.to_string() == "wgpu: no compatible adapter found" => None,
             Err(error) => panic!("register wgpu provider failed: {error:?}"),
         }
+    }
+
+    #[test]
+    fn integer_broadcast_plan_appends_singletons_and_enforces_zero_rules() {
+        let plan = integer_broadcast_plan("plus", &[2, 3], 6, &[2, 3, 4], 24)
+            .expect("missing dimensions are trailing singletons");
+        assert_eq!(
+            plan.a_shape[..3]
+                .iter()
+                .map(|dimension| dimension.value)
+                .collect::<Vec<_>>(),
+            vec![2, 3, 1]
+        );
+        assert_eq!(
+            plan.b_shape[..3]
+                .iter()
+                .map(|dimension| dimension.value)
+                .collect::<Vec<_>>(),
+            vec![2, 3, 4]
+        );
+        assert_eq!(plan.output_shape, vec![2, 3, 4]);
+
+        assert!(integer_broadcast_plan("plus", &[2, 3], 6, &[1, 2, 3], 6).is_err());
+
+        let empty = integer_broadcast_plan("plus", &[0, 3], 0, &[1, 3], 3)
+            .expect("zero is compatible with singleton");
+        assert_eq!(empty.output_shape, vec![0, 3]);
+        assert!(integer_broadcast_plan("plus", &[0, 3], 0, &[2, 3], 6).is_err());
+
+        let row_shorthand = integer_broadcast_plan("plus", &[3], 3, &[1, 3, 2], 6)
+            .expect("one-dimensional tensors represent MATLAB row vectors");
+        assert_eq!(row_shorthand.output_shape, vec![1, 3, 2]);
     }
 
     #[test]

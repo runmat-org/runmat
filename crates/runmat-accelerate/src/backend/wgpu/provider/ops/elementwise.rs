@@ -1514,39 +1514,13 @@ impl WgpuProvider {
         let rhs_complex = self.effective_storage_for_entry(b, entry_b)
             == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
 
-        let mut shape_a = entry_a.shape.clone();
-        let mut shape_b = entry_b.shape.clone();
-        let rank = shape_a.len().max(shape_b.len());
-        if rank > BCAST_MAX_RANK {
-            return Err(anyhow!("complex broadcast rank exceeds limit"));
-        }
-        if shape_a.len() < rank {
-            let pad = rank - shape_a.len();
-            let mut v = vec![1usize; pad];
-            v.extend_from_slice(&shape_a);
-            shape_a = v;
-        }
-        if shape_b.len() < rank {
-            let pad = rank - shape_b.len();
-            let mut v = vec![1usize; pad];
-            v.extend_from_slice(&shape_b);
-            shape_b = v;
-        }
-
-        let mut out_shape = vec![1usize; rank];
-        for i in 0..rank {
-            let da = shape_a[i];
-            let db = shape_b[i];
-            if da == db {
-                out_shape[i] = da;
-            } else if da == 1 {
-                out_shape[i] = db;
-            } else if db == 1 {
-                out_shape[i] = da;
-            } else {
-                return Err(anyhow!("shape mismatch for complex broadcast"));
-            }
-        }
+        let (shape_a, shape_b, out_shape) = super::backend_shared::matlab_broadcast_shapes(
+            "complex broadcast",
+            &entry_a.shape,
+            &entry_b.shape,
+            BCAST_MAX_RANK,
+        )?;
+        let rank = out_shape.len();
 
         let logical_len = out_shape
             .iter()
@@ -1632,38 +1606,13 @@ impl WgpuProvider {
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
         // Compute broadcasted output shape
-        let mut shape_a = entry_a.shape.clone();
-        let mut shape_b = entry_b.shape.clone();
-        let rank = shape_a.len().max(shape_b.len());
-        if rank > BCAST_MAX_RANK {
-            return Err(anyhow!("broadcast rank exceeds limit"));
-        }
-        if shape_a.len() < rank {
-            let pad = rank - shape_a.len();
-            let mut v = vec![1usize; pad];
-            v.extend_from_slice(&shape_a);
-            shape_a = v;
-        }
-        if shape_b.len() < rank {
-            let pad = rank - shape_b.len();
-            let mut v = vec![1usize; pad];
-            v.extend_from_slice(&shape_b);
-            shape_b = v;
-        }
-        let mut out_shape: Vec<usize> = vec![1; rank];
-        for i in 0..rank {
-            let da = shape_a[i];
-            let db = shape_b[i];
-            if da == db {
-                out_shape[i] = da;
-            } else if da == 1 {
-                out_shape[i] = db;
-            } else if db == 1 {
-                out_shape[i] = da;
-            } else {
-                return Err(anyhow!("shape mismatch for broadcast"));
-            }
-        }
+        let (shape_a, shape_b, out_shape) = super::backend_shared::matlab_broadcast_shapes(
+            "binary operation",
+            &entry_a.shape,
+            &entry_b.shape,
+            BCAST_MAX_RANK,
+        )?;
+        let rank = out_shape.len();
         let len: usize = out_shape
             .iter()
             .copied()
@@ -1887,13 +1836,12 @@ impl WgpuProvider {
             let out_shape_u32: Vec<u32> = output_shape.iter().map(|&d| d as u32).collect();
             write_packed_array(&mut bytes, &out_shape_u32);
             for entry in &entries {
-                let mut shape = entry.shape.clone();
-                if shape.len() < rank {
-                    let pad = rank - shape.len();
-                    let mut v = vec![1usize; pad];
-                    v.extend_from_slice(&shape);
-                    shape = v;
-                }
+                let mut shape = if rank >= 2 {
+                    super::backend_shared::canonical_matrix_shape(&entry.shape)
+                } else {
+                    entry.shape.clone()
+                };
+                shape.resize(rank, 1);
                 let shape_u32: Vec<u32> = shape.iter().map(|&d| d as u32).collect();
                 write_packed_array(&mut bytes, &shape_u32);
                 let mut strides: Vec<u32> = vec![0; rank];
@@ -2184,13 +2132,12 @@ impl WgpuProvider {
         let out_shape_u32: Vec<u32> = output_shape.iter().map(|&d| d as u32).collect();
         write_packed_array(&mut bytes, &out_shape_u32);
         for entry in &entries {
-            let mut shape = entry.shape.clone();
-            if shape.len() < rank {
-                let pad = rank - shape.len();
-                let mut v = vec![1usize; pad];
-                v.extend_from_slice(&shape);
-                shape = v;
-            }
+            let mut shape = if rank >= 2 {
+                super::backend_shared::canonical_matrix_shape(&entry.shape)
+            } else {
+                entry.shape.clone()
+            };
+            shape.resize(rank, 1);
             let shape_u32: Vec<u32> = shape.iter().map(|&d| d as u32).collect();
             write_packed_array(&mut bytes, &shape_u32);
             let mut strides: Vec<u32> = vec![0; rank];

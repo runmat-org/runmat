@@ -22,20 +22,25 @@ pub fn element_count_if_known(shape: &[Option<usize>]) -> Option<usize> {
     })
 }
 
+fn align_broadcast_shape(shape: &[Option<usize>], rank: usize) -> Vec<Option<usize>> {
+    debug_assert!(shape.len() <= rank);
+    let mut aligned = if shape.len() == 1 && rank >= 2 {
+        vec![Some(1), shape[0]]
+    } else {
+        shape.to_vec()
+    };
+    aligned.resize(rank, Some(1));
+    aligned
+}
+
 pub fn broadcast_shapes(lhs: &[Option<usize>], rhs: &[Option<usize>]) -> Vec<Option<usize>> {
     let max_rank = lhs.len().max(rhs.len());
+    let lhs = align_broadcast_shape(lhs, max_rank);
+    let rhs = align_broadcast_shape(rhs, max_rank);
     let mut out: Vec<Option<usize>> = Vec::with_capacity(max_rank);
     for i in 0..max_rank {
-        let lhs_idx = lhs.len().checked_sub(1 + i);
-        let rhs_idx = rhs.len().checked_sub(1 + i);
-        let da = lhs_idx
-            .and_then(|idx| lhs.get(idx))
-            .cloned()
-            .unwrap_or(Some(1));
-        let db = rhs_idx
-            .and_then(|idx| rhs.get(idx))
-            .cloned()
-            .unwrap_or(Some(1));
+        let da = lhs[i];
+        let db = rhs[i];
         let dim = match (da, db) {
             (Some(a), Some(b)) => {
                 if a == b {
@@ -66,24 +71,17 @@ pub fn broadcast_shapes(lhs: &[Option<usize>], rhs: &[Option<usize>]) -> Vec<Opt
         };
         out.push(dim);
     }
-    out.reverse();
     out
 }
 
 pub fn broadcast_compatible(lhs: &[Option<usize>], rhs: &[Option<usize>]) -> Option<bool> {
     let max_rank = lhs.len().max(rhs.len());
+    let lhs = align_broadcast_shape(lhs, max_rank);
+    let rhs = align_broadcast_shape(rhs, max_rank);
     let mut unknown = false;
     for i in 0..max_rank {
-        let lhs_idx = lhs.len().checked_sub(1 + i);
-        let rhs_idx = rhs.len().checked_sub(1 + i);
-        let da = lhs_idx
-            .and_then(|idx| lhs.get(idx))
-            .cloned()
-            .unwrap_or(Some(1));
-        let db = rhs_idx
-            .and_then(|idx| rhs.get(idx))
-            .cloned()
-            .unwrap_or(Some(1));
+        let da = lhs[i];
+        let db = rhs[i];
         match (da, db) {
             (Some(a), Some(b)) => {
                 if a != b && a != 1 && b != 1 {
@@ -516,9 +514,49 @@ mod tests {
     use super::*;
 
     #[test]
-    fn broadcast_shapes_aligns_trailing_dims() {
+    fn broadcast_shapes_expands_singletons_by_dimension() {
         let out = broadcast_shapes(&[Some(1), Some(3)], &[Some(2), Some(1)]);
         assert_eq!(out, vec![Some(2), Some(3)]);
+    }
+
+    #[test]
+    fn broadcast_shapes_append_missing_trailing_singletons() {
+        assert_eq!(
+            broadcast_shapes(&[Some(2), Some(3)], &[Some(2), Some(3), Some(4)]),
+            vec![Some(2), Some(3), Some(4)]
+        );
+        assert_eq!(
+            broadcast_shapes(&[Some(2), Some(3)], &[Some(1), Some(2), Some(3)]),
+            vec![Some(2), None, Some(3)]
+        );
+        assert_eq!(
+            broadcast_compatible(&[Some(2), Some(3)], &[Some(2), Some(3), Some(4)]),
+            Some(true)
+        );
+        assert_eq!(
+            broadcast_compatible(&[Some(2), Some(3)], &[Some(1), Some(2), Some(3)]),
+            Some(false)
+        );
+        assert_eq!(
+            broadcast_shapes(&[Some(3)], &[Some(1), Some(3), Some(2)]),
+            vec![Some(1), Some(3), Some(2)]
+        );
+    }
+
+    #[test]
+    fn broadcast_shapes_reject_zero_against_nonone_extent() {
+        assert_eq!(
+            broadcast_shapes(&[Some(0), Some(3)], &[Some(1), Some(3)]),
+            vec![Some(0), Some(3)]
+        );
+        assert_eq!(
+            broadcast_shapes(&[Some(0), Some(3)], &[Some(2), Some(3)]),
+            vec![None, Some(3)]
+        );
+        assert_eq!(
+            broadcast_compatible(&[Some(0), Some(3)], &[Some(2), Some(3)]),
+            Some(false)
+        );
     }
 
     #[test]

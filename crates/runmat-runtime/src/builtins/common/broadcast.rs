@@ -10,29 +10,19 @@ pub fn broadcast_shapes(
     left: &[usize],
     right: &[usize],
 ) -> Result<Vec<usize>, String> {
-    // MATLAB implicit expansion aligns trailing dimensions. To achieve this with
-    // column-major `[usize]` shape vectors, pad the shorter shape on the FRONT
-    // with ones so that the last dimensions line up.
     let rank = left.len().max(right.len());
-    let mut left_ext = Vec::with_capacity(rank);
-    left_ext.extend(std::iter::repeat_n(1, rank.saturating_sub(left.len())));
-    left_ext.extend_from_slice(left);
-    let mut right_ext = Vec::with_capacity(rank);
-    right_ext.extend(std::iter::repeat_n(1, rank.saturating_sub(right.len())));
-    right_ext.extend_from_slice(right);
-
+    let left = align_shape(left, rank);
+    let right = align_shape(right, rank);
     let mut shape = Vec::with_capacity(rank);
     for dim in 0..rank {
-        let a = left_ext[dim];
-        let b = right_ext[dim];
+        let a = left[dim];
+        let b = right[dim];
         if a == b {
             shape.push(a);
         } else if a == 1 {
             shape.push(b);
         } else if b == 1 {
             shape.push(a);
-        } else if a == 0 || b == 0 {
-            shape.push(0);
         } else {
             return Err(format!(
                 "{fn_name}: size mismatch between inputs (dimension {} has lengths {} and {})",
@@ -56,6 +46,18 @@ pub fn compute_strides(shape: &[usize]) -> Vec<usize> {
     strides
 }
 
+/// Append MATLAB's implicit trailing singleton dimensions until `shape` reaches `rank`.
+pub fn align_shape(shape: &[usize], rank: usize) -> Vec<usize> {
+    debug_assert!(shape.len() <= rank);
+    let mut aligned = if shape.len() == 1 && rank >= 2 {
+        vec![1, shape[0]]
+    } else {
+        shape.to_vec()
+    };
+    aligned.resize(rank, 1);
+    aligned
+}
+
 /// Map a linear index in the broadcasted result back to a source operand.
 pub fn broadcast_index(
     mut linear: usize,
@@ -66,6 +68,7 @@ pub fn broadcast_index(
     if in_shape.is_empty() {
         return 0;
     }
+    let row_shorthand = in_shape.len() == 1 && out_shape.len() >= 2;
     let mut offset = 0usize;
     for dim in 0..out_shape.len() {
         let out_extent = out_shape[dim];
@@ -77,15 +80,23 @@ pub fn broadcast_index(
         if out_extent != 0 {
             linear /= out_extent;
         }
-        let in_extent = in_shape.get(dim).copied().unwrap_or(1);
+        let (in_extent, in_stride) = if row_shorthand {
+            match dim {
+                1 => (in_shape[0], 1),
+                _ => (1, 0),
+            }
+        } else {
+            (
+                in_shape.get(dim).copied().unwrap_or(1),
+                strides.get(dim).copied().unwrap_or(0),
+            )
+        };
         let mapped = if in_extent == 1 || out_extent == 0 {
             0
         } else {
             coord
         };
-        if dim < strides.len() {
-            offset += mapped * strides[dim];
-        }
+        offset += mapped * in_stride;
     }
     offset
 }
@@ -105,15 +116,8 @@ impl BroadcastPlan {
     pub fn new(shape_a: &[usize], shape_b: &[usize]) -> Result<Self, String> {
         let ndims = shape_a.len().max(shape_b.len());
 
-        // Pad on the FRONT to align trailing dimensions per MATLAB rules.
-        let mut ext_a = Vec::with_capacity(ndims);
-        ext_a.extend(std::iter::repeat_n(1, ndims.saturating_sub(shape_a.len())));
-        ext_a.extend_from_slice(shape_a);
-
-        let mut ext_b = Vec::with_capacity(ndims);
-        ext_b.extend(std::iter::repeat_n(1, ndims.saturating_sub(shape_b.len())));
-        ext_b.extend_from_slice(shape_b);
-
+        let ext_a = align_shape(shape_a, ndims);
+        let ext_b = align_shape(shape_b, ndims);
         let mut output_shape = Vec::with_capacity(ndims);
         for i in 0..ndims {
             let da = ext_a[i];
@@ -255,11 +259,41 @@ pub(crate) mod tests {
         assert!(err.contains("dimension 1"));
     }
 
+    #[test]
+    fn broadcast_appends_missing_trailing_singletons() {
+        assert_eq!(
+            broadcast_shapes("test", &[2, 3], &[2, 3, 4]).unwrap(),
+            vec![2, 3, 4]
+        );
+        let error = broadcast_shapes("test", &[2, 3], &[1, 2, 3]).unwrap_err();
+        assert!(error.contains("dimension 2"));
+    }
+
+    #[test]
+    fn broadcast_zero_is_compatible_only_with_zero_or_one() {
+        assert_eq!(
+            broadcast_shapes("test", &[0, 3], &[1, 3]).unwrap(),
+            vec![0, 3]
+        );
+        assert_eq!(
+            broadcast_shapes("test", &[0, 3], &[0, 3]).unwrap(),
+            vec![0, 3]
+        );
+        assert!(broadcast_shapes("test", &[0, 3], &[2, 3]).is_err());
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn compute_strides_column_major() {
         let strides = compute_strides(&[2, 3, 4]);
         assert_eq!(strides, vec![1, 2, 6]);
+    }
+
+    #[test]
+    fn align_shape_appends_trailing_singletons() {
+        assert_eq!(align_shape(&[2, 3], 4), vec![2, 3, 1, 1]);
+        assert_eq!(align_shape(&[3], 3), vec![1, 3, 1]);
+        assert_eq!(align_shape(&[3], 1), vec![3]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -268,6 +302,17 @@ pub(crate) mod tests {
         let strides = compute_strides(&[1, 1]);
         let idx = broadcast_index(5, &[2, 3], &[1, 1], &strides);
         assert_eq!(idx, 0);
+    }
+
+    #[test]
+    fn broadcast_index_maps_one_dimensional_row_shorthand() {
+        let strides = compute_strides(&[3]);
+        assert_eq!(
+            (0..6)
+                .map(|linear| broadcast_index(linear, &[1, 3, 2], &[3], &strides))
+                .collect::<Vec<_>>(),
+            vec![0, 1, 2, 0, 1, 2]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -307,5 +352,37 @@ pub(crate) mod tests {
         assert_eq!(plan.output_shape(), &[0, 3]);
         assert_eq!(plan.len(), 0);
         assert_eq!(plan.iter().next(), None);
+    }
+
+    #[test]
+    fn broadcast_plan_appends_missing_trailing_singletons() {
+        let plan = BroadcastPlan::new(&[2, 1], &[2, 1, 3]).unwrap();
+        assert_eq!(plan.output_shape(), &[2, 1, 3]);
+        assert_eq!(
+            plan.iter().collect::<Vec<_>>(),
+            vec![
+                (0, 0, 0),
+                (1, 1, 1),
+                (2, 0, 2),
+                (3, 1, 3),
+                (4, 0, 4),
+                (5, 1, 5),
+            ]
+        );
+        assert!(BroadcastPlan::new(&[2, 3], &[1, 2, 3]).is_err());
+        assert!(BroadcastPlan::new(&[0, 3], &[2, 3]).is_err());
+        let row_shorthand = BroadcastPlan::new(&[3], &[1, 3, 2]).unwrap();
+        assert_eq!(row_shorthand.output_shape(), &[1, 3, 2]);
+        assert_eq!(
+            row_shorthand.iter().collect::<Vec<_>>(),
+            vec![
+                (0, 0, 0),
+                (1, 1, 1),
+                (2, 2, 2),
+                (3, 0, 3),
+                (4, 1, 4),
+                (5, 2, 5),
+            ]
+        );
     }
 }

@@ -10159,6 +10159,30 @@ mod tests {
     use runmat_builtins::{IntValue, IntegerStorage};
 
     #[test]
+    fn simple_provider_broadcast_canonicalizes_one_dimensional_row_shorthand() {
+        let left = [1.0, 2.0, 3.0];
+        let right = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0];
+        let (values, shape, storage) = elementwise_binary_broadcast_data(
+            "plus",
+            BinaryOperand {
+                data: &left,
+                storage: GpuTensorStorage::Real,
+                shape: &[3],
+            },
+            BinaryOperand {
+                data: &right,
+                storage: GpuTensorStorage::Real,
+                shape: &[1, 3, 2],
+            },
+            ElementwiseBinaryOp::Add,
+        )
+        .expect("row shorthand broadcast");
+        assert_eq!(shape, vec![1, 3, 2]);
+        assert_eq!(values, vec![11.0, 22.0, 33.0, 41.0, 52.0, 63.0]);
+        assert_eq!(storage, GpuTensorStorage::Real);
+    }
+
+    #[test]
     fn float_result_materializer_rejects_native_integers() {
         let scalar = tensor_from_value("qr", Value::Int(IntValue::U64(u64::MAX)))
             .expect_err("wide integer scalar must not use f64");

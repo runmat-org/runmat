@@ -701,6 +701,104 @@ fn integer_comparisons_return_logical_arrays_with_broadcast_shape_for_every_clas
 }
 
 #[test]
+fn integer_implicit_expansion_appends_singletons_and_enforces_zero_rules_for_every_class() {
+    macro_rules! check {
+        ($class:ident, $ty:ty) => {{
+            let left = integer_tensor(IntegerStorage::$class(vec![1 as $ty, 2 as $ty]), vec![2, 1]);
+            let right = integer_tensor(
+                IntegerStorage::$class(vec![
+                    10 as $ty, 20 as $ty, 30 as $ty, 40 as $ty, 50 as $ty, 60 as $ty,
+                ]),
+                vec![2, 1, 3],
+            );
+            expect_integer(
+                runmat_runtime::call_builtin("plus", &[left, right])
+                    .expect("rank-mismatched integer expansion"),
+                &[2, 1, 3],
+                IntegerStorage::$class(vec![
+                    11 as $ty, 22 as $ty, 31 as $ty, 42 as $ty, 51 as $ty, 62 as $ty,
+                ]),
+            );
+
+            let row_shorthand = integer_tensor(
+                IntegerStorage::$class(vec![1 as $ty, 2 as $ty, 3 as $ty]),
+                vec![3],
+            );
+            let pages = integer_tensor(
+                IntegerStorage::$class(vec![
+                    10 as $ty, 20 as $ty, 30 as $ty, 40 as $ty, 50 as $ty, 60 as $ty,
+                ]),
+                vec![1, 3, 2],
+            );
+            expect_integer(
+                runmat_runtime::call_builtin("plus", &[row_shorthand, pages])
+                    .expect("one-dimensional row shorthand expansion"),
+                &[1, 3, 2],
+                IntegerStorage::$class(vec![
+                    11 as $ty, 22 as $ty, 33 as $ty, 41 as $ty, 52 as $ty, 63 as $ty,
+                ]),
+            );
+
+            let old_front_aligned_left = integer_tensor(
+                IntegerStorage::$class(vec![
+                    1 as $ty, 2 as $ty, 3 as $ty, 4 as $ty, 5 as $ty, 6 as $ty,
+                ]),
+                vec![2, 3],
+            );
+            let old_front_aligned_right = integer_tensor(
+                IntegerStorage::$class(vec![
+                    1 as $ty, 2 as $ty, 3 as $ty, 4 as $ty, 5 as $ty, 6 as $ty,
+                ]),
+                vec![1, 2, 3],
+            );
+            let rank_error = runmat_runtime::call_builtin(
+                "plus",
+                &[old_front_aligned_left, old_front_aligned_right],
+            )
+            .expect_err("front-aligned rank expansion must be rejected");
+            assert!(
+                rank_error.message().contains("dimension mismatch"),
+                "unexpected rank mismatch error: {rank_error}"
+            );
+
+            let empty = integer_tensor(IntegerStorage::$class(Vec::<$ty>::new()), vec![0, 3]);
+            let singleton = integer_tensor(
+                IntegerStorage::$class(vec![1 as $ty, 2 as $ty, 3 as $ty]),
+                vec![1, 3],
+            );
+            expect_integer(
+                runmat_runtime::call_builtin("plus", &[empty.clone(), singleton])
+                    .expect("zero extent expands against singleton"),
+                &[0, 3],
+                IntegerStorage::$class(Vec::<$ty>::new()),
+            );
+
+            let nonsingleton = integer_tensor(
+                IntegerStorage::$class(vec![
+                    1 as $ty, 2 as $ty, 3 as $ty, 4 as $ty, 5 as $ty, 6 as $ty,
+                ]),
+                vec![2, 3],
+            );
+            let zero_error = runmat_runtime::call_builtin("plus", &[empty, nonsingleton])
+                .expect_err("zero extent cannot expand against a nonsingleton");
+            assert!(
+                zero_error.message().contains("dimension mismatch"),
+                "unexpected zero mismatch error: {zero_error}"
+            );
+        }};
+    }
+
+    check!(I8, i8);
+    check!(I16, i16);
+    check!(I32, i32);
+    check!(I64, i64);
+    check!(U8, u8);
+    check!(U16, u16);
+    check!(U32, u32);
+    check!(U64, u64);
+}
+
+#[test]
 fn native_integer_reductions_preserve_class_shape_and_empty_identities() {
     macro_rules! check {
         ($class:ident, $values:expr, $sum:expr, $product:expr, $mean:expr, $zero:expr, $one:expr) => {{

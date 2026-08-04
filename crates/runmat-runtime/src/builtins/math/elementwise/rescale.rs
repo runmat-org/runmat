@@ -9,7 +9,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::{
-    broadcast::{compute_strides, BroadcastPlan},
+    broadcast::{align_shape, compute_strides, BroadcastPlan},
     gpu_helpers, map_control_flow_with_builtin,
     random_args::keyword_of,
     spec::{
@@ -471,9 +471,7 @@ fn broadcast_output_shape(input_shape: &[usize], shapes: &[&[usize]]) -> Builtin
 
 impl OperandBroadcast {
     fn new(shape: &[usize], rank: usize) -> Self {
-        let mut padded = Vec::with_capacity(rank);
-        padded.extend(std::iter::repeat_n(1, rank.saturating_sub(shape.len())));
-        padded.extend_from_slice(shape);
+        let padded = align_shape(shape, rank);
         let strides = compute_strides(&padded);
         Self {
             shape: padded,
@@ -675,6 +673,17 @@ mod tests {
             }
             other => panic!("expected numeric output, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn rescale_operand_indexing_appends_trailing_singletons() {
+        let operand = OperandBroadcast::new(&[2, 1], 3);
+        assert_eq!(
+            (0..6)
+                .map(|linear| operand.index(linear, &[2, 1, 3]))
+                .collect::<Vec<_>>(),
+            vec![0, 1, 0, 1, 0, 1]
+        );
     }
 
     fn assert_close(actual: &[f64], expected: &[f64]) {

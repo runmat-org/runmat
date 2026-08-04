@@ -688,7 +688,7 @@ fn broadcast_tensor_to(
     if len == 0 {
         return Ok(Vec::new());
     }
-    let in_shape = align_shape(&tensor.shape, out_shape.len());
+    let in_shape = broadcast::align_shape(&tensor.shape, out_shape.len());
     let strides = broadcast::compute_strides(&in_shape);
     let mut out = Vec::with_capacity(len);
     let input_len = tensor::tensor_element_len(tensor);
@@ -703,13 +703,6 @@ fn broadcast_tensor_to(
         out.push(tensor::tensor_value_f64(tensor, source_idx));
     }
     Ok(out)
-}
-
-fn align_shape(shape: &[usize], rank: usize) -> Vec<usize> {
-    let mut aligned = Vec::with_capacity(rank);
-    aligned.extend(std::iter::repeat_n(1, rank.saturating_sub(shape.len())));
-    aligned.extend_from_slice(shape);
-    aligned
 }
 
 fn parse_sample(tensor: Tensor, options: FitOptions) -> BuiltinResult<WeightedSample> {
@@ -1447,6 +1440,15 @@ mod tests {
     fn mirrorless_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn fitdist_broadcast_indexing_appends_trailing_singletons() {
+        let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
+        assert_eq!(
+            broadcast_tensor_to(PDF_NAME, &tensor, &[2, 1, 3]).unwrap(),
+            vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0]
+        );
     }
 
     fn object(value: Value) -> ObjectInstance {

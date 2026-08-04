@@ -4857,8 +4857,8 @@ fn multidim_range_end_assign() {
 }
 
 #[test]
-fn multidim_range_end_assign_non_scalar_rhs_broadcast() {
-    // 2x3; assign the middle column selection with a 2x1 rhs, which should broadcast along the selection length
+fn multidim_range_end_assign_exact_nonscalar_rhs() {
+    // 2x3; assign the middle 2x1 column selection with an exact 2x1 RHS.
     let program = "A = [1 2 3; 4 5 6]; B = [7;8]; A(:,2:2:end-1) = B; s = sum(sum(A));";
     // Becomes [1 7 3; 4 8 6] => sum 29
     let vars = execute_source(program);
@@ -4868,15 +4868,12 @@ fn multidim_range_end_assign_non_scalar_rhs_broadcast() {
 }
 
 #[test]
-fn mixed_range_end_assign_vector_broadcast() {
-    // 3x4 matrix; select rows 2:end (rows {2,3}) and cols 1:2:end-1 (cols {1,3}); assign 2x1 vector broadcast across selected cols
+fn mixed_range_end_assign_rejects_nonscalar_expansion() {
     let program =
         "A = [1 2 3 4; 5 6 7 8; 9 10 11 12]; B = [100;200]; A(2:end, 1:2:end-1) = B; s = sum(sum(A));";
-    let vars = execute_source(program);
-    // Expected sum 646 (see analysis)
-    assert!(vars
-        .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 646.0).abs() < 1e-9)));
+    let error = execute_source_result(program)
+        .expect_err("indexed assignment must not implicitly expand a nonscalar RHS");
+    assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
 }
 
 #[test]
@@ -4902,24 +4899,11 @@ fn mixed_range_end_assign_shape_mismatch_error() {
 }
 
 #[test]
-fn broadcasting_roundtrip_property_like() {
-    // After assignment with broadcasted column vector, selected columns equal the vector
+fn indexed_assignment_rejects_column_vector_expansion_across_columns() {
     let program = "A = zeros(3,4); v = [7;8;9]; A(:, 1:2:end-1) = v; x = A(:,1); y = A(:,3);";
-    let vars = execute_source(program);
-    // Expect 7,8,9 present for x and y
-    let mut count = 0;
-    for v in vars {
-        if let runmat_builtins::Value::Tensor(t) = v {
-            if t.shape == vec![3, 1]
-                && (t.materialize_f64()[0] - 7.0).abs() < 1e-9
-                && (t.materialize_f64()[1] - 8.0).abs() < 1e-9
-                && (t.materialize_f64()[2] - 9.0).abs() < 1e-9
-            {
-                count += 1;
-            }
-        }
-    }
-    assert!(count >= 1);
+    let error = execute_source_result(program)
+        .expect_err("indexed assignment must not implicitly expand a column vector");
+    assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
 }
 
 #[test]
@@ -4949,18 +4933,70 @@ fn gather_scatter_roundtrip_nd() {
 }
 
 #[test]
-fn shape_broadcasting_laws() {
-    // Broadcast column vector over selected columns
-    let program = "A = zeros(3,4); v = [1;2;3]; A(:, 2:2:4) = v; x = sum(A(:));\nC = zeros(2,3,2); w = [5;6]; C(:,2,:) = w; y = sum(C(:));";
-    let vars = execute_source(program);
-    // A has 2 columns set to v => sum = (1+2+3)*2 = 12
-    assert!(vars
-        .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-12.0).abs()<1e-9)));
-    // C zeros 2x3x2; assignment sets middle column across both slices => positions: (1,2,1)=5,(2,2,1)=6,(1,2,2)=5,(2,2,2)=6 => sum 22
-    assert!(vars
-        .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-22.0).abs()<1e-9)));
+fn indexed_assignment_rejects_nonscalar_expansion_across_2d_and_nd_selections() {
+    for program in [
+        "A = zeros(3,4); v = [1;2;3]; A(:, 2:2:4) = v;",
+        "C = zeros(2,3,2); w = [5;6]; C(:,2,:) = w;",
+    ] {
+        let error = execute_source_result(program)
+            .expect_err("indexed assignment must not implicitly expand a nonscalar RHS");
+        assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
+    }
+}
+
+#[test]
+fn compiled_integer_implicit_expansion_uses_trailing_singletons_and_strict_zero_rules() {
+    for class_name in [
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+    ] {
+        let source = format!(
+            "a = reshape({class_name}([1 2]), 2, 1); b = reshape({class_name}([10 20 30 40 50 60]), 2, 1, 3); c = a + b;"
+        );
+        let values = execute_source(&source);
+        assert!(
+            values.iter().any(|value| {
+                let runmat_builtins::Value::Tensor(tensor) = value else {
+                    return false;
+                };
+                tensor.shape == [2, 1, 3]
+                    && tensor.integer_storage().map(|storage| storage.class_name())
+                        == Some(class_name)
+                    && tensor.materialize_f64() == [11.0, 22.0, 31.0, 42.0, 51.0, 62.0]
+            }),
+            "missing exact compiled {class_name} broadcast result: {values:?}"
+        );
+    }
+
+    let front_alignment_error = execute_source_result(
+        "a = reshape(int8(1:6), 2, 3); b = reshape(int8(1:6), 1, 2, 3); c = a + b;",
+    )
+    .expect_err("front-aligned rank expansion must be rejected");
+    assert!(
+        front_alignment_error
+            .message()
+            .contains("dimension mismatch"),
+        "unexpected rank mismatch error: {front_alignment_error}"
+    );
+
+    let empty_values = execute_source("a = reshape(int8([]), 0, 3); b = int8([1 2 3]); c = a + b;");
+    assert!(empty_values.iter().any(|value| {
+        matches!(
+            value,
+            runmat_builtins::Value::Tensor(tensor)
+                if tensor.shape == [0, 3]
+                    && tensor.integer_storage().is_some_and(|storage| storage.class_name() == "int8")
+                    && tensor.is_empty()
+        )
+    }));
+
+    let zero_error = execute_source_result(
+        "a = reshape(int8([]), 0, 3); b = reshape(int8(1:6), 2, 3); c = a + b;",
+    )
+    .expect_err("zero extent cannot expand against a nonsingleton");
+    assert!(
+        zero_error.message().contains("dimension mismatch"),
+        "unexpected zero mismatch error: {zero_error}"
+    );
 }
 
 #[test]

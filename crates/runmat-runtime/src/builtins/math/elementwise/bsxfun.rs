@@ -383,8 +383,8 @@ struct BsxfunBroadcastPlan {
 impl BsxfunBroadcastPlan {
     fn new(left_shape: &[usize], right_shape: &[usize]) -> Result<Self, String> {
         let rank = left_shape.len().max(right_shape.len());
-        let left_shape = extend_shape_trailing(left_shape, rank);
-        let right_shape = extend_shape_trailing(right_shape, rank);
+        let left_shape = crate::builtins::common::broadcast::align_shape(left_shape, rank);
+        let right_shape = crate::builtins::common::broadcast::align_shape(right_shape, rank);
         let mut output_shape = Vec::with_capacity(rank);
 
         for dim in 0..rank {
@@ -443,13 +443,6 @@ impl BsxfunBroadcastPlan {
     fn output_shape(&self) -> &[usize] {
         &self.output_shape
     }
-}
-
-fn extend_shape_trailing(shape: &[usize], rank: usize) -> Vec<usize> {
-    let mut extended = Vec::with_capacity(rank);
-    extended.extend_from_slice(shape);
-    extended.resize(rank, 1);
-    extended
 }
 
 fn checked_element_count(shape: &[usize]) -> Result<usize, String> {

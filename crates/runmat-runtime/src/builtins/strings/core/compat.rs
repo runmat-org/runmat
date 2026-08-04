@@ -906,12 +906,7 @@ pub(crate) fn broadcast_flat_index(
     if source_shape.iter().product::<usize>() <= 1 {
         return 0;
     }
-    let mut extended = Vec::with_capacity(shape.len());
-    extended.extend(std::iter::repeat_n(
-        1,
-        shape.len().saturating_sub(source_shape.len()),
-    ));
-    extended.extend_from_slice(source_shape);
+    let extended = matlab_broadcast::align_shape(source_shape, shape.len());
     let strides = matlab_broadcast::compute_strides(&extended);
     matlab_broadcast::broadcast_index(linear, shape, &extended, &strides)
 }
@@ -1714,6 +1709,21 @@ async fn bounded_pattern(
 mod tests {
     use super::*;
     use runmat_builtins::{IntValue, IntegerStorage, NumericDType};
+
+    #[test]
+    fn text_broadcast_helpers_append_trailing_singletons() {
+        assert_eq!(
+            broadcast_shape(&[2, 1], &[2, 1, 3], "test").unwrap(),
+            vec![2, 1, 3]
+        );
+        assert!(broadcast_shape(&[2, 3], &[1, 2, 3], "test").is_err());
+        assert_eq!(
+            (0..6)
+                .map(|linear| broadcast_flat_index(linear, &[2, 1, 3], &[2, 1]))
+                .collect::<Vec<_>>(),
+            vec![0, 1, 0, 1, 0, 1]
+        );
+    }
 
     #[test]
     fn mat2str_preserves_exact_uint64_scalar_text() {

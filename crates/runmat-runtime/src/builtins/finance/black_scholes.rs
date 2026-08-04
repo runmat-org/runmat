@@ -425,7 +425,7 @@ impl BroadcastInputs {
         }
         let len = shape_len_checked(builtin, &shape)?;
         for input in &mut inputs {
-            input.aligned_shape = align_shape(&input.shape, shape.len());
+            input.aligned_shape = broadcast::align_shape(&input.shape, shape.len());
             input.strides = broadcast::compute_strides(&input.aligned_shape);
         }
         Ok(Self { inputs, shape, len })
@@ -573,7 +573,7 @@ async fn try_blsprice_gpu(values: &[Value]) -> BuiltinResult<Option<BlsPriceGpuE
     let len = shape_len_checked(BLSPRICE, &output_shape)?;
     let rank = output_shape.len();
     for input in &mut prepared {
-        input.aligned_shape = align_shape(&input.shape, rank);
+        input.aligned_shape = broadcast::align_shape(&input.shape, rank);
         input.strides = broadcast::compute_strides(&input.aligned_shape);
     }
 
@@ -683,13 +683,6 @@ fn canonical_shape(shape: &[usize]) -> Vec<usize> {
         1 => vec![shape[0], 1],
         _ => shape.to_vec(),
     }
-}
-
-fn align_shape(shape: &[usize], rank: usize) -> Vec<usize> {
-    let mut out = Vec::with_capacity(rank);
-    out.extend(std::iter::repeat_n(1, rank.saturating_sub(shape.len())));
-    out.extend_from_slice(shape);
-    out
 }
 
 fn shape_len_checked(builtin: &'static str, shape: &[usize]) -> BuiltinResult<usize> {
@@ -1296,6 +1289,27 @@ mod tests {
         assert!(
             (actual - expected).abs() <= tolerance,
             "expected {expected}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn black_scholes_broadcast_indexing_appends_trailing_singletons() {
+        let inputs = BroadcastInputs::from_values(
+            BLSPRICE,
+            vec![
+                Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+                Value::Tensor(
+                    Tensor::new(vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0], vec![2, 1, 3]).unwrap(),
+                ),
+            ],
+        )
+        .unwrap();
+        assert_eq!(inputs.shape, vec![2, 1, 3]);
+        assert_eq!(
+            (0..inputs.len)
+                .map(|index| inputs.arg(0, index))
+                .collect::<Vec<_>>(),
+            vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0]
         );
     }
 

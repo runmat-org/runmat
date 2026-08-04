@@ -436,6 +436,49 @@ pub(super) fn pad_dims(mut dims: Vec<usize>, rank: usize) -> Vec<usize> {
     dims
 }
 
+pub(super) fn matlab_broadcast_shapes(
+    operation: &str,
+    lhs: &[usize],
+    rhs: &[usize],
+    max_rank: usize,
+) -> Result<(Vec<usize>, Vec<usize>, Vec<usize>)> {
+    let rank = lhs.len().max(rhs.len());
+    ensure!(
+        rank <= max_rank,
+        "{operation}: broadcast rank exceeds limit"
+    );
+    let mut lhs = if rank >= 2 {
+        canonical_matrix_shape(lhs)
+    } else {
+        lhs.to_vec()
+    };
+    lhs.resize(rank, 1);
+    let mut rhs = if rank >= 2 {
+        canonical_matrix_shape(rhs)
+    } else {
+        rhs.to_vec()
+    };
+    rhs.resize(rank, 1);
+    let mut output = Vec::with_capacity(rank);
+    for (index, (&left, &right)) in lhs.iter().zip(&rhs).enumerate() {
+        output.push(if left == right {
+            left
+        } else if left == 1 {
+            right
+        } else if right == 1 {
+            left
+        } else {
+            return Err(anyhow!(
+                "{operation}: non-singleton dimension mismatch (dimension {}: {} vs {})",
+                index + 1,
+                left,
+                right
+            ));
+        });
+    }
+    Ok((lhs, rhs, output))
+}
+
 pub(super) fn compute_page_strides(dims: &[usize]) -> Vec<usize> {
     let mut stride = 1usize;
     let mut out = Vec::with_capacity(dims.len());

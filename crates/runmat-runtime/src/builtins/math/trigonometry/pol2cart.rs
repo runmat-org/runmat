@@ -8,12 +8,12 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::common::{broadcast, gpu_helpers};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::shape_rules::element_count_if_known;
 
@@ -665,18 +665,18 @@ fn compute_pol2cart(
 
 fn matlab_broadcast_shape(left: &[usize], right: &[usize]) -> BuiltinResult<Vec<usize>> {
     let rank = left.len().max(right.len());
+    let left = broadcast::align_shape(left, rank);
+    let right = broadcast::align_shape(right, rank);
     let mut shape = Vec::with_capacity(rank);
     for dim in 0..rank {
-        let a = left.get(dim).copied().unwrap_or(1);
-        let b = right.get(dim).copied().unwrap_or(1);
+        let a = left[dim];
+        let b = right[dim];
         if a == b {
             shape.push(a);
         } else if a == 1 {
             shape.push(b);
         } else if b == 1 {
             shape.push(a);
-        } else if a == 0 || b == 0 {
-            shape.push(0);
         } else {
             return Err(pol2cart_error(
                 &ERROR_SIZE_MISMATCH,
@@ -696,24 +696,7 @@ fn matlab_broadcast_type_shape(
     left: &[Option<usize>],
     right: &[Option<usize>],
 ) -> Vec<Option<usize>> {
-    let rank = left.len().max(right.len());
-    let mut shape = Vec::with_capacity(rank);
-    for dim in 0..rank {
-        let a = left.get(dim).copied().unwrap_or(Some(1));
-        let b = right.get(dim).copied().unwrap_or(Some(1));
-        let out = match (a, b) {
-            (Some(a), Some(b)) if a == b => Some(a),
-            (Some(1), Some(b)) => Some(b),
-            (Some(a), Some(1)) => Some(a),
-            (Some(0), Some(_)) | (Some(_), Some(0)) => Some(0),
-            (Some(_), Some(_)) => None,
-            (Some(1), None) | (None, Some(1)) | (None, None) => None,
-            (Some(a), None) => Some(a),
-            (None, Some(b)) => Some(b),
-        };
-        shape.push(out);
-    }
-    shape
+    runmat_builtins::shape_rules::broadcast_shapes(left, right)
 }
 
 #[derive(Debug)]

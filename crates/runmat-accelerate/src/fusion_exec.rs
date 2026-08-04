@@ -232,6 +232,37 @@ fn resolve_image_scalar_value(
     }
 }
 
+fn runtime_broadcast_shape(values: &[Value]) -> Option<Vec<usize>> {
+    let mut shapes: Vec<Vec<usize>> = Vec::new();
+    for value in values {
+        match value {
+            Value::GpuTensor(handle) => shapes.push(handle.shape.clone()),
+            Value::Tensor(tensor) => shapes.push(tensor.shape.clone()),
+            Value::Num(_) | Value::Int(_) => shapes.push(Vec::new()),
+            _ => return None,
+        }
+    }
+    let rank = shapes.iter().map(Vec::len).max().unwrap_or(0);
+    let mut output = vec![1usize; rank];
+    for mut shape in shapes {
+        if shape.len() == 1 && rank >= 2 {
+            shape.insert(0, 1);
+        }
+        for (dimension, &extent) in shape.iter().enumerate() {
+            let current = output[dimension];
+            if current == extent {
+                continue;
+            }
+            if current == 1 {
+                output[dimension] = extent;
+            } else if extent != 1 {
+                return None;
+            }
+        }
+    }
+    Some(output)
+}
+
 fn execute_elementwise_outputs(
     request: &FusionExecutionRequest<'_>,
     output_ids: &[ValueId],
@@ -253,36 +284,6 @@ fn execute_elementwise_outputs(
     }
     reject_native_integer_fusion_inputs(&request)?;
     // Determine output shape from the fusion plan; if unknown, derive from runtime inputs via broadcasting.
-    fn runtime_broadcast_shape(values: &[Value]) -> Option<Vec<usize>> {
-        // Collect shapes; scalars map to empty shape which broadcasts to any
-        let mut shapes: Vec<Vec<usize>> = Vec::new();
-        for v in values {
-            match v {
-                Value::GpuTensor(h) => shapes.push(h.shape.clone()),
-                Value::Tensor(t) => shapes.push(t.shape.clone()),
-                Value::Num(_) | Value::Int(_) => shapes.push(Vec::new()),
-                _ => return None, // unsupported at runtime for broadcasting
-            }
-        }
-        let rank = shapes.iter().map(|s| s.len()).max().unwrap_or(0);
-        let mut out = vec![1usize; rank];
-        for shape in shapes {
-            let offset = rank.saturating_sub(shape.len());
-            for (i, &dim) in shape.iter().enumerate() {
-                let j = offset + i;
-                let a = out[j];
-                let b = dim;
-                if a == 1 {
-                    out[j] = b.max(1);
-                } else if b == 1 || a == b {
-                    // keep a
-                } else {
-                    return None; // incompatible
-                }
-            }
-        }
-        Some(out)
-    }
     // Determine output shape from the fusion plan and derive the element count from it.
     let runtime_shape = runtime_broadcast_shape(&request.inputs);
     let mut output_shape = match &request.plan.group.shape {
@@ -1259,5 +1260,36 @@ mod tests {
         assert_eq!(value_to_f64(&value), Some(1.25));
         reject_native_integer_fusion_values(std::slice::from_ref(&value), &[])
             .expect("floating fusion input remains supported");
+    }
+
+    #[test]
+    fn runtime_broadcast_appends_missing_singletons_and_enforces_zero_rules() {
+        let tensor = |shape: Vec<usize>| {
+            Value::Tensor(
+                runmat_builtins::Tensor::new(vec![0.0; shape.iter().product()], shape)
+                    .expect("test tensor"),
+            )
+        };
+
+        assert_eq!(
+            runtime_broadcast_shape(&[tensor(vec![2, 3]), tensor(vec![2, 3, 4])]),
+            Some(vec![2, 3, 4])
+        );
+        assert_eq!(
+            runtime_broadcast_shape(&[tensor(vec![2, 3]), tensor(vec![1, 2, 3])]),
+            None
+        );
+        assert_eq!(
+            runtime_broadcast_shape(&[tensor(vec![0, 3]), tensor(vec![1, 3])]),
+            Some(vec![0, 3])
+        );
+        assert_eq!(
+            runtime_broadcast_shape(&[tensor(vec![0, 3]), tensor(vec![2, 3])]),
+            None
+        );
+        assert_eq!(
+            runtime_broadcast_shape(&[tensor(vec![3]), tensor(vec![1, 3, 2])]),
+            Some(vec![1, 3, 2])
+        );
     }
 }

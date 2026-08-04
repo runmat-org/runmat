@@ -1341,19 +1341,16 @@ fn scalar_or_exact_size_plan(
     };
     let same_size = || {
         let rank = lhs_shape.len().max(rhs_shape.len()).max(2);
-        (0..rank).all(|dimension| {
-            lhs_shape.get(dimension).copied().unwrap_or(1)
-                == rhs_shape.get(dimension).copied().unwrap_or(1)
-        })
+        let lhs = crate::builtins::common::broadcast::align_shape(lhs_shape, rank);
+        let rhs = crate::builtins::common::broadcast::align_shape(rhs_shape, rank);
+        lhs == rhs
     };
     if !scalar(lhs_shape) && !scalar(rhs_shape) && !same_size() {
         return Err("inputs must be scalar or have exactly the same size".to_string());
     }
     let rank = lhs_shape.len().max(rhs_shape.len());
-    let mut lhs_canonical = lhs_shape.to_vec();
-    lhs_canonical.resize(rank, 1);
-    let mut rhs_canonical = rhs_shape.to_vec();
-    rhs_canonical.resize(rank, 1);
+    let lhs_canonical = crate::builtins::common::broadcast::align_shape(lhs_shape, rank);
+    let rhs_canonical = crate::builtins::common::broadcast::align_shape(rhs_shape, rank);
     BroadcastPlan::new(&lhs_canonical, &rhs_canonical)
 }
 
