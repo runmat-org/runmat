@@ -128,12 +128,16 @@ async fn worker_launch_uses_only_scoped_bootstrap_material() {
         )
         .await
         .unwrap();
-    for _ in 0..20 {
-        if !processes.reap_finished().unwrap().is_empty() {
-            break;
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            if !processes.reap_finished().unwrap().is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
+    })
+    .await
+    .expect("worker helper did not finish");
     assert_eq!(
         std::fs::read_to_string(&sandbox.stdout).unwrap(),
         "scoped-ticket|9|unset"

@@ -18,23 +18,32 @@ async fn client(org: Option<Uuid>) -> Result<(public_api::Client, String)> {
     Ok((build_public_client(&server_url, &token)?, org_id))
 }
 
-pub async fn list(org: Option<Uuid>, limit: Option<u32>, cursor: Option<String>) -> Result<()> {
+pub async fn list(
+    org: Option<Uuid>,
+    limit: Option<u32>,
+    cursor: Option<String>,
+    json: bool,
+) -> Result<()> {
     let (client, org_id) = client(org).await?;
     let response = client
         .list_clusters(&org_id, cursor.as_deref(), nonzero_limit(limit)?)
         .await
         .map_err(map_public_error)?
         .into_inner();
-    for cluster in response.clusters {
-        println!(
-            "{}\t{}\t{}\t{}",
-            cluster.id,
-            cluster.name,
-            cluster.state,
-            cluster.queues.join(",")
-        );
+    if json {
+        println!("{}", serde_json::to_string(&response)?);
+    } else {
+        for cluster in response.clusters {
+            println!(
+                "{}\t{}\t{}\t{}",
+                cluster.id,
+                cluster.name,
+                cluster.state,
+                cluster.queues.join(",")
+            );
+        }
+        print_cursor(response.next_cursor);
     }
-    print_cursor(response.next_cursor);
     Ok(())
 }
 
@@ -43,6 +52,7 @@ pub async fn create(
     name: String,
     project_id: Option<String>,
     queues: Vec<String>,
+    json: bool,
 ) -> Result<()> {
     let (client, org_id) = client(org).await?;
     let cluster = client
@@ -57,7 +67,11 @@ pub async fn create(
         .await
         .map_err(map_public_error)?
         .into_inner();
-    println!("{}\t{}\t{}", cluster.id, cluster.name, cluster.state);
+    if json {
+        println!("{}", serde_json::to_string(&cluster)?);
+    } else {
+        println!("{}\t{}\t{}", cluster.id, cluster.name, cluster.state);
+    }
     Ok(())
 }
 
@@ -65,6 +79,7 @@ pub async fn set_state(
     org: Option<Uuid>,
     cluster_id: String,
     state: ClusterStateArg,
+    json: bool,
 ) -> Result<()> {
     let (client, org_id) = client(org).await?;
     let state = match state {
@@ -81,7 +96,11 @@ pub async fn set_state(
         .await
         .map_err(map_public_error)?
         .into_inner();
-    println!("{}\t{}\t{}", cluster.id, cluster.name, cluster.state);
+    if json {
+        println!("{}", serde_json::to_string(&cluster)?);
+    } else {
+        println!("{}\t{}\t{}", cluster.id, cluster.name, cluster.state);
+    }
     Ok(())
 }
 
@@ -90,6 +109,7 @@ pub async fn enroll(
     cluster_id: String,
     ttl_seconds: i64,
     requested_identity_fingerprint: Option<String>,
+    json: bool,
 ) -> Result<()> {
     let (client, org_id) = client(org).await?;
     let enrollment = client
@@ -104,10 +124,14 @@ pub async fn enroll(
         .await
         .map_err(map_public_error)?
         .into_inner();
-    println!(
-        "{}\t{}\t{}\t{}",
-        enrollment.id, enrollment.cluster_id, enrollment.expires_at, enrollment.token
-    );
+    if json {
+        println!("{}", serde_json::to_string(&enrollment)?);
+    } else {
+        println!(
+            "{}\t{}\t{}\t{}",
+            enrollment.id, enrollment.cluster_id, enrollment.expires_at, enrollment.token
+        );
+    }
     Ok(())
 }
 
@@ -116,6 +140,7 @@ pub async fn list_nodes(
     cluster_id: String,
     limit: Option<u32>,
     cursor: Option<String>,
+    json: bool,
 ) -> Result<()> {
     let (client, org_id) = client(org).await?;
     let response = client
@@ -128,13 +153,17 @@ pub async fn list_nodes(
         .await
         .map_err(map_public_error)?
         .into_inner();
-    for node in response.nodes {
-        println!(
-            "{}\t{}\t{}\t{}",
-            node.id, node.state, node.identity_fingerprint, node.heartbeat_expires_at
-        );
+    if json {
+        println!("{}", serde_json::to_string(&response)?);
+    } else {
+        for node in response.nodes {
+            println!(
+                "{}\t{}\t{}\t{}",
+                node.id, node.state, node.identity_fingerprint, node.heartbeat_expires_at
+            );
+        }
+        print_cursor(response.next_cursor);
     }
-    print_cursor(response.next_cursor);
     Ok(())
 }
 
@@ -143,6 +172,7 @@ pub async fn set_node_state(
     cluster_id: String,
     node_id: String,
     state: NodeStateArg,
+    json: bool,
 ) -> Result<()> {
     let (client, org_id) = client(org).await?;
     let state = match state {
@@ -161,7 +191,11 @@ pub async fn set_node_state(
         .await
         .map_err(map_public_error)?
         .into_inner();
-    println!("{}\t{}\t{}", node.id, node.state, node.heartbeat_expires_at);
+    if json {
+        println!("{}", serde_json::to_string(&node)?);
+    } else {
+        println!("{}\t{}\t{}", node.id, node.state, node.heartbeat_expires_at);
+    }
     Ok(())
 }
 

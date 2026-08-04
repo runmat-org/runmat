@@ -29,5 +29,9 @@ runmat-execution-artifact = { workspace = true }
 runmat-process-host = { workspace = true }
 runmat-server-client = { workspace = true }
 
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.8.1"
+windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }
+
 [dev-dependencies]
 tempfile = "3.12"

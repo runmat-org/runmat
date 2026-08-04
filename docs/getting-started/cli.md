@@ -165,6 +165,35 @@ Common options:
 
 Configuration is resolved from built-in defaults, project files, environment variables, and CLI flags. CLI flags have the highest precedence. See [Configuration Reference](/docs/runtime/getting-started/config).
 
+## Clusters and Remote Jobs
+
+Cluster administration, enrollment, and durable encrypted jobs use the active Server, organization, and project credentials:
+
+```bash
+runmat cluster list
+runmat cluster create --name workstation-pool --queue default
+runmat cluster enroll CLUSTER_ID --ttl-seconds 900
+runmat cluster nodes CLUSTER_ID
+runmat cluster node-state CLUSTER_ID NODE_ID draining
+
+runmat job submit analysis.m --cluster CLUSTER_ID --trust-identity SHA256_FINGERPRINT --detach
+runmat job list
+runmat job show RUN_ID
+runmat job attach RUN_ID
+runmat job cancel RUN_ID
+```
+
+Every cluster command and every durable job observation/mutation supports `--json`. JSON mode emits one complete stable API object or page and never includes ANSI escapes; human list mode remains stable tab-separated output. Enrollment output contains a single-use secret, so avoid shell history and logs and prefer JSON-to-secret-store automation when scripting it.
+
+The node agent can run in the foreground for diagnosis or install its native systemd, launchd, or Windows service. Generate a dry-run plan before changing a host:
+
+```bash
+runmat-node-agent --server https://api.runmat.com --runmat /usr/local/bin/runmat service install --dry-run
+sudo runmat-node-agent --server https://api.runmat.com --runmat /usr/local/bin/runmat service install
+```
+
+Service installation persists only non-secret configuration. Enrollment credentials remain in the private state directory, service removal preserves that identity for safe reinstall, and retiring a host requires revoking the node before deleting its state. See the node-agent README and `runmat-node-agent --help` for platform paths and the foreground enrollment flow.
+
 ## Packages
 
 Package resolution is available directly and is also applied automatically by run, REPL, check, benchmark, and bytecode workflows:

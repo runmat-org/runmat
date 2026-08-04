@@ -486,16 +486,24 @@ mod tests {
             "01234567-89ab-cdef-0123-456789abcdef",
             "clu_0123456789abcdef0123456789abcdef",
             "draining",
+            "--json",
         ])
         .unwrap();
         let Some(Commands::Cluster {
-            cluster_command: ClusterCommand::State { cluster, state, .. },
+            cluster_command:
+                ClusterCommand::State {
+                    cluster,
+                    state,
+                    json,
+                    ..
+                },
         }) = cli.command
         else {
             panic!("expected cluster state command");
         };
         assert_eq!(cluster, "clu_0123456789abcdef0123456789abcdef");
         assert!(matches!(state, ClusterStateArg::Draining));
+        assert!(json);
     }
 }
 

@@ -11,6 +11,8 @@ pub enum ClusterCommand {
         limit: Option<u32>,
         #[arg(long)]
         cursor: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
     /// Create a cluster
     Create {
@@ -22,6 +24,8 @@ pub enum ClusterCommand {
         project: Option<String>,
         #[arg(long = "queue", default_value = "default")]
         queues: Vec<String>,
+        #[arg(long)]
+        json: bool,
     },
     /// Change a cluster's scheduling state
     State {
@@ -29,6 +33,8 @@ pub enum ClusterCommand {
         org: Option<Uuid>,
         cluster: String,
         state: ClusterStateArg,
+        #[arg(long)]
+        json: bool,
     },
     /// Create a single-use node enrollment token
     Enroll {
@@ -39,6 +45,8 @@ pub enum ClusterCommand {
         ttl_seconds: i64,
         #[arg(long)]
         identity_fingerprint: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
     /// List nodes enrolled in a cluster
     Nodes {
@@ -49,6 +57,8 @@ pub enum ClusterCommand {
         limit: Option<u32>,
         #[arg(long)]
         cursor: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
     /// Change an enrolled node's lifecycle state
     NodeState {
@@ -57,6 +67,8 @@ pub enum ClusterCommand {
         cluster: String,
         node: String,
         state: NodeStateArg,
+        #[arg(long)]
+        json: bool,
     },
 }
 

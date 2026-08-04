@@ -35,36 +35,46 @@ pub async fn execute_org_command(command: OrgCommand) -> Result<()> {
 
 pub async fn execute_cluster_command(command: ClusterCommand) -> Result<()> {
     match command {
-        ClusterCommand::List { org, limit, cursor } => clusters::list(org, limit, cursor).await,
+        ClusterCommand::List {
+            org,
+            limit,
+            cursor,
+            json,
+        } => clusters::list(org, limit, cursor, json).await,
         ClusterCommand::Create {
             org,
             name,
             project,
             queues,
-        } => clusters::create(org, name, project, queues).await,
+            json,
+        } => clusters::create(org, name, project, queues, json).await,
         ClusterCommand::State {
             org,
             cluster,
             state,
-        } => clusters::set_state(org, cluster, state).await,
+            json,
+        } => clusters::set_state(org, cluster, state, json).await,
         ClusterCommand::Enroll {
             org,
             cluster,
             ttl_seconds,
             identity_fingerprint,
-        } => clusters::enroll(org, cluster, ttl_seconds, identity_fingerprint).await,
+            json,
+        } => clusters::enroll(org, cluster, ttl_seconds, identity_fingerprint, json).await,
         ClusterCommand::Nodes {
             org,
             cluster,
             limit,
             cursor,
-        } => clusters::list_nodes(org, cluster, limit, cursor).await,
+            json,
+        } => clusters::list_nodes(org, cluster, limit, cursor, json).await,
         ClusterCommand::NodeState {
             org,
             cluster,
             node,
             state,
-        } => clusters::set_node_state(org, cluster, node, state).await,
+            json,
+        } => clusters::set_node_state(org, cluster, node, state, json).await,
     }
 }
 

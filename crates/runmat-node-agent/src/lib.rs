@@ -5,8 +5,9 @@ pub mod enrollment;
 pub mod inventory;
 pub mod platform;
 pub mod service;
+pub mod service_install;
 
-pub use config::AgentConfig;
+pub use config::{AgentConfig, AgentFileConfig};
 
 #[derive(Debug, thiserror::Error)]
 pub enum AgentError {
