@@ -40357,6 +40357,26 @@
           "when": "Internal tensor/container conversion fails.",
           "message": "gpuArray: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "gpuarray-size-arguments",
+          "mode": "RunMatOnly",
+          "description": "gpuArray size arguments are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GpuArraySizeExtension"
+        },
+        {
+          "id": "gpuarray-dtype-selector",
+          "mode": "RunMatOnly",
+          "description": "gpuArray dtype selectors are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GpuArrayDtypeExtension"
+        },
+        {
+          "id": "gpuarray-like",
+          "mode": "RunMatOnly",
+          "description": "the gpuArray \"like\" prototype selector is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GpuArrayLikeExtension"
+        }
       ]
     },
     {

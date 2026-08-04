@@ -189,6 +189,9 @@ mod tests {
         assert_eq!(
             declared,
             std::collections::BTreeSet::from([
+                ("gpuArray", "gpuarray-dtype-selector"),
+                ("gpuArray", "gpuarray-like"),
+                ("gpuArray", "gpuarray-size-arguments"),
                 ("meshgrid", "meshgrid-complex-axes"),
                 ("meshgrid", "meshgrid-like"),
                 ("randi", "randi-implicit-prototype"),

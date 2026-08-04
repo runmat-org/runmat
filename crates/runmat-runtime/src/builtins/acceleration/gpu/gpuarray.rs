@@ -1,9 +1,7 @@
 //! MATLAB-compatible `gpuArray` builtin that uploads host data to the active accelerator.
 //!
-//! The implementation mirrors MathWorks MATLAB semantics, including optional
-//! size arguments, `'like'` prototypes, and explicit dtype toggles. When no
-//! acceleration provider is registered the builtin surfaces a MATLAB-style
-//! error, ensuring callers know residency could not be established.
+//! Direct `gpuArray(X)` upload follows MATLAB semantics. Optional size arguments,
+//! `'like'` prototypes, and explicit dtype toggles are RunMat-mode extensions.
 
 use crate::builtins::acceleration::gpu::type_resolvers::gpuarray_type;
 use crate::builtins::common::spec::{
@@ -16,16 +14,43 @@ use runmat_accelerate_api::{
     HostTensorView, ProviderPrecision,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericStorage, Tensor,
-    Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor, CharArray, ComplexTensor, IntValue,
+    IntegerStorage, NumericDType, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "gpuArray";
+
+const GPUARRAY_SIZE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "gpuarray-size-arguments",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "gpuArray size arguments are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:GpuArraySizeExtension"),
+};
+
+const GPUARRAY_DTYPE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "gpuarray-dtype-selector",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "gpuArray dtype selectors are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:GpuArrayDtypeExtension"),
+};
+
+const GPUARRAY_LIKE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "gpuarray-like",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "the gpuArray \"like\" prototype selector is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:GpuArrayLikeExtension"),
+};
+
+pub const GPUARRAY_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    GPUARRAY_SIZE_EXTENSION,
+    GPUARRAY_DTYPE_EXTENSION,
+    GPUARRAY_LIKE_EXTENSION,
+];
 
 const GPUARRAY_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "G",
@@ -352,10 +377,29 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     type_resolver(gpuarray_type),
     descriptor(crate::builtins::acceleration::gpu::gpuarray::GPUARRAY_DESCRIPTOR),
+    extensions(crate::builtins::acceleration::gpu::gpuarray::GPUARRAY_EXTENSIONS),
     builtin_path = "crate::builtins::acceleration::gpu::gpuarray"
 )]
 async fn gpu_array_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let options = parse_options(&rest)?;
+    if options.dims.is_some() {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &GPUARRAY_SIZE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if options.explicit_dtype.is_some() {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &GPUARRAY_DTYPE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if options.prototype.is_some() {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &GPUARRAY_LIKE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let incoming_precision = match &value {
         Value::GpuTensor(handle) => runmat_accelerate_api::handle_precision(handle),
         _ => None,
@@ -1237,6 +1281,16 @@ pub(crate) mod tests {
     };
 
     fn call(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        block_on(gpu_array_builtin(value, rest))
+    }
+
+    fn call_with_mode(
+        value: Value,
+        rest: Vec<Value>,
+        extensions_enabled: bool,
+    ) -> crate::BuiltinResult<Value> {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(extensions_enabled);
         block_on(gpu_array_builtin(value, rest))
     }
 
@@ -1254,6 +1308,32 @@ pub(crate) mod tests {
                 (ar - er).abs() < 1e-12 && (ai - ei).abs() < 1e-12,
                 "at {idx}: expected ({er}, {ei}), got ({ar}, {ai})"
             );
+        }
+    }
+
+    #[test]
+    fn gpu_array_extra_construction_forms_follow_compatibility_mode() {
+        test_support::with_test_provider(|_| {
+            call_with_mode(Value::Num(1.0), Vec::new(), false)
+                .expect("MATLAB mode accepts documented gpuArray(X)");
+        });
+        for (rest, identifier) in [
+            (
+                vec![Value::from(1i32), Value::from(1i32)],
+                "RunMat:compatibility:GpuArraySizeExtension",
+            ),
+            (
+                vec![Value::from("uint8")],
+                "RunMat:compatibility:GpuArrayDtypeExtension",
+            ),
+            (
+                vec![Value::from("like"), Value::Num(0.0)],
+                "RunMat:compatibility:GpuArrayLikeExtension",
+            ),
+        ] {
+            let error = call_with_mode(Value::Num(1.0), rest, false)
+                .expect_err("MATLAB mode rejects extra gpuArray construction form");
+            assert_eq!(error.identifier(), Some(identifier));
         }
     }
 

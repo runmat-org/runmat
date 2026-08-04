@@ -367,6 +367,36 @@ fn test_generator_grid_extensions_follow_session_compatibility_mode() {
 }
 
 #[test]
+fn test_gpuarray_construction_extensions_follow_session_compatibility_mode() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+        for (source, identifier) in [
+            (
+                "out = gpuArray(1, 1, 1);",
+                "RunMat:compatibility:GpuArraySizeExtension",
+            ),
+            (
+                "out = gpuArray(1, 'uint8');",
+                "RunMat:compatibility:GpuArrayDtypeExtension",
+            ),
+            (
+                "out = gpuArray(1, 'like', uint8(0));",
+                "RunMat:compatibility:GpuArrayLikeExtension",
+            ),
+        ] {
+            let outcome = runmat_core::execute_text_request_for_testing(&mut engine, source)
+                .expect("runtime failure should be returned in the execution outcome");
+            assert_eq!(
+                outcome.error.as_ref().and_then(|error| error.identifier()),
+                Some(identifier),
+                "{source}"
+            );
+        }
+    });
+}
+
+#[test]
 fn test_sparse_integer_outputs_follow_session_compatibility_mode() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
