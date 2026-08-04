@@ -5111,6 +5111,19 @@ pub struct BuiltinDescriptor {
     pub errors: &'static [BuiltinErrorDescriptor],
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinExtensionMode {
+    RunMatOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct BuiltinExtensionDescriptor {
+    pub id: &'static str,
+    pub mode: BuiltinExtensionMode,
+    pub description: &'static str,
+    pub error_identifier: Option<&'static str>,
+}
+
 /// Simple builtin function definition using the unified type system
 #[derive(Debug, Clone)]
 pub struct BuiltinFunction {
@@ -5127,6 +5140,7 @@ pub struct BuiltinFunction {
     pub is_sink: bool,
     pub suppress_auto_output: bool,
     pub descriptor: Option<&'static BuiltinDescriptor>,
+    pub extensions: &'static [BuiltinExtensionDescriptor],
 }
 
 impl BuiltinFunction {
@@ -5159,6 +5173,7 @@ impl BuiltinFunction {
             is_sink,
             suppress_auto_output,
             descriptor: None,
+            extensions: &[],
         }
     }
 
@@ -5172,6 +5187,11 @@ impl BuiltinFunction {
         descriptor: Option<&'static BuiltinDescriptor>,
     ) -> Self {
         self.descriptor = descriptor;
+        self
+    }
+
+    pub fn with_extensions(mut self, extensions: &'static [BuiltinExtensionDescriptor]) -> Self {
+        self.extensions = extensions;
         self
     }
 

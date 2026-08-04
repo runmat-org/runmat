@@ -45,6 +45,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut type_resolver_path: Option<syn::Path> = None;
     let mut type_resolver_ctx_path: Option<syn::Path> = None;
     let mut descriptor_path: Option<syn::Path> = None;
+    let mut extensions_path: Option<syn::Path> = None;
     let mut sink_flag = false;
     let mut suppress_auto_output_flag = false;
     for arg in args {
@@ -141,6 +142,17 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                     descriptor_path = Some(path.clone());
                 } else {
                     panic!("descriptor expects a path argument");
+                }
+            }
+            NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("extensions") => {
+                if list.nested.len() != 1 {
+                    panic!("extensions expects exactly one path argument");
+                }
+                let nested = list.nested.first().unwrap();
+                if let NestedMeta::Meta(Meta::Path(path)) = nested {
+                    extensions_path = Some(path.clone());
+                } else {
+                    panic!("extensions expects a path argument");
                 }
             }
             _ => {}
@@ -353,6 +365,11 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     } else {
         quote! { None }
     };
+    let extensions_expr = if let Some(path) = extensions_path.as_ref() {
+        quote! { &#path }
+    } else {
+        quote! { &[] }
+    };
 
     let builtin_expr = quote! {
         runmat_builtins::BuiltinFunction::new(
@@ -368,7 +385,9 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             #accel_slice,
             #sink_bool,
             #suppress_auto_output_bool,
-        ).with_descriptor_option(#descriptor_expr)
+        )
+        .with_descriptor_option(#descriptor_expr)
+        .with_extensions(#extensions_expr)
     };
 
     let doc_expr = quote! {

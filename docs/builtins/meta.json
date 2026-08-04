@@ -82857,6 +82857,20 @@
           "when": "Dimension arguments fail numeric/shape parsing.",
           "message": "randi: dimension arguments must be numeric and nonnegative"
         }
+      ],
+      "extensions": [
+        {
+          "id": "randi-wide-integer-output",
+          "mode": "RunMatOnly",
+          "description": "int64 and uint64 output classes are RunMat extensions",
+          "error_identifier": "RunMat:compatibility:RandiWideIntegerExtension"
+        },
+        {
+          "id": "randi-implicit-prototype",
+          "mode": "RunMatOnly",
+          "description": "the bare randi(bounds, prototype) shorthand is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RandiImplicitPrototypeExtension"
+        }
       ]
     },
     {
@@ -94466,6 +94480,14 @@
           "identifier": "RunMat:sparse:Internal",
           "when": "Sparse matrix materialisation fails internally.",
           "message": "sparse: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "sparse-integer-storage",
+          "mode": "RunMatOnly",
+          "description": "sparse integer storage is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SparseIntegerExtension"
         }
       ]
     },

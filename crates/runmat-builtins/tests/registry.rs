@@ -1,7 +1,8 @@
 use runmat_builtins::{
     builtin_function_by_name, builtin_functions, AccelTag, BuiltinCompletionPolicy,
-    BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CellArray, Tensor, Value,
+    BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor, BuiltinExtensionMode,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CellArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -89,6 +90,12 @@ const ADD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::HiddenInternal,
     errors: &TEST_ERRORS,
 };
+const ADD_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [BuiltinExtensionDescriptor {
+    id: "test-add-extension",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "test-only add extension",
+    error_identifier: None,
+}];
 const SUB_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SUB_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -117,6 +124,7 @@ const MUL_ADD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "add",
     descriptor(crate::ADD_DESCRIPTOR),
+    extensions(crate::ADD_EXTENSIONS),
     builtin_path = "tests::add"
 )]
 fn add(x: i32, y: i32) -> Result<i32, String> {
@@ -174,6 +182,14 @@ fn contains_registered_functions() {
 fn binary_accel_metadata_maps_to_elementwise_tag() {
     let builtin = builtin_function_by_name("mul_add").expect("registered builtin");
     assert_eq!(builtin.accel_tags, &[AccelTag::Elementwise]);
+}
+
+#[test]
+fn extension_metadata_is_registered_declaratively() {
+    let add = builtin_function_by_name("add").expect("registered builtin");
+    assert_eq!(add.extensions, &ADD_EXTENSIONS);
+    let sub = builtin_function_by_name("sub").expect("registered builtin");
+    assert!(sub.extensions.is_empty());
 }
 
 #[test]

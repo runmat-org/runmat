@@ -100,6 +100,8 @@ RunMat extends the MATLAB language with intentional language features that are n
 
 The existence of a useful internal representation or implementation path does not by itself justify exposing a new language behavior. Extensions must be intentional, documented, and tested.
 
+Each mode-gated builtin signature or option must register a stable extension identifier, required compatibility mode, description, and error identifier in builtin metadata, and its implementation must enforce that same declaration through the shared runtime compatibility guard. This keeps documentation, tooling, and execution policy queryable from one registration record while allowing argument-dependent extension forms within an otherwise MATLAB-compatible builtin.
+
 Typed sparse integer storage is one mode-gated extension. MATLAB-compatible modes accept only documented `double`, `single`, and `logical` sparse payloads and reject construction, conversion, restoration, indexed access or assignment, and operation results that would expose sparse integer storage; `runmat` mode may preserve exact signed or unsigned sparse integer payloads. Sparse values remain host-resident in every mode because the current acceleration interface exposes dense tensor handles rather than native sparse device storage.
 
 ## Evidence policy

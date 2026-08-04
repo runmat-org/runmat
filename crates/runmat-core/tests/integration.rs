@@ -241,6 +241,10 @@ fn test_randi_wide_integer_outputs_follow_session_compatibility_mode() {
             "matlab mode must reject the wide randi extension: {:?}",
             matlab.error
         );
+        assert_eq!(
+            matlab.error.as_ref().and_then(|error| error.identifier()),
+            Some("RunMat:compatibility:RandiWideIntegerExtension")
+        );
 
         engine.set_compat_mode(CompatMode::RunMat);
         let runmat = runmat_core::execute_text_request_for_testing(
@@ -252,6 +256,69 @@ fn test_randi_wide_integer_outputs_follow_session_compatibility_mode() {
         assert_eq!(
             runmat.value,
             Some(runmat_builtins::Value::String("int64".to_string()))
+        );
+    });
+}
+
+#[test]
+fn test_randi_prototype_forms_follow_session_compatibility_mode() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+        let documented = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "p = uint8(zeros(2,3)); out = randi(5, 'like', p); numel(out)",
+        )
+        .expect("documented like form");
+        assert!(documented.error.is_none(), "{:?}", documented.error);
+        assert_eq!(documented.value, Some(runmat_builtins::Value::Num(1.0)));
+
+        let rejected = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "p = false(2,3); out = randi([0 1], p);",
+        )
+        .expect("runtime failure should be returned in the execution outcome");
+        assert_eq!(
+            rejected.error.as_ref().and_then(|error| error.identifier()),
+            Some("RunMat:compatibility:RandiImplicitPrototypeExtension")
+        );
+
+        engine.set_compat_mode(CompatMode::RunMat);
+        let extension = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "p = false(2,3); out = randi([0 1], p); numel(out)",
+        )
+        .expect("runmat mode should enable the bare prototype shorthand");
+        assert!(extension.error.is_none(), "{:?}", extension.error);
+        assert_eq!(extension.value, Some(runmat_builtins::Value::Num(6.0)));
+    });
+}
+
+#[test]
+fn test_sparse_integer_outputs_follow_session_compatibility_mode() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+        let matlab = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = sparse(uint64([1 2]));",
+        )
+        .expect("runtime failure should be returned in the execution outcome");
+        assert_eq!(
+            matlab.error.as_ref().and_then(|error| error.identifier()),
+            Some("RunMat:compatibility:SparseIntegerExtension")
+        );
+
+        engine.set_compat_mode(CompatMode::RunMat);
+        let runmat = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = sparse(uint64([1 2])); class(out)",
+        )
+        .expect("runmat mode should enable sparse integer storage");
+        assert!(runmat.error.is_none(), "{:?}", runmat.error);
+        assert_eq!(
+            runmat.value,
+            Some(runmat_builtins::Value::String("uint64".to_string()))
         );
     });
 }

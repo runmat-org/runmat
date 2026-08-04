@@ -324,6 +324,7 @@ fn sparse_error(
     accel = "custom",
     type_resolver(sparse_type),
     descriptor(crate::builtins::array::creation::sparse::SPARSE_DESCRIPTOR),
+    extensions(crate::compatibility::SPARSE_EXTENSIONS),
     builtin_path = "crate::builtins::array::creation::sparse"
 )]
 async fn sparse_builtin(args: Vec<Value>) -> BuiltinResult<Value> {

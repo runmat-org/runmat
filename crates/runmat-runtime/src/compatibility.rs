@@ -1,7 +1,7 @@
 //! Active language compatibility policy for runtime builtin dispatch.
 
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::Value;
+use runmat_builtins::{BuiltinExtensionDescriptor, BuiltinExtensionMode, Value};
 use runmat_thread_local::runmat_thread_local;
 use std::cell::Cell;
 use std::collections::HashSet;
@@ -21,16 +21,38 @@ pub fn set_runmat_extensions_enabled(enabled: bool) {
     RUNMAT_EXTENSIONS_ENABLED.with(|slot| slot.set(enabled));
 }
 
-/// Reject a RunMat-only sparse integer result at a MATLAB-compatible language boundary.
-pub fn ensure_sparse_integer_extension_enabled(context: &str) -> Result<(), RuntimeError> {
-    if runmat_extensions_enabled() {
+pub const SPARSE_INTEGER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "sparse-integer-storage",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "sparse integer storage is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SparseIntegerExtension"),
+};
+
+pub const SPARSE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [SPARSE_INTEGER_EXTENSION];
+
+pub fn ensure_builtin_extension_enabled(
+    extension: &BuiltinExtensionDescriptor,
+    context: &str,
+) -> Result<(), RuntimeError> {
+    let enabled = match extension.mode {
+        BuiltinExtensionMode::RunMatOnly => runmat_extensions_enabled(),
+    };
+    if enabled {
         return Ok(());
     }
-    Err(build_runtime_error(format!(
-        "{context}: sparse integer storage is a RunMat extension; enable runmat compatibility mode to use it"
-    ))
-    .with_identifier("RunMat:compatibility:SparseIntegerExtension")
-    .build())
+    let mut builder = build_runtime_error(format!(
+        "{context}: {}; enable runmat compatibility mode to use it",
+        extension.description
+    ));
+    if let Some(identifier) = extension.error_identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    Err(builder.build())
+}
+
+/// Reject a RunMat-only sparse integer result at a MATLAB-compatible language boundary.
+pub fn ensure_sparse_integer_extension_enabled(context: &str) -> Result<(), RuntimeError> {
+    ensure_builtin_extension_enabled(&SPARSE_INTEGER_EXTENSION, context)
 }
 
 /// Enforce the sparse-integer extension policy recursively for a public result.
@@ -138,6 +160,60 @@ mod tests {
         {
             let _compat = push_runmat_extensions_enabled(true);
             ensure_value_compatible(&nested, "load").expect("RunMat mode accepts");
+        }
+    }
+
+    #[test]
+    fn integer_extensions_are_declared_in_builtin_metadata() {
+        let sparse = runmat_builtins::builtin_function_by_name("sparse").expect("sparse builtin");
+        assert_eq!(sparse.extensions, &SPARSE_EXTENSIONS);
+        let randi = runmat_builtins::builtin_function_by_name("randi").expect("randi builtin");
+        assert_eq!(
+            randi.extensions,
+            &crate::builtins::array::creation::randi::RANDI_EXTENSIONS
+        );
+        assert_eq!(
+            randi.extensions[0].error_identifier,
+            Some("RunMat:compatibility:RandiWideIntegerExtension")
+        );
+
+        let declared = runmat_builtins::builtin_functions()
+            .into_iter()
+            .flat_map(|builtin| {
+                builtin
+                    .extensions
+                    .iter()
+                    .map(move |extension| (builtin.name, extension.id))
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            declared,
+            std::collections::BTreeSet::from([
+                ("randi", "randi-implicit-prototype"),
+                ("randi", "randi-wide-integer-output"),
+                ("sparse", "sparse-integer-storage"),
+            ])
+        );
+    }
+
+    #[test]
+    fn generated_builtin_catalog_matches_registered_integer_extensions() {
+        let catalog: serde_json::Value =
+            serde_json::from_str(include_str!("../../../docs/builtins/meta.json"))
+                .expect("builtin metadata catalog");
+        let builtins = catalog["builtins"].as_array().expect("builtin entries");
+        for name in ["randi", "sparse"] {
+            let registered =
+                runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+            let exported = builtins
+                .iter()
+                .find(|entry| entry["name"] == name)
+                .unwrap_or_else(|| panic!("exported {name} metadata"));
+            assert_eq!(
+                exported["extensions"],
+                serde_json::to_value(registered.extensions).expect("serialize extensions"),
+                "{name}"
+            );
         }
     }
 }

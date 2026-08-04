@@ -2,9 +2,10 @@
 
 use runmat_accelerate_api::{GpuTensorHandle, HostIntegerDataView, HostIntegerTensorView};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, IntegerStorage, LogicalArray, NumericDType, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor, IntValue, IntegerStorage, LogicalArray,
+    NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -63,6 +64,25 @@ const RANDI_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "Uniform random integers.",
 }];
+
+const RANDI_WIDE_INTEGER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "randi-wide-integer-output",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "int64 and uint64 output classes are RunMat extensions",
+    error_identifier: Some("RunMat:compatibility:RandiWideIntegerExtension"),
+};
+
+const RANDI_IMPLICIT_PROTOTYPE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "randi-implicit-prototype",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "the bare randi(bounds, prototype) shorthand is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RandiImplicitPrototypeExtension"),
+};
+
+pub const RANDI_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    RANDI_WIDE_INTEGER_EXTENSION,
+    RANDI_IMPLICIT_PROTOTYPE_EXTENSION,
+];
 
 const RANDI_SIG_IMAX_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "imax",
@@ -243,7 +263,8 @@ const RANDI_SIG_BOUNDS_PROTOTYPE_INPUTS: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::LikePrototype,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Prototype value when no numeric dimension arguments are provided.",
+        description:
+            "RunMat-only shorthand that copies prototype shape and class without a like keyword.",
     },
 ];
 
@@ -388,6 +409,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     type_resolver(randi_type),
     descriptor(crate::builtins::array::creation::randi::RANDI_DESCRIPTOR),
+    extensions(crate::builtins::array::creation::randi::RANDI_EXTENSIONS),
     builtin_path = "crate::builtins::array::creation::randi"
 )]
 async fn randi_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -412,12 +434,11 @@ enum OutputTemplate {
 }
 
 fn reject_disabled_wide_integer_extension(template: &OutputTemplate) -> crate::BuiltinResult<()> {
-    if output_template_uses_wide_integer(template)
-        && !crate::compatibility::runmat_extensions_enabled()
-    {
-        return Err(builtin_error(
-            "randi: int64 and uint64 output classes are RunMat extensions; enable runmat compatibility mode to use them",
-        ));
+    if output_template_uses_wide_integer(template) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &RANDI_WIDE_INTEGER_EXTENSION,
+            "randi",
+        )?;
     }
     Ok(())
 }
@@ -546,9 +567,6 @@ impl ParsedRandi {
                             return Err(builtin_error("randi: expected prototype after 'like'"));
                         };
                         like_proto = Some(proto.clone());
-                        if shape_source.is_none() && !saw_dims_arg {
-                            shape_source = Some(shape_from_value(&proto)?);
-                        }
                         idx += 2;
                         continue;
                     }
@@ -613,6 +631,13 @@ impl ParsedRandi {
                 implicit_proto = Some(arg.clone());
             }
             idx += 1;
+        }
+
+        if implicit_proto.is_some() {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &RANDI_IMPLICIT_PROTOTYPE_EXTENSION,
+                "randi",
+            )?;
         }
 
         let shape = if saw_dims_arg {
@@ -1257,21 +1282,16 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn randi_like_tensor() {
+    fn randi_like_without_size_returns_documented_scalar() {
         let _guard = random::test_lock().lock().unwrap();
         reset_rng_clean();
         let proto = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
         let args = vec![Value::Num(5.0), Value::from("like"), Value::Tensor(proto)];
         let result = block_on(randi_builtin(args)).expect("randi");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
-                for v in t.materialize_f64() {
-                    assert!((1.0..=5.0).contains(&v));
-                }
-            }
-            other => panic!("expected tensor result, got {other:?}"),
-        }
+        let Value::Num(value) = result else {
+            panic!("expected scalar double result");
+        };
+        assert!((1.0..=5.0).contains(&value));
     }
 
     #[test]
@@ -1318,14 +1338,10 @@ pub(crate) mod tests {
             Value::Tensor(prototype),
         ]))
         .expect("integer like randi");
-        let Value::Tensor(tensor) = result else {
-            panic!("expected integer tensor");
+        let Value::Int(IntValue::U64(value)) = result else {
+            panic!("expected uint64 scalar");
         };
-        assert_eq!(tensor.shape, vec![2, 2]);
-        assert!(matches!(
-            tensor.integer_storage(),
-            Some(IntegerStorage::U64(_))
-        ));
+        assert!((1..=5).contains(&value));
 
         let result = block_on(randi_builtin(vec![
             Value::Num(5.0),
@@ -1435,6 +1451,10 @@ pub(crate) mod tests {
             let error = block_on(randi_builtin(vec![Value::Num(5.0), Value::from(class)]))
                 .expect_err("wide explicit class must be gated");
             assert!(error.to_string().contains("RunMat extensions"), "{error}");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:RandiWideIntegerExtension")
+            );
         }
 
         let host_prototypes = [
@@ -1457,6 +1477,10 @@ pub(crate) mod tests {
             ]))
             .expect_err("wide host prototype must be gated");
             assert!(error.to_string().contains("RunMat extensions"), "{error}");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:RandiWideIntegerExtension")
+            );
         }
 
         for (offset, element_type) in [
@@ -1477,6 +1501,35 @@ pub(crate) mod tests {
             .expect_err("wide resident prototype must be gated before provider dispatch");
             assert!(error.to_string().contains("RunMat extensions"), "{error}");
             runmat_accelerate_api::clear_handle_integer_type(&handle);
+        }
+    }
+
+    #[test]
+    fn randi_bare_prototype_shorthand_is_runmat_mode_only() {
+        let prototype = LogicalArray::zeros(vec![2, 3]);
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(randi_builtin(vec![
+                Value::Num(1.0),
+                Value::LogicalArray(prototype.clone()),
+            ]))
+            .expect_err("MATLAB mode must reject the bare prototype shorthand");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:RandiImplicitPrototypeExtension")
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let result = block_on(randi_builtin(vec![
+                Value::Num(1.0),
+                Value::LogicalArray(prototype),
+            ]))
+            .expect("RunMat mode accepts the bare prototype shorthand");
+            let Value::LogicalArray(result) = result else {
+                panic!("expected logical output");
+            };
+            assert_eq!(result.shape, vec![2, 3]);
         }
     }
 
@@ -1559,7 +1612,7 @@ pub(crate) mod tests {
         let result = block_on(randi_builtin(args)).expect("randi logical like");
         match result {
             Value::LogicalArray(logical) => {
-                assert_eq!(logical.shape, vec![2, 3]);
+                assert_eq!(logical.shape, vec![1, 1]);
                 assert!(logical.data.iter().all(|&b| b <= 1));
             }
             other => panic!("expected logical array, got {other:?}"),
@@ -1639,7 +1692,7 @@ pub(crate) mod tests {
                 Value::GpuTensor(gpu) => {
                     let gathered =
                         test_support::gather(Value::GpuTensor(gpu)).expect("gather to host");
-                    assert_eq!(gathered.shape, vec![2, 2]);
+                    assert_eq!(gathered.shape, vec![1, 1]);
                     for value in gathered.materialize_f64() {
                         assert!((1.0..=4.0).contains(&value));
                     }
@@ -1790,14 +1843,14 @@ pub(crate) mod tests {
                 runmat_accelerate_api::handle_integer_type(&gpu),
                 Some(runmat_accelerate_api::IntegerElementType::U64)
             );
-            assert_eq!(gpu.shape, vec![1, 2]);
+            assert_eq!(gpu.shape, vec![1, 1]);
             let downloaded = block_on(provider.download_integer(&gpu))
                 .expect("download uint64 randi")
                 .data;
             let runmat_accelerate_api::HostIntegerDataOwned::U64(values) = downloaded else {
                 panic!("expected uint64 storage");
             };
-            assert_eq!(values.len(), 2);
+            assert_eq!(values.len(), 1);
             assert!(values.iter().all(|value| (lower..=upper).contains(value)));
         });
     }
@@ -1840,7 +1893,7 @@ pub(crate) mod tests {
             Value::GpuTensor(gpu) => {
                 let gathered =
                     test_support::gather(Value::GpuTensor(gpu)).expect("gather gpu result");
-                assert_eq!(gathered.shape, vec![2, 3]);
+                assert_eq!(gathered.shape, vec![1, 1]);
                 for value in gathered.materialize_f64() {
                     assert!(
                         (1.0..=8.0).contains(&value),

@@ -35,11 +35,12 @@
     "`randi(imax)` returns a scalar double selected uniformly from `1:imax`.",
     "`randi(imax, m, n, ...)` creates dense arrays whose entries are in `1:imax`.",
     "`randi([imin imax], sz)` accepts a two-element range vector plus either a size vector or explicit dimensions.",
-    "`randi(___, 'like', A)` matches both the shape and device residency of `A`, including GPU tensors when acceleration is enabled.",
+    "`randi(___, 'like', A)` matches the class, complexity where supported, and device residency of `A`; ordinary size arguments determine the output shape, and omitting them returns a scalar.",
     "Negative lower bounds are supported so long as `imin <= imax`.",
     "`randi(___, 'double')` is accepted for MATLAB compatibility and keeps the default double output.",
-    "`randi(___, 'logical')` emits a logical array when the inclusive range stays within `[0, 1]`.",
-    "RunMat diagnoses unsupported class specifiers (e.g., `'single'`, `'uint8'`) with descriptive errors until native representations land."
+    "`randi(___, 'single')`, `randi(___, 'logical')`, and the documented integer class names through `uint32` preserve the requested output class; logical output requires the inclusive range to stay within `[0, 1]`.",
+    "`int64` and `uint64` output classes are exact RunMat extensions available only in `runmat` compatibility mode.",
+    "The bare `randi(bounds, prototype)` shorthand copies prototype shape and class only in `runmat` mode; MATLAB-compatible code uses explicit dimensions and the `like` keyword."
   ],
   "examples": [
     {
@@ -84,7 +85,7 @@
     },
     {
       "question": "Does `randi` return doubles or integer arrays?",
-      "answer": "RunMat matches MATLAB by storing results in double-precision tensors whose values are integers. Future releases will add direct integer array classes."
+      "answer": "The default result is double. A documented class name or `'like'` prototype can select native single, logical, or integer storage; `int64` and `uint64` output are additional `runmat`-mode extensions."
     },
     {
       "question": "Can I request a logical result directly?",
@@ -104,7 +105,7 @@
     },
     {
       "question": "Does `randi` support `'single'` or integer output classes?",
-      "answer": "Not yet. The `randi` builtin currently supports doubles only. Supplying `'single'` or integer class names raises a descriptive error."
+      "answer": "Yes. `single`, `int8`, `int16`, `int32`, `uint8`, `uint16`, and `uint32` are available in MATLAB-compatible modes. Exact `int64` and `uint64` output is deliberately gated to `runmat` mode."
     }
   ],
   "links": [
