@@ -462,6 +462,32 @@ fn test_fread_like_extension_follows_session_compatibility_mode() {
 }
 
 #[test]
+fn test_pagefun_host_extension_follows_session_compatibility_mode() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+        let matlab = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = pagefun(@mtimes, [1 2; 3 4], eye(2));",
+        )
+        .expect("runtime failure should be returned in the execution outcome");
+        assert_eq!(
+            matlab.error.as_ref().and_then(|error| error.identifier()),
+            Some("RunMat:compatibility:PagefunHostInputsExtension")
+        );
+
+        engine.set_compat_mode(CompatMode::RunMat);
+        let runmat = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = pagefun(@mtimes, [1 2; 3 4], eye(2)); out(2,2)",
+        )
+        .expect("RunMat mode accepts all-host pagefun");
+        assert!(runmat.error.is_none(), "{:?}", runmat.error);
+        assert_eq!(runmat.value, Some(runmat_builtins::Value::Num(4.0)));
+    });
+}
+
+#[test]
 fn test_sparse_integer_outputs_follow_session_compatibility_mode() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();

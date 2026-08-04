@@ -197,6 +197,8 @@ mod tests {
                 ("macd", "macd-nondouble-matrix"),
                 ("meshgrid", "meshgrid-complex-axes"),
                 ("meshgrid", "meshgrid-like"),
+                ("pagefun", "pagefun-host-inputs"),
+                ("pagefun", "pagefun-text-callable"),
                 ("randi", "randi-implicit-prototype"),
                 ("randi", "randi-wide-integer-output"),
                 ("randperm", "randperm-explicit-double"),
