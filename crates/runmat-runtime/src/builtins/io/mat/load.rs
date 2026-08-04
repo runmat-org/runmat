@@ -2210,6 +2210,52 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn registered_load_gates_restored_sparse_integer_by_compatibility_mode() {
+        let sparse = SparseTensor::new_integer(
+            1,
+            1,
+            vec![0, 1],
+            vec![0],
+            IntegerStorage::U64(vec![u64::MAX]),
+        )
+        .expect("sparse integer");
+        let bytes = block_on(encode_workspace_to_mat_bytes(&[(
+            "S".to_string(),
+            Value::SparseTensor(sparse),
+        )]))
+        .expect("encode sparse integer");
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("sparse_integer.mat");
+        std::fs::write(&path, bytes).expect("write MAT file");
+        let args = [Value::String(path.to_string_lossy().into_owned())];
+
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = crate::dispatcher::call_builtin("load", &args)
+                .expect_err("MATLAB mode must reject restored sparse integer");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:SparseIntegerExtension")
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let restored =
+                crate::dispatcher::call_builtin("load", &args).expect("RunMat mode load");
+            assert!(matches!(
+                restored,
+                Value::Struct(ref fields)
+                    if matches!(
+                        fields.fields.get("S"),
+                        Some(Value::SparseTensor(sparse))
+                            if sparse.integer_storage()
+                                == Some(&IntegerStorage::U64(vec![u64::MAX]))
+                    )
+            ));
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_save_sparse_integer_roundtrips_preserve_every_dtype_and_exact_values() {

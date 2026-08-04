@@ -2,7 +2,7 @@
 title: "Semantic Compatibility Engineering Policy"
 category: "Development"
 section: "14.7"
-last_updated: "July 30, 2026"
+last_updated: "August 4, 2026"
 ---
 
 # Semantic Compatibility Engineering Policy
@@ -73,8 +73,7 @@ The RunMat project should:
 - preserve documented interchange formats where the relevant RunMat feature supports them; and
 - test legacy behavior that RunMat intentionally retains.
 
-The project is not required to preserve an older behavior when it conflicts with the semantic target. In such a case, the target behavior applies unless
-the project explicitly adopts a mode-gated RunMat extension.
+The project is not required to preserve an older behavior when it conflicts with the semantic target. In such a case, the target behavior applies unless the project explicitly adopts a mode-gated RunMat extension.
 
 There is no blanket earliest-supported MATLAB release. A historical behavior is inside the compatibility envelope only when it is supported by adequate public evidence, relevant to a RunMat surface, and not displaced by this policy.
 
@@ -100,6 +99,8 @@ RunMat extends the MATLAB language with intentional language features that are n
 | Incompatible divergence | Changes the result of a program accepted by the target | Do not introduce without a separate compatibility decision |
 
 The existence of a useful internal representation or implementation path does not by itself justify exposing a new language behavior. Extensions must be intentional, documented, and tested.
+
+Typed sparse integer storage is one mode-gated extension. MATLAB-compatible modes accept only documented `double`, `single`, and `logical` sparse payloads and reject construction, conversion, restoration, indexed access or assignment, and operation results that would expose sparse integer storage; `runmat` mode may preserve exact signed or unsigned sparse integer payloads. Sparse values remain host-resident in every mode because the current acceleration interface exposes dense tensor handles rather than native sparse device storage.
 
 ## Evidence policy
 

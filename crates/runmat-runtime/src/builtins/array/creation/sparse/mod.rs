@@ -421,6 +421,7 @@ async fn spdiags_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 fn construct_sparse(args: Vec<Value>) -> BuiltinResult<SparseTensor> {
+    reject_disabled_integer_sparse_constructor(&args)?;
     match args.len() {
         1 => sparse_from_value(args.into_iter().next().expect("one argument")),
         2 => {
@@ -446,6 +447,29 @@ fn construct_sparse(args: Vec<Value>) -> BuiltinResult<SparseTensor> {
             &SPARSE_ERROR_INVALID_INPUT,
             "sparse: expected sparse(A), sparse(m,n), or sparse(i,j,v[,m,n[,nzmax]])",
         )),
+    }
+}
+
+fn reject_disabled_integer_sparse_constructor(args: &[Value]) -> BuiltinResult<()> {
+    let integer_payload = match args {
+        [value] => value_is_real_integer(value),
+        [_, _, value] if keyword_of(value).is_none() => value_is_real_integer(value),
+        [_, _, value, _, _] | [_, _, value, _, _, _] => value_is_real_integer(value),
+        _ => false,
+    };
+    if integer_payload {
+        crate::compatibility::ensure_sparse_integer_extension_enabled("sparse")?;
+    }
+    Ok(())
+}
+
+fn value_is_real_integer(value: &Value) -> bool {
+    match value {
+        Value::Int(_) => true,
+        Value::Tensor(tensor) => tensor.integer_storage().is_some(),
+        Value::SparseTensor(sparse) => sparse.integer_storage().is_some(),
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle).is_some(),
+        _ => false,
     }
 }
 
@@ -1951,6 +1975,7 @@ fn sparse_from_logical_array(logical: &LogicalArray) -> BuiltinResult<SparseTens
 }
 
 fn sparse_from_triplet_form(args: Vec<Value>) -> BuiltinResult<SparseTensor> {
+    validate_triplet_subscript_classes(&args[0], &args[1])?;
     let rows_vec = triplet_subscripts(&args[0], "row")?;
     let cols_vec = triplet_subscripts(&args[1], "column")?;
     let values = triplet_values(&args[2])?;
@@ -2016,6 +2041,35 @@ fn sparse_from_triplet_form(args: Vec<Value>) -> BuiltinResult<SparseTensor> {
         TripletValues::Integer(values) => {
             sparse_from_integer_triplets(rows, cols, coordinates, values)
         }
+    }
+}
+
+fn validate_triplet_subscript_classes(rows: &Value, cols: &Value) -> BuiltinResult<()> {
+    let row_class = integer_subscript_class(rows);
+    let col_class = integer_subscript_class(cols);
+    if row_class.is_none() && col_class.is_none() {
+        return Ok(());
+    }
+    if row_class == col_class {
+        return Ok(());
+    }
+    Err(sparse_error(
+        &SPARSE_ERROR_INVALID_INPUT,
+        match (row_class, col_class) {
+            (Some(row), Some(col)) => format!(
+                "sparse: integer row and column subscripts must have the same datatype, got {row} and {col}"
+            ),
+            _ => "sparse: when either row or column subscripts use an integer datatype, both must use the same integer datatype".to_string(),
+        },
+    ))
+}
+
+fn integer_subscript_class(value: &Value) -> Option<&'static str> {
+    match value {
+        Value::Int(value) => Some(value.class_name()),
+        Value::Tensor(tensor) => tensor.integer_storage().map(IntegerStorage::class_name),
+        Value::SparseTensor(sparse) => sparse.integer_storage().map(IntegerStorage::class_name),
+        _ => None,
     }
 }
 
@@ -2631,7 +2685,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use nalgebra::DMatrix;
-    use runmat_accelerate_api::HostTensorView;
+    use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView, HostTensorView};
     use runmat_builtins::IntValue;
 
     fn sparse_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -2755,10 +2809,10 @@ pub(crate) mod tests {
         let large = 9_007_199_254_740_993_u64;
         let row =
             Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).expect("row index");
-        let col = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("col index");
+        let col = Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("col index");
         let value = Tensor::new(vec![0.0], vec![1, 1]).expect("zero value");
         let rows = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).expect("rows");
-        let cols = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("cols");
+        let cols = Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("cols");
 
         let sparse = expect_sparse(
             sparse_builtin(vec![
@@ -2780,7 +2834,7 @@ pub(crate) mod tests {
             Value::Tensor(col),
             Value::Tensor(value),
             Value::Tensor(smaller_rows),
-            Value::Int(IntValue::U8(1)),
+            Value::Int(IntValue::U64(1)),
         ])
         .unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:sparse:InvalidIndex"));
@@ -2810,6 +2864,7 @@ pub(crate) mod tests {
 
     #[test]
     fn sparse_from_integer_tensor_preserves_every_integer_class_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let cases = vec![
             IntegerStorage::I8(vec![0, i8::MIN, i8::MAX, 0]),
             IntegerStorage::I16(vec![0, i16::MIN, i16::MAX, 0]),
@@ -2849,6 +2904,7 @@ pub(crate) mod tests {
 
     #[test]
     fn nonzeros_of_uint64_sparse_preserves_exact_values() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let source = Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX, 7, 0]), vec![2, 2])
             .expect("uint64 tensor");
         let sparse = expect_sparse(
@@ -2913,6 +2969,159 @@ pub(crate) mod tests {
         assert_eq!(sparse.nnz(), 2);
         assert_eq!(sparse.get(0, 0), Some(7.0));
         assert_eq!(sparse.get(1, 2), Some(9.0));
+    }
+
+    #[test]
+    fn sparse_triplet_integer_subscripts_require_one_shared_datatype() {
+        let rows = Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![2, 1]).unwrap();
+        let cols = Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![2, 1]).unwrap();
+        let values = Tensor::new(vec![4.0, 5.0], vec![2, 1]).unwrap();
+        let sparse = expect_sparse(
+            sparse_builtin(vec![
+                Value::Tensor(rows),
+                Value::Tensor(cols),
+                Value::Tensor(values.clone()),
+            ])
+            .expect("matching integer subscript classes"),
+        );
+        assert_eq!(sparse.shape(), vec![2, 2]);
+
+        let rows = Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![2, 1]).unwrap();
+        let cols = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![2, 1]).unwrap();
+        let err = sparse_builtin(vec![
+            Value::Tensor(rows),
+            Value::Tensor(cols),
+            Value::Tensor(values.clone()),
+        ])
+        .expect_err("mixed integer subscript classes reject");
+        assert_eq!(err.identifier(), Some("RunMat:sparse:InvalidInput"));
+        assert!(err.message().contains("uint16 and int16"));
+
+        let rows = Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![2, 1]).unwrap();
+        let cols = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
+        let err = sparse_builtin(vec![
+            Value::Tensor(rows),
+            Value::Tensor(cols),
+            Value::Tensor(values),
+        ])
+        .expect_err("integer and floating subscript classes reject");
+        assert_eq!(err.identifier(), Some("RunMat:sparse:InvalidInput"));
+        assert!(err
+            .message()
+            .contains("both must use the same integer datatype"));
+    }
+
+    #[test]
+    fn registered_sparse_integer_results_require_runmat_mode() {
+        let integer = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("integer tensor");
+        let triplet_rows =
+            Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("row index");
+        let triplet_cols =
+            Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("column index");
+        let triplet_values =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("values");
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let err = crate::dispatcher::call_builtin("sparse", &[Value::Tensor(integer.clone())])
+                .expect_err("MATLAB mode must reject sparse integer output");
+            assert_eq!(
+                err.identifier(),
+                Some("RunMat:compatibility:SparseIntegerExtension")
+            );
+            let err = crate::dispatcher::call_builtin(
+                "sparse",
+                &[
+                    Value::Tensor(triplet_rows.clone()),
+                    Value::Tensor(triplet_cols.clone()),
+                    Value::Tensor(triplet_values.clone()),
+                ],
+            )
+            .expect_err("MATLAB mode must reject sparse integer triplet values");
+            assert_eq!(
+                err.identifier(),
+                Some("RunMat:compatibility:SparseIntegerExtension")
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let result =
+                crate::dispatcher::call_builtin("sparse", &[Value::Tensor(integer)]).unwrap();
+            let sparse = expect_sparse(result);
+            assert_eq!(
+                sparse.integer_storage(),
+                Some(&IntegerStorage::U64(vec![u64::MAX]))
+            );
+            let result = crate::dispatcher::call_builtin(
+                "sparse",
+                &[
+                    Value::Tensor(triplet_rows),
+                    Value::Tensor(triplet_cols),
+                    Value::Tensor(triplet_values),
+                ],
+            )
+            .expect("RunMat mode accepts sparse integer triplet values");
+            let sparse = expect_sparse(result);
+            assert_eq!(
+                sparse.integer_storage(),
+                Some(&IntegerStorage::U64(vec![u64::MAX]))
+            );
+        }
+    }
+
+    #[test]
+    fn registered_cast_and_arithmetic_cannot_expose_sparse_integer_in_matlab_mode() {
+        let floating =
+            SparseTensor::new(1, 1, vec![0, 1], vec![0], vec![7.0]).expect("floating sparse");
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let err =
+                crate::dispatcher::call_builtin("uint16", &[Value::SparseTensor(floating.clone())])
+                    .expect_err("MATLAB mode must reject sparse integer cast output");
+            assert_eq!(
+                err.identifier(),
+                Some("RunMat:compatibility:SparseIntegerExtension")
+            );
+        }
+
+        let integer =
+            SparseTensor::new_integer(1, 1, vec![0, 1], vec![0], IntegerStorage::U16(vec![7]))
+                .expect("integer sparse");
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let err = crate::dispatcher::call_builtin(
+                "plus",
+                &[
+                    Value::SparseTensor(integer.clone()),
+                    Value::Int(IntValue::U16(0)),
+                ],
+            )
+            .expect_err("MATLAB mode must reject sparse integer arithmetic output");
+            assert_eq!(
+                err.identifier(),
+                Some("RunMat:compatibility:SparseIntegerExtension")
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let cast = crate::dispatcher::call_builtin("uint16", &[Value::SparseTensor(floating)])
+                .unwrap();
+            assert!(matches!(
+                cast,
+                Value::SparseTensor(ref sparse)
+                    if sparse.integer_storage() == Some(&IntegerStorage::U16(vec![7]))
+            ));
+            let sum = crate::dispatcher::call_builtin(
+                "plus",
+                &[Value::SparseTensor(integer), Value::Int(IntValue::U16(0))],
+            )
+            .unwrap();
+            assert!(matches!(
+                sum,
+                Value::SparseTensor(ref sparse)
+                    if sparse.integer_storage() == Some(&IntegerStorage::U16(vec![7]))
+            ));
+        }
     }
 
     #[test]
@@ -3125,6 +3334,86 @@ pub(crate) mod tests {
             assert_eq!(sparse.nnz(), 2);
             assert_eq!(sparse.get(1, 0), Some(8.0));
             assert_eq!(sparse.get(1, 1), Some(3.0));
+        });
+    }
+
+    #[test]
+    fn sparse_provider_contract_is_explicitly_host_resident() {
+        assert!(GPU_SPEC.provider_hooks.is_empty());
+        assert!(matches!(
+            GPU_SPEC.residency,
+            ResidencyPolicy::GatherImmediately
+        ));
+        assert_eq!(
+            GPU_SPEC.supported_precisions,
+            &[ScalarType::F32, ScalarType::F64]
+        );
+        assert!(GPU_SPEC.notes.contains("host-resident CSC"));
+        assert!(GPU_SPEC.notes.contains("dense tensor handles only"));
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn sparse_wgpu_input_gathers_into_host_csc_storage() {
+        use runmat_accelerate::backend::wgpu::provider::{
+            register_wgpu_provider, WgpuProviderOptions,
+        };
+        use runmat_accelerate_api::AccelProvider;
+
+        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+            return;
+        };
+        let values = [0.0, 8.0, 0.0, 3.0];
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &values,
+                shape: &[2, 2],
+            })
+            .expect("upload WGPU input");
+        let sparse = expect_sparse(
+            crate::dispatcher::call_builtin("sparse", &[Value::GpuTensor(handle)])
+                .expect("gather WGPU sparse input"),
+        );
+        assert_eq!(sparse.shape(), vec![2, 2]);
+        assert_eq!(sparse.col_ptrs, vec![0, 1, 2]);
+        assert_eq!(sparse.row_indices, vec![1, 1]);
+        assert_eq!(sparse.materialize_f64(), vec![8.0, 3.0]);
+    }
+
+    #[test]
+    fn sparse_integer_gpu_input_gathers_to_host_and_remains_runmat_mode_only() {
+        test_support::with_test_provider(|provider| {
+            let values = [0_u64, u64::MAX];
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&values),
+                    shape: &[1, 2],
+                })
+                .expect("upload integer input");
+
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error =
+                    crate::dispatcher::call_builtin("sparse", &[Value::GpuTensor(handle.clone())])
+                        .expect_err("MATLAB mode must reject gathered sparse integer output");
+                assert_eq!(
+                    error.identifier(),
+                    Some("RunMat:compatibility:SparseIntegerExtension")
+                );
+            }
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+                let sparse = expect_sparse(
+                    crate::dispatcher::call_builtin("sparse", &[Value::GpuTensor(handle)])
+                        .expect("RunMat mode sparse integer gather"),
+                );
+                assert_eq!(
+                    sparse.integer_storage(),
+                    Some(&IntegerStorage::U64(vec![u64::MAX]))
+                );
+                assert_eq!(sparse.row_indices, vec![0]);
+                assert_eq!(sparse.col_ptrs, vec![0, 0, 1]);
+            }
         });
     }
 

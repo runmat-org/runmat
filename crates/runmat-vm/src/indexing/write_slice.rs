@@ -653,6 +653,11 @@ pub async fn assign_sparse_with_plan(
     plan: &IndexPlan,
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
+    if sparse.integer_storage().is_some() {
+        runmat_runtime::compatibility::ensure_sparse_integer_extension_enabled(
+            "indexed assignment",
+        )?;
+    }
     if is_empty_delete_rhs(rhs) {
         return Err(mex(
             "SparseAssignmentUnsupported",
@@ -789,6 +794,11 @@ pub fn delete_sparse_with_plan(
     plan: &IndexPlan,
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
+    if sparse.integer_storage().is_some() {
+        runmat_runtime::compatibility::ensure_sparse_integer_extension_enabled(
+            "indexed assignment",
+        )?;
+    }
     if !is_empty_delete_rhs(rhs) {
         return Err(mex(
             "DeletionRequiresEmptyRhs",
@@ -2019,6 +2029,7 @@ mod tests {
 
     #[test]
     fn sparse_integer_plan_assignment_preserves_exact_values_and_last_write_wins() {
+        let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
         let sparse =
             SparseTensor::new_integer(2, 2, vec![0, 0, 0], vec![], IntegerStorage::U64(vec![]))
                 .expect("sparse");
@@ -2045,6 +2056,7 @@ mod tests {
 
     #[test]
     fn sparse_integer_plan_assignment_rejects_nonscalar_singleton_expansion() {
+        let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
         let sparse =
             SparseTensor::new_integer(2, 2, vec![0, 0, 0], vec![], IntegerStorage::I8(vec![]))
                 .expect("sparse");

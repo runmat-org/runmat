@@ -401,6 +401,11 @@ pub async fn assign_sparse_scalar(
     rhs: &Value,
     delete: bool,
 ) -> Result<Value, RuntimeError> {
+    if sparse.integer_storage().is_some() {
+        runmat_runtime::compatibility::ensure_sparse_integer_extension_enabled(
+            "indexed assignment",
+        )?;
+    }
     if delete {
         if !is_empty_tensor(rhs) {
             return Err(mex(
@@ -993,6 +998,7 @@ mod tests {
 
     #[test]
     fn sparse_integer_assignment_preserves_exact_uint64_and_elides_zero() {
+        let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
         let sparse = runmat_builtins::SparseTensor::new_integer(
             2,
             2,
@@ -1072,6 +1078,7 @@ mod tests {
 
     #[test]
     fn sparse_integer_assignment_preserves_every_integer_class() {
+        let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
         let cases = vec![
             (IntegerStorage::I8(vec![]), IntValue::I8(i8::MIN)),
             (IntegerStorage::I16(vec![]), IntValue::I16(i16::MIN)),
@@ -1102,6 +1109,7 @@ mod tests {
 
     #[test]
     fn sparse_integer_assignment_rounds_and_saturates_numeric_rhs() {
+        let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
         let sparse = runmat_builtins::SparseTensor::new_integer(
             1,
             2,
@@ -1187,6 +1195,30 @@ mod tests {
         ))
         .expect_err("rank-three scalar assignment must fail");
         assert_eq!(rank.identifier(), Some("RunMat:UnsupportedAssignmentRank"));
+    }
+
+    #[test]
+    fn matlab_mode_rejects_sparse_integer_indexed_assignment() {
+        let sparse = runmat_builtins::SparseTensor::new_integer(
+            1,
+            1,
+            vec![0, 1],
+            vec![0],
+            IntegerStorage::U8(vec![7]),
+        )
+        .expect("sparse");
+        let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(assign_sparse_scalar(
+            sparse,
+            &[1],
+            &Value::Int(IntValue::U8(9)),
+            false,
+        ))
+        .expect_err("MATLAB mode must reject sparse integer assignment");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:SparseIntegerExtension")
+        );
     }
 
     #[test]

@@ -271,14 +271,15 @@ async fn call_builtin_async_impl(
 
     if matching_builtins.is_empty() {
         if let Some(result) = try_call_registered_instance_method(name, args, output_count).await? {
-            return Ok(result);
+            return compatibility_checked_builtin_result(name, result);
         }
         if let Some(result) = try_call_registered_static_method(name, args, output_count).await? {
-            return Ok(result);
+            return compatibility_checked_builtin_result(name, result);
         }
         // Fallback: treat as class constructor if class is registered.
         if runmat_builtins::get_class(name).is_some() {
-            return call_registered_class_constructor(name, args, output_count).await;
+            let result = call_registered_class_constructor(name, args, output_count).await?;
+            return compatibility_checked_builtin_result(name, result);
         }
         return Err(build_runtime_error(format!("Undefined function: {name}"))
             .with_identifier("RunMat:UndefinedFunction")
@@ -286,7 +287,7 @@ async fn call_builtin_async_impl(
     }
 
     if let Some(result) = try_call_registered_instance_method(name, args, output_count).await? {
-        return Ok(result);
+        return compatibility_checked_builtin_result(name, result);
     }
 
     // Partition into no-category (tests/legacy shims) and categorized (library) builtins.
@@ -311,12 +312,14 @@ async fn call_builtin_async_impl(
     {
         let f = builtin.implementation;
         match (f)(args).await {
-            Ok(result) => return Ok(result),
+            Ok(result) => return compatibility_checked_builtin_result(name, result),
             Err(err) => {
                 if should_retry_with_gpu_gather(&err, args) {
                     match gather_args_for_retry_async(args).await {
                         Ok(Some(gathered_args)) => match (f)(&gathered_args).await {
-                            Ok(result) => return Ok(result),
+                            Ok(result) => {
+                                return compatibility_checked_builtin_result(name, result);
+                            }
                             Err(retry_err) => last_error = retry_err,
                         },
                         Ok(None) => last_error = err,
@@ -350,6 +353,11 @@ async fn call_builtin_async_impl(
     .with_source(last_error);
     builder = builder.with_identifier(identifier);
     Err(builder.build())
+}
+
+fn compatibility_checked_builtin_result(name: &str, result: Value) -> Result<Value, RuntimeError> {
+    crate::compatibility::ensure_value_compatible(&result, name)?;
+    Ok(result)
 }
 
 pub(crate) async fn try_call_registered_instance_method(

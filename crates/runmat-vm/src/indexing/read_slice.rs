@@ -649,6 +649,9 @@ pub async fn read_sparse_slice(
     end_mask: u32,
     numeric: &[Value],
 ) -> Result<Value, RuntimeError> {
+    if sparse.integer_storage().is_some() {
+        runmat_runtime::compatibility::ensure_sparse_integer_extension_enabled("indexed access")?;
+    }
     let selectors =
         build_slice_selectors(dims, colon_mask, end_mask, numeric, &sparse.shape()).await?;
     match dims {
@@ -670,6 +673,9 @@ pub fn read_sparse_slice_from_plan(
     sparse: &SparseTensor,
     plan: &IndexPlan,
 ) -> Result<Value, RuntimeError> {
+    if sparse.integer_storage().is_some() {
+        runmat_runtime::compatibility::ensure_sparse_integer_extension_enabled("indexed access")?;
+    }
     if plan.indices.len() == 1 {
         let lin = plan.indices[0] as usize;
         if sparse.rows == 0 || lin >= sparse.rows.saturating_mul(sparse.cols) {
@@ -1012,6 +1018,7 @@ mod tests {
 
     #[test]
     fn sparse_slice_plan_preserves_exact_uint64_storage_and_empty_class() {
+        let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
         let sparse = SparseTensor::new_integer(
             2,
             2,

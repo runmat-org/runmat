@@ -512,6 +512,7 @@ mod tests {
 
     #[test]
     fn every_integer_cast_builtin_dispatches_sparse_inputs() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let sparse = runmat_builtins::SparseTensor::new(2, 1, vec![0, 1], vec![1], vec![1.5])
             .expect("sparse input");
         for (builtin, class) in [

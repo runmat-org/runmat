@@ -1814,7 +1814,42 @@ fn sparse_slice_indexing_preserves_sparse_outputs() {
 }
 
 #[test]
+fn sparse_integer_script_surface_is_runmat_mode_only() {
+    {
+        let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
+        for source in [
+            "s = sparse(uint64([1 2]));",
+            "s = sparse(uint64([1 2])); t = s(:);",
+            "s = sparse(uint64([1 2])); s(1) = uint64(3);",
+        ] {
+            let error = execute_source(source).expect_err("MATLAB mode must reject sparse integer");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:SparseIntegerExtension")
+            );
+        }
+    }
+    {
+        let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+        let vars =
+            execute_source("s = sparse(uint64([1 2])); s(1) = uint64(3); t = s(:); f = full(t);")
+                .expect("RunMat mode sparse integer extension");
+        assert!(matches!(
+            &vars[0],
+            Value::SparseTensor(sparse)
+                if sparse.integer_storage() == Some(&IntegerStorage::U64(vec![3, 2]))
+        ));
+        assert!(matches!(
+            &vars[2],
+            Value::Tensor(tensor)
+                if tensor.integer_storage() == Some(&IntegerStorage::U64(vec![3, 2]))
+        ));
+    }
+}
+
+#[test]
 fn typed_sparse_slice_indexing_preserves_uint64_storage() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let vars = execute_source(
         "s = sparse([1 3 2], [1 1 3], uint64([1 9223372036854775808 4]), 3, 3); a = s(3,1); z = s(2,1); lin = s(:); pick = s([1 3 8]); sub = s([3 1], [1 3]); empty = s([],1);",
     )
@@ -1870,6 +1905,7 @@ fn typed_sparse_slice_indexing_preserves_uint64_storage() {
 
 #[test]
 fn typed_sparse_find_preserves_exact_values_and_directional_order() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let vars = execute_source(
         "s = sparse(uint64([0 9223372036854775808;18446744073709551615 0])); [i,j,v] = find(s); [il,jl,vl] = find(s,1,'last');",
     )
@@ -1897,6 +1933,7 @@ fn typed_sparse_find_preserves_exact_values_and_directional_order() {
 
 #[test]
 fn sparse_assignment_updates_scalar_and_selector_entries() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let vars = execute_source(
         "s = sparse([1], [1], [5], 2, 2); s(2,2) = 7; s(1) = 0; s(:,1) = [1;2]; s(1:2,2) = [3;4]; s([3 3]) = [5 6]; f = full(s); n = nnz(s); t = sparse(uint64([0 0;0 0])); t(:,1) = uint64([1;9223372036854775808]);",
     )

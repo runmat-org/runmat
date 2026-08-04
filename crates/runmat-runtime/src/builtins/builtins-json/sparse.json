@@ -33,16 +33,16 @@
   },
   "description": "`sparse` creates a sparse matrix. RunMat stores sparse matrices in compressed sparse column form and supports the common MATLAB construction forms: conversion from a full array, empty sparse allocation by size, and triplet assembly from row indices, column indices, and values.",
   "behaviors": [
-    "`sparse(A)` converts a full numeric or logical array to sparse storage, storing only nonzero values. Logical inputs retain logical class with the CSC pattern as the authoritative set of true elements; RunMat-extension exact integer arrays retain their integer class.",
+    "`sparse(A)` converts a full single, double, or logical array to sparse storage, storing only nonzero values. Logical inputs retain logical class with the CSC pattern as the authoritative set of true elements. Exact integer arrays are accepted only in `runmat` compatibility mode and retain their integer class.",
     "`sparse(m, n)` returns an `m x n` sparse double matrix with zero stored entries.",
     "`sparse(i, j, v)` creates a sparse matrix whose size is inferred from the largest row and column subscripts.",
     "`sparse(i, j, v, m, n)` creates an `m x n` sparse matrix and errors if any subscript falls outside those dimensions.",
     "`sparse(i, j, v, m, n, nzmax)` accepts the MATLAB allocation hint for compatibility; RunMat's storage is still sized from the produced nonzero entries.",
     "Duplicate numeric `(i, j)` entries are summed and entries whose final value is zero are not stored. Duplicate logical triplets combine by logical OR and false values are not stored. RunMat-extension integer triplet values are summed in their exact integer class.",
-    "Row and column subscripts are one-based positive integers, matching MATLAB.",
+    "Row and column subscripts are one-based positive integers. If either subscript input uses an integer datatype, both must use the same integer datatype.",
     "Sparse matrices support scalar row/column indexing and linear indexing; scalar selections return sparse `1 x 1` values, unstored entries read as zero, and linear indices are resolved in column-major order.",
     "Sparse slice indexing preserves sparse storage for non-scalar selections.",
-    "Sparse indexed reads and assignments preserve CSC storage and the sparse value class, including logical, single, double, and RunMat-extension integer payloads.",
+    "Sparse indexed reads and assignments preserve CSC storage and the sparse value class. Typed sparse integer reads and assignments are available only in `runmat` compatibility mode.",
     "Sparse real matrices interoperate with `+`, `-`, and `.*` for sparse-sparse, sparse-dense, dense-sparse, sparse-scalar, character, logical, and complex operands. Addition and subtraction with dense, complex, or nonzero scalar operands return full storage when unstored sparse zeros become nonzero; sparse-preserving real products and sparse-sparse sums/differences return sparse storage."
   ],
   "examples": [
@@ -85,7 +85,7 @@
   "faqs": [
     {
       "question": "Which sparse construction forms are supported?",
-      "answer": "RunMat supports `sparse(A)`, `sparse(m,n)`, `sparse(i,j,v)`, `sparse(i,j,v,m,n)`, and `sparse(i,j,v,m,n,nzmax)` for real single, double, and logical data, plus RunMat-extension exact integer payloads."
+      "answer": "RunMat supports `sparse(A)`, `sparse(m,n)`, `sparse(i,j,v)`, `sparse(i,j,v,m,n)`, and `sparse(i,j,v,m,n,nzmax)` for real single, double, and logical data. Exact integer payloads are a mode-gated extension available only when compatibility is set to `runmat`."
     },
     {
       "question": "Does RunMat store sparse matrices densely?",
@@ -98,6 +98,10 @@
     {
       "question": "Can sparse matrices live on the GPU?",
       "answer": "Not yet. If you pass a `gpuArray` to `sparse`, RunMat gathers it and builds a host sparse matrix. Native GPU sparse handles can be added once the acceleration API grows sparse storage."
+    },
+    {
+      "question": "Can sparse matrices store integer values?",
+      "answer": "MATLAB-compatible modes reject sparse integer construction, casts, restoration, indexed access or assignment, and sparse-integer operation results. `runmat` mode exposes exact signed and unsigned sparse integer storage as a deliberate extension."
     },
     {
       "question": "Which operations interoperate with sparse matrices today?",
