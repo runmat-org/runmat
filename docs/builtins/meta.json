@@ -61211,6 +61211,20 @@
           "when": "Complex axis values cannot be represented in requested real output class.",
           "message": "meshgrid: cannot represent complex values in a real output"
         }
+      ],
+      "extensions": [
+        {
+          "id": "meshgrid-like",
+          "mode": "RunMatOnly",
+          "description": "the meshgrid \"like\" prototype selector is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MeshgridLikeExtension"
+        },
+        {
+          "id": "meshgrid-complex-axes",
+          "mode": "RunMatOnly",
+          "description": "complex meshgrid axes are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MeshgridComplexAxesExtension"
+        }
       ]
     },
     {
@@ -83413,6 +83427,20 @@
           "identifier": null,
           "when": "A trailing option string is not recognized.",
           "message": "randperm: unrecognised option"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "randperm-explicit-double",
+          "mode": "RunMatOnly",
+          "description": "the explicit randperm \"double\" selector is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RandpermExplicitDoubleExtension"
+        },
+        {
+          "id": "randperm-like",
+          "mode": "RunMatOnly",
+          "description": "the randperm \"like\" prototype selector is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RandpermLikeExtension"
         }
       ]
     },

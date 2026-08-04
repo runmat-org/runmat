@@ -189,8 +189,12 @@ mod tests {
         assert_eq!(
             declared,
             std::collections::BTreeSet::from([
+                ("meshgrid", "meshgrid-complex-axes"),
+                ("meshgrid", "meshgrid-like"),
                 ("randi", "randi-implicit-prototype"),
                 ("randi", "randi-wide-integer-output"),
+                ("randperm", "randperm-explicit-double"),
+                ("randperm", "randperm-like"),
                 ("sparse", "sparse-integer-storage"),
             ])
         );
@@ -202,9 +206,11 @@ mod tests {
             serde_json::from_str(include_str!("../../../docs/builtins/meta.json"))
                 .expect("builtin metadata catalog");
         let builtins = catalog["builtins"].as_array().expect("builtin entries");
-        for name in ["randi", "sparse"] {
-            let registered =
-                runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        for registered in runmat_builtins::builtin_functions()
+            .into_iter()
+            .filter(|builtin| !builtin.extensions.is_empty())
+        {
+            let name = registered.name;
             let exported = builtins
                 .iter()
                 .find(|entry| entry["name"] == name)

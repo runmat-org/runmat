@@ -295,6 +295,78 @@ fn test_randi_prototype_forms_follow_session_compatibility_mode() {
 }
 
 #[test]
+fn test_generator_grid_extensions_follow_session_compatibility_mode() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+
+        let explicit_double = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = randperm(0, 'double');",
+        )
+        .expect("runtime failure should be returned in the execution outcome");
+        assert_eq!(
+            explicit_double
+                .error
+                .as_ref()
+                .and_then(|error| error.identifier()),
+            Some("RunMat:compatibility:RandpermExplicitDoubleExtension")
+        );
+
+        let randperm_like = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = randperm(0, 'like', 0);",
+        )
+        .expect("runtime failure should be returned in the execution outcome");
+        assert_eq!(
+            randperm_like
+                .error
+                .as_ref()
+                .and_then(|error| error.identifier()),
+            Some("RunMat:compatibility:RandpermLikeExtension")
+        );
+
+        let meshgrid_like = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = meshgrid(uint8([1 2]), 'like', uint8(0));",
+        )
+        .expect("runtime failure should be returned in the execution outcome");
+        assert_eq!(
+            meshgrid_like
+                .error
+                .as_ref()
+                .and_then(|error| error.identifier()),
+            Some("RunMat:compatibility:MeshgridLikeExtension")
+        );
+
+        let meshgrid_complex = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = meshgrid([1+2i 3+4i]);",
+        )
+        .expect("runtime failure should be returned in the execution outcome");
+        assert_eq!(
+            meshgrid_complex
+                .error
+                .as_ref()
+                .and_then(|error| error.identifier()),
+            Some("RunMat:compatibility:MeshgridComplexAxesExtension")
+        );
+
+        engine.set_compat_mode(CompatMode::RunMat);
+        for source in [
+            "out = randperm(0, 'double'); numel(out)",
+            "out = randperm(0, 'like', 0); numel(out)",
+            "out = meshgrid(uint8([1 2]), 'like', uint8(0)); class(out)",
+            "out = meshgrid([1+2i 3+4i]); class(out)",
+        ] {
+            let runmat = runmat_core::execute_text_request_for_testing(&mut engine, source)
+                .expect("RunMat mode should enable generator/grid extension");
+            assert!(runmat.error.is_none(), "{source}: {:?}", runmat.error);
+        }
+    });
+}
+
+#[test]
 fn test_sparse_integer_outputs_follow_session_compatibility_mode() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();

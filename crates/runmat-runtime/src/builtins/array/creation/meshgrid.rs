@@ -5,10 +5,11 @@ use std::cmp::max;
 use log::warn;
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, HostTensorView};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexStorage, ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericDType,
-    NumericStorage, ResolveContext, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor, ComplexStorage, ComplexTensor,
+    IntegerComplexStorage, IntegerStorage, NumericDType, NumericStorage, ResolveContext, Tensor,
+    Type, Value,
 };
 
 use crate::builtins::array::type_resolvers::size_vector_len;
@@ -23,6 +24,23 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+
+const MESHGRID_LIKE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "meshgrid-like",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "the meshgrid \"like\" prototype selector is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:MeshgridLikeExtension"),
+};
+
+const MESHGRID_COMPLEX_AXES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "meshgrid-complex-axes",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "complex meshgrid axes are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:MeshgridComplexAxesExtension"),
+};
+
+pub const MESHGRID_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [MESHGRID_LIKE_EXTENSION, MESHGRID_COMPLEX_AXES_EXTENSION];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::meshgrid")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -382,6 +400,7 @@ pub const MESHGRID_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "array_construct",
     type_resolver(meshgrid_type),
     descriptor(crate::builtins::array::creation::meshgrid::MESHGRID_DESCRIPTOR),
+    extensions(crate::builtins::array::creation::meshgrid::MESHGRID_EXTENSIONS),
     builtin_path = "crate::builtins::array::creation::meshgrid"
 )]
 async fn meshgrid_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -500,6 +519,10 @@ impl ParsedMeshgrid {
             if let Some(keyword) = keyword_of(&value) {
                 match keyword.as_str() {
                     "like" => {
+                        crate::compatibility::ensure_builtin_extension_enabled(
+                            &MESHGRID_LIKE_EXTENSION,
+                            "meshgrid",
+                        )?;
                         if like_proto.is_some() {
                             return Err(builtin_error(
                                 "meshgrid: multiple 'like' specifications are not supported",
@@ -552,6 +575,12 @@ impl ParsedMeshgrid {
         for (i, value) in axis_values.into_iter().enumerate() {
             let mut consumed_gpu = false;
             let data = axis_from_value(value, i, &mut consumed_gpu).await?;
+            if data.is_complex {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &MESHGRID_COMPLEX_AXES_EXTENSION,
+                    "meshgrid",
+                )?;
+            }
             if consumed_gpu {
                 prefer_gpu = true;
             }
@@ -1640,6 +1669,7 @@ pub(crate) mod tests {
 
     #[test]
     fn meshgrid_reads_typed_complex_integer_axis_length_from_storage_without_mirror() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let storage = IntegerComplexStorage::new(
             IntegerStorage::I16(vec![-3, 5]),
             IntegerStorage::I16(vec![7, -11]),
@@ -1700,6 +1730,7 @@ pub(crate) mod tests {
 
     #[test]
     fn meshgrid_does_not_lossily_promote_typed_integer_axes_to_complex() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let axis = Tensor::new_integer(
             IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
             vec![1, 2],
@@ -1780,6 +1811,49 @@ pub(crate) mod tests {
             y_out.into_numeric_storage().expect("single Y storage"),
             NumericStorage::F32(vec![-1.0, 0.0, 1.0, -1.0, 0.0, 1.0, -1.0, 0.0, 1.0])
         );
+    }
+
+    #[test]
+    fn meshgrid_like_follows_compatibility_mode() {
+        let axis = || Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("axis");
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error =
+                match evaluate(&[Value::Tensor(axis()), Value::from("like"), Value::Num(0.0)]) {
+                    Ok(_) => panic!("MATLAB mode rejects meshgrid like"),
+                    Err(error) => error,
+                };
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:MeshgridLikeExtension")
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            evaluate(&[Value::Tensor(axis()), Value::from("like"), Value::Num(0.0)])
+                .expect("RunMat mode accepts meshgrid like");
+        }
+    }
+
+    #[test]
+    fn meshgrid_complex_axes_follow_compatibility_mode() {
+        let axis = || ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![1, 2]).expect("axis");
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = match evaluate(&[Value::ComplexTensor(axis())]) {
+                Ok(_) => panic!("MATLAB mode rejects complex meshgrid axes"),
+                Err(error) => error,
+            };
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:MeshgridComplexAxesExtension")
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            evaluate(&[Value::ComplexTensor(axis())])
+                .expect("RunMat mode accepts complex meshgrid axes");
+        }
     }
 
     #[test]
@@ -1864,6 +1938,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn meshgrid_like_keeps_gpu_residency() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let x = tensor_from_vec(vec![-1.0, 0.0, 1.0], 1, 3);
             let y = tensor_from_vec(vec![2.0, 4.0], 2, 1);
@@ -1965,6 +2040,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn meshgrid_complex_inputs_produce_complex_outputs() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let complex = ComplexTensor::new(vec![(1.0, 1.0), (2.0, -1.0)], vec![1, 2]).unwrap();
         let eval = evaluate(&[Value::ComplexTensor(complex)]).expect("meshgrid");
         let x_value = eval_first(&eval).expect("X");
@@ -1979,6 +2055,7 @@ pub(crate) mod tests {
 
     #[test]
     fn meshgrid_preserves_native_complex_single_storage() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let complex = ComplexTensor::from_f32(vec![(1.25, -2.5), (3.75, 4.5)], vec![1, 2]).unwrap();
         let eval = evaluate(&[Value::ComplexTensor(complex)]).expect("meshgrid");
         let Value::ComplexTensor(output) = eval_first(&eval).expect("X") else {
@@ -1994,6 +2071,7 @@ pub(crate) mod tests {
 
     #[test]
     fn meshgrid_like_complex_gpu_prototype_keeps_complex_residency() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let x = tensor_from_vec(vec![1.0, 2.0], 1, 2);
             let proto = ComplexTensor::new(vec![(0.0, 1.0)], vec![1, 1]).unwrap();
@@ -2029,6 +2107,7 @@ pub(crate) mod tests {
 
     #[test]
     fn meshgrid_complex_gpu_axis_stays_resident() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let axis = ComplexTensor::new(vec![(1.0, 1.0), (2.0, -1.0)], vec![1, 2]).unwrap();
             let axis_handle = gpu_helpers::upload_complex_tensor(provider, &axis).expect("upload");
@@ -2058,6 +2137,7 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn meshgrid_wgpu_complex_axis_matches_cpu_and_stays_resident() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = test_support::accel_test_lock();
         let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
@@ -2094,6 +2174,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn meshgrid_like_host_prototype() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let x = tensor_from_vec(vec![1.0, 2.0], 1, 2);
         let eval =
             evaluate(&[Value::Tensor(x), Value::from("like"), Value::Num(0.0)]).expect("meshgrid");
