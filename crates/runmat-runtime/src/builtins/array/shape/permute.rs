@@ -546,7 +546,7 @@ pub(crate) async fn permute_gpu(
     }
 }
 
-fn permute_generic<T: Clone>(
+pub(crate) fn permute_generic<T: Clone>(
     builtin: &'static str,
     data: &[T],
     shape: &[usize],

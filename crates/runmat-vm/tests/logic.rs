@@ -1938,3 +1938,58 @@ fn bit_position_and_count_functions_require_scalar_or_exact_sizes_when_compiled(
         );
     }
 }
+
+#[test]
+fn shiftdim_is_registered_and_preserves_exact_integer_shapes_through_vm_dispatch() {
+    let vars = execute_source(
+        "a = reshape(uint64([9223372036854775808 18446744073709551615 3 4]), 1, 2, 2); p = shiftdim(a, 1); base = reshape(a, 1, 1, 2, 2); [d, m] = shiftdim(base); n = shiftdim(a, -2);",
+    )
+    .expect("compiled shiftdim calls should execute");
+    let expected = IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX, 3, 4]);
+    assert!(matches!(
+        &vars[1],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![2, 2]
+                && tensor.integer_storage() == Some(&expected)
+    ));
+    assert!(matches!(
+        &vars[3],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![2, 2]
+                && tensor.integer_storage() == Some(&expected)
+    ));
+    assert_eq!(vars[4], Value::Num(2.0));
+    assert!(matches!(
+        &vars[5],
+        Value::Tensor(tensor)
+            if tensor.shape == vec![1, 1, 1, 2, 2]
+                && tensor.integer_storage() == Some(&expected)
+    ));
+}
+
+#[test]
+fn shiftdim_preserves_all_integer_classes_through_vm_dispatch() {
+    let classes = [
+        ("int8", "int8"),
+        ("int16", "int16"),
+        ("int32", "int32"),
+        ("int64", "int64"),
+        ("uint8", "uint8"),
+        ("uint16", "uint16"),
+        ("uint32", "uint32"),
+        ("uint64", "uint64"),
+    ];
+    for (constructor, expected_class) in classes {
+        let source = format!(
+            "a = reshape({constructor}([1 2 3 4]), 1, 2, 2); b = shiftdim(a, 1); c = class(b);"
+        );
+        let vars = execute_source(&source).expect("compiled integer shiftdim call should execute");
+        assert!(matches!(
+            &vars[1],
+            Value::Tensor(tensor)
+                if tensor.shape == vec![2, 2]
+                    && tensor.integer_storage().is_some_and(|storage| storage.class_name() == expected_class)
+        ));
+        assert_eq!(vars[2], Value::String(expected_class.into()));
+    }
+}
