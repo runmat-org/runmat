@@ -2,9 +2,9 @@
 use std::io::{Seek, SeekFrom, Write};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, IntValue, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor, CharArray, IntValue, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -16,6 +16,15 @@ use crate::builtins::common::tensor;
 use crate::builtins::io::filetext::registry;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use runmat_filesystem::File;
+
+const FWRITE_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fwrite-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "direct fwrite of gpuArray input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FwriteGpuInputExtension"),
+};
+
+pub const FWRITE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [FWRITE_GPU_INPUT_EXTENSION];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fwrite")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -306,6 +315,7 @@ fn map_string_result<T>(
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::fwrite_type),
     descriptor(crate::builtins::io::filetext::fwrite::FWRITE_DESCRIPTOR),
+    extensions(crate::builtins::io::filetext::fwrite::FWRITE_EXTENSIONS),
     builtin_path = "crate::builtins::io::filetext::fwrite"
 )]
 async fn fwrite_builtin(fid: Value, data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -336,6 +346,12 @@ pub async fn evaluate(
     data_value: &Value,
     rest: &[Value],
 ) -> BuiltinResult<FwriteEval> {
+    if matches!(data_value, Value::GpuTensor(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FWRITE_GPU_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let fid_host = gather_value(fid_value).await?;
     let fid = map_string_result(parse_fid(&fid_host), &FWRITE_ERROR_INVALID_INPUT)?;
     if fid < 0 {
@@ -1516,8 +1532,24 @@ pub(crate) mod tests {
             };
             let handle = provider.upload(&view).expect("upload");
             let args = vec![Value::from("uint16")];
-            let eval = run_evaluate(&Value::Num(fid as f64), &Value::GpuTensor(handle), &args)
-                .expect("fwrite");
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = run_evaluate(
+                    &Value::Num(fid as f64),
+                    &Value::GpuTensor(handle.clone()),
+                    &args,
+                )
+                .expect_err("MATLAB mode rejects direct gpuArray fwrite");
+                assert_eq!(
+                    error.identifier(),
+                    Some("RunMat:compatibility:FwriteGpuInputExtension")
+                );
+            }
+            let eval = {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+                run_evaluate(&Value::Num(fid as f64), &Value::GpuTensor(handle), &args)
+                    .expect("RunMat mode accepts direct gpuArray fwrite")
+            };
             assert_eq!(eval.count(), 4);
 
             run_fclose(&[Value::Num(fid as f64)]).unwrap();
@@ -1590,6 +1622,7 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn fwrite_wgpu_tensor_roundtrip() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fwrite_wgpu_roundtrip");

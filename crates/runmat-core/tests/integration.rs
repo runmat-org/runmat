@@ -426,6 +426,42 @@ fn test_macd_nondouble_matrix_extension_follows_session_compatibility_mode() {
 }
 
 #[test]
+fn test_fread_like_extension_follows_session_compatibility_mode() {
+    gc_test_context(|| {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let path = temp.path().join("fread-like.bin");
+        let path = path.to_string_lossy();
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+        let matlab = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            &format!(
+                "fid = fopen('{path}', 'w+b'); fwrite(fid, uint8(7), 'uint8'); frewind(fid); out = fread(fid, 1, 'uint8', 'like', uint8(0));"
+            ),
+        )
+        .expect("runtime failure should be returned in the execution outcome");
+        assert_eq!(
+            matlab.error.as_ref().and_then(|error| error.identifier()),
+            Some("RunMat:compatibility:FreadLikeExtension")
+        );
+
+        engine.set_compat_mode(CompatMode::RunMat);
+        let runmat = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            &format!(
+                "fid = fopen('{path}', 'rb'); out = fread(fid, 1, 'uint8', 'like', uint8(0)); fclose(fid); class(out)"
+            ),
+        )
+        .expect("RunMat mode accepts fread like");
+        assert!(runmat.error.is_none(), "{:?}", runmat.error);
+        assert_eq!(
+            runmat.value,
+            Some(runmat_builtins::Value::String("uint8".to_string()))
+        );
+    });
+}
+
+#[test]
 fn test_sparse_integer_outputs_follow_session_compatibility_mode() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();

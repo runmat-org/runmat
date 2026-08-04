@@ -4,10 +4,10 @@ use std::io::{ErrorKind, Read, Seek, SeekFrom};
 
 use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, IntValue, IntegerStorage, LogicalArray, NumericDType, NumericScalar, NumericStorage,
-    Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor, CharArray, IntValue, IntegerStorage,
+    LogicalArray, NumericDType, NumericScalar, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -21,6 +21,15 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 use runmat_filesystem::File;
 
 const BUILTIN_NAME: &str = "fread";
+
+const FREAD_LIKE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fread-like",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "the fread \"like\" prototype selector is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FreadLikeExtension"),
+};
+
+pub const FREAD_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [FREAD_LIKE_EXTENSION];
 
 const FREAD_OUTPUT_DATA: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "data",
@@ -434,6 +443,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::fread_type),
     descriptor(crate::builtins::io::filetext::fread::FREAD_DESCRIPTOR),
+    extensions(crate::builtins::io::filetext::fread::FREAD_EXTENSIONS),
     builtin_path = "crate::builtins::io::filetext::fread"
 )]
 async fn fread_builtin(fid: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -515,6 +525,12 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadE
     let arg_refs: Vec<&Value> = rest.iter().collect();
     let (size_arg, precision_arg, skip_arg, machine_arg, like_arg) =
         map_string_result(classify_arguments(&arg_refs), &FREAD_ERROR_INVALID_INPUT)?;
+    if like_arg.is_some() {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FREAD_LIKE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
 
     let size_host = match size_arg {
         Some(value) => Some(gather_value(value).await?),
@@ -1739,6 +1755,7 @@ pub(crate) mod tests {
 
     #[test]
     fn fread_like_preserves_every_exact_integer_class() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let prototypes = [
             IntegerStorage::I8(vec![0]),
             IntegerStorage::I16(vec![0]),
@@ -2170,7 +2187,19 @@ pub(crate) mod tests {
             Value::from("like"),
             Value::LogicalArray(prototype),
         ];
-        let eval = run_evaluate(&Value::Num(fid as f64), &args).expect("fread");
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = run_evaluate(&Value::Num(fid as f64), &args)
+                .expect_err("MATLAB mode rejects fread like");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:FreadLikeExtension")
+            );
+        }
+        let eval = {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            run_evaluate(&Value::Num(fid as f64), &args).expect("RunMat mode accepts fread like")
+        };
         assert_eq!(eval.count(), 2);
         match eval.data() {
             Value::LogicalArray(array) => {
@@ -2212,6 +2241,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_like_char_requires_precision() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fread_like_char_requires_precision");
@@ -2242,6 +2272,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fread_like_gpu_provider_roundtrip() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fread_like_gpu_provider_roundtrip");
@@ -2290,6 +2321,7 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn fread_wgpu_like_uploads_gpu() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fread_wgpu_like_uploads_gpu");

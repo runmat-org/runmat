@@ -39,7 +39,7 @@
     "`A = fread(fid, sizeA, precision, skip, machinefmt)` honours optional byte skipping and machine-format overrides (`'native'`, `'ieee-le'`, `'ieee-be'`). The machine format defaults to the value recorded by `fopen`.",
     "`[A, count] = fread(...)` returns the number of elements successfully read before encountering EOF.",
     "If MATLAB requests more elements than available, `fread` pads matrix outputs with zeros (or `'\\0'` for character data) to satisfy the requested dimensions; the `count` output always reflects the number of real elements read from the file.",
-    "`A = fread(___, 'like', prototype)` matches the residency and logical or numeric flavour of `prototype`. GPU prototypes trigger an upload after reading so the result remains on the device, while logical prototypes convert the output using MATLAB's non-zero rule.",
+    "In `runmat` compatibility mode, `A = fread(___, 'like', prototype)` is a RunMat extension that matches the residency and logical or numeric flavour of `prototype`. GPU prototypes trigger an upload after reading so the result remains on the device, while logical prototypes convert the output using the ordinary non-zero rule.",
     "RunMat executes the builtin entirely on the host CPU. Arguments that reside on a GPU are gathered automatically before any I/O occurs."
   ],
   "examples": [
@@ -144,8 +144,8 @@
     "label": "`crates/runmat-runtime/src/builtins/io/filetext/fread.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fread.rs"
   },
-  "gpu_residency": "```matlab:runnable\nfid = fopen('samples.bin', 'w+b');\nfwrite(fid, [2.5 4.5 6.5 8.5], 'double');\nfrewind(fid);\n\nprototype = gpuArray.zeros(4, 1);\n[values, count] = fread(fid, 4, 'double', 'like', prototype);\n% When a GPU provider is active, values stays on the GPU and count == 4.\n\nfclose(fid);\ndelete('samples.bin');\n```\n`values` stays on the GPU when an acceleration provider is active. Without a provider the function still returns correct data on the host.",
+  "gpu_residency": "In `runmat` compatibility mode, the RunMat-only `'like'` form can upload the result to match a GPU prototype:\n```matlab:runnable\nfid = fopen('samples.bin', 'w+b');\nfwrite(fid, [2.5 4.5 6.5 8.5], 'double');\nfrewind(fid);\n\nprototype = gpuArray.zeros(4, 1);\n[values, count] = fread(fid, 4, 'double', 'like', prototype);\n% When a GPU provider is active, values stays on the GPU and count == 4.\n\nfclose(fid);\ndelete('samples.bin');\n```\n`values` stays on the GPU when an acceleration provider is active. Without a provider the function still returns correct data on the host.",
   "gpu_behavior": [
-    "`fread` is a host-only operation. When the file identifier or optional arguments (size vectors, precision strings, skip counts) live on the GPU, RunMat gathers them to the host first. File handles are managed by the shared registry established by `fopen`, and GPU providers never participate in file I/O. When a `'like'` prototype is a GPU tensor, the builtin uploads the host result after the read so that the output mirrors the prototype's residency. Providers that fail the upload silently fall back to returning the host tensor."
+    "`fread` is a host-only operation. When the file identifier or optional arguments (size vectors, precision strings, skip counts) live on the GPU, RunMat gathers them to the host first. File handles are managed by the shared registry established by `fopen`, and GPU providers never participate in file I/O. In `runmat` compatibility mode, the RunMat-only `'like'` form uploads the host result when its prototype is a GPU tensor so that the output mirrors the prototype's residency. Providers that fail the upload silently fall back to returning the host tensor."
   ]
 }

@@ -36941,6 +36941,14 @@
           "when": "Internal runtime control-flow conversion failed.",
           "message": "fread: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "fread-like",
+          "mode": "RunMatOnly",
+          "description": "the fread \"like\" prototype selector is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FreadLikeExtension"
+        }
       ]
     },
     {
@@ -38072,6 +38080,14 @@
           "identifier": null,
           "when": "Internal runtime control-flow conversion fails.",
           "message": "fwrite: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "fwrite-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "direct fwrite of gpuArray input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FwriteGpuInputExtension"
         }
       ]
     },

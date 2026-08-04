@@ -192,6 +192,8 @@ mod tests {
                 ("gpuArray", "gpuarray-dtype-selector"),
                 ("gpuArray", "gpuarray-like"),
                 ("gpuArray", "gpuarray-size-arguments"),
+                ("fread", "fread-like"),
+                ("fwrite", "fwrite-gpu-input"),
                 ("macd", "macd-nondouble-matrix"),
                 ("meshgrid", "meshgrid-complex-axes"),
                 ("meshgrid", "meshgrid-like"),
