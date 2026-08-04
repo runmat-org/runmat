@@ -1413,25 +1413,25 @@ mod tests {
             assert!(call(integer_matrix(), Vec::new()).is_ok());
         }
 
-        crate::builtins::common::test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, 0, 0, 8]), vec![2, 2])
-                .expect("integer coefficient matrix");
-            let handle = gpu_helpers::upload_tensor(provider, &tensor)
-                .expect("upload integer coefficient matrix");
-            {
-                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-                let error = call(Value::GpuTensor(handle.clone()), Vec::new())
-                    .expect_err("MATLAB mode rejects resident integer A before gather");
-                assert_eq!(
-                    error.identifier(),
-                    Some("RunMat:compatibility:EigsGpuInputExtension")
-                );
-            }
-            {
-                let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-                assert!(call(Value::GpuTensor(handle), Vec::new()).is_ok());
-            }
-        });
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![2, 2],
+            device_id: 0,
+            buffer_id: 9_300_002,
+        };
+        runmat_accelerate_api::set_handle_integer_type(
+            &handle,
+            runmat_accelerate_api::IntegerElementType::I16,
+        );
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = call(Value::GpuTensor(handle.clone()), Vec::new())
+                .expect_err("MATLAB mode rejects resident integer A before gather");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:EigsGpuInputExtension")
+            );
+        }
+        runmat_accelerate_api::clear_handle_integer_type(&handle);
     }
 
     #[test]
