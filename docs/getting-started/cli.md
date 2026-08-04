@@ -181,6 +181,10 @@ runmat job list
 runmat job show RUN_ID
 runmat job attach RUN_ID
 runmat job cancel RUN_ID
+
+runmat job recovery keygen --output runmat-recovery.json
+runmat job recovery configure --org ORG_ID --key runmat-recovery.json
+runmat job recovery recover RUN_ID --project PROJECT_ID --key runmat-recovery.json
 ```
 
 Every cluster command and every durable job observation/mutation supports `--json`. JSON mode emits one complete stable API object or page and never includes ANSI escapes; human list mode remains stable tab-separated output. Enrollment output contains a single-use secret, so avoid shell history and logs and prefer JSON-to-secret-store automation when scripting it.
@@ -193,6 +197,8 @@ sudo runmat-node-agent --server https://api.runmat.com --runmat /usr/local/bin/r
 ```
 
 Service installation persists only non-secret configuration. Enrollment credentials remain in the private state directory, service removal preserves that identity for safe reinstall, and retiring a host requires revoking the node before deleting its state. See the node-agent README and `runmat-node-agent --help` for platform paths and the foreground enrollment flow.
+
+Organization recovery is optional. The CLI generates and retains the private key locally, sends only its validated public recipient to the Server policy API, and decrypts authorized terminal results or diagnostics on the custodian machine. Once configured, every new submission must carry an envelope for the exact active fingerprint. Keep rotated private keys for the full artifact-retention period. See [Remote Execution](/docs/runtime/execution/remote) for customer-node, hosted-node, browser, draining, and recovery workflows.
 
 ## Packages
 

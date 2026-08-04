@@ -23,6 +23,39 @@ const INFO: &[u8] = b"runmat-execution-artifact-hpke-v1";
 #[derive(Clone)]
 pub struct PortableExecutionPrivateKey(<X25519HkdfSha256 as hpke::Kem>::PrivateKey);
 
+impl PortableExecutionPrivateKey {
+    /// Restore a portable X25519 recipient private key from an exact 32-byte
+    /// secret previously returned by [`Self::to_bytes`].
+    ///
+    /// Callers own secure storage, access control, and zeroization of the
+    /// serialized bytes. The execution artifact layer deliberately does not
+    /// choose a filesystem, browser storage, or KMS policy.
+    pub fn from_bytes(bytes: &[u8]) -> ArtifactResult<Self> {
+        let private =
+            <X25519HkdfSha256 as hpke::Kem>::PrivateKey::from_bytes(bytes).map_err(encryption)?;
+        Ok(Self(private))
+    }
+
+    /// Export the exact 32-byte recipient secret for storage by a platform
+    /// key custodian.
+    pub fn to_bytes(&self) -> [u8; 32] {
+        self.0
+            .to_bytes()
+            .as_slice()
+            .try_into()
+            .expect("X25519 private keys are always 32 bytes")
+    }
+
+    /// Return the public X25519 recipient key corresponding to this secret.
+    pub fn public_key_bytes(&self) -> [u8; 32] {
+        X25519HkdfSha256::sk_to_pk(&self.0)
+            .to_bytes()
+            .as_slice()
+            .try_into()
+            .expect("X25519 public keys are always 32 bytes")
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PortableExecutionEncryption;
 

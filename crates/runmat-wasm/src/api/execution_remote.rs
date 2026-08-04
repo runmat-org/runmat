@@ -36,6 +36,17 @@ struct WireRecipient {
     valid_before_unix_millis: u64,
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WireRecoveryRecipient {
+    suite: String,
+    public_key: String,
+    fingerprint: String,
+    valid_after_unix_millis: u64,
+    valid_before_unix_millis: u64,
+    custodian_uri: Option<String>,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct WireDirectQuicEndpoint {
@@ -177,6 +188,29 @@ impl BrowserRemoteSubmission {
         encode_run_key_envelope(&envelope).map_err(js_error)
     }
 
+    /// Seal this submission's content key to an organization recovery
+    /// recipient returned by the public Server policy API.
+    #[wasm_bindgen(js_name = sealRunKeyForRecipient)]
+    pub fn seal_run_key_for_recipient(
+        &self,
+        recipient: JsValue,
+        key_epoch: u32,
+    ) -> Result<Vec<u8>, JsValue> {
+        let recipient: WireRecoveryRecipient =
+            serde_wasm_bindgen::from_value(recipient).map_err(js_error)?;
+        let recipient = recipient.into_domain()?;
+        let envelope = PortableExecutionEncryption
+            .seal_run_key_with_entropy(
+                super::execution_artifact::browser_entropy()?,
+                &recipient,
+                &self.run_key,
+                self.run_identity.clone(),
+                key_epoch,
+            )
+            .map_err(js_error)?;
+        encode_run_key_envelope(&envelope).map_err(js_error)
+    }
+
     #[allow(clippy::too_many_arguments)]
     #[wasm_bindgen(js_name = encryptObject)]
     pub fn encrypt_object(
@@ -303,6 +337,42 @@ impl WireEvidence {
     }
 }
 
+impl WireRecoveryRecipient {
+    fn into_domain(self) -> Result<ExecutionRecipientKey, JsValue> {
+        const RECOVERY_SUITE: &str = "x25519-hkdf-sha256-aes128gcm-v1";
+        if self.suite != RECOVERY_SUITE {
+            return Err(JsValue::from_str(
+                "execution recovery recipient suite is unsupported",
+            ));
+        }
+        let public_key = decode(&self.public_key)?;
+        if runmat_execution::security::recipient_fingerprint(&public_key) != self.fingerprint {
+            return Err(JsValue::from_str(
+                "execution recovery recipient fingerprint is invalid",
+            ));
+        }
+        let recipient = ExecutionRecipientKey {
+            suite:
+                runmat_execution_artifact::encryption::ExecutionHpkeSuite::X25519HkdfSha256Aes128GcmV1,
+            public_key,
+            fingerprint: self.fingerprint,
+            valid_after_unix_millis: self.valid_after_unix_millis,
+            valid_before_unix_millis: self.valid_before_unix_millis,
+            custodian_uri: self.custodian_uri,
+        };
+        recipient.validate().map_err(js_error)?;
+        let now_unix_millis = js_sys::Date::now().max(0.0) as u64;
+        if now_unix_millis < recipient.valid_after_unix_millis
+            || now_unix_millis >= recipient.valid_before_unix_millis
+        {
+            return Err(JsValue::from_str(
+                "execution recovery recipient is outside its validity window",
+            ));
+        }
+        Ok(recipient)
+    }
+}
+
 fn decode(value: &str) -> Result<Vec<u8>, JsValue> {
     base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(value)
@@ -325,7 +395,7 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn browser_submission_uses_canonical_envelopes_and_relay_protocols() {
-        let (recipient, _) = PortableExecutionEncryption
+        let (recipient, endpoint_private) = PortableExecutionEncryption
             .recipient_from_entropy([7; 32], "f".repeat(64), 1, 2_000_000_000_000)
             .unwrap();
         let endpoint = serde_wasm_bindgen::to_value(&VerifiedBrowserEndpoint {
@@ -335,13 +405,50 @@ mod tests {
         .unwrap();
         let submission = BrowserRemoteSubmission::new("run-browser".into(), endpoint).unwrap();
         let envelope = submission.seal_run_key_envelope(1).unwrap();
+        let envelope = decode_run_key_envelope(&envelope, 64 * 1024).unwrap();
+        assert_eq!(envelope.encrypted_key.context.run_identity, "run-browser");
+        let endpoint_run_key = PortableExecutionEncryption
+            .open_run_key(
+                &endpoint_private,
+                &envelope,
+                &"f".repeat(64),
+                "run-browser",
+                1,
+            )
+            .unwrap();
+
+        let (recovery, recovery_private) = PortableExecutionEncryption
+            .recipient_from_entropy_with_derived_fingerprint([9; 32], 1, 2_000_000_000_000)
+            .unwrap();
+        let recovery_wire = serde_wasm_bindgen::to_value(&WireRecoveryRecipient {
+            suite: "x25519-hkdf-sha256-aes128gcm-v1".into(),
+            public_key: base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .encode(&recovery.public_key),
+            fingerprint: recovery.fingerprint.clone(),
+            valid_after_unix_millis: recovery.valid_after_unix_millis,
+            valid_before_unix_millis: recovery.valid_before_unix_millis,
+            custodian_uri: None,
+        })
+        .unwrap();
+        let recovery_envelope = decode_run_key_envelope(
+            &submission
+                .seal_run_key_for_recipient(recovery_wire, 1)
+                .unwrap(),
+            64 * 1024,
+        )
+        .unwrap();
+        let recovery_run_key = PortableExecutionEncryption
+            .open_run_key(
+                &recovery_private,
+                &recovery_envelope,
+                &recovery.fingerprint,
+                "run-browser",
+                1,
+            )
+            .unwrap();
         assert_eq!(
-            decode_run_key_envelope(&envelope, 64 * 1024)
-                .unwrap()
-                .encrypted_key
-                .context
-                .run_identity,
-            "run-browser"
+            endpoint_run_key.expose_for_recipient_envelope(),
+            recovery_run_key.expose_for_recipient_envelope()
         );
         let protocols: Vec<String> =
             serde_wasm_bindgen::from_value(execution_relay_protocols("ticket_1".into()).unwrap())

@@ -1,8 +1,8 @@
 use runmat_execution::Digest;
 use runmat_execution_artifact::encryption::{
     decode_run_key_envelope, encode_run_key_envelope, open_run_key, seal_run_key,
-    EncryptionContext, EncryptionPurpose, NativeExecutionEncryption, RunKeyMaterial,
-    RunObjectEncryption,
+    EncryptionContext, EncryptionPurpose, NativeExecutionEncryption, PortableExecutionEncryption,
+    PortableExecutionPrivateKey, RunKeyMaterial, RunObjectEncryption,
 };
 
 fn context(run: &str, plaintext: &[u8]) -> EncryptionContext {
@@ -17,6 +17,34 @@ fn context(run: &str, plaintext: &[u8]) -> EncryptionContext {
         total_length: plaintext.len() as u64,
         key_epoch: 1,
     }
+}
+
+#[test]
+fn portable_recipient_secret_roundtrips_through_exact_bytes() {
+    let provider = PortableExecutionEncryption;
+    let (recipient, private_key) = provider
+        .recipient_from_entropy_with_derived_fingerprint([13; 32], 1, u64::MAX)
+        .unwrap();
+    let restored = PortableExecutionPrivateKey::from_bytes(&private_key.to_bytes()).unwrap();
+    assert_eq!(restored.public_key_bytes(), recipient.public_key.as_slice());
+    let run_key = RunKeyMaterial::from_entropy([17; 32]).unwrap();
+    let envelope = provider
+        .seal_run_key_with_entropy([19; 32], &recipient, &run_key, "run_portable", 1)
+        .unwrap();
+    let opened = provider
+        .open_run_key(
+            &restored,
+            &envelope,
+            &recipient.fingerprint,
+            "run_portable",
+            1,
+        )
+        .unwrap();
+    assert_eq!(
+        opened.expose_for_recipient_envelope(),
+        run_key.expose_for_recipient_envelope()
+    );
+    assert!(PortableExecutionPrivateKey::from_bytes(&[1; 31]).is_err());
 }
 
 #[test]

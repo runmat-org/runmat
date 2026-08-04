@@ -72,6 +72,19 @@ pub enum ClusterCommand {
     },
 }
 
+impl ClusterCommand {
+    pub(crate) fn machine_output(&self) -> bool {
+        match self {
+            Self::List { json, .. }
+            | Self::Create { json, .. }
+            | Self::State { json, .. }
+            | Self::Enroll { json, .. }
+            | Self::Nodes { json, .. }
+            | Self::NodeState { json, .. } => *json,
+        }
+    }
+}
+
 #[derive(Clone, Copy, ValueEnum)]
 pub enum ClusterStateArg {
     Active,

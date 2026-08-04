@@ -247,6 +247,13 @@ pub fn cli_output_mode(cli: &Cli) -> OutputMode {
         Some(Commands::Config {
             config_command: ConfigCommand::Show { .. },
         }) => OutputMode::Machine,
+        Some(Commands::Cluster { cluster_command }) if cluster_command.machine_output() => {
+            OutputMode::Machine
+        }
+        Some(Commands::Job { job_command }) if job_command.machine_output() => OutputMode::Machine,
+        Some(Commands::Package { package_command }) if package_command.machine_output() => {
+            OutputMode::Machine
+        }
         _ => OutputMode::Human,
     }
 }
@@ -565,8 +572,37 @@ mod tests {
         let config = Cli::try_parse_from(["runmat", "config", "show", "--format", "json"]).unwrap();
         assert_eq!(cli_output_mode(&config), OutputMode::Machine);
 
+        let cluster = Cli::try_parse_from(["runmat", "cluster", "list", "--json"]).unwrap();
+        assert_eq!(cli_output_mode(&cluster), OutputMode::Machine);
+
+        let recovery = Cli::try_parse_from([
+            "runmat",
+            "job",
+            "recovery",
+            "keygen",
+            "--output",
+            "recovery-key.json",
+            "--json",
+        ])
+        .unwrap();
+        assert_eq!(cli_output_mode(&recovery), OutputMode::Machine);
+
+        let package = Cli::try_parse_from(["runmat", "package", "inspect", "--json"]).unwrap();
+        assert_eq!(cli_output_mode(&package), OutputMode::Machine);
+
         let info = Cli::try_parse_from(["runmat", "info"]).unwrap();
         assert_eq!(cli_output_mode(&info), OutputMode::Human);
+
+        let human_recovery = Cli::try_parse_from([
+            "runmat",
+            "job",
+            "recovery",
+            "keygen",
+            "--output",
+            "recovery-key.json",
+        ])
+        .unwrap();
+        assert_eq!(cli_output_mode(&human_recovery), OutputMode::Human);
     }
 
     fn strip_ansi(value: &str) -> String {

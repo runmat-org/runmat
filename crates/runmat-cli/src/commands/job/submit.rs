@@ -181,6 +181,18 @@ pub(crate) async fn submit_prepared(
     options: RemoteSubmissionOptions,
 ) -> Result<types::RunResponse> {
     let (client, server_url, project_id) = super::client(options.project).await?;
+    let recovery_recipient = client
+        .api()
+        .get_project_execution_policy(&project_id)
+        .await
+        .map_err(public_error)?
+        .into_inner()
+        .recovery_recipient
+        .map(recovery_recipient)
+        .transpose()?;
+    let recovery_fingerprint = recovery_recipient
+        .as_ref()
+        .map(|recipient| recipient.fingerprint.clone());
     let idempotency_key = options
         .idempotency_key
         .unwrap_or_else(|| Uuid::new_v4().to_string());
@@ -190,6 +202,7 @@ pub(crate) async fn submit_prepared(
         &options.cluster,
         &options.queue,
         options.workers,
+        recovery_fingerprint.as_deref(),
     );
     let run = client
         .api()
@@ -200,6 +213,7 @@ pub(crate) async fn submit_prepared(
                 cluster_id: options.cluster.clone(),
                 queue: options.queue,
                 request_digest,
+                recovery_recipient_fingerprint: recovery_fingerprint,
                 project_revision: project_revision_identity(&prepared.revision),
                 bundle_ciphertext_size_class: size_class(prepared.bundle_archive.len()),
                 compatibility_fingerprints: HashMap::from([
@@ -324,13 +338,32 @@ pub(crate) async fn submit_prepared(
         input,
     )
     .await?;
-    let envelope = PortableExecutionEncryption.seal_run_key_with_entropy(
+    let driver_envelope = PortableExecutionEncryption.seal_run_key_with_entropy(
         random_entropy()?,
         &recipient,
         &run_key,
         &run.id,
         1,
     )?;
+    let mut envelopes = vec![types::RunKeyEnvelopeBody {
+        recipient_role: types::RunKeyRecipientRoleBody::Driver,
+        envelope: base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(encode_run_key_envelope(&driver_envelope)?),
+    }];
+    if let Some(recovery_recipient) = recovery_recipient {
+        let recovery_envelope = PortableExecutionEncryption.seal_run_key_with_entropy(
+            random_entropy()?,
+            &recovery_recipient,
+            &run_key,
+            &run.id,
+            1,
+        )?;
+        envelopes.push(types::RunKeyEnvelopeBody {
+            recipient_role: types::RunKeyRecipientRoleBody::Recovery,
+            envelope: base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .encode(encode_run_key_envelope(&recovery_envelope)?),
+        });
+    }
     let committed = client
         .api()
         .commit_run_content(
@@ -341,11 +374,7 @@ pub(crate) async fn submit_prepared(
                 program_artifact_id: program_id,
                 input_artifact_id: Some(input_id),
                 endpoint_fingerprint: recipient.fingerprint.clone(),
-                run_key_envelopes: vec![types::RunKeyEnvelopeBody {
-                    recipient_role: types::RunKeyRecipientRoleBody::Driver,
-                    envelope: base64::engine::general_purpose::URL_SAFE_NO_PAD
-                        .encode(encode_run_key_envelope(&envelope)?),
-                }],
+                run_key_envelopes: envelopes,
             },
         )
         .await
@@ -495,6 +524,7 @@ fn request_digest(
     cluster: &str,
     queue: &str,
     workers: u32,
+    recovery_recipient_fingerprint: Option<&str>,
 ) -> String {
     let mut digest = Sha256::new();
     digest.update(b"runmat-remote-run-request-v1\0");
@@ -503,7 +533,47 @@ fn request_digest(
     digest.update(cluster.as_bytes());
     digest.update(queue.as_bytes());
     digest.update(workers.to_be_bytes());
+    if let Some(fingerprint) = recovery_recipient_fingerprint {
+        digest.update(b"\0recovery-recipient\0");
+        digest.update(fingerprint.as_bytes());
+    }
     format!("{:x}", digest.finalize())
+}
+
+fn recovery_recipient(
+    value: types::ExecutionRecoveryRecipientBody,
+) -> Result<ExecutionRecipientKey> {
+    const RECOVERY_SUITE: &str = "x25519-hkdf-sha256-aes128gcm-v1";
+    if value.suite != RECOVERY_SUITE {
+        bail!("Server returned an unsupported recovery recipient suite");
+    }
+    let public_key = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(value.public_key)
+        .context("Server returned malformed recovery recipient key material")?;
+    if runmat_execution::security::recipient_fingerprint(&public_key) != value.fingerprint {
+        bail!("Server returned a recovery recipient with a mismatched fingerprint");
+    }
+    let recipient = ExecutionRecipientKey {
+        suite:
+            runmat_execution_artifact::encryption::ExecutionHpkeSuite::X25519HkdfSha256Aes128GcmV1,
+        public_key,
+        fingerprint: value.fingerprint,
+        valid_after_unix_millis: u64::try_from(value.valid_after_unix_millis)
+            .context("recovery recipient validity starts before the Unix epoch")?,
+        valid_before_unix_millis: u64::try_from(value.valid_before_unix_millis)
+            .context("recovery recipient validity ends before the Unix epoch")?,
+        custodian_uri: value.custodian_uri,
+    };
+    recipient.validate()?;
+    let now: u64 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)?
+        .as_millis()
+        .try_into()
+        .context("system clock exceeds execution timestamp range")?;
+    if now < recipient.valid_after_unix_millis || now >= recipient.valid_before_unix_millis {
+        bail!("organization recovery recipient is outside its configured validity window");
+    }
+    Ok(recipient)
 }
 
 fn project_revision_identity(revision: &ProgramRevision) -> String {

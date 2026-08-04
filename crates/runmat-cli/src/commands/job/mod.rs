@@ -1,4 +1,6 @@
 pub(crate) mod attach;
+mod crypto;
+mod recovery;
 mod secret;
 pub(crate) mod submit;
 
@@ -59,17 +61,23 @@ pub async fn execute(
             json,
         } => attach::attach(&run_id, no_follow, json).await,
         JobCommand::Cancel { run_id, json } => attach::cancel(&run_id, json).await,
+        JobCommand::Recovery { command } => recovery::execute(command).await,
     }
 }
 
 async fn client(project: Option<uuid::Uuid>) -> Result<(ExecutionClient, String, String)> {
-    let mut config = RemoteConfig::load()?;
+    let (client, server_url, config) = authenticated_context().await?;
     let project_id = resolve_project_id(&config, project)?.to_string();
+    Ok((client, server_url, project_id))
+}
+
+async fn authenticated_context() -> Result<(ExecutionClient, String, RemoteConfig)> {
+    let mut config = RemoteConfig::load()?;
     let server_url = resolve_server_url(&config, None)?;
     let token = resolve_auth_token(&mut config, &server_url).await?;
     let client =
         ExecutionClient::new(&server_url, &token).context("initialize execution client")?;
-    Ok((client, server_url, project_id))
+    Ok((client, server_url, config))
 }
 
 pub(crate) async fn cancel_remote_run(project: Option<uuid::Uuid>, run_id: &str) -> Result<()> {

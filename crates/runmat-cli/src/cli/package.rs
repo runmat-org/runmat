@@ -42,6 +42,26 @@ pub enum PackageCommand {
     Inspect(PackageInspectArgs),
 }
 
+impl PackageCommand {
+    pub(crate) fn machine_output(&self) -> bool {
+        match self {
+            Self::Inspect(args) => args.json,
+            Self::Publish(args) => args.artifact.json,
+            Self::Cache {
+                command: PackageCacheCommand::Status { json },
+            } => *json,
+            Self::Resolve(_)
+            | Self::Fetch(_)
+            | Self::Update(_)
+            | Self::Tree(_)
+            | Self::Why { .. }
+            | Self::Vendor { .. }
+            | Self::Cache { .. }
+            | Self::Keys { .. } => false,
+        }
+    }
+}
+
 #[derive(clap::Args, Clone, Debug)]
 pub struct PackageInspectArgs {
     /// Project manifest path

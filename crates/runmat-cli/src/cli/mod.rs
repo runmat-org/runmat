@@ -10,7 +10,7 @@ mod value_types;
 
 pub use batch::BatchCommand;
 pub use cluster::{ClusterCommand, ClusterStateArg, NodeStateArg};
-pub use job::JobCommand;
+pub use job::{JobCommand, JobRecoveryCommand};
 pub use package::{
     PackageCacheCommand, PackageCommand, PackageInspectArgs, PackageKeyCommand, PackageKeyTarget,
     PackageProjectArgs, PackagePublishArgs,

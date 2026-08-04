@@ -2,9 +2,7 @@ use std::num::NonZeroU64;
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
-use runmat_execution_artifact::encryption::{
-    decode_encrypted_run_object, EncryptionPurpose, RunObjectEncryption,
-};
+use runmat_execution_artifact::encryption::EncryptionPurpose;
 use runmat_execution_artifact::ProgramExecutionResponse;
 use runmat_server_client::auth::{
     resolve_auth_token, resolve_project_id, resolve_server_url, RemoteConfig,
@@ -94,7 +92,7 @@ pub(crate) async fn await_result(run_id: &str) -> Result<ProgramExecutionRespons
             let ciphertext = client
                 .download_artifact(&saved.project_id, artifact_id, &saved.endpoint_fingerprint)
                 .await?;
-            let plaintext = open(
+            let plaintext = super::crypto::open_run_object(
                 &saved.key()?,
                 &run.id,
                 EncryptionPurpose::Result,
@@ -107,7 +105,7 @@ pub(crate) async fn await_result(run_id: &str) -> Result<ProgramExecutionRespons
             let ciphertext = client
                 .download_artifact(&saved.project_id, artifact_id, &saved.endpoint_fingerprint)
                 .await?;
-            let diagnostic = open(
+            let diagnostic = super::crypto::open_run_object(
                 &saved.key()?,
                 &run.id,
                 EncryptionPurpose::DetailedEvent,
@@ -168,7 +166,8 @@ async fn print_terminal(
         let ciphertext = client
             .download_artifact(&saved.project_id, artifact_id, &saved.endpoint_fingerprint)
             .await?;
-        let plaintext = open(&key, &run.id, EncryptionPurpose::Result, &ciphertext)?;
+        let plaintext =
+            super::crypto::open_run_object(&key, &run.id, EncryptionPurpose::Result, &ciphertext)?;
         let response: ProgramExecutionResponse =
             serde_json::from_slice(&plaintext).context("remote result payload is malformed")?;
         if json {
@@ -194,7 +193,12 @@ async fn print_terminal(
         let ciphertext = client
             .download_artifact(&saved.project_id, artifact_id, &saved.endpoint_fingerprint)
             .await?;
-        let diagnostic = open(&key, &run.id, EncryptionPurpose::DetailedEvent, &ciphertext)?;
+        let diagnostic = super::crypto::open_run_object(
+            &key,
+            &run.id,
+            EncryptionPurpose::DetailedEvent,
+            &ciphertext,
+        )?;
         let message =
             String::from_utf8(diagnostic).context("remote diagnostic is not valid UTF-8")?;
         if json {
@@ -217,21 +221,6 @@ async fn print_terminal(
         print_run(&run);
     }
     Ok(())
-}
-
-fn open(
-    key: &runmat_execution_artifact::encryption::RunKeyMaterial,
-    run_id: &str,
-    purpose: EncryptionPurpose,
-    ciphertext: &[u8],
-) -> Result<Vec<u8>> {
-    let object = decode_encrypted_run_object(ciphertext, 64 * 1024 * 1024)?;
-    if object.context.run_identity != run_id || object.context.purpose != purpose {
-        bail!("encrypted remote artifact has the wrong run scope or purpose");
-    }
-    RunObjectEncryption
-        .open(key, &object)
-        .map_err(anyhow::Error::from)
 }
 
 async fn saved_client(run_id: &str) -> Result<(ExecutionClient, secret::SavedRemoteRun)> {

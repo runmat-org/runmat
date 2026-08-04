@@ -1572,6 +1572,109 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/execution/overview:
+    get:
+      tags:
+      - Execution
+      operationId: get_organization_execution_overview
+      parameters:
+      - name: after
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          nullable: true
+          maximum: 200
+          minimum: 1
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionOrganizationOverviewResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/execution/policy:
+    get:
+      tags:
+      - Execution
+      operationId: get_organization_execution_policy
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionOrganizationPolicyResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+    put:
+      tags:
+      - Execution
+      operationId: update_organization_execution_policy
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateExecutionOrganizationPolicyRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionOrganizationPolicyResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
   /v1/orgs/{orgId}/packages/registry:
     get:
       tags:
@@ -3907,6 +4010,30 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/execution/policy:
+    get:
+      tags:
+      - Execution
+      operationId: get_project_execution_policy
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionOrganizationPolicyResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
   /v1/projects/{projectId}/execution/runs:
     get:
       tags:
@@ -4265,6 +4392,47 @@ paths:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
         '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/execution/runs/{runId}/recovery:
+    get:
+      tags:
+      - Execution
+      operationId: get_run_recovery
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: runId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunRecoveryResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
           description: ''
           content:
             application/json:
@@ -7203,6 +7371,119 @@ components:
         traceId:
           type: string
           nullable: true
+    ExecutionOrganizationOverviewResponse:
+      type: object
+      required:
+      - policy
+      - activeRuns
+      - queuedRuns
+      - runningRuns
+      - terminalRunsLast24Hours
+      - failedRunsLast24Hours
+      - reservedMicrousd
+      - settledMicrousd
+      - runs
+      properties:
+        activeRuns:
+          type: integer
+          format: int64
+          minimum: 0
+        failedRunsLast24Hours:
+          type: integer
+          format: int64
+          minimum: 0
+        nextCursor:
+          type: string
+          nullable: true
+        policy:
+          $ref: '#/components/schemas/ExecutionOrganizationPolicyResponse'
+        queuedRuns:
+          type: integer
+          format: int64
+          minimum: 0
+        reservedMicrousd:
+          type: integer
+          format: int64
+          minimum: 0
+        runningRuns:
+          type: integer
+          format: int64
+          minimum: 0
+        runs:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunResponse'
+        settledMicrousd:
+          type: integer
+          format: int64
+          minimum: 0
+        terminalRunsLast24Hours:
+          type: integer
+          format: int64
+          minimum: 0
+    ExecutionOrganizationPolicyResponse:
+      type: object
+      required:
+      - orgId
+      - maxActiveRuns
+      - maxActiveRunsPerProject
+      - maxActiveRunsPerPrincipal
+      - version
+      - updatedAt
+      properties:
+        maxActiveRuns:
+          type: integer
+          format: int32
+          minimum: 0
+        maxActiveRunsPerPrincipal:
+          type: integer
+          format: int32
+          minimum: 0
+        maxActiveRunsPerProject:
+          type: integer
+          format: int32
+          minimum: 0
+        orgId:
+          type: string
+        recoveryRecipient:
+          allOf:
+          - $ref: '#/components/schemas/ExecutionRecoveryRecipientBody'
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+        version:
+          type: integer
+          format: int64
+          minimum: 0
+    ExecutionRecoveryRecipientBody:
+      type: object
+      required:
+      - suite
+      - publicKey
+      - fingerprint
+      - validAfterUnixMillis
+      - validBeforeUnixMillis
+      properties:
+        custodianUri:
+          type: string
+          nullable: true
+        fingerprint:
+          type: string
+        publicKey:
+          type: string
+          description: Base64url-encoded 32-byte X25519 public key.
+        suite:
+          type: string
+        validAfterUnixMillis:
+          type: integer
+          format: int64
+          minimum: 0
+        validBeforeUnixMillis:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
     ExecutionTrustTierBody:
       type: string
       enum:
@@ -10414,12 +10695,36 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/RunResponse'
+    RunRecoveryResponse:
+      type: object
+      required:
+      - runId
+      - projectId
+      - recipientFingerprint
+      - envelope
+      properties:
+        diagnosticArtifactId:
+          type: string
+          nullable: true
+        envelope:
+          type: string
+          description: Base64url-encoded canonical `RunKeyEnvelope`.
+        projectId:
+          type: string
+        recipientFingerprint:
+          type: string
+        resultArtifactId:
+          type: string
+          nullable: true
+        runId:
+          type: string
     RunResponse:
       type: object
       required:
       - id
       - orgId
       - projectId
+      - submittedBy
       - clusterId
       - queue
       - projectRevision
@@ -10483,6 +10788,9 @@ components:
         reasonCode:
           type: string
           nullable: true
+        recoveryRecipientFingerprint:
+          type: string
+          nullable: true
         reservedMicrousd:
           type: integer
           format: int64
@@ -10498,6 +10806,8 @@ components:
           nullable: true
           minimum: 0
         state:
+          type: string
+        submittedBy:
           type: string
         terminalAt:
           type: string
@@ -11026,6 +11336,9 @@ components:
           type: string
         queue:
           type: string
+        recoveryRecipientFingerprint:
+          type: string
+          nullable: true
         requestDigest:
           type: string
         resources:
@@ -11290,6 +11603,38 @@ components:
         sourceRepository:
           type: string
           nullable: true
+    UpdateExecutionOrganizationPolicyRequest:
+      type: object
+      required:
+      - expectedVersion
+      - maxActiveRuns
+      - maxActiveRunsPerProject
+      - maxActiveRunsPerPrincipal
+      properties:
+        expectedVersion:
+          type: integer
+          format: int64
+          minimum: 0
+        maxActiveRuns:
+          type: integer
+          format: int32
+          maximum: 10000
+          minimum: 1
+        maxActiveRunsPerPrincipal:
+          type: integer
+          format: int32
+          maximum: 10000
+          minimum: 1
+        maxActiveRunsPerProject:
+          type: integer
+          format: int32
+          maximum: 10000
+          minimum: 1
+        recoveryRecipient:
+          allOf:
+          - $ref: '#/components/schemas/ExecutionRecoveryRecipientBody'
+          nullable: true
+      additionalProperties: false
     UpdateGrantRequest:
       type: object
       required:
