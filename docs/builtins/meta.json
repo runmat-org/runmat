@@ -80449,6 +80449,104 @@
       ]
     },
     {
+      "name": "pskmod",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = pskmod(X, M)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Integer symbols or grouped bit input."
+            },
+            {
+              "name": "M",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Modulation order greater than one."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Complex M-PSK baseband samples."
+            }
+          ]
+        },
+        {
+          "label": "Y = pskmod(X, M, phaseoffset, symorder, Name, Value)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Integer symbols or grouped bit input."
+            },
+            {
+              "name": "M",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Modulation order greater than one."
+            },
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional phase offset, symbol order, and name-value options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Complex M-PSK baseband samples."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.PSKMOD.INVALID_ARGUMENT",
+          "identifier": null,
+          "when": "Symbols, modulation order, phase, mapping, or options are invalid.",
+          "message": "pskmod: invalid argument"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "pskmod-integer-modulation-order",
+          "mode": "RunMatOnly",
+          "description": "pskmod with typed-integer modulation order M is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PskmodIntegerModulationOrderExtension"
+        },
+        {
+          "id": "pskmod-integer-phase-offset",
+          "mode": "RunMatOnly",
+          "description": "pskmod with a typed-integer phase offset is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PskmodIntegerPhaseOffsetExtension"
+        },
+        {
+          "id": "pskmod-integer-custom-order",
+          "mode": "RunMatOnly",
+          "description": "pskmod with a typed-integer custom symbol order is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PskmodIntegerCustomOrderExtension"
+        }
+      ]
+    },
+    {
       "name": "pulstran",
       "output_mode": "Fixed",
       "completion_policy": "Public",

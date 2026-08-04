@@ -576,6 +576,45 @@ fn test_waveform_dtype_extensions_follow_session_compatibility_mode() {
 }
 
 #[test]
+fn test_pskmod_integer_controls_follow_session_compatibility_mode() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+
+        for (source, identifier) in [
+            (
+                "out = pskmod(0, uint16(4));",
+                "RunMat:compatibility:PskmodIntegerModulationOrderExtension",
+            ),
+            (
+                "out = pskmod(0, 4, int16(0), 'bin');",
+                "RunMat:compatibility:PskmodIntegerPhaseOffsetExtension",
+            ),
+            (
+                "out = pskmod(0, 4, 0, uint16([0 3 1 2]));",
+                "RunMat:compatibility:PskmodIntegerCustomOrderExtension",
+            ),
+        ] {
+            let outcome = runmat_core::execute_text_request_for_testing(&mut engine, source)
+                .expect("runtime failure should be returned in the execution outcome");
+            assert_eq!(
+                outcome.error.as_ref().and_then(|error| error.identifier()),
+                Some(identifier)
+            );
+        }
+
+        engine.set_compat_mode(CompatMode::RunMat);
+        let outcome = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = pskmod(0, uint16(4), int16(0), uint16([0 3 1 2])); abs(out)",
+        )
+        .expect("RunMat mode accepts typed-integer pskmod controls");
+        assert!(outcome.error.is_none(), "{:?}", outcome.error);
+        assert_eq!(outcome.value, Some(runmat_builtins::Value::Num(1.0)));
+    });
+}
+
+#[test]
 fn test_sparse_integer_outputs_follow_session_compatibility_mode() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();

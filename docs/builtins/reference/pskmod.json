@@ -38,10 +38,10 @@
   "description": "`pskmod(X, M)` maps integer symbols or bit groups to unit-magnitude M-PSK complex-baseband samples. Phase offset, Gray ordering, binary ordering, custom symbol ordering, bit input, and output precision follow the MATLAB Communications Toolbox surface.",
   "behaviors": [
     "`X` must contain finite integer symbols in the inclusive range `[0, M-1]` when `InputType` is `'integer'`.",
-    "`M` must be an integer greater than one. Bit input additionally requires `M` to be a power of two.",
-    "The default phase offset is zero radians.",
+    "`M` must be an integer greater than one. Bit input additionally requires `M` to be a power of two. MATLAB-compatible calls supply this control as a double; typed-integer `M` is available in `runmat` compatibility mode.",
+    "The default phase offset is zero radians. MATLAB-compatible calls supply an explicit phase offset as a double; a typed-integer phase offset is available in `runmat` compatibility mode.",
     "The default symbol order is `'gray'`; `'bin'` maps symbol `k` to angle `phaseoffset + 2*pi*k/M`.",
-    "Custom symbol order vectors must have length `M`, contain each integer in `[0, M-1]` exactly once, and label constellation points counter-clockwise starting at `phaseoffset`.",
+    "Custom symbol order vectors must have length `M`, contain each integer in `[0, M-1]` exactly once, and label constellation points counter-clockwise starting at `phaseoffset`. Integer-valued double vectors are MATLAB-compatible controls; typed-integer custom-order vectors are available in `runmat` compatibility mode.",
     "`InputType='bit'` groups rows by `log2(M)` bits per symbol with the first bit as the MSB, preserving remaining dimensions as independent channels.",
     "`OutputDataType='single'` rounds real and imaginary samples through single precision before returning the complex tensor or resident complex gpuArray output.",
     "`PlotConstellation=true` is accepted as a recognized option but raises an explicit not-implemented error."

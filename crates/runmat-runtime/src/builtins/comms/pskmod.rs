@@ -7,7 +7,10 @@ use runmat_accelerate_api::{
     ProviderPrecision,
 };
 use runmat_builtins::{
-    ComplexTensor, IntValue, IntegerStorage, LogicalArray, ResolveContext, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor, ComplexTensor, IntValue, IntegerStorage,
+    LogicalArray, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -21,6 +24,112 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "pskmod";
 const INTEGER_TOL: f64 = 1e-9;
+
+const PSKMOD_INTEGER_ORDER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pskmod-integer-modulation-order",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pskmod with typed-integer modulation order M is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PskmodIntegerModulationOrderExtension"),
+};
+
+const PSKMOD_INTEGER_PHASE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pskmod-integer-phase-offset",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pskmod with a typed-integer phase offset is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PskmodIntegerPhaseOffsetExtension"),
+};
+
+const PSKMOD_INTEGER_CUSTOM_ORDER_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "pskmod-integer-custom-order",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "pskmod with a typed-integer custom symbol order is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:PskmodIntegerCustomOrderExtension"),
+    };
+
+pub const PSKMOD_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    PSKMOD_INTEGER_ORDER_EXTENSION,
+    PSKMOD_INTEGER_PHASE_EXTENSION,
+    PSKMOD_INTEGER_CUSTOM_ORDER_EXTENSION,
+];
+
+const PSKMOD_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Complex M-PSK baseband samples.",
+}];
+
+const PSKMOD_BASE_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Integer symbols or grouped bit input.",
+    },
+    BuiltinParamDescriptor {
+        name: "M",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Modulation order greater than one.",
+    },
+];
+
+const PSKMOD_EXTENDED_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Integer symbols or grouped bit input.",
+    },
+    BuiltinParamDescriptor {
+        name: "M",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Modulation order greater than one.",
+    },
+    BuiltinParamDescriptor {
+        name: "args",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Optional phase offset, symbol order, and name-value options.",
+    },
+];
+
+const PSKMOD_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "Y = pskmod(X, M)",
+        inputs: &PSKMOD_BASE_INPUTS,
+        outputs: &PSKMOD_OUTPUTS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Y = pskmod(X, M, phaseoffset, symorder, Name, Value)",
+        inputs: &PSKMOD_EXTENDED_INPUTS,
+        outputs: &PSKMOD_OUTPUTS,
+    },
+];
+
+const PSKMOD_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PSKMOD.INVALID_ARGUMENT",
+    identifier: None,
+    when: "Symbols, modulation order, phase, mapping, or options are invalid.",
+    message: "pskmod: invalid argument",
+};
+
+const PSKMOD_ERRORS: [BuiltinErrorDescriptor; 1] = [PSKMOD_ERROR_INVALID_ARGUMENT];
+
+pub const PSKMOD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &PSKMOD_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &PSKMOD_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::comms::pskmod")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -60,11 +169,31 @@ fn pskmod_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     summary = "Map integer or bit symbols onto a PSK complex-baseband constellation.",
     keywords = "pskmod,psk,modulation,communications,gray,binary,phaseoffset,gpu",
     type_resolver(pskmod_type),
+    descriptor(crate::builtins::comms::pskmod::PSKMOD_DESCRIPTOR),
+    extensions(crate::builtins::comms::pskmod::PSKMOD_EXTENSIONS),
     builtin_path = "crate::builtins::comms::pskmod"
 )]
 async fn pskmod_builtin(x: Value, m: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let order = parse_modulation_order(&m)?;
+    if is_typed_integer_value(&m) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &PSKMOD_INTEGER_ORDER_EXTENSION,
+            NAME,
+        )?;
+    }
     let options = ParsedOptions::parse(&rest, order)?;
+    if options.integer_phase_extension {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &PSKMOD_INTEGER_PHASE_EXTENSION,
+            NAME,
+        )?;
+    }
+    if options.integer_custom_order_extension {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &PSKMOD_INTEGER_CUSTOM_ORDER_EXTENSION,
+            NAME,
+        )?;
+    }
     match x {
         Value::GpuTensor(handle) => pskmod_gpu(handle, order, options).await,
         other => {
@@ -162,6 +291,8 @@ struct ParsedOptions {
     mapping: SymbolMapping,
     input_type: InputType,
     output_dtype: OutputDType,
+    integer_phase_extension: bool,
+    integer_custom_order_extension: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -189,14 +320,19 @@ impl ParsedOptions {
         let mut mapping = SymbolMapping::Gray;
         let mut input_type = InputType::Integer;
         let mut output_dtype = OutputDType::Double;
+        let mut integer_phase_extension = false;
+        let mut integer_custom_order_extension = false;
         let mut idx = 0usize;
 
         if let Some(first) = args.first() {
             if !is_name_value_key(first) {
                 if is_scalar_numeric(first) {
                     phase_offset = scalar_number(first, "phaseoffset")?;
+                    integer_phase_extension = is_typed_integer_value(first);
                 } else {
                     mapping = parse_symbol_mapping(first, order)?;
+                    integer_custom_order_extension = matches!(&mapping, SymbolMapping::Custom(_))
+                        && is_typed_integer_value(first);
                 }
                 idx = 1;
             }
@@ -204,6 +340,8 @@ impl ParsedOptions {
         if let Some(second) = args.get(idx) {
             if !is_name_value_key(second) {
                 mapping = parse_symbol_mapping(second, order)?;
+                integer_custom_order_extension =
+                    matches!(&mapping, SymbolMapping::Custom(_)) && is_typed_integer_value(second);
                 idx += 1;
             }
         }
@@ -271,8 +409,15 @@ impl ParsedOptions {
             mapping,
             input_type,
             output_dtype,
+            integer_phase_extension,
+            integer_custom_order_extension,
         })
     }
+}
+
+fn is_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
 }
 
 #[derive(Debug)]
@@ -922,6 +1067,7 @@ mod tests {
 
     #[test]
     fn pskmod_reads_typed_integer_custom_mapping_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let mapping = integer_tensor(IntegerStorage::U16(vec![0, 3, 1, 2]), vec![1, 4]);
         let out = pskmod(
             integer_tensor(IntegerStorage::U8(vec![0, 1, 2, 3]), vec![1, 4]),
@@ -1277,16 +1423,19 @@ mod tests {
             &[(1.0, 0.0), (0.0, 1.0), (0.0, -1.0), (-1.0, 0.0)],
         );
 
-        let custom = integer_tensor(IntegerStorage::U16(vec![0, 3, 1, 2]), vec![1, 4]);
-        let out = pskmod(
-            integer_tensor(IntegerStorage::U8(vec![0, 1, 2, 3]), vec![1, 4]),
-            4,
-            vec![Value::Num(0.0), custom],
-        );
-        assert_complex_close(
-            &out.materialize_f64(),
-            &[(1.0, 0.0), (-1.0, 0.0), (0.0, -1.0), (0.0, 1.0)],
-        );
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let custom = integer_tensor(IntegerStorage::U16(vec![0, 3, 1, 2]), vec![1, 4]);
+            let out = pskmod(
+                integer_tensor(IntegerStorage::U8(vec![0, 1, 2, 3]), vec![1, 4]),
+                4,
+                vec![Value::Num(0.0), custom],
+            );
+            assert_complex_close(
+                &out.materialize_f64(),
+                &[(1.0, 0.0), (-1.0, 0.0), (0.0, -1.0), (0.0, 1.0)],
+            );
+        }
 
         for storage in [
             IntegerStorage::I8(vec![4]),
@@ -1300,6 +1449,60 @@ mod tests {
         ] {
             let order = Tensor::new_integer(storage, vec![1, 1]).expect("typed order");
             assert_eq!(parse_modulation_order(&Value::Tensor(order)).unwrap(), 4);
+        }
+    }
+
+    #[test]
+    fn pskmod_typed_integer_controls_follow_compatibility_mode() {
+        let custom = || {
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U16(vec![0, 3, 1, 2]), vec![1, 4])
+                    .expect("typed custom order"),
+            )
+        };
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(super::pskmod_builtin(
+                Value::Num(0.0),
+                Value::Int(IntValue::U16(4)),
+                vec![],
+            ))
+            .expect_err("MATLAB mode rejects typed-integer M");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:PskmodIntegerModulationOrderExtension")
+            );
+
+            let error = block_on(super::pskmod_builtin(
+                Value::Num(0.0),
+                Value::Num(4.0),
+                vec![Value::Int(IntValue::I16(0)), Value::from("bin")],
+            ))
+            .expect_err("MATLAB mode rejects typed-integer phase");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:PskmodIntegerPhaseOffsetExtension")
+            );
+
+            let error = block_on(super::pskmod_builtin(
+                Value::Num(0.0),
+                Value::Num(4.0),
+                vec![Value::Num(0.0), custom()],
+            ))
+            .expect_err("MATLAB mode rejects typed-integer custom order");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:PskmodIntegerCustomOrderExtension")
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            assert!(block_on(super::pskmod_builtin(
+                Value::Num(0.0),
+                Value::Int(IntValue::U16(4)),
+                vec![Value::Int(IntValue::I16(0)), custom()],
+            ))
+            .is_ok());
         }
     }
 }
