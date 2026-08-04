@@ -356,6 +356,50 @@ pub async fn build_execution_bundle(
     Ok(archive)
 }
 
+/// Verify and materialize an exact execution bundle into the active browser
+/// filesystem provider, returning the existing frozen-project handoff rebased
+/// to those bytes. Browser worker hosts should use an ephemeral provider and
+/// dispose it with the worker.
+#[wasm_bindgen(js_name = materializeExecutionBundle)]
+pub async fn materialize_execution_bundle(archive: Vec<u8>) -> Result<JsValue, JsValue> {
+    let bundle = runmat_execution_artifact::archive::read_bundle(
+        archive.as_slice(),
+        runmat_execution_artifact::archive::ArchiveLimits::default(),
+    )
+    .map_err(js_error)?;
+    let identity = bundle.identity().map_err(js_error)?;
+    let root = std::path::PathBuf::from(format!(
+        ".runmat/execution/{}",
+        identity.to_string().replace(':', "_")
+    ));
+    for object in &bundle.objects {
+        if object.descriptor.namespace != runmat_execution_artifact::ObjectNamespace::ProgramSource
+        {
+            continue;
+        }
+        let target = root.join(&object.descriptor.logical_name);
+        let parent = target
+            .parent()
+            .ok_or_else(|| JsValue::from_str("bundle source has no materialization parent"))?;
+        runmat_filesystem::create_dir_all_async(parent)
+            .await
+            .map_err(js_error)?;
+        runmat_filesystem::write_async(&target, &object.bytes)
+            .await
+            .map_err(js_error)?;
+        let written = runmat_filesystem::read_async(&target)
+            .await
+            .map_err(js_error)?;
+        if runmat_execution::Digest::sha256(&written) != object.descriptor.digest {
+            return Err(JsValue::from_str(
+                "browser materialization differs from the bundle source digest",
+            ));
+        }
+    }
+    let handoff = bundle.project_handoff_at(&root).map_err(js_error)?;
+    serde_wasm_bindgen::to_value(&handoff).map_err(js_error)
+}
+
 pub(super) fn browser_entropy() -> Result<[u8; 32], JsValue> {
     use wasm_bindgen::JsCast as _;
     let crypto = js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("crypto"))?

@@ -10,10 +10,17 @@ use runmat_test_runner_execution::TestAttemptWorkload;
 pub async fn execute_host_program_request(
     request: ProgramExecutionRequest,
 ) -> ProgramExecutionResponse {
+    execute_host_program_request_with_project(request, None).await
+}
+
+pub async fn execute_host_program_request_with_project(
+    request: ProgramExecutionRequest,
+    project: Option<&runmat_package::FrozenProjectHandoff>,
+) -> ProgramExecutionResponse {
     if request.artifact.form != ExecutableForm::TestAttemptV1 {
         return runmat_vm::execute_program_request(request).await;
     }
-    match execute_test_attempt(&request).await {
+    match execute_test_attempt(&request, project).await {
         Ok(execution) => match runmat_test_runner_execution::encode_execution(&execution) {
             Ok(value) => ProgramExecutionResponse::Success { value },
             Err(message) => ProgramExecutionResponse::Failure { message },
@@ -24,10 +31,27 @@ pub async fn execute_host_program_request(
 
 async fn execute_test_attempt(
     request: &ProgramExecutionRequest,
+    project: Option<&runmat_package::FrozenProjectHandoff>,
 ) -> Result<WorkerExecution, String> {
     let workload = TestAttemptWorkload::from_program_request(request)?;
+    if let Some(project) = project {
+        let revision = project.revision();
+        if request.recipe.program_revision.graph_digest().bytes() != revision.graph_digest.bytes()
+            || workload.submission.snapshot.base_source_digest
+                != revision.source_revision.to_string()
+        {
+            return Err(
+                "test workload base project revision differs from the installed bundle".into(),
+            );
+        }
+    }
     let mut session = runmat_core::RunMatSession::with_options(true, false)
         .map_err(|error| format!("failed to initialize test execution session: {error}"))?;
+    if let Some(project) = project {
+        session
+            .install_project_handoff(project.clone())
+            .map_err(|error| format!("failed to install exact test project: {error}"))?;
+    }
     let execution = session
         .execute_planned_test(
             &workload.submission.snapshot,

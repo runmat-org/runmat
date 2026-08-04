@@ -49,6 +49,8 @@ When migrating a toolbox that historically adds many ordinary directories, list 
 
 Browser RunMat uses the same Rust manifest, solver, lock, graph, integrity, cache-policy, and handoff types as native RunMat. JavaScript supplies virtual filesystem access, authenticated fetch, IndexedDB transactions, WebCrypto recipient keys, immutable mounts, and worker lifecycle only.
 
+Execution-bundle construction replaces host-local handoff paths with canonical logical source objects while retaining the same frozen graph and catalog. Native and browser workers verify and rebase that handoff onto worker-owned storage rather than resolving dependencies again. Browser hosts must materialize private closures in the worker’s ephemeral filesystem provider and dispose that provider with the worker; plaintext private package bodies are not added to the persistent package cache.
+
 The browser runtime reads `runmat.lock` beside the manifest, resolves or replays the graph, writes a canonical generated lock, installs the frozen handoff in the active WASM session, and exposes the graph/source revision. Complete cached closures can reopen with locked offline policy after a page reload. A missing or evicted object is a recoverable cache miss; denied persistent-storage permission is reported but does not weaken transaction correctness.
 
 Git dependencies use the RunMat Server Git snapshot gateway in browsers, while native hosts may use direct Git. Both validate the exact commit and canonical tree digest. Native-only capability requirements such as native libraries, MEX, JVM, or subprocesses fail during browser resolution with a dependency-path diagnostic instead of failing later during execution.

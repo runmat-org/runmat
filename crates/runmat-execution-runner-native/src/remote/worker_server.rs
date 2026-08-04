@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use runmat_execution::identity::AttemptId;
-use runmat_execution_artifact::archive::{read_bundle, ArchiveLimits};
 use runmat_execution_artifact::encryption::RunKeyMaterial;
 use runmat_execution_artifact::ExecutionBundle;
 use runmat_execution_runner::{AttemptFailureKind, AttemptReport, AttemptSuccess, WorkerSpec};
@@ -15,11 +14,12 @@ use super::protocol::{
     REMOTE_WORKER_PROTOCOL_V1,
 };
 use super::route::{QuicFrameRoute, RelayFrameRoute, RemoteFrameRoute};
-use super::{RemoteAttempt, RemoteBundleReceipt};
+use super::RemoteAttempt;
 use crate::{NativeExecutionError, NativeExecutionResult};
 
 struct WorkerState {
     bundle: Option<ExecutionBundle>,
+    materialized_project: Option<Arc<crate::materialized_project::MaterializedProject>>,
     bundle_digest: Option<runmat_execution::Digest>,
     attempts: HashMap<AttemptId, tokio::task::JoinHandle<()>>,
     values: HashMap<runmat_execution::identity::ValueId, runmat_execution::value::ValuePayload>,
@@ -152,6 +152,7 @@ async fn run_worker_loop(
     ));
     let state = Arc::new(Mutex::new(WorkerState {
         bundle: None,
+        materialized_project: None,
         bundle_digest: None,
         attempts: HashMap::new(),
         values: HashMap::new(),
@@ -197,31 +198,19 @@ async fn run_worker_loop(
                 bundle_digest,
                 bundle,
             } => {
-                let outcome = if runmat_execution::Digest::sha256(&bundle) != bundle_digest {
-                    RemoteWorkerOutcome::Rejected {
-                        message: "remote bundle digest does not match its bytes".into(),
-                    }
-                } else {
-                    match read_bundle(bundle.as_slice(), ArchiveLimits::default()) {
-                        Ok(exact) => {
+                let cache = state.lock().await.bundle_cache.clone();
+                let outcome =
+                    match super::worker_bundle::install(cache.as_deref(), bundle_digest, &bundle) {
+                        Ok(installed) => {
+                            let receipt = installed.receipt.clone();
                             let mut state = state.lock().await;
-                            if let Some(cache) = state.bundle_cache.as_ref() {
-                                super::bundle_cache::store(cache, bundle_digest, &bundle)?;
-                            }
-                            state.bundle = Some(exact);
-                            state.bundle_digest = Some(bundle_digest);
-                            RemoteWorkerOutcome::BundleStored {
-                                receipt: RemoteBundleReceipt {
-                                    bundle_digest,
-                                    stored_bytes: bundle.len() as u64,
-                                },
-                            }
+                            state.bundle = Some(installed.bundle);
+                            state.materialized_project = Some(installed.materialized_project);
+                            state.bundle_digest = Some(installed.digest);
+                            RemoteWorkerOutcome::BundleStored { receipt }
                         }
-                        Err(error) => RemoteWorkerOutcome::Rejected {
-                            message: format!("remote bundle is invalid: {error}"),
-                        },
-                    }
-                };
+                        Err(message) => RemoteWorkerOutcome::Rejected { message },
+                    };
                 reply(
                     connection.as_ref(),
                     &sender,
@@ -235,27 +224,21 @@ async fn run_worker_loop(
                 .await?;
             }
             RemoteWorkerCommand::ActivateBundle { bundle_digest } => {
-                let outcome = {
-                    let cache = state.lock().await.bundle_cache.clone();
-                    match cache
-                        .ok_or_else(|| protocol("worker has no node bundle cache"))
-                        .and_then(|cache| super::bundle_cache::load(&cache, bundle_digest))
-                    {
-                        Ok((bundle, stored_bytes)) => {
-                            let mut state = state.lock().await;
-                            state.bundle = Some(bundle);
-                            state.bundle_digest = Some(bundle_digest);
-                            RemoteWorkerOutcome::BundleStored {
-                                receipt: RemoteBundleReceipt {
-                                    bundle_digest,
-                                    stored_bytes,
-                                },
-                            }
-                        }
-                        Err(error) => RemoteWorkerOutcome::Rejected {
-                            message: error.to_string(),
-                        },
+                let cache = state.lock().await.bundle_cache.clone();
+                let outcome = match cache
+                    .as_deref()
+                    .ok_or_else(|| "worker has no node bundle cache".to_string())
+                    .and_then(|cache| super::worker_bundle::activate(cache, bundle_digest))
+                {
+                    Ok(installed) => {
+                        let receipt = installed.receipt.clone();
+                        let mut state = state.lock().await;
+                        state.bundle = Some(installed.bundle);
+                        state.materialized_project = Some(installed.materialized_project);
+                        state.bundle_digest = Some(installed.digest);
+                        RemoteWorkerOutcome::BundleStored { receipt }
                     }
+                    Err(message) => RemoteWorkerOutcome::Rejected { message },
                 };
                 reply(
                     connection.as_ref(),
@@ -326,6 +309,13 @@ async fn run_worker_loop(
                 let connection = Arc::clone(&connection);
                 let sender = Arc::clone(&sender);
                 let state_for_task = Arc::clone(&state);
+                let materialized_project = state
+                    .lock()
+                    .await
+                    .materialized_project
+                    .as_ref()
+                    .cloned()
+                    .expect("validated remote attempt has a materialized project");
                 let drain_complete_for_task = Arc::clone(&drain_complete);
                 let task = tokio::task::spawn_local(async move {
                     let mut program = attempt.program;
@@ -340,7 +330,11 @@ async fn run_worker_loop(
                     let response = match materialized {
                         Ok(arguments) => {
                             program.arguments = arguments;
-                            crate::execute_host_program_request(program).await
+                            crate::execute_host_program_request_with_project(
+                                program,
+                                Some(materialized_project.handoff()),
+                            )
+                            .await
                         }
                         Err(error) => {
                             runmat_execution_artifact::ProgramExecutionResponse::Failure {
@@ -434,7 +428,8 @@ async fn validate_attempt(
     let Some(bundle) = state.bundle.as_ref() else {
         return Some("exact execution bundle is not installed".into());
     };
-    if attempt.program.validate().is_err()
+    if state.materialized_project.is_none()
+        || attempt.program.validate().is_err()
         || !bundle
             .manifest
             .recipes

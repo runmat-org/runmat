@@ -4,12 +4,12 @@ use minicbor::Encoder;
 use runmat_execution::resource::Capability;
 use runmat_execution::Digest;
 
-use super::{BundleManifest, ExecutionBundle};
+use super::{BundleManifest, ExecutionBundle, EXECUTION_BUNDLE_SCHEMA_VERSION};
 use crate::object::{validate_inventory, ObjectInventoryLimits};
 use crate::{ArtifactError, ArtifactResult, ObjectNamespace};
 
 pub(super) fn validate(bundle: &ExecutionBundle) -> ArtifactResult<()> {
-    if bundle.manifest.schema_version != 1 {
+    if bundle.manifest.schema_version != EXECUTION_BUNDLE_SCHEMA_VERSION {
         return Err(ArtifactError::Invalid(
             "unsupported execution bundle schema".into(),
         ));
@@ -24,10 +24,16 @@ pub(super) fn validate(bundle: &ExecutionBundle) -> ArtifactResult<()> {
         .program_revision
         .validate()
         .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+    let exact_project_sources = bundle.manifest.program_revision.source_digest()
+        == &bundle.manifest.project_revision.source_digest;
+    let exact_test_overlay = bundle
+        .manifest
+        .program_revision
+        .domain_contribution("runmat.test.config")
+        .is_some();
     if bundle.manifest.program_revision.graph_digest()
         != &bundle.manifest.project_revision.graph_digest
-        || bundle.manifest.program_revision.source_digest()
-            != &bundle.manifest.project_revision.source_digest
+        || (!exact_project_sources && !exact_test_overlay)
         || bundle.manifest.resources.cpu_millicores == 0
         || bundle.manifest.resources.memory_bytes == 0
     {
@@ -35,6 +41,7 @@ pub(super) fn validate(bundle: &ExecutionBundle) -> ArtifactResult<()> {
             "bundle revisions or resources are inconsistent".into(),
         ));
     }
+    validate_project_handoff(bundle)?;
     validate_inventory(&bundle.objects, ObjectInventoryLimits::default())?;
     let descriptors = bundle
         .objects
@@ -152,19 +159,101 @@ pub(super) fn validate(bundle: &ExecutionBundle) -> ArtifactResult<()> {
     Ok(())
 }
 
+fn validate_project_handoff(bundle: &ExecutionBundle) -> ArtifactResult<()> {
+    let handoff = &bundle.manifest.project_handoff;
+    handoff
+        .validate()
+        .map_err(|error| ArtifactError::Invalid(format!("invalid project handoff: {error}")))?;
+    let revision = handoff.revision();
+    if revision.graph_digest.bytes() != bundle.manifest.project_revision.graph_digest.bytes()
+        || revision.source_revision.bytes()
+            != bundle.manifest.project_revision.source_digest.bytes()
+        || handoff.project.workspace_root != std::path::Path::new(".")
+        || handoff.project.manifest_path != std::path::Path::new("runmat.toml")
+    {
+        return Err(ArtifactError::Identity(
+            "bundle project handoff does not match its portable revision or roots".into(),
+        ));
+    }
+
+    let mut expected_sources = Vec::new();
+    let mut expected_callables = Vec::new();
+    for package in handoff.project.sources.packages.values() {
+        for source in &package.sources {
+            let logical_name =
+                format!("{}/{}", package.mount.logical_root, source.id.relative_path);
+            let access_path = handoff
+                .project
+                .access_paths
+                .get(&source.id)
+                .ok_or_else(|| {
+                    ArtifactError::Invalid(format!(
+                        "bundle source {} has no portable access path",
+                        source.id.relative_path
+                    ))
+                })?;
+            if access_path != std::path::Path::new(&logical_name) {
+                return Err(ArtifactError::Invalid(format!(
+                    "bundle source {} is bound to a physical or inconsistent path",
+                    source.id.relative_path
+                )));
+            }
+            let object = bundle
+                .objects
+                .iter()
+                .find(|object| object.descriptor.logical_name == logical_name)
+                .ok_or_else(|| {
+                    ArtifactError::Invalid(format!(
+                        "bundle source {} has no logical object",
+                        source.id.relative_path
+                    ))
+                })?;
+            if object.descriptor.namespace != ObjectNamespace::ProgramSource
+                || object.descriptor.digest.bytes() != source.id.content_digest.bytes()
+            {
+                return Err(ArtifactError::Identity(format!(
+                    "bundle source {} differs from the frozen source identity",
+                    source.id.relative_path
+                )));
+            }
+            expected_sources.push(object.descriptor.clone());
+            expected_callables.push(crate::BundleCallable {
+                owner_identity: package.package_instance.to_string(),
+                qualified_name: source.qualified_name.clone(),
+                source_digest: object.descriptor.digest,
+            });
+        }
+    }
+    expected_sources.sort();
+    expected_callables.sort();
+    if expected_sources != bundle.manifest.sources
+        || expected_callables != bundle.manifest.callables
+    {
+        return Err(ArtifactError::Identity(
+            "bundle source/callable inventories differ from the frozen project".into(),
+        ));
+    }
+    Ok(())
+}
+
 pub(super) fn identity(manifest: &BundleManifest) -> ArtifactResult<Digest> {
-    let mut bytes = b"runmat-execution-bundle-v1\0".to_vec();
+    let mut bytes = b"runmat-execution-bundle-v2\0".to_vec();
     let revision = manifest
         .program_revision
         .canonical_bytes()
         .map_err(|error| ArtifactError::Encoding(error.to_string()))?;
     let mut encoder = Encoder::new(&mut bytes);
     encoder
-        .array(11)
+        .array(12)
         .and_then(|encoder| encoder.u16(manifest.schema_version))
         .and_then(|encoder| encoder.bytes(&revision))
         .and_then(|encoder| encoder.bytes(manifest.project_revision.graph_digest.bytes()))
         .and_then(|encoder| encoder.bytes(manifest.project_revision.source_digest.bytes()))
+        .and_then(|encoder| {
+            let handoff = serde_json::to_vec(&manifest.project_handoff)
+                .map_err(|_| minicbor::encode::Error::message("invalid project handoff"))?;
+            encoder.bytes(&handoff)
+        })
         .and_then(|encoder| encoder.array(manifest.sources.len() as u64))
         .map_err(encoding)?;
     for source in &manifest.sources {

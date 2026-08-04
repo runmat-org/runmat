@@ -3,7 +3,8 @@ use std::sync::{Arc, Mutex};
 
 use runmat_execution::state::{PoolState, TaskState};
 use runmat_execution::{CancellationReason, Digest, ExecutionScopeId, PoolId, TaskId};
-use runmat_execution_artifact::ProgramExecutionRequest;
+use runmat_execution_artifact::archive::{read_bundle, ArchiveLimits};
+use runmat_execution_artifact::{ProgramExecutionRequest, ProjectRevisionRecord};
 use runmat_execution_runner::pool::ResizeRequest;
 use runmat_execution_runner::port::BackendReport;
 use runmat_execution_runner::{
@@ -37,6 +38,8 @@ pub struct RemotePoolDriver {
     scope_id: ExecutionScopeId,
     pool_id: PoolId,
     bundle_digest: Digest,
+    bundle_identity: Digest,
+    project_revision: ProjectRevisionRecord,
     bundle: Arc<[u8]>,
     driver: Mutex<Driver>,
     channels: RwLock<HashMap<runmat_execution::identity::WorkerId, Arc<dyn RemoteWorkerChannel>>>,
@@ -72,6 +75,15 @@ impl RemotePoolDriver {
     ) -> NativeExecutionResult<Arc<Self>> {
         let pool_id = pool.id;
         let bundle = bundle.into();
+        let decoded = read_bundle(bundle.as_ref(), ArchiveLimits::default()).map_err(|error| {
+            NativeExecutionError::Protocol(format!("remote pool bundle is invalid: {error}"))
+        })?;
+        let bundle_identity = decoded.identity().map_err(|error| {
+            NativeExecutionError::Protocol(format!(
+                "remote pool bundle identity is invalid: {error}"
+            ))
+        })?;
+        let project_revision = decoded.manifest.project_revision;
         let mut driver = Driver::new(DriverConfig::default(), driver_fence)?;
         driver.handle(DriverCommand::RegisterScope {
             scope_id,
@@ -82,6 +94,8 @@ impl RemotePoolDriver {
             scope_id,
             pool_id,
             bundle_digest: Digest::sha256(bundle.as_ref()),
+            bundle_identity,
+            project_revision,
             bundle,
             driver: Mutex::new(driver),
             channels: RwLock::new(HashMap::new()),
@@ -135,6 +149,8 @@ impl RemotePoolDriver {
                     .await?
             };
             if receipt.bundle_digest != self.bundle_digest
+                || receipt.bundle_identity != self.bundle_identity
+                || receipt.project_revision != self.project_revision
                 || receipt.stored_bytes != self.bundle.len() as u64
             {
                 return Err(NativeExecutionError::Protocol(

@@ -12,6 +12,7 @@ mod quic_channel;
 mod relay_channel;
 mod route;
 mod value_transfer;
+mod worker_bundle;
 mod worker_env;
 mod worker_server;
 

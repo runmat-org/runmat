@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use runmat_execution::value::ValueRef;
 use runmat_execution::Digest;
 use runmat_execution_artifact::ProgramExecutionRequest;
+use runmat_execution_artifact::ProjectRevisionRecord;
 use runmat_execution_runner::{AttemptReport, AttemptRequest, WorkerSpec};
 
 use crate::NativeExecutionResult;
@@ -12,9 +13,11 @@ pub struct RemoteAttempt {
     pub program: ProgramExecutionRequest,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RemoteBundleReceipt {
     pub bundle_digest: Digest,
+    pub bundle_identity: Digest,
+    pub project_revision: ProjectRevisionRecord,
     pub stored_bytes: u64,
 }
 

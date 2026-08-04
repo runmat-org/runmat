@@ -201,6 +201,8 @@ The same portable discovery, plan, coordinator, result, and coverage authorities
 
 Remote tests use the same coordinator through the general execution scheduler and encrypted execution control/data plane. `--cluster` overrides `[test.cluster].profile`, `--queue` overrides `[test.cluster].queue`, and `--max-workers` caps concurrent remote fixture groups. A pinned `--trust-identity` is required before protected plan, source, result, event, artifact, or coverage content is encrypted to the admitted endpoint. The Server sees only the coarse execution metadata needed for admission, leases, routing, retention, and billing; it cannot decrypt test content or detailed results.
 
+Remote jobs and tests carry the exact frozen package graph, alias visibility, base source revision, and verified source bytes inside the encrypted execution bundle. The driver and every worker validate the same bundle and project identities, materialize the logical objects into a private read-only source root, and install the original frozen handoff in Core. Package resolution and private-package decryption happen only on the submitting client: remote workers need no Git, Server-project, registry, or package-decryption credentials and cannot silently select a different dependency.
+
 ## Color and Terminal Output
 
 RunMat uses restrained ANSI styling for human-readable diagnostics, help, headings, status messages, and summaries. The default `--color=auto` mode checks stdout and stderr independently, styles only streams connected to capable interactive terminals, and stays plain when output is redirected, `TERM=dumb`, or a non-empty `NO_COLOR` value is present.

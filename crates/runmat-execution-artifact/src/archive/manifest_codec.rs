@@ -12,12 +12,20 @@ use crate::{
 
 const MAX_ITEMS: usize = 100_000;
 const MAX_TEXT: usize = 4096;
+const MAX_PROJECT_HANDOFF_BYTES: usize = 16 * 1024 * 1024;
 
 pub(super) fn encode_manifest(manifest: &BundleManifest) -> ArtifactResult<Vec<u8>> {
-    let mut bytes = b"runmat-execution-bundle-manifest-v1\0".to_vec();
+    let handoff = serde_json::to_vec(&manifest.project_handoff)
+        .map_err(|error| ArtifactError::Encoding(error.to_string()))?;
+    if handoff.len() > MAX_PROJECT_HANDOFF_BYTES {
+        return Err(ArtifactError::Limit(
+            "project handoff is too large".to_string(),
+        ));
+    }
+    let mut bytes = b"runmat-execution-bundle-manifest-v2\0".to_vec();
     let mut encoder = Encoder::new(&mut bytes);
     encoder
-        .array(10)
+        .array(11)
         .and_then(|encoder| encoder.u16(manifest.schema_version))
         .and_then(|encoder| {
             encoder.bytes(
@@ -30,6 +38,7 @@ pub(super) fn encode_manifest(manifest: &BundleManifest) -> ArtifactResult<Vec<u
         .and_then(|encoder| encoder.array(2))
         .and_then(|encoder| encoder.bytes(manifest.project_revision.graph_digest.bytes()))
         .and_then(|encoder| encoder.bytes(manifest.project_revision.source_digest.bytes()))
+        .and_then(|encoder| encoder.bytes(&handoff))
         .and_then(|encoder| encoder.array(manifest.sources.len() as u64))
         .map_err(encode_error)?;
     for source in &manifest.sources {
@@ -91,10 +100,10 @@ pub(super) fn encode_manifest(manifest: &BundleManifest) -> ArtifactResult<Vec<u
 
 pub(super) fn decode_manifest(bytes: &[u8]) -> ArtifactResult<BundleManifest> {
     let payload = bytes
-        .strip_prefix(b"runmat-execution-bundle-manifest-v1\0")
+        .strip_prefix(b"runmat-execution-bundle-manifest-v2\0")
         .ok_or_else(|| ArtifactError::Invalid("invalid bundle manifest domain".into()))?;
     let mut decoder = Decoder::new(payload);
-    require_len(decoder.array(), 10, "bundle manifest")?;
+    require_len(decoder.array(), 11, "bundle manifest")?;
     let schema_version = decoder.u16().map_err(decode_error)?;
     let revision = decoder.bytes().map_err(decode_error)?;
     let program_revision = ProgramRevision::from_canonical_bytes(revision)
@@ -104,6 +113,14 @@ pub(super) fn decode_manifest(bytes: &[u8]) -> ArtifactResult<BundleManifest> {
         graph_digest: decode_digest(&mut decoder)?,
         source_digest: decode_digest(&mut decoder)?,
     };
+    let project_handoff_bytes = decoder.bytes().map_err(decode_error)?;
+    if project_handoff_bytes.len() > MAX_PROJECT_HANDOFF_BYTES {
+        return Err(ArtifactError::Limit(
+            "project handoff is too large".to_string(),
+        ));
+    }
+    let project_handoff = serde_json::from_slice(project_handoff_bytes)
+        .map_err(|error| ArtifactError::Encoding(error.to_string()))?;
     let source_count = bounded_len(decoder.array(), "sources")?;
     let mut sources = Vec::with_capacity(source_count);
     for _ in 0..source_count {
@@ -165,6 +182,7 @@ pub(super) fn decode_manifest(bytes: &[u8]) -> ArtifactResult<BundleManifest> {
         schema_version,
         program_revision,
         project_revision,
+        project_handoff,
         sources,
         callables,
         recipes,

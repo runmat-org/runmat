@@ -1,11 +1,11 @@
 use std::path::Path;
 
 use runmat_execution::{Digest, ProgramRevision};
-use runmat_package::FrozenProject;
+use runmat_package::{FrozenProject, FrozenProjectHandoff};
 
 use crate::bundle::{
     BuildResourceDeclaration, BundleCallable, BundleManifest, ExecutionBundle,
-    ProjectRevisionRecord,
+    ProjectRevisionRecord, EXECUTION_BUNDLE_SCHEMA_VERSION,
 };
 use crate::{
     ArtifactError, ArtifactResult, ExecutableForm, LogicalObject, ObjectNamespace, ProgramArtifact,
@@ -47,11 +47,14 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
         reader: R,
     ) -> ArtifactResult<Self> {
         let project_revision = project.revision();
+        let exact_project_sources =
+            revision.source_digest().bytes() == project_revision.source_revision.bytes();
+        let exact_test_overlay = revision.domain_contribution("runmat.test.config").is_some();
         if revision.graph_digest().bytes() != project_revision.graph_digest.bytes()
-            || revision.source_digest().bytes() != project_revision.source_revision.bytes()
+            || (!exact_project_sources && !exact_test_overlay)
         {
             return Err(ArtifactError::Identity(
-                "program and frozen-project revisions differ".into(),
+                "program and frozen-project revisions differ without an exact test overlay".into(),
             ));
         }
         Ok(Self {
@@ -95,6 +98,9 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
     pub fn build(mut self) -> ArtifactResult<ExecutionBundle> {
         let mut objects = Vec::new();
         let mut callables = Vec::new();
+        let mut project_handoff = FrozenProjectHandoff::new(self.project.clone());
+        project_handoff.project.manifest_path = "runmat.toml".into();
+        project_handoff.project.workspace_root = ".".into();
         for package in self.project.sources.packages.values() {
             for source in &package.sources {
                 let path = self.project.access_paths.get(&source.id).ok_or_else(|| {
@@ -112,6 +118,10 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
                 }
                 let logical_name =
                     format!("{}/{}", package.mount.logical_root, source.id.relative_path);
+                project_handoff
+                    .project
+                    .access_paths
+                    .insert(source.id.clone(), logical_name.clone().into());
                 objects.push(LogicalObject::new(
                     ObjectNamespace::ProgramSource,
                     logical_name,
@@ -164,12 +174,13 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
         artifacts.sort_by_key(|artifact| artifact.id);
         let project_revision = self.project.revision();
         let manifest = BundleManifest {
-            schema_version: 1,
+            schema_version: EXECUTION_BUNDLE_SCHEMA_VERSION,
             program_revision: self.revision,
             project_revision: ProjectRevisionRecord {
                 graph_digest: Digest::from_bytes(*project_revision.graph_digest.bytes()),
                 source_digest: Digest::from_bytes(*project_revision.source_revision.bytes()),
             },
+            project_handoff,
             sources: source_descriptors,
             callables,
             recipes,

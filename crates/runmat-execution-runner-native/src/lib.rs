@@ -5,6 +5,7 @@ mod driver;
 mod durable;
 mod error;
 mod local_store;
+mod materialized_project;
 mod protocol;
 mod remote;
 mod service;
@@ -22,5 +23,5 @@ pub use remote::{
     RemoteWorkerChannel,
 };
 pub use service::NativeExecutionService;
-pub use test_workload::execute_host_program_request;
+pub use test_workload::{execute_host_program_request, execute_host_program_request_with_project};
 pub use worker::run_worker_stdio;

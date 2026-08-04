@@ -79,6 +79,27 @@ impl PackageGraph {
                     package.instance.identity_digest
                 )));
             }
+            package
+                .instance
+                .source
+                .validate()
+                .map_err(|error| GraphError::Invalid(error.to_string()))?;
+            if package.instance.source.tree_digest() != &package.instance.tree_digest {
+                return Err(GraphError::Invalid(format!(
+                    "package {identity} source and instance tree digests differ"
+                )));
+            }
+            let expected = PackageInstanceId::new(
+                package.instance.package.clone(),
+                package.instance.source.clone(),
+                package.instance.version.clone(),
+                package.instance.tree_digest.clone(),
+            );
+            if expected.identity_digest != package.instance.identity_digest {
+                return Err(GraphError::Invalid(format!(
+                    "package {identity} identity digest does not match its canonical instance"
+                )));
+            }
         }
         for edge in &self.edges {
             if !self.packages.contains_key(&edge.from) || !self.packages.contains_key(&edge.to) {

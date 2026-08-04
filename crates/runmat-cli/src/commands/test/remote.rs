@@ -151,10 +151,22 @@ impl WorkerBackend for RemoteTestBackend {
             let mut bundle_archive = Vec::new();
             write_bundle(&bundle, &mut bundle_archive, ArchiveLimits::default())
                 .map_err(protocol)?;
+            let bundled_recipe = bundle
+                .manifest
+                .recipes
+                .first()
+                .cloned()
+                .ok_or_else(|| protocol("remote test bundle has no recipe"))?;
+            let bundled_artifact = bundle
+                .manifest
+                .artifacts
+                .first()
+                .cloned()
+                .ok_or_else(|| protocol("remote test bundle has no program artifact"))?;
             let descriptor = serde_json::to_vec(&ProgramExecutionDescriptor {
                 schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
-                recipe: program.recipe.clone(),
-                artifact: program.artifact.clone(),
+                recipe: bundled_recipe.clone(),
+                artifact: bundled_artifact,
                 function: 0,
                 requested_outputs: 1,
             })
@@ -167,7 +179,7 @@ impl WorkerBackend for RemoteTestBackend {
             let active_run = Arc::clone(&session.active_run);
             let submitted = crate::commands::job::submit::submit_prepared(
                 PreparedRemoteExecution {
-                    revision: program.recipe.program_revision,
+                    revision: bundled_recipe.program_revision,
                     bundle_archive,
                     descriptor,
                     inputs,

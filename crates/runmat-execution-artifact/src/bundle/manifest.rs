@@ -2,9 +2,12 @@ use std::collections::BTreeSet;
 
 use runmat_execution::resource::Capability;
 use runmat_execution::{Digest, ProgramRevision};
+use runmat_package::FrozenProjectHandoff;
 use serde::{Deserialize, Serialize};
 
 use crate::{ArtifactResult, LogicalObject, ObjectDescriptor, ProgramArtifact, ProgramBuildRecipe};
+
+pub const EXECUTION_BUNDLE_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -35,6 +38,7 @@ pub struct BundleManifest {
     pub schema_version: u16,
     pub program_revision: ProgramRevision,
     pub project_revision: ProjectRevisionRecord,
+    pub project_handoff: FrozenProjectHandoff,
     pub sources: Vec<ObjectDescriptor>,
     pub callables: Vec<BundleCallable>,
     pub recipes: Vec<ProgramBuildRecipe>,
@@ -58,5 +62,28 @@ impl ExecutionBundle {
     pub fn identity(&self) -> ArtifactResult<Digest> {
         self.validate()?;
         super::validator::identity(&self.manifest)
+    }
+
+    /// Rebind the bundle's logical source paths to one host-owned storage root.
+    ///
+    /// The returned handoff is the same frozen package graph and source catalog
+    /// that the submitter used. Only the physical access paths change.
+    pub fn project_handoff_at(
+        &self,
+        root: &std::path::Path,
+    ) -> ArtifactResult<FrozenProjectHandoff> {
+        self.validate()?;
+        let mut handoff = self.manifest.project_handoff.clone();
+        handoff.project.workspace_root = root.to_path_buf();
+        handoff.project.manifest_path = root.join("runmat.toml");
+        for path in handoff.project.access_paths.values_mut() {
+            let relative = runmat_package::NormalizedRelativePath::new(path.as_path())
+                .map_err(|error| crate::ArtifactError::Invalid(error.to_string()))?;
+            *path = root.join(relative.as_str());
+        }
+        handoff
+            .validate()
+            .map_err(|error| crate::ArtifactError::Invalid(error.to_string()))?;
+        Ok(handoff)
     }
 }

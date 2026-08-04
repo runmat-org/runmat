@@ -15,9 +15,8 @@ use runmat_execution::{
 };
 use runmat_execution_artifact::{
     archive::{write_bundle, ArchiveLimits},
-    BuildResourceDeclaration, BundleManifest, ExecutableForm, ExecutionBundle, ProgramArtifact,
-    ProgramBuildRecipe, ProgramExecutionRequest, ProjectRevisionRecord,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    ExecutableForm, ExecutionBundleBuilder, ProgramArtifact, ProgramBuildRecipe,
+    ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
 };
 use runmat_execution_runner::{
     AttemptReport, AttemptSuccess, PoolSpec, TaskSubmission, WorkerSpec,
@@ -56,10 +55,7 @@ impl RemoteWorkerChannel for FakeWorker {
         bundle: &[u8],
     ) -> NativeExecutionResult<RemoteBundleReceipt> {
         self.installs.fetch_add(1, Ordering::SeqCst);
-        Ok(RemoteBundleReceipt {
-            bundle_digest,
-            stored_bytes: bundle.len() as u64,
-        })
+        Ok(bundle_receipt(bundle_digest, bundle))
     }
 
     async fn execute(&self, attempt: RemoteAttempt) -> NativeExecutionResult<AttemptReport> {
@@ -81,10 +77,8 @@ impl RemoteWorkerChannel for FakeWorker {
         &self,
         bundle_digest: Digest,
     ) -> NativeExecutionResult<RemoteBundleReceipt> {
-        Ok(RemoteBundleReceipt {
-            bundle_digest,
-            stored_bytes: b"exact encrypted bundle".len() as u64,
-        })
+        let (_, _, bundle) = executable_bundle();
+        Ok(bundle_receipt(bundle_digest, &bundle))
     }
 
     async fn transfer_value(
@@ -127,7 +121,7 @@ async fn remote_pool_installs_once_per_node_and_schedules_concurrently() {
             resource_limit: resources,
         },
         7,
-        b"exact encrypted bundle".to_vec(),
+        executable_bundle().2,
     )
     .unwrap();
     let installs = Arc::new(AtomicUsize::new(0));
@@ -211,7 +205,7 @@ async fn remote_pool_cancels_active_work_and_fences_lost_workers() {
             resource_limit: inventory(1_000),
         },
         11,
-        b"exact encrypted bundle".to_vec(),
+        executable_bundle().2,
     )
     .unwrap();
     let active = Arc::new(AtomicUsize::new(0));
@@ -275,7 +269,7 @@ async fn remote_pool_cancels_active_work_and_fences_lost_workers() {
             resource_limit: inventory(1_000),
         },
         12,
-        b"exact encrypted bundle".to_vec(),
+        executable_bundle().2,
     )
     .unwrap();
     let active = Arc::new(AtomicUsize::new(0));
@@ -419,12 +413,10 @@ async fn pinned_quic_worker_executes_only_the_installed_exact_bundle() {
         .await
         .unwrap();
         let digest = Digest::sha256(&bundle);
+        let expected_receipt = bundle_receipt(digest, &bundle);
         assert_eq!(
             channel.install_bundle(digest, &bundle).await.unwrap(),
-            RemoteBundleReceipt {
-                bundle_digest: digest,
-                stored_bytes: bundle.len() as u64,
-            }
+            expected_receipt
         );
         assert_eq!(
             channel
@@ -522,9 +514,27 @@ fn executable_bundle_with_input() -> (ProgramExecutionRequest, ArtifactId, Vec<u
 }
 
 fn build_executable_bundle(accepts_input: bool) -> (ProgramExecutionRequest, ArtifactId, Vec<u8>) {
+    let project_root = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(project_root.path().join("src")).unwrap();
+    std::fs::write(
+        project_root.path().join("runmat.toml"),
+        "[package]\nname = \"remote-pool\"\n[sources]\nroots = [\"src\"]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        project_root.path().join("src/answer.m"),
+        "function y = answer(); y = 42; end\n",
+    )
+    .unwrap();
+    let project = runmat_package::build_frozen_project(
+        &project_root.path().join("runmat.toml"),
+        BTreeSet::new(),
+    )
+    .unwrap();
+    let project_revision = project.revision();
     let revision = ProgramRevision::new(
-        Digest::sha256(b"graph"),
-        Digest::sha256(b"source"),
+        Digest::from_bytes(*project_revision.graph_digest.bytes()),
+        Digest::from_bytes(*project_revision.source_revision.bytes()),
         ProgramEnvironment::new(
             1,
             1,
@@ -587,29 +597,18 @@ fn build_executable_bundle(accepts_input: bool) -> (ProgramExecutionRequest, Art
         serde_json::to_vec(&registry).unwrap(),
     )
     .unwrap();
+    let bundle = ExecutionBundleBuilder::native(&project, recipe.program_revision.clone())
+        .unwrap()
+        .with_materialized_program(
+            recipe.clone(),
+            ExecutableForm::InterpreterBytecodeV1,
+            artifact.executable_bytes.clone(),
+        )
+        .build()
+        .unwrap();
+    let recipe = bundle.manifest.recipes.first().cloned().unwrap();
+    let artifact = bundle.manifest.artifacts.first().cloned().unwrap();
     let artifact_id = ArtifactId::derive(&[artifact.id.0.bytes()]);
-    let bundle = ExecutionBundle {
-        manifest: BundleManifest {
-            schema_version: 1,
-            program_revision: recipe.program_revision.clone(),
-            project_revision: ProjectRevisionRecord {
-                graph_digest: *recipe.program_revision.graph_digest(),
-                source_digest: *recipe.program_revision.source_digest(),
-            },
-            sources: Vec::new(),
-            callables: Vec::new(),
-            recipes: vec![recipe.clone()],
-            artifacts: vec![artifact.clone()],
-            requested_capabilities: BTreeSet::new(),
-            resources: BuildResourceDeclaration {
-                cpu_millicores: 1_000,
-                memory_bytes: 1024,
-                scratch_bytes: 1024,
-            },
-            portable_environment: Vec::new(),
-        },
-        objects: Vec::new(),
-    };
     let mut bundle_bytes = Vec::new();
     write_bundle(&bundle, &mut bundle_bytes, ArchiveLimits::default()).unwrap();
     let program = ProgramExecutionRequest {
@@ -621,4 +620,18 @@ fn build_executable_bundle(accepts_input: bool) -> (ProgramExecutionRequest, Art
         requested_outputs: 1,
     };
     (program, artifact_id, bundle_bytes)
+}
+
+fn bundle_receipt(bundle_digest: Digest, bytes: &[u8]) -> RemoteBundleReceipt {
+    let bundle = runmat_execution_artifact::archive::read_bundle(
+        bytes,
+        runmat_execution_artifact::archive::ArchiveLimits::default(),
+    )
+    .unwrap();
+    RemoteBundleReceipt {
+        bundle_digest,
+        bundle_identity: bundle.identity().unwrap(),
+        project_revision: bundle.manifest.project_revision,
+        stored_bytes: bytes.len() as u64,
+    }
 }
