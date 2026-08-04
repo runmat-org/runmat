@@ -1060,6 +1060,12 @@ fn parse_sparse_array(
         .ok_or_else(|| load_error("load: sparse array missing values"))?;
     let values = match decode_sparse_integer_storage(&real_elem, endian)? {
         Some(storage) => NumericStorage::from(storage),
+        None if real_elem.data_type == MI_SINGLE => NumericStorage::F32(
+            decode_numeric_values(&real_elem, endian)?
+                .into_iter()
+                .map(|value| value as f32)
+                .collect(),
+        ),
         None => NumericStorage::F64(decode_numeric_values(&real_elem, endian)?),
     };
 
@@ -1383,8 +1389,8 @@ fn mat_array_to_value(array: MatArray) -> BuiltinResult<Value> {
                 NumericStorage::F64(values) => {
                     SparseTensor::new(rows, cols, col_ptrs, row_indices, values)
                 }
-                NumericStorage::F32(_) => {
-                    Err("load: native single sparse storage is not supported".to_string())
+                NumericStorage::F32(values) => {
+                    SparseTensor::new_f32(rows, cols, col_ptrs, row_indices, values)
                 }
                 storage => SparseTensor::new_integer(
                     rows,
@@ -2148,6 +2154,23 @@ pub(crate) mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0, "S");
         assert_eq!(entries[0].1, Value::SparseTensor(sparse));
+    }
+
+    #[test]
+    fn load_save_native_single_sparse_roundtrip_preserves_dtype_and_values() {
+        let sparse =
+            SparseTensor::new_f32(3, 3, vec![0, 1, 1, 3], vec![1, 0, 2], vec![4.25, 5.5, 6.75])
+                .expect("single sparse");
+        let bytes = block_on(encode_workspace_to_mat_bytes(&[(
+            "single_sparse".to_string(),
+            Value::SparseTensor(sparse.clone()),
+        )]))
+        .expect("save single sparse");
+        let entries = load_entries_from_bytes(bytes);
+        assert_eq!(
+            entries,
+            vec![("single_sparse".to_string(), Value::SparseTensor(sparse))]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

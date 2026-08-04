@@ -687,6 +687,17 @@ pub async fn assign_sparse_with_plan(
         sparse
             .with_updated_integer_linear_values(&updates)
             .map_err(|error| map_slice_shape_error("sparse slice assign", error))?
+    } else if sparse.numeric_dtype() == NumericDType::F32 {
+        let rhs_values = materialize_rhs_real_for_plan(rhs, plan).await?;
+        let updates = plan
+            .indices
+            .iter()
+            .zip(rhs_values)
+            .map(|(&index, value)| (index as usize, value as f32))
+            .collect::<Vec<_>>();
+        sparse
+            .with_updated_f32_linear_values(&updates)
+            .map_err(|error| map_slice_shape_error("sparse slice assign", error))?
     } else {
         let rhs_values = materialize_rhs_real_for_plan(rhs, plan).await?;
         let updates = plan
@@ -2049,6 +2060,23 @@ mod tests {
         assert_eq!(output.col_ptrs, vec![0, 0, 1]);
         assert_eq!(output.row_indices, vec![0]);
         assert_eq!(output.as_f64_slice(), Some(&[3.0][..]));
+    }
+
+    #[test]
+    fn sparse_single_plan_assignment_preserves_class_and_rounds_to_f32() {
+        let sparse = SparseTensor::new_f32(2, 2, vec![0, 1, 2], vec![0, 1], vec![1.0, 3.0])
+            .expect("single sparse");
+        let plan = IndexPlan::new(vec![0, 1], vec![2, 1], vec![2, 1], 2, vec![2, 2]);
+        let rhs = Value::Tensor(Tensor::new(vec![0.0, 1.0 / 3.0], vec![2, 1]).expect("double rhs"));
+        let result = block_on(assign_sparse_with_plan(sparse, &plan, &rhs)).expect("assign");
+
+        let Value::SparseTensor(output) = result else {
+            panic!("expected sparse output");
+        };
+        assert_eq!(output.numeric_dtype(), NumericDType::F32);
+        assert_eq!(output.col_ptrs, vec![0, 1, 2]);
+        assert_eq!(output.row_indices, vec![1, 1]);
+        assert_eq!(output.as_f32_slice(), Some(&[(1.0 / 3.0) as f32, 3.0][..]));
     }
 
     #[test]

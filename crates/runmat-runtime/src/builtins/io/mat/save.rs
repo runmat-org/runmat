@@ -819,14 +819,17 @@ fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray
                 data: MatData::Logical { data: la.data },
             }),
             Value::SparseTensor(sparse) => {
-                let values = match sparse.integer_storage() {
-                    Some(storage) => NumericStorage::from(storage.clone()),
-                    None => NumericStorage::F64(
+                let values = if let Some(storage) = sparse.integer_storage() {
+                    NumericStorage::from(storage.clone())
+                } else if let Some(values) = sparse.as_f32_slice() {
+                    NumericStorage::F32(values.to_vec())
+                } else {
+                    NumericStorage::F64(
                         sparse
                             .as_f64_slice()
-                            .expect("floating sparse storage must expose f64 values")
+                            .expect("double sparse storage must expose f64 values")
                             .to_vec(),
-                    ),
+                    )
                 };
                 Ok(MatArray {
                     class: MatClass::Sparse,

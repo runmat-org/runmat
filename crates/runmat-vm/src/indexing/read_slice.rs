@@ -1,8 +1,8 @@
 use crate::indexing::plan::{build_index_plan, IndexPlan};
 use crate::indexing::selectors::{build_slice_selectors, SliceSelector};
 use runmat_builtins::{
-    ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericScalar, SparseTensor,
-    StringArray, Tensor, Value,
+    ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericDType, NumericScalar,
+    SparseTensor, StringArray, Tensor, Value,
 };
 use runmat_runtime::RuntimeError;
 use std::collections::HashMap;
@@ -179,6 +179,16 @@ fn sparse_scalar_value(
         return Ok(Value::SparseTensor(scalar));
     }
 
+    if sparse.numeric_dtype() == NumericDType::F32 {
+        let value = sparse.get(row, col).unwrap_or(0.0) as f32;
+        let scalar = if value == 0.0 {
+            SparseTensor::zeros_f32(1, 1)
+        } else {
+            SparseTensor::new_f32(1, 1, vec![0, 1], vec![0], vec![value])
+                .map_err(map_slice_shape_error)?
+        };
+        return Ok(Value::SparseTensor(scalar));
+    }
     let value = sparse.get(row, col).unwrap_or(0.0);
     if value == 0.0 {
         return Ok(Value::SparseTensor(SparseTensor::zeros(1, 1)));
@@ -195,10 +205,13 @@ fn checked_sparse_numel(sparse: &SparseTensor) -> Result<usize, RuntimeError> {
 }
 
 fn sparse_zeros_like(sparse: &SparseTensor, rows: usize, cols: usize) -> SparseTensor {
-    sparse.integer_storage().map_or_else(
-        || SparseTensor::zeros(rows, cols),
-        |storage| SparseTensor::zeros_with_integer_storage(rows, cols, storage),
-    )
+    if let Some(storage) = sparse.integer_storage() {
+        SparseTensor::zeros_with_integer_storage(rows, cols, storage)
+    } else if sparse.numeric_dtype() == NumericDType::F32 {
+        SparseTensor::zeros_f32(rows, cols)
+    } else {
+        SparseTensor::zeros(rows, cols)
+    }
 }
 
 fn typed_sparse_from_column_entries(
@@ -247,6 +260,14 @@ fn linear_sparse_slice(
                 vec![0, sparse.nnz()],
                 row_indices,
                 storage.clone(),
+            )
+        } else if let Some(values) = sparse.as_f32_slice() {
+            SparseTensor::new_f32(
+                total,
+                1,
+                vec![0, sparse.nnz()],
+                row_indices,
+                values.to_vec(),
             )
         } else {
             SparseTensor::new(
@@ -326,6 +347,23 @@ fn linear_sparse_slice(
         return typed_sparse_from_column_entries(out_rows, out_cols, col_entries, storage);
     }
 
+    if sparse.numeric_dtype() == NumericDType::F32 {
+        let mut col_entries: Vec<Vec<(usize, f32)>> = vec![Vec::new(); out_cols];
+        for (out_pos, &index) in indices.iter().enumerate() {
+            let base_lin = index - 1;
+            let base_row = base_lin % sparse.rows;
+            let base_col = base_lin / sparse.rows;
+            if let Some(value) = sparse.get(base_row, base_col).map(|value| value as f32) {
+                if value != 0.0 {
+                    let out_row = out_pos % out_rows;
+                    let out_col = out_pos / out_rows;
+                    col_entries[out_col].push((out_row, value));
+                }
+            }
+        }
+        return sparse_f32_from_column_entries(out_rows, out_cols, col_entries);
+    }
+
     let mut col_entries: Vec<Vec<(usize, f64)>> = vec![Vec::new(); out_cols];
     for (out_pos, &index) in indices.iter().enumerate() {
         let base_lin = index - 1;
@@ -373,6 +411,30 @@ fn sparse_from_column_entries(
         col_ptrs.push(values.len());
     }
     let sparse = SparseTensor::new(rows, cols, col_ptrs, row_indices, values)
+        .map_err(map_slice_shape_error)?;
+    Ok(Value::SparseTensor(sparse))
+}
+
+fn sparse_f32_from_column_entries(
+    rows: usize,
+    cols: usize,
+    mut col_entries: Vec<Vec<(usize, f32)>>,
+) -> Result<Value, RuntimeError> {
+    let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
+    let mut row_indices = Vec::new();
+    let mut values = Vec::new();
+    col_ptrs.push(0);
+    for entries in col_entries.iter_mut().take(cols) {
+        entries.sort_by_key(|(row, _)| *row);
+        for &(row, value) in entries.iter() {
+            if value != 0.0 {
+                row_indices.push(row);
+                values.push(value);
+            }
+        }
+        col_ptrs.push(values.len());
+    }
+    let sparse = SparseTensor::new_f32(rows, cols, col_ptrs, row_indices, values)
         .map_err(map_slice_shape_error)?;
     Ok(Value::SparseTensor(sparse))
 }
@@ -445,6 +507,39 @@ fn matrix_sparse_slice(
             return Ok(Value::SparseTensor(scalar));
         }
         return typed_sparse_from_column_entries(out_rows, out_cols, col_entries, storage);
+    }
+
+    if let Some(values) = sparse.as_f32_slice() {
+        let mut col_entries = vec![Vec::new(); out_cols];
+        for (out_col, &col) in cols.iter().enumerate() {
+            let base_col = col - 1;
+            for entry in sparse.col_ptrs[base_col]..sparse.col_ptrs[base_col + 1] {
+                let base_row = sparse.row_indices[entry];
+                let value = values[entry];
+                if all_rows {
+                    col_entries[out_col].push((base_row, value));
+                } else if let Some(output_rows) = row_positions.get(&base_row) {
+                    for &out_row in output_rows {
+                        col_entries[out_col].push((out_row, value));
+                    }
+                }
+            }
+        }
+        if out_rows == 1 && out_cols == 1 {
+            let value = col_entries
+                .first()
+                .and_then(|entries| entries.first())
+                .map(|(_, value)| *value)
+                .unwrap_or(0.0);
+            let scalar = if value == 0.0 {
+                SparseTensor::zeros_f32(1, 1)
+            } else {
+                SparseTensor::new_f32(1, 1, vec![0, 1], vec![0], vec![value])
+                    .map_err(map_slice_shape_error)?
+            };
+            return Ok(Value::SparseTensor(scalar));
+        }
+        return sparse_f32_from_column_entries(out_rows, out_cols, col_entries);
     }
 
     let values = sparse.as_f64_slice().expect("double sparse storage");
@@ -600,8 +695,18 @@ pub fn read_sparse_slice_from_plan(
         col_ptrs.push(values.len());
     }
 
-    let out = SparseTensor::new(out_rows, out_cols, col_ptrs, row_indices, values)
-        .map_err(map_slice_shape_error)?;
+    let out = if sparse.numeric_dtype() == NumericDType::F32 {
+        SparseTensor::new_f32(
+            out_rows,
+            out_cols,
+            col_ptrs,
+            row_indices,
+            values.into_iter().map(|value| value as f32).collect(),
+        )
+    } else {
+        SparseTensor::new(out_rows, out_cols, col_ptrs, row_indices, values)
+    }
+    .map_err(map_slice_shape_error)?;
     Ok(Value::SparseTensor(out))
 }
 
@@ -865,6 +970,30 @@ mod tests {
         };
         assert_eq!(empty.shape(), vec![0, 1]);
         assert_eq!(empty.integer_storage(), Some(&IntegerStorage::U64(vec![])));
+    }
+
+    #[test]
+    fn sparse_slice_plan_preserves_native_single_storage_and_empty_class() {
+        let sparse = SparseTensor::new_f32(2, 2, vec![0, 1, 2], vec![0, 1], vec![1.25, 3.5])
+            .expect("single sparse");
+        let plan = IndexPlan::new(vec![0, 3, 1, 2], vec![2, 2], vec![2, 2], 2, vec![2, 2]);
+        let result = read_sparse_slice_from_plan(&sparse, &plan).expect("slice");
+        let Value::SparseTensor(output) = result else {
+            panic!("expected sparse output");
+        };
+        assert_eq!(output.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(output.col_ptrs, vec![0, 2, 2]);
+        assert_eq!(output.row_indices, vec![0, 1]);
+        assert_eq!(output.as_f32_slice(), Some(&[1.25, 3.5][..]));
+
+        let empty_plan = IndexPlan::new(Vec::new(), vec![0, 1], vec![0], 1, vec![2, 2]);
+        let empty = read_sparse_slice_from_plan(&sparse, &empty_plan).expect("empty slice");
+        let Value::SparseTensor(empty) = empty else {
+            panic!("expected sparse output");
+        };
+        assert_eq!(empty.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(empty.shape(), vec![0, 1]);
+        assert_eq!(empty.as_f32_slice(), Some(&[][..]));
     }
 
     #[test]

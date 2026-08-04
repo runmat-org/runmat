@@ -299,8 +299,7 @@ pub(crate) fn cast_sparse_value(
             .map(|value| target.cast_int(value))
             .collect(),
         None => sparse
-            .as_f64_slice()
-            .expect("double sparse storage")
+            .materialize_f64()
             .iter()
             .map(|&value| target.cast_scalar(value))
             .collect(),

@@ -664,8 +664,7 @@ fn sparse_has_implicit_zeros(sparse: &SparseTensor) -> bool {
 fn sparse_stored_values_are_finite(sparse: &SparseTensor) -> bool {
     sparse.integer_storage().is_some()
         || sparse
-            .as_f64_slice()
-            .expect("double sparse storage")
+            .materialize_f64()
             .iter()
             .all(|value| value.is_finite())
 }

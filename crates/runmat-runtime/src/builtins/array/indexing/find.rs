@@ -455,6 +455,7 @@ struct FindResult {
 #[derive(Clone)]
 enum FindValues {
     Real(Vec<f64>),
+    F32(Vec<f32>),
     Integer(IntegerStorage),
     Complex(Vec<(f64, f64)>),
     IntegerComplex(IntegerComplexStorage),
@@ -775,14 +776,18 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
 }
 
 fn sparse_find_values(
-    integer_storage: Option<&IntegerStorage>,
+    sparse: &runmat_builtins::SparseTensor,
     real_values: Vec<f64>,
+    single_values: Vec<f32>,
     integer_value_indices: &[usize],
 ) -> FindValues {
-    integer_storage.map_or_else(
-        || FindValues::Real(real_values),
-        |storage| FindValues::Integer(select_integer_values(storage, integer_value_indices)),
-    )
+    if let Some(storage) = sparse.integer_storage() {
+        FindValues::Integer(select_integer_values(storage, integer_value_indices))
+    } else if sparse.as_f32_slice().is_some() {
+        FindValues::F32(single_values)
+    } else {
+        FindValues::Real(real_values)
+    }
 }
 
 fn sparse_stored_value_is_nonzero(sparse: &runmat_builtins::SparseTensor, index: usize) -> bool {
@@ -801,12 +806,14 @@ fn compute_find_sparse(
 
     let mut indices = Vec::new();
     let mut values = Vec::new();
+    let mut single_values = Vec::new();
     let integer_storage = sparse.integer_storage();
     let floating_values = sparse.as_f64_slice();
+    let native_single_values = sparse.as_f32_slice();
     let mut integer_value_indices = Vec::new();
 
     if matches!(limit, Some(0)) {
-        let values = sparse_find_values(integer_storage, values, &integer_value_indices);
+        let values = sparse_find_values(sparse, values, single_values, &integer_value_indices);
         return FindResult::new(shape, indices, values);
     }
 
@@ -822,12 +829,18 @@ fn compute_find_sparse(
                         indices.push(linear_idx + 1);
                         if integer_storage.is_some() {
                             integer_value_indices.push(idx);
+                        } else if let Some(native_single_values) = native_single_values {
+                            single_values.push(native_single_values[idx]);
                         } else {
                             values.push(floating_values.expect("double sparse storage")[idx]);
                         }
                         if limit.is_some_and(|k| indices.len() >= k) {
-                            let values =
-                                sparse_find_values(integer_storage, values, &integer_value_indices);
+                            let values = sparse_find_values(
+                                sparse,
+                                values,
+                                single_values,
+                                &integer_value_indices,
+                            );
                             return FindResult::new(shape, indices, values);
                         }
                     }
@@ -845,15 +858,22 @@ fn compute_find_sparse(
                         indices.push(linear_idx + 1);
                         if integer_storage.is_some() {
                             integer_value_indices.push(idx);
+                        } else if let Some(native_single_values) = native_single_values {
+                            single_values.push(native_single_values[idx]);
                         } else {
                             values.push(floating_values.expect("double sparse storage")[idx]);
                         }
                         if limit.is_some_and(|k| indices.len() >= k) {
                             indices.reverse();
                             values.reverse();
+                            single_values.reverse();
                             integer_value_indices.reverse();
-                            let values =
-                                sparse_find_values(integer_storage, values, &integer_value_indices);
+                            let values = sparse_find_values(
+                                sparse,
+                                values,
+                                single_values,
+                                &integer_value_indices,
+                            );
                             return FindResult::new(shape, indices, values);
                         }
                     }
@@ -865,9 +885,10 @@ fn compute_find_sparse(
     if matches!(options.direction, FindDirection::Last) {
         indices.reverse();
         values.reverse();
+        single_values.reverse();
         integer_value_indices.reverse();
     }
-    let values = sparse_find_values(integer_storage, values, &integer_value_indices);
+    let values = sparse_find_values(sparse, values, single_values, &integer_value_indices);
     FindResult::new(shape, indices, values)
 }
 
@@ -927,6 +948,13 @@ impl FindResult {
                 })?;
                 Ok(tensor_to_value(tensor, prefer_gpu))
             }
+            FindValues::F32(values) => {
+                let tensor =
+                    Tensor::from_f32(values.clone(), vec![values.len(), 1]).map_err(|e| {
+                        find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL)
+                    })?;
+                Ok(tensor_to_value(tensor, prefer_gpu))
+            }
             FindValues::Integer(values) => integer_values_to_value(values.clone(), prefer_gpu),
             FindValues::Complex(values) => {
                 let tensor =
@@ -948,6 +976,9 @@ impl FindResult {
 
 fn find_values_for_tensor(tensor: &Tensor, indices: &[usize]) -> FindValues {
     let Some(storage) = tensor.integer_storage() else {
+        if let Some(values) = tensor.as_f32_slice() {
+            return FindValues::F32(indices.iter().map(|index| values[index - 1]).collect());
+        }
         return FindValues::Real(
             indices
                 .iter()
@@ -1360,6 +1391,24 @@ pub(crate) mod tests {
             last_values.integer_storage(),
             Some(&IntegerStorage::U64(vec![1_u64 << 63, 7]))
         );
+    }
+
+    #[test]
+    fn find_sparse_values_preserve_native_single_class_and_order() {
+        let sparse = runmat_builtins::SparseTensor::new_f32(
+            3,
+            2,
+            vec![0, 2, 3],
+            vec![0, 2, 1],
+            vec![1.25, 3.5, 7.75],
+        )
+        .expect("single sparse");
+        let eval = evaluate(Value::SparseTensor(sparse), &[]).expect("find sparse");
+        let Value::Tensor(values) = eval.values_value().expect("values") else {
+            panic!("expected native-single find values");
+        };
+        assert_eq!(values.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(values.as_f32_slice(), Some(&[1.25, 3.5, 7.75][..]));
     }
 
     #[test]

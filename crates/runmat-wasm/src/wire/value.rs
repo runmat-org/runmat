@@ -1,4 +1,6 @@
-use runmat_builtins::{ComplexStorage, IntValue, ObjectInstance, StructValue, Value};
+use runmat_builtins::{
+    ComplexStorage, IntValue, NumericScalar, ObjectInstance, StructValue, Value,
+};
 use runmat_core::{matlab_class_name, value_shape};
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
 
@@ -362,6 +364,18 @@ fn rows_cols_from_shape(shape: &[usize]) -> (usize, usize) {
     (rows, cols)
 }
 
+fn numeric_scalar_json_value(value: NumericScalar) -> JsonValue {
+    match value {
+        NumericScalar::F64(value) => JsonValue::from(value),
+        NumericScalar::F32(value) => JsonValue::from(value),
+        integer => integer_json_value(
+            &integer
+                .into_int_value()
+                .expect("non-floating numeric scalar is an integer"),
+        ),
+    }
+}
+
 fn sparse_entry_preview(
     st: &runmat_builtins::SparseTensor,
     limit: usize,
@@ -374,18 +388,10 @@ fn sparse_entry_preview(
             if entries.len() >= limit {
                 return (entries, true);
             }
-            let value = if let Some(storage) = st.integer_storage() {
-                integer_json_value(
-                    &storage
-                        .value_at(idx)
-                        .expect("integer sparse storage index is valid"),
-                )
-            } else {
-                JsonValue::from(
-                    st.as_f64_slice()
-                        .expect("floating sparse storage is available")[idx],
-                )
-            };
+            let value = numeric_scalar_json_value(
+                st.numeric_value_at(idx)
+                    .expect("sparse storage index is valid"),
+            );
             entries.push(json!({
                 "row": st.row_indices[idx] + 1,
                 "col": col + 1,
@@ -400,29 +406,16 @@ fn sparse_values_preview(
     st: &runmat_builtins::SparseTensor,
     limit: usize,
 ) -> (Vec<JsonValue>, bool) {
-    if let Some(storage) = st.integer_storage() {
-        let truncated = storage.len() > limit;
-        let preview = (0..storage.len().min(limit))
-            .map(|index| {
-                integer_json_value(
-                    &storage
-                        .value_at(index)
-                        .expect("integer storage index is valid"),
-                )
-            })
-            .collect();
-        return (preview, truncated);
-    }
-
-    let (preview, truncated) = preview_slice(
-        st.as_f64_slice()
-            .expect("floating sparse storage is available"),
-        limit,
-    );
-    (
-        preview.into_iter().map(JsonValue::from).collect(),
-        truncated,
-    )
+    let truncated = st.nnz() > limit;
+    let preview = (0..st.nnz().min(limit))
+        .map(|index| {
+            numeric_scalar_json_value(
+                st.numeric_value_at(index)
+                    .expect("sparse storage index is valid"),
+            )
+        })
+        .collect();
+    (preview, truncated)
 }
 
 fn preview_slice<T: Clone>(data: &[T], limit: usize) -> (Vec<T>, bool) {
@@ -481,6 +474,22 @@ mod tests {
         assert_eq!(json["rowIndicesTruncated"], true);
         assert_eq!(json["valuesTruncated"], true);
         assert_eq!(json["truncated"], true);
+    }
+
+    #[wasm_bindgen_test]
+    fn native_single_sparse_json_preserves_dtype_and_values() {
+        let sparse = SparseTensor::new_f32(2, 2, vec![0, 1, 2], vec![1, 0], vec![1.25, 3.5])
+            .expect("single sparse");
+        let json = value_to_json(&Value::SparseTensor(sparse), 0);
+        assert_eq!(json["dtype"], "single");
+        assert_eq!(json["valuesPreview"], json!([1.25, 3.5]));
+        assert_eq!(
+            json["preview"],
+            json!([
+                {"row": 2, "col": 1, "value": 1.25},
+                {"row": 1, "col": 2, "value": 3.5}
+            ])
+        );
     }
 
     #[wasm_bindgen_test]

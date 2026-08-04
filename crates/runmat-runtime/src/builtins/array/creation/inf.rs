@@ -489,7 +489,11 @@ async fn inf_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value>
         Value::SparseTensor(sparse) if sparse.integer_storage().is_some() => {
             Err(inf_error(&INF_ERROR_INTEGER_LIKE_PROTOTYPE))
         }
-        Value::SparseTensor(_) => inf_double(shape),
+        Value::SparseTensor(sparse) => match sparse.numeric_dtype() {
+            NumericDType::F32 => inf_single(shape),
+            NumericDType::F64 => inf_double(shape),
+            _ => unreachable!("integer sparse prototypes are rejected above"),
+        },
         Value::Int(_) => Err(inf_error(&INF_ERROR_INTEGER_LIKE_PROTOTYPE)),
         Value::Num(_) | Value::Bool(_) => inf_double(shape),
         Value::LogicalArray(_) => inf_double(shape),
@@ -800,6 +804,27 @@ pub(crate) mod tests {
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape, vec![2, 2]);
         assert_all_pos_inf(&tensor);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn inf_like_single_sparse_returns_dense_single() {
+        let prototype = SparseTensor::zeros_f32(1, 1);
+        let result = block_on(inf_builtin(vec![
+            Value::Num(2.0),
+            Value::from("like"),
+            Value::SparseTensor(prototype),
+        ]))
+        .expect("inf single sparse like");
+        let Value::Tensor(output) = result else {
+            panic!("expected dense tensor");
+        };
+        assert_eq!(output.numeric_dtype(), NumericDType::F32);
+        assert!(output
+            .as_f32_slice()
+            .expect("single storage")
+            .iter()
+            .all(|value| value.is_infinite() && value.is_sign_positive()));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

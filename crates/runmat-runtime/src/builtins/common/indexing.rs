@@ -7,8 +7,8 @@ use crate::builtins::common::tensor as tensor_utils;
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::HostIntegerDataOwned;
 use runmat_builtins::{
-    ComplexTensor, IntValue, IntegerComplexStorage, NumericScalar, NumericStorage, SparseTensor,
-    Tensor, Value,
+    ComplexTensor, IntValue, IntegerComplexStorage, NumericDType, NumericScalar, NumericStorage,
+    SparseTensor, Tensor, Value,
 };
 
 fn indexing_error(message: impl Into<String>) -> RuntimeError {
@@ -130,6 +130,16 @@ fn sparse_scalar_index(sparse: &SparseTensor, indices: &[f64]) -> Result<Value, 
             return Ok(Value::SparseTensor(result));
         }
 
+        if sparse.numeric_dtype() == NumericDType::F32 {
+            let value = sparse.get(row, col).unwrap_or(0.0) as f32;
+            let result = if value == 0.0 {
+                SparseTensor::zeros_f32(1, 1)
+            } else {
+                SparseTensor::new_f32(1, 1, vec![0, 1], vec![0], vec![value])
+                    .map_err(indexing_error)?
+            };
+            return Ok(Value::SparseTensor(result));
+        }
         let value = sparse.get(row, col).unwrap_or(0.0);
         if value == 0.0 {
             return Ok(Value::SparseTensor(SparseTensor::zeros(1, 1)));

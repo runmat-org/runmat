@@ -65,6 +65,30 @@ const SPARSE_INPUT_DIMS: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
+const SPARSE_INPUT_DIMS_TYPENAME: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "m",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Number of rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "n",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Number of columns.",
+    },
+    BuiltinParamDescriptor {
+        name: "typename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sparse storage type: double or single.",
+    },
+];
+
 const SPARSE_INPUT_TRIPLETS: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "i",
@@ -172,7 +196,7 @@ const SPARSE_INPUT_TRIPLETS_DIMS_NZMAX: [BuiltinParamDescriptor; 6] = [
     },
 ];
 
-const SPARSE_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
+const SPARSE_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
     BuiltinSignatureDescriptor {
         label: "S = sparse(A)",
         inputs: &SPARSE_INPUT_A,
@@ -181,6 +205,11 @@ const SPARSE_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
     BuiltinSignatureDescriptor {
         label: "S = sparse(m, n)",
         inputs: &SPARSE_INPUT_DIMS,
+        outputs: &SPARSE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = sparse(m, n, typename)",
+        inputs: &SPARSE_INPUT_DIMS_TYPENAME,
         outputs: &SPARSE_OUTPUT,
     },
     BuiltinSignatureDescriptor {
@@ -315,8 +344,8 @@ async fn sparse_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     builtin_path = "crate::builtins::array::creation::sparse"
 )]
 fn speye_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let (rows, cols) = parse_speye_shape(&args)?;
-    Ok(Value::SparseTensor(sparse_identity(rows, cols)?))
+    let (rows, cols, dtype) = parse_speye_shape(&args)?;
+    Ok(Value::SparseTensor(sparse_identity(rows, cols, dtype)?))
 }
 
 #[runtime_builtin(
@@ -400,6 +429,15 @@ fn construct_sparse(args: Vec<Value>) -> BuiltinResult<SparseTensor> {
             let cols = parse_size_arg(iter.next().as_ref().expect("cols"), "n")?;
             Ok(SparseTensor::zeros(rows, cols))
         }
+        3 if keyword_of(&args[2]).is_some() => {
+            let rows = parse_size_arg(&args[0], "m")?;
+            let cols = parse_size_arg(&args[1], "n")?;
+            match sparse_float_dtype(&args[2], "sparse")? {
+                NumericDType::F64 => Ok(SparseTensor::zeros(rows, cols)),
+                NumericDType::F32 => Ok(SparseTensor::zeros_f32(rows, cols)),
+                _ => unreachable!("sparse floating typename parser returned integer dtype"),
+            }
+        }
         3 | 5 | 6 => sparse_from_triplet_form(args),
         _ => Err(sparse_error(
             &SPARSE_ERROR_INVALID_INPUT,
@@ -408,23 +446,17 @@ fn construct_sparse(args: Vec<Value>) -> BuiltinResult<SparseTensor> {
     }
 }
 
-fn parse_speye_shape(args: &[Value]) -> BuiltinResult<(usize, usize)> {
+fn parse_speye_shape(args: &[Value]) -> BuiltinResult<(usize, usize, NumericDType)> {
     let mut args = args;
+    let mut dtype = NumericDType::F64;
     if let Some((last, rest)) = args.split_last() {
-        if let Some(type_name) = optional_sparse_double_typename(last) {
-            if !type_name.eq_ignore_ascii_case("double") {
-                return Err(sparse_error(
-                    &SPARSE_ERROR_INVALID_INPUT,
-                    format!(
-                        "speye: only double sparse storage is currently supported, got {type_name}"
-                    ),
-                ));
-            }
+        if keyword_of(last).is_some() {
+            dtype = sparse_float_dtype(last, "speye")?;
             args = rest;
         }
     }
 
-    match args {
+    let shape = match args {
         [] => Ok((1, 1)),
         [n] => match n {
             Value::Tensor(tensor)
@@ -464,7 +496,8 @@ fn parse_speye_shape(args: &[Value]) -> BuiltinResult<(usize, usize)> {
             &SPARSE_ERROR_INVALID_INPUT,
             "speye: expected speye(), speye(n), speye([m n]), or speye(m,n)",
         )),
-    }
+    }?;
+    Ok((shape.0, shape.1, dtype))
 }
 
 fn parse_speye_shape_tensor(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
@@ -483,11 +516,20 @@ fn parse_speye_shape_tensor(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
         .collect()
 }
 
-fn optional_sparse_double_typename(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) => Some(text.clone()),
-        Value::CharArray(chars) => Some(chars.data.iter().collect()),
-        _ => None,
+fn sparse_float_dtype(value: &Value, label: &str) -> BuiltinResult<NumericDType> {
+    let type_name = keyword_of(value).ok_or_else(|| {
+        sparse_error(
+            &SPARSE_ERROR_INVALID_INPUT,
+            format!("{label}: typename must be \"double\" or \"single\""),
+        )
+    })?;
+    match type_name.as_str() {
+        "double" => Ok(NumericDType::F64),
+        "single" => Ok(NumericDType::F32),
+        _ => Err(sparse_error(
+            &SPARSE_ERROR_INVALID_INPUT,
+            format!("{label}: typename must be \"double\" or \"single\", got {type_name}"),
+        )),
     }
 }
 
@@ -545,7 +587,7 @@ fn parse_speye_size_raw(raw: f64, name: &str) -> BuiltinResult<usize> {
     Ok(raw as usize)
 }
 
-fn sparse_identity(rows: usize, cols: usize) -> BuiltinResult<SparseTensor> {
+fn sparse_identity(rows: usize, cols: usize, dtype: NumericDType) -> BuiltinResult<SparseTensor> {
     let diagonal = rows.min(cols);
     let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
     let mut row_indices = Vec::with_capacity(diagonal);
@@ -558,22 +600,43 @@ fn sparse_identity(rows: usize, cols: usize) -> BuiltinResult<SparseTensor> {
         }
         col_ptrs.push(values.len());
     }
-    SparseTensor::new(rows, cols, col_ptrs, row_indices, values)
-        .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("speye: {err}")))
+    match dtype {
+        NumericDType::F64 => SparseTensor::new(rows, cols, col_ptrs, row_indices, values),
+        NumericDType::F32 => SparseTensor::new_f32(
+            rows,
+            cols,
+            col_ptrs,
+            row_indices,
+            values.into_iter().map(|value| value as f32).collect(),
+        ),
+        _ => unreachable!("sparse identity requested with integer dtype"),
+    }
+    .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("speye: {err}")))
 }
 
 fn nonzeros_value(value: &Value) -> BuiltinResult<Value> {
     match value {
-        Value::SparseTensor(sparse) => match sparse.integer_storage() {
-            Some(storage) => integer_tensor_column(storage.clone(), "nonzeros"),
-            None => tensor_column(
+        Value::SparseTensor(sparse) => {
+            if let Some(storage) = sparse.integer_storage() {
+                return integer_tensor_column(storage.clone(), "nonzeros");
+            }
+            if let Some(values) = sparse.as_f32_slice() {
+                let values = values.to_vec();
+                let len = values.len();
+                return Tensor::from_f32(values, vec![len, 1])
+                    .map(Value::Tensor)
+                    .map_err(|err| {
+                        sparse_error(&SPARSE_ERROR_INTERNAL, format!("nonzeros: {err}"))
+                    });
+            }
+            tensor_column(
                 sparse
                     .as_f64_slice()
                     .expect("double sparse storage")
                     .to_vec(),
                 "nonzeros",
-            ),
-        },
+            )
+        }
         Value::Tensor(tensor) => nonzeros_dense_tensor(tensor),
         Value::ComplexTensor(tensor) => {
             let data: Vec<(f64, f64)> = tensor
@@ -666,8 +729,8 @@ fn sparse_pattern_from_value(value: Value) -> BuiltinResult<SparseTensor> {
 }
 
 fn sprand_sparse(mut args: Vec<Value>) -> BuiltinResult<SparseTensor> {
-    take_optional_sparse_double_typename(&mut args, "sprand")?;
-    match args.len() {
+    let dtype = take_optional_sparse_float_typename(&mut args, "sprand")?;
+    let sparse = match args.len() {
         1 => {
             let pattern = sparse_pattern_from_value(args.into_iter().next().expect("pattern"))?;
             let values = random::generate_uniform(pattern.nnz(), "sprand")?;
@@ -678,7 +741,7 @@ fn sprand_sparse(mut args: Vec<Value>) -> BuiltinResult<SparseTensor> {
                 pattern.row_indices,
                 values,
             )
-            .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sprand: {err}")))
+            .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sprand: {err}")))?
         }
         3 | 4 => {
             let rows = parse_size_arg(&args[0], "m")?;
@@ -686,34 +749,55 @@ fn sprand_sparse(mut args: Vec<Value>) -> BuiltinResult<SparseTensor> {
             let density = parse_density_arg(&args[2])?;
             if args.len() == 4 {
                 let profile = parse_sprand_condition_profile(&args[3], rows, cols)?;
-                return sprand_from_condition_profile(rows, cols, density, &profile);
+                sprand_from_condition_profile(rows, cols, density, &profile)?
+            } else {
+                sprand_from_density(rows, cols, density)?
             }
-            sprand_from_density(rows, cols, density)
         }
-        _ => Err(sparse_error(
-            &SPARSE_ERROR_INVALID_INPUT,
-            "sprand: expected sprand(S), sprand(m,n,density), or sprand(m,n,density,rc)",
-        )),
-    }
+        _ => {
+            return Err(sparse_error(
+                &SPARSE_ERROR_INVALID_INPUT,
+                "sprand: expected sprand(S), sprand(m,n,density), or sprand(m,n,density,rc)",
+            ))
+        }
+    };
+    sparse_with_float_dtype(sparse, dtype, "sprand")
 }
 
-fn take_optional_sparse_double_typename(args: &mut Vec<Value>, label: &str) -> BuiltinResult<()> {
-    let Some(type_name) = args.last().and_then(keyword_of) else {
-        return Ok(());
-    };
-    match type_name.as_str() {
-        "double" => {
-            args.pop();
-            Ok(())
+fn take_optional_sparse_float_typename(
+    args: &mut Vec<Value>,
+    label: &str,
+) -> BuiltinResult<NumericDType> {
+    if args.last().and_then(keyword_of).is_none() {
+        return Ok(NumericDType::F64);
+    }
+    let value = args.pop().expect("typename argument exists");
+    sparse_float_dtype(&value, label)
+}
+
+fn sparse_with_float_dtype(
+    sparse: SparseTensor,
+    dtype: NumericDType,
+    label: &str,
+) -> BuiltinResult<SparseTensor> {
+    match dtype {
+        NumericDType::F64 => Ok(sparse),
+        NumericDType::F32 => {
+            let values = sparse
+                .materialize_f64()
+                .into_iter()
+                .map(|value| value as f32)
+                .collect();
+            SparseTensor::new_f32(
+                sparse.rows,
+                sparse.cols,
+                sparse.col_ptrs,
+                sparse.row_indices,
+                values,
+            )
+            .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("{label}: {err}")))
         }
-        "single" => Err(sparse_error(
-            &SPARSE_ERROR_INVALID_INPUT,
-            format!("{label}: single sparse storage is not supported yet"),
-        )),
-        _ => Err(sparse_error(
-            &SPARSE_ERROR_INVALID_INPUT,
-            format!("{label}: typename must be \"double\" or \"single\", got {type_name}"),
-        )),
+        _ => unreachable!("sparse floating typename parser returned integer dtype"),
     }
 }
 
@@ -1565,6 +1649,24 @@ fn sparse_from_dense_tensor(tensor: &Tensor) -> BuiltinResult<SparseTensor> {
     }
     let rows = tensor.rows();
     let cols = tensor.cols();
+    if let Some(dense_values) = tensor.as_f32_slice() {
+        let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
+        let mut row_indices = Vec::new();
+        let mut values = Vec::new();
+        col_ptrs.push(0);
+        for col in 0..cols {
+            for row in 0..rows {
+                let value = dense_values[row + col * rows];
+                if value != 0.0 {
+                    row_indices.push(row);
+                    values.push(value);
+                }
+            }
+            col_ptrs.push(values.len());
+        }
+        return SparseTensor::new_f32(rows, cols, col_ptrs, row_indices, values)
+            .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")));
+    }
     let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
     let mut row_indices = Vec::new();
     let mut values = Vec::new();
@@ -1725,7 +1827,8 @@ fn sparse_from_triplet_form(args: Vec<Value>) -> BuiltinResult<SparseTensor> {
     }
 
     match values {
-        TripletValues::Float(values) => sparse_from_float_triplets(rows, cols, coordinates, values),
+        TripletValues::F64(values) => sparse_from_float_triplets(rows, cols, coordinates, values),
+        TripletValues::F32(values) => sparse_from_f32_triplets(rows, cols, coordinates, values),
         TripletValues::Integer(values) => {
             sparse_from_integer_triplets(rows, cols, coordinates, values)
         }
@@ -1733,14 +1836,16 @@ fn sparse_from_triplet_form(args: Vec<Value>) -> BuiltinResult<SparseTensor> {
 }
 
 enum TripletValues {
-    Float(Vec<f64>),
+    F64(Vec<f64>),
+    F32(Vec<f32>),
     Integer(IntegerStorage),
 }
 
 impl TripletValues {
     fn len(&self) -> usize {
         match self {
-            Self::Float(values) => values.len(),
+            Self::F64(values) => values.len(),
+            Self::F32(values) => values.len(),
             Self::Integer(values) => values.len(),
         }
     }
@@ -1750,7 +1855,8 @@ impl TripletValues {
             return Ok(self);
         }
         match self {
-            Self::Float(values) => Ok(Self::Float(vec![values[0]; len])),
+            Self::F64(values) => Ok(Self::F64(vec![values[0]; len])),
+            Self::F32(values) => Ok(Self::F32(vec![values[0]; len])),
             Self::Integer(storage) => {
                 let value = storage.value_at(0).expect("single integer storage value");
                 let values = vec![value; len];
@@ -1788,7 +1894,19 @@ fn triplet_values(value: &Value) -> BuiltinResult<TripletValues> {
             dense_typed_triplet_sparse(sparse, "v")
                 .and_then(|dense| triplet_values(&Value::Tensor(dense)))
         }
-        _ => numeric_triplet_array(value, "v").map(TripletValues::Float),
+        Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32 => {
+            Ok(TripletValues::F32(
+                tensor
+                    .as_f32_slice()
+                    .expect("single tensor storage")
+                    .to_vec(),
+            ))
+        }
+        Value::SparseTensor(sparse) if sparse.numeric_dtype() == NumericDType::F32 => {
+            dense_typed_triplet_sparse(sparse, "v")
+                .and_then(|dense| triplet_values(&Value::Tensor(dense)))
+        }
+        _ => numeric_triplet_array(value, "v").map(TripletValues::F64),
     }
 }
 
@@ -1830,6 +1948,46 @@ fn sparse_from_float_triplets(
     }
 
     SparseTensor::new(rows, cols, col_ptrs, row_indices, values)
+        .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))
+}
+
+fn sparse_from_f32_triplets(
+    rows: usize,
+    cols: usize,
+    coordinates: Vec<(usize, usize)>,
+    values: Vec<f32>,
+) -> BuiltinResult<SparseTensor> {
+    let mut entries: BTreeMap<(usize, usize), f32> = BTreeMap::new();
+    for (coordinate, value) in coordinates.into_iter().zip(values) {
+        if value != 0.0 {
+            *entries.entry(coordinate).or_insert(0.0) += value;
+        }
+    }
+
+    let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
+    let mut row_indices = Vec::new();
+    let mut values = Vec::new();
+    col_ptrs.push(0);
+    for col in 0..cols {
+        for (&(entry_col, row), value) in entries.range((col, 0)..=(col, usize::MAX)) {
+            if entry_col != col {
+                break;
+            }
+            if row >= rows {
+                return Err(sparse_error(
+                    &SPARSE_ERROR_INVALID_INDEX,
+                    "sparse: row index exceeds matrix dimensions",
+                ));
+            }
+            if *value != 0.0 {
+                row_indices.push(row);
+                values.push(*value);
+            }
+        }
+        col_ptrs.push(values.len());
+    }
+
+    SparseTensor::new_f32(rows, cols, col_ptrs, row_indices, values)
         .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))
 }
 
@@ -2578,6 +2736,64 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn native_single_sparse_constructors_and_nonzeros_preserve_class() {
+        let dense = Tensor::from_f32(vec![0.0, 4.25, 5.5, 0.0], vec![2, 2]).unwrap();
+        let from_dense =
+            expect_sparse(sparse_builtin(vec![Value::Tensor(dense)]).expect("single sparse"));
+        assert_eq!(from_dense.numeric_dtype(), NumericDType::F32);
+        assert_eq!(from_dense.as_f32_slice(), Some(&[4.25, 5.5][..]));
+
+        let rows = Tensor::new(vec![1.0, 1.0, 2.0], vec![3, 1]).unwrap();
+        let cols = Tensor::new(vec![1.0, 1.0, 2.0], vec![3, 1]).unwrap();
+        let values = Tensor::from_f32(vec![0.25, 0.5, 3.0], vec![3, 1]).unwrap();
+        let triplets = expect_sparse(
+            sparse_builtin(vec![
+                Value::Tensor(rows),
+                Value::Tensor(cols),
+                Value::Tensor(values),
+            ])
+            .expect("single triplets"),
+        );
+        assert_eq!(triplets.numeric_dtype(), NumericDType::F32);
+        assert_eq!(triplets.as_f32_slice(), Some(&[0.75, 3.0][..]));
+
+        let empty = expect_sparse(
+            sparse_builtin(vec![
+                Value::Num(3.0),
+                Value::Num(4.0),
+                Value::String("single".to_string()),
+            ])
+            .expect("typed empty sparse"),
+        );
+        assert_eq!(empty.shape(), vec![3, 4]);
+        assert_eq!(empty.numeric_dtype(), NumericDType::F32);
+
+        let eye = expect_sparse(
+            super::speye_builtin(vec![Value::Num(3.0), Value::String("single".to_string())])
+                .expect("single speye"),
+        );
+        assert_eq!(eye.numeric_dtype(), NumericDType::F32);
+        assert_eq!(eye.as_f32_slice(), Some(&[1.0, 1.0, 1.0][..]));
+
+        let random_empty = expect_sparse(
+            sprand_builtin(vec![
+                Value::Num(2.0),
+                Value::Num(3.0),
+                Value::Num(0.0),
+                Value::String("single".to_string()),
+            ])
+            .expect("single sprand"),
+        );
+        assert_eq!(random_empty.shape(), vec![2, 3]);
+        assert_eq!(random_empty.numeric_dtype(), NumericDType::F32);
+
+        let nonzeros =
+            expect_tensor(nonzeros_builtin(Value::SparseTensor(triplets)).expect("nonzeros"));
+        assert_eq!(nonzeros.numeric_dtype(), NumericDType::F32);
+        assert_eq!(nonzeros.as_f32_slice(), Some(&[0.75, 3.0][..]));
+    }
+
+    #[test]
     fn sparse_gathers_gpu_input() {
         test_support::with_test_provider(|provider| {
             let dense = Tensor::new(vec![0.0, 8.0, 0.0, 3.0], vec![2, 2]).unwrap();
@@ -2828,15 +3044,16 @@ pub(crate) mod tests {
         assert_eq!(err.identifier(), Some("RunMat:sparse:InvalidInput"));
         assert!(err.message().contains("between 0 and 1"));
 
-        let err = sprand_builtin(vec![
-            Value::Num(4.0),
-            Value::Num(4.0),
-            Value::Num(0.25),
-            Value::String("single".into()),
-        ])
-        .unwrap_err();
-        assert_eq!(err.identifier(), Some("RunMat:sparse:InvalidInput"));
-        assert!(err.message().contains("single sparse storage"));
+        let single = expect_sparse(
+            sprand_builtin(vec![
+                Value::Num(4.0),
+                Value::Num(4.0),
+                Value::Num(0.25),
+                Value::String("single".into()),
+            ])
+            .expect("single sprand"),
+        );
+        assert_eq!(single.numeric_dtype(), NumericDType::F32);
     }
 
     #[test]

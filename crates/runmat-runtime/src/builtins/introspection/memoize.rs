@@ -1007,11 +1007,13 @@ fn sparse_tensors_equal(a: &SparseTensor, b: &SparseTensor) -> bool {
         (Some(_), None) | (None, Some(_)) => return false,
         (None, None) => {}
     }
-    a.as_f64_slice()
-        .expect("double sparse storage")
+    if a.numeric_dtype() != b.numeric_dtype() {
+        return false;
+    }
+    a.materialize_f64()
         .iter()
-        .zip(b.as_f64_slice().expect("double sparse storage"))
-        .all(|(x, y)| floats_equal_nan(*x, *y))
+        .zip(b.materialize_f64())
+        .all(|(x, y)| floats_equal_nan(*x, y))
 }
 
 fn complex_tensors_equal(a: &ComplexTensor, b: &ComplexTensor) -> bool {
@@ -1119,12 +1121,13 @@ fn value_fingerprint(value: &Value) -> String {
                 tensor.rows, tensor.cols, tensor.col_ptrs, tensor.row_indices
             ),
             None => format!(
-                "sparse:{}x{}:{:?}:{:?}:{:?}",
+                "sparse:{}x{}:{:?}:{:?}:{:?}:{:?}",
                 tensor.rows,
                 tensor.cols,
                 tensor.col_ptrs,
                 tensor.row_indices,
-                tensor.as_f64_slice().expect("double sparse storage")
+                tensor.numeric_dtype(),
+                tensor.materialize_f64()
             ),
         },
         Value::ComplexTensor(tensor) => {

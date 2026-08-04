@@ -1300,13 +1300,17 @@ impl XlsTable {
                 }
             }
         } else {
-            let values = sparse.as_f64_slice().expect("double sparse storage");
             for col in 0..cols {
                 let start = sparse.col_ptrs[col];
                 let end = sparse.col_ptrs[col + 1];
                 for entry in start..end {
                     let row = sparse.row_indices[entry];
-                    cells[row * cols + col] = CellValue::Number(values[entry]);
+                    cells[row * cols + col] = CellValue::Number(
+                        sparse
+                            .numeric_value_at(entry)
+                            .expect("sparse storage index is valid")
+                            .materialize_f64(),
+                    );
                 }
             }
         }

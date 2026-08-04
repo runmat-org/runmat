@@ -449,11 +449,7 @@ pub fn value_is_finite(value: &Value) -> bool {
             .iter()
             .all(|v| v.is_finite()),
         Value::SparseTensor(t) if t.integer_storage().is_some() => true,
-        Value::SparseTensor(t) => t
-            .as_f64_slice()
-            .expect("double sparse storage")
-            .iter()
-            .all(|v| v.is_finite()),
+        Value::SparseTensor(t) => t.materialize_f64().iter().all(|v| v.is_finite()),
         Value::ComplexTensor(t) if t.integer_storage().is_some() => true,
         Value::ComplexTensor(t) => t
             .materialize_f64()
@@ -560,8 +556,7 @@ pub fn value_is_integer(value: &Value) -> bool {
             .all(|v| v.is_finite() && v.fract() == 0.0),
         Value::SparseTensor(t) if t.integer_storage().is_some() => true,
         Value::SparseTensor(t) => t
-            .as_f64_slice()
-            .expect("double sparse storage")
+            .materialize_f64()
             .iter()
             .all(|v| v.is_finite() && v.fract() == 0.0),
         Value::Complex(re, im) => *im == 0.0 && re.is_finite() && re.fract() == 0.0,
@@ -584,11 +579,7 @@ pub fn value_is_non_nan(value: &Value) -> bool {
         Value::Tensor(t) if t.integer_storage().is_some() => true,
         Value::Tensor(t) => tensor::tensor_values_f64_cow(t).iter().all(|v| !v.is_nan()),
         Value::SparseTensor(t) if t.integer_storage().is_some() => true,
-        Value::SparseTensor(t) => t
-            .as_f64_slice()
-            .expect("double sparse storage")
-            .iter()
-            .all(|v| !v.is_nan()),
+        Value::SparseTensor(t) => t.materialize_f64().iter().all(|v| !v.is_nan()),
         Value::ComplexTensor(t) if t.integer_storage().is_some() => true,
         Value::ComplexTensor(t) => t
             .materialize_f64()
@@ -877,7 +868,7 @@ fn sparse_atoms(t: &SparseTensor) -> Result<Vec<ValidationAtom>, RuntimeError> {
         }
         return Ok(out);
     }
-    let values = t.as_f64_slice().expect("double sparse storage");
+    let values = t.materialize_f64();
     out.extend(values.iter().copied().map(ValidationAtom::Number));
     if values.len() < numel {
         out.push(ValidationAtom::Number(0.0));
@@ -1002,7 +993,7 @@ fn numeric_values_all(value: &Value, pred: impl Fn(f64) -> bool) -> bool {
         }
         Value::SparseTensor(t) => {
             let numel = t.rows.saturating_mul(t.cols);
-            let values = t.as_f64_slice().expect("double sparse storage");
+            let values = t.materialize_f64();
             values.iter().copied().all(&pred) && (values.len() >= numel || pred(0.0))
         }
         Value::Complex(re, im) => *im == 0.0 && pred(*re),

@@ -632,9 +632,16 @@ fn zeros_complex_integer_like(
 
 fn zeros_sparse_like(proto: &SparseTensor, shape: &[usize]) -> crate::BuiltinResult<Value> {
     match shape {
-        [rows, cols] => Ok(Value::SparseTensor(match proto.integer_storage() {
-            Some(storage) => SparseTensor::zeros_with_integer_storage(*rows, *cols, storage),
-            None => SparseTensor::zeros(*rows, *cols),
+        [rows, cols] => Ok(Value::SparseTensor(match proto.numeric_dtype() {
+            NumericDType::F32 => SparseTensor::zeros_f32(*rows, *cols),
+            NumericDType::F64 => SparseTensor::zeros(*rows, *cols),
+            _ => SparseTensor::zeros_with_integer_storage(
+                *rows,
+                *cols,
+                proto
+                    .integer_storage()
+                    .expect("integer sparse dtype has integer storage"),
+            ),
         })),
         other => Err(builtin_error(format!(
             "zeros: sparse 'like' output must be 2-D, got {} dimensions",
@@ -1142,6 +1149,27 @@ pub(crate) mod tests {
             }
             other => panic!("expected sparse tensor, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn zeros_like_single_sparse_preserves_native_single_storage() {
+        let _guard = clear_accel_provider_state();
+        let proto =
+            SparseTensor::new_f32(2, 2, vec![0, 1, 1], vec![0], vec![1.25]).expect("single sparse");
+        let result = block_on(zeros_builtin(vec![
+            Value::Num(3.0),
+            Value::Num(4.0),
+            Value::from("like"),
+            Value::SparseTensor(proto),
+        ]))
+        .expect("zeros");
+        let Value::SparseTensor(sparse) = result else {
+            panic!("expected sparse tensor");
+        };
+        assert_eq!(sparse.shape(), vec![3, 4]);
+        assert_eq!(sparse.numeric_dtype(), NumericDType::F32);
+        assert!(sparse.as_f32_slice().is_some_and(<[f32]>::is_empty));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
