@@ -201,6 +201,8 @@ mod tests {
                     "delaunaytri-integer-coordinates",
                 ),
                 ("DelaunayTri.pointLocation", "delaunaytri-integer-topology"),
+                ("corr", "corr-integer-data"),
+                ("corr", "corr-integer-weights"),
                 ("cummax", "cummax-gpu-nanflag"),
                 ("cummin", "cummin-gpu-nanflag"),
                 ("cumprod", "cumprod-gpu-nanflag"),

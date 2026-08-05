@@ -15241,7 +15241,7 @@
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Name-value options including Type and Rows."
+              "description": "Name-value options including Type, Rows, Tail, and Weights."
             }
           ],
           "outputs": [
@@ -15276,7 +15276,7 @@
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Name-value options including Type and Rows."
+              "description": "Name-value options including Type, Rows, Tail, and Weights."
             }
           ],
           "outputs": [
@@ -15367,7 +15367,7 @@
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Name-value options including Type and Rows."
+              "description": "Name-value options including Type, Rows, Tail, and Weights."
             }
           ],
           "outputs": [
@@ -15409,7 +15409,7 @@
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Name-value options including Type and Rows."
+              "description": "Name-value options including Type, Rows, Tail, and Weights."
             }
           ],
           "outputs": [
@@ -15434,7 +15434,7 @@
         {
           "code": "RM.corr.INVALID_ARGUMENT",
           "identifier": "RunMat:corr:InvalidArgument",
-          "when": "Inputs, row counts, Type, or Rows options are malformed or unsupported.",
+          "when": "Inputs, row counts, Type, Rows, Tail, or Weights options are malformed or unsupported.",
           "message": "corr: invalid argument"
         },
         {
@@ -15442,6 +15442,76 @@
           "identifier": "RunMat:corr:Internal",
           "when": "Internal tensor conversion or allocation fails.",
           "message": "corr: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "corr-integer-data",
+          "mode": "RunMatOnly",
+          "description": "corr with typed-integer observation data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CorrIntegerDataExtension"
+        },
+        {
+          "id": "corr-integer-weights",
+          "mode": "RunMatOnly",
+          "description": "corr with typed-integer observation weights is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CorrIntegerWeightsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[rho, pval] = corr(integer_X_or_Y, Type=type, Rows=rows, Weights=weights)",
+          "inputs": [
+            {
+              "name": "X_or_Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented observation domain is single or double; RunMat mode additionally accepts all eight real integer classes."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat's integer-data extension preserves exact same-class ordering for Spearman/Kendall and exact integer differences for Pearson centering before producing double rho/p-values."
+        },
+        {
+          "form": "[rho, pval] = corr(X, Y, Weights=integer_weights)",
+          "inputs": [
+            {
+              "name": "Weights",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The documented observation-weight domain is single or double; RunMat mode additionally accepts exact nonnegative typed-integer column vectors."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Typed integer weights are validated exactly, then enter the documented nonnegative weighted-correlation domain; weighted p-values are NaN."
         }
       ]
     },
