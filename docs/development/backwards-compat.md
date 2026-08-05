@@ -118,6 +118,8 @@ The adjacent descriptive functions likewise retain their individually documented
 
 `cov` documents single/double observation data, a scalar single/double normalization weight of zero or one, and missing-row controls. RunMat independently mode-gates typed-integer data, logical data, typed-integer/logical normalization, and its broader vector-of-observation-weights form before provider dispatch or gather. Integer variables are centered through exact differences before entering double covariance arithmetic, supported resident integer data uses explicit gather fallback, and vector weights remain a RunMat extension for every element class rather than being confused with the documented scalar normalization weight.
 
+`corrcoef` documents real or complex single/double observation data, equal-size paired inputs that are vectorized into two variables, `Rows` and floating `Alpha` name-value controls, and one, two, or four public outputs. RunMat independently mode-gates typed-integer and logical observation data before provider dispatch or gather, centers real and complex integer components through exact differences before floating correlation, rejects typed-integer `Alpha` because no integer satisfies its documented open interval, preserves complex one-output correlation, and keeps supported real single-output GPU calls resident with the same vector and paired geometry.
+
 ## Evidence policy
 
 Compatibility decisions should be based on publicly available information and literature only. RunMat is a clean-room implementation of MATLAB compatable syntax, and as a result we do not rely on proprietary binaries, disassembly, or reverse engineering. Prefer evidence in this order:

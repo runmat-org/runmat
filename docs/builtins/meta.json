@@ -15517,14 +15517,14 @@
     },
     {
       "name": "corrcoef",
-      "output_mode": "Fixed",
+      "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "R = corrcoef(X)",
+          "label": "R = corrcoef(A)",
           "inputs": [
             {
-              "name": "X",
+              "name": "A",
               "ty": "Any",
               "arity": "Required",
               "default": null,
@@ -15542,21 +15542,21 @@
           ]
         },
         {
-          "label": "R = corrcoef(X, Y)",
+          "label": "R = corrcoef(A, B)",
           "inputs": [
             {
-              "name": "X",
+              "name": "A",
               "ty": "Any",
               "arity": "Required",
               "default": null,
               "description": "Input observations (rows are observations, columns are variables)."
             },
             {
-              "name": "Y",
+              "name": "B",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Second dataset with matching row count."
+              "description": "Second array with the same size as A; both arrays are vectorized."
             }
           ],
           "outputs": [
@@ -15570,21 +15570,14 @@
           ]
         },
         {
-          "label": "R = corrcoef(X, normalization)",
+          "label": "[R, P] = corrcoef(A)",
           "inputs": [
             {
-              "name": "X",
+              "name": "A",
               "ty": "Any",
               "arity": "Required",
               "default": null,
               "description": "Input observations (rows are observations, columns are variables)."
-            },
-            {
-              "name": "normalization",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": "0",
-              "description": "Normalization flag: 0 (unbiased) or 1 (biased)."
             }
           ],
           "outputs": [
@@ -15594,32 +15587,32 @@
               "arity": "Required",
               "default": null,
               "description": "Correlation coefficient matrix."
+            },
+            {
+              "name": "P",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "P-values for testing zero correlation."
             }
           ]
         },
         {
-          "label": "R = corrcoef(X, \"rows\", rows_option)",
+          "label": "[R, P] = corrcoef(A, B)",
           "inputs": [
             {
-              "name": "X",
+              "name": "A",
               "ty": "Any",
               "arity": "Required",
               "default": null,
               "description": "Input observations (rows are observations, columns are variables)."
             },
             {
-              "name": "name",
-              "ty": "StringScalar",
+              "name": "B",
+              "ty": "Any",
               "arity": "Required",
-              "default": "\"rows\"",
-              "description": "Rows option keyword."
-            },
-            {
-              "name": "rows_option",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": "\"all\"",
-              "description": "Rows handling mode: 'all', 'complete', or 'pairwise'."
+              "default": null,
+              "description": "Second array with the same size as A; both arrays are vectorized."
             }
           ],
           "outputs": [
@@ -15629,32 +15622,25 @@
               "arity": "Required",
               "default": null,
               "description": "Correlation coefficient matrix."
+            },
+            {
+              "name": "P",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "P-values for testing zero correlation."
             }
           ]
         },
         {
-          "label": "R = corrcoef(X, Y, normalization)",
+          "label": "[R, P, RL, RU] = corrcoef(A)",
           "inputs": [
             {
-              "name": "X",
+              "name": "A",
               "ty": "Any",
               "arity": "Required",
               "default": null,
               "description": "Input observations (rows are observations, columns are variables)."
-            },
-            {
-              "name": "Y",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Second dataset with matching row count."
-            },
-            {
-              "name": "normalization",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": "0",
-              "description": "Normalization flag: 0 (unbiased) or 1 (biased)."
             }
           ],
           "outputs": [
@@ -15664,39 +15650,46 @@
               "arity": "Required",
               "default": null,
               "description": "Correlation coefficient matrix."
+            },
+            {
+              "name": "P",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "P-values for testing zero correlation."
+            },
+            {
+              "name": "RL",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Lower confidence bounds for the correlation coefficients."
+            },
+            {
+              "name": "RU",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Upper confidence bounds for the correlation coefficients."
             }
           ]
         },
         {
-          "label": "R = corrcoef(X, Y, \"rows\", rows_option)",
+          "label": "[R, P, RL, RU] = corrcoef(A, B)",
           "inputs": [
             {
-              "name": "X",
+              "name": "A",
               "ty": "Any",
               "arity": "Required",
               "default": null,
               "description": "Input observations (rows are observations, columns are variables)."
             },
             {
-              "name": "Y",
+              "name": "B",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Second dataset with matching row count."
-            },
-            {
-              "name": "name",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": "\"rows\"",
-              "description": "Rows option keyword."
-            },
-            {
-              "name": "rows_option",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": "\"all\"",
-              "description": "Rows handling mode: 'all', 'complete', or 'pairwise'."
+              "description": "Second array with the same size as A; both arrays are vectorized."
             }
           ],
           "outputs": [
@@ -15706,39 +15699,46 @@
               "arity": "Required",
               "default": null,
               "description": "Correlation coefficient matrix."
+            },
+            {
+              "name": "P",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "P-values for testing zero correlation."
+            },
+            {
+              "name": "RL",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Lower confidence bounds for the correlation coefficients."
+            },
+            {
+              "name": "RU",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Upper confidence bounds for the correlation coefficients."
             }
           ]
         },
         {
-          "label": "R = corrcoef(X, normalization, \"rows\", rows_option)",
+          "label": "___ = corrcoef(A, Name, Value)",
           "inputs": [
             {
-              "name": "X",
+              "name": "A",
               "ty": "Any",
               "arity": "Required",
               "default": null,
               "description": "Input observations (rows are observations, columns are variables)."
             },
             {
-              "name": "normalization",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": "0",
-              "description": "Normalization flag: 0 (unbiased) or 1 (biased)."
-            },
-            {
-              "name": "name",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": "\"rows\"",
-              "description": "Rows option keyword."
-            },
-            {
-              "name": "rows_option",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": "\"all\"",
-              "description": "Rows handling mode: 'all', 'complete', or 'pairwise'."
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Alpha and Rows name-value arguments."
             }
           ],
           "outputs": [
@@ -15748,6 +15748,83 @@
               "arity": "Required",
               "default": null,
               "description": "Correlation coefficient matrix."
+            },
+            {
+              "name": "P",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "P-values for testing zero correlation."
+            },
+            {
+              "name": "RL",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Lower confidence bounds for the correlation coefficients."
+            },
+            {
+              "name": "RU",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Upper confidence bounds for the correlation coefficients."
+            }
+          ]
+        },
+        {
+          "label": "___ = corrcoef(A, B, Name, Value)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input observations (rows are observations, columns are variables)."
+            },
+            {
+              "name": "B",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Second array with the same size as A; both arrays are vectorized."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Alpha and Rows name-value arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "R",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Correlation coefficient matrix."
+            },
+            {
+              "name": "P",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "P-values for testing zero correlation."
+            },
+            {
+              "name": "RL",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Lower confidence bounds for the correlation coefficients."
+            },
+            {
+              "name": "RU",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Upper confidence bounds for the correlation coefficients."
             }
           ]
         }
@@ -15760,22 +15837,22 @@
           "message": "corrcoef: invalid argument"
         },
         {
-          "code": "RM.CORRCOEF.COMPLEX_UNSUPPORTED",
-          "identifier": "RunMat:corrcoef:ComplexUnsupported",
-          "when": "Any input argument is complex-valued.",
-          "message": "corrcoef: complex inputs are not supported yet"
+          "code": "RM.CORRCOEF.COMPLEX_OUTPUTS",
+          "identifier": "RunMat:corrcoef:ComplexOutputs",
+          "when": "P-values or confidence bounds are requested for complex correlation coefficients.",
+          "message": "corrcoef: P-values and confidence bounds are invalid for complex coefficients"
         },
         {
-          "code": "RM.CORRCOEF.ROWS_MISMATCH",
-          "identifier": "RunMat:corrcoef:RowsMismatch",
-          "when": "Two input datasets do not have the same number of rows.",
-          "message": "corrcoef: inputs must have the same number of rows"
+          "code": "RM.CORRCOEF.SIZE_MISMATCH",
+          "identifier": "RunMat:corrcoef:SizeMismatch",
+          "when": "A and B do not have the same size.",
+          "message": "corrcoef: A and B must have the same size"
         },
         {
-          "code": "RM.CORRCOEF.NORMALIZATION_INVALID",
-          "identifier": "RunMat:corrcoef:NormalizationInvalid",
-          "when": "Normalization flag is non-finite, non-integer, or not 0/1.",
-          "message": "corrcoef: normalization flag is invalid"
+          "code": "RM.CORRCOEF.ALPHA_INVALID",
+          "identifier": "RunMat:corrcoef:AlphaInvalid",
+          "when": "Alpha is not a finite single/double scalar strictly between zero and one.",
+          "message": "corrcoef: Alpha must be a floating scalar in the open interval (0,1)"
         },
         {
           "code": "RM.CORRCOEF.ROWS_OPTION_UNKNOWN",
@@ -15784,10 +15861,10 @@
           "message": "corrcoef: unknown rows option"
         },
         {
-          "code": "RM.CORRCOEF.NORMALIZATION_DUPLICATE",
-          "identifier": "RunMat:corrcoef:NormalizationDuplicate",
-          "when": "Normalization flag is provided more than once.",
-          "message": "corrcoef: normalization flag specified more than once"
+          "code": "RM.CORRCOEF.OPTION_DUPLICATE",
+          "identifier": "RunMat:corrcoef:OptionDuplicate",
+          "when": "Alpha or Rows is specified more than once.",
+          "message": "corrcoef: option specified more than once"
         },
         {
           "code": "RM.CORRCOEF.ROWS_OPTION_MALFORMED",
@@ -15812,6 +15889,49 @@
           "identifier": "RunMat:corrcoef:Internal",
           "when": "Internal tensor conversion/allocation or corrcoef computation fails.",
           "message": "corrcoef: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "corrcoef-integer-data",
+          "mode": "RunMatOnly",
+          "description": "corrcoef with typed-integer observation data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CorrcoefIntegerDataExtension"
+        },
+        {
+          "id": "corrcoef-logical-data",
+          "mode": "RunMatOnly",
+          "description": "corrcoef with logical observation data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CorrcoefLogicalDataExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "___ = corrcoef(integer_A_or_B, Name, Value)",
+          "inputs": [
+            {
+              "name": "A_or_B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented real or complex observation domain is single or double; RunMat mode additionally accepts all eight real and componentwise-complex integer classes."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat preserves exact integer component differences while centering each variable before producing real or complex double correlation coefficients."
         }
       ]
     },

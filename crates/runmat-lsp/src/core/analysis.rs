@@ -1952,15 +1952,18 @@ mod tests {
     fn signature_help_uses_stats_summary_descriptors() {
         let cases = [
             ("mode([1 2 2 3]);", "M = mode(X)"),
-            ("mode([1 2 2 3], 1);", "M = mode(X, dim_or_all)"),
-            ("mode([1 2 2 3], 'all');", "M = mode(X, dim_or_all)"),
+            ("mode([1 2 2 3], 1);", "M = mode(X, dim_or_vecdim_or_all)"),
+            (
+                "mode([1 2 2 3], 'all');",
+                "M = mode(X, dim_or_vecdim_or_all)",
+            ),
             ("cov([1 2; 3 4]);", "C = cov(X)"),
             ("cov([1 2; 3 4], 0);", "C = cov(X, normalization)"),
             (
                 "corrcoef([1 2; 3 4], 'rows', 'complete');",
-                "R = corrcoef(X, \"rows\", rows_option)",
+                "___ = corrcoef(A, Name, Value)",
             ),
-            ("corrcoef([1 2; 3 4], [5 6; 7 8]);", "R = corrcoef(X, Y)"),
+            ("corrcoef([1 2; 3 4], [5 6; 7 8]);", "R = corrcoef(A, B)"),
         ];
 
         for (text, expected_label) in cases {

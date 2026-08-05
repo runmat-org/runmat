@@ -820,6 +820,29 @@ impl WgpuProvider {
         matrix: &GpuTensorHandle,
         options: &CorrcoefOptions,
     ) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(matrix)?;
+        let normalized = match entry.shape.as_slice() {
+            [1, _] => Some(self.register_existing_buffer_with_storage(
+                entry.buffer.clone(),
+                vec![entry.len, 1],
+                entry.len,
+                entry.storage,
+            )),
+            _ => None,
+        };
+        let source = normalized.as_ref().unwrap_or(matrix);
+        let result = self.corrcoef_matrix_exec(source, options).await;
+        if let Some(handle) = normalized {
+            let _ = self.free_exec(&handle);
+        }
+        result
+    }
+
+    async fn corrcoef_matrix_exec(
+        &self,
+        matrix: &GpuTensorHandle,
+        options: &CorrcoefOptions,
+    ) -> Result<GpuTensorHandle> {
         if options.rows != CorrcoefRows::All {
             return Err(anyhow!(
                 "corrcoef: rows option {:?} not supported by WGPU provider",
