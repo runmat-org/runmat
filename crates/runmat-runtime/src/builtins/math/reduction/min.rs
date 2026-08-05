@@ -5,10 +5,13 @@ use std::collections::BTreeSet;
 
 use runmat_accelerate_api::{GpuTensorHandle, ReduceDimResult};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexStorage, ComplexTensor, NumericDType, NumericStorage, ResolveContext, Tensor, Type,
-    Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, ComplexStorage, ComplexTensor, NumericDType, NumericStorage,
+    ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -298,6 +301,63 @@ pub const MIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &MIN_ERRORS,
 };
 
+const REDUCTION_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Ordinary real reduction data accepts every integer storage class; complex-integer ordering remains a separately tracked conformance question.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "dim_or_vecdim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Positive integer dimension selectors are decoded exactly from typed integer or integer-valued floating storage.",
+    },
+];
+
+const PAIRWISE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "An integer array may pair with the same integer class or a scalar double in either operand position.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "B",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Two integer arrays must share one class; mixed integer classes and nonscalar floating arrays are rejected.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[M, I] = min(A, [], dim_or_vecdim, missingflag)",
+        inputs: &REDUCTION_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Minimum values preserve the integer input class and one-based indices are double; supported provider reductions retain resident values and indices.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "C = min(A, B, missingflag)",
+        inputs: &PAIRWISE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::BroadcastCompatible,
+        notes: "Pairwise minimum applies compatible-size expansion and preserves the integer operand class, including exact comparison against an allowed scalar double.",
+    },
+];
+
 use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
@@ -425,6 +485,7 @@ impl MinEvaluation {
     accel = "reduction",
     type_resolver(min_type),
     descriptor(crate::builtins::math::reduction::min::MIN_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::reduction::min::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::reduction::min"
 )]
 pub(crate) async fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

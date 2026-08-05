@@ -3,7 +3,11 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, ProviderNanMode, ProviderStdNormalization,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     Tensor, Type, Value,
 };
@@ -25,6 +29,16 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::ResolveContext;
 
 const NAME: &str = "var";
+
+const TYPED_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "var-typed-integer-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "var with a typed-integer normalization or dimension control is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:VarTypedIntegerControlExtension"),
+};
+
+pub const EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [TYPED_INTEGER_CONTROL_EXTENSION];
 
 fn var_type(args: &[Type], ctx: &ResolveContext) -> Type {
     reduce_numeric_type(args, ctx)
@@ -182,6 +196,47 @@ pub const VAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &VAR_ERRORS,
 };
 
+const REJECTED_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &[],
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented data domain is single, double, table, or timetable; every typed-integer data class is rejected before host or provider dispatch.",
+    }];
+
+const INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "normalization_or_dimension",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "RunMat mode accepts exact host typed-integer normalization and dimension controls; MATLAB-compatible modes retain the documented floating control surface.",
+    }];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[V, M] = var(A, args...) with integer A",
+        inputs: &REJECTED_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer data is invalid in every compatibility mode, including resident integer data, and no integer output contract exists.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[V, M] = var(A, normalization_or_dimension, ...) with floating A",
+        inputs: &INTEGER_CONTROL_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed-integer controls are a mode-gated RunMat extension; values are decoded exactly on the host, while the floating data reduction may still execute on a provider.",
+    },
+];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::var")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "var",
@@ -282,16 +337,34 @@ enum NormParse {
     accel = "reduction",
     type_resolver(var_type),
     descriptor(crate::builtins::math::reduction::var::VAR_DESCRIPTOR),
+    extensions(crate::builtins::math::reduction::var::EXTENSIONS),
+    integer_capabilities(crate::builtins::math::reduction::var::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::reduction::var"
 )]
 pub(crate) async fn var_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     reject_integer_data_input(&value)?;
+    if rest.iter().any(is_real_typed_integer_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TYPED_INTEGER_CONTROL_EXTENSION,
+            NAME,
+        )?;
+    }
     let parsed = parse_arguments(&rest).await?;
     match value {
         Value::GpuTensor(handle) => var_gpu(handle, &parsed).await,
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(var_complex_unsupported_default()),
         other => var_host(other, &parsed),
     }
+}
+
+fn is_real_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(
+            value,
+            Value::GpuTensor(handle)
+                if runmat_accelerate_api::handle_integer_type(handle).is_some()
+        )
 }
 
 fn reject_integer_data_input(value: &Value) -> BuiltinResult<()> {
@@ -865,6 +938,7 @@ pub(crate) mod tests {
     use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
 
     fn var_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(super::var_builtin(value, rest))
     }
 
@@ -913,6 +987,29 @@ pub(crate) mod tests {
             parse_normalization(&Value::Tensor(normalization)),
             Ok(NormParse::Value(VarNormalization::Population))
         ));
+    }
+
+    #[test]
+    fn var_typed_integer_controls_follow_compatibility_mode() {
+        let tensor = Tensor::new(vec![1.0, 3.0], vec![2, 1]).expect("input");
+        let args = vec![Value::Int(IntValue::U8(1))];
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(super::var_builtin(
+                Value::Tensor(tensor.clone()),
+                args.clone(),
+            ))
+            .expect_err("MATLAB-compatible mode");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:VarTypedIntegerControlExtension")
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            block_on(super::var_builtin(Value::Tensor(tensor), args))
+                .expect("RunMat extension mode");
+        }
     }
 
     #[test]

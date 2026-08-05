@@ -241,8 +241,10 @@ mod tests {
                 ("sparse", "sparse-integer-storage"),
                 ("square", "square-gpu-input"),
                 ("square", "square-nonfloating-input"),
+                ("std", "std-typed-integer-control"),
                 ("trnd", "trnd-integer-degrees-of-freedom"),
                 ("trnd", "trnd-integer-size"),
+                ("var", "var-typed-integer-control"),
             ])
         );
     }
@@ -328,7 +330,10 @@ mod tests {
             "imshow",
             "isprime",
             "lcm",
+            "max",
             "mean",
+            "median",
+            "min",
             "mod",
             "mpower",
             "nanmax",
@@ -347,7 +352,12 @@ mod tests {
             "primes",
             "qammod",
             "rem",
+            "std",
+            "sum",
             "trnd",
+            "var",
+            "bounds",
+            "prod",
         ] {
             let builtin = registered
                 .iter()

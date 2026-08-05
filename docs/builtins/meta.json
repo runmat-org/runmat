@@ -8255,6 +8255,51 @@
           "when": "Min/max evaluation fails internally.",
           "message": "bounds: internal failure"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[S, L] = bounds(A, dim_or_vecdim, missingflag)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Ordinary real arrays accept all eight integer storage classes; complex-integer ordering remains a separately tracked conformance question."
+            },
+            {
+              "name": "dim_or_vecdim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Positive integer dimension selectors are decoded exactly from typed integer or integer-valued floating storage."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Both extrema preserve the integer input class; resident inputs currently gather through the shared min/max implementation and both exact results are re-uploaded."
+        }
       ]
     },
     {
@@ -61182,6 +61227,94 @@
           "when": "Execution fails due to gather, provider, allocation, or conversion internals.",
           "message": "max: internal failure"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[M, I] = max(A, [], dim_or_vecdim, missingflag)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Ordinary real reduction data accepts every integer storage class; complex-integer ordering remains a separately tracked conformance question."
+            },
+            {
+              "name": "dim_or_vecdim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Positive integer dimension selectors are decoded exactly from typed integer or integer-valued floating storage."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Maximum values preserve the integer input class and one-based indices are double; supported provider reductions retain resident values and indices."
+        },
+        {
+          "form": "C = max(A, B, missingflag)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "An integer array may pair with the same integer class or a scalar double in either operand position."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Two integer arrays must share one class; mixed integer classes and nonscalar floating arrays are rejected."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "BroadcastCompatible",
+          "notes": "Pairwise maximum applies compatible-size expansion and preserves the integer operand class, including exact comparison against an allowed scalar double."
+        }
       ]
     },
     {
@@ -62318,6 +62451,101 @@
           "identifier": "RunMat:median:Internal",
           "when": "Median reduction fails due to tensor allocation or device fallback internals.",
           "message": "median: internal reduction failure"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "M = median(A, dim_or_vecdim, missingflag)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Numeric median data explicitly accepts all eight integer classes."
+            },
+            {
+              "name": "dim_or_vecdim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Positive integer dimension selectors are decoded exactly from typed integer or integer-valued floating storage."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer median preserves the input class; even-cardinality midpoint conversion rounds nearest with ties away from zero, and resident integer order statistics gather then re-upload exactly."
+        },
+        {
+          "form": "M = median(A, dim, missingflag, Weights=W)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Weighted median retains the documented all-class integer data contract."
+            },
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Weighted median permits one operating dimension but not vecdim or all."
+            },
+            {
+              "name": "W",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "Weights are documented and enforced as nonnegative single or double arrays; integer and logical weights are rejected."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Weighted integer median selects an input-class value at cumulative 50 percent using floating weights; resident input and weights may gather, and the result is re-uploaded with its exact integer class."
         }
       ]
     },
@@ -64024,6 +64252,94 @@
           "identifier": "RunMat:min:Internal",
           "when": "Execution fails due to gather, provider, allocation, or conversion internals.",
           "message": "min: internal failure"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[M, I] = min(A, [], dim_or_vecdim, missingflag)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Ordinary real reduction data accepts every integer storage class; complex-integer ordering remains a separately tracked conformance question."
+            },
+            {
+              "name": "dim_or_vecdim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Positive integer dimension selectors are decoded exactly from typed integer or integer-valued floating storage."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Minimum values preserve the integer input class and one-based indices are double; supported provider reductions retain resident values and indices."
+        },
+        {
+          "form": "C = min(A, B, missingflag)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "An integer array may pair with the same integer class or a scalar double in either operand position."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Two integer arrays must share one class; mixed integer classes and nonscalar floating arrays are rejected."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "BroadcastCompatible",
+          "notes": "Pairwise minimum applies compatible-size expansion and preserves the integer operand class, including exact comparison against an allowed scalar double."
         }
       ]
     },
@@ -82702,6 +83018,94 @@
           "when": "Reduction execution fails due to conversion, provider, allocation, or coercion operations.",
           "message": "prod: internal reduction failure"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = prod(A, dim_or_vecdim, nanflag, \"default\"|\"double\")",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Ordinary real arrays accept all eight integer storage classes; complex-integer reduction remains a separately tracked conformance question."
+            },
+            {
+              "name": "dim_or_vecdim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Dimension scalars and vectors explicitly accept every integer class as well as integer-valued floating selectors."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Default and explicit-double integer products compute and return double; omitted dimensions and all share the same rule, and resident results remain resident."
+        },
+        {
+          "form": "B = prod(A, dim_or_vecdim, nanflag, \"native\")",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Ordinary real arrays accept all eight integer storage classes; complex-integer reduction remains a separately tracked conformance question."
+            },
+            {
+              "name": "dim_or_vecdim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Dimension scalars and vectors explicitly accept every integer class as well as integer-valued floating selectors."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "Saturate",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Native integer products preserve the input class and saturate at its bounds; host and provider paths retain exact integer storage, although documented reduction order can affect signed saturated results."
+        }
       ]
     },
     {
@@ -101219,6 +101623,61 @@
           "when": "Execution fails due to conversion, provider, upload, allocation, or fallback internals.",
           "message": "std: internal reduction failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "std-typed-integer-control",
+          "mode": "RunMatOnly",
+          "description": "std with a typed-integer normalization or dimension control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:StdTypedIntegerControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "S = std(A, args...) with integer A",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented data domain is single, double, datetime, duration, table, or timetable; every typed-integer data class is rejected before host or provider dispatch."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Integer data is invalid in every compatibility mode, including resident integer data, and no integer output contract exists."
+        },
+        {
+          "form": "S = std(A, normalization_or_dimension, ...) with floating A",
+          "inputs": [
+            {
+              "name": "normalization_or_dimension",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat mode accepts exact host typed-integer normalization and dimension controls; MATLAB-compatible modes retain the documented floating control surface."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Typed-integer controls are a mode-gated RunMat extension; values are decoded exactly on the host, while the floating data reduction may still execute on a provider."
+        }
       ]
     },
     {
@@ -104606,6 +105065,94 @@
           "identifier": "RunMat:sum:Internal",
           "when": "Reduction execution fails due to conversion, provider, allocation, or coercion operations.",
           "message": "sum: internal reduction failure"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "S = sum(A, dim_or_vecdim, nanflag, \"default\"|\"double\")",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Ordinary real arrays accept all eight integer storage classes; complex-integer reduction remains a separately tracked conformance question."
+            },
+            {
+              "name": "dim_or_vecdim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Dimension scalars and vectors explicitly accept every integer class as well as integer-valued floating selectors."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Default and explicit-double integer sums compute and return double; omitted dimensions and all share the same rule, and resident results remain resident."
+        },
+        {
+          "form": "S = sum(A, dim_or_vecdim, nanflag, \"native\")",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Ordinary real arrays accept all eight integer storage classes; complex-integer reduction remains a separately tracked conformance question."
+            },
+            {
+              "name": "dim_or_vecdim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Dimension scalars and vectors explicitly accept every integer class as well as integer-valued floating selectors."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "Saturate",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Native integer sums preserve the input class and saturate at its bounds; host and provider paths retain exact integer storage, although documented reduction order can affect signed saturated results."
         }
       ]
     },
@@ -112931,6 +113478,61 @@
           "identifier": "RunMat:var:Internal",
           "when": "Execution fails due to provider, conversion, gather, or tensor allocation internals.",
           "message": "var: internal reduction failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "var-typed-integer-control",
+          "mode": "RunMatOnly",
+          "description": "var with a typed-integer normalization or dimension control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:VarTypedIntegerControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[V, M] = var(A, args...) with integer A",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented data domain is single, double, table, or timetable; every typed-integer data class is rejected before host or provider dispatch."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Integer data is invalid in every compatibility mode, including resident integer data, and no integer output contract exists."
+        },
+        {
+          "form": "[V, M] = var(A, normalization_or_dimension, ...) with floating A",
+          "inputs": [
+            {
+              "name": "normalization_or_dimension",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat mode accepts exact host typed-integer normalization and dimension controls; MATLAB-compatible modes retain the documented floating control surface."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Typed-integer controls are a mode-gated RunMat extension; values are decoded exactly on the host, while the floating data reduction may still execute on a provider."
         }
       ]
     },

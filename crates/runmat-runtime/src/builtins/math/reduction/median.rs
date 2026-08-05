@@ -4,10 +4,13 @@ use std::cmp::Ordering;
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, IntegerStorage, LogicalArray, NumericDType, NumericScalar, NumericStorage, Tensor,
-    Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, IntValue, IntegerStorage, LogicalArray, NumericDType,
+    NumericScalar, NumericStorage, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -230,6 +233,70 @@ pub const MEDIAN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &MEDIAN_ERRORS,
 };
 
+const INTEGER_DATA_AND_DIM_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Numeric median data explicitly accepts all eight integer classes.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "dim_or_vecdim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Positive integer dimension selectors are decoded exactly from typed integer or integer-valued floating storage.",
+    },
+];
+
+const WEIGHTED_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 3] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Weighted median retains the documented all-class integer data contract.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "dim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Weighted median permits one operating dimension but not vecdim or all.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "W",
+        classes: &[],
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Weights are documented and enforced as nonnegative single or double arrays; integer and logical weights are rejected.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "M = median(A, dim_or_vecdim, missingflag)",
+        inputs: &INTEGER_DATA_AND_DIM_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer median preserves the input class; even-cardinality midpoint conversion rounds nearest with ties away from zero, and resident integer order statistics gather then re-upload exactly.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "M = median(A, dim, missingflag, Weights=W)",
+        inputs: &WEIGHTED_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Weighted integer median selects an input-class value at cumulative 50 percent using floating weights; resident input and weights may gather, and the result is re-uploaded with its exact integer class.",
+    },
+];
+
 use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::spec::{
@@ -332,6 +399,7 @@ struct MedianWeights {
     accel = "reduction",
     type_resolver(median_type),
     descriptor(crate::builtins::math::reduction::median::MEDIAN_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::reduction::median::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::reduction::median"
 )]
 pub(crate) async fn median_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

@@ -1,9 +1,12 @@
 //! MATLAB-compatible `bounds` builtin.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, ResolveContext, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -115,6 +118,35 @@ pub const BOUNDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &BOUNDS_ERRORS,
 };
 
+const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Ordinary real arrays accept all eight integer storage classes; complex-integer ordering remains a separately tracked conformance question.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "dim_or_vecdim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Positive integer dimension selectors are decoded exactly from typed integer or integer-valued floating storage.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[S, L] = bounds(A, dim_or_vecdim, missingflag)",
+        inputs: &INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Both extrema preserve the integer input class; resident inputs currently gather through the shared min/max implementation and both exact results are re-uploaded.",
+    }];
+
 #[runtime_builtin(
     name = "bounds",
     category = "math/reduction",
@@ -122,6 +154,7 @@ pub const BOUNDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     keywords = "bounds,min,max,reduction,omitnan",
     type_resolver(bounds_type),
     descriptor(crate::builtins::math::reduction::bounds::BOUNDS_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::reduction::bounds::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::reduction::bounds"
 )]
 async fn bounds_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

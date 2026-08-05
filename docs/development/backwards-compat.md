@@ -106,6 +106,8 @@ Typed sparse integer storage is one mode-gated extension. MATLAB-compatible mode
 
 The legacy NaN-aware Statistics and Machine Learning Toolbox reductions (`nanmean`, `nansum`, `nanmin`, `nanmax`, `nanmedian`, `nanstd`, and `nanvar`) are not unconditional aliases for their modern replacements because their documented call forms and accepted classes differ. MATLAB-compatible modes retain the documented floating-input surface; typed-integer data or controls accepted through modern RunMat reduction machinery are individually registered and mode-gated extensions, while typed-integer data remains rejected for `nanstd` and `nanvar`. Compatibility checks inspect resident integer handle metadata before provider dispatch and do not gather device data merely to classify the call.
 
+Canonical reductions retain their documented per-form integer contracts rather than applying a blanket numeric rule: `sum` and `prod` return double by default and preserve class with saturating `"native"` arithmetic; `median`, `min`, `max`, and both `bounds` outputs preserve integer class; and `std` and `var` reject integer data in every mode. The documented `std` and `var` data and weight domains are floating, so RunMat's useful typed-integer normalization and dimension controls are registered mode-gated extensions rather than silently widening the MATLAB-compatible surface.
+
 ## Evidence policy
 
 Compatibility decisions should be based on publicly available information and literature only. RunMat is a clean-room implementation of MATLAB compatable syntax, and as a result we do not rely on proprietary binaries, disassembly, or reverse engineering. Prefer evidence in this order:
