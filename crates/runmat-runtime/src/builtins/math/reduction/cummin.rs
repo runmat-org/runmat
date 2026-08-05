@@ -4,7 +4,11 @@ use runmat_accelerate_api::{
     GpuTensorHandle, ProviderCumminResult, ProviderNanMode, ProviderScanDirection,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ComplexTensor, ResolveContext, Tensor, Type, Value,
 };
@@ -17,6 +21,15 @@ use super::floating_cumulative_extrema::{
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "cummin";
+
+const GPU_NANFLAG_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cummin-gpu-nanflag",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "cummin with an explicit missing-value flag on a GPU input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CumminGpuNanflagExtension"),
+};
+
+pub const EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [GPU_NANFLAG_EXTENSION];
 
 fn cummin_type(args: &[Type], ctx: &ResolveContext) -> Type {
     cumulative_numeric_type(args, ctx)
@@ -234,6 +247,35 @@ pub const CUMMIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &CUMMIN_ERRORS,
 };
 
+const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Ordinary real arrays accept all eight integer classes; complex-integer ordering remains a separately tracked conformance question.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "dim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The optional positive scalar dimension is decoded exactly from typed integer or integer-valued floating storage.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "M = cummin(A, dim, direction, nanflag)",
+        inputs: &INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Cumulative minimum preserves integer class and exact shape in forward or reverse direction; current R2026a exposes one public value output and rejects GPU nanflag, so internal/provider indices remain private and RunMat GPU nanflag support is mode-gated.",
+    }];
+
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -339,6 +381,8 @@ impl CumminEvaluation {
     accel = "reduction",
     type_resolver(cummin_type),
     descriptor(crate::builtins::math::reduction::cummin::CUMMIN_DESCRIPTOR),
+    extensions(crate::builtins::math::reduction::cummin::EXTENSIONS),
+    integer_capabilities(crate::builtins::math::reduction::cummin::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::reduction::cummin"
 )]
 async fn cummin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -366,7 +410,10 @@ pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<CumminEvalu
             "operations involving complex numbers with integer types are not supported",
         ));
     }
-    let (dim, direction, nan_mode) = parse_arguments(rest)?;
+    let (dim, direction, nan_mode, nanflag_explicit) = parse_arguments(rest)?;
+    if matches!(&value, Value::GpuTensor(_)) && nanflag_explicit {
+        crate::compatibility::ensure_builtin_extension_enabled(&GPU_NANFLAG_EXTENSION, NAME)?;
+    }
     match value {
         Value::GpuTensor(handle) => cummin_gpu(handle, dim, direction, nan_mode).await,
         Value::Complex(re, im) => {
@@ -394,7 +441,7 @@ pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<CumminEvalu
 
 fn parse_arguments(
     args: &[Value],
-) -> BuiltinResult<(Option<usize>, CumminDirection, CumminNanMode)> {
+) -> BuiltinResult<(Option<usize>, CumminDirection, CumminNanMode, bool)> {
     if args.len() > 3 {
         return Err(cummin_error(&CUMMIN_ERROR_INVALID_ARGUMENT));
     }
@@ -500,7 +547,7 @@ fn parse_arguments(
         }
     }
 
-    Ok((dim, direction, nan_mode))
+    Ok((dim, direction, nan_mode, nan_set))
 }
 
 fn cummin_host(
@@ -1186,6 +1233,33 @@ pub(crate) mod tests {
             let gathered_indices =
                 test_support::gather(Value::GpuTensor(index_handle)).expect("gather indices");
             assert_eq!(gathered_indices.materialize_f64(), vec![1.0, 2.0, 2.0, 2.0]);
+        });
+    }
+
+    #[test]
+    fn cummin_gpu_nanflag_follows_compatibility_mode() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![2.0, 3.0], vec![2, 1]).expect("input");
+            let handle = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &tensor.materialize_f64(),
+                    shape: &tensor.shape,
+                })
+                .expect("upload");
+            let args = vec![Value::from("omitnan")];
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = evaluate(Value::GpuTensor(handle.clone()), &args)
+                    .expect_err("MATLAB-compatible mode");
+                assert_eq!(
+                    error.identifier(),
+                    Some("RunMat:compatibility:CumminGpuNanflagExtension")
+                );
+            }
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+                evaluate(Value::GpuTensor(handle), &args).expect("RunMat extension mode");
+            }
         });
     }
 

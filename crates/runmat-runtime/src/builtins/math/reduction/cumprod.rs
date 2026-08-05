@@ -2,7 +2,11 @@
 
 use runmat_accelerate_api::{GpuTensorHandle, ProviderNanMode, ProviderScanDirection};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ComplexTensor, ResolveContext, Tensor, Type, Value,
 };
@@ -14,6 +18,15 @@ use super::floating_cumulative_arithmetic::{
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "cumprod";
+
+const GPU_NANFLAG_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cumprod-gpu-nanflag",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "cumprod with an explicit missing-value flag on a GPU input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CumprodGpuNanflagExtension"),
+};
+
+pub const EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [GPU_NANFLAG_EXTENSION];
 
 fn cumprod_type(args: &[Type], ctx: &ResolveContext) -> Type {
     cumulative_numeric_type(args, ctx)
@@ -253,6 +266,35 @@ pub const CUMPROD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &CUMPROD_ERRORS,
 };
 
+const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Ordinary real arrays accept all eight integer classes; complex-integer scans remain a separately tracked conformance question.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "dim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The optional positive scalar dimension is decoded exactly from typed integer or integer-valued floating storage.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "B = cumprod(A, dim, direction, nanflag)",
+        inputs: &INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Every prefix preserves the integer input class and shape with per-step saturating multiplication; forward/reverse and missing-value spellings share the host rule, explicit GPU nanflag use is a mode-gated extension, and provider scan order may differ.",
+    }];
+
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -333,6 +375,8 @@ enum CumprodNanMode {
     accel = "reduction",
     type_resolver(cumprod_type),
     descriptor(crate::builtins::math::reduction::cumprod::CUMPROD_DESCRIPTOR),
+    extensions(crate::builtins::math::reduction::cumprod::EXTENSIONS),
+    integer_capabilities(crate::builtins::math::reduction::cumprod::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::reduction::cumprod"
 )]
 async fn cumprod_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -342,7 +386,10 @@ async fn cumprod_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value>
             "operations involving complex numbers with integer types are not supported",
         ));
     }
-    let (dim, direction, nan_mode) = parse_arguments(&rest)?;
+    let (dim, direction, nan_mode, nanflag_explicit) = parse_arguments(&rest)?;
+    if matches!(&value, Value::GpuTensor(_)) && nanflag_explicit {
+        crate::compatibility::ensure_builtin_extension_enabled(&GPU_NANFLAG_EXTENSION, NAME)?;
+    }
     match value {
         Value::GpuTensor(handle) => cumprod_gpu(handle, dim, direction, nan_mode).await,
         Value::Complex(re, im) => {
@@ -363,7 +410,7 @@ async fn cumprod_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value>
 
 fn parse_arguments(
     args: &[Value],
-) -> BuiltinResult<(Option<usize>, CumprodDirection, CumprodNanMode)> {
+) -> BuiltinResult<(Option<usize>, CumprodDirection, CumprodNanMode, bool)> {
     if args.len() > 3 {
         return Err(cumprod_error(&CUMPROD_ERROR_INVALID_ARGUMENT));
     }
@@ -471,7 +518,7 @@ fn parse_arguments(
         }
     }
 
-    Ok((dim, direction, nan_mode))
+    Ok((dim, direction, nan_mode, nan_set))
 }
 
 fn cumprod_host(
@@ -828,6 +875,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
 
     fn cumprod_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(super::cumprod_builtin(value, rest))
     }
 
@@ -1208,6 +1256,37 @@ pub(crate) mod tests {
                     .data,
                 runmat_accelerate_api::HostIntegerDataOwned::U8(vec![80, 4, 10, 2])
             );
+        });
+    }
+
+    #[test]
+    fn cumprod_gpu_nanflag_follows_compatibility_mode() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![2.0, 3.0], vec![2, 1]).expect("input");
+            let handle = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &tensor.materialize_f64(),
+                    shape: &tensor.shape,
+                })
+                .expect("upload");
+            let args = vec![Value::from("omitnan")];
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = block_on(super::cumprod_builtin(
+                    Value::GpuTensor(handle.clone()),
+                    args.clone(),
+                ))
+                .expect_err("MATLAB-compatible mode");
+                assert_eq!(
+                    error.identifier(),
+                    Some("RunMat:compatibility:CumprodGpuNanflagExtension")
+                );
+            }
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+                block_on(super::cumprod_builtin(Value::GpuTensor(handle), args))
+                    .expect("RunMat extension mode");
+            }
         });
     }
 

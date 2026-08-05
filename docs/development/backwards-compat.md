@@ -108,6 +108,8 @@ The legacy NaN-aware Statistics and Machine Learning Toolbox reductions (`nanmea
 
 Canonical reductions retain their documented per-form integer contracts rather than applying a blanket numeric rule: `sum` and `prod` return double by default and preserve class with saturating `"native"` arithmetic; `median`, `min`, `max`, and both `bounds` outputs preserve integer class; and `std` and `var` reject integer data in every mode. The documented `std` and `var` data and weight domains are floating, so RunMat's useful typed-integer normalization and dimension controls are registered mode-gated extensions rather than silently widening the MATLAB-compatible surface.
 
+The cumulative reducers preserve integer class and shape: `cumsum` and `cumprod` apply per-step saturating native arithmetic, while `cummin` and `cummax` select exact values and expose one public output in the current semantic target. Interactive GPU input is documented for all four names, but explicit missing-value flags are not supported on GPU for `cumprod`, `cummin`, or `cummax`; RunMat's supported GPU flag forms are therefore registered mode-gated extensions.
+
 ## Evidence policy
 
 Compatibility decisions should be based on publicly available information and literature only. RunMat is a clean-room implementation of MATLAB compatable syntax, and as a result we do not rely on proprietary binaries, disassembly, or reverse engineering. Prefer evidence in this order:
