@@ -846,6 +846,112 @@ one_sig_descriptor!(
     &OUT_DATASET
 );
 
+const DATASET_NONATTRIBUTE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "Dataset array lookup/listing, transaction construction, identity/path/version access, membership tests, refresh, and snapshot operations accept a Dataset receiver plus strings or reserved options; they do not accept integer values or controls, return integer-class values, perform integer arithmetic, or expose an integer backend surface.",
+    };
+
+const DATASET_ATTRS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "stored_attribute_values",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Persisted scalar attributes may originate from every integer class and retain their exact mathematical value in the JSON manifest.",
+    }];
+pub const DATASET_ATTRS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "S = Dataset.attrs(ds_with_integer_attributes)",
+        inputs: &DATASET_ATTRS_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Each JSON integer is decoded exactly into a canonical scalar: int64 when its value is representable there, otherwise uint64; the original narrow storage class is not encoded by JSON.",
+    }];
+
+const DATASET_GET_ATTR_STORED_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "stored_attribute",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "A persisted scalar attribute may originate from every integer class and retains its exact mathematical value in the JSON manifest.",
+    }];
+const DATASET_GET_ATTR_DEFAULT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "defaultValue",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "An explicit scalar default accepts every integer class and is returned unchanged when the requested key is absent.",
+    }];
+pub const DATASET_GET_ATTR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "value = Dataset.get_attr(ds_with_integer_attribute, key)",
+        inputs: &DATASET_GET_ATTR_STORED_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "A stored JSON integer is decoded exactly as int64 when representable there and otherwise as uint64; JSON does not encode the original narrow integer class.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "value = Dataset.get_attr(ds, missing_key, integer_defaultValue)",
+        inputs: &DATASET_GET_ATTR_DEFAULT_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "A missing key returns the supplied default Value directly, preserving its exact integer class and value without serialization or floating conversion.",
+    },
+];
+
+const DATASET_SET_ATTR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "value",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "A scalar attribute value accepts every integer class and is serialized as an exact JSON integer, including full-width int64 and uint64 values.",
+    }];
+pub const DATASET_SET_ATTR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = Dataset.set_attr(ds, key, integer_value)",
+        inputs: &DATASET_SET_ATTR_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The scalar is emitted directly as an exact manifest JSON number without an f64 intermediary; the operation returns logical success.",
+    }];
+
+const DATASET_SET_ATTRS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "attribute_values",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Scalar values in the attribute struct accept every integer class and are serialized as exact JSON integers, including full-width int64 and uint64 values.",
+    }];
+pub const DATASET_SET_ATTRS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = Dataset.set_attrs(ds, struct_with_integer_values)",
+        inputs: &DATASET_SET_ATTRS_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Each scalar integer field is emitted directly as an exact manifest JSON number without an f64 intermediary; the operation returns logical success.",
+    }];
+
 one_sig_descriptor!(
     DATAARRAY_NAME_DESCRIPTOR,
     DATAARRAY_NAME_SIGS,
@@ -1549,6 +1655,7 @@ async fn data_inspect_builtin(path: Value) -> BuiltinResult<Value> {
     keywords = "dataset,path",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
     descriptor(crate::builtins::io::data::DATASET_PATH_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATASET_NONATTRIBUTE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_path_builtin(base: Value) -> BuiltinResult<Value> {
@@ -1561,6 +1668,7 @@ async fn dataset_path_builtin(base: Value) -> BuiltinResult<Value> {
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
     descriptor(crate::builtins::io::data::DATASET_ID_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATASET_NONATTRIBUTE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_id_builtin(base: Value) -> BuiltinResult<Value> {
@@ -1573,6 +1681,7 @@ async fn dataset_id_builtin(base: Value) -> BuiltinResult<Value> {
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
     descriptor(crate::builtins::io::data::DATASET_VERSION_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATASET_NONATTRIBUTE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_version_builtin(base: Value) -> BuiltinResult<Value> {
@@ -1585,6 +1694,7 @@ async fn dataset_version_builtin(base: Value) -> BuiltinResult<Value> {
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_cell_string_type),
     descriptor(crate::builtins::io::data::DATASET_ARRAYS_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATASET_NONATTRIBUTE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_arrays_builtin(base: Value) -> BuiltinResult<Value> {
@@ -1603,6 +1713,7 @@ async fn dataset_arrays_builtin(base: Value) -> BuiltinResult<Value> {
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATASET_HAS_ARRAY_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATASET_NONATTRIBUTE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_has_array_builtin(base: Value, name: Value) -> BuiltinResult<Value> {
@@ -1617,6 +1728,7 @@ async fn dataset_has_array_builtin(base: Value, name: Value) -> BuiltinResult<Va
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_array_type),
     descriptor(crate::builtins::io::data::DATASET_ARRAY_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATASET_NONATTRIBUTE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_array_builtin(base: Value, name: Value) -> BuiltinResult<Value> {
@@ -1636,6 +1748,7 @@ async fn dataset_array_builtin(base: Value, name: Value) -> BuiltinResult<Value>
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_struct_type),
     descriptor(crate::builtins::io::data::DATASET_ATTRS_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATASET_ATTRS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_attrs_builtin(base: Value) -> BuiltinResult<Value> {
@@ -1649,6 +1762,7 @@ async fn dataset_attrs_builtin(base: Value) -> BuiltinResult<Value> {
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_unknown_type),
     descriptor(crate::builtins::io::data::DATASET_GET_ATTR_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATASET_GET_ATTR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_get_attr_builtin(
@@ -1671,6 +1785,7 @@ async fn dataset_get_attr_builtin(
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATASET_SET_ATTR_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATASET_SET_ATTR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_set_attr_builtin(base: Value, key: Value, value: Value) -> BuiltinResult<Value> {
@@ -1691,6 +1806,7 @@ async fn dataset_set_attr_builtin(base: Value, key: Value, value: Value) -> Buil
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATASET_SET_ATTRS_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATASET_SET_ATTRS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_set_attrs_builtin(base: Value, attrs: Value) -> BuiltinResult<Value> {
@@ -1714,6 +1830,7 @@ async fn dataset_set_attrs_builtin(base: Value, attrs: Value) -> BuiltinResult<V
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_tx_type),
     descriptor(crate::builtins::io::data::DATASET_BEGIN_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATASET_NONATTRIBUTE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_begin_builtin(base: Value, _rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -1735,6 +1852,7 @@ async fn dataset_begin_builtin(base: Value, _rest: Vec<Value>) -> BuiltinResult<
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
     descriptor(crate::builtins::io::data::DATASET_SNAPSHOT_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATASET_NONATTRIBUTE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_snapshot_builtin(
@@ -1764,6 +1882,7 @@ async fn dataset_snapshot_builtin(
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_dataset_type),
     descriptor(crate::builtins::io::data::DATASET_REFRESH_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATASET_NONATTRIBUTE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_refresh_builtin(base: Value) -> BuiltinResult<Value> {
@@ -3588,6 +3707,10 @@ mod tests {
         assert_eq!(DATAARRAY_WRITE_INTEGER_CAPABILITIES.len(), 1);
         assert_eq!(DATAARRAY_RESIZE_INTEGER_CAPABILITIES.len(), 1);
         assert_eq!(DATAARRAY_FILL_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(DATASET_ATTRS_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(DATASET_GET_ATTR_INTEGER_CAPABILITIES.len(), 2);
+        assert_eq!(DATASET_SET_ATTR_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(DATASET_SET_ATTRS_INTEGER_CAPABILITIES.len(), 1);
         assert_eq!(DATATX_WRITE_INTEGER_CAPABILITIES.len(), 1);
         assert_eq!(DATATX_SET_ATTR_INTEGER_CAPABILITIES.len(), 1);
         assert_eq!(DATATX_SET_ATTRS_INTEGER_CAPABILITIES.len(), 1);
@@ -3599,6 +3722,11 @@ mod tests {
             &DATAARRAY_WRITE_INTEGER_CAPABILITIES[0],
             &DATAARRAY_RESIZE_INTEGER_CAPABILITIES[0],
             &DATAARRAY_FILL_INTEGER_CAPABILITIES[0],
+            &DATASET_ATTRS_INTEGER_CAPABILITIES[0],
+            &DATASET_GET_ATTR_INTEGER_CAPABILITIES[0],
+            &DATASET_GET_ATTR_INTEGER_CAPABILITIES[1],
+            &DATASET_SET_ATTR_INTEGER_CAPABILITIES[0],
+            &DATASET_SET_ATTRS_INTEGER_CAPABILITIES[0],
             &DATATX_WRITE_INTEGER_CAPABILITIES[0],
             &DATATX_SET_ATTR_INTEGER_CAPABILITIES[0],
             &DATATX_SET_ATTRS_INTEGER_CAPABILITIES[0],
@@ -3608,6 +3736,155 @@ mod tests {
         ] {
             assert!(capability.inputs.iter().all(|input| input.classes
                 == crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES));
+        }
+    }
+
+    #[test]
+    fn dataset_nonattribute_methods_reject_integer_receivers() {
+        for (name, extra) in [
+            ("Dataset.array", Some(Value::String("samples".to_string()))),
+            ("Dataset.arrays", None),
+            ("Dataset.begin", None),
+            (
+                "Dataset.has_array",
+                Some(Value::String("samples".to_string())),
+            ),
+            ("Dataset.id", None),
+            ("Dataset.path", None),
+            ("Dataset.refresh", None),
+            (
+                "Dataset.snapshot",
+                Some(Value::String("checkpoint".to_string())),
+            ),
+            ("Dataset.version", None),
+        ] {
+            let mut args = vec![Value::Int(IntValue::U64(u64::MAX))];
+            args.extend(extra);
+            let error = call_builtin(name, &args).expect_err("method requires a Dataset receiver");
+            assert!(
+                error.message().contains("expected object"),
+                "{name}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn dataset_attributes_keep_exact_integer_values_and_documented_class_boundaries() {
+        let _serial = serial_test_guard();
+        let _provider = native_provider_guard();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir
+            .path()
+            .join("integer-attrs.data")
+            .to_string_lossy()
+            .to_string();
+        let mut array_meta = StructValue::new();
+        array_meta
+            .fields
+            .insert("dtype".to_string(), Value::String("f64".to_string()));
+        array_meta.fields.insert(
+            "shape".to_string(),
+            Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).expect("shape")),
+        );
+        let mut arrays = StructValue::new();
+        arrays
+            .fields
+            .insert("base".to_string(), Value::Struct(array_meta));
+        let mut schema = StructValue::new();
+        schema
+            .fields
+            .insert("arrays".to_string(), Value::Struct(arrays));
+        let ds = call_builtin(
+            "data.create",
+            &[
+                Value::String(path),
+                Value::Struct(schema),
+                Value::Cell(CellArray::new(vec![], 1, 0).expect("cell")),
+            ],
+        )
+        .expect("create dataset");
+        let cases = [
+            ("int8", IntValue::I8(i8::MIN), IntValue::I64(i8::MIN as i64)),
+            (
+                "int16",
+                IntValue::I16(i16::MIN),
+                IntValue::I64(i16::MIN as i64),
+            ),
+            (
+                "int32",
+                IntValue::I32(i32::MIN),
+                IntValue::I64(i32::MIN as i64),
+            ),
+            ("int64", IntValue::I64(i64::MIN), IntValue::I64(i64::MIN)),
+            (
+                "uint8",
+                IntValue::U8(u8::MAX),
+                IntValue::I64(u8::MAX as i64),
+            ),
+            (
+                "uint16",
+                IntValue::U16(u16::MAX),
+                IntValue::I64(u16::MAX as i64),
+            ),
+            (
+                "uint32",
+                IntValue::U32(u32::MAX),
+                IntValue::I64(u32::MAX as i64),
+            ),
+            ("uint64", IntValue::U64(u64::MAX), IntValue::U64(u64::MAX)),
+        ];
+
+        let mut bulk = StructValue::new();
+        for (name, source, _) in &cases {
+            call_builtin(
+                "Dataset.set_attr",
+                &[
+                    ds.clone(),
+                    Value::String(format!("direct_{name}")),
+                    Value::Int(source.clone()),
+                ],
+            )
+            .expect("set integer attribute");
+            bulk.fields
+                .insert(format!("bulk_{name}"), Value::Int(source.clone()));
+        }
+        call_builtin("Dataset.set_attrs", &[ds.clone(), Value::Struct(bulk)])
+            .expect("set integer attributes");
+
+        let Value::Struct(attrs) =
+            call_builtin("Dataset.attrs", &[ds.clone()]).expect("read attributes")
+        else {
+            panic!("expected attribute struct");
+        };
+        for (name, source, canonical) in cases {
+            let expected = Value::Int(canonical);
+            assert_eq!(
+                call_builtin(
+                    "Dataset.get_attr",
+                    &[ds.clone(), Value::String(format!("direct_{name}"))],
+                )
+                .expect("get integer attribute"),
+                expected,
+                "{name} direct"
+            );
+            assert_eq!(
+                attrs.fields.get(&format!("bulk_{name}")),
+                Some(&expected),
+                "{name} bulk"
+            );
+            assert_eq!(
+                call_builtin(
+                    "Dataset.get_attr",
+                    &[
+                        ds.clone(),
+                        Value::String(format!("missing_{name}")),
+                        Value::Int(source.clone()),
+                    ],
+                )
+                .expect("get integer default"),
+                Value::Int(source),
+                "{name} default"
+            );
         }
     }
 

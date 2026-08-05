@@ -96,6 +96,8 @@ source = Dataset.get_attr(ds, "source", "unknown");
 
 Each metadata update advances the dataset version. `Dataset.version(ds)` returns the current manifest version token.
 
+Scalar attributes accept all eight built-in integer classes and are written to the JSON manifest as exact integer numbers without an `f64` intermediary. Because JSON numbers do not encode narrow integer dtypes, `Dataset.attrs` and stored-value `Dataset.get_attr` results use canonical `int64` scalars whenever the value fits and `uint64` otherwise; the mathematical value remains exact. When a key is absent, an explicitly supplied integer default is returned directly and therefore preserves its original class.
+
 ## Choosing Chunks
 
 Chunk shape controls how an array is divided for storage. It should follow the common access pattern.
@@ -193,7 +195,9 @@ Path-level operations manage whole datasets.
 | `Dataset.has_array(ds, name)` | Check whether an array exists. |
 | `Dataset.array(ds, name)` | Return an array handle. |
 | `Dataset.attrs(ds)` | Return dataset attributes. |
+| `Dataset.get_attr(ds, key, defaultValue)` | Return one attribute or the optional unchanged default. |
 | `Dataset.set_attr(ds, key, value)` | Set one attribute. |
+| `Dataset.set_attrs(ds, attrs)` | Set multiple attributes. |
 | `Dataset.refresh(ds)` | Reopen the handle from current storage state. |
 | `DataArray.shape(arr)` | Return array shape. |
 | `DataArray.chunk_shape(arr)` | Return chunk shape. |

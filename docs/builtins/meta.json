@@ -1672,7 +1672,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Dataset array lookup/listing, transaction construction, identity/path/version access, membership tests, refresh, and snapshot operations accept a Dataset receiver plus strings or reserved options; they do not accept integer values or controls, return integer-class values, perform integer arithmetic, or expose an integer backend surface."
+      }
     },
     {
       "name": "Dataset.arrays",
@@ -1720,7 +1724,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Dataset array lookup/listing, transaction construction, identity/path/version access, membership tests, refresh, and snapshot operations accept a Dataset receiver plus strings or reserved options; they do not accept integer values or controls, return integer-class values, perform integer arithmetic, or expose an integer backend surface."
+      }
     },
     {
       "name": "Dataset.attrs",
@@ -1767,6 +1775,35 @@
           "identifier": "RunMat:data:Internal",
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "S = Dataset.attrs(ds_with_integer_attributes)",
+          "inputs": [
+            {
+              "name": "stored_attribute_values",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Persisted scalar attributes may originate from every integer class and retain their exact mathematical value in the JSON manifest."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Each JSON integer is decoded exactly into a canonical scalar: int64 when its value is representable there, otherwise uint64; the original narrow storage class is not encoded by JSON."
         }
       ]
     },
@@ -1823,7 +1860,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Dataset array lookup/listing, transaction construction, identity/path/version access, membership tests, refresh, and snapshot operations accept a Dataset receiver plus strings or reserved options; they do not accept integer values or controls, return integer-class values, perform integer arithmetic, or expose an integer backend surface."
+      }
     },
     {
       "name": "Dataset.get_attr",
@@ -1885,6 +1926,62 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "value = Dataset.get_attr(ds_with_integer_attribute, key)",
+          "inputs": [
+            {
+              "name": "stored_attribute",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "A persisted scalar attribute may originate from every integer class and retains its exact mathematical value in the JSON manifest."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "A stored JSON integer is decoded exactly as int64 when representable there and otherwise as uint64; JSON does not encode the original narrow integer class."
+        },
+        {
+          "form": "value = Dataset.get_attr(ds, missing_key, integer_defaultValue)",
+          "inputs": [
+            {
+              "name": "defaultValue",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "An explicit scalar default accepts every integer class and is returned unchanged when the requested key is absent."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "A missing key returns the supplied default Value directly, preserving its exact integer class and value without serialization or floating conversion."
+        }
       ]
     },
     {
@@ -1940,7 +2037,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Dataset array lookup/listing, transaction construction, identity/path/version access, membership tests, refresh, and snapshot operations accept a Dataset receiver plus strings or reserved options; they do not accept integer values or controls, return integer-class values, perform integer arithmetic, or expose an integer backend surface."
+      }
     },
     {
       "name": "Dataset.id",
@@ -1988,7 +2089,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Dataset array lookup/listing, transaction construction, identity/path/version access, membership tests, refresh, and snapshot operations accept a Dataset receiver plus strings or reserved options; they do not accept integer values or controls, return integer-class values, perform integer arithmetic, or expose an integer backend surface."
+      }
     },
     {
       "name": "Dataset.path",
@@ -2036,7 +2141,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Dataset array lookup/listing, transaction construction, identity/path/version access, membership tests, refresh, and snapshot operations accept a Dataset receiver plus strings or reserved options; they do not accept integer values or controls, return integer-class values, perform integer arithmetic, or expose an integer backend surface."
+      }
     },
     {
       "name": "Dataset.refresh",
@@ -2084,7 +2193,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Dataset array lookup/listing, transaction construction, identity/path/version access, membership tests, refresh, and snapshot operations accept a Dataset receiver plus strings or reserved options; they do not accept integer values or controls, return integer-class values, perform integer arithmetic, or expose an integer backend surface."
+      }
     },
     {
       "name": "Dataset.set_attr",
@@ -2146,6 +2259,35 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = Dataset.set_attr(ds, key, integer_value)",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A scalar attribute value accepts every integer class and is serialized as an exact JSON integer, including full-width int64 and uint64 values."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The scalar is emitted directly as an exact manifest JSON number without an f64 intermediary; the operation returns logical success."
+        }
       ]
     },
     {
@@ -2200,6 +2342,35 @@
           "identifier": "RunMat:data:Internal",
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = Dataset.set_attrs(ds, struct_with_integer_values)",
+          "inputs": [
+            {
+              "name": "attribute_values",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Scalar values in the attribute struct accept every integer class and are serialized as exact JSON integers, including full-width int64 and uint64 values."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Each scalar integer field is emitted directly as an exact manifest JSON number without an f64 intermediary; the operation returns logical success."
         }
       ]
     },
@@ -2263,7 +2434,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Dataset array lookup/listing, transaction construction, identity/path/version access, membership tests, refresh, and snapshot operations accept a Dataset receiver plus strings or reserved options; they do not accept integer values or controls, return integer-class values, perform integer arithmetic, or expose an integer backend surface."
+      }
     },
     {
       "name": "Dataset.version",
@@ -2311,7 +2486,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Dataset array lookup/listing, transaction construction, identity/path/version access, membership tests, refresh, and snapshot operations accept a Dataset receiver plus strings or reserved options; they do not accept integer values or controls, return integer-class values, perform integer arithmetic, or expose an integer backend surface."
+      }
     },
     {
       "name": "DelaunayTri",
