@@ -36,6 +36,8 @@ This creates a `training.data` directory with two arrays:
 - `samples`, a `1000000 x 64` matrix.
 - `labels`, a `1000000 x 1` vector.
 
+The `dtype` field accepts `f64`, `f32`, and every built-in integer class: `int8`, `int16`, `int32`, `int64`, `uint8`, `uint16`, `uint32`, and `uint64`. Full and sliced reads preserve that declared class exactly. Writes and fills preserve exact values when the source class matches the declared dtype; unlike numeric classes are converted once through the declared dtype's ordinary numeric cast contract before storage. Complex numeric arrays are not currently supported.
+
 The dataset can be opened later from the same path:
 
 ```matlab
@@ -62,6 +64,8 @@ Slice entries use one-based MATLAB indexing:
 | `":"` | The full dimension. |
 | `17` | One element in that dimension. |
 | `[start end]` | Inclusive range. |
+
+Scalar indices, inclusive range endpoints, array shapes, and resize shapes accept all eight built-in integer classes as well as exactly integral floating values within platform bounds.
 
 The right-hand value must match the shape selected by the slice. A write to `{ [1 4096], ":" }` for a `1000000 x 64` array expects a `4096 x 64` value.
 
@@ -193,6 +197,8 @@ Path-level operations manage whole datasets.
 | `DataArray.chunk_shape(arr)` | Return chunk shape. |
 | `DataArray.read(arr, sliceSpec)` | Read a full array or slice. |
 | `DataArray.write(arr, sliceSpec, values)` | Write a full array or slice. |
+| `DataArray.resize(arr, newShape)` | Replace the array with zero-filled storage of the declared dtype and new shape. |
+| `DataArray.fill(arr, value)` | Fill the complete array with one scalar converted to the declared dtype. |
 | `DataTransaction.commit(tx)` | Apply staged transaction changes. |
 | `DataTransaction.abort(tx)` | Discard staged transaction changes. |
 

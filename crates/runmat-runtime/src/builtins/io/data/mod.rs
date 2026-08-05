@@ -5,9 +5,14 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, NumericScalar, ObjectInstance, StructValue, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, IntValue, NumericScalar, ObjectInstance, StructValue, Tensor,
+    Value,
 };
 use runmat_filesystem::data_contract::{DataChunkDescriptor, DataChunkUploadRequest};
 use runmat_macros::runtime_builtin;
@@ -923,6 +928,109 @@ one_sig_descriptor!(
     &OUT_BOOL
 );
 
+const DATAARRAY_METADATA_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "DataArray name, dtype, shape, rank, chunk-shape, and codec accessors accept only a DataArray receiver object; integer storage may be described by the returned metadata but is not an integer argument, control, class-preserving value output, arithmetic form, or backend surface.",
+    };
+
+const DATAARRAY_READ_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "stored_array",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "A DataArray whose declared dtype is any built-in integer class is decoded directly into authoritative same-class tensor storage.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "sliceSpec",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Scalar indices and two-element inclusive ranges accept all eight integer classes or exactly integral floating values.",
+    },
+];
+pub const DATAARRAY_READ_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "X = DataArray.read(integer_array, integer_sliceSpec)",
+        inputs: &DATAARRAY_READ_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Full and sliced reads preserve the declared integer dtype, exact values, selected shape, and column-major order; dataset persistence is host/filesystem I/O.",
+    }];
+
+const DATAARRAY_WRITE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "values",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Scalar or tensor values accept every integer class and are stored exactly when their class matches the declared array dtype.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "sliceSpec",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Optional scalar indices and two-element inclusive ranges accept all eight integer classes or exactly integral floating values.",
+    },
+];
+pub const DATAARRAY_WRITE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = DataArray.write(arr, integer_values) or DataArray.write(arr, integer_sliceSpec, integer_values)",
+        inputs: &DATAARRAY_WRITE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Writes preserve exact same-class integer storage; unlike source and declared dtypes use the declared numeric cast contract before chunk serialization, and shape mismatches reject.",
+    }];
+
+const DATAARRAY_RESIZE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "newShape",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Shape scalars and vectors accept all eight integer classes or exactly integral floating values within nonnegative platform bounds.",
+    }];
+pub const DATAARRAY_RESIZE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = DataArray.resize(arr, integer_newShape)",
+        inputs: &DATAARRAY_RESIZE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The exact shape is validated against platform bounds, persisted as metadata, and used to recreate zero-filled storage in the array's declared dtype.",
+    }];
+
+const DATAARRAY_FILL_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "value",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The scalar fill value accepts every integer class and is exact when its class matches the declared array dtype.",
+    }];
+pub const DATAARRAY_FILL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = DataArray.fill(arr, integer_value)",
+        inputs: &DATAARRAY_FILL_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "A scalar is cast once to the declared dtype and repeated without floating mirroring; nonscalar fills reject.",
+    }];
+
 one_sig_descriptor!(
     DATATX_ID_DESCRIPTOR,
     DATATX_ID_SIGS,
@@ -1520,6 +1628,7 @@ async fn dataset_refresh_builtin(base: Value) -> BuiltinResult<Value> {
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
     descriptor(crate::builtins::io::data::DATAARRAY_NAME_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATAARRAY_METADATA_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_name_builtin(base: Value) -> BuiltinResult<Value> {
@@ -1532,6 +1641,7 @@ async fn data_array_name_builtin(base: Value) -> BuiltinResult<Value> {
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
     descriptor(crate::builtins::io::data::DATAARRAY_DTYPE_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATAARRAY_METADATA_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_dtype_builtin(base: Value) -> BuiltinResult<Value> {
@@ -1549,6 +1659,7 @@ async fn data_array_dtype_builtin(base: Value) -> BuiltinResult<Value> {
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_shape_tensor_type),
     descriptor(crate::builtins::io::data::DATAARRAY_SHAPE_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATAARRAY_METADATA_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_shape_builtin(base: Value) -> BuiltinResult<Value> {
@@ -1569,6 +1680,7 @@ async fn data_array_shape_builtin(base: Value) -> BuiltinResult<Value> {
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_int_type),
     descriptor(crate::builtins::io::data::DATAARRAY_RANK_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATAARRAY_METADATA_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_rank_builtin(base: Value) -> BuiltinResult<Value> {
@@ -1586,6 +1698,7 @@ async fn data_array_rank_builtin(base: Value) -> BuiltinResult<Value> {
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_shape_tensor_type),
     descriptor(crate::builtins::io::data::DATAARRAY_CHUNK_SHAPE_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATAARRAY_METADATA_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_chunk_shape_builtin(base: Value) -> BuiltinResult<Value> {
@@ -1610,6 +1723,7 @@ async fn data_array_chunk_shape_builtin(base: Value) -> BuiltinResult<Value> {
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
     descriptor(crate::builtins::io::data::DATAARRAY_CODEC_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATAARRAY_METADATA_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_codec_builtin(base: Value) -> BuiltinResult<Value> {
@@ -1627,6 +1741,7 @@ async fn data_array_codec_builtin(base: Value) -> BuiltinResult<Value> {
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_tensor_type),
     descriptor(crate::builtins::io::data::DATAARRAY_READ_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATAARRAY_READ_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_read_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -1654,6 +1769,7 @@ async fn data_array_read_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATAARRAY_WRITE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATAARRAY_WRITE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_write_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -1677,6 +1793,7 @@ async fn data_array_write_builtin(base: Value, rest: Vec<Value>) -> BuiltinResul
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATAARRAY_RESIZE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATAARRAY_RESIZE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_resize_builtin(
@@ -1710,6 +1827,7 @@ async fn data_array_resize_builtin(
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATAARRAY_FILL_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATAARRAY_FILL_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_fill_builtin(
@@ -3303,6 +3421,39 @@ mod tests {
             .map(|sig| sig.label)
             .collect();
         assert!(tx_labels.contains(&"tf = DataTransaction.commit(tx, Name, Value, ...)"));
+
+        assert_eq!(DATAARRAY_READ_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(DATAARRAY_WRITE_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(DATAARRAY_RESIZE_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(DATAARRAY_FILL_INTEGER_CAPABILITIES.len(), 1);
+        for capability in [
+            &DATAARRAY_READ_INTEGER_CAPABILITIES[0],
+            &DATAARRAY_WRITE_INTEGER_CAPABILITIES[0],
+            &DATAARRAY_RESIZE_INTEGER_CAPABILITIES[0],
+            &DATAARRAY_FILL_INTEGER_CAPABILITIES[0],
+        ] {
+            assert!(capability.inputs.iter().all(|input| input.classes
+                == crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES));
+        }
+    }
+
+    #[test]
+    fn data_array_metadata_accessors_reject_integer_receivers() {
+        for name in [
+            "DataArray.chunk_shape",
+            "DataArray.codec",
+            "DataArray.dtype",
+            "DataArray.name",
+            "DataArray.rank",
+            "DataArray.shape",
+        ] {
+            let error = call_builtin(name, &[Value::Int(IntValue::U64(u64::MAX))])
+                .expect_err("metadata accessor requires a DataArray receiver");
+            assert!(
+                error.message().contains("expected object"),
+                "{name}: {error}"
+            );
+        }
     }
 
     #[derive(Default)]
@@ -4235,17 +4386,57 @@ mod tests {
         let _serial = serial_test_guard();
         let _provider = native_provider_guard();
         let cases = vec![
-            ("int8", IntegerStorage::I8(vec![i8::MIN, i8::MAX])),
-            ("int16", IntegerStorage::I16(vec![i16::MIN, i16::MAX])),
-            ("int32", IntegerStorage::I32(vec![i32::MIN, i32::MAX])),
-            ("int64", IntegerStorage::I64(vec![i64::MIN, i64::MAX])),
-            ("uint8", IntegerStorage::U8(vec![0, u8::MAX])),
-            ("uint16", IntegerStorage::U16(vec![0, u16::MAX])),
-            ("uint32", IntegerStorage::U32(vec![0, u32::MAX])),
-            ("uint64", IntegerStorage::U64(vec![0, u64::MAX])),
+            (
+                "int8",
+                IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+                IntValue::I8(i8::MIN),
+                IntegerStorage::I8(vec![i8::MIN; 2]),
+            ),
+            (
+                "int16",
+                IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+                IntValue::I16(i16::MIN),
+                IntegerStorage::I16(vec![i16::MIN; 2]),
+            ),
+            (
+                "int32",
+                IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+                IntValue::I32(i32::MIN),
+                IntegerStorage::I32(vec![i32::MIN; 2]),
+            ),
+            (
+                "int64",
+                IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+                IntValue::I64(i64::MIN),
+                IntegerStorage::I64(vec![i64::MIN; 2]),
+            ),
+            (
+                "uint8",
+                IntegerStorage::U8(vec![0, u8::MAX]),
+                IntValue::U8(u8::MAX),
+                IntegerStorage::U8(vec![u8::MAX; 2]),
+            ),
+            (
+                "uint16",
+                IntegerStorage::U16(vec![0, u16::MAX]),
+                IntValue::U16(u16::MAX),
+                IntegerStorage::U16(vec![u16::MAX; 2]),
+            ),
+            (
+                "uint32",
+                IntegerStorage::U32(vec![0, u32::MAX]),
+                IntValue::U32(u32::MAX),
+                IntegerStorage::U32(vec![u32::MAX; 2]),
+            ),
+            (
+                "uint64",
+                IntegerStorage::U64(vec![0, u64::MAX]),
+                IntValue::U64(u64::MAX),
+                IntegerStorage::U64(vec![u64::MAX; 2]),
+            ),
         ];
 
-        for (dtype, storage) in cases {
+        for (dtype, storage, fill, filled_storage) in cases {
             let dir = tempfile::tempdir().expect("tempdir");
             let path = dir
                 .path()
@@ -4288,11 +4479,25 @@ mod tests {
             call_builtin("DataArray.write", &[arr.clone(), Value::Tensor(input)])
                 .expect("write integer array");
 
-            let Value::Tensor(read_back) = call_builtin("DataArray.read", &[arr]).expect("read")
+            let Value::Tensor(read_back) =
+                call_builtin("DataArray.read", &[arr.clone()]).expect("read")
             else {
                 panic!("expected tensor");
             };
             assert_eq!(read_back.integer_storage(), Some(&storage), "{dtype}");
+
+            call_builtin("DataArray.fill", &[arr.clone(), Value::Int(fill)])
+                .expect("fill integer array");
+            let Value::Tensor(read_back) =
+                call_builtin("DataArray.read", &[arr]).expect("read filled array")
+            else {
+                panic!("expected tensor");
+            };
+            assert_eq!(
+                read_back.integer_storage(),
+                Some(&filled_storage),
+                "{dtype} fill"
+            );
         }
     }
 

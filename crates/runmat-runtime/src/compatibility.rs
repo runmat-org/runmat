@@ -410,6 +410,10 @@ mod tests {
             );
         }
         for name in [
+            "DataArray.fill",
+            "DataArray.read",
+            "DataArray.resize",
+            "DataArray.write",
             "DelaunayTri",
             "DelaunayTri.freeBoundary",
             "DelaunayTri.nearestNeighbor",
@@ -554,7 +558,18 @@ mod tests {
         }
         assert_eq!(
             audited.keys().copied().collect::<Vec<_>>(),
-            ["addlistener", "argsort", "cancel", "onCleanup"]
+            [
+                "DataArray.chunk_shape",
+                "DataArray.codec",
+                "DataArray.dtype",
+                "DataArray.name",
+                "DataArray.rank",
+                "DataArray.shape",
+                "addlistener",
+                "argsort",
+                "cancel",
+                "onCleanup",
+            ]
         );
         for (name, audit) in audited {
             assert!(!audit.notes.is_empty(), "{name} integer audit notes");

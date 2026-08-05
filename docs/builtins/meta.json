@@ -47,7 +47,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "DataArray name, dtype, shape, rank, chunk-shape, and codec accessors accept only a DataArray receiver object; integer storage may be described by the returned metadata but is not an integer argument, control, class-preserving value output, arithmetic form, or backend surface."
+      }
     },
     {
       "name": "DataArray.codec",
@@ -95,7 +99,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "DataArray name, dtype, shape, rank, chunk-shape, and codec accessors accept only a DataArray receiver object; integer storage may be described by the returned metadata but is not an integer argument, control, class-preserving value output, arithmetic form, or backend surface."
+      }
     },
     {
       "name": "DataArray.dtype",
@@ -143,7 +151,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "DataArray name, dtype, shape, rank, chunk-shape, and codec accessors accept only a DataArray receiver object; integer storage may be described by the returned metadata but is not an integer argument, control, class-preserving value output, arithmetic form, or backend surface."
+      }
     },
     {
       "name": "DataArray.fill",
@@ -205,6 +217,35 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = DataArray.fill(arr, integer_value)",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The scalar fill value accepts every integer class and is exact when its class matches the declared array dtype."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Logical",
+          "overflow": "FunctionSpecific",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "A scalar is cast once to the declared dtype and repeated without floating mirroring; nonscalar fills reject."
+        }
       ]
     },
     {
@@ -253,7 +294,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "DataArray name, dtype, shape, rank, chunk-shape, and codec accessors accept only a DataArray receiver object; integer storage may be described by the returned metadata but is not an integer argument, control, class-preserving value output, arithmetic form, or backend surface."
+      }
     },
     {
       "name": "DataArray.rank",
@@ -301,7 +346,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "DataArray name, dtype, shape, rank, chunk-shape, and codec accessors accept only a DataArray receiver object; integer storage may be described by the returned metadata but is not an integer argument, control, class-preserving value output, arithmetic form, or backend surface."
+      }
     },
     {
       "name": "DataArray.read",
@@ -355,6 +404,51 @@
           "identifier": "RunMat:data:Internal",
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "X = DataArray.read(integer_array, integer_sliceSpec)",
+          "inputs": [
+            {
+              "name": "stored_array",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "A DataArray whose declared dtype is any built-in integer class is decoded directly into authoritative same-class tensor storage."
+            },
+            {
+              "name": "sliceSpec",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Scalar indices and two-element inclusive ranges accept all eight integer classes or exactly integral floating values."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Full and sliced reads preserve the declared integer dtype, exact values, selected shape, and column-major order; dataset persistence is host/filesystem I/O."
         }
       ]
     },
@@ -418,6 +512,35 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = DataArray.resize(arr, integer_newShape)",
+          "inputs": [
+            {
+              "name": "newShape",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Shape scalars and vectors accept all eight integer classes or exactly integral floating values within nonnegative platform bounds."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The exact shape is validated against platform bounds, persisted as metadata, and used to recreate zero-filled storage in the array's declared dtype."
+        }
       ]
     },
     {
@@ -466,7 +589,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "DataArray name, dtype, shape, rank, chunk-shape, and codec accessors accept only a DataArray receiver object; integer storage may be described by the returned metadata but is not an integer argument, control, class-preserving value output, arithmetic form, or backend surface."
+      }
     },
     {
       "name": "DataArray.write",
@@ -555,6 +682,51 @@
           "identifier": "RunMat:data:Internal",
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = DataArray.write(arr, integer_values) or DataArray.write(arr, integer_sliceSpec, integer_values)",
+          "inputs": [
+            {
+              "name": "values",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Scalar or tensor values accept every integer class and are stored exactly when their class matches the declared array dtype."
+            },
+            {
+              "name": "sliceSpec",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Optional scalar indices and two-element inclusive ranges accept all eight integer classes or exactly integral floating values."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Logical",
+          "overflow": "FunctionSpecific",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Writes preserve exact same-class integer storage; unlike source and declared dtypes use the declared numeric cast contract before chunk serialization, and shape mismatches reject."
         }
       ]
     },
