@@ -176,6 +176,26 @@ descriptor!(
     ANYMISSING_SIGNATURES,
     BuiltinOutputMode::Fixed
 );
+
+const ANYMISSING_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight built-in integer classes have no standard missing value.",
+    }];
+pub const ANYMISSING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "TF = anymissing(integer_A)",
+        inputs: &ANYMISSING_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer scalars and arrays return logical false because integer classes have no default missing representation; resident inputs gather without floating conversion.",
+    }];
 descriptor!(
     FILLMISSING_DESCRIPTOR,
     FILLMISSING_SIGNATURES,
@@ -497,6 +517,7 @@ async fn ismissing_builtin(value: Value) -> BuiltinResult<Value> {
     accel = "cpu",
     type_resolver(logical_type),
     descriptor(crate::builtins::missing::ANYMISSING_DESCRIPTOR),
+    integer_capabilities(crate::builtins::missing::ANYMISSING_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::missing"
 )]
 async fn anymissing_builtin(value: Value) -> BuiltinResult<Value> {
@@ -2700,6 +2721,27 @@ mod tests {
             result,
             Value::LogicalArray(mask) if mask.data == vec![0, 0, 0] && mask.shape == vec![1, 3]
         ));
+    }
+
+    #[test]
+    fn anymissing_returns_false_for_every_integer_storage_class() {
+        let storages = [
+            IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+            IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![u8::MIN, u8::MAX]),
+            IntegerStorage::U16(vec![u16::MIN, u16::MAX]),
+            IntegerStorage::U32(vec![u32::MIN, u32::MAX]),
+            IntegerStorage::U64(vec![u64::MIN, u64::MAX]),
+        ];
+        for storage in storages {
+            let input = Tensor::new_integer(storage, vec![1, 2]).unwrap();
+            assert_eq!(
+                block_on(anymissing_builtin(Value::Tensor(input))).unwrap(),
+                Value::Bool(false)
+            );
+        }
     }
 
     #[test]

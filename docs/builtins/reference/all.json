@@ -30,13 +30,14 @@
     "unit": "builtins::math::reduction::all::tests",
     "integration": "builtins::math::reduction::all::tests::all_gpu_provider_roundtrip"
   },
-  "description": "`all(X)` returns logical `true` when every element in the selected slice of `X` is nonzero. By default, `all` reduces along the first non-singleton dimension; optional `dim`, `\"all\"`, and `nanflag` arguments follow MATLAB semantics.",
+  "description": "`all(X)` returns logical `true` when every element in the selected slice of `X` is nonzero. By default, `all` reduces along the first non-singleton dimension; `dim`, `vecdim`, and `\"all\"` follow the MATLAB-compatible contract, while explicit `nanflag` arguments are available only in RunMat mode.",
   "behaviors": [
     "Works with logical, numeric, complex, and character arrays; other types raise a descriptive error.",
     "Accepts `all(X, dim)` to reduce along a single dimension or `all(X, vecdim)` to collapse multiple axes at once.",
     "`all(X, 'all')` flattens the entire array into a single logical scalar.",
-    "`all(___, 'omitnan')` ignores `NaN` values (including complex parts) when deciding whether a slice contains nonzero content; empty or all-`NaN` slices evaluate to `true`.",
-    "`all(___, 'includenan')` (default) treats `NaN` as logical `true`, matching MATLAB behaviour.",
+    "Typed integer data and integer `dim` or `vecdim` selectors accept all eight built-in integer classes and always return logical results.",
+    "RunMat mode adds explicit `all(___, 'omitnan')` and `all(___, 'includenan')` forms; MATLAB-compatible modes reject those flags.",
+    "Without an explicit flag, `NaN` counts as nonzero.",
     "Empty dimensions yield logical ones with MATLAB-compatible shapes; empty arrays reduced with `'all'` return `true`.",
     "Results are always host-resident logical scalars or logical arrays, even when the input tensor lives on the GPU, because the runtime copies the compact output back to the CPU."
   ],
@@ -62,9 +63,9 @@
       "output": "everythingNonZero = true"
     },
     {
-      "description": "Ignoring `NaN` values while testing slices",
-      "input": "E = [NaN 1 2; NaN 0 3];\nwithNaN = all(E);               % returns [1 0 1]\nignoringNaN = all(E, 'omitnan'); % returns [1 0 1]\ndisp(withNaN);\ndisp(ignoringNaN)",
-      "output": "1 0 1\n1 0 1"
+      "description": "Observing the default `NaN` behavior",
+      "input": "E = [NaN 1 2; NaN 0 3];\neveryValue = all(E);\ndisp(everyValue)",
+      "output": "1 0 1"
     },
     {
       "description": "Evaluating `all` on GPU arrays",
@@ -96,7 +97,7 @@
     },
     {
       "question": "How are `NaN` values handled?",
-      "answer": "By default they count as nonzero (`'includenan'`). Add `'omitnan'` to ignore them; if every element in a slice is `NaN`, the result becomes `true`."
+      "answer": "By default they count as nonzero. RunMat mode additionally accepts explicit `'omitnan'` and `'includenan'` flags; MATLAB-compatible modes reject those extension forms."
     },
     {
       "question": "Does `all` work with complex numbers?",

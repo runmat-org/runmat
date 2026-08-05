@@ -35,8 +35,8 @@
     "Numeric arrays return a scalar logical over all elements; empty numeric arrays return `true`.",
     "Complex inputs return `true` only when every real and imaginary component is finite.",
     "Sparse inputs inspect stored nonzero values; implicit zeros are finite.",
-    "Logical and character arrays return `true`.",
-    "String scalars and nonempty string arrays return `false`; empty string arrays return `true`.",
+    "Logical, character, and all eight built-in integer classes return `true`.",
+    "RunMat mode additionally accepts strings: string scalars and nonempty string arrays return `false`, while empty string arrays return `true`.",
     "Cell arrays, structs, objects, and function handles are rejected with `RunMat:allfinite:InvalidInput`."
   ],
   "examples": [

@@ -1,7 +1,11 @@
 //! Scalar finite-value predicate for complete arrays.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ComplexTensor, SparseTensor, Tensor, Type, Value,
 };
@@ -41,8 +45,8 @@ const ALLFINITE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureD
 const ALLFINITE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.ALLFINITE.INVALID_INPUT",
     identifier: Some("RunMat:allfinite:InvalidInput"),
-    when: "Input is not numeric, logical, char, or string.",
-    message: "allfinite: expected numeric, logical, char, or string input",
+    when: "Input is not numeric, logical, or char.",
+    message: "allfinite: expected numeric, logical, or char input",
 };
 
 const ALLFINITE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -55,12 +59,40 @@ const ALLFINITE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor 
 const ALLFINITE_ERRORS: [BuiltinErrorDescriptor; 2] =
     [ALLFINITE_ERROR_INVALID_INPUT, ALLFINITE_ERROR_INTERNAL];
 
+const ALLFINITE_STRING_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "allfinite-string-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "allfinite with string input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:AllfiniteStringInputExtension"),
+};
+const ALLFINITE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ALLFINITE_STRING_INPUT_EXTENSION];
+
 pub const ALLFINITE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ALLFINITE_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ALLFINITE_ERRORS,
 };
+
+const ALLFINITE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Every built-in integer class is finite for every representable scalar or array element.",
+    }];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = allfinite(integer_A)",
+        inputs: &ALLFINITE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Every real integer scalar or array returns logical true, including empty arrays; resident inputs use provider hooks or an exact gather fallback.",
+    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::tests::allfinite")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -107,9 +139,17 @@ pub fn allfinite_type(args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> 
     accel = "cpu",
     type_resolver(allfinite_type),
     descriptor(crate::builtins::logical::tests::allfinite::ALLFINITE_DESCRIPTOR),
+    extensions(ALLFINITE_EXTENSIONS),
+    integer_capabilities(crate::builtins::logical::tests::allfinite::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::logical::tests::allfinite"
 )]
 async fn allfinite_builtin(value: Value) -> BuiltinResult<Value> {
+    if matches!(value, Value::String(_) | Value::StringArray(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ALLFINITE_STRING_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     match value {
         Value::GpuTensor(handle) => {
             if let Some(result) = allfinite_gpu(&handle).await? {
@@ -282,10 +322,21 @@ mod tests {
     }
 
     #[test]
-    fn typed_integer_tensor_checks_native_storage_not_f64_mirror() {
-        let tensor =
-            Tensor::new_integer(IntegerStorage::I32(vec![1, 2, 3, 4]), vec![2, 2]).unwrap();
-        assert_eq!(call(Value::Tensor(tensor)).unwrap(), Value::Bool(true));
+    fn every_typed_integer_tensor_class_is_finite_without_floating_materialization() {
+        let storages = [
+            IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+            IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![u8::MIN, u8::MAX]),
+            IntegerStorage::U16(vec![u16::MIN, u16::MAX]),
+            IntegerStorage::U32(vec![u32::MIN, u32::MAX]),
+            IntegerStorage::U64(vec![u64::MIN, u64::MAX]),
+        ];
+        for storage in storages {
+            let tensor = Tensor::new_integer(storage, vec![1, 2]).unwrap();
+            assert_eq!(call(Value::Tensor(tensor)).unwrap(), Value::Bool(true));
+        }
     }
 
     #[test]
@@ -376,6 +427,7 @@ mod tests {
 
     #[test]
     fn strings_are_not_finite_values() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         assert_eq!(
             call(Value::String("1".to_string())).unwrap(),
             Value::Bool(false)
@@ -389,6 +441,21 @@ mod tests {
 
         let empty = StringArray::new(Vec::<String>::new(), vec![0, 1]).unwrap();
         assert_eq!(call(Value::StringArray(empty)).unwrap(), Value::Bool(true));
+    }
+
+    #[test]
+    fn string_input_is_a_declared_runmat_only_extension() {
+        let value = Value::String("1".to_string());
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err = call(value.clone()).unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:compatibility:AllfiniteStringInputExtension")
+        );
+        drop(_compat);
+
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        assert_eq!(call(value).unwrap(), Value::Bool(false));
     }
 
     #[test]

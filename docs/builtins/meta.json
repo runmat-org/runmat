@@ -3821,6 +3821,59 @@
           "when": "Reduction execution fails due to internal conversion, provider, or shape operations.",
           "message": "all: internal reduction failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "all-nanflag",
+          "mode": "RunMatOnly",
+          "description": "all with an explicit omitnan or includenan flag is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AllNanflagExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = all(integer_A, dim_or_vecdim|\"all\")",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Real scalar and array data accepts every built-in integer class and tests exact zero versus nonzero values."
+            },
+            {
+              "name": "dim_or_vecdim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Dimension scalars and vectors accept all eight integer classes as well as integer-valued floating selectors."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Every reduced element is tested exactly for zero; output is logical with reduced dimensions retained at size one, including empty identities."
+        }
       ]
     },
     {
@@ -3854,14 +3907,51 @@
         {
           "code": "RM.ALLFINITE.INVALID_INPUT",
           "identifier": "RunMat:allfinite:InvalidInput",
-          "when": "Input is not numeric, logical, char, or string.",
-          "message": "allfinite: expected numeric, logical, char, or string input"
+          "when": "Input is not numeric, logical, or char.",
+          "message": "allfinite: expected numeric, logical, or char input"
         },
         {
           "code": "RM.ALLFINITE.INTERNAL",
           "identifier": "RunMat:allfinite:InternalError",
           "when": "A GPU provider, gather, download, or internal shape operation fails.",
           "message": "allfinite: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "allfinite-string-input",
+          "mode": "RunMatOnly",
+          "description": "allfinite with string input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AllfiniteStringInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = allfinite(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every built-in integer class is finite for every representable scalar or array element."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Every real integer scalar or array returns logical true, including empty arrays; resident inputs use provider hooks or an exact gather fallback."
         }
       ]
     },
@@ -4352,6 +4442,59 @@
           "when": "Reduction execution fails due to internal conversion, provider, or shape operations.",
           "message": "any: internal reduction failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "any-nanflag",
+          "mode": "RunMatOnly",
+          "description": "any with an explicit omitnan or includenan flag is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AnyNanflagExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = any(integer_A, dim_or_vecdim|\"all\")",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Real scalar and array data accepts every built-in integer class and tests exact zero versus nonzero values."
+            },
+            {
+              "name": "dim_or_vecdim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Dimension scalars and vectors accept all eight integer classes as well as integer-valued floating selectors."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Every reduced element is tested exactly for zero; output is logical with reduced dimensions retained at size one, including empty identities."
+        }
       ]
     },
     {
@@ -4399,6 +4542,35 @@
           "identifier": "RunMat:missing:InternalError",
           "when": "Internal shape or table materialization fails.",
           "message": "missing-value builtin: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "TF = anymissing(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight built-in integer classes have no standard missing value."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer scalars and arrays return logical false because integer classes have no default missing representation; resident inputs gather without floating conversion."
         }
       ]
     },

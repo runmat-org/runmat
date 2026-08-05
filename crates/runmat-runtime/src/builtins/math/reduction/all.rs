@@ -15,7 +15,11 @@ use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResul
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorOwned};
 use runmat_builtins::ResolveContext;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexTensor, LogicalArray, Tensor, Type, Value,
 };
@@ -198,6 +202,42 @@ const ALL_ERRORS: [BuiltinErrorDescriptor; 3] = [
     ALL_ERROR_INTERNAL,
 ];
 
+const ALL_NANFLAG_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "all-nanflag",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "all with an explicit omitnan or includenan flag is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:AllNanflagExtension"),
+};
+pub const ALL_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ALL_NANFLAG_EXTENSION];
+
+const ALL_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Real scalar and array data accepts every built-in integer class and tests exact zero versus nonzero values.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "dim_or_vecdim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Dimension scalars and vectors accept all eight integer classes as well as integer-valued floating selectors.",
+    },
+];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "B = all(integer_A, dim_or_vecdim|\"all\")",
+        inputs: &ALL_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Every reduced element is tested exactly for zero; output is logical with reduced dimensions retained at size one, including empty identities.",
+    }];
+
 pub const ALL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ALL_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -281,6 +321,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     type_resolver(all_type),
     descriptor(crate::builtins::math::reduction::all::ALL_DESCRIPTOR),
+    extensions(crate::builtins::math::reduction::all::ALL_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::reduction::all::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::reduction::all"
 )]
 async fn all_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -792,6 +834,7 @@ fn apply_reduction(
 async fn parse_arguments(args: &[Value]) -> BuiltinResult<(ReductionSpec, ReductionNaN)> {
     let mut spec = ReductionSpec::Default;
     let mut nan_mode = ReductionNaN::Include;
+    let mut nan_mode_seen = false;
 
     let tokens = crate::builtins::common::arg_tokens::tokens_from_values(args);
     for (arg, token) in args.iter().zip(tokens.iter()) {
@@ -806,13 +849,15 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<(ReductionSpec, Reduct
             continue;
         }
         if let Some(mode) = parse_nan_mode_token(token)? {
-            if !matches!(nan_mode, ReductionNaN::Include) {
+            if nan_mode_seen {
                 return Err(all_descriptor_error_with_detail(
                     &ALL_ERROR_INVALID_ARGUMENT,
                     "multiple NaN handling options specified",
                 ));
             }
+            crate::compatibility::ensure_builtin_extension_enabled(&ALL_NANFLAG_EXTENSION, NAME)?;
             nan_mode = mode;
+            nan_mode_seen = true;
             continue;
         }
         let dims = parse_dimensions(arg).await?;
@@ -987,18 +1032,45 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn all_reads_typed_integer_storage_without_mirror() {
-        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, 1, 4, 5, 0, 6]), vec![2, 3])
-            .expect("typed integer input");
-
-        let result = all_builtin(Value::Tensor(tensor), Vec::new()).expect("all");
-
-        match result {
-            Value::LogicalArray(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
-                assert_eq!(out.data, vec![1, 1, 0]);
+    fn all_reads_all_integer_storage_classes_without_floating_materialization() {
+        let storages = [
+            IntegerStorage::I8(vec![1, 1, 4, 5, 0, 6]),
+            IntegerStorage::I16(vec![1, 1, 4, 5, 0, 6]),
+            IntegerStorage::I32(vec![1, 1, 4, 5, 0, 6]),
+            IntegerStorage::I64(vec![1, 1, 4, 5, 0, i64::MAX]),
+            IntegerStorage::U8(vec![1, 1, 4, 5, 0, 6]),
+            IntegerStorage::U16(vec![1, 1, 4, 5, 0, 6]),
+            IntegerStorage::U32(vec![1, 1, 4, 5, 0, 6]),
+            IntegerStorage::U64(vec![1, 1, 4, 5, 0, u64::MAX]),
+        ];
+        for storage in storages {
+            let tensor = Tensor::new_integer(storage, vec![2, 3]).expect("typed integer input");
+            let result = all_builtin(Value::Tensor(tensor), Vec::new()).expect("all");
+            match result {
+                Value::LogicalArray(out) => {
+                    assert_eq!(out.shape, vec![1, 3]);
+                    assert_eq!(out.data, vec![1, 1, 0]);
+                }
+                other => panic!("expected logical array, got {other:?}"),
             }
-            other => panic!("expected logical array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn all_nanflag_is_a_declared_runmat_only_extension() {
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = all_builtin(Value::Num(1.0), vec![Value::from("omitnan")])
+                .expect_err("MATLAB mode rejects nanflag");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:AllNanflagExtension")
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            all_builtin(Value::Num(1.0), vec![Value::from("omitnan")])
+                .expect("RunMat mode accepts nanflag");
         }
     }
 
@@ -1086,6 +1158,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_handles_nan_modes() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![f64::NAN, f64::NAN, 1.0, 0.0], vec![2, 2]).unwrap();
         let includenan = all_builtin(Value::Tensor(tensor.clone()), Vec::new()).expect("all");
         match includenan {
@@ -1116,6 +1189,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_includenan_keyword_allowed() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![f64::NAN, 1.0], vec![2, 1]).unwrap();
         let result =
             all_builtin(Value::Tensor(tensor), vec![Value::from("includenan")]).expect("all");
@@ -1132,6 +1206,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_complex_tensor_with_omitnan() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let complex = ComplexTensor::new(vec![(f64::NAN, 0.0), (1.0, 0.0)], vec![2, 1]).unwrap();
         let tensor_value = Value::ComplexTensor(complex);
         let omit = all_builtin(tensor_value.clone(), vec![Value::from("omitnan")]).expect("all");
@@ -1157,6 +1232,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_vecdim_with_omitnan() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let mut data = vec![0.0; 8];
         data[7] = f64::NAN;
         let tensor = Tensor::new(data, vec![2, 2, 2]).unwrap();
@@ -1212,6 +1288,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_gpu_provider_omitnan_roundtrip() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![f64::NAN, f64::NAN, 1.0, 0.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
@@ -1289,6 +1366,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_wgpu_omitnan_matches_cpu() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let init = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
                 runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
