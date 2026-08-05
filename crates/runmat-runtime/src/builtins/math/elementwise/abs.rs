@@ -2,10 +2,14 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericStorage, Tensor,
-    Value,
+    CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericStorage,
+    SparseTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -65,7 +69,8 @@ const ABS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Numeric, logical, char, or complex input.",
+    description:
+        "Real numeric input or floating complex input; logical and character forms are RunMat-only extensions.",
 }];
 const ABS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "Y = abs(X)",
@@ -75,7 +80,7 @@ const ABS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescrip
 const ABS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.ABS.INVALID_INPUT",
     identifier: Some("RunMat:abs:InvalidInput"),
-    when: "Input cannot be interpreted as numeric, logical, char, or complex data.",
+    when: "Input is not supported real numeric, floating complex, or declared extension data.",
     message: "abs: invalid input",
 };
 const ABS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -84,7 +89,73 @@ const ABS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "Internal tensor conversion/allocation/provider interaction failed.",
     message: "abs: internal error",
 };
-const ABS_ERRORS: [BuiltinErrorDescriptor; 2] = [ABS_ERROR_INVALID_INPUT, ABS_ERROR_INTERNAL];
+const ABS_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ABS.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:abs:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "abs: too many output arguments",
+};
+const ABS_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    ABS_ERROR_INVALID_INPUT,
+    ABS_ERROR_INTERNAL,
+    ABS_ERROR_TOO_MANY_OUTPUTS,
+];
+
+const ABS_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "abs-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "abs with logical input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:AbsLogicalInputExtension"),
+};
+const ABS_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "abs-character-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "abs with character input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:AbsCharacterInputExtension"),
+};
+const ABS_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    ABS_LOGICAL_INPUT_EXTENSION,
+    ABS_CHARACTER_INPUT_EXTENSION,
+    crate::compatibility::SPARSE_INTEGER_EXTENSION,
+];
+
+const ABS_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "X",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Real full scalars and arrays accept every built-in integer class and preserve size and class.",
+}];
+const ABS_SPARSE_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "MATLAB sparse numeric values are single or double; RunMat mode additionally preserves exact integer CSC values.",
+    }];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = abs(integer_X)",
+        inputs: &ABS_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Unsigned values are unchanged; signed values negate exactly and the unrepresentable magnitude of intmin saturates to intmax. Documented resident input returns to its owning provider.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "S = abs(sparse(integer_X))",
+        inputs: &ABS_SPARSE_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "RunMat-only typed sparse storage retains CSC structure and exact class while applying the same signed saturation rule to stored values.",
+    },
+];
 pub const ABS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ABS_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -112,9 +183,18 @@ fn builtin_error_with_detail(
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::elementwise::abs::ABS_DESCRIPTOR),
+    extensions(ABS_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::elementwise::abs::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::elementwise::abs"
 )]
 async fn abs_builtin(value: Value) -> BuiltinResult<Value> {
+    if matches!(crate::output_count::current_output_count(), Some(count) if count > 1) {
+        return Err(builtin_error_with_detail(
+            &ABS_ERROR_TOO_MANY_OUTPUTS,
+            "expected at most one output",
+        ));
+    }
+    ensure_abs_extensions(&value)?;
     match value {
         Value::GpuTensor(handle) => abs_gpu(handle).await,
         Value::Int(value) => Ok(Value::Int(abs_integer_scalar(value))),
@@ -123,6 +203,7 @@ async fn abs_builtin(value: Value) -> BuiltinResult<Value> {
             crate::builtins::common::validation::reject_typed_complex_integer_tensor(&ct, "abs")?;
             abs_complex_tensor(ct)
         }
+        Value::SparseTensor(sparse) => abs_sparse_tensor(sparse),
         Value::CharArray(ca) => abs_char_array(ca),
         Value::String(_) | Value::StringArray(_) => Err(builtin_error_with_detail(
             &ABS_ERROR_INVALID_INPUT,
@@ -132,32 +213,80 @@ async fn abs_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
+fn ensure_abs_extensions(value: &Value) -> BuiltinResult<()> {
+    let logical = matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::SparseTensor(sparse) if sparse.is_logical())
+        || matches!(
+            value,
+            Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle)
+        );
+    if logical {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ABS_LOGICAL_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if matches!(value, Value::CharArray(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ABS_CHARACTER_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if matches!(
+        value,
+        Value::SparseTensor(sparse) if sparse.integer_storage().is_some()
+    ) {
+        crate::compatibility::ensure_sparse_integer_extension_enabled(BUILTIN_NAME)?;
+    }
+    Ok(())
+}
+
 async fn abs_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    let provider = runmat_accelerate_api::provider_for_handle(&handle).ok_or_else(|| {
+        builtin_error_with_detail(&ABS_ERROR_INTERNAL, "GPU provider unavailable for input")
+    })?;
     if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
-        let provider = runmat_accelerate_api::provider_for_handle(&handle).ok_or_else(|| {
-            builtin_error_with_detail(
-                &ABS_ERROR_INTERNAL,
-                "GPU provider unavailable for integer input",
-            )
-        })?;
         let tensor = gpu_helpers::gather_tensor_async(&handle)
             .await
             .map_err(|err| builtin_error_with_detail(&ABS_ERROR_INTERNAL, err.to_string()))?;
         let output = abs_tensor(tensor)?;
-        return match gpu_helpers::upload_tensor(provider, &output) {
-            Ok(out) => Ok(Value::GpuTensor(out)),
-            Err(_) => Ok(tensor::tensor_into_value(output)),
-        };
+        let out = gpu_helpers::upload_tensor(provider, &output).map_err(|err| {
+            builtin_error_with_detail(
+                &ABS_ERROR_INTERNAL,
+                format!("failed to restore integer result to input provider: {err}"),
+            )
+        })?;
+        return Ok(gpu_helpers::resident_gpu_value(out));
     }
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(out) = provider.unary_abs(&handle).await {
-            return Ok(Value::GpuTensor(out));
-        }
+    if let Ok(out) = provider.unary_abs(&handle).await {
+        runmat_accelerate_api::set_handle_logical(&out, false);
+        return Ok(gpu_helpers::resident_gpu_value(out));
     }
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
+    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
         .await
         .map_err(|err| builtin_error_with_detail(&ABS_ERROR_INTERNAL, err.to_string()))?;
-    Ok(tensor::tensor_into_value(abs_tensor(tensor)?))
+    let host = abs_host_value(gathered)?;
+    let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, host)
+        .map_err(|err| builtin_error_with_detail(&ABS_ERROR_INTERNAL, err))?;
+    let out = gpu_helpers::upload_tensor(provider, &tensor).map_err(|err| {
+        builtin_error_with_detail(
+            &ABS_ERROR_INTERNAL,
+            format!("failed to restore fallback result to input provider: {err}"),
+        )
+    })?;
+    Ok(gpu_helpers::resident_gpu_value(out))
+}
+
+fn abs_host_value(value: Value) -> BuiltinResult<Value> {
+    match value {
+        Value::Int(value) => Ok(Value::Int(abs_integer_scalar(value))),
+        Value::Complex(re, im) => Ok(Value::Num(complex_magnitude(re, im))),
+        Value::ComplexTensor(ct) => {
+            crate::builtins::common::validation::reject_typed_complex_integer_tensor(&ct, "abs")?;
+            abs_complex_tensor(ct)
+        }
+        other => abs_real(other),
+    }
 }
 
 fn abs_real(value: Value) -> BuiltinResult<Value> {
@@ -186,6 +315,47 @@ fn abs_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     };
     Tensor::from_numeric_storage(output, shape)
         .map_err(|e| builtin_error_with_detail(&ABS_ERROR_INTERNAL, e))
+}
+
+fn abs_sparse_tensor(sparse: SparseTensor) -> BuiltinResult<Value> {
+    let rows = sparse.rows;
+    let cols = sparse.cols;
+    let col_ptrs = sparse.col_ptrs.clone();
+    let row_indices = sparse.row_indices.clone();
+    let output = if sparse.is_logical() {
+        SparseTensor::new(rows, cols, col_ptrs, row_indices, vec![1.0; sparse.nnz()])
+    } else if let Some(values) = sparse.as_f64_slice() {
+        SparseTensor::new(
+            rows,
+            cols,
+            col_ptrs,
+            row_indices,
+            values.iter().copied().map(f64::abs).collect(),
+        )
+    } else if let Some(values) = sparse.as_f32_slice() {
+        SparseTensor::new_f32(
+            rows,
+            cols,
+            col_ptrs,
+            row_indices,
+            values.iter().copied().map(f32::abs).collect(),
+        )
+    } else if let Some(values) = sparse.integer_storage() {
+        SparseTensor::new_integer(
+            rows,
+            cols,
+            col_ptrs,
+            row_indices,
+            abs_integer_storage(values),
+        )
+    } else {
+        return Err(builtin_error_with_detail(
+            &ABS_ERROR_INTERNAL,
+            "unsupported sparse storage",
+        ));
+    }
+    .map_err(|err| builtin_error_with_detail(&ABS_ERROR_INTERNAL, err))?;
+    Ok(Value::SparseTensor(output))
 }
 
 fn abs_integer_scalar(value: IntValue) -> IntValue {
@@ -279,7 +449,9 @@ pub(crate) mod tests {
         .is_ok()
             && runmat_accelerate_api::provider().is_some()
     }
-    use runmat_builtins::{IntValue, IntegerComplexStorage, ResolveContext, Tensor, Type};
+    use runmat_builtins::{
+        IntValue, IntegerComplexStorage, LogicalArray, ResolveContext, Tensor, Type,
+    };
 
     fn abs_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::abs_builtin(value))
@@ -293,6 +465,8 @@ pub(crate) mod tests {
             .map(|sig| sig.label)
             .collect();
         assert!(labels.contains(&"Y = abs(X)"));
+        assert_eq!(INTEGER_CAPABILITIES.len(), 2);
+        assert_eq!(ABS_EXTENSIONS.len(), 3);
     }
 
     #[test]
@@ -432,6 +606,133 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn abs_sparse_preserves_floating_class_structure_and_exact_integer_extension() {
+        let double =
+            SparseTensor::new(3, 2, vec![0, 2, 3], vec![0, 2, 1], vec![-2.5, 0.0, -4.0]).unwrap();
+        let Value::SparseTensor(double) =
+            abs_builtin(Value::SparseTensor(double)).expect("double sparse abs")
+        else {
+            panic!("expected sparse output");
+        };
+        assert_eq!(double.col_ptrs, vec![0, 2, 3]);
+        assert_eq!(double.row_indices, vec![0, 2, 1]);
+        assert_eq!(double.as_f64_slice(), Some(&[2.5, 0.0, 4.0][..]));
+
+        let single =
+            SparseTensor::new_f32(2, 2, vec![0, 1, 2], vec![1, 0], vec![-3.0, 4.5]).unwrap();
+        let Value::SparseTensor(single) =
+            abs_builtin(Value::SparseTensor(single)).expect("single sparse abs")
+        else {
+            panic!("expected sparse output");
+        };
+        assert_eq!(single.as_f32_slice(), Some(&[3.0, 4.5][..]));
+
+        let integer = SparseTensor::new_integer(
+            2,
+            2,
+            vec![0, 1, 2],
+            vec![0, 1],
+            IntegerStorage::I64(vec![i64::MIN, -9_007_199_254_740_993]),
+        )
+        .unwrap();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let Value::SparseTensor(integer) =
+            abs_builtin(Value::SparseTensor(integer)).expect("integer sparse abs")
+        else {
+            panic!("expected sparse output");
+        };
+        assert_eq!(
+            integer.integer_storage(),
+            Some(&IntegerStorage::I64(vec![i64::MAX, 9_007_199_254_740_993]))
+        );
+    }
+
+    #[test]
+    fn abs_extensions_and_output_arity_are_enforced_before_execution() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let logical_error = abs_builtin(Value::LogicalArray(
+            LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap(),
+        ))
+        .expect_err("logical input is an extension");
+        assert_eq!(
+            logical_error.identifier(),
+            ABS_LOGICAL_INPUT_EXTENSION.error_identifier
+        );
+        let char_error = abs_builtin(Value::CharArray(
+            CharArray::new("A".chars().collect(), 1, 1).unwrap(),
+        ))
+        .expect_err("character input is an extension");
+        assert_eq!(
+            char_error.identifier(),
+            ABS_CHARACTER_INPUT_EXTENSION.error_identifier
+        );
+        let sparse_integer =
+            SparseTensor::new_integer(1, 1, vec![0, 1], vec![0], IntegerStorage::I8(vec![-1]))
+                .unwrap();
+        let sparse_error = abs_builtin(Value::SparseTensor(sparse_integer))
+            .expect_err("integer sparse input is an extension");
+        assert_eq!(
+            sparse_error.identifier(),
+            crate::compatibility::SPARSE_INTEGER_EXTENSION.error_identifier
+        );
+
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        let output_error =
+            abs_builtin(Value::Int(IntValue::I8(-1))).expect_err("excess outputs reject");
+        assert_eq!(
+            output_error.identifier(),
+            ABS_ERROR_TOO_MANY_OUTPUTS.identifier
+        );
+    }
+
+    #[test]
+    fn abs_zero_output_still_validates_input() {
+        let _outputs = crate::output_count::push_output_count(Some(0));
+        let error = abs_builtin(Value::from("not numeric")).expect_err("input must validate");
+        assert_eq!(error.identifier(), ABS_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn abs_logical_extension_returns_double_and_gates_resident_input_before_dispatch() {
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let logical = LogicalArray::new(vec![1, 0, 1], vec![1, 3]).unwrap();
+            let Value::Tensor(output) =
+                abs_builtin(Value::LogicalArray(logical)).expect("logical extension")
+            else {
+                panic!("expected numeric tensor");
+            };
+            assert_eq!(output.as_f64_slice(), Some(&[1.0, 0.0, 1.0][..]));
+        }
+
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
+            runmat_accelerate_api::set_handle_logical(&handle, true);
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = abs_builtin(Value::GpuTensor(handle))
+                .expect_err("resident logical input must gate before provider dispatch");
+            assert_eq!(
+                error.identifier(),
+                ABS_LOGICAL_INPUT_EXTENSION.error_identifier
+            );
+        });
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
+            runmat_accelerate_api::set_handle_logical(&handle, true);
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let result = abs_builtin(Value::GpuTensor(handle)).expect("resident logical extension");
+            let Value::GpuTensor(ref output) = result else {
+                panic!("expected resident numeric output");
+            };
+            assert!(!runmat_accelerate_api::handle_is_logical(output));
+            let gathered = test_support::gather(result).expect("gather output");
+            assert_eq!(gathered.as_f64_slice(), Some(&[1.0, 0.0][..]));
+        });
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn abs_tensor_elements() {
@@ -474,6 +775,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn abs_char_array_codes() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let char_array = CharArray::new("Az".chars().collect(), 1, 2).unwrap();
         let result = abs_builtin(Value::CharArray(char_array)).expect("abs");
         match result {

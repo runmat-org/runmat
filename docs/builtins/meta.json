@@ -2355,7 +2355,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Numeric, logical, char, or complex input."
+              "description": "Real numeric input or floating complex input; logical and character forms are RunMat-only extensions."
             }
           ],
           "outputs": [
@@ -2373,7 +2373,7 @@
         {
           "code": "RM.ABS.INVALID_INPUT",
           "identifier": "RunMat:abs:InvalidInput",
-          "when": "Input cannot be interpreted as numeric, logical, char, or complex data.",
+          "when": "Input is not supported real numeric, floating complex, or declared extension data.",
           "message": "abs: invalid input"
         },
         {
@@ -2381,6 +2381,88 @@
           "identifier": "RunMat:abs:Internal",
           "when": "Internal tensor conversion/allocation/provider interaction failed.",
           "message": "abs: internal error"
+        },
+        {
+          "code": "RM.ABS.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:abs:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "abs: too many output arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "abs-logical-input",
+          "mode": "RunMatOnly",
+          "description": "abs with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AbsLogicalInputExtension"
+        },
+        {
+          "id": "abs-character-input",
+          "mode": "RunMatOnly",
+          "description": "abs with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AbsCharacterInputExtension"
+        },
+        {
+          "id": "sparse-integer-storage",
+          "mode": "RunMatOnly",
+          "description": "sparse integer storage is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SparseIntegerExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = abs(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Real full scalars and arrays accept every built-in integer class and preserve size and class."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "Saturate",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Unsigned values are unchanged; signed values negate exactly and the unrepresentable magnitude of intmin saturates to intmax. Documented resident input returns to its owning provider."
+        },
+        {
+          "form": "S = abs(sparse(integer_X))",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "MATLAB sparse numeric values are single or double; RunMat mode additionally preserves exact integer CSC values."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "Saturate",
+          "backend": "HostOnly",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "RunMat-only typed sparse storage retains CSC structure and exact class while applying the same signed saturation rule to stored values."
         }
       ]
     },
