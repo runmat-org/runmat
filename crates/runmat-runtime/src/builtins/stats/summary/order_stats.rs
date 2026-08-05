@@ -137,6 +137,36 @@ const TIEDRANK_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     },
 ];
 
+const TIEDRANK_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tiedrank-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "tiedrank with typed-integer input data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TiedrankIntegerDataExtension"),
+};
+
+const TIEDRANK_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [TIEDRANK_INTEGER_DATA_EXTENSION];
+
+const TIEDRANK_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented data domain is single or double; RunMat mode additionally accepts all eight real integer classes.",
+    }];
+
+const TIEDRANK_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[R, tieadj] = tiedrank(integer_X)",
+        inputs: &TIEDRANK_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat's integer-data extension compares and groups same-class integers exactly, including wide values above flintmax, then returns double ranks and tie adjustments.",
+    }];
+
 macro_rules! quantile_integer_metadata {
     ($data_id:literal, $control_id:literal, $data_description:literal, $control_description:literal, $data_identifier:literal, $control_identifier:literal) => {
         pub(super) const INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor =
@@ -780,9 +810,17 @@ pub mod tiedrank {
         keywords = "tiedrank,rank,ties,statistics",
         type_resolver(super::same_shape_type),
         descriptor(self::DESCRIPTOR),
+        extensions(super::TIEDRANK_EXTENSIONS),
+        integer_capabilities(super::TIEDRANK_INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::stats::summary::order_stats::tiedrank"
     )]
     pub(crate) async fn tiedrank_builtin(value: Value) -> BuiltinResult<Value> {
+        if super::is_real_typed_integer_value(&value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &TIEDRANK_INTEGER_DATA_EXTENSION,
+                "tiedrank",
+            )?;
+        }
         let input = super::value_to_tensor("tiedrank", value).await?;
         let (ranks, tieadj) = super::tiedrank_tensor(input)?;
         match crate::output_count::current_output_count() {
@@ -886,6 +924,30 @@ mod tests {
             ))
             .unwrap();
             assert!(matches!(out, Value::Num(value) if value == 2.0));
+        }
+    }
+
+    #[test]
+    fn tiedrank_integer_extension_follows_compatibility_mode() {
+        let input = || {
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![1, 2, 1]), vec![3, 1]).unwrap(),
+            )
+        };
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(tiedrank::tiedrank_builtin(input())).unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:TiedrankIntegerDataExtension")
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let out = block_on(tiedrank::tiedrank_builtin(input())).unwrap();
+            assert!(
+                matches!(out, Value::Tensor(tensor) if tensor.materialize_f64() == vec![1.5, 3.0, 1.5])
+            );
         }
     }
 
@@ -1024,6 +1086,7 @@ mod tests {
 
     #[test]
     fn tiedrank_typed_integer_matrix_reads_exact_storage() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let x =
             Tensor::new_integer(IntegerStorage::I16(vec![3, 1, 1, 2, 2, 5]), vec![3, 2]).unwrap();
 
@@ -1053,6 +1116,7 @@ mod tests {
 
     #[test]
     fn tiedrank_uint64_distinguishes_values_beyond_f64_precision() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let base = 1_u64 << 53;
         let x = Tensor::new_integer(IntegerStorage::U64(vec![base, base + 1, base]), vec![3, 1])
             .unwrap();
@@ -1086,5 +1150,27 @@ mod tests {
         assert_ordered!(U16, 1, 2);
         assert_ordered!(U32, 1, 2);
         assert_ordered!(U64, 1, 2);
+    }
+
+    #[test]
+    fn tiedrank_registered_extension_covers_all_integer_classes() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let storages = vec![
+            IntegerStorage::I8(vec![1, 2, 1]),
+            IntegerStorage::I16(vec![1, 2, 1]),
+            IntegerStorage::I32(vec![1, 2, 1]),
+            IntegerStorage::I64(vec![1, 2, 1]),
+            IntegerStorage::U8(vec![1, 2, 1]),
+            IntegerStorage::U16(vec![1, 2, 1]),
+            IntegerStorage::U32(vec![1, 2, 1]),
+            IntegerStorage::U64(vec![1, 2, 1]),
+        ];
+        for storage in storages {
+            let input = Tensor::new_integer(storage, vec![3, 1]).unwrap();
+            let out = block_on(tiedrank::tiedrank_builtin(Value::Tensor(input))).unwrap();
+            assert!(
+                matches!(out, Value::Tensor(tensor) if tensor.materialize_f64() == vec![1.5, 3.0, 1.5])
+            );
+        }
     }
 }

@@ -1,7 +1,7 @@
 //! Descriptive statistics compatibility helpers.
 
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
@@ -10,7 +10,7 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, ResolveContext, StringArray, Tensor, Type, Value,
+    CellArray, IntValue, ResolveContext, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -223,6 +223,304 @@ const MAD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
         notes: "Typed-integer controls are decoded exactly on the host and are independently gated from the integer-data extension.",
     },
 ];
+
+macro_rules! floating_stat_integer_metadata {
+    (
+        $data_extension:ident,
+        $control_extension:ident,
+        $extensions:ident,
+        $data_inputs:ident,
+        $control_inputs:ident,
+        $capabilities:ident,
+        $name:literal,
+        $data_id:literal,
+        $control_id:literal,
+        $data_error:literal,
+        $control_error:literal,
+        $data_notes:literal,
+        $control_notes:literal
+    ) => {
+        const $data_extension: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+            id: $data_id,
+            mode: BuiltinExtensionMode::RunMatOnly,
+            description: concat!($name, " with typed-integer input data is a RunMat extension"),
+            error_identifier: Some($data_error),
+        };
+        const $control_extension: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+            id: $control_id,
+            mode: BuiltinExtensionMode::RunMatOnly,
+            description: concat!(
+                $name,
+                " with a typed-integer flag or dimension control is a RunMat extension"
+            ),
+            error_identifier: Some($control_error),
+        };
+        const $extensions: [BuiltinExtensionDescriptor; 2] =
+            [$data_extension, $control_extension];
+        const $data_inputs: [BuiltinIntegerInputCapability; 1] =
+            [BuiltinIntegerInputCapability {
+                name: "X",
+                classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+                availability: BuiltinIntegerInputAvailability::RunMatOnly,
+                scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+                notes: $data_notes,
+            }];
+        const $control_inputs: [BuiltinIntegerInputCapability; 1] =
+            [BuiltinIntegerInputCapability {
+                name: "flag_or_dimension",
+                classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+                availability: BuiltinIntegerInputAvailability::RunMatOnly,
+                scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+                notes: $control_notes,
+            }];
+        const $capabilities: [BuiltinIntegerCapabilityDescriptor; 2] = [
+            BuiltinIntegerCapabilityDescriptor {
+                form: concat!("Y = ", $name, "(X, ...) with integer X"),
+                inputs: &$data_inputs,
+                computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+                output_class: BuiltinIntegerOutputClassRule::Double,
+                overflow: BuiltinIntegerOverflowRule::NotApplicable,
+                backend: BuiltinIntegerBackendRule::GatherFallback,
+                overload: BuiltinIntegerOverloadKind::Multiple,
+                notes: "RunMat's integer-data extension enters one explicit double computation/output boundary after compatibility is decided from host storage or resident dtype metadata.",
+            },
+            BuiltinIntegerCapabilityDescriptor {
+                form: concat!(
+                    "Y = ",
+                    $name,
+                    "(X, integer_flag_or_dimension, ...) with floating X"
+                ),
+                inputs: &$control_inputs,
+                computation_domain: BuiltinIntegerComputationDomain::Structural,
+                output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+                overflow: BuiltinIntegerOverflowRule::NotApplicable,
+                backend: BuiltinIntegerBackendRule::HostOnly,
+                overload: BuiltinIntegerOverloadKind::StructuralParameter,
+                notes: "Typed-integer controls are decoded exactly and independently gated from integer data.",
+            },
+        ];
+    };
+}
+
+floating_stat_integer_metadata!(
+    GEOMEAN_INTEGER_DATA_EXTENSION,
+    GEOMEAN_INTEGER_CONTROL_EXTENSION,
+    GEOMEAN_EXTENSIONS,
+    GEOMEAN_INTEGER_DATA_INPUT,
+    GEOMEAN_INTEGER_CONTROL_INPUT,
+    GEOMEAN_INTEGER_CAPABILITIES,
+    "geomean",
+    "geomean-integer-data",
+    "geomean-typed-integer-control",
+    "RunMat:compatibility:GeomeanIntegerDataExtension",
+    "RunMat:compatibility:GeomeanTypedIntegerControlExtension",
+    "The documented nonnegative data domain is single or double; RunMat mode additionally accepts all eight real integer classes.",
+    "Documented dimensions accept single or double; exact typed-integer dimensions are a mode-gated RunMat extension."
+);
+
+floating_stat_integer_metadata!(
+    HARMMEAN_INTEGER_DATA_EXTENSION,
+    HARMMEAN_INTEGER_CONTROL_EXTENSION,
+    HARMMEAN_EXTENSIONS,
+    HARMMEAN_INTEGER_DATA_INPUT,
+    HARMMEAN_INTEGER_CONTROL_INPUT,
+    HARMMEAN_INTEGER_CAPABILITIES,
+    "harmmean",
+    "harmmean-integer-data",
+    "harmmean-typed-integer-control",
+    "RunMat:compatibility:HarmmeanIntegerDataExtension",
+    "RunMat:compatibility:HarmmeanTypedIntegerControlExtension",
+    "The documented numeric data domain is single or double; RunMat mode additionally accepts all eight real integer classes.",
+    "Documented dimensions accept single or double; exact typed-integer dimensions are a mode-gated RunMat extension."
+);
+
+floating_stat_integer_metadata!(
+    SKEWNESS_INTEGER_DATA_EXTENSION,
+    SKEWNESS_INTEGER_CONTROL_EXTENSION,
+    SKEWNESS_EXTENSIONS_BASE,
+    SKEWNESS_INTEGER_DATA_INPUT,
+    SKEWNESS_INTEGER_CONTROL_INPUT,
+    SKEWNESS_INTEGER_CAPABILITIES,
+    "skewness",
+    "skewness-integer-data",
+    "skewness-typed-integer-control",
+    "RunMat:compatibility:SkewnessIntegerDataExtension",
+    "RunMat:compatibility:SkewnessTypedIntegerControlExtension",
+    "The documented data domain is single or double; RunMat mode additionally accepts all eight real integer classes.",
+    "The documented bias flag accepts single, double, or logical and documented dimensions accept single or double; exact typed-integer controls are mode-gated."
+);
+
+floating_stat_integer_metadata!(
+    KURTOSIS_INTEGER_DATA_EXTENSION,
+    KURTOSIS_INTEGER_CONTROL_EXTENSION,
+    KURTOSIS_EXTENSIONS_BASE,
+    KURTOSIS_INTEGER_DATA_INPUT,
+    KURTOSIS_INTEGER_CONTROL_INPUT,
+    KURTOSIS_INTEGER_CAPABILITIES,
+    "kurtosis",
+    "kurtosis-integer-data",
+    "kurtosis-typed-integer-control",
+    "RunMat:compatibility:KurtosisIntegerDataExtension",
+    "RunMat:compatibility:KurtosisTypedIntegerControlExtension",
+    "The documented data domain is single or double; RunMat mode additionally accepts all eight real integer classes.",
+    "The documented bias flag accepts single, double, or logical and documented dimensions accept single or double; exact typed-integer controls are mode-gated."
+);
+
+const SKEWNESS_GPU_MULTI_AXIS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "skewness-gpu-all-or-vecdim",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "skewness with all or vecdim on a GPU input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SkewnessGpuMultiAxisExtension"),
+};
+
+const KURTOSIS_GPU_MULTI_AXIS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "kurtosis-gpu-all-or-vecdim",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "kurtosis with all or vecdim on a GPU input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:KurtosisGpuMultiAxisExtension"),
+};
+
+const SKEWNESS_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    SKEWNESS_EXTENSIONS_BASE[0],
+    SKEWNESS_EXTENSIONS_BASE[1],
+    SKEWNESS_GPU_MULTI_AXIS_EXTENSION,
+];
+
+const KURTOSIS_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    KURTOSIS_EXTENSIONS_BASE[0],
+    KURTOSIS_EXTENSIONS_BASE[1],
+    KURTOSIS_GPU_MULTI_AXIS_EXTENSION,
+];
+
+const RMS_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "rms-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "rms with typed real or complex integer input data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RmsIntegerDataExtension"),
+};
+
+const RMS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [RMS_INTEGER_DATA_EXTENSION];
+
+const RMS_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented data domain is single, double, logical, or char; RunMat mode additionally accepts real and paired complex values of all eight integer classes.",
+    }];
+
+const RMS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = rms(X, dim_or_vecdim_or_all, nanflag) with integer X",
+        inputs: &RMS_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Real or paired complex integer magnitudes enter one explicit double RMS computation/output boundary; resident compatibility is decided before gather.",
+    }];
+
+const RMSE_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "rmse-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "rmse with typed real or complex integer forecast or actual data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RmseIntegerDataExtension"),
+};
+
+const RMSE_INTEGER_WEIGHTS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "rmse-integer-weights",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "rmse with typed-integer weights is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RmseIntegerWeightsExtension"),
+};
+
+const RMSE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [RMSE_INTEGER_DATA_EXTENSION, RMSE_INTEGER_WEIGHTS_EXTENSION];
+
+const RMSE_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "F_or_A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented forecast and actual data domains are single or double; RunMat mode additionally accepts real and paired complex values of all eight integer classes.",
+    }];
+
+const RMSE_INTEGER_WEIGHT_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "W",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented weight domain is single or double; RunMat mode additionally accepts nonnegative typed-integer weights.",
+    }];
+
+const RMSE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "E = rmse(F, A, dim_or_vecdim_or_all, nanflag, Weights=W) with integer F or A",
+        inputs: &RMSE_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Exact integer components materialize once into the double residual-magnitude and RMS domain after compatibility is decided from host storage or resident metadata.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "E = rmse(F, A, ..., Weights=integer_W) with floating F and A",
+        inputs: &RMSE_INTEGER_WEIGHT_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed-integer weights materialize explicitly into the nonnegative double weighting domain and are independently gated from integer forecast or actual data.",
+    },
+];
+
+const TABULATE_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tabulate-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "tabulate with typed-integer input data and exact cell output is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TabulateIntegerDataExtension"),
+};
+
+const TABULATE_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tabulate-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "tabulate with a GPU input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TabulateGpuInputExtension"),
+};
+
+const TABULATE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    TABULATE_INTEGER_DATA_EXTENSION,
+    TABULATE_GPU_INPUT_EXTENSION,
+];
+
+const TABULATE_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented numeric input domain is single or double; RunMat mode additionally accepts all eight integer classes and returns a heterogeneous cell table so exact wide values are not coerced through binary64.",
+    }];
+
+const TABULATE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tbl = tabulate(integer_X)",
+        inputs: &TABULATE_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer observations group and sort in exact same-class storage; the cell table preserves integer values in column one and uses double counts and percentages, while positive-gap expansion is bounded to avoid unrepresentable allocation.",
+    }];
 
 const RMSE_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
     BuiltinSignatureDescriptor {
@@ -834,6 +1132,54 @@ fn is_real_typed_integer_value(value: &Value) -> bool {
         )
 }
 
+fn is_typed_integer_numeric_value(value: &Value) -> bool {
+    is_real_typed_integer_value(value)
+        || matches!(value, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some())
+}
+
+fn ensure_floating_stat_integer_extensions(
+    name: &str,
+    value: &Value,
+    rest: &[Value],
+    data_extension: &BuiltinExtensionDescriptor,
+    control_extension: &BuiltinExtensionDescriptor,
+) -> BuiltinResult<()> {
+    if is_typed_integer_numeric_value(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(data_extension, name)?;
+    }
+    if rest.iter().any(is_real_typed_integer_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(control_extension, name)?;
+    }
+    Ok(())
+}
+
+fn rest_requests_multi_axis(rest: &[Value]) -> bool {
+    rest.iter().any(|value| {
+        keyword_of(value).is_some_and(|keyword| keyword == "all")
+            || matches!(value, Value::Tensor(tensor) if tensor::tensor_element_len(tensor) > 1)
+            || matches!(value, Value::GpuTensor(handle) if handle.shape.iter().product::<usize>() > 1)
+    })
+}
+
+fn ensure_gpu_multi_axis_extension(
+    name: &str,
+    value: &Value,
+    rest: &[Value],
+    extension: &BuiltinExtensionDescriptor,
+) -> BuiltinResult<()> {
+    if matches!(value, Value::GpuTensor(_)) && rest_requests_multi_axis(rest) {
+        crate::compatibility::ensure_builtin_extension_enabled(extension, name)?;
+    }
+    Ok(())
+}
+
+fn rest_has_typed_integer_weights(rest: &[Value]) -> bool {
+    rest.windows(2).any(|pair| {
+        keyword_of(&pair[0]).is_some_and(|keyword| keyword == "weights")
+            && is_real_typed_integer_value(&pair[1])
+    })
+}
+
 fn ensure_mad_integer_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
     if is_real_typed_integer_value(value) {
         crate::compatibility::ensure_builtin_extension_enabled(&MAD_INTEGER_DATA_EXTENSION, "mad")?;
@@ -937,7 +1283,108 @@ where
     reduce_tensor(name, input, options, |slice| op(slice, flag))
 }
 
+const MAX_EXACT_TABULATE_ROWS: u128 = 1_000_000;
+
+fn compare_same_class_integers(left: &IntValue, right: &IntValue) -> Ordering {
+    match (left, right) {
+        (IntValue::I8(left), IntValue::I8(right)) => left.cmp(right),
+        (IntValue::I16(left), IntValue::I16(right)) => left.cmp(right),
+        (IntValue::I32(left), IntValue::I32(right)) => left.cmp(right),
+        (IntValue::I64(left), IntValue::I64(right)) => left.cmp(right),
+        (IntValue::U8(left), IntValue::U8(right)) => left.cmp(right),
+        (IntValue::U16(left), IntValue::U16(right)) => left.cmp(right),
+        (IntValue::U32(left), IntValue::U32(right)) => left.cmp(right),
+        (IntValue::U64(left), IntValue::U64(right)) => left.cmp(right),
+        _ => unreachable!("integer tensor storage is homogeneous"),
+    }
+}
+
+fn positive_integer_magnitude(value: &IntValue) -> Option<u128> {
+    match value {
+        IntValue::I8(value) if *value >= 1 => Some(*value as u128),
+        IntValue::I16(value) if *value >= 1 => Some(*value as u128),
+        IntValue::I32(value) if *value >= 1 => Some(*value as u128),
+        IntValue::I64(value) if *value >= 1 => Some(*value as u128),
+        IntValue::U8(value) if *value >= 1 => Some(*value as u128),
+        IntValue::U16(value) if *value >= 1 => Some(*value as u128),
+        IntValue::U32(value) if *value >= 1 => Some(*value as u128),
+        IntValue::U64(value) if *value >= 1 => Some(*value as u128),
+        _ => None,
+    }
+}
+
+fn positive_integer_like(prototype: &IntValue, value: u128) -> IntValue {
+    match prototype {
+        IntValue::I8(_) => IntValue::I8(value as i8),
+        IntValue::I16(_) => IntValue::I16(value as i16),
+        IntValue::I32(_) => IntValue::I32(value as i32),
+        IntValue::I64(_) => IntValue::I64(value as i64),
+        IntValue::U8(_) => IntValue::U8(value as u8),
+        IntValue::U16(_) => IntValue::U16(value as u16),
+        IntValue::U32(_) => IntValue::U32(value as u32),
+        IntValue::U64(_) => IntValue::U64(value as u64),
+    }
+}
+
+fn exact_integer_tabulate(name: &str, mut values: Vec<IntValue>) -> BuiltinResult<Value> {
+    let total = values.len();
+    if values.is_empty() {
+        return CellArray::new(Vec::new(), 0, 3)
+            .map(Value::Cell)
+            .map_err(|err| descriptive_error(name, format!("{name}: {err}")));
+    }
+    let positive_max = values
+        .iter()
+        .map(positive_integer_magnitude)
+        .collect::<Option<Vec<_>>>()
+        .and_then(|values| values.into_iter().max());
+    let rows = if let Some(max) = positive_max.filter(|max| *max <= MAX_EXACT_TABULATE_ROWS) {
+        let prototype = values[0].clone();
+        let counts =
+            values
+                .into_iter()
+                .fold(HashMap::<IntValue, usize>::new(), |mut counts, value| {
+                    *counts.entry(value).or_insert(0) += 1;
+                    counts
+                });
+        (1..=max)
+            .map(|value| {
+                let value = positive_integer_like(&prototype, value);
+                let count = counts.get(&value).copied().unwrap_or(0);
+                (value, count)
+            })
+            .collect::<Vec<_>>()
+    } else {
+        values.sort_by(compare_same_class_integers);
+        let mut rows = Vec::new();
+        let mut idx = 0usize;
+        while idx < values.len() {
+            let value = values[idx].clone();
+            let mut end = idx + 1;
+            while end < values.len() && compare_same_class_integers(&values[end], &value).is_eq() {
+                end += 1;
+            }
+            rows.push((value, end - idx));
+            idx = end;
+        }
+        rows
+    };
+    let row_count = rows.len();
+    let mut data = Vec::with_capacity(row_count * 3);
+    for (value, count) in rows {
+        data.push(Value::Int(value));
+        data.push(Value::Num(count as f64));
+        data.push(Value::Num(count as f64 * 100.0 / total as f64));
+    }
+    CellArray::new(data, row_count, 3)
+        .map(Value::Cell)
+        .map_err(|err| descriptive_error(name, format!("{name}: {err}")))
+}
+
 fn numeric_tabulate(name: &str, tensor: Tensor) -> BuiltinResult<Value> {
+    if let Some(storage) = tensor.integer_storage() {
+        return exact_integer_tabulate(name, storage.exact_values());
+    }
     let mut values = tensor::tensor_into_values_f64(tensor)
         .into_iter()
         .filter(|value| !value.is_nan())
@@ -1059,11 +1506,10 @@ fn tabulate_value(name: &str, value: Value) -> BuiltinResult<Value> {
     match value {
         Value::Tensor(tensor) => numeric_tabulate(name, tensor),
         Value::LogicalArray(logical) => logical_tabulate(name, logical.data),
-        Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
-            tensor::value_into_tensor_for(name, value)
-                .map_err(|err| descriptive_error(name, format!("{name}: {err}")))
-                .and_then(|tensor| numeric_tabulate(name, tensor))
-        }
+        Value::Int(value) => exact_integer_tabulate(name, vec![value]),
+        Value::Num(_) | Value::Bool(_) => tensor::value_into_tensor_for(name, value)
+            .map_err(|err| descriptive_error(name, format!("{name}: {err}")))
+            .and_then(|tensor| numeric_tabulate(name, tensor)),
         Value::String(text) => string_tabulate(name, [text]),
         Value::StringArray(array) => string_tabulate(name, array.data),
         Value::CharArray(chars) if chars.rows == 1 => {
@@ -1100,9 +1546,18 @@ pub mod geomean {
         keywords = "geomean,geometric mean,statistics,summary",
         type_resolver(super::descriptive_type),
         descriptor(self::DESCRIPTOR),
+        extensions(super::GEOMEAN_EXTENSIONS),
+        integer_capabilities(super::GEOMEAN_INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::stats::summary::descriptive::geomean"
     )]
     pub(crate) async fn geomean_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        super::ensure_floating_stat_integer_extensions(
+            "geomean",
+            &value,
+            &rest,
+            &GEOMEAN_INTEGER_DATA_EXTENSION,
+            &GEOMEAN_INTEGER_CONTROL_EXTENSION,
+        )?;
         super::reduce_builtin(
             "geomean",
             value,
@@ -1125,9 +1580,18 @@ pub mod harmmean {
         keywords = "harmmean,harmonic mean,statistics,summary",
         type_resolver(super::descriptive_type),
         descriptor(self::DESCRIPTOR),
+        extensions(super::HARMMEAN_EXTENSIONS),
+        integer_capabilities(super::HARMMEAN_INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::stats::summary::descriptive::harmmean"
     )]
     pub(crate) async fn harmmean_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        super::ensure_floating_stat_integer_extensions(
+            "harmmean",
+            &value,
+            &rest,
+            &HARMMEAN_INTEGER_DATA_EXTENSION,
+            &HARMMEAN_INTEGER_CONTROL_EXTENSION,
+        )?;
         super::reduce_builtin(
             "harmmean",
             value,
@@ -1150,9 +1614,17 @@ pub mod rms {
         keywords = "rms,root mean square,statistics,signal",
         type_resolver(super::descriptive_type),
         descriptor(self::DESCRIPTOR),
+        extensions(super::RMS_EXTENSIONS),
+        integer_capabilities(super::RMS_INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::stats::summary::descriptive::rms"
     )]
     pub(crate) async fn rms_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        if super::is_typed_integer_numeric_value(&value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &RMS_INTEGER_DATA_EXTENSION,
+                "rms",
+            )?;
+        }
         let input = super::value_to_magnitude_tensor("rms", value).await?;
         let options = super::parse_reduce_options("rms", rest, super::NanFlag::Include).await?;
         super::reduce_tensor("rms", input, options, super::rms_slice)
@@ -1199,9 +1671,24 @@ pub mod skewness {
         keywords = "skewness,third moment,statistics,summary",
         type_resolver(super::descriptive_type),
         descriptor(self::DESCRIPTOR),
+        extensions(super::SKEWNESS_EXTENSIONS),
+        integer_capabilities(super::SKEWNESS_INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::stats::summary::descriptive::skewness"
     )]
     pub(crate) async fn skewness_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        super::ensure_floating_stat_integer_extensions(
+            "skewness",
+            &value,
+            &rest,
+            &SKEWNESS_INTEGER_DATA_EXTENSION,
+            &SKEWNESS_INTEGER_CONTROL_EXTENSION,
+        )?;
+        super::ensure_gpu_multi_axis_extension(
+            "skewness",
+            &value,
+            &rest,
+            &SKEWNESS_GPU_MULTI_AXIS_EXTENSION,
+        )?;
         super::flagged_reduce_builtin(
             "skewness",
             value,
@@ -1225,9 +1712,24 @@ pub mod kurtosis {
         keywords = "kurtosis,fourth moment,statistics,summary",
         type_resolver(super::descriptive_type),
         descriptor(self::DESCRIPTOR),
+        extensions(super::KURTOSIS_EXTENSIONS),
+        integer_capabilities(super::KURTOSIS_INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::stats::summary::descriptive::kurtosis"
     )]
     pub(crate) async fn kurtosis_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        super::ensure_floating_stat_integer_extensions(
+            "kurtosis",
+            &value,
+            &rest,
+            &KURTOSIS_INTEGER_DATA_EXTENSION,
+            &KURTOSIS_INTEGER_CONTROL_EXTENSION,
+        )?;
+        super::ensure_gpu_multi_axis_extension(
+            "kurtosis",
+            &value,
+            &rest,
+            &KURTOSIS_GPU_MULTI_AXIS_EXTENSION,
+        )?;
         super::flagged_reduce_builtin(
             "kurtosis",
             value,
@@ -1251,6 +1753,8 @@ pub mod rmse {
         keywords = "rmse,root mean squared error,error,statistics",
         type_resolver(super::descriptive_type),
         descriptor(self::DESCRIPTOR),
+        extensions(super::RMSE_EXTENSIONS),
+        integer_capabilities(super::RMSE_INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::stats::summary::descriptive::rmse"
     )]
     pub(crate) async fn rmse_builtin(
@@ -1258,6 +1762,20 @@ pub mod rmse {
         rhs: Value,
         rest: Vec<Value>,
     ) -> BuiltinResult<Value> {
+        if super::is_typed_integer_numeric_value(&lhs)
+            || super::is_typed_integer_numeric_value(&rhs)
+        {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &RMSE_INTEGER_DATA_EXTENSION,
+                "rmse",
+            )?;
+        }
+        if super::rest_has_typed_integer_weights(&rest) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &RMSE_INTEGER_WEIGHTS_EXTENSION,
+                "rmse",
+            )?;
+        }
         let lhs = super::value_to_complex_buffer("rmse", lhs).await?;
         let rhs = super::value_to_complex_buffer("rmse", rhs).await?;
         let input = super::residual_magnitudes("rmse", lhs, rhs)?;
@@ -1282,9 +1800,23 @@ pub mod tabulate {
         keywords = "tabulate,frequency,count,percent,statistics",
         type_resolver(super::descriptive_type),
         descriptor(self::DESCRIPTOR),
+        extensions(super::TABULATE_EXTENSIONS),
+        integer_capabilities(super::TABULATE_INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::stats::summary::descriptive::tabulate"
     )]
     pub(crate) async fn tabulate_builtin(value: Value) -> BuiltinResult<Value> {
+        if super::is_real_typed_integer_value(&value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &TABULATE_INTEGER_DATA_EXTENSION,
+                "tabulate",
+            )?;
+        }
+        if matches!(value, Value::GpuTensor(_)) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &TABULATE_GPU_INPUT_EXTENSION,
+                "tabulate",
+            )?;
+        }
         let value = super::gathered(value, "tabulate").await?;
         super::tabulate_value("tabulate", value)
     }
@@ -1293,6 +1825,7 @@ pub mod tabulate {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage};
 
@@ -1320,6 +1853,11 @@ mod tests {
             (actual - expected).abs() < 1e-10,
             "expected {expected}, got {actual}"
         );
+    }
+
+    fn assert_extension_error(result: BuiltinResult<Value>, identifier: &'static str) {
+        let error = result.unwrap_err();
+        assert_eq!(error.identifier(), Some(identifier));
     }
 
     fn tensor_values(value: Value) -> (Vec<f64>, Vec<usize>) {
@@ -1412,7 +1950,37 @@ mod tests {
     }
 
     #[test]
+    fn descriptive_integer_extensions_cover_all_storage_classes() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let storages = vec![
+            IntegerStorage::I8(vec![1, 2, 4]),
+            IntegerStorage::I16(vec![1, 2, 4]),
+            IntegerStorage::I32(vec![1, 2, 4]),
+            IntegerStorage::I64(vec![1, 2, 4]),
+            IntegerStorage::U8(vec![1, 2, 4]),
+            IntegerStorage::U16(vec![1, 2, 4]),
+            IntegerStorage::U32(vec![1, 2, 4]),
+            IntegerStorage::U64(vec![1, 2, 4]),
+        ];
+        for storage in storages {
+            let input = || int_tensor(storage.clone(), vec![3, 1]);
+            let all = || vec![Value::from("all")];
+            assert!(block_on(geomean::geomean_builtin(input(), all())).is_ok());
+            assert!(block_on(harmmean::harmmean_builtin(input(), all())).is_ok());
+            assert!(block_on(rms::rms_builtin(input(), all())).is_ok());
+            assert!(block_on(skewness::skewness_builtin(input(), all())).is_ok());
+            assert!(block_on(kurtosis::kurtosis_builtin(input(), all())).is_ok());
+            assert!(block_on(rmse::rmse_builtin(input(), Value::Num(0.0), all())).is_ok());
+            assert!(matches!(
+                block_on(tabulate::tabulate_builtin(input())).unwrap(),
+                Value::Cell(_)
+            ));
+        }
+    }
+
+    #[test]
     fn descriptive_reduction_shape_uses_typed_integer_storage_not_mirror() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let x = mirrorless_int_tensor(IntegerStorage::U16(vec![9]), Vec::new());
 
         let out = block_on(geomean::geomean_builtin(x, Vec::new())).unwrap();
@@ -1486,6 +2054,118 @@ mod tests {
     }
 
     #[test]
+    fn remaining_descriptive_integer_extensions_follow_compatibility_mode() {
+        let integer_data = || int_tensor(IntegerStorage::I16(vec![1, 4, 9]), vec![1, 3]);
+        let floating_data = || Value::Tensor(Tensor::new(vec![1.0, 4.0, 9.0], vec![1, 3]).unwrap());
+        let integer_dim = || Value::Int(IntValue::U8(2));
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+
+        assert_extension_error(
+            block_on(geomean::geomean_builtin(integer_data(), Vec::new())),
+            "RunMat:compatibility:GeomeanIntegerDataExtension",
+        );
+        assert_extension_error(
+            block_on(geomean::geomean_builtin(
+                floating_data(),
+                vec![integer_dim()],
+            )),
+            "RunMat:compatibility:GeomeanTypedIntegerControlExtension",
+        );
+        assert_extension_error(
+            block_on(harmmean::harmmean_builtin(integer_data(), Vec::new())),
+            "RunMat:compatibility:HarmmeanIntegerDataExtension",
+        );
+        assert_extension_error(
+            block_on(harmmean::harmmean_builtin(
+                floating_data(),
+                vec![integer_dim()],
+            )),
+            "RunMat:compatibility:HarmmeanTypedIntegerControlExtension",
+        );
+        assert_extension_error(
+            block_on(rms::rms_builtin(integer_data(), Vec::new())),
+            "RunMat:compatibility:RmsIntegerDataExtension",
+        );
+        assert_extension_error(
+            block_on(skewness::skewness_builtin(integer_data(), Vec::new())),
+            "RunMat:compatibility:SkewnessIntegerDataExtension",
+        );
+        assert_extension_error(
+            block_on(skewness::skewness_builtin(
+                floating_data(),
+                vec![integer_dim()],
+            )),
+            "RunMat:compatibility:SkewnessTypedIntegerControlExtension",
+        );
+        assert_extension_error(
+            block_on(kurtosis::kurtosis_builtin(integer_data(), Vec::new())),
+            "RunMat:compatibility:KurtosisIntegerDataExtension",
+        );
+        assert_extension_error(
+            block_on(kurtosis::kurtosis_builtin(
+                floating_data(),
+                vec![integer_dim()],
+            )),
+            "RunMat:compatibility:KurtosisTypedIntegerControlExtension",
+        );
+        assert_extension_error(
+            block_on(rmse::rmse_builtin(
+                integer_data(),
+                floating_data(),
+                Vec::new(),
+            )),
+            "RunMat:compatibility:RmseIntegerDataExtension",
+        );
+        assert_extension_error(
+            block_on(rmse::rmse_builtin(
+                floating_data(),
+                floating_data(),
+                vec![Value::from("Weights"), integer_data()],
+            )),
+            "RunMat:compatibility:RmseIntegerWeightsExtension",
+        );
+        assert_extension_error(
+            block_on(tabulate::tabulate_builtin(integer_data())),
+            "RunMat:compatibility:TabulateIntegerDataExtension",
+        );
+    }
+
+    #[test]
+    fn descriptive_gpu_extensions_reject_before_gather() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new(vec![1.0, 4.0, 9.0], vec![3, 1]).unwrap();
+            let handle =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &input).unwrap();
+            let vecdim = crate::builtins::common::gpu_helpers::upload_tensor(
+                provider,
+                &Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap(),
+            )
+            .unwrap();
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            assert_extension_error(
+                block_on(skewness::skewness_builtin(
+                    Value::GpuTensor(handle.clone()),
+                    vec![Value::Num(1.0), Value::from("all")],
+                )),
+                "RunMat:compatibility:SkewnessGpuMultiAxisExtension",
+            );
+            assert_extension_error(
+                block_on(kurtosis::kurtosis_builtin(
+                    Value::GpuTensor(handle.clone()),
+                    vec![Value::Num(1.0), Value::GpuTensor(vecdim.clone())],
+                )),
+                "RunMat:compatibility:KurtosisGpuMultiAxisExtension",
+            );
+            assert_extension_error(
+                block_on(tabulate::tabulate_builtin(Value::GpuTensor(handle.clone()))),
+                "RunMat:compatibility:TabulateGpuInputExtension",
+            );
+            let _ = provider.free(&handle);
+            let _ = provider.free(&vecdim);
+        });
+    }
+
+    #[test]
     fn skewness_and_kurtosis_match_biased_moments() {
         let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap());
         let skew = block_on(skewness::skewness_builtin(
@@ -1521,6 +2201,7 @@ mod tests {
 
     #[test]
     fn rmse_reads_typed_integer_residual_inputs_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let x = int_tensor(IntegerStorage::I16(vec![2, 4, 6]), vec![3, 1]);
         let y = int_tensor(IntegerStorage::U16(vec![1]), vec![1, 1]);
         let out = block_on(rmse::rmse_builtin(
@@ -1558,6 +2239,7 @@ mod tests {
 
     #[test]
     fn weighted_rmse_reads_typed_integer_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let x = int_tensor(IntegerStorage::I16(vec![2, 4, 6]), vec![3, 1]);
         let y = int_tensor(IntegerStorage::I16(vec![1]), vec![1, 1]);
         let weights = int_tensor(IntegerStorage::U16(vec![1, 2, 3]), vec![3, 1]);
@@ -1579,6 +2261,7 @@ mod tests {
 
     #[test]
     fn weighted_rmse_weight_length_uses_typed_integer_storage_not_mirror() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let x = Value::Tensor(Tensor::new(vec![2.0, 4.0, 6.0], vec![3, 1]).unwrap());
         let y = Value::Num(1.0);
         let weights = mirrorless_int_tensor(IntegerStorage::U16(vec![1, 2, 3]), vec![3, 1]);
@@ -1648,6 +2331,7 @@ mod tests {
 
     #[test]
     fn rms_reads_typed_complex_integer_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let x = complex_int_tensor(
             IntegerStorage::I16(vec![3, 0]),
             IntegerStorage::I16(vec![4, 12]),
@@ -1663,6 +2347,7 @@ mod tests {
 
     #[test]
     fn rmse_reads_typed_complex_integer_residual_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let x = complex_int_tensor(
             IntegerStorage::I16(vec![3, 0]),
             IntegerStorage::I16(vec![4, 12]),
@@ -1720,15 +2405,35 @@ mod tests {
 
     #[test]
     fn tabulate_numeric_reads_typed_integer_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let x = int_tensor(IntegerStorage::U8(vec![1, 3, 3]), vec![1, 3]);
         let out = block_on(tabulate::tabulate_builtin(x)).unwrap();
-        let (data, shape) = tensor_values(out);
-        assert_eq!(shape, vec![3, 3]);
-        assert_eq!(&data[0..3], &[1.0, 2.0, 3.0]);
-        assert_eq!(&data[3..6], &[1.0, 0.0, 2.0]);
-        assert_close(data[6], 100.0 / 3.0);
-        assert_close(data[7], 0.0);
-        assert_close(data[8], 200.0 / 3.0);
+        let Value::Cell(cell) = out else {
+            panic!("expected exact integer cell table");
+        };
+        assert_eq!((cell.rows, cell.cols), (3, 3));
+        assert_eq!(cell.get(0, 0).unwrap(), Value::Int(IntValue::U8(1)));
+        assert_eq!(cell.get(1, 0).unwrap(), Value::Int(IntValue::U8(2)));
+        assert_eq!(cell.get(2, 0).unwrap(), Value::Int(IntValue::U8(3)));
+        assert_eq!(cell.get(0, 1).unwrap(), Value::Num(1.0));
+        assert_eq!(cell.get(1, 1).unwrap(), Value::Num(0.0));
+        assert_eq!(cell.get(2, 1).unwrap(), Value::Num(2.0));
+    }
+
+    #[test]
+    fn tabulate_integer_extension_preserves_wide_distinct_values() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let base = 1_u64 << 53;
+        let x = int_tensor(IntegerStorage::U64(vec![base, base + 1, base]), vec![1, 3]);
+        let out = block_on(tabulate::tabulate_builtin(x)).unwrap();
+        let Value::Cell(cell) = out else {
+            panic!("expected exact integer cell table");
+        };
+        assert_eq!((cell.rows, cell.cols), (2, 3));
+        assert_eq!(cell.get(0, 0).unwrap(), Value::Int(IntValue::U64(base)));
+        assert_eq!(cell.get(1, 0).unwrap(), Value::Int(IntValue::U64(base + 1)));
+        assert_eq!(cell.get(0, 1).unwrap(), Value::Num(2.0));
+        assert_eq!(cell.get(1, 1).unwrap(), Value::Num(1.0));
     }
 
     #[test]

@@ -40873,6 +40873,76 @@
           "when": "Internal tensor conversion or allocation fails.",
           "message": "descriptive statistics: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "geomean-integer-data",
+          "mode": "RunMatOnly",
+          "description": "geomean with typed-integer input data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GeomeanIntegerDataExtension"
+        },
+        {
+          "id": "geomean-typed-integer-control",
+          "mode": "RunMatOnly",
+          "description": "geomean with a typed-integer flag or dimension control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GeomeanTypedIntegerControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = geomean(X, ...) with integer X",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented nonnegative data domain is single or double; RunMat mode additionally accepts all eight real integer classes."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat's integer-data extension enters one explicit double computation/output boundary after compatibility is decided from host storage or resident dtype metadata."
+        },
+        {
+          "form": "Y = geomean(X, integer_flag_or_dimension, ...) with floating X",
+          "inputs": [
+            {
+              "name": "flag_or_dimension",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Documented dimensions accept single or double; exact typed-integer dimensions are a mode-gated RunMat extension."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Typed-integer controls are decoded exactly and independently gated from integer data."
+        }
       ]
     },
     {
@@ -43184,6 +43254,76 @@
           "identifier": "RunMat:harmmean:Internal",
           "when": "Internal tensor conversion or allocation fails.",
           "message": "descriptive statistics: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "harmmean-integer-data",
+          "mode": "RunMatOnly",
+          "description": "harmmean with typed-integer input data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:HarmmeanIntegerDataExtension"
+        },
+        {
+          "id": "harmmean-typed-integer-control",
+          "mode": "RunMatOnly",
+          "description": "harmmean with a typed-integer flag or dimension control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:HarmmeanTypedIntegerControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = harmmean(X, ...) with integer X",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented numeric data domain is single or double; RunMat mode additionally accepts all eight real integer classes."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat's integer-data extension enters one explicit double computation/output boundary after compatibility is decided from host storage or resident dtype metadata."
+        },
+        {
+          "form": "Y = harmmean(X, integer_flag_or_dimension, ...) with floating X",
+          "inputs": [
+            {
+              "name": "flag_or_dimension",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Documented dimensions accept single or double; exact typed-integer dimensions are a mode-gated RunMat extension."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Typed-integer controls are decoded exactly and independently gated from integer data."
         }
       ]
     },
@@ -55790,6 +55930,82 @@
           "identifier": "RunMat:kurtosis:Internal",
           "when": "Internal tensor conversion or allocation fails.",
           "message": "descriptive statistics: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "kurtosis-integer-data",
+          "mode": "RunMatOnly",
+          "description": "kurtosis with typed-integer input data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:KurtosisIntegerDataExtension"
+        },
+        {
+          "id": "kurtosis-typed-integer-control",
+          "mode": "RunMatOnly",
+          "description": "kurtosis with a typed-integer flag or dimension control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:KurtosisTypedIntegerControlExtension"
+        },
+        {
+          "id": "kurtosis-gpu-all-or-vecdim",
+          "mode": "RunMatOnly",
+          "description": "kurtosis with all or vecdim on a GPU input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:KurtosisGpuMultiAxisExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = kurtosis(X, ...) with integer X",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented data domain is single or double; RunMat mode additionally accepts all eight real integer classes."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat's integer-data extension enters one explicit double computation/output boundary after compatibility is decided from host storage or resident dtype metadata."
+        },
+        {
+          "form": "Y = kurtosis(X, integer_flag_or_dimension, ...) with floating X",
+          "inputs": [
+            {
+              "name": "flag_or_dimension",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The documented bias flag accepts single, double, or logical and documented dimensions accept single or double; exact typed-integer controls are mode-gated."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Typed-integer controls are decoded exactly and independently gated from integer data."
         }
       ]
     },
@@ -93223,6 +93439,43 @@
           "when": "Internal tensor conversion or allocation fails.",
           "message": "descriptive statistics: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "rms-integer-data",
+          "mode": "RunMatOnly",
+          "description": "rms with typed real or complex integer input data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RmsIntegerDataExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = rms(X, dim_or_vecdim_or_all, nanflag) with integer X",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented data domain is single, double, logical, or char; RunMat mode additionally accepts real and paired complex values of all eight integer classes."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Real or paired complex integer magnitudes enter one explicit double RMS computation/output boundary; resident compatibility is decided before gather."
+        }
       ]
     },
     {
@@ -93446,6 +93699,76 @@
           "identifier": "RunMat:rmse:Internal",
           "when": "Internal tensor conversion or allocation fails.",
           "message": "descriptive statistics: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "rmse-integer-data",
+          "mode": "RunMatOnly",
+          "description": "rmse with typed real or complex integer forecast or actual data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RmseIntegerDataExtension"
+        },
+        {
+          "id": "rmse-integer-weights",
+          "mode": "RunMatOnly",
+          "description": "rmse with typed-integer weights is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RmseIntegerWeightsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "E = rmse(F, A, dim_or_vecdim_or_all, nanflag, Weights=W) with integer F or A",
+          "inputs": [
+            {
+              "name": "F_or_A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented forecast and actual data domains are single or double; RunMat mode additionally accepts real and paired complex values of all eight integer classes."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Exact integer components materialize once into the double residual-magnitude and RMS domain after compatibility is decided from host storage or resident metadata."
+        },
+        {
+          "form": "E = rmse(F, A, ..., Weights=integer_W) with floating F and A",
+          "inputs": [
+            {
+              "name": "W",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The documented weight domain is single or double; RunMat mode additionally accepts nonnegative typed-integer weights."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Typed-integer weights materialize explicitly into the nonnegative double weighting domain and are independently gated from integer forecast or actual data."
         }
       ]
     },
@@ -98005,6 +98328,82 @@
           "identifier": "RunMat:skewness:Internal",
           "when": "Internal tensor conversion or allocation fails.",
           "message": "descriptive statistics: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "skewness-integer-data",
+          "mode": "RunMatOnly",
+          "description": "skewness with typed-integer input data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SkewnessIntegerDataExtension"
+        },
+        {
+          "id": "skewness-typed-integer-control",
+          "mode": "RunMatOnly",
+          "description": "skewness with a typed-integer flag or dimension control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SkewnessTypedIntegerControlExtension"
+        },
+        {
+          "id": "skewness-gpu-all-or-vecdim",
+          "mode": "RunMatOnly",
+          "description": "skewness with all or vecdim on a GPU input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:SkewnessGpuMultiAxisExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = skewness(X, ...) with integer X",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented data domain is single or double; RunMat mode additionally accepts all eight real integer classes."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat's integer-data extension enters one explicit double computation/output boundary after compatibility is decided from host storage or resident dtype metadata."
+        },
+        {
+          "form": "Y = skewness(X, integer_flag_or_dimension, ...) with floating X",
+          "inputs": [
+            {
+              "name": "flag_or_dimension",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The documented bias flag accepts single, double, or logical and documented dimensions accept single or double; exact typed-integer controls are mode-gated."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Typed-integer controls are decoded exactly and independently gated from integer data."
         }
       ]
     },
@@ -107812,6 +108211,49 @@
           "when": "Internal tensor conversion or allocation fails.",
           "message": "descriptive statistics: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "tabulate-integer-data",
+          "mode": "RunMatOnly",
+          "description": "tabulate with typed-integer input data and exact cell output is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TabulateIntegerDataExtension"
+        },
+        {
+          "id": "tabulate-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "tabulate with a GPU input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TabulateGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tbl = tabulate(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented numeric input domain is single or double; RunMat mode additionally accepts all eight integer classes and returns a heterogeneous cell table so exact wide values are not coerced through binary64."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer observations group and sort in exact same-class storage; the cell table preserves integer values in column one and uses double counts and percentages, while positive-gap expansion is bounded to avoid unrepresentable allocation."
+        }
       ]
     },
     {
@@ -109482,6 +109924,43 @@
           "identifier": "RunMat:tiedrank:Internal",
           "when": "Internal tensor conversion or allocation fails.",
           "message": "order statistics: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "tiedrank-integer-data",
+          "mode": "RunMatOnly",
+          "description": "tiedrank with typed-integer input data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:TiedrankIntegerDataExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[R, tieadj] = tiedrank(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented data domain is single or double; RunMat mode additionally accepts all eight real integer classes."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat's integer-data extension compares and groups same-class integers exactly, including wide values above flintmax, then returns double ranks and tie adjustments."
         }
       ]
     },
