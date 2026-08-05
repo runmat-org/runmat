@@ -3,9 +3,12 @@
 use runmat_accelerate_api::{GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor, NumericDType, ResolveContext, Tensor, Type,
-    Value,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    NumericDType, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -102,6 +105,35 @@ pub const TRND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "nu",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer degrees of freedom are gated by trnd-integer-degrees-of-freedom and enter the floating Student-t computation domain.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "sz",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer scalar/vector size arguments are gated by trnd-integer-size and parsed exactly before allocation.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "r = trnd(nu, sz1, sz2, ...)",
+        inputs: &INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Typed-integer parameters are RunMat-only; integer nu produces double samples, and a resident source receives host-generated fallback output re-uploaded with matching precision.",
+    }];
+
 fn trnd_error(
     descriptor: &'static BuiltinErrorDescriptor,
     message: impl Into<String>,
@@ -128,6 +160,7 @@ fn trnd_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     type_resolver(trnd_type),
     descriptor(crate::builtins::stats::random::trnd::TRND_DESCRIPTOR),
     extensions(crate::builtins::stats::random::trnd::TRND_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::random::trnd::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::random::trnd"
 )]
 pub(crate) async fn trnd_builtin(args: Vec<Value>) -> BuiltinResult<Value> {

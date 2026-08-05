@@ -5131,10 +5131,18 @@ pub enum BuiltinIntegerScalarDoubleRule {
     Rejected,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinIntegerInputAvailability {
+    Documented,
+    RunMatOnly,
+    Rejected,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct BuiltinIntegerInputCapability {
     pub name: &'static str,
     pub classes: &'static [BuiltinIntegerClass],
+    pub availability: BuiltinIntegerInputAvailability,
     pub scalar_double: BuiltinIntegerScalarDoubleRule,
     pub notes: &'static str,
 }

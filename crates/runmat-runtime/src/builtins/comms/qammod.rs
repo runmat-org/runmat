@@ -5,8 +5,13 @@ use runmat_accelerate_api::{
     ProviderPrecision,
 };
 use runmat_builtins::{
-    ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericDType, ResolveContext, Tensor,
-    Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, ComplexTensor, IntValue, IntegerStorage, LogicalArray,
+    NumericDType, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -20,6 +25,96 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "qammod";
 const INTEGER_TOL: f64 = 1e-9;
+
+const OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Complex rectangular-QAM baseband samples.",
+}];
+
+const INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Integer symbols or grouped bit input.",
+    },
+    BuiltinParamDescriptor {
+        name: "M",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Square modulation order greater than one.",
+    },
+    BuiltinParamDescriptor {
+        name: "args",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Optional symbol order and name-value options.",
+    },
+];
+
+const SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "Y = qammod(X, M, symorder, Name, Value)",
+    inputs: &INPUTS,
+    outputs: &OUTPUTS,
+}];
+
+const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.QAMMOD.INVALID_ARGUMENT",
+    identifier: None,
+    when: "Symbols, modulation order, mapping, or options are invalid.",
+    message: "qammod: invalid argument",
+};
+
+const ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_ARGUMENT];
+
+pub const QAMMOD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+
+const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 3] = [
+    BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::INTEGER_CLASSES_THROUGH_16_BITS,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer symbol/bit input accepts int8, int16, uint8, and uint16 on host and GPU; wider integer symbol classes reject.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "M",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Modulation order accepts every exact integer class or an integer-valued floating scalar.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "symorder",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Custom symbol-order vectors accept all eight exact integer classes.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = qammod(X, M, symorder, Name, Value)",
+        inputs: &INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Built-in integer symbol input defaults to complex double output; OutputDataType can select single, and provider/fallback paths preserve the selected resident precision.",
+    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::comms::qammod")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -59,6 +154,8 @@ fn qammod_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     summary = "Map integer or bit symbols onto a QAM complex-baseband constellation.",
     keywords = "qammod,qam,modulation,communications,gray,binary,gpu",
     type_resolver(qammod_type),
+    descriptor(crate::builtins::comms::qammod::QAMMOD_DESCRIPTOR),
+    integer_capabilities(crate::builtins::comms::qammod::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::comms::qammod"
 )]
 async fn qammod_builtin(x: Value, m: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

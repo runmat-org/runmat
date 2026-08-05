@@ -5,10 +5,10 @@ use num_complex::Complex64;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
     BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, NumericDType, NumericStorage, Tensor, Value,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, ComplexTensor, NumericDType, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -109,12 +109,14 @@ const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
     BuiltinIntegerInputCapability {
         name: "p",
         classes: &[],
+        availability: BuiltinIntegerInputAvailability::Rejected,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
         notes: "Integer and logical coefficient vectors are rejected before floating host/provider dispatch.",
     },
     BuiltinIntegerInputCapability {
         name: "k",
         classes: &[],
+        availability: BuiltinIntegerInputAvailability::Rejected,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
         notes: "Integer and logical integration constants are rejected; only single/double real or complex values are supported.",
     },

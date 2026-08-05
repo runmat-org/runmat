@@ -11360,6 +11360,7 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
               "scalar_double": "NotApplicable",
               "notes": "Array elements are permuted without changing or materializing their native integer class."
             },
@@ -11375,6 +11376,7 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
               "scalar_double": "Allowed",
               "notes": "Shift scalars/vectors are parsed exactly for integer storage and must be finite integer-valued when floating."
             },
@@ -11390,6 +11392,7 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
               "scalar_double": "Allowed",
               "notes": "Dimension scalars/vectors are parsed exactly, must be positive, and cannot contain duplicates."
             }
@@ -22772,6 +22775,51 @@
           "description": "db with integer, logical, or complex-integer computation input is a RunMat extension",
           "error_identifier": "RunMat:compatibility:DbNonfloatingInputExtension"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "yDb = db(y, mode_or_R)",
+          "inputs": [
+            {
+              "name": "y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Real and paired-complex integer computation input is gated by db-nonfloating-input and enters the decibel floating domain."
+            },
+            {
+              "name": "R",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer positive resistance is gated by db-nonfloating-input and broadcasts with the signal magnitude."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "OptionDependent",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "BroadcastCompatible",
+          "notes": "Nonfloating computation input is RunMat-only; ordinary integer/logical input promotes to double, while a native-single resistance can select single output, and resident inputs gather for host conversion."
+        }
       ]
     },
     {
@@ -29643,6 +29691,7 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
               "scalar_double": "NotApplicable",
               "notes": "Input must be a real nonnegative integer-valued scalar."
             }
@@ -29760,6 +29809,7 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
               "scalar_double": "NotApplicable",
               "notes": "Every element must be a real nonnegative integer value."
             }
@@ -39968,6 +40018,7 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
               "scalar_double": "Allowed",
               "notes": "If A is integer, B must use the same integer class or be a scalar double."
             },
@@ -39983,6 +40034,7 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
               "scalar_double": "Allowed",
               "notes": "If B is integer, A must use the same integer class or be a scalar double."
             }
@@ -40005,6 +40057,7 @@
                 "Int32",
                 "Int64"
               ],
+              "availability": "Documented",
               "scalar_double": "Allowed",
               "notes": "Extended outputs support signed integer, single, and double inputs."
             },
@@ -40016,6 +40069,7 @@
                 "Int32",
                 "Int64"
               ],
+              "availability": "Documented",
               "scalar_double": "Allowed",
               "notes": "Extended outputs support signed integer, single, and double inputs."
             }
@@ -43997,6 +44051,7 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
               "scalar_double": "NotApplicable",
               "notes": "Host data accepts all eight integer classes; interactive GPU data accepts integer classes through 32 bits and rejects int64/uint64 before gather."
             },
@@ -44012,6 +44067,7 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
               "scalar_double": "Allowed",
               "notes": "Typed integer bin counts, explicit edges, widths, and limits are parsed according to each control's scalar/vector contract."
             }
@@ -46122,6 +46178,7 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
               "scalar_double": "AllowedExceptWith64BitInteger",
               "notes": "A is an integer array or a compatible integer-valued scalar double."
             },
@@ -46137,6 +46194,7 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
               "scalar_double": "AllowedExceptWith64BitInteger",
               "notes": "B is an integer array or a compatible integer-valued scalar double."
             }
@@ -48417,6 +48475,99 @@
           "mode": "RunMatOnly",
           "description": "imshow with numeric M-by-N-by-4 image data is a RunMat extension",
           "error_identifier": "RunMat:compatibility:ImshowFourChannelImageExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = imshow(I, DisplayRange) [grayscale]",
+          "inputs": [
+            {
+              "name": "I",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Grayscale image data accepts every integer class and derives the default display range from its exact class."
+            },
+            {
+              "name": "DisplayRange",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Explicit two-element display limits accept all integer classes and are parsed from exact storage."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Exact integer class selects normalization limits before values enter the rendering domain; grayscale GPU inputs may remain resident with shared WGPU context."
+        },
+        {
+          "form": "h = imshow(I) [truecolor]",
+          "inputs": [
+            {
+              "name": "I",
+              "classes": [
+                "Uint8",
+                "Uint16"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Documented integer truecolor input accepts uint8 and uint16; other integer classes reject."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "Three-channel integer truecolor rendering is documented only for uint8 and uint16."
+        },
+        {
+          "form": "h = imshow(I) [four-channel image]",
+          "inputs": [
+            {
+              "name": "I",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Numeric M-by-N-by-4 image data is gated by imshow-four-channel-image."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "Four-channel numeric rendering is a separately gated RunMat-only form."
         }
       ]
     },
@@ -53124,6 +53275,7 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
               "scalar_double": "NotApplicable",
               "notes": "Every element must be a real nonnegative integer value."
             }
@@ -55693,6 +55845,7 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
               "scalar_double": "Allowed",
               "notes": "If A is integer, B must use the same integer class or be a scalar double."
             },
@@ -55708,6 +55861,7 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
               "scalar_double": "Allowed",
               "notes": "If B is integer, A must use the same integer class or be a scalar double."
             }
@@ -64705,6 +64859,7 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
               "scalar_double": "AllowedExceptWith64BitInteger",
               "notes": "A is an integer array or a compatible real scalar double."
             },
@@ -64720,6 +64875,7 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
               "scalar_double": "AllowedExceptWith64BitInteger",
               "notes": "B is an integer array or a compatible real scalar double."
             }
@@ -67817,6 +67973,7 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
               "scalar_double": "NotApplicable",
               "notes": "Integer scalar or square-matrix bases retain their native class."
             },
@@ -67832,6 +67989,7 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
               "scalar_double": "Allowed",
               "notes": "The exponent must be a real nonnegative integer-valued scalar."
             }
@@ -70917,6 +71075,7 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
               "scalar_double": "Allowed",
               "notes": "n must be a real nonnegative integer-valued scalar."
             },
@@ -70932,6 +71091,7 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
               "scalar_double": "Allowed",
               "notes": "k must be a real nonnegative integer-valued scalar no greater than n."
             }
@@ -70958,6 +71118,7 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
               "scalar_double": "NotApplicable",
               "notes": "v is a real vector whose integer storage class is preserved in the combinations."
             },
@@ -70973,6 +71134,7 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
               "scalar_double": "Allowed",
               "notes": "k is a real nonnegative integer-valued scalar structural parameter."
             }
@@ -72715,6 +72877,7 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
               "scalar_double": "NotApplicable",
               "notes": "Every integer element or grouped block retains A's native integer class."
             },
@@ -72730,6 +72893,7 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
               "scalar_double": "Allowed",
               "notes": "Dimension selectors are exact positive integer scalars/vectors; duplicate and out-of-range dimensions reject."
             }
@@ -80427,12 +80591,14 @@
             {
               "name": "p",
               "classes": [],
+              "availability": "Rejected",
               "scalar_double": "NotApplicable",
               "notes": "Integer and logical coefficient vectors are rejected before floating host/provider dispatch."
             },
             {
               "name": "k",
               "classes": [],
+              "availability": "Rejected",
               "scalar_double": "NotApplicable",
               "notes": "Integer and logical integration constants are rejected; only single/double real or complex values are supported."
             }
@@ -81378,6 +81544,7 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
               "scalar_double": "NotApplicable",
               "notes": "Input must be a real integer-valued scalar upper bound."
             }
@@ -81887,6 +82054,81 @@
           "description": "pskmod with a typed-integer custom symbol order is a RunMat extension",
           "error_identifier": "RunMat:compatibility:PskmodIntegerCustomOrderExtension"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = pskmod(X, M, phaseoffset, symorder, Name, Value)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Uint8",
+                "Uint16",
+                "Uint32"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer symbol/bit input accepts signed and unsigned classes through 32 bits on host and GPU; int64/uint64 symbols reject."
+            },
+            {
+              "name": "M",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer modulation order is gated by pskmod-integer-modulation-order; documented floating scalar order remains ordinary."
+            },
+            {
+              "name": "phaseoffset",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer phase offset is gated by pskmod-integer-phase-offset."
+            },
+            {
+              "name": "symorder",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer custom symbol order is gated by pskmod-integer-custom-order."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "OptionDependent",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Default output is complex double for every integer input; OutputDataType can select single, and provider/fallback paths preserve selected resident precision."
+        }
       ]
     },
     {
@@ -82326,6 +82568,113 @@
           "identifier": "RunMat:pzmap:Internal",
           "when": "Pole-zero extraction or output construction failed.",
           "message": "pzmap: internal error"
+        }
+      ]
+    },
+    {
+      "name": "qammod",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = qammod(X, M, symorder, Name, Value)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Integer symbols or grouped bit input."
+            },
+            {
+              "name": "M",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Square modulation order greater than one."
+            },
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional symbol order and name-value options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Complex rectangular-QAM baseband samples."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.QAMMOD.INVALID_ARGUMENT",
+          "identifier": null,
+          "when": "Symbols, modulation order, mapping, or options are invalid.",
+          "message": "qammod: invalid argument"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = qammod(X, M, symorder, Name, Value)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Uint8",
+                "Uint16"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer symbol/bit input accepts int8, int16, uint8, and uint16 on host and GPU; wider integer symbol classes reject."
+            },
+            {
+              "name": "M",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Modulation order accepts every exact integer class or an integer-valued floating scalar."
+            },
+            {
+              "name": "symorder",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Custom symbol-order vectors accept all eight exact integer classes."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "OptionDependent",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Built-in integer symbol input defaults to complex double output; OutputDataType can select single, and provider/fallback paths preserve the selected resident precision."
         }
       ]
     },
@@ -87965,6 +88314,7 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
               "scalar_double": "AllowedExceptWith64BitInteger",
               "notes": "A is an integer array or a compatible real scalar double."
             },
@@ -87980,6 +88330,7 @@
                 "Uint32",
                 "Uint64"
               ],
+              "availability": "Documented",
               "scalar_double": "AllowedExceptWith64BitInteger",
               "notes": "B is an integer array or a compatible real scalar double."
             }
@@ -108765,6 +109116,51 @@
           "mode": "RunMatOnly",
           "description": "trnd with typed-integer size arguments is a RunMat extension",
           "error_identifier": "RunMat:compatibility:TrndIntegerSizeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "r = trnd(nu, sz1, sz2, ...)",
+          "inputs": [
+            {
+              "name": "nu",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer degrees of freedom are gated by trnd-integer-degrees-of-freedom and enter the floating Student-t computation domain."
+            },
+            {
+              "name": "sz",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer scalar/vector size arguments are gated by trnd-integer-size and parsed exactly before allocation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Typed-integer parameters are RunMat-only; integer nu produces double samples, and a resident source receives host-generated fallback output re-uploaded with matching precision."
         }
       ]
     },

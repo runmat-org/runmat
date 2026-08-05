@@ -300,20 +300,25 @@ mod tests {
         let registered = runmat_builtins::builtin_functions();
         for name in [
             "circshift",
+            "db",
             "factor",
             "factorial",
             "gcd",
             "histcounts",
             "idivide",
+            "imshow",
             "isprime",
             "lcm",
             "mod",
             "mpower",
             "nchoosek",
             "num2cell",
+            "pskmod",
             "polyint",
             "primes",
+            "qammod",
             "rem",
+            "trnd",
         ] {
             let builtin = registered
                 .iter()
@@ -329,13 +334,28 @@ mod tests {
                 assert!(!capability.notes.is_empty(), "{name} notes");
                 for input in capability.inputs {
                     assert!(!input.notes.is_empty(), "{name}:{} notes", input.name);
-                    if input.classes.is_empty() {
-                        assert_eq!(
-                            input.scalar_double,
-                            runmat_builtins::BuiltinIntegerScalarDoubleRule::NotApplicable,
-                            "{name}:{} empty accepted-class mask",
-                            input.name
-                        );
+                    match input.availability {
+                        runmat_builtins::BuiltinIntegerInputAvailability::Rejected => {
+                            assert!(
+                                input.classes.is_empty(),
+                                "{name}:{} rejected class mask",
+                                input.name
+                            );
+                            assert_eq!(
+                                input.scalar_double,
+                                runmat_builtins::BuiltinIntegerScalarDoubleRule::NotApplicable,
+                                "{name}:{} rejected scalar-double rule",
+                                input.name
+                            );
+                        }
+                        runmat_builtins::BuiltinIntegerInputAvailability::Documented
+                        | runmat_builtins::BuiltinIntegerInputAvailability::RunMatOnly => {
+                            assert!(
+                                !input.classes.is_empty(),
+                                "{name}:{} accepted class mask",
+                                input.name
+                            );
+                        }
                     }
                     for (index, class) in input.classes.iter().enumerate() {
                         assert!(
@@ -345,6 +365,17 @@ mod tests {
                         );
                     }
                 }
+            }
+            if builtin.integer_capabilities.iter().any(|capability| {
+                capability.inputs.iter().any(|input| {
+                    input.availability
+                        == runmat_builtins::BuiltinIntegerInputAvailability::RunMatOnly
+                })
+            }) {
+                assert!(
+                    !builtin.extensions.is_empty(),
+                    "{name} RunMat-only integer input requires extension metadata"
+                );
             }
         }
     }

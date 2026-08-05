@@ -2,8 +2,12 @@
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor, ComplexTensor, NumericDType, Tensor, Value,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -129,6 +133,35 @@ pub const DB_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &DB_ERRORS,
 };
 
+const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Real and paired-complex integer computation input is gated by db-nonfloating-input and enters the decibel floating domain.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "R",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer positive resistance is gated by db-nonfloating-input and broadcasts with the signal magnitude.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "yDb = db(y, mode_or_R)",
+        inputs: &INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::BroadcastCompatible,
+        notes: "Nonfloating computation input is RunMat-only; ordinary integer/logical input promotes to double, while a native-single resistance can select single output, and resident inputs gather for host conversion.",
+    }];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::db")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "db",
@@ -190,6 +223,7 @@ enum DbMode {
     type_resolver(db_type),
     descriptor(crate::builtins::control::db::DB_DESCRIPTOR),
     extensions(crate::builtins::control::db::DB_EXTENSIONS),
+    integer_capabilities(crate::builtins::control::db::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::control::db"
 )]
 async fn db_builtin(y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

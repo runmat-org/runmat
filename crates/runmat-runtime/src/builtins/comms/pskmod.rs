@@ -8,9 +8,12 @@ use runmat_accelerate_api::{
 };
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor, ComplexTensor, IntValue, IntegerStorage,
-    LogicalArray, ResolveContext, Tensor, Type, Value,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, IntValue, IntegerStorage, LogicalArray, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -131,6 +134,49 @@ pub const PSKMOD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &PSKMOD_ERRORS,
 };
 
+const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 4] = [
+    BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::INTEGER_CLASSES_THROUGH_32_BITS,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer symbol/bit input accepts signed and unsigned classes through 32 bits on host and GPU; int64/uint64 symbols reject.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "M",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer modulation order is gated by pskmod-integer-modulation-order; documented floating scalar order remains ordinary.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "phaseoffset",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer phase offset is gated by pskmod-integer-phase-offset.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "symorder",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer custom symbol order is gated by pskmod-integer-custom-order.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = pskmod(X, M, phaseoffset, symorder, Name, Value)",
+        inputs: &INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Default output is complex double for every integer input; OutputDataType can select single, and provider/fallback paths preserve selected resident precision.",
+    }];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::comms::pskmod")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: NAME,
@@ -171,6 +217,7 @@ fn pskmod_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     type_resolver(pskmod_type),
     descriptor(crate::builtins::comms::pskmod::PSKMOD_DESCRIPTOR),
     extensions(crate::builtins::comms::pskmod::PSKMOD_EXTENSIONS),
+    integer_capabilities(crate::builtins::comms::pskmod::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::comms::pskmod"
 )]
 async fn pskmod_builtin(x: Value, m: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
