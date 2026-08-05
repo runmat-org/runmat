@@ -28,10 +28,10 @@ impl WgpuProvider {
             let left_entry = self.get_entry(matrix)?;
             let right_entry = self.get_entry(rhs)?;
 
-            let rows_left = match left_entry.shape.len() {
-                0 => 1usize,
-                1 => left_entry.shape[0],
-                2 => left_entry.shape[0],
+            let left_is_vector = match left_entry.shape.len() {
+                0 => true,
+                1 => true,
+                2 => left_entry.shape[0] == 1 || left_entry.shape[1] == 1,
                 _ => {
                     return Err(anyhow!(
                         "covariance: inputs must be 2-D matrices or vectors (got shape {:?})",
@@ -39,10 +39,10 @@ impl WgpuProvider {
                     ))
                 }
             };
-            let rows_right = match right_entry.shape.len() {
-                0 => 1usize,
-                1 => right_entry.shape[0],
-                2 => right_entry.shape[0],
+            let right_is_vector = match right_entry.shape.len() {
+                0 => true,
+                1 => true,
+                2 => right_entry.shape[0] == 1 || right_entry.shape[1] == 1,
                 _ => {
                     return Err(anyhow!(
                         "covariance: inputs must be 2-D matrices or vectors (got shape {:?})",
@@ -51,25 +51,48 @@ impl WgpuProvider {
                 }
             };
 
+            let compatible = if left_is_vector && right_is_vector {
+                left_entry.len == right_entry.len
+            } else {
+                left_entry.shape == right_entry.shape
+            };
             ensure!(
-                rows_left == rows_right,
-                "covariance: inputs must have the same number of rows (got {} and {})",
-                rows_left,
-                rows_right
+                compatible,
+                "covariance: paired inputs must have the same size"
             );
 
-            let cat_inputs = vec![matrix.clone(), rhs.clone()];
-            Some(self.cat_exec(2, &cat_inputs)?)
+            let left_column = self.reshape(matrix, &[left_entry.len, 1])?;
+            let right_column = self.reshape(rhs, &[right_entry.len, 1])?;
+            let cat_inputs = vec![left_column.clone(), right_column.clone()];
+            let result = self.cat_exec(2, &cat_inputs);
+            let _ = self.free_exec(&left_column);
+            let _ = self.free_exec(&right_column);
+            Some(result?)
         } else {
             None
         };
 
+        let normalized_single = if combined.is_none() {
+            let entry = self.get_entry(matrix)?;
+            match entry.shape.as_slice() {
+                [1, _] => Some(self.reshape(matrix, &[entry.len, 1])?),
+                _ => None,
+            }
+        } else {
+            None
+        };
         let result = {
-            let source = combined.as_ref().unwrap_or(matrix);
+            let source = combined
+                .as_ref()
+                .or(normalized_single.as_ref())
+                .unwrap_or(matrix);
             self.covariance_exec(source, weights, options).await
         };
 
         if let Some(handle) = combined {
+            let _ = self.free_exec(&handle);
+        }
+        if let Some(handle) = normalized_single {
             let _ = self.free_exec(&handle);
         }
 
@@ -753,6 +776,10 @@ impl WgpuProvider {
             }
         };
 
+        if entry.len == 0 && cols == 0 {
+            return self.fill_exec(&[1, 1], f64::NAN);
+        }
+
         if cols == 0 {
             let out_buffer = self.create_storage_buffer(0, "runmat-cov-empty");
             return Ok(self.register_existing_buffer(out_buffer, vec![0, 0], 0));
@@ -769,7 +796,7 @@ impl WgpuProvider {
         }
 
         let denom = match options.normalization {
-            CovNormalization::Unbiased => (rows as f64) - 1.0,
+            CovNormalization::Unbiased => ((rows as f64) - 1.0).max(1.0),
             CovNormalization::Biased => rows as f64,
         };
 

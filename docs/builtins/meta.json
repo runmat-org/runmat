@@ -16405,7 +16405,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Second dataset with matching row count."
+              "description": "Second dataset with matching size (or equal vector length)."
             },
             {
               "name": "opt",
@@ -16440,7 +16440,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Second dataset with matching row count."
+              "description": "Second dataset with matching size (or equal vector length)."
             },
             {
               "name": "w",
@@ -16475,7 +16475,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Second dataset with matching row count."
+              "description": "Second dataset with matching size (or equal vector length)."
             },
             {
               "name": "w",
@@ -16519,8 +16519,8 @@
         {
           "code": "RM.COV.ROWS_MISMATCH",
           "identifier": "RunMat:cov:RowsMismatch",
-          "when": "Two input datasets do not have the same number of rows.",
-          "message": "cov: inputs must have the same number of rows"
+          "when": "Two input datasets do not have the same size or equal vector lengths.",
+          "message": "cov: paired inputs must have the same size"
         },
         {
           "code": "RM.COV.NORMALIZATION_INVALID",
@@ -16557,6 +16557,115 @@
           "identifier": "RunMat:cov:Internal",
           "when": "Internal tensor conversion/allocation or covariance computation fails.",
           "message": "cov: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "cov-integer-data",
+          "mode": "RunMatOnly",
+          "description": "cov with typed-integer observation data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CovIntegerDataExtension"
+        },
+        {
+          "id": "cov-logical-data",
+          "mode": "RunMatOnly",
+          "description": "cov with logical observation data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CovLogicalDataExtension"
+        },
+        {
+          "id": "cov-typed-normalization",
+          "mode": "RunMatOnly",
+          "description": "cov with typed-integer or logical normalization is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CovTypedNormalizationExtension"
+        },
+        {
+          "id": "cov-vector-weights",
+          "mode": "RunMatOnly",
+          "description": "cov with a vector of observation weights is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CovVectorWeightsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "C = cov(integer_A_or_B, w, nanflag)",
+          "inputs": [
+            {
+              "name": "A_or_B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented observation domain is single or double; RunMat mode additionally accepts all eight real integer classes."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat preserves exact integer differences while centering each variable before producing double covariance."
+        },
+        {
+          "form": "C = cov(A, integer_w, nanflag)",
+          "inputs": [
+            {
+              "name": "w",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The documented scalar normalization weight is single or double; RunMat mode additionally accepts typed integer 0 or 1."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "Typed integer normalization is a RunMat-only control and must equal zero or one."
+        },
+        {
+          "form": "C = cov(A, integer_vector_weights, nanflag)",
+          "inputs": [
+            {
+              "name": "vector_weights",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Observation-weight vectors are a RunMat extension for every numeric class; integer vectors are validated exactly before floating weighted covariance."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "OptionDependent",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "RunMat-only observation-weight vectors are nonnegative and finite; integer weights enter the floating weighted covariance domain and the data input determines output precision."
         }
       ]
     },

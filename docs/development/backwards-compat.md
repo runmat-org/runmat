@@ -116,6 +116,8 @@ The adjacent descriptive functions likewise retain their individually documented
 
 `corr` documents single/double observation matrices and single/double nonnegative observation weights. RunMat's typed-integer observation and weight forms are independent mode-gated extensions: exact same-class ordering is retained for Spearman and Kendall correlation, Pearson centers integer columns through exact differences before entering the double correlation domain, and typed weights are validated exactly before floating weighted computation. Weighted calls return `NaN` p-values on the same surface as the documented form, and supported resident inputs use explicit gather fallback rather than changing the compatibility classification.
 
+`cov` documents single/double observation data, a scalar single/double normalization weight of zero or one, and missing-row controls. RunMat independently mode-gates typed-integer data, logical data, typed-integer/logical normalization, and its broader vector-of-observation-weights form before provider dispatch or gather. Integer variables are centered through exact differences before entering double covariance arithmetic, supported resident integer data uses explicit gather fallback, and vector weights remain a RunMat extension for every element class rather than being confused with the documented scalar normalization weight.
+
 ## Evidence policy
 
 Compatibility decisions should be based on publicly available information and literature only. RunMat is a clean-room implementation of MATLAB compatable syntax, and as a result we do not rely on proprietary binaries, disassembly, or reverse engineering. Prefer evidence in this order:

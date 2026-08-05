@@ -5,9 +5,13 @@ use runmat_accelerate_api::{
     HostTensorView,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    IntValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -101,7 +105,7 @@ const COV_INPUTS_X_Y_OPT: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Second dataset with matching row count.",
+        description: "Second dataset with matching size (or equal vector length).",
     },
     BuiltinParamDescriptor {
         name: "opt",
@@ -125,7 +129,7 @@ const COV_INPUTS_X_Y_W: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Second dataset with matching row count.",
+        description: "Second dataset with matching size (or equal vector length).",
     },
     BuiltinParamDescriptor {
         name: "w",
@@ -149,7 +153,7 @@ const COV_INPUTS_X_Y_W_OPT: [BuiltinParamDescriptor; 4] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Second dataset with matching row count.",
+        description: "Second dataset with matching size (or equal vector length).",
     },
     BuiltinParamDescriptor {
         name: "w",
@@ -222,8 +226,8 @@ const COV_ERROR_COMPLEX_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescri
 const COV_ERROR_ROWS_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.COV.ROWS_MISMATCH",
     identifier: Some("RunMat:cov:RowsMismatch"),
-    when: "Two input datasets do not have the same number of rows.",
-    message: "cov: inputs must have the same number of rows",
+    when: "Two input datasets do not have the same size or equal vector lengths.",
+    message: "cov: paired inputs must have the same size",
 };
 
 const COV_ERROR_NORMALIZATION_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -278,6 +282,101 @@ const COV_ERRORS: [BuiltinErrorDescriptor; 9] = [
     COV_ERROR_NORMALIZATION_DUPLICATE,
     COV_ERROR_TOO_MANY_ARRAY_ARGUMENTS,
     COV_ERROR_INTERNAL,
+];
+
+const COV_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cov-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "cov with typed-integer observation data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CovIntegerDataExtension"),
+};
+
+const COV_LOGICAL_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cov-logical-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "cov with logical observation data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CovLogicalDataExtension"),
+};
+
+const COV_TYPED_NORMALIZATION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cov-typed-normalization",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "cov with typed-integer or logical normalization is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CovTypedNormalizationExtension"),
+};
+
+const COV_VECTOR_WEIGHTS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cov-vector-weights",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "cov with a vector of observation weights is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CovVectorWeightsExtension"),
+};
+
+const COV_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    COV_INTEGER_DATA_EXTENSION,
+    COV_LOGICAL_DATA_EXTENSION,
+    COV_TYPED_NORMALIZATION_EXTENSION,
+    COV_VECTOR_WEIGHTS_EXTENSION,
+];
+
+const COV_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A_or_B",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented observation domain is single or double; RunMat mode additionally accepts all eight real integer classes.",
+    }];
+
+const COV_INTEGER_NORMALIZATION_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "w",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented scalar normalization weight is single or double; RunMat mode additionally accepts typed integer 0 or 1.",
+    }];
+
+const COV_INTEGER_VECTOR_WEIGHTS_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "vector_weights",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Observation-weight vectors are a RunMat extension for every numeric class; integer vectors are validated exactly before floating weighted covariance.",
+    }];
+
+const COV_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "C = cov(integer_A_or_B, w, nanflag)",
+        inputs: &COV_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat preserves exact integer differences while centering each variable before producing double covariance.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "C = cov(A, integer_w, nanflag)",
+        inputs: &COV_INTEGER_NORMALIZATION_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed integer normalization is a RunMat-only control and must equal zero or one.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "C = cov(A, integer_vector_weights, nanflag)",
+        inputs: &COV_INTEGER_VECTOR_WEIGHTS_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "RunMat-only observation-weight vectors are nonnegative and finite; integer weights enter the floating weighted covariance domain and the data input determines output precision.",
+    },
 ];
 
 pub const COV_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -348,10 +447,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     type_resolver(cov_type),
     descriptor(crate::builtins::stats::summary::cov::COV_DESCRIPTOR),
+    extensions(COV_EXTENSIONS),
+    integer_capabilities(COV_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::summary::cov"
 )]
 async fn cov_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let args = CovArgs::parse(value, rest)?;
+    ensure_cov_extensions(&args)?;
     if let Some(result) = cov_try_gpu(&args).await? {
         return Ok(result);
     }
@@ -391,6 +493,7 @@ struct CovArgs {
     normalization: CovNormalization,
     rows: CovRows,
     weight_vector: Option<Value>,
+    typed_normalization: bool,
 }
 
 impl CovArgs {
@@ -399,6 +502,7 @@ impl CovArgs {
         let mut weight_candidate: Option<Value> = None;
         let mut normalization = CovNormalization::Unbiased;
         let mut normalization_explicit = false;
+        let mut typed_normalization = false;
         let mut rows = CovRows::All;
 
         let iter = rest.into_iter();
@@ -423,6 +527,7 @@ impl CovArgs {
                     if normalization_explicit || weight_candidate.is_some() {
                         return Err(cov_error(&COV_ERROR_NORMALIZATION_DUPLICATE));
                     }
+                    typed_normalization = matches!(arg, Value::Int(_) | Value::Bool(_));
                     normalization = parse_normalization(arg)?;
                     normalization_explicit = true;
                 }
@@ -446,6 +551,7 @@ impl CovArgs {
                 normalization,
                 rows,
                 weight_vector: Some(weight_array),
+                typed_normalization,
             });
         }
 
@@ -466,8 +572,51 @@ impl CovArgs {
             normalization,
             rows,
             weight_vector,
+            typed_normalization,
         })
     }
+}
+
+fn is_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(
+            value,
+            Value::GpuTensor(handle)
+                if runmat_accelerate_api::handle_integer_type(handle).is_some()
+        )
+}
+
+fn is_logical_value(value: &Value) -> bool {
+    matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(
+            value,
+            Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle)
+        )
+}
+
+fn ensure_cov_extensions(args: &CovArgs) -> BuiltinResult<()> {
+    if is_typed_integer_value(&args.first)
+        || args.second.as_ref().is_some_and(is_typed_integer_value)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(&COV_INTEGER_DATA_EXTENSION, NAME)?;
+    }
+    if is_logical_value(&args.first) || args.second.as_ref().is_some_and(is_logical_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(&COV_LOGICAL_DATA_EXTENSION, NAME)?;
+    }
+    if args.typed_normalization {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &COV_TYPED_NORMALIZATION_EXTENSION,
+            NAME,
+        )?;
+    }
+    if args.weight_vector.is_some() {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &COV_VECTOR_WEIGHTS_EXTENSION,
+            NAME,
+        )?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -507,7 +656,7 @@ async fn cov_try_gpu(args: &CovArgs) -> BuiltinResult<Option<Value>> {
         None => None,
     };
 
-    let rows = gpu_rows(first_handle)?;
+    let rows = gpu_observation_count(first_handle, maybe_second_handle.is_some())?;
     let mut temporary_inputs = Vec::new();
     let weight_handle = match materialize_gpu_weight_vector(
         provider,
@@ -554,17 +703,21 @@ async fn cov_try_gpu(args: &CovArgs) -> BuiltinResult<Option<Value>> {
     }
 }
 
-fn gpu_rows(handle: &GpuTensorHandle) -> BuiltinResult<usize> {
+fn gpu_observation_count(handle: &GpuTensorHandle, paired_input: bool) -> BuiltinResult<usize> {
     if handle.shape.len() > 2 {
         return Err(cov_error_with_detail(
             &COV_ERROR_INVALID_ARGUMENT,
             "inputs must be 2-D matrices or vectors",
         ));
     }
-    Ok(if handle.shape.is_empty() {
-        1
-    } else {
-        handle.shape[0]
+    let len = handle.shape.iter().copied().product::<usize>();
+    Ok(match handle.shape.as_slice() {
+        [] => 1,
+        _ if paired_input => len,
+        [length] => *length,
+        [rows, cols] if *rows == 1 || *cols == 1 => len,
+        [rows, _] => *rows,
+        _ => unreachable!("shape rank was checked above"),
     })
 }
 
@@ -659,6 +812,7 @@ async fn cov_host(args: CovArgs) -> BuiltinResult<Value> {
         normalization,
         rows,
         weight_vector,
+        ..
     } = args;
 
     let left = value_to_tensor_gather(first).await?;
@@ -666,9 +820,16 @@ async fn cov_host(args: CovArgs) -> BuiltinResult<Value> {
         Some(value) => Some(value_to_tensor_gather(value).await?),
         None => None,
     };
+    let expected_weight_rows = if right.is_some() {
+        left.len()
+    } else if left.rows() == 1 || left.cols() == 1 {
+        left.len()
+    } else {
+        left.rows()
+    };
 
     let weight_spec = if let Some(weight_value) = weight_vector {
-        let vector = value_to_weight_vector(weight_value, left.rows()).await?;
+        let vector = value_to_weight_vector(weight_value, expected_weight_rows).await?;
         CovWeightSpec::Vector(vector)
     } else {
         CovWeightSpec::Scalar(normalization)
@@ -806,7 +967,10 @@ fn should_treat_as_weight(
         return Ok(false);
     }
 
-    if cols_first == 1 && !normalization_explicit && matches!(rows_option, CovRows::All) {
+    if (rows_first == 1 || cols_first == 1)
+        && !normalization_explicit
+        && matches!(rows_option, CovRows::All)
+    {
         // Ambiguous `cov(x, y)` case – prefer dataset semantics for compatibility.
         return Ok(false);
     }
@@ -871,19 +1035,54 @@ struct Matrix {
 }
 
 impl Matrix {
-    fn from_tensor(name: &str, tensor: Tensor) -> BuiltinResult<Self> {
+    fn from_single_tensor(tensor: Tensor) -> BuiltinResult<Self> {
         if tensor.shape.len() > 2 {
             return Err(cov_error_with_detail(
                 &COV_ERROR_INVALID_ARGUMENT,
-                format!("{name}: inputs must be 2-D matrices or vectors"),
+                "inputs must be 2-D matrices or vectors",
             ));
         }
-        let rows = tensor.rows();
-        let cols = tensor.cols();
+        let original_rows = tensor.rows();
+        let original_cols = tensor.cols();
+        let is_vector = original_rows == 1 || original_cols == 1;
+        let (rows, cols) = if is_vector {
+            (tensor.len(), 1)
+        } else if tensor.len() == 0 && original_cols == 0 {
+            (0, 1)
+        } else {
+            (original_rows, original_cols)
+        };
         Ok(Self {
             rows,
             cols,
-            data: tensor::tensor_into_values_f64(tensor),
+            data: centered_tensor_values(&tensor, rows, cols),
+        })
+    }
+
+    fn from_tensor_pair(left: Tensor, right: Tensor) -> BuiltinResult<Self> {
+        if left.shape.len() > 2 || right.shape.len() > 2 {
+            return Err(cov_error_with_detail(
+                &COV_ERROR_INVALID_ARGUMENT,
+                "inputs must be 2-D matrices or vectors",
+            ));
+        }
+        let left_is_vector = left.rows() == 1 || left.cols() == 1;
+        let right_is_vector = right.rows() == 1 || right.cols() == 1;
+        let compatible = if left_is_vector && right_is_vector {
+            left.len() == right.len()
+        } else {
+            left.shape == right.shape
+        };
+        if !compatible {
+            return Err(cov_error(&COV_ERROR_ROWS_MISMATCH));
+        }
+        let rows = left.len();
+        let mut data = centered_tensor_values(&left, rows, 1);
+        data.extend(centered_tensor_values(&right, rows, 1));
+        Ok(Self {
+            data,
+            rows,
+            cols: 2,
         })
     }
 
@@ -901,18 +1100,46 @@ impl Matrix {
 }
 
 fn combine_tensors(left: Tensor, right: Option<Tensor>) -> BuiltinResult<Matrix> {
-    let mut matrix = Matrix::from_tensor("cov", left)?;
-    if let Some(second) = right {
-        let right_matrix = Matrix::from_tensor("cov", second)?;
-        if matrix.rows != right_matrix.rows {
-            return Err(cov_error(&COV_ERROR_ROWS_MISMATCH));
-        }
-        matrix.cols += right_matrix.cols;
-        matrix
-            .data
-            .extend_from_slice(&right_matrix.data[..right_matrix.rows * right_matrix.cols]);
+    if let Some(right) = right {
+        Matrix::from_tensor_pair(left, right)
+    } else {
+        Matrix::from_single_tensor(left)
     }
-    Ok(matrix)
+}
+
+fn centered_tensor_values(tensor: &Tensor, rows: usize, cols: usize) -> Vec<f64> {
+    let Some(storage) = tensor.integer_storage() else {
+        return tensor.materialize_f64();
+    };
+    let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+    for col in 0..cols {
+        let start = col * rows;
+        let anchor = storage
+            .value_at(start)
+            .map(|value| int_value_to_i128(&value))
+            .unwrap_or(0);
+        for index in start..start + rows {
+            let value = storage
+                .value_at(index)
+                .map(|value| int_value_to_i128(&value))
+                .unwrap_or(anchor);
+            values.push((value - anchor) as f64);
+        }
+    }
+    values
+}
+
+fn int_value_to_i128(value: &IntValue) -> i128 {
+    match value {
+        IntValue::I8(value) => i128::from(*value),
+        IntValue::I16(value) => i128::from(*value),
+        IntValue::I32(value) => i128::from(*value),
+        IntValue::I64(value) => i128::from(*value),
+        IntValue::U8(value) => i128::from(*value),
+        IntValue::U16(value) => i128::from(*value),
+        IntValue::U32(value) => i128::from(*value),
+        IntValue::U64(value) => i128::from(*value),
+    }
 }
 
 fn covariance_dense(matrix: &Matrix, weight: &CovWeightSpec) -> BuiltinResult<Tensor> {
@@ -928,7 +1155,7 @@ fn covariance_dense(matrix: &Matrix, weight: &CovWeightSpec) -> BuiltinResult<Te
     match weight {
         CovWeightSpec::Scalar(normalization) => {
             let denom = match normalization {
-                CovNormalization::Unbiased => (rows as f64) - 1.0,
+                CovNormalization::Unbiased => ((rows as f64) - 1.0).max(1.0),
                 CovNormalization::Biased => rows as f64,
             };
             if denom <= 0.0 {
@@ -1300,6 +1527,27 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn cov_type_paired_matrices_returns_two_by_two() {
+        let out = cov_type(
+            &[
+                Type::Tensor {
+                    shape: Some(vec![Some(5), Some(3)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(5), Some(3)]),
+                },
+            ],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(2)])
+            }
+        );
+    }
+
+    #[test]
     fn cov_descriptor_signatures_cover_core_forms() {
         let labels: Vec<&str> = COV_DESCRIPTOR
             .signatures
@@ -1360,9 +1608,48 @@ pub(crate) mod tests {
         assert_tensor_close(&tensor, &expected, 1.0e-6);
     }
 
+    #[test]
+    fn cov_row_vector_scalar_empty_and_paired_matrix_shapes_match_contract() {
+        let row = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
+        let Value::Tensor(row_cov) =
+            block_on(cov_builtin(Value::Tensor(row), Vec::new())).expect("row covariance")
+        else {
+            panic!("expected tensor");
+        };
+        assert_tensor_close(&row_cov, &[1.0], 1.0e-12);
+
+        let scalar = Tensor::new(vec![7.0], vec![1, 1]).unwrap();
+        let Value::Tensor(scalar_cov) =
+            block_on(cov_builtin(Value::Tensor(scalar), Vec::new())).expect("scalar covariance")
+        else {
+            panic!("expected tensor");
+        };
+        assert_tensor_close(&scalar_cov, &[0.0], 1.0e-12);
+
+        let empty = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
+        let Value::Tensor(empty_cov) =
+            block_on(cov_builtin(Value::Tensor(empty), Vec::new())).expect("empty covariance")
+        else {
+            panic!("expected tensor");
+        };
+        assert_tensor_close(&empty_cov, &[f64::NAN], 0.0);
+
+        let left = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let right = Tensor::new(vec![5.0, 6.0, 7.0, 8.0], vec![2, 2]).unwrap();
+        let Value::Tensor(pair_cov) =
+            block_on(cov_builtin(Value::Tensor(left), vec![Value::Tensor(right)]))
+                .expect("paired matrix covariance")
+        else {
+            panic!("expected tensor");
+        };
+        let expected = [5.0 / 3.0; 4];
+        assert_tensor_close(&pair_cov, &expected, 1.0e-12);
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cov_weighted_vector() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(
             vec![
                 4.0, 4.2, 3.9, 4.3, 4.1, //
@@ -1393,6 +1680,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cov_accepts_typed_integer_matrix_and_weights() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = poisoned_int_tensor(
             IntegerStorage::I16(vec![
                 4, 4, 3, 4, 4, //
@@ -1427,6 +1715,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cov_rejects_negative_typed_integer_weights() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2], 0.0);
         let weights = poisoned_int_tensor(IntegerStorage::I16(vec![1, -1]), vec![2, 1], 1.0);
         let err = block_on(cov_builtin(
@@ -1435,6 +1724,124 @@ pub(crate) mod tests {
         ))
         .expect_err("negative weights should fail");
         assert_eq!(err.identifier(), COV_ERROR_INVALID_ARGUMENT.identifier);
+    }
+
+    #[test]
+    fn cov_extensions_are_independently_gated_before_computation() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let integer_error = block_on(cov_builtin(
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3]), vec![3, 1]).unwrap(),
+            ),
+            Vec::new(),
+        ))
+        .unwrap_err();
+        assert_eq!(
+            integer_error.identifier(),
+            Some("RunMat:compatibility:CovIntegerDataExtension")
+        );
+
+        let logical_error = block_on(cov_builtin(Value::Bool(true), Vec::new())).unwrap_err();
+        assert_eq!(
+            logical_error.identifier(),
+            Some("RunMat:compatibility:CovLogicalDataExtension")
+        );
+
+        let data = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
+        let normalization_error = block_on(cov_builtin(
+            Value::Tensor(data.clone()),
+            vec![Value::Int(IntValue::U8(1))],
+        ))
+        .unwrap_err();
+        assert_eq!(
+            normalization_error.identifier(),
+            Some("RunMat:compatibility:CovTypedNormalizationExtension")
+        );
+
+        let weights = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
+        let weight_error = block_on(cov_builtin(
+            Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 3.0, 2.0, 1.0], vec![3, 2]).unwrap()),
+            vec![Value::Tensor(weights)],
+        ))
+        .unwrap_err();
+        assert_eq!(
+            weight_error.identifier(),
+            Some("RunMat:compatibility:CovVectorWeightsExtension")
+        );
+    }
+
+    #[test]
+    fn cov_supports_all_eight_integer_classes_and_wide_centering() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let storages = vec![
+            IntegerStorage::I8(vec![1, 2, 3]),
+            IntegerStorage::I16(vec![1, 2, 3]),
+            IntegerStorage::I32(vec![1, 2, 3]),
+            IntegerStorage::I64(vec![1, 2, 3]),
+            IntegerStorage::U8(vec![1, 2, 3]),
+            IntegerStorage::U16(vec![1, 2, 3]),
+            IntegerStorage::U32(vec![1, 2, 3]),
+            IntegerStorage::U64(vec![1, 2, 3]),
+        ];
+        for storage in storages {
+            let class = storage.class_name();
+            let data = Tensor::new_integer(storage.clone(), vec![3, 1]).unwrap();
+            let Value::Tensor(covariance) = block_on(cov_builtin(Value::Tensor(data), Vec::new()))
+                .unwrap_or_else(|error| panic!("{class}: {error}"))
+            else {
+                panic!("{class}: expected tensor");
+            };
+            assert_tensor_close(&covariance, &[1.0], 1.0e-12);
+
+            let left = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
+            let right = Tensor::new_integer(storage.clone(), vec![3, 1]).unwrap();
+            let Value::Tensor(pair) =
+                block_on(cov_builtin(Value::Tensor(left), vec![Value::Tensor(right)]))
+                    .unwrap_or_else(|error| panic!("{class} paired data: {error}"))
+            else {
+                panic!("{class}: expected paired tensor");
+            };
+            assert_tensor_close(&pair, &[1.0; 4], 1.0e-12);
+
+            let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 3.0, 2.0, 1.0], vec![3, 2]).unwrap();
+            let weights = Tensor::new_integer(storage, vec![3, 1]).unwrap();
+            let weighted = block_on(cov_builtin(
+                Value::Tensor(matrix),
+                vec![Value::Tensor(weights)],
+            ))
+            .unwrap_or_else(|error| panic!("{class} weights: {error}"));
+            assert!(matches!(weighted, Value::Tensor(_)));
+        }
+
+        let base = 1_u64 << 63;
+        let wide = Tensor::new_integer(
+            IntegerStorage::U64(vec![base, base + 1, base + 2]),
+            vec![3, 1],
+        )
+        .unwrap();
+        let Value::Tensor(covariance) =
+            block_on(cov_builtin(Value::Tensor(wide), Vec::new())).expect("wide covariance")
+        else {
+            panic!("expected tensor");
+        };
+        assert_tensor_close(&covariance, &[1.0], 1.0e-12);
+    }
+
+    #[test]
+    fn cov_resident_integer_data_rejects_before_provider_dispatch() {
+        test_support::with_test_provider(|provider| {
+            let tensor =
+                Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 3]), vec![3, 1]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload integer");
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error =
+                block_on(cov_builtin(Value::GpuTensor(handle.clone()), Vec::new())).unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:CovIntegerDataExtension")
+            );
+            let _ = provider.free(&handle);
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1538,6 +1945,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cov_weight_vector_length_mismatch_errors() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let x = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![3, 2]).unwrap();
         let y = Tensor::new(vec![10.0, 11.0, 12.0], vec![3, 1]).unwrap();
         let w = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1627,6 +2035,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cov_gpu_host_weights_return_resident_result() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(
                 vec![
@@ -1663,6 +2072,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cov_gpu_resident_weights_return_resident_result() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(
                 vec![
@@ -1706,6 +2116,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cov_gpu_rejects_negative_resident_weights() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let weights = Tensor::new(vec![1.0, -1.0], vec![2, 1]).unwrap();
@@ -1772,7 +2183,70 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
+    fn cov_wgpu_paired_matrices_vectorize_to_two_variables() {
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) else {
+            return;
+        };
+        let left = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let right = Tensor::new(vec![5.0, 6.0, 7.0, 8.0], vec![2, 2]).unwrap();
+        let left_handle = provider
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: &left.materialize_f64(),
+                shape: &left.shape,
+            })
+            .expect("upload left");
+        let right_handle = provider
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: &right.materialize_f64(),
+                shape: &right.shape,
+            })
+            .expect("upload right");
+        let result = cov_builtin_sync(
+            Value::GpuTensor(left_handle),
+            vec![Value::GpuTensor(right_handle)],
+        )
+        .expect("paired covariance");
+        assert!(matches!(result, Value::GpuTensor(_)));
+        let gathered = test_support::gather(result).expect("gather");
+        assert_tensor_close(&gathered, &[5.0 / 3.0; 4], 1.0e-5);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn cov_wgpu_row_scalar_and_empty_match_host_shapes() {
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) else {
+            return;
+        };
+
+        for (data, shape, expected) in [
+            (vec![1.0, 2.0, 3.0], vec![1, 3], 1.0),
+            (vec![7.0], Vec::new(), 0.0),
+            (Vec::new(), vec![0, 0], f64::NAN),
+        ] {
+            let handle = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &data,
+                    shape: &shape,
+                })
+                .expect("upload");
+            let result =
+                cov_builtin_sync(Value::GpuTensor(handle), Vec::new()).expect("covariance");
+            assert!(matches!(result, Value::GpuTensor(_)));
+            let gathered = test_support::gather(result).expect("gather");
+            assert_tensor_close(&gathered, &[expected], 1.0e-6);
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    #[cfg(feature = "wgpu")]
     fn cov_wgpu_weighted_matches_cpu_and_stays_resident() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         ) else {
