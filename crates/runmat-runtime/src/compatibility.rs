@@ -493,6 +493,7 @@ mod tests {
             "var",
             "bounds",
             "prod",
+            "accept",
         ] {
             let builtin = registered
                 .iter()

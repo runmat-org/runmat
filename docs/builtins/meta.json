@@ -3180,6 +3180,35 @@
           "when": "Underlying socket accept call fails for reasons other than timeout.",
           "message": "accept: failed to accept client"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "client = accept(server, \"Timeout\", integer_timeout)",
+          "inputs": [
+            {
+              "name": "Timeout",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "RunMat's safe additive accept API documents a nonnegative scalar timeout in every integer class, or a floating scalar including positive Inf."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "The timeout crosses one explicit binary64-seconds boundary and must fit std::time::Duration; networking and its returned client handle remain host-only, while resident scalar controls gather before validation."
+        }
       ]
     },
     {
